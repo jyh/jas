@@ -4,6 +4,7 @@ Internal coordinates are in points (pt). SVG coordinates are in pixels (px).
 The conversion factor is 96/72 (CSS px per pt at 96 DPI).
 """
 
+import dataclasses
 import re
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
@@ -78,6 +79,28 @@ def _opacity_attr(opacity: float) -> str:
     if opacity >= 1.0:
         return ""
     return f' opacity="{_fmt(opacity)}"'
+
+
+def _tspan_svg(t) -> str:
+    """Emit a single Tspan as an SVG ``<tspan ...>content</tspan>``.
+    Only overridden attributes are emitted (inherited values are absent).
+    Matches the Rust / Swift / OCaml ``tspan_svg`` — the 5 attributes
+    that round-trip natively via SVG: font-family, font-size,
+    font-weight, font-style, text-decoration.
+    """
+    attrs = ""
+    if t.font_family is not None:
+        attrs += f' font-family="{escape(t.font_family)}"'
+    if t.font_size is not None:
+        attrs += f' font-size="{_fmt(_px(t.font_size))}"'
+    if t.font_weight is not None:
+        attrs += f' font-weight="{escape(t.font_weight)}"'
+    if t.font_style is not None:
+        attrs += f' font-style="{escape(t.font_style)}"'
+    if t.text_decoration is not None and t.text_decoration:
+        joined = " ".join(t.text_decoration)
+        attrs += f' text-decoration="{escape(joined)}"'
+    return f"<tspan{attrs}>{escape(t.content)}</tspan>"
 
 
 def _text_extra_attrs(elem) -> str:
@@ -207,14 +230,26 @@ def _element_svg(elem: Element, indent: str) -> str:
             td_attr = (f' text-decoration="{elem_tp.text_decoration}"'
                        if elem_tp.text_decoration not in ("none", "") else "")
             extra = _text_extra_attrs(elem_tp)
+            # Pre-Tspan-compatible emission: a single no-override tspan
+            # round-trips as a flat <textPath>content</textPath> (no
+            # <tspan> wrapper). Multi-tspan or any override carries
+            # xml:space="preserve" so inter-tspan whitespace is byte-
+            # stable across round-trips (TSPAN.md SVG serialization).
+            tp_is_flat = len(elem_tp.tspans) == 1 and elem_tp.tspans[0].has_no_overrides()
+            if tp_is_flat:
+                tp_body = escape(elem_tp.content)
+                tp_space = ""
+            else:
+                tp_body = "".join(_tspan_svg(t) for t in elem_tp.tspans)
+                tp_space = ' xml:space="preserve"'
             return (f'{indent}<text'
                     f'{_fill_attrs(elem_tp.fill)}{_stroke_attrs(elem_tp.stroke)}'
                     f' font-family="{escape(elem_tp.font_family)}"'
                     f' font-size="{_fmt(_px(elem_tp.font_size))}"'
                     f'{fw_attr}{fst_attr}{td_attr}{extra}'
                     f'{_opacity_attr(elem_tp.opacity)}{_transform_attr(elem_tp.transform)}>'
-                    f'<textPath path="{_path_data(elem_tp.d)}"{offset_attr}>'
-                    f'{escape(elem_tp.content)}</textPath></text>')
+                    f'<textPath path="{_path_data(elem_tp.d)}"{offset_attr}{tp_space}>'
+                    f'{tp_body}</textPath></text>')
 
         case Text():
             # See TextPath: attribute-access destructure.
@@ -232,14 +267,21 @@ def _element_svg(elem: Element, indent: str) -> str:
             # is the *top* of the layout box, so add the ascent (0.8 *
             # font_size, the same value `text_layout` uses).
             svg_y = elem_t.y + elem_t.font_size * 0.8
+            is_flat = len(elem_t.tspans) == 1 and elem_t.tspans[0].has_no_overrides()
+            if is_flat:
+                body = escape(elem_t.content)
+                space_attr = ""
+            else:
+                body = "".join(_tspan_svg(t) for t in elem_t.tspans)
+                space_attr = ' xml:space="preserve"'
             return (f'{indent}<text x="{_fmt(_px(elem_t.x))}" y="{_fmt(_px(svg_y))}"'
                     f' font-family="{escape(elem_t.font_family)}"'
                     f' font-size="{_fmt(_px(elem_t.font_size))}"'
                     f'{fw_attr}{fst_attr}{td_attr}{extra}'
                     f'{area_attrs}'
                     f'{_fill_attrs(elem_t.fill)}{_stroke_attrs(elem_t.stroke)}'
-                    f'{_opacity_attr(elem_t.opacity)}{_transform_attr(elem_t.transform)}>'
-                    f'{escape(elem_t.content)}</text>')
+                    f'{_opacity_attr(elem_t.opacity)}{_transform_attr(elem_t.transform)}{space_attr}>'
+                    f'{body}</text>')
 
         case Layer(children=children, name=name, opacity=opacity, transform=transform):
             label = f' inkscape:label="{escape(name)}"' if name else ""
@@ -583,6 +625,48 @@ _SVG_NS = "http://www.w3.org/2000/svg"
 _INKSCAPE_NS = "http://www.inkscape.org/namespaces/inkscape"
 
 
+def _parse_tspan(node, tspan_id: int):
+    """Parse an SVG ``<tspan>`` child node into a Tspan. Only attributes
+    present on the node become non-None overrides; absent attributes
+    remain None (tspan inherits from the parent element). Mirrors the
+    Rust / Swift / OCaml ``parse_tspan``.
+    """
+    from geometry.tspan import Tspan
+    content = node.text or ""
+    font_family = node.get("font-family")
+    fs_str = node.get("font-size")
+    font_size = _pt(float(fs_str)) if fs_str else None
+    font_weight = node.get("font-weight")
+    font_style = node.get("font-style")
+    raw_decor = node.get("text-decoration")
+    if raw_decor is not None:
+        parts = [t for t in raw_decor.split() if t and t != "none"]
+        parts.sort()
+        decoration: tuple[str, ...] | None = tuple(parts)
+    else:
+        decoration = None
+    return Tspan(
+        id=tspan_id, content=content,
+        font_family=font_family, font_size=font_size,
+        font_style=font_style, font_weight=font_weight,
+        text_decoration=decoration,
+    )
+
+
+def _collect_tspan_children(node):
+    """Collect ``<tspan>`` children from an ElementTree node, in
+    document order. Returns an empty tuple when none are present —
+    the caller falls back to flat-content parsing.
+    """
+    result = []
+    next_id = 0
+    for child in node:
+        if _strip_ns(child.tag) == "tspan":
+            result.append(_parse_tspan(child, next_id))
+            next_id += 1
+    return tuple(result)
+
+
 def _strip_ns(tag: str) -> str:
     """Strip namespace from an XML tag."""
     if tag.startswith("{"):
@@ -672,14 +756,20 @@ def _parse_element(node: ET.Element) -> Element | None:
             if ctag == "textPath":
                 d_str = child.get("path") or child.get("d") or ""
                 d = _parse_path_d(d_str)
-                tp_content = child.text or ""
+                # Prefer <tspan> children inside the <textPath>; fall
+                # back to flat string content when none are present.
+                tp_tspans = _collect_tspan_children(child)
+                tp_content = (
+                    "".join(t.content for t in tp_tspans)
+                    if tp_tspans else (child.text or "")
+                )
                 offset_str = child.get("startOffset", "0")
                 start_offset = 0.0
                 if offset_str.endswith("%"):
                     start_offset = _safe_float(offset_str[:-1]) / 100.0
                 else:
                     start_offset = _safe_float(offset_str)
-                return TextPath(
+                tp = TextPath(
                     d=d, content=tp_content, start_offset=start_offset,
                     font_family=ff, font_size=fs,
                     font_weight=fw, font_style=fst, text_decoration=td,
@@ -688,7 +778,16 @@ def _parse_element(node: ET.Element) -> Element | None:
                     aa_mode=aa, rotate=rotate, horizontal_scale=hs,
                     vertical_scale=vs, kerning=kern,
                     fill=fill, stroke=stroke, opacity=opacity, transform=transform)
-        content = node.text or ""
+                if tp_tspans:
+                    # Override the seeded-from-content tspans with the
+                    # parsed children so per-range overrides survive.
+                    tp = dataclasses.replace(tp, tspans=tp_tspans)
+                return tp
+        tspan_children = _collect_tspan_children(node)
+        if tspan_children:
+            content = "".join(t.content for t in tspan_children)
+        else:
+            content = node.text or ""
         tw = 0.0
         style = node.get("style", "")
         if style:
@@ -704,7 +803,7 @@ def _parse_element(node: ET.Element) -> Element | None:
         # SVG `y` is the baseline of the first line; convert it to the
         # layout-box top by subtracting the ascent (0.8 * fs).
         svg_y = _pt(_safe_float(node.get("y")))
-        return Text(
+        t = Text(
             x=_pt(_safe_float(node.get("x"))),
             y=svg_y - fs * 0.8,
             content=content, font_family=ff, font_size=fs,
@@ -715,6 +814,9 @@ def _parse_element(node: ET.Element) -> Element | None:
             vertical_scale=vs, kerning=kern,
             width=tw, height=th,
             fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+        if tspan_children:
+            t = dataclasses.replace(t, tspans=tspan_children)
+        return t
 
     if tag == "g":
         children = []
