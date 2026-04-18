@@ -235,6 +235,45 @@ let subscription_tests = [
     assert (!fires = 1));
 ]
 
+(* ── Preview snapshot/restore (Phase 0) ─────────────────────
+
+   capture_dialog_snapshot copies the current value of every state
+   key referenced by a dialog's preview_targets. Phase 0 supports
+   only top-level state keys; deep paths (those containing a dot)
+   are silently skipped and will land alongside their first real
+   consumer in Phase 8/9. *)
+
+let preview_snapshot_tests = [
+  Alcotest.test_case "dialog_snapshot_capture_and_get" `Quick (fun () ->
+    let s = create ~defaults:[("left_indent", `Int 12); ("right_indent", `Int 0)] () in
+    capture_dialog_snapshot s
+      [("dlg_left", "left_indent"); ("dlg_right", "right_indent")];
+    (match get_dialog_snapshot s with
+     | Some snap ->
+       assert (List.assoc "left_indent" snap = `Int 12);
+       assert (List.assoc "right_indent" snap = `Int 0)
+     | None -> assert false);
+    assert (has_dialog_snapshot s));
+
+  Alcotest.test_case "dialog_snapshot_clear_drops_it" `Quick (fun () ->
+    let s = create ~defaults:[("x", `Int 1)] () in
+    capture_dialog_snapshot s [("k", "x")];
+    assert (has_dialog_snapshot s);
+    clear_dialog_snapshot s;
+    assert (not (has_dialog_snapshot s));
+    assert (get_dialog_snapshot s = None));
+
+  Alcotest.test_case "dialog_snapshot_skips_deep_paths_for_phase0" `Quick (fun () ->
+    let s = create ~defaults:[("flat", `Int 1)] () in
+    capture_dialog_snapshot s
+      [("a", "flat"); ("b", "selection.deep.path")];
+    (match get_dialog_snapshot s with
+     | Some snap ->
+       assert (List.mem_assoc "flat" snap);
+       assert (not (List.mem_assoc "selection.deep.path" snap))
+     | None -> assert false));
+]
+
 let () =
   Alcotest.run "State store" [
     "Global", global_tests;
@@ -242,4 +281,5 @@ let () =
     "Dialog", dialog_tests;
     "Context", ctx_tests;
     "Subscriptions", subscription_tests;
+    "Preview snapshot", preview_snapshot_tests;
   ]
