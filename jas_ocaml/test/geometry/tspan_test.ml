@@ -232,6 +232,51 @@ let merge_of_all_empty_returns_default_test () =
   assert (got.(0).id = 0);
   assert (has_no_overrides got.(0))
 
+(* ── Text / Text_path tspans field integration ──────────────── *)
+
+let make_text_populates_tspans_test () =
+  let elem = Jas.Element.make_text 0.0 0.0 "Hello" in
+  match elem with
+  | Jas.Element.Text { tspans; content; _ } ->
+    assert (Array.length tspans = 1);
+    assert (tspans.(0).content = "Hello");
+    assert (tspans.(0).id = 0);
+    assert (has_no_overrides tspans.(0));
+    assert (content = "Hello");
+    assert (concat_content tspans = content)
+  | _ -> assert false
+
+let make_text_path_populates_tspans_test () =
+  let elem = Jas.Element.make_text_path [] "path text" in
+  match elem with
+  | Jas.Element.Text_path { tspans; content; _ } ->
+    assert (Array.length tspans = 1);
+    assert (tspans.(0).content = "path text");
+    assert (has_no_overrides tspans.(0));
+    assert (concat_content tspans = content)
+  | _ -> assert false
+
+let sync_tspans_from_content_test () =
+  (* A record-update that changes [content] leaves [tspans] stale; the
+     helper rebuilds a single-tspan list reflecting the new content. *)
+  let elem = Jas.Element.make_text 0.0 0.0 "old" in
+  let updated =
+    match elem with
+    | Jas.Element.Text r -> Jas.Element.Text { r with content = "new" }
+    | _ -> assert false
+  in
+  let synced = Jas.Element.sync_tspans_from_content updated in
+  match synced with
+  | Jas.Element.Text { tspans; content; _ } ->
+    assert (content = "new");
+    assert (tspans.(0).content = "new");
+    assert (concat_content tspans = content)
+  | _ -> assert false
+
+let sync_tspans_on_non_text_is_noop_test () =
+  let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+  assert (Jas.Element.sync_tspans_from_content rect = rect)
+
 let () =
   Alcotest.run "Tspan" [
     "fixtures", [
@@ -248,5 +293,11 @@ let () =
       Alcotest.test_case "merge_keeps_distinct_overrides" `Quick merge_keeps_distinct_overrides_test;
       Alcotest.test_case "resolve_id_after_merge" `Quick resolve_id_after_merge_test;
       Alcotest.test_case "merge_of_all_empty_returns_default" `Quick merge_of_all_empty_returns_default_test;
+    ];
+    "integration", [
+      Alcotest.test_case "make_text_populates_tspans" `Quick make_text_populates_tspans_test;
+      Alcotest.test_case "make_text_path_populates_tspans" `Quick make_text_path_populates_tspans_test;
+      Alcotest.test_case "sync_tspans_from_content" `Quick sync_tspans_from_content_test;
+      Alcotest.test_case "sync_tspans_on_non_text_is_noop" `Quick sync_tspans_on_non_text_is_noop_test;
     ];
   ]

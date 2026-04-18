@@ -106,6 +106,46 @@ type transform = {
   d : float; e : float; f : float;
 }
 
+(** Per-character-range formatting substructure of Text / Text_path.
+
+    Owns a substring of the parent element's content plus a (possibly
+    empty) set of attribute overrides. Missing overrides inherit from
+    the parent element. See TSPAN.md at the repository root.
+
+    Declared here (rather than in the [Tspan] module) so [Text] /
+    [Text_path] can carry a [tspans] field without Element and Tspan
+    forming a module cycle. [Tspan] consumes this type and provides
+    the pure-function primitives ([split], [merge], etc). *)
+type tspan_id = int
+
+type tspan = {
+  id : tspan_id;
+  content : string;
+  baseline_shift : float option;
+  dx : float option;
+  font_family : string option;
+  font_size : float option;
+  font_style : string option;
+  font_variant : string option;
+  font_weight : string option;
+  jas_aa_mode : string option;
+  jas_fractional_widths : bool option;
+  jas_kerning_mode : string option;
+  jas_no_break : bool option;
+  letter_spacing : float option;
+  line_height : float option;
+  rotate : float option;
+  style_name : string option;
+  (** Sorted-set of decoration members (``"underline"``, ``"line-through"``).
+      [None] inherits the parent; [Some []] is an explicit no-decoration
+      override; writers sort members alphabetically. *)
+  text_decoration : string list option;
+  text_rendering : string option;
+  text_transform : string option;
+  transform : transform option;
+  xml_lang : string option;
+}
+
 (** SVG path commands (the 'd' attribute). *)
 type path_command =
   | MoveTo of float * float
@@ -214,6 +254,14 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      (** Ordered, non-empty list of per-range formatting fragments.
+          Invariant: [concat_content tspans = content]. Constructors
+          initialise to a single-tspan list with empty overrides;
+          record-update writes to [content] currently leave [tspans]
+          stale (callers that need consistency should rebuild via
+          [sync_tspans_from_content]). Serialisation and editing of
+          tspans will use this field once they land. *)
+      tspans : tspan array;
     }
   | Text_path of {
       d : path_command list;
@@ -241,6 +289,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      (** See Text.tspans above. *)
+      tspans : tspan array;
     }
   | Group of {
       children : element array;
@@ -284,6 +334,18 @@ val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float 
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> element
+
+val tspans_from_content : string -> tspan array
+(** Build a one-element [tspan] array that mirrors the given content
+    with no overrides. Used by constructors to seed the [tspans]
+    field on Text / Text_path. *)
+
+val sync_tspans_from_content : element -> element
+(** Rebuild a Text / Text_path element's [tspans] field from its
+    [content] field. The resulting tspans list has a single entry
+    with empty overrides (the plain-text base case). Non-Text
+    elements pass through unchanged. *)
+
 val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_transform:string -> ?font_variant:string -> ?baseline_shift:string -> ?line_height:string -> ?letter_spacing:string -> ?xml_lang:string -> ?aa_mode:string -> ?rotate:string -> ?horizontal_scale:string -> ?vertical_scale:string -> ?kerning:string -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> string -> element
 val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_transform:string -> ?font_variant:string -> ?baseline_shift:string -> ?line_height:string -> ?letter_spacing:string -> ?xml_lang:string -> ?aa_mode:string -> ?rotate:string -> ?horizontal_scale:string -> ?vertical_scale:string -> ?kerning:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> string -> element
 val make_group : ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element

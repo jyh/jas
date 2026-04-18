@@ -677,9 +677,10 @@ let rec parse_element j =
            width_points = [];
            opacity; transform; locked; visibility }
   | "text" ->
+    let content = parse_content_or_tspans j in
     Text { x = j |> member "x" |> to_num;
            y = j |> member "y" |> to_num;
-           content = parse_content_or_tspans j;
+           content;
            font_family = j |> member "font_family" |> to_string;
            font_size = j |> member "font_size" |> to_num;
            font_weight = j |> member "font_weight" |> to_string;
@@ -700,10 +701,12 @@ let rec parse_element j =
            text_height = j |> member "height" |> to_num;
            fill = parse_fill (j |> member "fill");
            stroke = parse_stroke (j |> member "stroke");
-           opacity; transform; locked; visibility }
+           opacity; transform; locked; visibility;
+           tspans = tspans_from_content content }
   | "text_path" ->
+    let content = parse_content_or_tspans j in
     Text_path { d = j |> member "d" |> to_list |> List.map parse_path_command;
-                content = parse_content_or_tspans j;
+                content;
                 start_offset = j |> member "start_offset" |> to_num;
                 font_family = j |> member "font_family" |> to_string;
                 font_size = j |> member "font_size" |> to_num;
@@ -723,7 +726,8 @@ let rec parse_element j =
                 kerning = nullable_str (j |> member "jas_kerning_mode");
                 fill = parse_fill (j |> member "fill");
                 stroke = parse_stroke (j |> member "stroke");
-                opacity; transform; locked; visibility }
+                opacity; transform; locked; visibility;
+                tspans = tspans_from_content content }
   | "group" ->
     let children = j |> member "children" |> to_list
       |> List.map parse_element |> Array.of_list in
