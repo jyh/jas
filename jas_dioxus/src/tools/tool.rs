@@ -172,6 +172,14 @@ pub trait CanvasTool {
     fn paste_text(&mut self, _model: &mut Model, _text: &str) -> bool { false }
     fn activate(&mut self, _model: &mut Model) {}
     fn deactivate(&mut self, _model: &mut Model) {}
+    /// Optional mutable access to the tool's in-place text-editing
+    /// session. Non-text tools return `None`; the Type tool and
+    /// Type-on-Path tool return `Some(&mut session)` while editing.
+    /// Consumed by the Character panel to route widget writes to the
+    /// session's next-typed-character state when a bare caret is
+    /// placed.
+    fn edit_session_mut(&mut self)
+        -> Option<&mut crate::tools::text_edit::TextEditSession> { None }
 }
 
 #[cfg(test)]

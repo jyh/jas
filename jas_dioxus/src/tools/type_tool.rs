@@ -694,6 +694,10 @@ impl CanvasTool for TypeTool {
         TypeTool::paste_text(self, model, text)
     }
 
+    fn edit_session_mut(&mut self) -> Option<&mut TextEditSession> {
+        self.session.as_mut()
+    }
+
     fn deactivate(&mut self, _model: &mut Model) {
         self.end_session();
     }
