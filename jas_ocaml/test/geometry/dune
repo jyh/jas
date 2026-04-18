@@ -1,11 +1,19 @@
 (test
  (name element_test)
+ (modules element_test)
  (libraries jas alcotest))
 
 (test
  (name measure_test)
+ (modules measure_test)
  (libraries jas alcotest))
 
 (test
  (name svg_test)
+ (modules svg_test)
  (libraries jas str alcotest))
+
+(test
+ (name tspan_test)
+ (modules tspan_test)
+ (libraries jas yojson alcotest))
