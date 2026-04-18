@@ -332,7 +332,18 @@ class type_tool = object (_self)
          still matches, splice the captured tspan overrides back in
          at the caret. Otherwise fall through to flat insert. *)
       let elem_tspans = _self#current_element_tspans ctx in
-      (match Text_edit.try_paste_tspans s elem_tspans text with
+      (* Rich-paste preference: session-scoped clipboard, then
+         app-global rich clipboard, then flat insert. *)
+      let rich = match Text_edit.try_paste_tspans s elem_tspans text with
+        | Some _ as r -> r
+        | None ->
+          (match Rich_clipboard.read_matching text with
+           | Some payload ->
+             Some (Tspan.insert_tspans_at elem_tspans
+                     (Text_edit.insertion s) payload)
+           | None -> None)
+      in
+      (match rich with
        | Some new_tspans ->
          _self#ensure_snapshot ctx;
          _self#replace_element_tspans ctx (Text_edit.path s) new_tspans;
@@ -362,17 +373,24 @@ class type_tool = object (_self)
         if mods.shift then Text_edit.redo s else Text_edit.undo s;
         bump (); _self#sync_to_model ctx; ctx.request_update (); true
       end else if cmd && (key = "c" || key = "C") then begin
-        (* Capture the selection's tspan overrides from the current
-           element so a later paste within this session can splice them
-           back in. The flat string still goes to the system clipboard
-           via the usual platform copy wiring. *)
+        (* Capture the selection's tspan overrides for both the
+           session-scoped fast path and the app-global rich clipboard
+           (cross-session / cross-element paste). *)
         let elem_tspans = _self#current_element_tspans ctx in
-        ignore (Text_edit.copy_selection_with_tspans s elem_tspans);
+        (match Text_edit.copy_selection_with_tspans s elem_tspans with
+         | Some flat ->
+           (match Text_edit.tspan_clipboard_payload s with
+            | Some payload -> Rich_clipboard.write flat payload
+            | None -> ())
+         | None -> ());
         true
       end else if cmd && (key = "x" || key = "X") then begin
         let elem_tspans = _self#current_element_tspans ctx in
         (match Text_edit.copy_selection_with_tspans s elem_tspans with
-         | Some _ ->
+         | Some flat ->
+           (match Text_edit.tspan_clipboard_payload s with
+            | Some payload -> Rich_clipboard.write flat payload
+            | None -> ());
            _self#ensure_snapshot ctx;
            Text_edit.backspace s;
            bump (); _self#sync_to_model ctx; ctx.request_update ()

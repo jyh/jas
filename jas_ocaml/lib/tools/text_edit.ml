@@ -278,6 +278,11 @@ let empty_text_path_elem d =
     ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
     d ""
 
+let tspan_clipboard_payload t =
+  match t.tspan_clipboard with
+  | Some (_, payload) -> Some payload
+  | None -> None
+
 (** Wrap [t] as a structurally-typed [Model.edit_session_ref] so the
     Character-panel pipeline in [Effects] can route writes to this
     session without the [document] layer having to know about

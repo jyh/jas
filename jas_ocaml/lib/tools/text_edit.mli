@@ -51,6 +51,12 @@ val pending_char_start : t -> int option
     [Text_edit]. *)
 val as_session_ref : t -> Model.edit_session_ref
 
+(** Read the session's tspan-clipboard payload (the captured tspan
+    array paired with flat text) set by [copy_selection_with_tspans].
+    Used by the rich-clipboard wiring to publish the same payload
+    app-globally for cross-element / cross-session paste. *)
+val tspan_clipboard_payload : t -> Element.tspan array option
+
 (** Resolve the caret's [(tspan_idx, offset)] using [caret_affinity].
     Used by the next-typed-character path. *)
 val insertion_tspan_pos : t -> Element.tspan array -> int * int

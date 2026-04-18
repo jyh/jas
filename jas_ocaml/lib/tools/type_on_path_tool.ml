@@ -360,7 +360,16 @@ class type_on_path_tool = object (_self)
     | None -> false
     | Some s ->
       let elem_tspans = _self#current_element_tspans ctx in
-      (match Text_edit.try_paste_tspans s elem_tspans text with
+      let rich = match Text_edit.try_paste_tspans s elem_tspans text with
+        | Some _ as r -> r
+        | None ->
+          (match Rich_clipboard.read_matching text with
+           | Some payload ->
+             Some (Tspan.insert_tspans_at elem_tspans
+                     (Text_edit.insertion s) payload)
+           | None -> None)
+      in
+      (match rich with
        | Some new_tspans ->
          _self#ensure_snapshot ctx;
          _self#replace_element_tspans ctx (Text_edit.path s) new_tspans;
@@ -391,12 +400,20 @@ class type_on_path_tool = object (_self)
         bump (); _self#sync_to_model ctx; ctx.request_update (); true
       end else if cmd && (key = "c" || key = "C") then begin
         let elem_tspans = _self#current_element_tspans ctx in
-        ignore (Text_edit.copy_selection_with_tspans s elem_tspans);
+        (match Text_edit.copy_selection_with_tspans s elem_tspans with
+         | Some flat ->
+           (match Text_edit.tspan_clipboard_payload s with
+            | Some payload -> Rich_clipboard.write flat payload
+            | None -> ())
+         | None -> ());
         true
       end else if cmd && (key = "x" || key = "X") then begin
         let elem_tspans = _self#current_element_tspans ctx in
         (match Text_edit.copy_selection_with_tspans s elem_tspans with
-         | Some _ ->
+         | Some flat ->
+           (match Text_edit.tspan_clipboard_payload s with
+            | Some payload -> Rich_clipboard.write flat payload
+            | None -> ());
            _self#ensure_snapshot ctx;
            Text_edit.backspace s;
            bump (); _self#sync_to_model ctx; ctx.request_update ()
