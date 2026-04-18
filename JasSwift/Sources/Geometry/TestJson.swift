@@ -266,6 +266,9 @@ private func tspanJson(_ t: Tspan) -> String {
     o.optBool("jas_fractional_widths", t.jasFractionalWidths)
     o.optStr("jas_kerning_mode", t.jasKerningMode)
     o.optBool("jas_no_break", t.jasNoBreak)
+    // jas_role intentionally omitted from cross-language test JSON
+    // until the shared fixtures gain the field. Reader at parseTspan
+    // tolerates absent jas_role and defaults to nil.
     o.optNum("letter_spacing", t.letterSpacing)
     o.optNum("line_height", t.lineHeight)
     o.optNum("rotate", t.rotate)
@@ -596,6 +599,7 @@ private func parseTspan(_ d: [String: Any]) -> Tspan {
         jasFractionalWidths: d["jas_fractional_widths"] as? Bool,
         jasKerningMode: d["jas_kerning_mode"] as? String,
         jasNoBreak: d["jas_no_break"] as? Bool,
+        jasRole: d["jas_role"] as? String,
         letterSpacing: (d["letter_spacing"] as? NSNumber)?.doubleValue,
         lineHeight: (d["line_height"] as? NSNumber)?.doubleValue,
         rotate: (d["rotate"] as? NSNumber)?.doubleValue,

@@ -362,6 +362,24 @@ private func roundtrip(_ doc: Document) -> Document {
     #expect(svg.contains("<tspan font-weight=\"bold\">world</tspan>"))
 }
 
+@Test func svgJasRoleEmittedOnTspan() {
+    // Phase 1a: a wrapper Tspan with jasRole="paragraph" emits
+    // urn:jas:1:role="paragraph" on the <tspan> element. Full
+    // document round-trip through XMLDocument is deferred to
+    // Phase 1b alongside the xmlns:jas namespace work.
+    let tspans = [
+        Tspan(id: 0, content: "", jasRole: "paragraph"),
+        Tspan(id: 1, content: "hello"),
+    ]
+    let doc = Document(layers: [Layer(children: [
+        .text(Text(x: 0, y: 0, tspans: tspans))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("urn:jas:1:role=\"paragraph\""),
+            "expected urn:jas:1:role in serialised SVG, got: \(svg)")
+    #expect(svg.contains(">hello</tspan>"))
+}
+
 @Test func svgTspanRoundTripPreservesOverrides() {
     // Round-trip a two-tspan text through SVG and back: content,
     // override attributes, and tspan count are preserved.

@@ -634,7 +634,7 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
         attrs.push_str(&format!(" rotate=\"{}\"", fmt(v)));
     }
     if let Some(v) = &t.jas_role {
-        attrs.push_str(&format!(" jas:role=\"{}\"", escape_xml(v)));
+        attrs.push_str(&format!(" urn:jas:1:role=\"{}\"", escape_xml(v)));
     }
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
@@ -668,7 +668,7 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
             parts.sort();
             parts
         }),
-        jas_role: node.attrs.get("jas:role").cloned(),
+        jas_role: node.attrs.get("urn:jas:1:role").cloned(),
         ..Tspan::default_tspan()
     };
     // Multi-value rotate: SVG allows `rotate="a1 a2 a3 …"` on a tspan,
@@ -2041,7 +2041,7 @@ mod tests {
 
     #[test]
     fn svg_jas_role_paragraph_roundtrips_through_document() {
-        // Phase 1a: a <tspan jas:role="paragraph"> in document SVG
+        // Phase 1a: a <tspan urn:jas:1:role="paragraph"> in document SVG
         // parses with jas_role=Some("paragraph") and serialises back
         // with the role attribute preserved.
         use crate::geometry::tspan::Tspan;
@@ -2062,8 +2062,8 @@ mod tests {
         doc.layers[0].children_mut().unwrap()
             .push(std::rc::Rc::new(Element::Text(t)));
         let svg = document_to_svg(&doc);
-        assert!(svg.contains(r#"jas:role="paragraph""#),
-                "expected jas:role in serialised SVG, got: {}", svg);
+        assert!(svg.contains(r#"urn:jas:1:role="paragraph""#),
+                "expected urn:jas:1:role in serialised SVG, got: {}", svg);
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         let Element::Text(t) = &*children[0] else { panic!("expected Text"); };

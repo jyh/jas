@@ -25,6 +25,12 @@ public struct Tspan: Equatable {
     public let jasFractionalWidths: Bool?
     public let jasKerningMode: String?
     public let jasNoBreak: Bool?
+    /// Marks a tspan as a paragraph wrapper when set to `"paragraph"`.
+    /// Wrapper tspans implicitly group subsequent content tspans (until
+    /// the next wrapper) into one paragraph for the Paragraph panel.
+    /// Phase 1a only round-trips this marker; the paragraph attribute
+    /// fields and Enter/Backspace edit primitives land in Phase 1b.
+    public let jasRole: String?
     public let letterSpacing: Double?
     public let lineHeight: Double?
     public let rotate: Double?
@@ -45,6 +51,7 @@ public struct Tspan: Equatable {
                 fontWeight: String? = nil,
                 jasAaMode: String? = nil, jasFractionalWidths: Bool? = nil,
                 jasKerningMode: String? = nil, jasNoBreak: Bool? = nil,
+                jasRole: String? = nil,
                 letterSpacing: Double? = nil, lineHeight: Double? = nil,
                 rotate: Double? = nil, styleName: String? = nil,
                 textDecoration: [String]? = nil, textRendering: String? = nil,
@@ -57,6 +64,7 @@ public struct Tspan: Equatable {
         self.fontWeight = fontWeight
         self.jasAaMode = jasAaMode; self.jasFractionalWidths = jasFractionalWidths
         self.jasKerningMode = jasKerningMode; self.jasNoBreak = jasNoBreak
+        self.jasRole = jasRole
         self.letterSpacing = letterSpacing; self.lineHeight = lineHeight
         self.rotate = rotate; self.styleName = styleName
         self.textDecoration = textDecoration; self.textRendering = textRendering
@@ -76,6 +84,7 @@ public struct Tspan: Equatable {
             && fontStyle == nil && fontVariant == nil && fontWeight == nil
             && jasAaMode == nil && jasFractionalWidths == nil
             && jasKerningMode == nil && jasNoBreak == nil
+            && jasRole == nil
             && letterSpacing == nil && lineHeight == nil
             && rotate == nil && styleName == nil
             && textDecoration == nil && textRendering == nil
