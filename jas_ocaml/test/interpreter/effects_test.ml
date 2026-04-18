@@ -304,6 +304,27 @@ let character_attrs_tests = [
     let a = attrs_from_character_panel [("kerning", `Int 50)] in
     assert (a.kerning = "0.05em"));
 
+  Alcotest.test_case "kerning_numeric_string" `Quick (fun () ->
+    (* combo_box commits values as strings — numeric form still
+       converts to "{N}em". *)
+    let a = attrs_from_character_panel [("kerning", `String "25")] in
+    assert (a.kerning = "0.025em"));
+
+  Alcotest.test_case "kerning_named_modes_pass_through" `Quick (fun () ->
+    let a = attrs_from_character_panel [("kerning", `String "Optical")] in
+    assert (a.kerning = "Optical");
+    let b = attrs_from_character_panel [("kerning", `String "Metrics")] in
+    assert (b.kerning = "Metrics"));
+
+  Alcotest.test_case "kerning_auto_empties" `Quick (fun () ->
+    (* Auto / "" / "0" all round-trip to an empty element attribute. *)
+    let a = attrs_from_character_panel [("kerning", `String "Auto")] in
+    assert (a.kerning = "");
+    let b = attrs_from_character_panel [("kerning", `String "0")] in
+    assert (b.kerning = "");
+    let c = attrs_from_character_panel [("kerning", `String "")] in
+    assert (c.kerning = ""));
+
   Alcotest.test_case "rotation_nonzero" `Quick (fun () ->
     let a = attrs_from_character_panel [("character_rotation", `Int 15)] in
     assert (a.rotate = "15"));
