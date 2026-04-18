@@ -194,6 +194,7 @@ def _pack_tspan(t) -> list:
         t.text_transform,
         transform,
         t.xml_lang,
+        t.jas_role,
     ]
 
 
@@ -235,6 +236,7 @@ def _unpack_tspan(v):
         text_transform=get(19),
         transform=transform,
         xml_lang=get(21),
+        jas_role=get(22),
     )
 
 

@@ -712,6 +712,30 @@ class SvgImportTest(absltest.TestCase):
         self.assertEqual(elem.tspans[1].rotate, 90.0)
         self.assertEqual(elem.tspans[2].rotate, 0.0)
 
+    def test_svg_jas_role_emitted_on_tspan(self):
+        # Phase 1a: a wrapper Tspan with jas_role="paragraph" emits
+        # urn:jas:1:role="paragraph" on the <tspan> element. Full
+        # document round-trip through ElementTree is verified by the
+        # next test below; this one just locks down the emission.
+        from geometry.element import Layer, Text
+        t = Text(
+            x=10, y=20, content="hello",
+            tspans=(
+                Tspan(id=0, content="", jas_role="paragraph"),
+                Tspan(id=1, content="hello"),
+            ))
+        layer = Layer(children=(t,))
+        doc = Document(layers=(layer,))
+        svg = document_to_svg(doc)
+        self.assertIn('urn:jas:1:role="paragraph"', svg)
+        self.assertIn(">hello</tspan>", svg)
+
+    # Full document SVG round-trip through ElementTree is deferred to
+    # Phase 1b alongside the xmlns:jas namespace work — Python's
+    # XML parser, like Foundation's XMLDocument and OCaml's Xmlm,
+    # rejects colon-prefixed attribute names without an explicit
+    # namespace declaration on the SVG root.
+
 
 if __name__ == "__main__":
     absltest.main()
