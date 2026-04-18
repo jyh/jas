@@ -59,19 +59,34 @@ private func normalizeElement(_ elem: Element) -> Element {
                           opacity: e.opacity, transform: e.transform,
                           locked: e.locked, visibility: e.visibility))
     case .text(let e):
-        return .text(Text(x: e.x, y: e.y, content: e.content,
+        // Pass the tspans tuple through so multi-tspan text
+        // survives normalisation. The content-init would collapse
+        // into a single flat tspan and drop any per-range overrides.
+        return .text(Text(x: e.x, y: e.y, tspans: e.tspans,
                           fontFamily: e.fontFamily, fontSize: e.fontSize,
                           fontWeight: e.fontWeight, fontStyle: e.fontStyle,
                           textDecoration: e.textDecoration,
+                          textTransform: e.textTransform, fontVariant: e.fontVariant,
+                          baselineShift: e.baselineShift, lineHeight: e.lineHeight,
+                          letterSpacing: e.letterSpacing, xmlLang: e.xmlLang,
+                          aaMode: e.aaMode, rotate: e.rotate,
+                          horizontalScale: e.horizontalScale, verticalScale: e.verticalScale,
+                          kerning: e.kerning,
                           width: e.width, height: e.height,
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                           opacity: e.opacity, transform: e.transform,
                           locked: e.locked, visibility: e.visibility))
     case .textPath(let e):
-        return .textPath(TextPath(d: e.d, content: e.content, startOffset: e.startOffset,
+        return .textPath(TextPath(d: e.d, tspans: e.tspans, startOffset: e.startOffset,
                                   fontFamily: e.fontFamily, fontSize: e.fontSize,
                                   fontWeight: e.fontWeight, fontStyle: e.fontStyle,
                                   textDecoration: e.textDecoration,
+                                  textTransform: e.textTransform, fontVariant: e.fontVariant,
+                                  baselineShift: e.baselineShift, lineHeight: e.lineHeight,
+                                  letterSpacing: e.letterSpacing, xmlLang: e.xmlLang,
+                                  aaMode: e.aaMode, rotate: e.rotate,
+                                  horizontalScale: e.horizontalScale, verticalScale: e.verticalScale,
+                                  kerning: e.kerning,
                                   fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                                   opacity: e.opacity, transform: e.transform,
                                   locked: e.locked, visibility: e.visibility))

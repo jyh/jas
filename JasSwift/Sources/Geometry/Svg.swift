@@ -119,6 +119,31 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
     return s
 }
 
+/// Emit a single Tspan as an SVG `<tspan ...>content</tspan>` element.
+/// Only overridden attributes are emitted (inherited values are
+/// absent). Matches the Rust `tspan_svg` — the 5 attributes that
+/// round-trip via SVG natively: font-family, font-size, font-weight,
+/// font-style, text-decoration.
+private func tspanSvg(_ t: Tspan) -> String {
+    var attrs = ""
+    if let v = t.fontFamily {
+        attrs += " font-family=\"\(escapeXml(v))\""
+    }
+    if let v = t.fontSize {
+        attrs += " font-size=\"\(fmt(px(v)))\""
+    }
+    if let v = t.fontWeight {
+        attrs += " font-weight=\"\(escapeXml(v))\""
+    }
+    if let v = t.fontStyle {
+        attrs += " font-style=\"\(escapeXml(v))\""
+    }
+    if let members = t.textDecoration, !members.isEmpty {
+        attrs += " text-decoration=\"\(escapeXml(members.joined(separator: " ")))\""
+    }
+    return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
+}
+
 public func elementSvg(_ elem: Element, indent: String) -> String {
     switch elem {
     case .line(let v):
@@ -183,13 +208,28 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         // is the *top* of the layout box, so add the ascent (0.8 *
         // fontSize, the same value `text_layout` uses).
         let svgY = v.y + v.fontSize * 0.8
+        // Pre-Tspan-compatible emission: a single no-override tspan
+        // round-trips as a flat <text>contents</text>, no <tspan>
+        // wrapper. Multi-tspan or any override carries
+        // xml:space="preserve" and emits <tspan> children so
+        // whitespace round-trips byte-stably (TSPAN.md SVG serialization).
+        let isFlat = v.tspans.count == 1 && v.tspans[0].hasNoOverrides
+        let body: String
+        let spaceAttr: String
+        if isFlat {
+            body = escapeXml(v.content)
+            spaceAttr = ""
+        } else {
+            body = v.tspans.map(tspanSvg).joined()
+            spaceAttr = " xml:space=\"preserve\""
+        }
         return "\(indent)<text x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(svgY)))\"" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
             "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
             "\(areaAttrs)" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
-            "\(escapeXml(v.content))</text>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(spaceAttr)>" +
+            "\(body)</text>"
 
     case .textPath(let v):
         let d = pathData(v.d)
@@ -204,13 +244,23 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             aaMode: v.aaMode, rotate: v.rotate,
             horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
             kerning: v.kerning)
+        let isFlat = v.tspans.count == 1 && v.tspans[0].hasNoOverrides
+        let tpBody: String
+        let tpSpaceAttr: String
+        if isFlat {
+            tpBody = escapeXml(v.content)
+            tpSpaceAttr = ""
+        } else {
+            tpBody = v.tspans.map(tspanSvg).joined()
+            tpSpaceAttr = " xml:space=\"preserve\""
+        }
         return "\(indent)<text\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
             "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
             "<textPath path=\"\(d)\"" +
             (v.startOffset > 0 ? " startOffset=\"\(fmt(v.startOffset * 100))%\"" : "") +
-            ">\(escapeXml(v.content))</textPath></text>"
+            "\(tpSpaceAttr)>\(tpBody)</textPath></text>"
 
     case .group(let v):
         var lines = ["\(indent)<g\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
@@ -329,6 +379,47 @@ private func parseColor(_ s: String) -> Color? {
     }
     print("Warning: unrecognized SVG color value: \(s)")
     return nil
+}
+
+/// Parse an SVG `<tspan>` child node into a Tspan. Only attributes
+/// present on the node become `Some` overrides; absent attributes
+/// remain `nil` (tspan inherits from the parent element). Mirrors
+/// the Rust `parse_tspan`.
+private func parseTspan(_ node: XMLElement, id: UInt32) -> Tspan {
+    let content = node.stringValue ?? ""
+    let fontFamily = node.attribute(forName: "font-family")?.stringValue
+    let fontSize = (node.attribute(forName: "font-size")?.stringValue)
+        .flatMap(Double.init).map(toPt)
+    let fontWeight = node.attribute(forName: "font-weight")?.stringValue
+    let fontStyle = node.attribute(forName: "font-style")?.stringValue
+    let decoration = (node.attribute(forName: "text-decoration")?.stringValue).map { raw -> [String] in
+        raw.split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .filter { $0 != "none" && !$0.isEmpty }
+            .sorted()
+    }
+    return Tspan(
+        id: id, content: content,
+        fontFamily: fontFamily, fontSize: fontSize,
+        fontStyle: fontStyle, fontWeight: fontWeight,
+        textDecoration: decoration)
+}
+
+/// Collect `<tspan>` children from an XMLElement and return them as
+/// a list of parsed Tspans, in document order. Returns an empty list
+/// when no `<tspan>` children are present (caller falls back to the
+/// flat-content single-tspan default).
+private func collectTspanChildren(_ elem: XMLElement) -> [Tspan] {
+    guard let children = elem.children else { return [] }
+    var result: [Tspan] = []
+    var nextId: UInt32 = 0
+    for child in children {
+        if let xml = child as? XMLElement, xml.localName == "tspan" {
+            result.append(parseTspan(xml, id: nextId))
+            nextId += 1
+        }
+    }
+    return result
 }
 
 private func parseFill(_ node: XMLElement) -> Fill? {
@@ -610,7 +701,6 @@ private func parseElement(_ node: XMLNode) -> Element? {
                 let dStr = tpElem.attribute(forName: "path")?.stringValue
                         ?? tpElem.attribute(forName: "d")?.stringValue ?? ""
                 let d = parsePathD(dStr)
-                let tpContent = tpElem.stringValue ?? ""
                 var startOffset = 0.0
                 let offsetStr = tpElem.attribute(forName: "startOffset")?.stringValue ?? "0"
                 if offsetStr.hasSuffix("%") {
@@ -618,6 +708,21 @@ private func parseElement(_ node: XMLNode) -> Element? {
                 } else {
                     startOffset = Double(offsetStr) ?? 0
                 }
+                // Prefer <tspan> children inside the <textPath>; fall
+                // back to flat string content when none are present.
+                let tpTspanChildren = collectTspanChildren(tpElem)
+                if !tpTspanChildren.isEmpty {
+                    return .textPath(TextPath(
+                        d: d, tspans: tpTspanChildren, startOffset: startOffset,
+                        fontFamily: ff, fontSize: fs,
+                        fontWeight: fw, fontStyle: fst, textDecoration: td,
+                        textTransform: tt, fontVariant: fv,
+                        baselineShift: bs, lineHeight: lh, letterSpacing: ls,
+                        xmlLang: lang, aaMode: aa, rotate: rotate,
+                        horizontalScale: hScale, verticalScale: vScale, kerning: kern,
+                        fill: fill, stroke: stroke, opacity: opacity, transform: transform))
+                }
+                let tpContent = tpElem.stringValue ?? ""
                 return .textPath(TextPath(
                     d: d, content: tpContent, startOffset: startOffset,
                     fontFamily: ff, fontSize: fs,
@@ -629,7 +734,10 @@ private func parseElement(_ node: XMLNode) -> Element? {
                     fill: fill, stroke: stroke, opacity: opacity, transform: transform))
             }
         }
-        let content = elem.stringValue ?? ""
+        let tspanChildren = collectTspanChildren(elem)
+        let content = tspanChildren.isEmpty
+            ? (elem.stringValue ?? "")
+            : tspanChildren.map(\.content).joined()
         var tw = 0.0
         if let style = elem.attribute(forName: "style")?.stringValue {
             if let range = style.range(of: #"inline-size:\s*([\d.]+)px"#, options: .regularExpression) {
@@ -647,6 +755,19 @@ private func parseElement(_ node: XMLNode) -> Element? {
         // SVG `y` is the baseline of the first line; convert to the
         // layout-box top by subtracting the ascent (0.8 * fs).
         let svgY = toPt(attrF(elem, "y"))
+        if !tspanChildren.isEmpty {
+            return .text(Text(
+                x: toPt(attrF(elem, "x")), y: svgY - fs * 0.8,
+                tspans: tspanChildren,
+                fontFamily: ff, fontSize: fs,
+                fontWeight: fw, fontStyle: fst, textDecoration: td,
+                textTransform: tt, fontVariant: fv,
+                baselineShift: bs, lineHeight: lh, letterSpacing: ls,
+                xmlLang: lang, aaMode: aa, rotate: rotate,
+                horizontalScale: hScale, verticalScale: vScale, kerning: kern,
+                width: tw, height: th,
+                fill: fill, stroke: stroke, opacity: opacity, transform: transform))
+        }
         return .text(Text(
             x: toPt(attrF(elem, "x")), y: svgY - fs * 0.8,
             content: content, fontFamily: ff, fontSize: fs,

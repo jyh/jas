@@ -334,6 +334,78 @@ private func roundtrip(_ doc: Document) -> Document {
     }
 }
 
+@Test func svgFlatTextHasNoTspanWrapper() {
+    // A Text with a single no-override tspan should round-trip as
+    // flat SVG — no <tspan> wrapper, no xml:space="preserve".
+    let doc = Document(layers: [Layer(children: [
+        .text(Text(x: 0, y: 0, content: "Hello"))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(!svg.contains("<tspan"))
+    #expect(!svg.contains("xml:space"))
+    #expect(svg.contains(">Hello</text>"))
+}
+
+@Test func svgMultiTspanTextEmitsTspanChildren() {
+    // Two tspans with distinct overrides round-trip as <tspan>
+    // children + xml:space="preserve" on the parent <text>.
+    let tspans = [
+        Tspan(id: 0, content: "Hello "),
+        Tspan(id: 1, content: "world", fontWeight: "bold"),
+    ]
+    let doc = Document(layers: [Layer(children: [
+        .text(Text(x: 0, y: 0, tspans: tspans))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("xml:space=\"preserve\""))
+    #expect(svg.contains("<tspan>Hello </tspan>"))
+    #expect(svg.contains("<tspan font-weight=\"bold\">world</tspan>"))
+}
+
+@Test func svgTspanRoundTripPreservesOverrides() {
+    // Round-trip a two-tspan text through SVG and back: content,
+    // override attributes, and tspan count are preserved.
+    let tspans = [
+        Tspan(id: 0, content: "A"),
+        Tspan(id: 1, content: "B", fontFamily: "Courier", fontWeight: "bold",
+              textDecoration: ["line-through", "underline"]),
+    ]
+    let doc = Document(layers: [Layer(children: [
+        .text(Text(x: 0, y: 0, tspans: tspans))
+    ])])
+    let doc2 = roundtrip(doc)
+    guard case .text(let t) = doc2.layers[0].children[0] else {
+        Issue.record("expected text"); return
+    }
+    #expect(t.tspans.count == 2)
+    #expect(t.tspans[0].content == "A")
+    #expect(t.tspans[0].hasNoOverrides)
+    #expect(t.tspans[1].content == "B")
+    #expect(t.tspans[1].fontFamily == "Courier")
+    #expect(t.tspans[1].fontWeight == "bold")
+    #expect(t.tspans[1].textDecoration == ["line-through", "underline"])
+}
+
+@Test func svgTextPathTspanRoundTrip() {
+    let tspans = [
+        Tspan(id: 0, content: "foo "),
+        Tspan(id: 1, content: "bar", fontStyle: "italic"),
+    ]
+    let doc = Document(layers: [Layer(children: [
+        .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(100, 0)],
+                               tspans: tspans))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<tspan>foo </tspan>"))
+    #expect(svg.contains("<tspan font-style=\"italic\">bar</tspan>"))
+    let doc2 = roundtrip(doc)
+    guard case .textPath(let tp) = doc2.layers[0].children[0] else {
+        Issue.record("expected text path"); return
+    }
+    #expect(tp.tspans.count == 2)
+    #expect(tp.tspans[1].fontStyle == "italic")
+}
+
 @Test func svgRoundTripTextYPreservesTop() {
     // Internally `Text.y` is the top of the layout box. Round-tripping
     // through SVG (where `y` is the baseline) must put us back at the
