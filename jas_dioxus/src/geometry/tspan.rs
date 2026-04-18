@@ -38,6 +38,12 @@ pub struct Tspan {
     pub jas_fractional_widths: Option<bool>,
     pub jas_kerning_mode: Option<String>,
     pub jas_no_break: Option<bool>,
+    /// Marks a tspan as a paragraph wrapper when set to `Some("paragraph")`.
+    /// Wrapper tspans implicitly group subsequent content tspans (until
+    /// the next wrapper) into one paragraph for the Paragraph panel.
+    /// Phase 1a only round-trips this marker; the paragraph attribute
+    /// fields and Enter/Backspace edit primitives land in Phase 1b.
+    pub jas_role: Option<String>,
     pub letter_spacing: Option<f64>,
     pub line_height: Option<f64>,
     pub rotate: Option<f64>,
@@ -74,6 +80,7 @@ impl Tspan {
             && self.jas_fractional_widths.is_none()
             && self.jas_kerning_mode.is_none()
             && self.jas_no_break.is_none()
+            && self.jas_role.is_none()
             && self.letter_spacing.is_none()
             && self.line_height.is_none()
             && self.rotate.is_none()
@@ -169,6 +176,7 @@ pub fn tspans_to_svg_fragment(tspans: &[Tspan]) -> String {
         if let Some(v) = t.jas_fractional_widths { attrs.push(("jas:fractional-widths", v.to_string())); }
         if let Some(v) = &t.jas_kerning_mode { attrs.push(("jas:kerning-mode", v.clone())); }
         if let Some(v) = t.jas_no_break { attrs.push(("jas:no-break", v.to_string())); }
+        if let Some(v) = &t.jas_role { attrs.push(("jas:role", v.clone())); }
         if let Some(v) = t.letter_spacing { attrs.push(("letter-spacing", fmt_f64(v))); }
         if let Some(v) = t.line_height { attrs.push(("line-height", fmt_f64(v))); }
         if let Some(v) = t.rotate { attrs.push(("rotate", fmt_f64(v))); }
@@ -250,6 +258,7 @@ pub fn tspans_from_svg_fragment(svg_str: &str) -> Option<Vec<Tspan>> {
                 "jas:fractional-widths" => t.jas_fractional_widths = Some(v == "true"),
                 "jas:kerning-mode" => t.jas_kerning_mode = Some(v),
                 "jas:no-break" => t.jas_no_break = Some(v == "true"),
+                "jas:role" => t.jas_role = Some(v),
                 "letter-spacing" => t.letter_spacing = v.parse().ok(),
                 "line-height" => t.line_height = v.parse().ok(),
                 "rotate" => t.rotate = v.parse().ok(),
@@ -339,8 +348,8 @@ pub fn merge_tspan_overrides(target: &mut Tspan, source: &Tspan) {
     copy_if_some!(
         baseline_shift, dx, font_family, font_size, font_style,
         font_variant, font_weight, jas_aa_mode, jas_fractional_widths,
-        jas_kerning_mode, jas_no_break, letter_spacing, line_height,
-        rotate, style_name, text_decoration, text_rendering,
+        jas_kerning_mode, jas_no_break, jas_role, letter_spacing,
+        line_height, rotate, style_name, text_decoration, text_rendering,
         text_transform, transform, xml_lang
     );
 }
@@ -1432,6 +1441,37 @@ mod tests {
         let td = back[0].text_decoration.as_ref().unwrap();
         assert!(td.contains(&"underline".to_string()));
         assert!(td.contains(&"line-through".to_string()));
+    }
+
+    // ── jas:role wrapper tspan (Phase 1a) ───────────────────────────
+    //
+    // Paragraph wrapper tspans are tagged with jas:role="paragraph".
+    // Phase 1a only persists the role marker through clipboard and
+    // document SVG round-trips; paragraph attribute fields and
+    // Enter/Backspace edit primitives land in Phase 1b.
+
+    #[test]
+    fn default_tspan_has_no_role() {
+        assert!(Tspan::default_tspan().jas_role.is_none());
+    }
+
+    #[test]
+    fn has_no_overrides_false_when_jas_role_set() {
+        let mut t = Tspan::default_tspan();
+        t.jas_role = Some("paragraph".into());
+        assert!(!t.has_no_overrides());
+    }
+
+    #[test]
+    fn svg_fragment_jas_role_round_trip() {
+        let mut t = Tspan::default_tspan();
+        t.content = "".into();
+        t.jas_role = Some("paragraph".into());
+        let svg = tspans_to_svg_fragment(&[t]);
+        assert!(svg.contains(r#"jas:role="paragraph""#), "got: {}", svg);
+        let back = tspans_from_svg_fragment(&svg).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].jas_role.as_deref(), Some("paragraph"));
     }
 
     // ── char_to_tspan_pos / Affinity ────────────────────────────────

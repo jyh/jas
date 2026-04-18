@@ -602,6 +602,7 @@ fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
         text_transform: parse_str_opt(&v["text_transform"]),
         transform: parse_transform_opt(&v["transform"]),
         xml_lang: parse_str_opt(&v["xml_lang"]),
+        jas_role: parse_str_opt(&v["jas_role"]),
     }
 }
 
