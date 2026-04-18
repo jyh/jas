@@ -135,6 +135,22 @@ class TestLeadingTracking:
         attrs = _attrs_from_panel({"kerning": 50})
         assert attrs["kerning"] == "0.05em"
 
+    def test_kerning_numeric_string(self):
+        # combo_box commits values as strings — numeric form still
+        # converts to "{N}em".
+        attrs = _attrs_from_panel({"kerning": "25"})
+        assert attrs["kerning"] == "0.025em"
+
+    def test_kerning_named_modes_pass_through(self):
+        assert _attrs_from_panel({"kerning": "Optical"})["kerning"] == "Optical"
+        assert _attrs_from_panel({"kerning": "Metrics"})["kerning"] == "Metrics"
+
+    def test_kerning_auto_empties(self):
+        # Auto / "" / "0" all round-trip to an empty element attribute.
+        assert _attrs_from_panel({"kerning": "Auto"})["kerning"] == ""
+        assert _attrs_from_panel({"kerning": "0"})["kerning"] == ""
+        assert _attrs_from_panel({"kerning": ""})["kerning"] == ""
+
 
 # ── _attrs_from_panel — rotation / scale ─────────────────────
 
