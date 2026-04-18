@@ -215,16 +215,50 @@ impl TypeOnPathTool {
         self.state = State::Idle;
     }
 
+    /// Insert clipboard text into the active session, if any.
+    /// Tspan-aware when the session clipboard still matches.
     pub fn paste_text(&mut self, model: &mut Model, text: &str) -> bool {
-        if self.session.is_some() {
-            self.ensure_snapshot(model);
-            self.session.as_mut().unwrap().insert(text);
-            self.session.as_mut().unwrap().blink_epoch_ms = now_ms();
-            self.sync_to_model(model);
-            true
-        } else {
-            false
+        let Some(session) = self.session.as_ref() else { return false };
+        let path = session.path.clone();
+        let elem_tspans: Option<Vec<crate::geometry::tspan::Tspan>> =
+            model.document().get_element(&path).and_then(|e| match e {
+                Element::TextPath(tp) => Some(tp.tspans.clone()),
+                Element::Text(t) => Some(t.tspans.clone()),
+                _ => None,
+            });
+        let tspan_result = elem_tspans.as_ref()
+            .and_then(|tsp| session.try_paste_tspans(tsp, text));
+        self.ensure_snapshot(model);
+        if let Some(new_tspans) = tspan_result {
+            let mut doc = model.document().clone();
+            if let Some(elem) = doc.get_element(&path) {
+                let new_elem = match elem {
+                    Element::Text(t) => {
+                        let mut new_t = t.clone();
+                        new_t.tspans = new_tspans.clone();
+                        Element::Text(new_t)
+                    }
+                    Element::TextPath(tp) => {
+                        let mut new_tp = tp.clone();
+                        new_tp.tspans = new_tspans.clone();
+                        Element::TextPath(new_tp)
+                    }
+                    _ => return false,
+                };
+                doc = doc.replace_element(&path, new_elem);
+                model.set_document(doc);
+            }
+            let session = self.session.as_mut().unwrap();
+            session.content = crate::geometry::tspan::concat_content(&new_tspans);
+            session.insertion = session.insertion + text.chars().count();
+            session.anchor = session.insertion;
+            session.blink_epoch_ms = now_ms();
+            return true;
         }
+        self.session.as_mut().unwrap().insert(text);
+        self.session.as_mut().unwrap().blink_epoch_ms = now_ms();
+        self.sync_to_model(model);
+        true
     }
 
     fn find_offset_handle(model: &Model, x: f64, y: f64) -> Option<(Vec<usize>, f64)> {
@@ -503,11 +537,36 @@ impl CanvasTool for TypeOnPathTool {
                     return true;
                 }
                 "c" | "C" => {
-                    if let Some(text) = session.copy_selection() { clipboard_write(text); }
+                    // Capture tspan overrides alongside the flat text.
+                    let elem_tspans: Vec<crate::geometry::tspan::Tspan> = model
+                        .document()
+                        .get_element(&session.path)
+                        .and_then(|e| match e {
+                            Element::TextPath(tp) => Some(tp.tspans.clone()),
+                            Element::Text(t) => Some(t.tspans.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    if let Some(text) = self.session.as_mut().unwrap()
+                        .copy_selection_with_tspans(&elem_tspans)
+                    {
+                        clipboard_write(text);
+                    }
                     return true;
                 }
                 "x" | "X" => {
-                    if let Some(text) = session.copy_selection() {
+                    let elem_tspans: Vec<crate::geometry::tspan::Tspan> = model
+                        .document()
+                        .get_element(&session.path)
+                        .and_then(|e| match e {
+                            Element::TextPath(tp) => Some(tp.tspans.clone()),
+                            Element::Text(t) => Some(t.tspans.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    if let Some(text) = self.session.as_mut().unwrap()
+                        .copy_selection_with_tspans(&elem_tspans)
+                    {
                         clipboard_write(text);
                         self.ensure_snapshot(model);
                         self.session.as_mut().unwrap().backspace();

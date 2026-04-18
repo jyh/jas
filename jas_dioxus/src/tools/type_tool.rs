@@ -240,16 +240,59 @@ impl TypeTool {
 
     /// Insert clipboard text into the active session, if any. Returns true
     /// if handled (to suppress the app's element-paste path).
+    ///
+    /// Tspan-aware paste: when the session's tspan clipboard matches
+    /// the flat text (i.e. the user cut/copied earlier in this
+    /// session and the system clipboard hasn't been replaced), the
+    /// captured tspan overrides splice back in at the caret rather
+    /// than collapsing to a plain insert. Otherwise it falls through
+    /// to the flat `insert` path.
     pub fn paste_text(&mut self, model: &mut Model, text: &str) -> bool {
-        if self.session.is_some() {
-            self.ensure_snapshot(model);
-            self.session.as_mut().unwrap().insert(text);
-            self.session.as_mut().unwrap().blink_epoch_ms = now_ms();
-            self.sync_to_model(model);
-            true
-        } else {
-            false
+        let Some(session) = self.session.as_ref() else { return false };
+        // Snapshot path + clipboard match up-front so we can borrow
+        // model mutably below.
+        let path = session.path.clone();
+        let elem_tspans: Option<Vec<crate::geometry::tspan::Tspan>> =
+            model.document().get_element(&path).and_then(|e| match e {
+                Element::Text(t) => Some(t.tspans.clone()),
+                Element::TextPath(tp) => Some(tp.tspans.clone()),
+                _ => None,
+            });
+        let tspan_result = elem_tspans.as_ref()
+            .and_then(|tsp| session.try_paste_tspans(tsp, text));
+        self.ensure_snapshot(model);
+        if let Some(new_tspans) = tspan_result {
+            // Tspan-aware paste: update the element directly.
+            let mut doc = model.document().clone();
+            if let Some(elem) = doc.get_element(&path) {
+                let new_elem = match elem {
+                    Element::Text(t) => {
+                        let mut new_t = t.clone();
+                        new_t.tspans = new_tspans.clone();
+                        Element::Text(new_t)
+                    }
+                    Element::TextPath(tp) => {
+                        let mut new_tp = tp.clone();
+                        new_tp.tspans = new_tspans.clone();
+                        Element::TextPath(new_tp)
+                    }
+                    _ => return false,
+                };
+                doc = doc.replace_element(&path, new_elem);
+                model.set_document(doc);
+            }
+            let session = self.session.as_mut().unwrap();
+            session.content = crate::geometry::tspan::concat_content(&new_tspans);
+            session.insertion = session.insertion + text.chars().count();
+            session.anchor = session.insertion;
+            session.blink_epoch_ms = now_ms();
+            return true;
         }
+        // Flat paste fallback.
+        self.session.as_mut().unwrap().insert(text);
+        self.session.as_mut().unwrap().blink_epoch_ms = now_ms();
+        self.sync_to_model(model);
+        true
     }
 
     /// Returns the substring currently selected in the editor, if any.
@@ -490,13 +533,39 @@ impl CanvasTool for TypeTool {
                     return true;
                 }
                 "c" | "C" => {
-                    if let Some(text) = session.copy_selection() {
+                    // Capture the selection's flat text and tspan
+                    // overrides in one shot — the tspan payload is
+                    // consumed on paste within the same session when
+                    // the system-clipboard flat text still matches.
+                    let elem_tspans: Vec<crate::geometry::tspan::Tspan> = model
+                        .document()
+                        .get_element(&session.path)
+                        .and_then(|e| match e {
+                            Element::Text(t) => Some(t.tspans.clone()),
+                            Element::TextPath(tp) => Some(tp.tspans.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    if let Some(text) = self.session.as_mut().unwrap()
+                        .copy_selection_with_tspans(&elem_tspans)
+                    {
                         clipboard_write(text);
                     }
                     return true;
                 }
                 "x" | "X" => {
-                    if let Some(text) = session.copy_selection() {
+                    let elem_tspans: Vec<crate::geometry::tspan::Tspan> = model
+                        .document()
+                        .get_element(&session.path)
+                        .and_then(|e| match e {
+                            Element::Text(t) => Some(t.tspans.clone()),
+                            Element::TextPath(tp) => Some(tp.tspans.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    if let Some(text) = self.session.as_mut().unwrap()
+                        .copy_selection_with_tspans(&elem_tspans)
+                    {
                         clipboard_write(text);
                         self.ensure_snapshot(model);
                         self.session.as_mut().unwrap().backspace();
