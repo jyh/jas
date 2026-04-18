@@ -197,15 +197,13 @@ external references (commits, issues) must not dangle.
 
 ### 10. Visual checks
 
-Prose `Expect`s. Cite CHARACTER.md / the yaml `description` / CSS theme tokens
-when precision is needed.
+Prose `Expect`s. Cite the component's design doc / the yaml `description` /
+CSS theme tokens when precision is needed.
 
-One per-component reference image (`examples/<name>.png`) is acceptable for
-the smoke-level holistic check ("panel matches reference at default width,
-Dark appearance"). Do **not** add per-test baselines — they rot, capture is
-ceremony, comparison is still eyeball. If visual regression becomes a real
-concern, add automated tooling (Playwright/Percy-style) rather than building
-a manual photo album.
+Do **not** reference `examples/*.png` or any checked-in image as a baseline —
+those images are scratch captures, not durable reference material. If visual
+regression becomes a real concern, add automated tooling (Playwright/Percy-
+style) rather than building a manual photo album.
 
 ### 11. Enhancements / follow-ups
 
@@ -242,8 +240,6 @@ across an external tracker or memory system.
 10. Draft cross-app parity section (~5–8 load-bearing `[wired]` tests).
 11. Add the standard scaffolding: tier definitions, default setup, known-broken
     block (empty), graveyard (empty), enhancements section (empty).
-12. Capture an initial `examples/<name>.png` reference image from the primary
-    app at default appearance.
 
 ## Maintenance rituals
 
