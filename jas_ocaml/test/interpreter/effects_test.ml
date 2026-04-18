@@ -526,6 +526,44 @@ let phase3_pending_tests = [
     assert (out.(0).content = "foobar");
     assert (out.(0).font_weight = Some "bold"));
 
+  Alcotest.test_case "identity_omit clears font_weight matching element" `Quick (fun () ->
+    let open Jas in
+    let t = { (Tspan.default_tspan ()) with
+              content = "X"; font_weight = Some "normal" } in
+    let elem = _default_text_elem () in
+    let out = Tspan.identity_omit_tspan t elem in
+    assert (out.font_weight = None));
+
+  Alcotest.test_case "identity_omit keeps font_weight differing from element" `Quick (fun () ->
+    let open Jas in
+    let t = { (Tspan.default_tspan ()) with
+              content = "X"; font_weight = Some "bold" } in
+    let elem = _default_text_elem () in
+    let out = Tspan.identity_omit_tspan t elem in
+    assert (out.font_weight = Some "bold"));
+
+  Alcotest.test_case "identity_omit clears line_height matching auto default" `Quick (fun () ->
+    let open Jas in
+    let t = { (Tspan.default_tspan ()) with
+              content = "X"; line_height = Some (16.0 *. 1.2) } in
+    let elem = _default_text_elem () in
+    let out = Tspan.identity_omit_tspan t elem in
+    assert (out.line_height = None));
+
+  Alcotest.test_case "identity_omit end-to-end per-range write" `Quick (fun () ->
+    let open Jas in
+    let base = [|
+      { (Tspan.default_tspan ()) with
+        content = "foo"; font_weight = Some "bold" };
+    |] in
+    let overrides = { (Tspan.default_tspan ()) with
+                      font_weight = Some "normal" } in
+    let elem = _default_text_elem () in
+    let out = apply_overrides_to_tspan_range ~elem base 0 3 overrides in
+    assert (Array.length out = 1);
+    assert (out.(0).content = "foo");
+    assert (out.(0).font_weight = None));
+
   Alcotest.test_case "template_leading_differs_from_auto" `Quick (fun () ->
     let elem = _default_text_elem () in
     let panel = _panel_with [("leading", `Float 32.0)] in

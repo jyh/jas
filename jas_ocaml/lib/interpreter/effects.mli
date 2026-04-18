@@ -103,6 +103,7 @@ val build_panel_full_overrides :
     [merge_tspan_overrides] + [merge]. Passthrough when the range
     is empty. *)
 val apply_overrides_to_tspan_range :
+  ?elem:Element.element ->
   Element.tspan array -> int -> int -> Element.tspan -> Element.tspan array
 
 (** Push the Character-panel state to every selected Text / Text_path.

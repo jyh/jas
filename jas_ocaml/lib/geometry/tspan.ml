@@ -349,6 +349,92 @@ let merge_tspan_overrides (target : tspan) (source : tspan) : tspan =
     xml_lang = or_some source.xml_lang target.xml_lang;
   }
 
+let identity_omit_tspan (t : tspan) (elem : Element.element) : tspan =
+  match elem with
+  | Element.Text _ | Element.Text_path _ ->
+    let (ff, fs, fw, fst, td, tt, fv, xl, rot, lh, ls, bs, aa) = match elem with
+      | Element.Text r ->
+        (r.font_family, r.font_size, r.font_weight, r.font_style,
+         r.text_decoration, r.text_transform, r.font_variant,
+         r.xml_lang, r.rotate, r.line_height, r.letter_spacing,
+         r.baseline_shift, r.aa_mode)
+      | Element.Text_path r ->
+        (r.font_family, r.font_size, r.font_weight, r.font_style,
+         r.text_decoration, r.text_transform, r.font_variant,
+         r.xml_lang, r.rotate, r.line_height, r.letter_spacing,
+         r.baseline_shift, r.aa_mode)
+      | _ -> assert false
+    in
+    let has_suffix ~suffix s =
+      let ls = String.length s in
+      let lsuf = String.length suffix in
+      ls >= lsuf && String.sub s (ls - lsuf) lsuf = suffix
+    in
+    let parse_pt s =
+      let s = String.trim s in
+      if s = "" then None
+      else
+        let rest = if has_suffix ~suffix:"pt" s
+          then String.sub s 0 (String.length s - 2) else s in
+        try Some (float_of_string rest) with _ -> None
+    in
+    let parse_em s =
+      let s = String.trim s in
+      if s = "" then None
+      else
+        let rest = if has_suffix ~suffix:"em" s
+          then String.sub s 0 (String.length s - 2) else s in
+        try Some (float_of_string rest) with _ -> None
+    in
+    let eq_str_opt a b = match a with Some s -> s = b | None -> false in
+    let t = if eq_str_opt t.font_family ff then { t with font_family = None } else t in
+    let t = match t.font_size with
+      | Some v when abs_float (v -. fs) < 1e-6 -> { t with font_size = None }
+      | _ -> t in
+    let t = if eq_str_opt t.font_weight fw then { t with font_weight = None } else t in
+    let t = if eq_str_opt t.font_style fst then { t with font_style = None } else t in
+    let t = match t.text_decoration with
+      | Some parts ->
+        let a = List.sort compare parts in
+        let b = List.sort compare
+          (String.split_on_char ' ' td
+           |> List.filter (fun p -> p <> "" && p <> "none")) in
+        if a = b then { t with text_decoration = None } else t
+      | None -> t in
+    let t = if eq_str_opt t.text_transform tt then { t with text_transform = None } else t in
+    let t = if eq_str_opt t.font_variant fv then { t with font_variant = None } else t in
+    let t = if eq_str_opt t.xml_lang xl then { t with xml_lang = None } else t in
+    let t = match t.rotate with
+      | Some v ->
+        let elem_rot = try float_of_string rot with _ -> 0.0 in
+        if abs_float (v -. elem_rot) < 1e-6 then { t with rotate = None } else t
+      | None -> t in
+    let t = match t.line_height with
+      | Some v ->
+        let elem_lh = match parse_pt lh with Some x -> x | None -> fs *. 1.2 in
+        if abs_float (v -. elem_lh) < 1e-6 then { t with line_height = None } else t
+      | None -> t in
+    let t = match t.letter_spacing with
+      | Some v ->
+        let elem_ls = match parse_em ls with Some x -> x | None -> 0.0 in
+        if abs_float (v -. elem_ls) < 1e-6 then { t with letter_spacing = None } else t
+      | None -> t in
+    let t = match t.baseline_shift with
+      | Some v ->
+        (match parse_pt bs with
+         | Some elem_bs ->
+           if abs_float (v -. elem_bs) < 1e-6 then { t with baseline_shift = None } else t
+         | None ->
+           if bs = "" && v = 0.0 then { t with baseline_shift = None } else t)
+      | None -> t in
+    let t = match t.jas_aa_mode with
+      | Some v ->
+        let elem_aa = if aa = "Sharp" then "" else aa in
+        if v = elem_aa then { t with jas_aa_mode = None } else t
+      | None -> t in
+    t
+  | _ -> t
+
 type affinity = Left | Right
 
 let char_to_tspan_pos (tspans : tspan array) (char_idx : int) (aff : affinity) : int * int =

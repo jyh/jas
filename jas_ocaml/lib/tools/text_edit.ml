@@ -230,15 +230,22 @@ let set_content t new_content ~insertion ~anchor =
 
 (* Apply the pending next-typed-character override to the range
    [pending_char_start, insertion) of [tspans], then merge.
-   Passthrough when pending is unset or the range is empty. *)
-let apply_pending_to t tspans =
+   Passthrough when pending is unset or the range is empty. When
+   [?elem] is supplied, runs identity-omission (TSPAN.md step 3)
+   between the merge-overrides and final merge steps so redundant
+   overrides get cleared. *)
+let apply_pending_to ?elem t tspans =
   match t.pending_override, t.pending_char_start with
   | Some pending, Some start when start < t.insertion ->
     let (split, first, last) = Tspan.split_range tspans start t.insertion in
     (match first, last with
      | Some f, Some l ->
        for i = f to l do
-         split.(i) <- Tspan.merge_tspan_overrides split.(i) pending
+         let merged = Tspan.merge_tspan_overrides split.(i) pending in
+         let finalized = match elem with
+           | Some e -> Tspan.identity_omit_tspan merged e
+           | None -> merged in
+         split.(i) <- finalized
        done;
        Tspan.merge split
      | _ -> split)
@@ -250,7 +257,7 @@ let apply_to_document t doc =
     match t.target, elem with
     | Edit_text, Element.Text r ->
       let reconciled = Tspan.reconcile_content r.tspans t.content in
-      let new_tspans = apply_pending_to t reconciled in
+      let new_tspans = apply_pending_to ~elem t reconciled in
       let new_elem = Element.Text { r with
         content = t.content;
         tspans = new_tspans
@@ -258,7 +265,7 @@ let apply_to_document t doc =
       Some (Document.replace_element doc t.path new_elem)
     | Edit_text_path, Element.Text_path r ->
       let reconciled = Tspan.reconcile_content r.tspans t.content in
-      let new_tspans = apply_pending_to t reconciled in
+      let new_tspans = apply_pending_to ~elem t reconciled in
       let new_elem = Element.Text_path { r with
         content = t.content;
         tspans = new_tspans

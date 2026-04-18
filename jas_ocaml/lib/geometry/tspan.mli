@@ -32,6 +32,15 @@ val resolve_id : tspan array -> tspan_id -> int option
     character state (the "pending override" template). *)
 val merge_tspan_overrides : tspan -> tspan -> tspan
 
+(** Drop any tspan override field that matches the parent element's
+    effective value (TSPAN.md "Character attribute writes (from
+    panels)" step 3). After this pass the tspan retains only
+    overrides whose stored value differs from the element's
+    rendering default; [merge] can then collapse same-override
+    neighbours freely. Non-Text / Text_path elements return the
+    tspan unchanged. *)
+val identity_omit_tspan : tspan -> Element.element -> tspan
+
 (** Serialize [tspans] as the rich-clipboard JSON payload described
     in TSPAN.md — [{"tspans": [...]}] with each tspan's override
     fields in snake_case. Ids are stripped; [None] overrides are
