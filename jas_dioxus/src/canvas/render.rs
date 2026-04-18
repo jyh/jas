@@ -719,7 +719,35 @@ fn draw_segmented_text(
             eff_style, eff_weight, eff_size, eff_family);
         ctx.set_font(&font);
 
-        ctx.fill_text(&t.content, cx, baseline).ok();
+        // Per-tspan positioning: dx is a leading-edge horizontal
+        // nudge in em (so a fresh tspan advance contribution);
+        // baseline_shift in pt offsets the baseline (sign convention
+        // mirrors CSS / TSPAN.md: + is up — negative y in canvas).
+        // rotate / transform wrap the tspan draw around its starting
+        // baseline position. All compose on top of the shared
+        // baseline from the parent Text.
+        let dx_px = t.dx.unwrap_or(0.0) * eff_size;
+        cx += dx_px;
+        let baseline_shift = t.baseline_shift.unwrap_or(0.0);
+        let tspan_baseline = baseline - baseline_shift;
+        let rotate_deg = t.rotate.unwrap_or(0.0);
+        let rotate_rad = rotate_deg.to_radians();
+        let has_transform = t.transform.is_some();
+        let has_rotate = rotate_rad != 0.0;
+
+        if has_rotate || has_transform {
+            ctx.save();
+            ctx.translate(cx, tspan_baseline).ok();
+            if let Some(tr) = &t.transform {
+                ctx.transform(tr.a, tr.b, tr.c, tr.d, tr.e, tr.f).ok();
+            }
+            if has_rotate {
+                ctx.rotate(rotate_rad).ok();
+            }
+            ctx.fill_text(&t.content, 0.0, 0.0).ok();
+        } else {
+            ctx.fill_text(&t.content, cx, tspan_baseline).ok();
+        }
 
         // Effective decoration: Some([..]) overrides parent (empty
         // list = explicit no-decoration); None inherits parent tokens.
@@ -736,10 +764,22 @@ fn draw_segmented_text(
         let measure = crate::tools::text_measure::make_measurer(&font, eff_size);
         let w = measure(&t.content);
         if has_underline || has_strike {
-            draw_text_decorations(
-                ctx, cx, baseline, w, eff_size,
-                has_underline, has_strike, e.fill.as_ref(),
-            );
+            if has_rotate || has_transform {
+                // Decorations draw in the tspan's local frame so
+                // they rotate / transform with the glyphs.
+                draw_text_decorations(
+                    ctx, 0.0, 0.0, w, eff_size,
+                    has_underline, has_strike, e.fill.as_ref(),
+                );
+            } else {
+                draw_text_decorations(
+                    ctx, cx, tspan_baseline, w, eff_size,
+                    has_underline, has_strike, e.fill.as_ref(),
+                );
+            }
+        }
+        if has_rotate || has_transform {
+            ctx.restore();
         }
         cx += w;
     }
