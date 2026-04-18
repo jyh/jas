@@ -2263,6 +2263,10 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_i64()).unwrap_or(0);
     let max = el.get("max").and_then(|m| m.as_i64()).unwrap_or(100);
+    // Declared bounds drive clamp-on-commit. Undeclared → no clamp (e.g.
+    // Tracking is signed and has no yaml-declared min/max).
+    let min_clamp = el.get("min").and_then(|m| m.as_f64());
+    let max_clamp = el.get("max").and_then(|m| m.as_f64());
     let style = build_style(el, ctx);
 
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
@@ -2294,50 +2298,62 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         let app = app.clone();
         let mut revision = revision;
         Some(EventHandler::new(move |evt: Event<FormData>| {
-            let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+            let mut new_val: f64 = evt.value().parse().unwrap_or(0.0);
+            if let Some(lo) = min_clamp { if new_val < lo { new_val = lo; } }
+            if let Some(hi) = max_clamp { if new_val > hi { new_val = hi; } }
             let f = f.clone();
             let app = app.clone();
+            let mut revision = revision;
             spawn(async move {
-                let mut st = app.borrow_mut();
-                match panel_kind {
-                    Some(PanelKind::Character) => {
-                        set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
-                        st.apply_character_panel_to_selection();
-                    }
-                    Some(PanelKind::Stroke) | None => {
-                        set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                        if f == "weight" {
-                            if let Some(ref mut stroke) = st.app_default_stroke {
-                                stroke.width = new_val;
-                            }
-                            let idx = st.active_tab;
-                            if let Some(tab) = st.tabs.get_mut(idx) {
-                                if let Some(ref mut stroke) = tab.model.default_stroke {
+                {
+                    let mut st = app.borrow_mut();
+                    match panel_kind {
+                        Some(PanelKind::Character) => {
+                            set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
+                            st.apply_character_panel_to_selection();
+                        }
+                        Some(PanelKind::Stroke) | None => {
+                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                            if f == "weight" {
+                                if let Some(ref mut stroke) = st.app_default_stroke {
                                     stroke.width = new_val;
                                 }
+                                let idx = st.active_tab;
+                                if let Some(tab) = st.tabs.get_mut(idx) {
+                                    if let Some(ref mut stroke) = tab.model.default_stroke {
+                                        stroke.width = new_val;
+                                    }
+                                }
                             }
+                            st.apply_stroke_panel_to_selection();
                         }
-                        st.apply_stroke_panel_to_selection();
+                        // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                        // no-op for number_input writes until their per-panel state
+                        // structs land. Drops the edit silently rather than
+                        // corrupting stroke state.
+                        _ => {}
                     }
-                    // Paragraph, Artboards, Layers, Color, Swatches, Properties:
-                    // no-op for number_input writes until their per-panel state
-                    // structs land. Drops the edit silently rather than
-                    // corrupting stroke state.
-                    _ => {}
                 }
+                // Bump revision after the state mutation completes so the
+                // re-render reads the clamped value, not the pre-mutation one.
+                revision += 1;
             });
-            revision += 1;
         }))
     } else { None };
 
     if panel_handler.is_some() {
         rsx! {
             input {
+                // Key on the state value forces remount whenever the bound
+                // state changes, so clamp-on-commit and external writes
+                // are reflected in the DOM `.value` (which HTML inputs
+                // otherwise keep stuck on the typed text).
+                key: "{id}-{value}",
                 id: "{id}",
                 r#type: "number",
                 min: "{min}",
                 max: "{max}",
-                initial_value: "{value}",
+                value: "{value}",
                 style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }

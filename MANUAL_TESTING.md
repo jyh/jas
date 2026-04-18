@@ -34,6 +34,8 @@ cross-panel regressions, and keyboard-only paths.
 6. Sessions               — tests grouped by tier within each session
 7. Cross-app parity       — per-platform checkbox blocks
 8. Graveyard              — won't fix / duplicate / retired, grouped
+9. Enhancements           — non-blocking follow-ups raised during testing
+                            (feature requests, UX gaps, cross-cutting polish)
 ```
 
 ## Step-by-step procedure
@@ -205,6 +207,24 @@ ceremony, comparison is still eyeball. If visual regression becomes a real
 concern, add automated tooling (Playwright/Percy-style) rather than building
 a manual photo album.
 
+### 11. Enhancements / follow-ups
+
+Manual testing surfaces non-blocking ideas — feature requests, UX gaps, cross-
+cutting polish — that aren't test failures but shouldn't be lost. Append them
+to an **Enhancements** section at the end of the same `<NAME>_TESTS.md` file.
+
+- Use the `ENH-NNN` prefix, three-digit dense numbering per component.
+- Each entry: one paragraph describing the idea; italicized trailer with
+  `_Raised during <test-id> on <date>._`
+- When an enhancement ships, delete the entry (or move under a "Done"
+  subheader if useful).
+- Cross-cutting enhancements (affect more than this component) still live
+  here, noted first in the file that surfaced them. Don't duplicate across
+  test files.
+
+This keeps the finding with the test that surfaced it and avoids sprawl
+across an external tracker or memory system.
+
 ## Checklist — creating a new `<NAME>_TESTS.md`
 
 1. Read the component yaml end to end.
@@ -221,7 +241,7 @@ a manual photo album.
    doesn't suffice.
 10. Draft cross-app parity section (~5–8 load-bearing `[wired]` tests).
 11. Add the standard scaffolding: tier definitions, default setup, known-broken
-    block (empty), graveyard (empty).
+    block (empty), graveyard (empty), enhancements section (empty).
 12. Capture an initial `examples/<name>.png` reference image from the primary
     app at default appearance.
 
@@ -236,8 +256,11 @@ a manual photo album.
   `[known-broken]` tag and summary entry.
 - **When a test is superseded:** move to graveyard with appropriate category
   tag; keep the ID.
+- **When testing surfaces an enhancement idea:** append an `ENH-NNN` entry
+  to the Enhancements section with the test ID and date it was raised.
 - **Periodic (every 30–60 days):** scan known-broken summary, sweep stale
-  `last:` dates, re-examine the graveyard for anything ready to rehabilitate.
+  `last:` dates, re-examine the graveyard for anything ready to rehabilitate,
+  review Enhancements for anything ripe to ship or reclassify.
 
 ## Applying to non-panel components
 
