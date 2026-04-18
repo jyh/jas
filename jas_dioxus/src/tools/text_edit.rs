@@ -536,13 +536,13 @@ impl TextEditSession {
             (EditTarget::Text, Element::Text(t)) => {
                 let reconciled = reconcile_content(&t.tspans, &self.content);
                 let mut new_t = t.clone();
-                new_t.tspans = self.apply_pending_to(reconciled);
+                new_t.tspans = self.apply_pending_to(reconciled, Some(elem));
                 Element::Text(new_t)
             }
             (EditTarget::TextPath, Element::TextPath(tp)) => {
                 let reconciled = reconcile_content(&tp.tspans, &self.content);
                 let mut new_tp = tp.clone();
-                new_tp.tspans = self.apply_pending_to(reconciled);
+                new_tp.tspans = self.apply_pending_to(reconciled, Some(elem));
                 Element::TextPath(new_tp)
             }
             _ => return None,
@@ -556,6 +556,7 @@ impl TextEditSession {
     fn apply_pending_to(
         &self,
         tspans: Vec<crate::geometry::tspan::Tspan>,
+        elem: Option<&crate::geometry::element::Element>,
     ) -> Vec<crate::geometry::tspan::Tspan> {
         use crate::geometry::tspan::{merge, merge_tspan_overrides, split_range};
         match (&self.pending_override, self.pending_char_start) {
@@ -565,6 +566,12 @@ impl TextEditSession {
                 if let (Some(f), Some(l)) = (first, last) {
                     for i in f..=l {
                         merge_tspan_overrides(&mut split[i], pending);
+                        // Identity-omission: drop fields that match the
+                        // parent's effective value. See TSPAN.md step 3.
+                        if let Some(e) = elem {
+                            crate::workspace::app_state::identity_omit_tspan(
+                                &mut split[i], e);
+                        }
                     }
                     merge(&split)
                 } else {

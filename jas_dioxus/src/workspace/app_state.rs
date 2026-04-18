@@ -977,15 +977,15 @@ impl AppState {
             if let Some(elem) = doc.get_element(&path) {
                 let new_elem = match elem {
                     Element::Text(t) => {
-                        let new_tspans = apply_overrides_to_tspan_range(
-                            &t.tspans, lo, hi, &overrides);
+                        let new_tspans = apply_overrides_to_tspan_range_with_elem(
+                            &t.tspans, lo, hi, &overrides, Some(elem));
                         let mut new_t = t.clone();
                         new_t.tspans = new_tspans;
                         Some(Element::Text(new_t))
                     }
                     Element::TextPath(tp) => {
-                        let new_tspans = apply_overrides_to_tspan_range(
-                            &tp.tspans, lo, hi, &overrides);
+                        let new_tspans = apply_overrides_to_tspan_range_with_elem(
+                            &tp.tspans, lo, hi, &overrides, Some(elem));
                         let mut new_tp = tp.clone();
                         new_tp.tspans = new_tspans;
                         Some(Element::TextPath(new_tp))
@@ -1134,6 +1134,104 @@ pub(crate) fn build_panel_full_overrides(
     t
 }
 
+/// Drop any tspan override field that matches the parent element's
+/// effective value (TSPAN.md "Character attribute writes (from
+/// panels)" step 3). After this pass, the tspan only retains
+/// overrides whose stored value actually differs from what the
+/// element would render on its own; `merge` can then collapse
+/// same-override neighbours more aggressively.
+///
+/// Only covers the same 13 attributes the apply pipelines emit;
+/// fields that don't originate from Character-panel writes
+/// (style_name, dx, fractional widths, kerning-mode, no-break,
+/// text-rendering, transform) are left untouched.
+pub(crate) fn identity_omit_tspan(
+    t: &mut crate::geometry::tspan::Tspan,
+    elem: &crate::geometry::element::Element,
+) {
+    use crate::geometry::element::Element;
+    let (ff, fs, fw, fst, td, tt, fv, xl, rot, lh, ls, bs, aa) = match elem {
+        Element::Text(te) => (
+            &te.font_family, te.font_size,
+            &te.font_weight, &te.font_style,
+            &te.text_decoration, &te.text_transform, &te.font_variant,
+            &te.xml_lang, &te.rotate,
+            &te.line_height, &te.letter_spacing, &te.baseline_shift,
+            &te.aa_mode,
+        ),
+        Element::TextPath(tp) => (
+            &tp.font_family, tp.font_size,
+            &tp.font_weight, &tp.font_style,
+            &tp.text_decoration, &tp.text_transform, &tp.font_variant,
+            &tp.xml_lang, &tp.rotate,
+            &tp.line_height, &tp.letter_spacing, &tp.baseline_shift,
+            &tp.aa_mode,
+        ),
+        _ => return,
+    };
+    if t.font_family.as_deref() == Some(ff.as_str()) {
+        t.font_family = None;
+    }
+    if let Some(v) = t.font_size
+        && (v - fs).abs() < 1e-6 { t.font_size = None; }
+    if t.font_weight.as_deref() == Some(fw.as_str()) {
+        t.font_weight = None;
+    }
+    if t.font_style.as_deref() == Some(fst.as_str()) {
+        t.font_style = None;
+    }
+    // text-decoration: compare sorted parsed sets so "" and "none"
+    // collapse, and "underline line-through" == "line-through underline".
+    if let Some(parts) = &t.text_decoration {
+        let mut a: Vec<&str> = parts.iter().map(String::as_str).collect();
+        a.sort();
+        let mut b: Vec<&str> = td.split_whitespace().filter(|p| *p != "none").collect();
+        b.sort();
+        if a == b { t.text_decoration = None; }
+    }
+    if t.text_transform.as_deref() == Some(tt.as_str()) {
+        t.text_transform = None;
+    }
+    if t.font_variant.as_deref() == Some(fv.as_str()) {
+        t.font_variant = None;
+    }
+    if t.xml_lang.as_deref() == Some(xl.as_str()) {
+        t.xml_lang = None;
+    }
+    // rotate: element stores as string (e.g. "45"); tspan as f64.
+    if let Some(v) = t.rotate {
+        let elem_rot = rot.parse::<f64>().unwrap_or(0.0);
+        if (v - elem_rot).abs() < 1e-6 { t.rotate = None; }
+    }
+    // line_height: element as "14.4pt" string; tspan as f64 (pt).
+    if let Some(v) = t.line_height {
+        // Empty element line_height = Auto = 120% of font_size.
+        let elem_lh = parse_pt(lh).unwrap_or(fs * 1.2);
+        if (v - elem_lh).abs() < 1e-6 { t.line_height = None; }
+    }
+    // letter_spacing: element as "0.025em"; tspan as f64 (em).
+    if let Some(v) = t.letter_spacing {
+        let elem_ls = parse_em_as_thousandths(ls).map(|n| n / 1000.0).unwrap_or(0.0);
+        if (v - elem_ls).abs() < 1e-6 { t.letter_spacing = None; }
+    }
+    // baseline_shift numeric: element string may be "super" / "sub"
+    // or a pt value. We can only collapse numeric values.
+    if let Some(v) = t.baseline_shift {
+        if let Some(elem_bs) = parse_pt(bs) {
+            if (v - elem_bs).abs() < 1e-6 { t.baseline_shift = None; }
+        } else if bs.is_empty() && v == 0.0 {
+            t.baseline_shift = None;
+        }
+    }
+    // jas_aa_mode: element aa_mode "Sharp" / "" both mean inherit.
+    if let Some(v) = &t.jas_aa_mode {
+        let elem_aa = if aa == "Sharp" { "" } else { aa.as_str() };
+        if v == elem_aa {
+            t.jas_aa_mode = None;
+        }
+    }
+}
+
 /// Apply `overrides` to the tspans covering the character range
 /// `[char_start, char_end)`. Uses `split_range` to isolate the
 /// targeted tspans, copies every `Some(...)` field from `overrides`
@@ -1147,6 +1245,21 @@ pub(crate) fn apply_overrides_to_tspan_range(
     char_end: usize,
     overrides: &crate::geometry::tspan::Tspan,
 ) -> Vec<crate::geometry::tspan::Tspan> {
+    apply_overrides_to_tspan_range_with_elem(
+        tspans, char_start, char_end, overrides, None)
+}
+
+/// Same as [`apply_overrides_to_tspan_range`] but runs TSPAN.md's
+/// identity-omission step when an `elem` is supplied: override fields
+/// that match the parent's effective value are cleared before the
+/// final `merge` so adjacent tspans can collapse freely.
+pub(crate) fn apply_overrides_to_tspan_range_with_elem(
+    tspans: &[crate::geometry::tspan::Tspan],
+    char_start: usize,
+    char_end: usize,
+    overrides: &crate::geometry::tspan::Tspan,
+    elem: Option<&crate::geometry::element::Element>,
+) -> Vec<crate::geometry::tspan::Tspan> {
     use crate::geometry::tspan::{merge, merge_tspan_overrides, split_range};
     if char_start >= char_end {
         return tspans.to_vec();
@@ -1156,6 +1269,9 @@ pub(crate) fn apply_overrides_to_tspan_range(
         for i in f..=l {
             let mut t = split[i].clone();
             merge_tspan_overrides(&mut t, overrides);
+            if let Some(e) = elem {
+                identity_omit_tspan(&mut t, e);
+            }
             split[i] = t;
         }
         merge(&split)
@@ -1618,5 +1734,89 @@ mod pending_override_tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].content, "foobar");
         assert_eq!(out[0].font_weight.as_deref(), Some("bold"));
+    }
+
+    // ── identity-omission ────────────────────────────────────────
+
+    #[test]
+    fn identity_omit_clears_font_weight_matching_element() {
+        use crate::geometry::tspan::Tspan;
+        let mut t = Tspan {
+            content: "X".into(),
+            font_weight: Some("normal".into()),
+            ..Tspan::default_tspan()
+        };
+        let elem = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        // empty_text_elem has font_weight="normal", so the tspan's
+        // Some("normal") is redundant → should be cleared.
+        identity_omit_tspan(&mut t, &Element::Text(elem));
+        assert!(t.font_weight.is_none());
+    }
+
+    #[test]
+    fn identity_omit_keeps_font_weight_differing_from_element() {
+        use crate::geometry::tspan::Tspan;
+        let mut t = Tspan {
+            content: "X".into(),
+            font_weight: Some("bold".into()),
+            ..Tspan::default_tspan()
+        };
+        let elem = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        identity_omit_tspan(&mut t, &Element::Text(elem));
+        assert_eq!(t.font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn identity_omit_clears_line_height_matching_auto_default() {
+        use crate::geometry::tspan::Tspan;
+        let mut t = Tspan {
+            content: "X".into(),
+            // Element's empty line_height = Auto = 120% of font_size (16 by default).
+            line_height: Some(19.2),
+            ..Tspan::default_tspan()
+        };
+        let elem = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        identity_omit_tspan(&mut t, &Element::Text(elem));
+        assert!(t.line_height.is_none());
+    }
+
+    #[test]
+    fn identity_omit_clears_text_decoration_empty_matching_none() {
+        use crate::geometry::tspan::Tspan;
+        let mut t = Tspan {
+            content: "X".into(),
+            text_decoration: Some(vec![]),
+            ..Tspan::default_tspan()
+        };
+        // Element text_decoration starts as "none" string.
+        let elem = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        identity_omit_tspan(&mut t, &Element::Text(elem));
+        assert!(t.text_decoration.is_none());
+    }
+
+    #[test]
+    fn identity_omit_end_to_end_per_range_write() {
+        // Apply font_weight="normal" to a range in an element whose
+        // element-level font_weight is already "normal". After the
+        // per-range write, the range should have no override — the
+        // merge pass can collapse everything back into one tspan.
+        use crate::geometry::tspan::Tspan;
+        let base = vec![
+            Tspan { content: "foo".into(), font_weight: Some("bold".into()),
+                    ..Tspan::default_tspan() },
+        ];
+        let overrides = Tspan {
+            font_weight: Some("normal".into()),
+            ..Tspan::default_tspan()
+        };
+        let elem = Element::Text(
+            crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0));
+        let out = apply_overrides_to_tspan_range_with_elem(
+            &base, 0, 3, &overrides, Some(&elem));
+        // After identity-omission, the Some("normal") matches the
+        // element's "normal" → cleared. Then merge collapses.
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].content, "foo");
+        assert!(out[0].font_weight.is_none());
     }
 }
