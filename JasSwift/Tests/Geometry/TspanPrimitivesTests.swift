@@ -454,3 +454,67 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     #expect(charToTspanPos(base, 2, .left) == (0, 2))
     #expect(charToTspanPos(base, 2, .right) == (1, 0))
 }
+
+// MARK: - rich clipboard: JSON + SVG formats
+
+@Test func jsonClipboardRoundtripPreservesContentAndOverrides() {
+    let src = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    let json = tspansToJsonClipboard(src)
+    let back = tspansFromJsonClipboard(json) ?? []
+    #expect(back.count == 2)
+    #expect(back[0].content == "foo")
+    #expect(back[0].fontWeight == nil)
+    #expect(back[1].content == "bar")
+    #expect(back[1].fontWeight == "bold")
+}
+
+@Test func jsonClipboardStripsId() {
+    let src = [Tspan(id: 42, content: "x")]
+    let json = tspansToJsonClipboard(src)
+    #expect(!json.contains("\"id\":42"))
+    #expect(!json.contains("\"id\": 42"))
+}
+
+@Test func jsonClipboardStripsNullOverrides() {
+    let src = [plainTspan("foo")]
+    let json = tspansToJsonClipboard(src)
+    #expect(!json.contains("null"))
+}
+
+@Test func jsonClipboardFromAssignsFreshIds() {
+    let json = #"{"tspans":[{"content":"a"},{"content":"b"}]}"#
+    let back = tspansFromJsonClipboard(json)!
+    #expect(back.count == 2)
+    #expect(back[0].id == 0)
+    #expect(back[1].id == 1)
+}
+
+@Test func jsonClipboardRejectsBadPayload() {
+    #expect(tspansFromJsonClipboard("not json") == nil)
+    #expect(tspansFromJsonClipboard(#"{"not_tspans":[]}"#) == nil)
+}
+
+@Test func svgFragmentRoundtrip() {
+    let src = [plainTspan("hello "), boldTspan("world", id: 1)]
+    let svg = tspansToSvgFragment(src)
+    #expect(svg.contains(#"<text xmlns="http://www.w3.org/2000/svg">"#))
+    #expect(svg.contains("<tspan>hello </tspan>"))
+    #expect(svg.contains(#"<tspan font-weight="bold">world</tspan>"#))
+    let back = tspansFromSvgFragment(svg)!
+    #expect(back.count == 2)
+    #expect(back[0].content == "hello ")
+    #expect(back[1].content == "world")
+    #expect(back[1].fontWeight == "bold")
+}
+
+@Test func svgFragmentEscapesSpecialChars() {
+    let src = [plainTspan("< & >")]
+    let svg = tspansToSvgFragment(src)
+    #expect(svg.contains("&lt; &amp; &gt;"))
+    let back = tspansFromSvgFragment(svg)!
+    #expect(back[0].content == "< & >")
+}
+
+@Test func svgFragmentRejectsMissingTextRoot() {
+    #expect(tspansFromSvgFragment("<span>hi</span>") == nil)
+}

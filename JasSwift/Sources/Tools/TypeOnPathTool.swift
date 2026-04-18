@@ -284,10 +284,16 @@ class TypeOnPathTool: CanvasTool {
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool {
         guard let s = session else { return false }
         let elemTspans = currentElementTspans(ctx)
-        if let newTspans = s.tryPasteTspans(elemTspans, text: text) {
+        // Rich-paste preference: session-scoped clipboard, then the
+        // multi-format OS pasteboard, then flat insert.
+        var newTspans: [Tspan]? = s.tryPasteTspans(elemTspans, text: text)
+        if newTspans == nil, let payload = richClipboardReadTspans() {
+            newTspans = insertTspansAt(elemTspans, charPos: s.insertion, payload)
+        }
+        if let new = newTspans {
             ensureSnapshot(ctx)
-            replaceElementTspans(ctx, path: s.path, tspans: newTspans)
-            s.setContent(concatTspanContent(newTspans),
+            replaceElementTspans(ctx, path: s.path, tspans: new)
+            s.setContent(concatTspanContent(new),
                          insertion: s.insertion + text.count,
                          anchor: s.insertion + text.count)
             s.blinkEpochMs = nowMs()
@@ -337,11 +343,20 @@ class TypeOnPathTool: CanvasTool {
             bump(); syncToModel(ctx); ctx.requestUpdate(); return true
         }
         if cmd && lower == "c" {
-            _ = s.copySelectionWithTspans(currentElementTspans(ctx))
+            let elem = currentElementTspans(ctx)
+            if let flat = s.copySelectionWithTspans(elem),
+               let (_, payload) = s.tspanClipboard
+            {
+                richClipboardWrite(flat: flat, tspans: payload)
+            }
             return true
         }
         if cmd && lower == "x" {
-            if s.copySelectionWithTspans(currentElementTspans(ctx)) != nil {
+            let elem = currentElementTspans(ctx)
+            if let flat = s.copySelectionWithTspans(elem),
+               let (_, payload) = s.tspanClipboard
+            {
+                richClipboardWrite(flat: flat, tspans: payload)
                 ensureSnapshot(ctx)
                 s.backspace()
                 bump(); syncToModel(ctx); ctx.requestUpdate()
