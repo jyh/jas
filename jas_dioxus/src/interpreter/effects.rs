@@ -250,12 +250,43 @@ fn run_one(
                 store.set_dialog(key, value_to_json(&val));
             }
         }
+        // Capture preview snapshot if the dialog declares preview_targets.
+        // Restored on close_dialog unless first cleared by an OK action via
+        // clear_dialog_snapshot.
+        if let Some(serde_json::Value::Object(targets_obj)) = dlg_def.get("preview_targets") {
+            let mut targets = std::collections::HashMap::new();
+            for (k, v) in targets_obj {
+                if let Some(s) = v.as_str() {
+                    targets.insert(k.clone(), s.to_string());
+                }
+            }
+            store.capture_dialog_snapshot(&targets);
+        }
         return;
     }
 
     // close_dialog: null or dialog_id
     if effect.contains_key("close_dialog") {
+        // Preview restore: if a snapshot survived (i.e., no OK action
+        // cleared it), revert each target to its captured original value.
+        // Phase 0 handles only top-level state keys; deep paths defer to
+        // Phase 8/9 alongside their first real consumer.
+        if let Some(snapshot) = store.dialog_snapshot().cloned() {
+            for (key, value) in snapshot {
+                if !key.contains('.') {
+                    store.set(&key, value);
+                }
+            }
+            store.clear_dialog_snapshot();
+        }
         store.close_dialog();
+        return;
+    }
+
+    // clear_dialog_snapshot: drop the preview snapshot so close_dialog
+    // does not restore. OK actions emit this before close_dialog to commit.
+    if effect.contains_key("clear_dialog_snapshot") {
+        store.clear_dialog_snapshot();
         return;
     }
 
@@ -391,6 +422,100 @@ mod tests {
         store.init_dialog("test", defaults, None);
         let effects = vec![serde_json::json!({"close_dialog": null})];
         run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        assert_eq!(store.dialog_id(), None);
+    }
+
+    // ── Preview snapshot/restore (Phase 0) ─────────────────────────
+
+    #[test]
+    fn test_open_dialog_captures_preview_snapshot() {
+        let mut store = StateStore::new();
+        store.set("left_indent", serde_json::json!(12));
+        store.set("right_indent", serde_json::json!(0));
+        let dialogs = serde_json::json!({
+            "para_indent": {
+                "summary": "Indents",
+                "state": {
+                    "left": {"type": "number", "default": 0},
+                    "right": {"type": "number", "default": 0},
+                },
+                "preview_targets": {
+                    "left": "left_indent",
+                    "right": "right_indent",
+                },
+                "content": {"type": "container"},
+            }
+        });
+        let effects = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        let snap = store.dialog_snapshot().expect("snapshot should be captured on open");
+        assert_eq!(snap.get("left_indent"), Some(&serde_json::json!(12)));
+        assert_eq!(snap.get("right_indent"), Some(&serde_json::json!(0)));
+    }
+
+    #[test]
+    fn test_open_dialog_without_preview_targets_no_snapshot() {
+        let mut store = StateStore::new();
+        let dialogs = serde_json::json!({
+            "plain": {
+                "summary": "Plain",
+                "state": {"name": {"type": "string", "default": ""}},
+                "content": {"type": "container"},
+            }
+        });
+        let effects = vec![serde_json::json!({"open_dialog": {"id": "plain"}})];
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        assert!(!store.has_dialog_snapshot());
+    }
+
+    #[test]
+    fn test_close_dialog_restores_from_snapshot() {
+        let mut store = StateStore::new();
+        store.set("left_indent", serde_json::json!(12));
+        let dialogs = serde_json::json!({
+            "para_indent": {
+                "summary": "Indents",
+                "state": {"left": {"type": "number", "default": 0}},
+                "preview_targets": {"left": "left_indent"},
+                "content": {"type": "container"},
+            }
+        });
+        // Open captures snapshot of left_indent = 12
+        let open = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
+        run_effects(&open, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        // Simulate Preview live-applying an edit: state moves to 99
+        store.set("left_indent", serde_json::json!(99));
+        // Cancel (close_dialog with snapshot present) restores to 12
+        let close = vec![serde_json::json!({"close_dialog": null})];
+        run_effects(&close, &serde_json::json!({}), &mut store, None, None);
+        assert_eq!(store.get("left_indent"), &serde_json::json!(12));
+        assert_eq!(store.dialog_id(), None);
+        assert!(!store.has_dialog_snapshot());
+    }
+
+    #[test]
+    fn test_clear_dialog_snapshot_prevents_restore() {
+        let mut store = StateStore::new();
+        store.set("left_indent", serde_json::json!(12));
+        let dialogs = serde_json::json!({
+            "para_indent": {
+                "summary": "Indents",
+                "state": {"left": {"type": "number", "default": 0}},
+                "preview_targets": {"left": "left_indent"},
+                "content": {"type": "container"},
+            }
+        });
+        let open = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
+        run_effects(&open, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        store.set("left_indent", serde_json::json!(99));
+        // OK action equivalent: clear snapshot, then close
+        let ok_then_close = vec![
+            serde_json::json!({"clear_dialog_snapshot": null}),
+            serde_json::json!({"close_dialog": null}),
+        ];
+        run_effects(&ok_then_close, &serde_json::json!({}), &mut store, None, None);
+        // Without snapshot to restore from, the user's edit (99) survives
+        assert_eq!(store.get("left_indent"), &serde_json::json!(99));
         assert_eq!(store.dialog_id(), None);
     }
 
