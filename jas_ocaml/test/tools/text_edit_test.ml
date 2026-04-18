@@ -130,6 +130,61 @@ let () =
         assert (Jas.Text_edit.content s = "b"));
     ];
 
+    "session tspan clipboard", [
+      (* Mirrors TextEditSessionTests.swift. *)
+      Alcotest.test_case "copy_selection_with_tspans captures and returns flat" `Quick (fun () ->
+        let open Jas in
+        let ts0 = { (Tspan.default_tspan ()) with id = 0; content = "foo" } in
+        let ts1 = { (Tspan.default_tspan ()) with id = 1; content = "bar";
+                                                  font_weight = Some "bold" } in
+        let element_tspans = [| ts0; ts1 |] in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"foobar" ~insertion:0 in
+        Text_edit.set_insertion s 1 ~extend:false;
+        Text_edit.set_insertion s 5 ~extend:true;
+        let flat = Text_edit.copy_selection_with_tspans s element_tspans in
+        assert (flat = Some "ooba"));
+
+      Alcotest.test_case "try_paste_tspans matches and splices" `Quick (fun () ->
+        let open Jas in
+        let element_tspans = [| { (Tspan.default_tspan ()) with id = 0; content = "foo" } |] in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"foo" ~insertion:0 in
+        (* Prime the clipboard by doing a copy first, then overwrite
+           content to simulate an external change-and-return scenario. *)
+        let payload = [| { (Tspan.default_tspan ()) with id = 0; content = "X";
+                                                         font_weight = Some "bold" } |] in
+        let element_with_X = [| { (Tspan.default_tspan ()) with id = 0; content = "X";
+                                                                font_weight = Some "bold" } |] in
+        (* Simulate capture path: set selection and call copy_selection_with_tspans
+           after priming content. *)
+        Text_edit.set_content s "X" ~insertion:0 ~anchor:1;
+        let _ = Text_edit.copy_selection_with_tspans s element_with_X in
+        (* Now simulate paste at position 1 within "foo". *)
+        Text_edit.set_content s "foo" ~insertion:1 ~anchor:1;
+        (match Text_edit.try_paste_tspans s element_tspans "X" with
+         | Some result ->
+           assert (Array.length result = 3);
+           assert (result.(0).content = "f");
+           assert (result.(1).content = "X");
+           assert (result.(1).font_weight = Some "bold");
+           assert (result.(2).content = "oo")
+         | None ->
+           ignore payload;
+           assert false));
+
+      Alcotest.test_case "try_paste_tspans returns None when text doesn't match" `Quick (fun () ->
+        let open Jas in
+        let element_tspans = [| { (Tspan.default_tspan ()) with id = 0; content = "foo" } |] in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"foo" ~insertion:0 in
+        (* With no prior copy, paste should return None. *)
+        assert (Text_edit.try_paste_tspans s element_tspans "X" = None));
+    ];
+
     "UTF-8 multibyte", [
       (* UTF-8 multibyte handling. 'é' is 2 bytes in UTF-8 but a single
          Unicode scalar; the editor must speak in chars throughout. *)

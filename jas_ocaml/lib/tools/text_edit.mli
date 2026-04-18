@@ -27,6 +27,25 @@ val set_insertion : t -> int -> extend:bool -> unit
 val select_all : t -> unit
 val copy_selection : t -> string option
 
+(** Capture the selection's flat text and tspan structure (from
+    [element_tspans]) into the session clipboard. Returns the flat
+    text for the system clipboard, or [None] if there is no
+    selection. Mirrors Rust's [copy_selection_with_tspans]. *)
+val copy_selection_with_tspans :
+  t -> Element.tspan array -> string option
+
+(** When the session clipboard's flat text matches [text], splice
+    the captured tspans into [element_tspans] at the caret and
+    return the resulting tspan array. Otherwise [None] — caller
+    falls back to [insert]. *)
+val try_paste_tspans :
+  t -> Element.tspan array -> string -> Element.tspan array option
+
+(** Atomic content / caret update after an external tspan-aware
+    paste rewrote the underlying element. *)
+val set_content :
+  t -> string -> insertion:int -> anchor:int -> unit
+
 val undo : t -> unit
 val redo : t -> unit
 
