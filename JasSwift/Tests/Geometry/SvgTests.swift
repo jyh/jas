@@ -837,3 +837,79 @@ private func pt(_ px: Double) -> Double { px * 72.0 / 96.0 }
 @Test func strokeDefaultOpacity() {
     #expect(Stroke(color: .black).opacity == 1.0)
 }
+
+// MARK: - Tspan rotate roundtrip (multi-value handling)
+
+private func svgWithTspanMarkup(_ markup: String) -> String {
+    return """
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+<text x="0" y="20" font-size="12">\(markup)</text>
+</svg>
+"""
+}
+
+@Test func svgSingleValueTspanRotateRoundtrip() {
+    let svg = svgWithTspanMarkup(#"<tspan rotate="30">abc</tspan>"#)
+    let doc = svgToDocument(svg)
+    guard case .text(let t) = doc.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 1)
+    #expect(t.tspans[0].content == "abc")
+    #expect(t.tspans[0].rotate == 30.0)
+}
+
+@Test func svgMultiValueTspanRotateSplitsPerGlyph() {
+    let svg = svgWithTspanMarkup(#"<tspan rotate="45 90 0">abc</tspan>"#)
+    let doc = svgToDocument(svg)
+    guard case .text(let t) = doc.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 3)
+    #expect(t.tspans[0].content == "a")
+    #expect(t.tspans[0].rotate == 45.0)
+    #expect(t.tspans[1].content == "b")
+    #expect(t.tspans[1].rotate == 90.0)
+    #expect(t.tspans[2].content == "c")
+    #expect(t.tspans[2].rotate == 0.0)
+    #expect(t.tspans[0].id == 0)
+    #expect(t.tspans[1].id == 1)
+    #expect(t.tspans[2].id == 2)
+}
+
+@Test func svgMultiValueTspanRotateReusesLastAngle() {
+    let svg = svgWithTspanMarkup(#"<tspan rotate="45 90">abcd</tspan>"#)
+    let doc = svgToDocument(svg)
+    guard case .text(let t) = doc.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 4)
+    #expect(t.tspans[0].rotate == 45.0)
+    #expect(t.tspans[1].rotate == 90.0)
+    #expect(t.tspans[2].rotate == 90.0)
+    #expect(t.tspans[3].rotate == 90.0)
+}
+
+@Test func svgPerGlyphTspanRotateFullRoundtrip() {
+    var doc = Document(layers: [Layer(children: [
+        .text(emptyTextElem(x: 10, y: 20, width: 0, height: 0))
+    ])])
+    if case .text(let t0) = doc.layers[0].children[0] {
+        let tspans = [
+            Tspan(id: 0, content: "a", rotate: 45),
+            Tspan(id: 1, content: "b", rotate: 90),
+            Tspan(id: 2, content: "c", rotate: 0),
+        ]
+        doc = doc.replaceElement([0, 0], with: .text(t0.withTspans(tspans)))
+    }
+    let svg = documentToSvg(doc)
+    let doc2 = svgToDocument(svg)
+    guard case .text(let t) = doc2.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 3)
+    #expect(t.tspans[0].rotate == 45.0)
+    #expect(t.tspans[1].rotate == 90.0)
+    #expect(t.tspans[2].rotate == 0.0)
+}
