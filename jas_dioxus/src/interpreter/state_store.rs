@@ -16,6 +16,10 @@ pub struct StateStore {
     dialog: Option<HashMap<String, serde_json::Value>>,
     dialog_id: Option<String>,
     dialog_params: Option<HashMap<String, serde_json::Value>>,
+    /// Captured original values of state keys named in the open dialog's
+    /// `preview_targets`. Restored on close_dialog unless first cleared
+    /// by the `clear_dialog_snapshot` effect (used by OK actions).
+    dialog_snapshot: Option<HashMap<String, serde_json::Value>>,
 }
 
 impl StateStore {
@@ -27,6 +31,7 @@ impl StateStore {
             dialog: None,
             dialog_id: None,
             dialog_params: None,
+            dialog_snapshot: None,
         }
     }
 
@@ -82,6 +87,33 @@ impl StateStore {
         self.dialog_id = None;
         self.dialog = None;
         self.dialog_params = None;
+    }
+
+    /// Capture the current value of every state key referenced by a
+    /// dialog's `preview_targets`. Phase 0 supports only top-level state
+    /// keys (no dots in the path); deep paths are silently skipped and
+    /// will land alongside their first real consumer in Phase 8/9.
+    /// `targets` maps `dialog_state_key` → `state_key`.
+    pub fn capture_dialog_snapshot(&mut self, targets: &HashMap<String, String>) {
+        let mut snap = HashMap::new();
+        for state_key in targets.values() {
+            if !state_key.contains('.') {
+                snap.insert(state_key.clone(), self.get(state_key).clone());
+            }
+        }
+        self.dialog_snapshot = Some(snap);
+    }
+
+    pub fn dialog_snapshot(&self) -> Option<&HashMap<String, serde_json::Value>> {
+        self.dialog_snapshot.as_ref()
+    }
+
+    pub fn clear_dialog_snapshot(&mut self) {
+        self.dialog_snapshot = None;
+    }
+
+    pub fn has_dialog_snapshot(&self) -> bool {
+        self.dialog_snapshot.is_some()
     }
 
     // ── Global state ─────────────────────────────────────
@@ -352,5 +384,53 @@ mod tests {
         let ctx = store.eval_context();
         assert_eq!(ctx["panel"]["mode"], serde_json::json!("hsb"));
         assert_eq!(ctx["dialog"]["h"], serde_json::json!(270));
+    }
+
+    // ── Preview snapshot/restore (Phase 0) ─────────────────────────
+    //
+    // capture_dialog_snapshot copies the current value of every state key
+    // referenced by a dialog's preview_targets. Phase 0 supports only
+    // top-level state keys (no path traversal); deep paths are skipped
+    // and will be added in Phase 8/9 alongside their first real consumer.
+
+    #[test]
+    fn dialog_snapshot_capture_and_get() {
+        let mut store = StateStore::new();
+        store.set("left_indent", serde_json::json!(12));
+        store.set("right_indent", serde_json::json!(0));
+        let mut targets = HashMap::new();
+        targets.insert("dlg_left".to_string(), "left_indent".to_string());
+        targets.insert("dlg_right".to_string(), "right_indent".to_string());
+        store.capture_dialog_snapshot(&targets);
+        let snap = store.dialog_snapshot().expect("snapshot should be present");
+        assert_eq!(snap.get("left_indent"), Some(&serde_json::json!(12)));
+        assert_eq!(snap.get("right_indent"), Some(&serde_json::json!(0)));
+        assert!(store.has_dialog_snapshot());
+    }
+
+    #[test]
+    fn dialog_snapshot_clear_drops_it() {
+        let mut store = StateStore::new();
+        store.set("x", serde_json::json!(1));
+        let mut targets = HashMap::new();
+        targets.insert("k".to_string(), "x".to_string());
+        store.capture_dialog_snapshot(&targets);
+        assert!(store.has_dialog_snapshot());
+        store.clear_dialog_snapshot();
+        assert!(!store.has_dialog_snapshot());
+        assert!(store.dialog_snapshot().is_none());
+    }
+
+    #[test]
+    fn dialog_snapshot_skips_deep_paths_for_phase0() {
+        let mut store = StateStore::new();
+        store.set("flat", serde_json::json!(1));
+        let mut targets = HashMap::new();
+        targets.insert("a".to_string(), "flat".to_string());
+        targets.insert("b".to_string(), "selection.deep.path".to_string());
+        store.capture_dialog_snapshot(&targets);
+        let snap = store.dialog_snapshot().expect("snapshot should be present");
+        assert!(snap.contains_key("flat"));
+        assert!(!snap.contains_key("selection.deep.path"));
     }
 }
