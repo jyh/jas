@@ -279,23 +279,25 @@ class TextEditSession:
         elem = doc.get_element(self.path)
         if self.target == EditTarget.TEXT and isinstance(elem, Text):
             reconciled = reconcile_content(list(elem.tspans), self.content)
-            new_tspans = tuple(self._apply_pending_to(reconciled))
+            new_tspans = tuple(self._apply_pending_to(reconciled, elem=elem))
             new_elem = dataclasses.replace(
                 elem, content=self.content, tspans=new_tspans)
         elif self.target == EditTarget.TEXT_PATH and isinstance(elem, TextPath):
             reconciled = reconcile_content(list(elem.tspans), self.content)
-            new_tspans = tuple(self._apply_pending_to(reconciled))
+            new_tspans = tuple(self._apply_pending_to(reconciled, elem=elem))
             new_elem = dataclasses.replace(
                 elem, content=self.content, tspans=new_tspans)
         else:
             return None
         return doc.replace_element(self.path, new_elem)
 
-    def _apply_pending_to(self, tspans):
+    def _apply_pending_to(self, tspans, elem=None):
         """Apply the pending next-typed-character override to the
         range ``[pending_char_start, insertion)`` of ``tspans``, then
         merge. Passthrough when pending is unset or the range is
-        empty.
+        empty. When ``elem`` is supplied, runs identity-omission
+        (TSPAN.md step 3) between the override-merge and final merge
+        steps so redundant overrides get cleared.
         """
         if (self.pending_override is None
                 or self.pending_char_start is None
@@ -308,7 +310,12 @@ class TextEditSession:
             return split
         out = list(split)
         for i in range(first, last + 1):
-            out[i] = merge_tspan_overrides(out[i], self.pending_override)
+            merged = merge_tspan_overrides(out[i], self.pending_override)
+            if elem is not None:
+                # Imported lazily to avoid a cycle with character_panel_state.
+                from panels.character_panel_state import identity_omit_tspan
+                merged = identity_omit_tspan(merged, elem)
+            out[i] = merged
         return merge(out)
 
 

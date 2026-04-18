@@ -457,6 +457,53 @@ class TestFullOverridesComplexAttrs:
         assert t.jas_aa_mode is not None
 
 
+class TestIdentityOmit:
+    def _elem(self):
+        from geometry.element import Text
+        return Text(x=0, y=0, content="",
+                    font_family="sans-serif", font_size=16,
+                    font_weight="normal", font_style="normal",
+                    text_decoration="", text_transform="", font_variant="",
+                    baseline_shift="", line_height="", letter_spacing="",
+                    xml_lang="", aa_mode="", rotate="")
+
+    def test_clears_font_weight_matching_element(self):
+        from geometry.tspan import Tspan
+        from panels.character_panel_state import identity_omit_tspan
+        t = Tspan(id=0, content="X", font_weight="normal")
+        out = identity_omit_tspan(t, self._elem())
+        assert out.font_weight is None
+
+    def test_keeps_font_weight_differing_from_element(self):
+        from geometry.tspan import Tspan
+        from panels.character_panel_state import identity_omit_tspan
+        t = Tspan(id=0, content="X", font_weight="bold")
+        out = identity_omit_tspan(t, self._elem())
+        assert out.font_weight == "bold"
+
+    def test_clears_line_height_matching_auto_default(self):
+        # Element's empty line_height = auto = 120% of font_size (16).
+        from geometry.tspan import Tspan
+        from panels.character_panel_state import identity_omit_tspan
+        t = Tspan(id=0, content="X", line_height=16.0 * 1.2)
+        out = identity_omit_tspan(t, self._elem())
+        assert out.line_height is None
+
+    def test_end_to_end_per_range_write(self):
+        # Apply font_weight=normal to a range where element is also
+        # normal → identity-omission clears the override, merge
+        # collapses back to one tspan.
+        from geometry.tspan import Tspan
+        from panels.character_panel_state import apply_overrides_to_tspan_range
+        base = [Tspan(id=0, content="foo", font_weight="bold")]
+        overrides = Tspan(font_weight="normal")
+        elem = self._elem()
+        out = apply_overrides_to_tspan_range(base, 0, 3, overrides, elem=elem)
+        assert len(out) == 1
+        assert out[0].content == "foo"
+        assert out[0].font_weight is None
+
+
 class TestApplyOverridesToTspanRange:
     def test_bolds_partial_word(self):
         from geometry.tspan import Tspan
