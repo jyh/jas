@@ -175,6 +175,7 @@ class type_tool = object (_self)
       ~path ~target:Text_edit.Edit_text ~content ~insertion:cursor in
     Text_edit.set_blink_epoch_ms s (now_ms ());
     session <- Some s;
+    ctx.model#set_current_edit_session (Some (Text_edit.as_session_ref s));
     did_snapshot <- false;
     ctx.controller#select_element path
 
@@ -195,14 +196,19 @@ class type_tool = object (_self)
       let s = Text_edit.create
         ~path ~target:Text_edit.Edit_text ~content:"" ~insertion:0 in
       Text_edit.set_blink_epoch_ms s (now_ms ());
-      session <- Some s
+      session <- Some s;
+      ctx.model#set_current_edit_session (Some (Text_edit.as_session_ref s))
     end
 
-  method private end_session () =
+  method private end_session ?ctx () =
     session <- None;
     did_snapshot <- false;
     drag_start <- None;
     drag_end <- None;
+    (match ctx with
+     | Some (c : Canvas_tool.tool_context) ->
+       c.model#set_current_edit_session None
+     | None -> ())
 
   method has_session = session <> None
   method get_session = session
@@ -223,7 +229,7 @@ class type_tool = object (_self)
          Text_edit.set_blink_epoch_ms s (now_ms ());
          ctx.request_update ()
        end else begin
-         _self#end_session ();
+         _self#end_session ~ctx ();
          (match hit_test_text ctx.model#document x y with
           | Some (path, elem) ->
             _self#begin_session_existing ctx path elem 0;
@@ -307,7 +313,7 @@ class type_tool = object (_self)
   method on_key (_ctx : Canvas_tool.tool_context) (_key : int) = false
   method on_key_release (_ctx : Canvas_tool.tool_context) (_key : int) = false
   method activate (_ctx : Canvas_tool.tool_context) = ()
-  method deactivate (_ctx : Canvas_tool.tool_context) = _self#end_session ()
+  method deactivate (ctx : Canvas_tool.tool_context) = _self#end_session ~ctx ()
 
   method! captures_keyboard () = session <> None
   method! is_editing () = session <> None
@@ -373,7 +379,7 @@ class type_tool = object (_self)
          | None -> ());
         true
       end else if key = "Escape" then begin
-        _self#end_session (); ctx.request_update (); true
+        _self#end_session ~ctx (); ctx.request_update (); true
       end else if key = "Enter" then begin
         _self#ensure_snapshot ctx;
         Text_edit.insert s "\n";

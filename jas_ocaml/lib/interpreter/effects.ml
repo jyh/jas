@@ -766,12 +766,146 @@ let apply_character_attrs_to_elem (elem : Element.element) (a : character_attrs)
     }
   | other -> other
 
-(** Push the Character-panel state to every selected Text / Text_path.
-    No-op when the selection is empty or contains no text elements.
-    Mirrors Rust [apply_character_panel_to_selection] / Python's
-    [apply_character_panel_to_selection]. *)
+(** Build a [tspan] override template from the Character panel state
+    that contains only the fields where the panel differs from the
+    currently-edited element. [None] when everything matches. Scope
+    (Phase 3 MVP, mirrors Rust 390513e / Swift bea4d61): font-family,
+    font-size, font-weight, font-style, text-decoration,
+    text-transform, font-variant, xml-lang, rotate. Complex attrs
+    (baseline-shift super/sub, kerning modes, scales, line-height)
+    aren't pending-override candidates yet — they still write to the
+    element normally. *)
+let build_panel_pending_template
+    (panel : (string * Yojson.Safe.t) list)
+    (elem : Element.element)
+  : Element.tspan option =
+  let (elem_ff, elem_fs, elem_fw, elem_fst, elem_td, elem_tt, elem_fv,
+       elem_xl, elem_rot) = match elem with
+    | Element.Text r ->
+      (r.font_family, r.font_size, r.font_weight, r.font_style,
+       r.text_decoration, r.text_transform, r.font_variant,
+       r.xml_lang, r.rotate)
+    | Element.Text_path r ->
+      (r.font_family, r.font_size, r.font_weight, r.font_style,
+       r.text_decoration, r.text_transform, r.font_variant,
+       r.xml_lang, r.rotate)
+    | _ -> raise Exit in
+  let tpl = ref (Tspan.default_tspan ()) in
+  let any = ref false in
+  (* font-family *)
+  (match List.assoc_opt "font_family" panel with
+   | Some (`String s) when s <> elem_ff ->
+     tpl := { !tpl with font_family = Some s }; any := true
+   | _ -> ());
+  (* font-size *)
+  let panel_fs = match List.assoc_opt "font_size" panel with
+    | Some (`Int n) -> Some (Float.of_int n)
+    | Some (`Float n) -> Some n
+    | _ -> None in
+  (match panel_fs with
+   | Some fs when abs_float (fs -. elem_fs) > 1e-6 ->
+     tpl := { !tpl with font_size = Some fs }; any := true
+   | _ -> ());
+  (* style_name → font_weight + font_style *)
+  let style = match List.assoc_opt "style_name" panel with
+    | Some (`String s) -> String.trim s | _ -> "" in
+  let (fw_parsed, fst_parsed) = match style with
+    | "Regular" -> (Some "normal", Some "normal")
+    | "Italic" -> (Some "normal", Some "italic")
+    | "Bold" -> (Some "bold", Some "normal")
+    | "Bold Italic" | "Italic Bold" -> (Some "bold", Some "italic")
+    | _ -> (None, None) in
+  (match fw_parsed with
+   | Some fw when fw <> elem_fw ->
+     tpl := { !tpl with font_weight = Some fw }; any := true
+   | _ -> ());
+  (match fst_parsed with
+   | Some fs when fs <> elem_fst ->
+     tpl := { !tpl with font_style = Some fs }; any := true
+   | _ -> ());
+  (* text-decoration: parse both sides into sorted sets so "none"
+     and "" (no decoration) collapse. *)
+  let underline = match List.assoc_opt "underline" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let strikethrough = match List.assoc_opt "strikethrough" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let panel_td = List.sort compare (List.filter_map (fun x -> x) [
+    if strikethrough then Some "line-through" else None;
+    if underline then Some "underline" else None;
+  ]) in
+  let elem_td_parsed = List.sort compare
+    (List.filter (fun t -> t <> "none")
+       (String.split_on_char ' ' elem_td
+        |> List.filter (fun s -> s <> ""))) in
+  if panel_td <> elem_td_parsed then begin
+    tpl := { !tpl with text_decoration = Some panel_td };
+    any := true
+  end;
+  (* text-transform (All Caps) *)
+  let all_caps = match List.assoc_opt "all_caps" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let tt = if all_caps then "uppercase" else "" in
+  if tt <> elem_tt then begin
+    tpl := { !tpl with text_transform = Some tt }; any := true
+  end;
+  (* font-variant (Small Caps when All Caps is off) *)
+  let small_caps = match List.assoc_opt "small_caps" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let fv = if small_caps && not all_caps then "small-caps" else "" in
+  if fv <> elem_fv then begin
+    tpl := { !tpl with font_variant = Some fv }; any := true
+  end;
+  (* language *)
+  (match List.assoc_opt "language" panel with
+   | Some (`String s) when s <> elem_xl ->
+     tpl := { !tpl with xml_lang = Some s }; any := true
+   | _ -> ());
+  (* character rotation: float on the panel, string on the element. *)
+  let rot = match List.assoc_opt "character_rotation" panel with
+    | Some (`Int n) -> Float.of_int n
+    | Some (`Float n) -> n
+    | _ -> 0.0 in
+  let rot_str = if rot = 0.0 then ""
+    else Printf.sprintf "%g" rot in
+  if rot_str <> elem_rot then begin
+    tpl := { !tpl with rotate = if rot = 0.0 then None else Some rot };
+    if rot <> 0.0 then any := true
+  end;
+  if !any then Some !tpl else None
+
 let apply_character_panel_to_selection (store : State_store.t)
     (ctrl : Controller.controller) : unit =
+  let panel_list () =
+    let read k = (k, State_store.get_panel store "character_panel" k) in
+    List.map read [
+      "font_family"; "style_name"; "font_size";
+      "leading"; "kerning"; "tracking";
+      "vertical_scale"; "horizontal_scale";
+      "baseline_shift"; "character_rotation";
+      "all_caps"; "small_caps"; "superscript"; "subscript";
+      "underline"; "strikethrough";
+      "language"; "anti_aliasing";
+    ]
+  in
+  (* Phase 3: route to next-typed-character state when there is an
+     active edit session with a bare caret (no range selection).
+     Replace semantics: clear pending, prime from new template.
+     Non-bare-caret sessions fall through to the legacy element-
+     level write below. *)
+  let routed_to_pending = match ctrl#model#current_edit_session with
+    | Some session when not session#has_selection ->
+      (try
+        let elem = Document.get_element ctrl#document session#path in
+        let template = build_panel_pending_template (panel_list ()) elem in
+        session#clear_pending_override ();
+        (match template with
+         | Some tpl -> session#set_pending_override tpl
+         | None -> ());
+        true
+      with _ -> true (* swallow — Exit on non-Text elem path still counts
+                       as "handled by pending route" *))
+    | _ -> false in
+  if routed_to_pending then () else
   let doc = ctrl#document in
   if Document.PathMap.is_empty doc.Document.selection then ()
   else begin

@@ -409,6 +409,93 @@ let stroke_subscribe_tests = [
     assert (ctrl#document == before));
 ]
 
+(* ── Phase 3: Character panel → pending override routing ──────── *)
+
+let _default_text_elem () =
+  Jas.Text_edit.empty_text_elem 0.0 0.0 0.0 0.0
+
+let _aligned_panel () =
+  (* Panel shape that matches the default empty text element for the
+     attributes covered by the pending-template scope. *)
+  [
+    ("font_family", `String "sans-serif");
+    ("font_size", `Float 16.0);
+    ("style_name", `String "Regular");
+    ("all_caps", `Bool false);
+    ("small_caps", `Bool false);
+    ("superscript", `Bool false);
+    ("subscript", `Bool false);
+    ("underline", `Bool false);
+    ("strikethrough", `Bool false);
+    ("language", `String "");
+    ("character_rotation", `Float 0.0);
+  ]
+
+let phase3_pending_tests = [
+  Alcotest.test_case "template_empty_when_panel_matches_element" `Quick (fun () ->
+    let elem = _default_text_elem () in
+    assert (build_panel_pending_template (_aligned_panel ()) elem = None));
+
+  Alcotest.test_case "template_bold_sets_font_weight_only" `Quick (fun () ->
+    let elem = _default_text_elem () in
+    let panel = List.map (fun (k, v) ->
+      if k = "style_name" then (k, `String "Bold") else (k, v)
+    ) (_aligned_panel ()) in
+    match build_panel_pending_template panel elem with
+    | None -> assert false
+    | Some tpl ->
+      assert (tpl.font_weight = Some "bold");
+      (* Bold parses to ("bold", "normal"); element font_style is
+         "normal", so font_style is not included. *)
+      assert (tpl.font_style = None);
+      assert (tpl.font_family = None);
+      assert (tpl.font_size = None));
+
+  Alcotest.test_case "template_text_decoration_normalizes_none_to_empty" `Quick (fun () ->
+    (* Build a Text element whose text_decoration is the CSS "none"
+       string — the panel (both flags off) represents the same state;
+       template should be None. *)
+    let t = _default_text_elem () in
+    let elem = match t with
+      | Jas.Element.Text r ->
+        Jas.Element.Text { r with text_decoration = "none" }
+      | _ -> assert false in
+    assert (build_panel_pending_template (_aligned_panel ()) elem = None));
+
+  Alcotest.test_case "panel_write_with_bare_caret_sets_pending" `Quick (fun () ->
+    (* Build a document with a Text element, set up an active session
+       with a bare caret on model, then apply panel Bold → pending
+       should be set, element untouched. *)
+    let text = _default_text_elem () in
+    let model = Jas.Model.create () in
+    let layer = Jas.Element.make_layer ~name:"Layer 1" [| text |] in
+    let doc = {
+      (Jas.Document.default_document ()) with
+      layers = [| layer |];
+    } in
+    model#set_document doc;
+    let session = Jas.Text_edit.create
+      ~path:[0; 0] ~target:Jas.Text_edit.Edit_text
+      ~content:"hello" ~insertion:3 in
+    model#set_current_edit_session (Some (Jas.Text_edit.as_session_ref session));
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    let panel_kv = List.map (fun (k, v) ->
+      if k = "style_name" then (k, `String "Bold") else (k, v)
+    ) (_aligned_panel ()) in
+    init_panel store "character_panel" panel_kv;
+    apply_character_panel_to_selection store ctrl;
+    assert (Jas.Text_edit.has_pending_override session);
+    assert (Jas.Text_edit.pending_char_start session = Some 3);
+    (match Jas.Text_edit.pending_override session with
+     | Some p -> assert (p.font_weight = Some "bold")
+     | None -> assert false);
+    (* Element untouched. *)
+    match Jas.Document.get_element ctrl#document [0; 0] with
+    | Jas.Element.Text r -> assert (r.font_weight = "normal")
+    | _ -> assert false);
+]
+
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
@@ -425,4 +512,5 @@ let () =
     "Character attrs", character_attrs_tests;
     "Character apply-to-elem", apply_to_elem_tests;
     "Stroke subscribe", stroke_subscribe_tests;
+    "Phase3 pending", phase3_pending_tests;
   ]

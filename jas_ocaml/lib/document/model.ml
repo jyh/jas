@@ -3,6 +3,19 @@
     Views register callbacks via on_document_changed to be notified
     whenever the document is replaced. *)
 
+(** Structural view of an in-place text-editing session, exposed to
+    callers (the Character panel pipeline) that need to detect an
+    active bare-caret editor and prime its next-typed-character
+    state. The concrete [Text_edit.t] lives in [lib/tools] — we use
+    an object type here to keep the layering pointed the right way
+    (tools may see Document/Model, but not the other way round). *)
+type edit_session_ref = <
+  has_selection : bool;
+  path : int list;
+  set_pending_override : Element.tspan -> unit;
+  clear_pending_override : unit -> unit
+>
+
 let max_undo = 100
 
 let next_untitled = ref 1
@@ -26,6 +39,7 @@ class model ?(document = Document.default_document ()) ?filename () =
     val mutable default_stroke : Element.stroke option =
       Some (Element.make_stroke Element.black)
     val mutable recent_colors : string list = []
+    val mutable current_edit_session : edit_session_ref option = None
 
     method document = doc
 
@@ -84,6 +98,10 @@ class model ?(document = Document.default_document ()) ?filename () =
     method set_default_stroke (s : Element.stroke option) = default_stroke <- s
     method recent_colors = recent_colors
     method set_recent_colors (c : string list) = recent_colors <- c
+
+    method current_edit_session = current_edit_session
+    method set_current_edit_session (s : edit_session_ref option) =
+      current_edit_session <- s
   end
 
 let create ?document ?filename () = new model ?document ?filename ()
