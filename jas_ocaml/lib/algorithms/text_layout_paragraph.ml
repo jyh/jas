@@ -1,12 +1,24 @@
 (** Build [paragraph_segment] lists from tspans. See .mli. *)
 
-let _text_align_from (value : string option) (_is_area : bool)
+let _text_align_from (value : string option) (is_area : bool)
   : Text_layout.text_align =
   match value with
   | Some "center" -> Text_layout.Center
   | Some "right" -> Text_layout.Right
-  | Some "justify" -> Text_layout.Left  (* Phase 5 placeholder *)
+  | Some "justify" when is_area -> Text_layout.Justify
   | _ -> Text_layout.Left
+
+(** Map [text-align-last] to the last-line alignment of a justified
+    paragraph. Ignored when the paragraph is not justified. *)
+let _last_line_align_from (value : string option)
+    (base : Text_layout.text_align) (is_area : bool)
+  : Text_layout.text_align =
+  if base <> Text_layout.Justify || not is_area then Text_layout.Left
+  else match value with
+    | Some "center" -> Text_layout.Center
+    | Some "right" -> Text_layout.Right
+    | Some "justify" -> Text_layout.Justify
+    | _ -> Text_layout.Left
 
 let marker_gap_pt = 12.0
 
@@ -100,6 +112,8 @@ let build_segments_from_text (tspans : Element.tspan array) (content : string)
       let marker_gap = if list_style <> None then marker_gap_pt else 0.0 in
       let hanging_punctuation =
         match t.jas_hanging_punctuation with Some v -> v | None -> false in
+      let ta = _text_align_from t.text_align is_area in
+      let lla = _last_line_align_from t.text_align_last ta is_area in
       current := Some {
         Text_layout.char_start = !cursor;
         char_end = !cursor;
@@ -108,10 +122,26 @@ let build_segments_from_text (tspans : Element.tspan array) (content : string)
         first_line_indent = (match t.text_indent with Some v -> v | None -> 0.0);
         space_before = (match t.jas_space_before with Some v -> v | None -> 0.0);
         space_after = (match t.jas_space_after with Some v -> v | None -> 0.0);
-        text_align = _text_align_from t.text_align is_area;
+        text_align = ta;
         list_style;
         marker_gap;
         hanging_punctuation;
+        word_spacing_min =
+          (match t.jas_word_spacing_min with Some v -> v | None -> 80.0);
+        word_spacing_desired =
+          (match t.jas_word_spacing_desired with Some v -> v | None -> 100.0);
+        word_spacing_max =
+          (match t.jas_word_spacing_max with Some v -> v | None -> 133.0);
+        last_line_align = lla;
+        hyphenate = (match t.jas_hyphenate with Some v -> v | None -> false);
+        hyphenate_min_word =
+          (match t.jas_hyphenate_min_word with Some v -> Float.to_int v | None -> 3);
+        hyphenate_min_before =
+          (match t.jas_hyphenate_min_before with Some v -> Float.to_int v | None -> 1);
+        hyphenate_min_after =
+          (match t.jas_hyphenate_min_after with Some v -> Float.to_int v | None -> 1);
+        hyphenate_bias =
+          (match t.jas_hyphenate_bias with Some v -> Float.to_int v | None -> 0);
       }
     end else
       cursor := !cursor + body_chars

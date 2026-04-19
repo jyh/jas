@@ -71,10 +71,10 @@ val ordered_range : int -> int -> int * int
 (** {2 Phase 5 paragraph-aware layout} *)
 
 (** Horizontal alignment within a paragraph's effective box (the
-    box width minus left/right indents). Phase 5 supports the three
-    non-justify alignments; the four [JUSTIFY_*] variants land with
-    the composer in Phase 8 — they fall back to [Left] for now. *)
-type text_align = Left | Center | Right
+    box width minus left/right indents). Phase 10 lights up
+    [Justify] (area-text only — point text and text-on-path coerce
+    back to [Left]). *)
+type text_align = Left | Center | Right | Justify
 
 (** Per-paragraph layout constraints derived from the wrapper tspan
     attributes (or panel defaults when there is no wrapper). All
@@ -84,29 +84,24 @@ type paragraph_segment = {
   char_end : int;
   left_indent : float;
   right_indent : float;
-  (** [text-indent] — additional x offset on the *first* line only.
-      Signed; negative produces a hanging indent. Phase 5 supports
-      non-negative values; negative falls back to 0. Ignored when
-      [list_style] is [Some _] per PARAGRAPH.md §Marker rendering. *)
   first_line_indent : float;
-  (** [jas:space-before] — extra vertical gap above this paragraph.
-      Always 0 for the first paragraph in the element. *)
   space_before : float;
   space_after : float;
   text_align : text_align;
-  (** [jas:list-style] — Phase 6. When [Some _], the paragraph is
-      a list item: the layout pushes every line by an extra
-      [marker_gap] and ignores [first_line_indent]. The marker
-      glyph itself is drawn at [x = left_indent] by the renderer. *)
   list_style : string option;
-  (** Gap between marker and text. Phase 6 uses a fixed 12pt per
-      PARAGRAPH.md §Marker rendering. *)
   marker_gap : float;
-  (** [jas:hanging-punctuation] — Phase 7. When true, hangable
-      punctuation chars at line start / end offset outside the
-      effective edge by their own advance width per PARAGRAPH.md
-      §Hanging Punctuation. *)
   hanging_punctuation : bool;
+  (* Phase 10: Justification dialog soft constraints. *)
+  word_spacing_min : float;
+  word_spacing_desired : float;
+  word_spacing_max : float;
+  last_line_align : text_align;
+  (* Phase 10: Hyphenation dialog wiring. *)
+  hyphenate : bool;
+  hyphenate_min_word : int;
+  hyphenate_min_before : int;
+  hyphenate_min_after : int;
+  hyphenate_bias : int;
 }
 
 (** True if [c] may hang into the *left* margin. *)
