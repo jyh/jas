@@ -83,6 +83,17 @@ init:
   distribute_spacing_value: "state.align_distribute_spacing"
   use_preview_bounds: "state.align_use_preview_bounds"
 
+menu:
+  - label: "Use Preview Bounds"
+    action: toggle_use_preview_bounds
+    checked: "panel.use_preview_bounds"
+  - separator
+  - label: "Reset Panel"
+    action: reset_align_panel
+  - separator
+  - label: "Close Align"
+    action: close_panel
+
 content:
   type: container
   id: align_content

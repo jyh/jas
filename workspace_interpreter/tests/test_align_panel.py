@@ -373,3 +373,51 @@ class TestAlignBindDisabled:
         spec = ws["panels"]["align_panel_content"]
         widget = _find_by_id(spec["content"], button_id)
         assert "disabled" not in widget.get("bind", {})
+
+
+class TestAlignPanelMenu:
+    """Stage 1e: panel menu in align.yaml per ALIGN.md §Panel menu.
+    Three entries plus two separators: Use Preview Bounds (toggle),
+    Reset Panel, Close Align."""
+
+    def test_menu_is_declared(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        assert isinstance(spec.get("menu"), list)
+        assert len(spec["menu"]) > 0
+
+    def test_menu_use_preview_bounds_entry(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        menu = ws["panels"]["align_panel_content"]["menu"]
+        entry = next((m for m in menu
+                      if isinstance(m, dict) and m.get("label") == "Use Preview Bounds"),
+                     None)
+        assert entry is not None
+        assert entry["action"] == "toggle_use_preview_bounds"
+        assert entry["checked"] == "panel.use_preview_bounds"
+
+    def test_menu_reset_panel_entry(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        menu = ws["panels"]["align_panel_content"]["menu"]
+        entry = next((m for m in menu
+                      if isinstance(m, dict) and m.get("label") == "Reset Panel"),
+                     None)
+        assert entry is not None
+        assert entry["action"] == "reset_align_panel"
+
+    def test_menu_close_align_entry(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        menu = ws["panels"]["align_panel_content"]["menu"]
+        entry = next((m for m in menu
+                      if isinstance(m, dict) and m.get("label") == "Close Align"),
+                     None)
+        assert entry is not None
+        assert entry["action"] == "close_panel"
+
+    def test_menu_has_separators_between_groups(self, workspace_path):
+        """Two separators: one between Use Preview Bounds and Reset
+        Panel, one between Reset Panel and Close Align."""
+        ws = load_workspace(workspace_path)
+        menu = ws["panels"]["align_panel_content"]["menu"]
+        sep_count = sum(1 for m in menu if m == "separator")
+        assert sep_count == 2
