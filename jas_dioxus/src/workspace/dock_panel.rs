@@ -298,22 +298,24 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         m.insert("kerning".into(), J::String(kerning_display));
     }
 
-    // ── Paragraph panel — text-kind gating (Phase 3a) + attr reads (Phase 3b) ──
+    // ── Paragraph panel — text-kind gating (Phase 3a) + attr reads (Phase 3b/c) ──
     // PARAGRAPH.md §Text-kind gating disables JUSTIFY_*, indents,
     // hyphenate, and hanging punctuation when any selected text
     // element is non-area (point text or text-on-path). The bare
     // alignments, space-before/after, and list dropdowns gate on
     // text_selected only.
     //
-    // Phase 3b additionally reads the first paragraph wrapper
-    // tspan's jas:* attrs from the first selected text element and
-    // pushes them to panel.left_indent / right_indent / hyphenate /
-    // hanging_punctuation / bullets + numbered_list. Mixed-state
-    // aggregation across multiple wrappers / multiple text elements
-    // is deferred to Phase 3c.
+    // Phase 3b/c iterates every paragraph wrapper tspan in every
+    // selected text element and aggregates the panel-surface attrs.
+    // When all wrappers agree on a value, the panel reflects it;
+    // when they disagree (mixed state per PARAGRAPH.md §Selection
+    // model rule 2/3/4), the override is omitted so the panel
+    // retains its prior / YAML-default value. A future Phase polishes
+    // this into a tri-state visual indicator on checkboxes and a
+    // blank state on combos.
     let mut any_text = false;
     let mut all_area = true;
-    let mut first_para: Option<&crate::geometry::tspan::Tspan> = None;
+    let mut wrappers: Vec<&crate::geometry::tspan::Tspan> = Vec::new();
     if let Some(tab) = st.tab() {
         let doc = tab.model.document();
         for es in doc.selection.iter() {
@@ -324,9 +326,10 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
                         if !(t.width > 0.0 && t.height > 0.0) {
                             all_area = false;
                         }
-                        if first_para.is_none() {
-                            first_para = t.tspans.iter().find(|tspan|
-                                tspan.jas_role.as_deref() == Some("paragraph"));
+                        for tspan in t.tspans.iter() {
+                            if tspan.jas_role.as_deref() == Some("paragraph") {
+                                wrappers.push(tspan);
+                            }
                         }
                     }
                     crate::geometry::element::Element::TextPath(_) => {
@@ -341,33 +344,51 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("text_selected".into(), J::Bool(any_text));
     m.insert("area_text_selected".into(), J::Bool(any_text && all_area));
 
-    // Paragraph attribute reads (Phase 3b). When no wrapper exists,
-    // panel state retains its YAML defaults; we only override when a
-    // wrapper is found so untouched documents still see the panel's
-    // baseline values.
-    if let Some(p) = first_para {
-        if let Some(v) = p.jas_left_indent {
+    // Aggregate across all wrappers. Each wrapper's effective value
+    // is the field if Some, else the panel/YAML default. We collect
+    // distinct values; one distinct value → write it; >1 distinct or
+    // 0 wrappers → omit override.
+    fn agree<T: PartialEq + Clone>(values: &[T]) -> Option<T> {
+        let first = values.first()?.clone();
+        if values.iter().all(|v| *v == first) { Some(first) } else { None }
+    }
+    if !wrappers.is_empty() {
+        let lefts: Vec<f64> = wrappers.iter()
+            .map(|w| w.jas_left_indent.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&lefts) {
             m.insert("left_indent".into(), serde_json::json!(v));
         }
-        if let Some(v) = p.jas_right_indent {
+        let rights: Vec<f64> = wrappers.iter()
+            .map(|w| w.jas_right_indent.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&rights) {
             m.insert("right_indent".into(), serde_json::json!(v));
         }
-        if let Some(v) = p.jas_hyphenate {
+        let hyphs: Vec<bool> = wrappers.iter()
+            .map(|w| w.jas_hyphenate.unwrap_or(false)).collect();
+        if let Some(v) = agree(&hyphs) {
             m.insert("hyphenate".into(), J::Bool(v));
         }
-        if let Some(v) = p.jas_hanging_punctuation {
+        let hps: Vec<bool> = wrappers.iter()
+            .map(|w| w.jas_hanging_punctuation.unwrap_or(false)).collect();
+        if let Some(v) = agree(&hps) {
             m.insert("hanging_punctuation".into(), J::Bool(v));
         }
-        // Single backing attr split into two panel dropdowns.
-        // bullet-* values populate panel.bullets; num-* values
-        // populate panel.numbered_list. The other dropdown shows None.
-        if let Some(ls) = &p.jas_list_style {
+        // Single backing attr split into two panel dropdowns. We
+        // aggregate the raw list-style value first, then route to
+        // bullets / numbered_list based on the prefix.
+        let styles: Vec<String> = wrappers.iter()
+            .map(|w| w.jas_list_style.clone().unwrap_or_default()).collect();
+        if let Some(ls) = agree(&styles) {
             if ls.starts_with("bullet-") {
-                m.insert("bullets".into(), J::String(ls.clone()));
+                m.insert("bullets".into(), J::String(ls));
                 m.insert("numbered_list".into(), J::String("".into()));
             } else if ls.starts_with("num-") {
-                m.insert("numbered_list".into(), J::String(ls.clone()));
+                m.insert("numbered_list".into(), J::String(ls));
                 m.insert("bullets".into(), J::String("".into()));
+            } else {
+                // Empty string (no marker) — clear both dropdowns.
+                m.insert("bullets".into(), J::String("".into()));
+                m.insert("numbered_list".into(), J::String("".into()));
             }
         }
     }
