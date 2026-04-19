@@ -258,11 +258,11 @@ public func orderedRange(_ a: Int, _ b: Int) -> (Int, Int) {
 // MARK: - Phase 5 paragraph-aware layout
 
 /// Horizontal alignment within a paragraph's effective box (the
-/// box width minus left/right indents). Phase 5 supports the three
-/// non-justify alignments; the four `JUSTIFY_*` variants land with
-/// the composer in Phase 8 — they fall back to `.left` for now.
+/// box width minus left/right indents). Phase 10 lights up `.justify`
+/// (area-text only — point text and text-on-path coerce back to
+/// `.left` in `textAlignFrom`).
 public enum TextAlign: Equatable {
-    case left, center, right
+    case left, center, right, justify
 }
 
 /// Per-paragraph layout constraints derived from the wrapper tspan
@@ -299,6 +299,27 @@ public struct ParagraphSegment: Equatable {
     /// hangs only left side, right-aligned only right side,
     /// centered both.
     public var hangingPunctuation: Bool
+    // ── Phase 10: Justification dialog soft constraints ──
+    /// `jas:word-spacing-{min,desired,max}` as percentages of a
+    /// natural space. Defaults 80 / 100 / 133 per PARAGRAPH.md
+    /// §Reset Panel. Used by `.justify` to derive glue stretch /
+    /// shrink for the every-line composer.
+    public var wordSpacingMin: Double
+    public var wordSpacingDesired: Double
+    public var wordSpacingMax: Double
+    /// `text-align-last` mapped from the wrapper attr. Only consulted
+    /// when `textAlign == .justify`. The last line aligns per this
+    /// value; `.justify` flushes the last line to both edges
+    /// (JUSTIFY_ALL).
+    public var lastLineAlign: TextAlign
+    // ── Phase 10: Hyphenation dialog wiring ──
+    public var hyphenate: Bool
+    public var hyphenateMinWord: Int
+    public var hyphenateMinBefore: Int
+    public var hyphenateMinAfter: Int
+    /// 0 (Better Spacing) ... 6 (Fewer Hyphens). Maps to per-hyphen
+    /// penalty value in the composer.
+    public var hyphenateBias: Int
 
     public init(charStart: Int = 0, charEnd: Int = 0,
                 leftIndent: Double = 0, rightIndent: Double = 0,
@@ -306,7 +327,16 @@ public struct ParagraphSegment: Equatable {
                 spaceBefore: Double = 0, spaceAfter: Double = 0,
                 textAlign: TextAlign = .left,
                 listStyle: String? = nil, markerGap: Double = 0,
-                hangingPunctuation: Bool = false) {
+                hangingPunctuation: Bool = false,
+                wordSpacingMin: Double = 80,
+                wordSpacingDesired: Double = 100,
+                wordSpacingMax: Double = 133,
+                lastLineAlign: TextAlign = .left,
+                hyphenate: Bool = false,
+                hyphenateMinWord: Int = 3,
+                hyphenateMinBefore: Int = 1,
+                hyphenateMinAfter: Int = 1,
+                hyphenateBias: Int = 0) {
         self.charStart = charStart
         self.charEnd = charEnd
         self.leftIndent = leftIndent
@@ -318,6 +348,15 @@ public struct ParagraphSegment: Equatable {
         self.listStyle = listStyle
         self.markerGap = markerGap
         self.hangingPunctuation = hangingPunctuation
+        self.wordSpacingMin = wordSpacingMin
+        self.wordSpacingDesired = wordSpacingDesired
+        self.wordSpacingMax = wordSpacingMax
+        self.lastLineAlign = lastLineAlign
+        self.hyphenate = hyphenate
+        self.hyphenateMinWord = hyphenateMinWord
+        self.hyphenateMinBefore = hyphenateMinBefore
+        self.hyphenateMinAfter = hyphenateMinAfter
+        self.hyphenateBias = hyphenateBias
     }
 }
 
@@ -428,7 +467,19 @@ public func layoutTextWithParagraphs(_ content: String,
         let listIndent: Double = hasList ? seg.markerGap : 0
         let effectiveMax: Double = maxWidth > 0
             ? max(0, maxWidth - seg.leftIndent - listIndent - seg.rightIndent) : 0
-        let para = layoutText(slice, maxWidth: effectiveMax, fontSize: fontSize, measure: measure)
+        // Phase 10: justify segments go through the every-line
+        // composer instead of greedy first-fit. Falls back to greedy
+        // when the composer can't find a feasible composition.
+        let para: TextLayout
+        if seg.textAlign == .justify && effectiveMax > 0,
+           let kp = justifyLayoutSegment(slice, maxWidth: effectiveMax,
+                                          fontSize: fontSize, seg: seg,
+                                          measure: measure) {
+            para = kp
+        } else {
+            para = layoutText(slice, maxWidth: effectiveMax,
+                              fontSize: fontSize, measure: measure)
+        }
         let firstLineExtra: Double = hasList ? 0 : max(0, seg.firstLineIndent)
         let firstLineNoInCombined = allLines.count
         for (li, line) in para.lines.enumerated() {
@@ -460,7 +511,7 @@ public func layoutTextWithParagraphs(_ content: String,
             let effectiveVisibleW = max(0, visibleW - leftHangW - rightHangW)
             let alignShift: Double
             switch seg.textAlign {
-            case .left: alignShift = -leftHangW
+            case .left, .justify: alignShift = -leftHangW
             case .center:
                 alignShift = lineAvail > effectiveVisibleW
                     ? (lineAvail - effectiveVisibleW) / 2 - leftHangW
@@ -512,4 +563,243 @@ public func layoutTextWithParagraphs(_ content: String,
 
     return TextLayout(glyphs: allGlyphs, lines: allLines,
                       fontSize: fontSize, charCount: n)
+}
+
+// MARK: - Phase 10: Justify path via Knuth-Plass composer
+
+/// Map the dialog bias slider (0..6) to a KP penalty value.
+/// 0 = Better Spacing (cheap hyphens), 6 = Fewer Hyphens (expensive).
+/// Linear interpolation over [50, 1000].
+private func hyphenPenaltyFromBias(_ bias: Int) -> Double {
+    50 + Double(min(max(bias, 0), 6)) * (950.0 / 6.0)
+}
+
+/// Justify-mode line layout via the every-line composer. Returns nil
+/// when no feasible composition exists (caller falls back to greedy
+/// first-fit). Mirrors `justify_layout` in jas_dioxus.
+func justifyLayoutSegment(_ content: String, maxWidth: Double,
+                          fontSize: Double, seg: ParagraphSegment,
+                          measure: (String) -> Double) -> TextLayout? {
+    let lineHeight = fontSize
+    let ascent = fontSize * 0.8
+    let chars = Array(content)
+    let n = chars.count
+    if n == 0 {
+        var info = LineInfo(start: 0, end: 0, hardBreak: false,
+                            top: 0, baselineY: ascent,
+                            height: lineHeight, width: 0)
+        info.glyphStart = 0; info.glyphEnd = 0
+        return TextLayout(glyphs: [], lines: [info],
+                          fontSize: fontSize, charCount: 0)
+    }
+
+    let spaceW = measure(" ")
+    let desiredW = spaceW * seg.wordSpacingDesired / 100
+    let stretchW = spaceW * (seg.wordSpacingMax - seg.wordSpacingDesired) / 100
+    let shrinkW = spaceW * (seg.wordSpacingDesired - seg.wordSpacingMin) / 100
+    let hyphenW = measure("-")
+    let hyphenPen = hyphenPenaltyFromBias(seg.hyphenateBias)
+
+    // Sub-paragraphs split on '\n'.
+    var paraStarts: [Int] = [0]
+    for (i, c) in chars.enumerated() where c == "\n" { paraStarts.append(i + 1) }
+    paraStarts.append(n + 1)
+
+    var allGlyphs: [TextGlyph] = []
+    var allLines: [LineInfo] = []
+    var nextLineNo = 0
+
+    for k in 0..<(paraStarts.count - 1) {
+        let paraStart = paraStarts[k]
+        let paraEndExcl = min(max(0, paraStarts[k + 1] - 1), n)
+        if paraStart > n { break }
+        let sliceChars = Array(chars[paraStart..<paraEndExcl])
+
+        var items: [KPItem] = []
+        var i = 0
+        while i < sliceChars.count {
+            if sliceChars[i].isWhitespace {
+                var j = i
+                while j < sliceChars.count && sliceChars[j].isWhitespace { j += 1 }
+                items.append(.glue(width: desiredW, stretch: stretchW,
+                                   shrink: shrinkW,
+                                   charIdx: paraStart + i))
+                i = j
+                continue
+            }
+            let wordStart = i
+            while i < sliceChars.count && !sliceChars[i].isWhitespace { i += 1 }
+            let word = String(sliceChars[wordStart..<i])
+            let wordW = measure(word)
+            if seg.hyphenate && word.count >= seg.hyphenateMinWord {
+                let breaks = hyphenate(word, patterns: enUsPatternsSample,
+                                        minBefore: seg.hyphenateMinBefore,
+                                        minAfter: seg.hyphenateMinAfter)
+                var cur = 0
+                for bi in 0..<breaks.count {
+                    if !breaks[bi] || bi == 0 || bi >= breaks.count - 1 { continue }
+                    let pre = String(word.dropFirst(cur).prefix(bi - cur))
+                    let preW = measure(pre)
+                    items.append(.box(width: preW,
+                                       charIdx: paraStart + wordStart + cur))
+                    items.append(.penalty(width: hyphenW, value: hyphenPen,
+                                           flagged: true,
+                                           charIdx: paraStart + wordStart + bi))
+                    cur = bi
+                }
+                let tail = String(word.dropFirst(cur))
+                items.append(.box(width: measure(tail),
+                                   charIdx: paraStart + wordStart + cur))
+            } else {
+                items.append(.box(width: wordW, charIdx: paraStart + wordStart))
+            }
+        }
+        // End-of-paragraph terminator.
+        items.append(.glue(width: 0, stretch: 1e9, shrink: 0,
+                           charIdx: paraStart + sliceChars.count))
+        items.append(.penalty(width: 0, value: -kpPenaltyInfinity,
+                               flagged: false,
+                               charIdx: paraStart + sliceChars.count))
+
+        guard let breaks = kpCompose(items: items, lineWidths: [maxWidth]),
+              !breaks.isEmpty else {
+            return nil
+        }
+
+        var prevBreak: Int? = nil
+        let lineCount = breaks.count
+        for (lidx, br) in breaks.enumerated() {
+            let isLast = lidx == lineCount - 1
+            let from = prevBreak.map { $0 + 1 } ?? 0
+            let to = br.itemIdx
+            var x: Double = 0
+            let lineStartChar = items[from].charIdx
+            var lineEndChar = items[from].charIdx
+            let glyphStart = allGlyphs.count
+            let top = Double(nextLineNo) * lineHeight
+            let baselineY = top + ascent
+            for ii in from...to {
+                let item = items[ii]
+                let isTrailing = ii == to
+                switch item {
+                case .box(_, let charIdx):
+                    let chunkEnd = ii + 1 < items.count
+                        ? items[ii + 1].charIdx : (n + paraStart)
+                    var ci = charIdx
+                    while ci < min(chunkEnd, paraStart + sliceChars.count) {
+                        let ch = chars[ci]
+                        let cw = measure(String(ch))
+                        allGlyphs.append(TextGlyph(
+                            idx: ci, line: nextLineNo,
+                            x: x, right: x + cw,
+                            baselineY: baselineY, top: top,
+                            height: lineHeight,
+                            isTrailingSpace: false))
+                        x += cw
+                        lineEndChar = ci + 1
+                        ci += 1
+                    }
+                case .glue(let gw, let gs, let gz, let charIdx):
+                    let runEnd = ii + 1 < items.count
+                        ? items[ii + 1].charIdx : (paraStart + sliceChars.count)
+                    if isTrailing {
+                        var wi = charIdx
+                        while wi < runEnd {
+                            allGlyphs.append(TextGlyph(
+                                idx: wi, line: nextLineNo,
+                                x: x, right: x,
+                                baselineY: baselineY, top: top,
+                                height: lineHeight,
+                                isTrailingSpace: true))
+                            wi += 1
+                        }
+                        lineEndChar = runEnd
+                    } else {
+                        let r: Double
+                        if isLast && seg.lastLineAlign != .justify {
+                            r = 0
+                        } else if isLast && seg.lastLineAlign == .justify {
+                            r = lastLineJustifyRatio(items: items, from: from,
+                                                      to: to, lineWidth: maxWidth)
+                        } else {
+                            r = br.ratio
+                        }
+                        let adj = r >= 0 ? gw + r * gs : gw + r * gz
+                        var wi = charIdx
+                        var placedFirst = false
+                        while wi < runEnd {
+                            let cw = !placedFirst ? adj : 0
+                            allGlyphs.append(TextGlyph(
+                                idx: wi, line: nextLineNo,
+                                x: x, right: x + cw,
+                                baselineY: baselineY, top: top,
+                                height: lineHeight,
+                                isTrailingSpace: false))
+                            if !placedFirst { x += cw; placedFirst = true }
+                            wi += 1
+                        }
+                        lineEndChar = runEnd
+                    }
+                case .penalty(let pw, _, _, let charIdx):
+                    if isTrailing && pw > 0 {
+                        allGlyphs.append(TextGlyph(
+                            idx: charIdx, line: nextLineNo,
+                            x: x, right: x + pw,
+                            baselineY: baselineY, top: top,
+                            height: lineHeight,
+                            isTrailingSpace: false))
+                        x += pw
+                    }
+                }
+            }
+            let glyphEnd = allGlyphs.count
+            let hardBreak = isLast && paraEndExcl < n && chars[paraEndExcl] == "\n"
+            var info = LineInfo(start: lineStartChar, end: lineEndChar,
+                                hardBreak: hardBreak,
+                                top: top, baselineY: baselineY,
+                                height: lineHeight, width: x)
+            info.glyphStart = glyphStart
+            info.glyphEnd = glyphEnd
+            allLines.append(info)
+            nextLineNo += 1
+            prevBreak = to
+            _ = lineStartChar  // suppress unused warning
+        }
+    }
+
+    if allLines.isEmpty {
+        var info = LineInfo(start: 0, end: 0, hardBreak: false,
+                            top: 0, baselineY: ascent,
+                            height: lineHeight, width: 0)
+        info.glyphStart = 0; info.glyphEnd = 0
+        allLines.append(info)
+    }
+
+    return TextLayout(glyphs: allGlyphs, lines: allLines,
+                      fontSize: fontSize, charCount: n)
+}
+
+/// Custom ratio for the last line of a JUSTIFY_ALL paragraph.
+/// Excludes the fil-glue terminator so regular inter-word glues
+/// stretch / shrink to fill the line.
+private func lastLineJustifyRatio(items: [KPItem], from: Int, to: Int,
+                                   lineWidth: Double) -> Double {
+    var nat: Double = 0
+    var stretchTotal: Double = 0
+    var shrinkTotal: Double = 0
+    for ii in from..<to {  // exclude trailing item `to`
+        switch items[ii] {
+        case .box(let w, _): nat += w
+        case .glue(let w, let s, let z, _):
+            if s >= 1e8 { continue }  // fil-glue terminator, ignore
+            nat += w
+            stretchTotal += s
+            shrinkTotal += z
+        case .penalty: break
+        }
+    }
+    let slack = lineWidth - nat
+    if slack > 0 && stretchTotal > 0 { return slack / stretchTotal }
+    if slack < 0 && shrinkTotal > 0 { return slack / shrinkTotal }
+    return 0
 }
