@@ -716,5 +716,41 @@ let () =
         assert (contains {|text-indent="-12"|});
         assert (contains {|urn:jas:1:space-before="6"|});
         assert (contains {|urn:jas:1:space-after="3"|}));
+
+      Alcotest.test_case "Phase 8 Justification attrs round-trip through document SVG" `Quick (fun () ->
+        let base = make_text 0.0 0.0 "X" in
+        let input = match base with
+          | Text r ->
+            let tspans = [|
+              { (Jas.Tspan.default_tspan ()) with
+                id = 0; content = "";
+                jas_role = Some "paragraph";
+                jas_word_spacing_min = Some 75.0;
+                jas_word_spacing_desired = Some 95.0;
+                jas_word_spacing_max = Some 150.0;
+                jas_letter_spacing_min = Some (-5.0);
+                jas_letter_spacing_desired = Some 0.0;
+                jas_letter_spacing_max = Some 10.0;
+                jas_glyph_scaling_min = Some 95.0;
+                jas_glyph_scaling_desired = Some 100.0;
+                jas_glyph_scaling_max = Some 105.0;
+                jas_auto_leading = Some 140.0;
+                jas_single_word_justify = Some "left" };
+              { (Jas.Tspan.default_tspan ()) with id = 1; content = "X" };
+            |] in
+            Text { r with tspans }
+          | _ -> assert false
+        in
+        let doc = make_document [|make_layer [| input |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains pat =
+          try let _ : int = Str.search_forward (Str.regexp_string pat) svg 0
+              in true
+          with Not_found -> false in
+        assert (contains {|urn:jas:1:word-spacing-min="75"|});
+        assert (contains {|urn:jas:1:letter-spacing-desired="0"|});
+        assert (contains {|urn:jas:1:glyph-scaling-max="105"|});
+        assert (contains {|urn:jas:1:auto-leading="140"|});
+        assert (contains {|urn:jas:1:single-word-justify="left"|}));
     ];
   ]

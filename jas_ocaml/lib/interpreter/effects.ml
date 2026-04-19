@@ -1565,3 +1565,102 @@ let set_paragraph_panel_field (store : State_store.t)
   apply_paragraph_panel_mutual_exclusion store key value;
   State_store.set_panel store "paragraph_panel_content" key value;
   apply_paragraph_panel_to_selection store ctrl
+
+(* ── Phase 8: Justification dialog OK commit ──────────── *)
+
+(** 11 Justification-dialog field values. [None] means the field was
+    blank (mixed selection) and should not write. *)
+type justification_dialog_values = {
+  word_spacing_min : float option;
+  word_spacing_desired : float option;
+  word_spacing_max : float option;
+  letter_spacing_min : float option;
+  letter_spacing_desired : float option;
+  letter_spacing_max : float option;
+  glyph_scaling_min : float option;
+  glyph_scaling_desired : float option;
+  glyph_scaling_max : float option;
+  auto_leading : float option;
+  single_word_justify : string option;
+}
+
+(** Commit the 11 Justification-dialog fields onto every paragraph
+    wrapper tspan in the selection. Per the identity-value rule
+    each value at its spec default (word-spacing 80/100/133,
+    letter-spacing 0/0/0, glyph-scaling 100/100/100, auto-leading
+    120, single-word-justify 'justify') writes [None] so the
+    wrapper attribute stays absent. Phase 8. *)
+let apply_justification_dialog_to_selection
+    (ctrl : Controller.controller) (v : justification_dialog_values) : unit =
+  let opt_n value default =
+    match value with
+    | None -> None
+    | Some f -> if Float.abs (f -. default) < 1e-6 then None else Some f in
+  let ws_min = opt_n v.word_spacing_min 80.0 in
+  let ws_des = opt_n v.word_spacing_desired 100.0 in
+  let ws_max = opt_n v.word_spacing_max 133.0 in
+  let ls_min = opt_n v.letter_spacing_min 0.0 in
+  let ls_des = opt_n v.letter_spacing_desired 0.0 in
+  let ls_max = opt_n v.letter_spacing_max 0.0 in
+  let gs_min = opt_n v.glyph_scaling_min 100.0 in
+  let gs_des = opt_n v.glyph_scaling_desired 100.0 in
+  let gs_max = opt_n v.glyph_scaling_max 100.0 in
+  let auto_leading = opt_n v.auto_leading 120.0 in
+  let single_word_justify =
+    match v.single_word_justify with
+    | Some s when s <> "justify" -> Some s
+    | _ -> None in
+  let doc = ctrl#document in
+  if Document.PathMap.is_empty doc.Document.selection then () else begin
+    let any_change = ref false in
+    let new_doc = Document.PathMap.fold (fun path _ acc ->
+      let elem = Document.get_element acc path in
+      let update_wrappers tspans =
+        let arr = Array.copy tspans in
+        let wrapper_indices = ref [] in
+        Array.iteri (fun i (t : Element.tspan) ->
+          if t.jas_role = Some "paragraph" then
+            wrapper_indices := i :: !wrapper_indices
+        ) arr;
+        let indices =
+          if !wrapper_indices = [] && Array.length arr > 0 then begin
+            arr.(0) <- { arr.(0) with jas_role = Some "paragraph" };
+            [0]
+          end else List.rev !wrapper_indices in
+        List.iter (fun i ->
+          arr.(i) <- { arr.(i) with
+            jas_word_spacing_min = ws_min;
+            jas_word_spacing_desired = ws_des;
+            jas_word_spacing_max = ws_max;
+            jas_letter_spacing_min = ls_min;
+            jas_letter_spacing_desired = ls_des;
+            jas_letter_spacing_max = ls_max;
+            jas_glyph_scaling_min = gs_min;
+            jas_glyph_scaling_desired = gs_des;
+            jas_glyph_scaling_max = gs_max;
+            jas_auto_leading = auto_leading;
+            jas_single_word_justify = single_word_justify;
+          }
+        ) indices;
+        (arr, indices <> [])
+      in
+      match elem with
+      | Element.Text r ->
+        let (tspans, changed) = update_wrappers r.tspans in
+        if changed then begin
+          any_change := true;
+          Document.replace_element acc path (Element.Text { r with tspans })
+        end else acc
+      | Element.Text_path r ->
+        let (tspans, changed) = update_wrappers r.tspans in
+        if changed then begin
+          any_change := true;
+          Document.replace_element acc path (Element.Text_path { r with tspans })
+        end else acc
+      | _ -> acc
+    ) doc.Document.selection doc in
+    if !any_change then begin
+      ctrl#model#snapshot;
+      ctrl#model#set_document new_doc
+    end
+  end

@@ -170,7 +170,22 @@ let tspan_svg (t : Element.tspan) : string =
   let ti_attr = attr_num "text-indent" t.text_indent in
   let sb_attr = attr_num "urn:jas:1:space-before" t.jas_space_before in
   let sa_attr = attr_num "urn:jas:1:space-after" t.jas_space_after in
-  Printf.sprintf "<tspan%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s>%s</tspan>"
+  (* Phase 1b2 / Phase 8: 11 Justification dialog attrs. Word /
+     letter / glyph spacing min/desired/max are jas-namespaced
+     numerics; auto-leading is a numeric percent; single-word-justify
+     is a string (justify / left / center / right). *)
+  let wsm_attr = attr_num "urn:jas:1:word-spacing-min" t.jas_word_spacing_min in
+  let wsd_attr = attr_num "urn:jas:1:word-spacing-desired" t.jas_word_spacing_desired in
+  let wsx_attr = attr_num "urn:jas:1:word-spacing-max" t.jas_word_spacing_max in
+  let lsm_attr = attr_num "urn:jas:1:letter-spacing-min" t.jas_letter_spacing_min in
+  let lsd_attr = attr_num "urn:jas:1:letter-spacing-desired" t.jas_letter_spacing_desired in
+  let lsx_attr = attr_num "urn:jas:1:letter-spacing-max" t.jas_letter_spacing_max in
+  let gsm_attr = attr_num "urn:jas:1:glyph-scaling-min" t.jas_glyph_scaling_min in
+  let gsd_attr = attr_num "urn:jas:1:glyph-scaling-desired" t.jas_glyph_scaling_desired in
+  let gsx_attr = attr_num "urn:jas:1:glyph-scaling-max" t.jas_glyph_scaling_max in
+  let al_attr = attr_num "urn:jas:1:auto-leading" t.jas_auto_leading in
+  let swj_attr = attr_str "urn:jas:1:single-word-justify" t.jas_single_word_justify in
+  Printf.sprintf "<tspan%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s>%s</tspan>"
     (attr_str "font-family" t.font_family)
     (attr_f "font-size" t.font_size)
     (attr_str "font-weight" t.font_weight)
@@ -180,6 +195,10 @@ let tspan_svg (t : Element.tspan) : string =
     role_attr
     li_attr ri_attr hyph_attr hp_attr ls_attr
     ta_attr tal_attr ti_attr sb_attr sa_attr
+    wsm_attr wsd_attr wsx_attr
+    lsm_attr lsd_attr lsx_attr
+    gsm_attr gsd_attr gsx_attr
+    al_attr swj_attr
     (escape_xml t.content)
 
 let rec element_svg indent (elem : Element.element) =
@@ -779,6 +798,27 @@ and parse_tspan_body i attrs : Element.tspan list =
       | Some s -> float_of_string_opt s | None -> None);
     jas_space_after = (match get_attr a "urn:jas:1:space-after" with
       | Some s -> float_of_string_opt s | None -> None);
+    jas_word_spacing_min = (match get_attr a "urn:jas:1:word-spacing-min" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_word_spacing_desired = (match get_attr a "urn:jas:1:word-spacing-desired" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_word_spacing_max = (match get_attr a "urn:jas:1:word-spacing-max" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_letter_spacing_min = (match get_attr a "urn:jas:1:letter-spacing-min" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_letter_spacing_desired = (match get_attr a "urn:jas:1:letter-spacing-desired" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_letter_spacing_max = (match get_attr a "urn:jas:1:letter-spacing-max" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_glyph_scaling_min = (match get_attr a "urn:jas:1:glyph-scaling-min" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_glyph_scaling_desired = (match get_attr a "urn:jas:1:glyph-scaling-desired" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_glyph_scaling_max = (match get_attr a "urn:jas:1:glyph-scaling-max" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_auto_leading = (match get_attr a "urn:jas:1:auto-leading" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_single_word_justify = get_attr a "urn:jas:1:single-word-justify";
   } in
   match rotate_vals with
   | [] -> [base]
