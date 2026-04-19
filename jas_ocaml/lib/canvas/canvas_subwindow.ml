@@ -448,9 +448,25 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     let ascent = effective_fs *. 0.8 in
     (* line_height: when non-empty, overrides the layout stride.
        Empty = Auto (120% of font size, which is what text_layout
-       uses when we pass [effective_fs]). *)
+       uses when we pass [effective_fs]).
+
+       Phase 8: when line_height is empty (Character Auto) and the
+       first paragraph wrapper carries jas:auto-leading, override
+       the Auto default with [auto_leading%] of the font size. V1
+       applies one Auto override element-wide using the first
+       wrapper's value (per-paragraph leading would need text_layout
+       to take per-segment font_size). *)
     let layout_fs = match _parse_pt line_height with
-      | Some lh -> lh | None -> effective_fs in
+      | Some lh -> lh
+      | None ->
+        let auto_leading = Array.fold_left (fun acc (t : Element.tspan) ->
+          match acc with Some _ -> acc | None ->
+            if t.jas_role = Some "paragraph" then t.jas_auto_leading
+            else None
+        ) None tspans in
+        match auto_leading with
+        | Some pct -> effective_fs *. pct /. 100.0
+        | None -> effective_fs in
     (* Cairo's [show_text] does not accept a per-glyph kern attribute,
        so when letter_spacing / numeric kerning resolves to a non-zero
        advance we draw character-by-character and add [ls_px] between

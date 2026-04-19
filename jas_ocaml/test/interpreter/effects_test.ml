@@ -1003,6 +1003,68 @@ let paragraph_phase4_tests = [
     assert (get_panel s "paragraph_panel_content" "align_center" = `Bool false));
 ]
 
+(* ── Paragraph panel — Phase 8 Justification dialog OK ───── *)
+
+let paragraph_phase8_tests = [
+  Alcotest.test_case "apply_writes_non_default_attrs" `Quick (fun () ->
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    Jas.Effects.apply_justification_dialog_to_selection ctrl {
+      word_spacing_min = Some 75.0;
+      word_spacing_desired = Some 95.0;
+      word_spacing_max = Some 150.0;
+      letter_spacing_min = Some (-5.0);
+      letter_spacing_desired = Some 0.0;  (* default → omit *)
+      letter_spacing_max = Some 10.0;
+      glyph_scaling_min = Some 95.0;
+      glyph_scaling_desired = Some 100.0;  (* default → omit *)
+      glyph_scaling_max = Some 105.0;
+      auto_leading = Some 140.0;
+      single_word_justify = Some "left";
+    };
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.jas_word_spacing_min = Some 75.0);
+       assert (w.jas_word_spacing_desired = Some 95.0);
+       assert (w.jas_word_spacing_max = Some 150.0);
+       assert (w.jas_letter_spacing_min = Some (-5.0));
+       assert (w.jas_letter_spacing_desired = None);  (* identity-omit *)
+       assert (w.jas_letter_spacing_max = Some 10.0);
+       assert (w.jas_glyph_scaling_min = Some 95.0);
+       assert (w.jas_glyph_scaling_desired = None);   (* identity-omit *)
+       assert (w.jas_glyph_scaling_max = Some 105.0);
+       assert (w.jas_auto_leading = Some 140.0);
+       assert (w.jas_single_word_justify = Some "left")
+     | _ -> assert false));
+
+  Alcotest.test_case "apply_all_defaults_writes_nothing" `Quick (fun () ->
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    Jas.Effects.apply_justification_dialog_to_selection ctrl {
+      word_spacing_min = Some 80.0; word_spacing_desired = Some 100.0;
+      word_spacing_max = Some 133.0;
+      letter_spacing_min = Some 0.0; letter_spacing_desired = Some 0.0;
+      letter_spacing_max = Some 0.0;
+      glyph_scaling_min = Some 100.0; glyph_scaling_desired = Some 100.0;
+      glyph_scaling_max = Some 100.0;
+      auto_leading = Some 120.0; single_word_justify = Some "justify";
+    };
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.jas_word_spacing_min = None);
+       assert (w.jas_word_spacing_desired = None);
+       assert (w.jas_word_spacing_max = None);
+       assert (w.jas_letter_spacing_min = None);
+       assert (w.jas_glyph_scaling_min = None);
+       assert (w.jas_auto_leading = None);
+       assert (w.jas_single_word_justify = None)
+     | _ -> assert false));
+]
+
 (* ── Preview snapshot/restore (Phase 0) ─────────────────────
 
    open_dialog captures a snapshot of every state key referenced by
@@ -1100,5 +1162,6 @@ let () =
     "Phase3 pending", phase3_pending_tests;
     "Paragraph text-kind", paragraph_text_kind_tests;
     "Paragraph Phase 4", paragraph_phase4_tests;
+    "Paragraph Phase 8", paragraph_phase8_tests;
     "Preview snapshot", preview_snapshot_tests;
   ]

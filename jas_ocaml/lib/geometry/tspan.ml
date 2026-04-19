@@ -33,6 +33,17 @@ let default_tspan () : tspan = {
   text_indent = None;
   jas_space_before = None;
   jas_space_after = None;
+  jas_word_spacing_min = None;
+  jas_word_spacing_desired = None;
+  jas_word_spacing_max = None;
+  jas_letter_spacing_min = None;
+  jas_letter_spacing_desired = None;
+  jas_letter_spacing_max = None;
+  jas_glyph_scaling_min = None;
+  jas_glyph_scaling_desired = None;
+  jas_glyph_scaling_max = None;
+  jas_auto_leading = None;
+  jas_single_word_justify = None;
   letter_spacing = None;
   line_height = None;
   rotate = None;
@@ -67,6 +78,17 @@ let has_no_overrides (t : tspan) : bool =
   && t.text_indent = None
   && t.jas_space_before = None
   && t.jas_space_after = None
+  && t.jas_word_spacing_min = None
+  && t.jas_word_spacing_desired = None
+  && t.jas_word_spacing_max = None
+  && t.jas_letter_spacing_min = None
+  && t.jas_letter_spacing_desired = None
+  && t.jas_letter_spacing_max = None
+  && t.jas_glyph_scaling_min = None
+  && t.jas_glyph_scaling_desired = None
+  && t.jas_glyph_scaling_max = None
+  && t.jas_auto_leading = None
+  && t.jas_single_word_justify = None
   && t.letter_spacing = None
   && t.line_height = None
   && t.rotate = None
@@ -121,6 +143,17 @@ let _tspan_to_json (t : tspan) : Yojson.Safe.t =
   (match t.text_indent with Some v -> add "text_indent" (`Float v) | None -> ());
   (match t.jas_space_before with Some v -> add "jas_space_before" (`Float v) | None -> ());
   (match t.jas_space_after with Some v -> add "jas_space_after" (`Float v) | None -> ());
+  (match t.jas_word_spacing_min with Some v -> add "jas_word_spacing_min" (`Float v) | None -> ());
+  (match t.jas_word_spacing_desired with Some v -> add "jas_word_spacing_desired" (`Float v) | None -> ());
+  (match t.jas_word_spacing_max with Some v -> add "jas_word_spacing_max" (`Float v) | None -> ());
+  (match t.jas_letter_spacing_min with Some v -> add "jas_letter_spacing_min" (`Float v) | None -> ());
+  (match t.jas_letter_spacing_desired with Some v -> add "jas_letter_spacing_desired" (`Float v) | None -> ());
+  (match t.jas_letter_spacing_max with Some v -> add "jas_letter_spacing_max" (`Float v) | None -> ());
+  (match t.jas_glyph_scaling_min with Some v -> add "jas_glyph_scaling_min" (`Float v) | None -> ());
+  (match t.jas_glyph_scaling_desired with Some v -> add "jas_glyph_scaling_desired" (`Float v) | None -> ());
+  (match t.jas_glyph_scaling_max with Some v -> add "jas_glyph_scaling_max" (`Float v) | None -> ());
+  (match t.jas_auto_leading with Some v -> add "jas_auto_leading" (`Float v) | None -> ());
+  (match t.jas_single_word_justify with Some v -> add "jas_single_word_justify" (`String v) | None -> ());
   (match t.letter_spacing with Some v -> add "letter_spacing" (`Float v) | None -> ());
   (match t.line_height with Some v -> add "line_height" (`Float v) | None -> ());
   (match t.rotate with Some v -> add "rotate" (`Float v) | None -> ());
@@ -176,6 +209,17 @@ let _tspan_from_json (i : int) (j : Yojson.Safe.t) : tspan =
     text_indent = get_float "text_indent";
     jas_space_before = get_float "jas_space_before";
     jas_space_after = get_float "jas_space_after";
+    jas_word_spacing_min = get_float "jas_word_spacing_min";
+    jas_word_spacing_desired = get_float "jas_word_spacing_desired";
+    jas_word_spacing_max = get_float "jas_word_spacing_max";
+    jas_letter_spacing_min = get_float "jas_letter_spacing_min";
+    jas_letter_spacing_desired = get_float "jas_letter_spacing_desired";
+    jas_letter_spacing_max = get_float "jas_letter_spacing_max";
+    jas_glyph_scaling_min = get_float "jas_glyph_scaling_min";
+    jas_glyph_scaling_desired = get_float "jas_glyph_scaling_desired";
+    jas_glyph_scaling_max = get_float "jas_glyph_scaling_max";
+    jas_auto_leading = get_float "jas_auto_leading";
+    jas_single_word_justify = get_str "jas_single_word_justify";
     letter_spacing = get_float "letter_spacing";
     line_height = get_float "line_height";
     rotate = get_float "rotate";
@@ -250,6 +294,17 @@ let tspans_to_svg_fragment (tspans : tspan array) : string =
     (match t.text_indent with Some v -> add "text-indent" (_fmt_float v) | None -> ());
     (match t.jas_space_before with Some v -> add "jas:space-before" (_fmt_float v) | None -> ());
     (match t.jas_space_after with Some v -> add "jas:space-after" (_fmt_float v) | None -> ());
+    (match t.jas_word_spacing_min with Some v -> add "jas:word-spacing-min" (_fmt_float v) | None -> ());
+    (match t.jas_word_spacing_desired with Some v -> add "jas:word-spacing-desired" (_fmt_float v) | None -> ());
+    (match t.jas_word_spacing_max with Some v -> add "jas:word-spacing-max" (_fmt_float v) | None -> ());
+    (match t.jas_letter_spacing_min with Some v -> add "jas:letter-spacing-min" (_fmt_float v) | None -> ());
+    (match t.jas_letter_spacing_desired with Some v -> add "jas:letter-spacing-desired" (_fmt_float v) | None -> ());
+    (match t.jas_letter_spacing_max with Some v -> add "jas:letter-spacing-max" (_fmt_float v) | None -> ());
+    (match t.jas_glyph_scaling_min with Some v -> add "jas:glyph-scaling-min" (_fmt_float v) | None -> ());
+    (match t.jas_glyph_scaling_desired with Some v -> add "jas:glyph-scaling-desired" (_fmt_float v) | None -> ());
+    (match t.jas_glyph_scaling_max with Some v -> add "jas:glyph-scaling-max" (_fmt_float v) | None -> ());
+    (match t.jas_auto_leading with Some v -> add "jas:auto-leading" (_fmt_float v) | None -> ());
+    (match t.jas_single_word_justify with Some v -> add "jas:single-word-justify" v | None -> ());
     (match t.letter_spacing with Some v -> add "letter-spacing" (_fmt_float v) | None -> ());
     (match t.line_height with Some v -> add "line-height" (_fmt_float v) | None -> ());
     (match t.rotate with Some v -> add "rotate" (_fmt_float v) | None -> ());
@@ -366,6 +421,17 @@ let tspans_from_svg_fragment (svg_str : string) : tspan array option =
             | "text-indent" -> { cur with text_indent = float_of_string_opt v }
             | "jas:space-before" -> { cur with jas_space_before = float_of_string_opt v }
             | "jas:space-after" -> { cur with jas_space_after = float_of_string_opt v }
+            | "jas:word-spacing-min" -> { cur with jas_word_spacing_min = float_of_string_opt v }
+            | "jas:word-spacing-desired" -> { cur with jas_word_spacing_desired = float_of_string_opt v }
+            | "jas:word-spacing-max" -> { cur with jas_word_spacing_max = float_of_string_opt v }
+            | "jas:letter-spacing-min" -> { cur with jas_letter_spacing_min = float_of_string_opt v }
+            | "jas:letter-spacing-desired" -> { cur with jas_letter_spacing_desired = float_of_string_opt v }
+            | "jas:letter-spacing-max" -> { cur with jas_letter_spacing_max = float_of_string_opt v }
+            | "jas:glyph-scaling-min" -> { cur with jas_glyph_scaling_min = float_of_string_opt v }
+            | "jas:glyph-scaling-desired" -> { cur with jas_glyph_scaling_desired = float_of_string_opt v }
+            | "jas:glyph-scaling-max" -> { cur with jas_glyph_scaling_max = float_of_string_opt v }
+            | "jas:auto-leading" -> { cur with jas_auto_leading = float_of_string_opt v }
+            | "jas:single-word-justify" -> { cur with jas_single_word_justify = Some v }
             | "letter-spacing" -> { cur with letter_spacing = float_of_string_opt v }
             | "line-height" -> { cur with line_height = float_of_string_opt v }
             | "rotate" -> { cur with rotate = float_of_string_opt v }
@@ -414,6 +480,17 @@ let merge_tspan_overrides (target : tspan) (source : tspan) : tspan =
     text_indent = or_some source.text_indent target.text_indent;
     jas_space_before = or_some source.jas_space_before target.jas_space_before;
     jas_space_after = or_some source.jas_space_after target.jas_space_after;
+    jas_word_spacing_min = or_some source.jas_word_spacing_min target.jas_word_spacing_min;
+    jas_word_spacing_desired = or_some source.jas_word_spacing_desired target.jas_word_spacing_desired;
+    jas_word_spacing_max = or_some source.jas_word_spacing_max target.jas_word_spacing_max;
+    jas_letter_spacing_min = or_some source.jas_letter_spacing_min target.jas_letter_spacing_min;
+    jas_letter_spacing_desired = or_some source.jas_letter_spacing_desired target.jas_letter_spacing_desired;
+    jas_letter_spacing_max = or_some source.jas_letter_spacing_max target.jas_letter_spacing_max;
+    jas_glyph_scaling_min = or_some source.jas_glyph_scaling_min target.jas_glyph_scaling_min;
+    jas_glyph_scaling_desired = or_some source.jas_glyph_scaling_desired target.jas_glyph_scaling_desired;
+    jas_glyph_scaling_max = or_some source.jas_glyph_scaling_max target.jas_glyph_scaling_max;
+    jas_auto_leading = or_some source.jas_auto_leading target.jas_auto_leading;
+    jas_single_word_justify = or_some source.jas_single_word_justify target.jas_single_word_justify;
     letter_spacing = or_some source.letter_spacing target.letter_spacing;
     line_height = or_some source.line_height target.line_height;
     rotate = or_some source.rotate target.rotate;
@@ -671,6 +748,17 @@ let _attrs_equal (a : tspan) (b : tspan) : bool =
   && a.text_indent = b.text_indent
   && a.jas_space_before = b.jas_space_before
   && a.jas_space_after = b.jas_space_after
+  && a.jas_word_spacing_min = b.jas_word_spacing_min
+  && a.jas_word_spacing_desired = b.jas_word_spacing_desired
+  && a.jas_word_spacing_max = b.jas_word_spacing_max
+  && a.jas_letter_spacing_min = b.jas_letter_spacing_min
+  && a.jas_letter_spacing_desired = b.jas_letter_spacing_desired
+  && a.jas_letter_spacing_max = b.jas_letter_spacing_max
+  && a.jas_glyph_scaling_min = b.jas_glyph_scaling_min
+  && a.jas_glyph_scaling_desired = b.jas_glyph_scaling_desired
+  && a.jas_glyph_scaling_max = b.jas_glyph_scaling_max
+  && a.jas_auto_leading = b.jas_auto_leading
+  && a.jas_single_word_justify = b.jas_single_word_justify
   && a.letter_spacing = b.letter_spacing
   && a.line_height = b.line_height
   && a.rotate = b.rotate

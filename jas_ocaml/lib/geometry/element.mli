@@ -160,6 +160,22 @@ type tspan = {
   text_indent : float option;
   jas_space_before : float option;
   jas_space_after : float option;
+  (** Phase 1b2 / Phase 8 — Justification dialog attrs. Word/letter/
+      glyph spacing min/desired/max are percent soft constraints fed
+      to the every-line composer. auto_leading is the percent-of-
+      font-size used when Character leading is Auto. single_word_justify
+      is justify / left / center / right. *)
+  jas_word_spacing_min : float option;
+  jas_word_spacing_desired : float option;
+  jas_word_spacing_max : float option;
+  jas_letter_spacing_min : float option;
+  jas_letter_spacing_desired : float option;
+  jas_letter_spacing_max : float option;
+  jas_glyph_scaling_min : float option;
+  jas_glyph_scaling_desired : float option;
+  jas_glyph_scaling_max : float option;
+  jas_auto_leading : float option;
+  jas_single_word_justify : string option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;

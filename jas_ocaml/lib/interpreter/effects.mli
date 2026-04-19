@@ -174,3 +174,27 @@ val apply_paragraph_panel_mutual_exclusion :
     in one snapshot. Phase 4. *)
 val set_paragraph_panel_field :
   State_store.t -> Controller.controller -> string -> Yojson.Safe.t -> unit
+
+(** 11 Justification-dialog field values. [None] means the field
+    was blank (mixed selection) and should not write — the existing
+    wrapper attribute stays. Phase 8. *)
+type justification_dialog_values = {
+  word_spacing_min : float option;
+  word_spacing_desired : float option;
+  word_spacing_max : float option;
+  letter_spacing_min : float option;
+  letter_spacing_desired : float option;
+  letter_spacing_max : float option;
+  glyph_scaling_min : float option;
+  glyph_scaling_desired : float option;
+  glyph_scaling_max : float option;
+  auto_leading : float option;
+  single_word_justify : string option;
+}
+
+(** Commit the 11 Justification-dialog fields onto every paragraph
+    wrapper tspan in the selection. Identity-value rule: each value
+    matching the spec default writes [None] so the wrapper attribute
+    is omitted. Phase 8. *)
+val apply_justification_dialog_to_selection :
+  Controller.controller -> justification_dialog_values -> unit
