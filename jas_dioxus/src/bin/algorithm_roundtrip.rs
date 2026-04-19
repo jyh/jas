@@ -71,6 +71,7 @@ fn main() {
         "shape_recognize" => run_shape_recognize(&vectors),
         "planar" => run_planar(&vectors),
         "text_layout" => run_text_layout(&vectors),
+        "text_layout_paragraph" => run_text_layout_paragraph(&vectors),
         "path_text_layout" => run_path_text_layout(&vectors),
         _ => {
             eprintln!("Unknown algorithm: {}", algo);
@@ -458,6 +459,93 @@ fn run_text_layout(vectors: &[Value]) -> Vec<Value> {
                     })
                 })
                 .collect();
+
+            json!({
+                "name": name,
+                "result": {
+                    "line_count": layout.lines.len(),
+                    "char_count": layout.char_count,
+                    "glyphs": glyphs
+                }
+            })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// text_layout_paragraph (Phase 11 parity)
+// ---------------------------------------------------------------
+
+fn run_text_layout_paragraph(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::text_layout::{
+        layout_with_paragraphs, ParagraphSegment, TextAlign,
+    };
+    fn parse_align(v: Option<&Value>) -> TextAlign {
+        match v.and_then(|x| x.as_str()) {
+            Some("center") => TextAlign::Center,
+            Some("right") => TextAlign::Right,
+            Some("justify") => TextAlign::Justify,
+            _ => TextAlign::Left,
+        }
+    }
+    fn f(v: Option<&Value>, default: f64) -> f64 {
+        v.and_then(|x| x.as_f64()).unwrap_or(default)
+    }
+    fn b(v: Option<&Value>) -> bool {
+        v.and_then(|x| x.as_bool()).unwrap_or(false)
+    }
+    fn u(v: Option<&Value>, default: usize) -> usize {
+        v.and_then(|x| x.as_u64()).map(|n| n as usize).unwrap_or(default)
+    }
+    fn parse_seg(j: &Value) -> ParagraphSegment {
+        let d = ParagraphSegment::default();
+        ParagraphSegment {
+            char_start: u(j.get("char_start"), 0),
+            char_end: u(j.get("char_end"), 0),
+            left_indent: f(j.get("left_indent"), d.left_indent),
+            right_indent: f(j.get("right_indent"), d.right_indent),
+            first_line_indent: f(j.get("first_line_indent"), d.first_line_indent),
+            space_before: f(j.get("space_before"), d.space_before),
+            space_after: f(j.get("space_after"), d.space_after),
+            text_align: parse_align(j.get("text_align")),
+            list_style: j.get("list_style").and_then(|x| x.as_str()).map(String::from),
+            marker_gap: f(j.get("marker_gap"), d.marker_gap),
+            hanging_punctuation: b(j.get("hanging_punctuation")),
+            word_spacing_min: f(j.get("word_spacing_min"), d.word_spacing_min),
+            word_spacing_desired: f(j.get("word_spacing_desired"), d.word_spacing_desired),
+            word_spacing_max: f(j.get("word_spacing_max"), d.word_spacing_max),
+            last_line_align: parse_align(j.get("last_line_align")),
+            hyphenate: b(j.get("hyphenate")),
+            hyphenate_min_word: u(j.get("hyphenate_min_word"), d.hyphenate_min_word),
+            hyphenate_min_before: u(j.get("hyphenate_min_before"), d.hyphenate_min_before),
+            hyphenate_min_after: u(j.get("hyphenate_min_after"), d.hyphenate_min_after),
+            hyphenate_bias: u(j.get("hyphenate_bias"), d.hyphenate_bias as usize) as u8,
+        }
+    }
+
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap();
+            let content = tc["content"].as_str().unwrap();
+            let max_width = tc["max_width"].as_f64().unwrap();
+            let font_size = tc["font_size"].as_f64().unwrap();
+            let char_width = tc["char_width"].as_f64().unwrap();
+            let segs: Vec<ParagraphSegment> = tc["paragraphs"].as_array()
+                .map(|a| a.iter().map(parse_seg).collect())
+                .unwrap_or_default();
+
+            let measure = |s: &str| s.chars().count() as f64 * char_width;
+            let layout = layout_with_paragraphs(content, max_width, font_size, &segs, &measure);
+
+            let glyphs: Vec<Value> = layout.glyphs.iter().map(|g| {
+                json!({
+                    "idx": g.idx,
+                    "line": g.line,
+                    "x": g.x,
+                    "right": g.right
+                })
+            }).collect();
 
             json!({
                 "name": name,
