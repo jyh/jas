@@ -33,12 +33,18 @@ ALGORITHMS = {
     "shape_recognize":   ("shape", 0.5),
     "planar":            ("property_planar", 0.01),
     "text_layout":       ("tolerance", 1e-4),
+    "text_layout_paragraph": ("tolerance", 1e-4),
     "path_text_layout":  ("tolerance", 1e-4),
 }
 
 # Known per-language algorithm exclusions (pre-existing bugs to fix separately)
 SKIP_LANG_ALGO = {
     ("swift", "boolean_normalize"),  # Range crash in Swift normalize()
+    # Phase 11: Swift / OCaml / Python runners are added in their own
+    # commits; until then those languages skip text_layout_paragraph.
+    ("swift", "text_layout_paragraph"),
+    ("ocaml", "text_layout_paragraph"),
+    ("python", "text_layout_paragraph"),
 }
 
 

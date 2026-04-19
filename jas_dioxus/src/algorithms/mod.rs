@@ -8,6 +8,7 @@ pub mod path_text_layout;
 pub mod shape_recognize;
 pub mod text_layout;
 pub mod text_layout_paragraph;
+#[cfg(feature = "web")]
 pub mod offset_path;
 pub mod hyphenator;
 pub mod knuth_plass;
