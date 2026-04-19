@@ -464,9 +464,9 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
       if ls_px = 0.0 || n < 2 then w
       else w +. float_of_int (n - 1) *. ls_px
     in
-    let show_with_spacing seg base_y =
+    let show_with_spacing seg base_x base_y =
       if ls_px = 0.0 && rot_rad = 0.0 then begin
-        Cairo.move_to cr x base_y;
+        Cairo.move_to cr base_x base_y;
         Cairo.show_text cr seg
       end else begin
         (* Per-char loop covers two cases: non-zero letter_spacing
@@ -474,7 +474,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
            rotate (each glyph rotates around its own baseline). When
            both are zero we take the fast path above. *)
         let len = String.length seg in
-        let pos = ref x in
+        let pos = ref base_x in
         for i = 0 to len - 1 do
           let ch = String.make 1 seg.[i] in
           let cw = (Cairo.text_extents cr ch).Cairo.x_advance in
@@ -495,7 +495,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     in
     let has_underline = List.mem "underline" (String.split_on_char ' ' text_decoration) in
     let has_strike = List.mem "line-through" (String.split_on_char ' ' text_decoration) in
-    let draw_line_decorations seg base_y =
+    let draw_line_decorations seg base_x base_y =
       if has_underline || has_strike then begin
         let w = segment_width seg in
         let thickness = Float.max 1.0 (effective_fs *. 0.07) in
@@ -503,14 +503,14 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
         Cairo.set_line_width cr thickness;
         if has_underline then begin
           let ly = base_y +. effective_fs *. 0.12 in
-          Cairo.move_to cr x ly;
-          Cairo.line_to cr (x +. w) ly;
+          Cairo.move_to cr base_x ly;
+          Cairo.line_to cr (base_x +. w) ly;
           Cairo.stroke cr
         end;
         if has_strike then begin
           let ly = base_y -. effective_fs *. 0.3 in
-          Cairo.move_to cr x ly;
-          Cairo.line_to cr (x +. w) ly;
+          Cairo.move_to cr base_x ly;
+          Cairo.line_to cr (base_x +. w) ly;
           Cairo.stroke cr
         end;
         Cairo.restore cr
@@ -518,21 +518,37 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     in
     if text_width > 0.0 && text_height > 0.0 then begin
       let measure = segment_width in
-      let lay = Text_layout.layout content text_width layout_fs measure in
+      (* Phase 5: paragraph-aware layout. The wrapper tspans
+         (jas_role = "paragraph") inside the element provide the
+         per-paragraph indent / space / alignment attrs; absent
+         wrappers fall through to a default segment so plain text
+         renders identically to the old [layout] path. *)
+      let psegs = Text_layout_paragraph.build_segments_from_text
+                    tspans content true in
+      let lay = Text_layout.layout_with_paragraphs
+                  content text_width layout_fs psegs measure in
       Array.iter (fun (line : Text_layout.line_info) ->
         let seg = String.sub content line.start (line.end_ - line.start) in
         let seg = if String.length seg > 0 && seg.[String.length seg - 1] = '\n'
                   then String.sub seg 0 (String.length seg - 1) else seg in
         let base_y = y +. line.baseline_y +. y_shift in
-        show_with_spacing seg base_y;
-        draw_line_decorations seg base_y
+        (* Per-line x shift comes from the first glyph's x — the
+           paragraph-aware layout already shifted it by left_indent
+           + first_line_indent + alignment. *)
+        let line_x_shift =
+          if line.glyph_start < Array.length lay.glyphs
+          then lay.glyphs.(line.glyph_start).x
+          else 0.0 in
+        let base_x = x +. line_x_shift in
+        show_with_spacing seg base_x base_y;
+        draw_line_decorations seg base_x base_y
       ) lay.lines
     end else begin
       let lines = String.split_on_char '\n' content in
       List.iteri (fun i line ->
         let line_y = y +. ascent +. float_of_int i *. layout_fs +. y_shift in
-        show_with_spacing line line_y;
-        draw_line_decorations line line_y
+        show_with_spacing line x line_y;
+        draw_line_decorations line x line_y
       ) lines
     end;
     if needs_scale then Cairo.restore cr;
