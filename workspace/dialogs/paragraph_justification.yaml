@@ -14,10 +14,17 @@ paragraph_justification:
     - Footer: Preview checkbox (left) + Cancel button + OK button
       (right-aligned)
 
-    Phase 2 stores all values in dialog-local state. The Preview
-    checkbox is wired through the Phase 0 preview snapshot/restore
-    harness; preview_targets is empty until Phase 8 wires per-paragraph
-    document writes (jas:word-spacing-min etc. on the wrapper tspan).
+    Dialog-local state holds the 11 justification fields. OK
+    commits them onto every paragraph wrapper tspan in the
+    selection (per-app apply functions handle the identity-value
+    rule, omitting attrs that match the spec defaults). Cancel
+    closes without committing.
+
+    Preview-on rollback is still on the to-do list: the Phase 0
+    snapshot harness only captures top-level state keys, and the
+    Justification dialog needs a per-wrapper attr snapshot so
+    Cancel can restore live-applied edits. Until that lands, leave
+    Preview off when you might want to bail out.
 
     Defaults match examples/justification.png (Adobe parity):
     word spacing 80 / 100 / 133 %; letter spacing 0 / 0 / 0 %;
@@ -31,7 +38,7 @@ paragraph_justification:
       default: 80
       min: 0
       max: 1000
-      description: "WORD_SPACING_MIN_VALUE — percent. Stored as jas:word-spacing-min in Phase 8."
+      description: "WORD_SPACING_MIN_VALUE — percent. Stored as jas:word-spacing-min on the paragraph wrapper tspan."
     word_spacing_desired:
       type: number
       default: 100
@@ -106,10 +113,12 @@ paragraph_justification:
         snapshot via the Phase 0 preview snapshot/restore harness.
         Defaults to off each time the dialog opens.
 
-  # Preview snapshot/restore wiring (Phase 0 schema slot). Empty for
-  # Phase 2 because there is no selection / document write path yet —
-  # Phase 8 populates this with the dialog-state-key → document-state-path
-  # mapping for each justification attribute.
+  # Preview snapshot/restore wiring (Phase 0 schema slot). Stays
+  # empty for Phase 8: the harness only handles top-level state
+  # keys, but Justification dialog needs to snapshot per-paragraph-
+  # wrapper attrs across the selection. A future patch extends the
+  # harness to capture attr maps keyed by element path and wires
+  # each dialog field's restore here.
   preview_targets: {}
 
   content:

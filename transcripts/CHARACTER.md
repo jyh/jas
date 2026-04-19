@@ -47,7 +47,12 @@ When no text element is selected at all, the panel is fully disabled
 
 - `LEADING_DROPDOWN` — `numeric_combo`. Unit: pt. Range 0–1296 pt.
   Presets as for font size. Auto = 120% of the current font size;
-  displayed in parentheses, e.g. `(14.4 pt)`.
+  displayed in parentheses, e.g. `(14.4 pt)`. The 120% default is
+  per-paragraph overridable via the Justification dialog's
+  AUTO_LEADING_VALUE field (see PARAGRAPH.md §Justification
+  Dialog) — when the wrapping paragraph carries `jas:auto-leading`
+  and Character leading is Auto, that percentage replaces the 120%
+  default for that paragraph.
 
 - `KERNING_DROPDOWN` — `numeric_combo` with named modes `Auto`,
   `Optical`, `Metrics`, `0`. Free numeric input in 1/1000 em. When a

@@ -6676,7 +6676,7 @@
     },
     "paragraph_justification": {
       "summary": "Justification",
-      "description": "Modal dialog for fine-grained paragraph justification controls per PARAGRAPH.md \u00a7Justification Dialog. Opened from the Paragraph panel menu (Justification\u2026).\nLayout (top to bottom): - 3\u00d73 grid: Word Spacing / Letter Spacing / Glyph Scaling rows\n  \u00d7 Minimum / Desired / Maximum columns\n- separator (spec's `.hr`) - Auto Leading: row (label col-6 + numeric input col-3) - Single Word Justification: row (label col-6 + dropdown col-4) - Footer: Preview checkbox (left) + Cancel button + OK button\n  (right-aligned)\n\nPhase 2 stores all values in dialog-local state. The Preview checkbox is wired through the Phase 0 preview snapshot/restore harness; preview_targets is empty until Phase 8 wires per-paragraph document writes (jas:word-spacing-min etc. on the wrapper tspan).\nDefaults match examples/justification.png (Adobe parity): word spacing 80 / 100 / 133 %; letter spacing 0 / 0 / 0 %; glyph scaling 100 / 100 / 100 %; auto leading 120 %; single word justification = Full Justify.\n",
+      "description": "Modal dialog for fine-grained paragraph justification controls per PARAGRAPH.md \u00a7Justification Dialog. Opened from the Paragraph panel menu (Justification\u2026).\nLayout (top to bottom): - 3\u00d73 grid: Word Spacing / Letter Spacing / Glyph Scaling rows\n  \u00d7 Minimum / Desired / Maximum columns\n- separator (spec's `.hr`) - Auto Leading: row (label col-6 + numeric input col-3) - Single Word Justification: row (label col-6 + dropdown col-4) - Footer: Preview checkbox (left) + Cancel button + OK button\n  (right-aligned)\n\nDialog-local state holds the 11 justification fields. OK commits them onto every paragraph wrapper tspan in the selection (per-app apply functions handle the identity-value rule, omitting attrs that match the spec defaults). Cancel closes without committing.\nPreview-on rollback is still on the to-do list: the Phase 0 snapshot harness only captures top-level state keys, and the Justification dialog needs a per-wrapper attr snapshot so Cancel can restore live-applied edits. Until that lands, leave Preview off when you might want to bail out.\nDefaults match examples/justification.png (Adobe parity): word spacing 80 / 100 / 133 %; letter spacing 0 / 0 / 0 %; glyph scaling 100 / 100 / 100 %; auto leading 120 %; single word justification = Full Justify.\n",
       "modal": true,
       "width": 460,
       "state": {
@@ -6685,7 +6685,7 @@
           "default": 80,
           "min": 0,
           "max": 1000,
-          "description": "WORD_SPACING_MIN_VALUE \u2014 percent. Stored as jas:word-spacing-min in Phase 8."
+          "description": "WORD_SPACING_MIN_VALUE \u2014 percent. Stored as jas:word-spacing-min on the paragraph wrapper tspan."
         },
         "word_spacing_desired": {
           "type": "number",
