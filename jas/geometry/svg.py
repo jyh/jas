@@ -109,6 +109,16 @@ def _tspan_svg(t) -> str:
         attrs += f' rotate="{_fmt(t.rotate)}"'
     if t.jas_role is not None:
         attrs += f' urn:jas:1:role="{escape(t.jas_role)}"'
+    if t.jas_left_indent is not None:
+        attrs += f' urn:jas:1:left-indent="{_fmt(t.jas_left_indent)}"'
+    if t.jas_right_indent is not None:
+        attrs += f' urn:jas:1:right-indent="{_fmt(t.jas_right_indent)}"'
+    if t.jas_hyphenate is not None:
+        attrs += f' urn:jas:1:hyphenate="{"true" if t.jas_hyphenate else "false"}"'
+    if t.jas_hanging_punctuation is not None:
+        attrs += f' urn:jas:1:hanging-punctuation="{"true" if t.jas_hanging_punctuation else "false"}"'
+    if t.jas_list_style is not None:
+        attrs += f' urn:jas:1:list-style="{escape(t.jas_list_style)}"'
     return f"<tspan{attrs}>{escape(t.content)}</tspan>"
 
 
@@ -666,10 +676,25 @@ def _parse_tspan(node) -> list:
             except ValueError:
                 pass
     jas_role = node.get("urn:jas:1:role")
+    def _opt_float(s):
+        try: return float(s) if s is not None else None
+        except ValueError: return None
+    def _opt_bool(s):
+        return None if s is None else (s == "true")
+    jas_left_indent = _opt_float(node.get("urn:jas:1:left-indent"))
+    jas_right_indent = _opt_float(node.get("urn:jas:1:right-indent"))
+    jas_hyphenate = _opt_bool(node.get("urn:jas:1:hyphenate"))
+    jas_hanging_punctuation = _opt_bool(node.get("urn:jas:1:hanging-punctuation"))
+    jas_list_style = node.get("urn:jas:1:list-style")
     base_kwargs = dict(
         font_family=font_family, font_size=font_size,
         font_style=font_style, font_weight=font_weight,
         text_decoration=decoration, jas_role=jas_role,
+        jas_left_indent=jas_left_indent,
+        jas_right_indent=jas_right_indent,
+        jas_hyphenate=jas_hyphenate,
+        jas_hanging_punctuation=jas_hanging_punctuation,
+        jas_list_style=jas_list_style,
     )
     if not rotate_vals:
         return [Tspan(id=0, content=content, **base_kwargs)]

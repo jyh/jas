@@ -509,3 +509,39 @@ class TestJasRolePhase1a:
         assert back is not None
         assert len(back) == 1
         assert back[0].jas_role == "paragraph"
+
+
+class TestPhase3bParagraphAttrs:
+    """Phase 3b panel-surface paragraph attrs on Tspan."""
+
+    def test_has_no_overrides_false_when_phase3b_attrs_set(self):
+        from geometry.tspan import default_tspan
+        from dataclasses import replace
+        assert not replace(default_tspan(), jas_left_indent=12.0).has_no_overrides()
+        assert not replace(default_tspan(), jas_hyphenate=True).has_no_overrides()
+        assert not replace(default_tspan(), jas_list_style="bullet-disc").has_no_overrides()
+
+    def test_svg_fragment_phase3b_attrs_round_trip(self):
+        from geometry.tspan import (
+            default_tspan, tspans_to_svg_fragment, tspans_from_svg_fragment,
+        )
+        from dataclasses import replace
+        t = replace(default_tspan(),
+                    content="", jas_role="paragraph",
+                    jas_left_indent=18.0, jas_right_indent=9.0,
+                    jas_hyphenate=True, jas_hanging_punctuation=True,
+                    jas_list_style="bullet-disc")
+        svg = tspans_to_svg_fragment([t])
+        assert 'jas:left-indent="18"' in svg
+        assert 'jas:right-indent="9"' in svg
+        assert 'jas:hyphenate="true"' in svg
+        assert 'jas:hanging-punctuation="true"' in svg
+        assert 'jas:list-style="bullet-disc"' in svg
+        back = tspans_from_svg_fragment(svg)
+        assert back is not None
+        assert len(back) == 1
+        assert back[0].jas_left_indent == 18.0
+        assert back[0].jas_right_indent == 9.0
+        assert back[0].jas_hyphenate is True
+        assert back[0].jas_hanging_punctuation is True
+        assert back[0].jas_list_style == "bullet-disc"
