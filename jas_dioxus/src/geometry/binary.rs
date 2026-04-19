@@ -234,6 +234,11 @@ fn pack_tspan(t: &crate::geometry::tspan::Tspan) -> Value {
         opt_bool(t.jas_hyphenate),
         opt_bool(t.jas_hanging_punctuation),
         opt_str(t.jas_list_style.as_ref()),
+        opt_str(t.text_align.as_ref()),
+        opt_str(t.text_align_last.as_ref()),
+        opt_f64(t.text_indent),
+        opt_f64(t.jas_space_before),
+        opt_f64(t.jas_space_after),
     ])
 }
 
@@ -285,6 +290,11 @@ fn unpack_tspan(v: &Value) -> crate::geometry::tspan::Tspan {
         jas_hyphenate: as_opt_bool(get(25)),
         jas_hanging_punctuation: as_opt_bool(get(26)),
         jas_list_style: as_opt_str(get(27)),
+        text_align: as_opt_str(get(28)),
+        text_align_last: as_opt_str(get(29)),
+        text_indent: as_opt_f64(get(30)),
+        jas_space_before: as_opt_f64(get(31)),
+        jas_space_after: as_opt_f64(get(32)),
     }
 }
 

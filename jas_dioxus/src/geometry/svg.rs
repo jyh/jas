@@ -651,6 +651,21 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
     if let Some(v) = &t.jas_list_style {
         attrs.push_str(&format!(" urn:jas:1:list-style=\"{}\"", escape_xml(v)));
     }
+    if let Some(v) = &t.text_align {
+        attrs.push_str(&format!(" text-align=\"{}\"", escape_xml(v)));
+    }
+    if let Some(v) = &t.text_align_last {
+        attrs.push_str(&format!(" text-align-last=\"{}\"", escape_xml(v)));
+    }
+    if let Some(v) = t.text_indent {
+        attrs.push_str(&format!(" text-indent=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_space_before {
+        attrs.push_str(&format!(" urn:jas:1:space-before=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_space_after {
+        attrs.push_str(&format!(" urn:jas:1:space-after=\"{}\"", fmt(v)));
+    }
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
 
@@ -693,6 +708,14 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
         jas_hanging_punctuation: node.attrs.get("urn:jas:1:hanging-punctuation")
             .map(|v| v == "true"),
         jas_list_style: node.attrs.get("urn:jas:1:list-style").cloned(),
+        text_align: node.attrs.get("text-align").cloned(),
+        text_align_last: node.attrs.get("text-align-last").cloned(),
+        text_indent: node.attrs.get("text-indent")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_space_before: node.attrs.get("urn:jas:1:space-before")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_space_after: node.attrs.get("urn:jas:1:space-after")
+            .and_then(|s| s.parse::<f64>().ok()),
         ..Tspan::default_tspan()
     };
     // Multi-value rotate: SVG allows `rotate="a1 a2 a3 …"` on a tspan,
@@ -2061,6 +2084,47 @@ mod tests {
         assert_eq!(t.tspans[1].rotate, Some(90.0));
         assert_eq!(t.tspans[2].rotate, Some(90.0));
         assert_eq!(t.tspans[3].rotate, Some(90.0));
+    }
+
+    #[test]
+    fn svg_phase1b1_attrs_round_trip_through_document() {
+        // Phase 1b1: a wrapper tspan carrying the 5 remaining
+        // panel-surface paragraph attrs round-trips through the
+        // document SVG: text-align, text-align-last, text-indent
+        // (signed), jas:space-before, jas:space-after.
+        use crate::geometry::tspan::Tspan;
+        let mut doc = Document::default();
+        let mut t = crate::tools::text_edit::empty_text_elem(10.0, 20.0, 0.0, 0.0);
+        let mut wrapper = Tspan::default_tspan();
+        wrapper.id = 0;
+        wrapper.jas_role = Some("paragraph".into());
+        wrapper.text_align = Some("justify".into());
+        wrapper.text_align_last = Some("left".into());
+        wrapper.text_indent = Some(-18.0);
+        wrapper.jas_space_before = Some(6.0);
+        wrapper.jas_space_after = Some(12.0);
+        t.tspans = vec![
+            wrapper,
+            Tspan { id: 1, content: "hello".into(), ..Tspan::default_tspan() },
+        ];
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains(r#"text-align="justify""#),
+                "expected text-align in serialised SVG, got: {}", svg);
+        assert!(svg.contains(r#"text-align-last="left""#));
+        assert!(svg.contains(r#"text-indent="-18""#));
+        assert!(svg.contains(r#"urn:jas:1:space-before="6""#));
+        assert!(svg.contains(r#"urn:jas:1:space-after="12""#));
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        let w = &t.tspans[0];
+        assert_eq!(w.text_align.as_deref(), Some("justify"));
+        assert_eq!(w.text_align_last.as_deref(), Some("left"));
+        assert_eq!(w.text_indent, Some(-18.0));
+        assert_eq!(w.jas_space_before, Some(6.0));
+        assert_eq!(w.jas_space_after, Some(12.0));
     }
 
     #[test]
