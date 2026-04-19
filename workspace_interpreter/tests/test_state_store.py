@@ -128,6 +128,65 @@ class TestContextForEval:
         assert ctx["panel"] == {}
 
 
+class TestActiveDocumentSelection:
+    """active_document.has_selection / selection_count / element_selection
+    are populated from the document's canvas selection. Tests here model
+    selection as a list of paths on _document["selection"]."""
+
+    def test_no_document_yields_no_selection(self):
+        store = StateStore()
+        view = store._active_document_view()
+        assert view["has_selection"] is False
+        assert view["selection_count"] == 0
+        assert view["element_selection"] == []
+
+    def test_empty_selection_yields_no_selection(self):
+        store = StateStore(document={"layers": [], "selection": []})
+        view = store._active_document_view()
+        assert view["has_selection"] is False
+        assert view["selection_count"] == 0
+        assert view["element_selection"] == []
+
+    def test_missing_selection_key_yields_no_selection(self):
+        store = StateStore(document={"layers": []})
+        view = store._active_document_view()
+        assert view["has_selection"] is False
+        assert view["selection_count"] == 0
+        assert view["element_selection"] == []
+
+    def test_selection_count_matches_selection_length(self):
+        store = StateStore(document={
+            "layers": [],
+            "selection": [(0,), (0, 2), (1, 0, 3)],
+        })
+        view = store._active_document_view()
+        assert view["selection_count"] == 3
+        assert view["has_selection"] is True
+
+    def test_element_selection_returns_path_values(self):
+        from workspace_interpreter.expr_types import Value, ValueType
+        store = StateStore(document={
+            "layers": [],
+            "selection": [(0,), (0, 2)],
+        })
+        view = store._active_document_view()
+        assert len(view["element_selection"]) == 2
+        for entry in view["element_selection"]:
+            assert isinstance(entry, Value)
+            assert entry.type == ValueType.PATH
+        assert view["element_selection"][0].value == (0,)
+        assert view["element_selection"][1].value == (0, 2)
+
+    def test_single_selected_element(self):
+        store = StateStore(document={
+            "layers": [],
+            "selection": [(0,)],
+        })
+        view = store._active_document_view()
+        assert view["has_selection"] is True
+        assert view["selection_count"] == 1
+
+
 class TestListPush:
     def test_push_to_front(self):
         store = StateStore()
