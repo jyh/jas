@@ -721,25 +721,39 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
         // line_height overrides the per-line stride in text_layout when
         // non-empty; empty = Auto = fontSize.
         let layoutFs = parsePt(v.lineHeight) ?? effectiveFs
-        let lay = layoutText(drawContent, maxWidth: maxW,
-                             fontSize: layoutFs, measure: measure)
+        // Phase 5: build paragraph segments from the wrapper tspans
+        // (jas_role == "paragraph"). Each wrapper carries its
+        // [left/right/first-line] indent and [space-before/after]
+        // attributes plus alignment. Empty list → falls through to
+        // a single default segment, equivalent to plain layoutText.
+        let pSegs = buildParagraphSegments(
+            tspans: v.tspans, content: drawContent, isArea: v.isAreaText)
+        let lay = layoutTextWithParagraphs(
+            drawContent, maxWidth: maxW, fontSize: layoutFs,
+            paragraphs: pSegs, measure: measure)
         let chars = Array(drawContent)
         for line in lay.lines {
             let segChars = chars[line.start..<line.end]
             let segStr = String(segChars)
             let baselineY = v.y + line.baselineY + yShift
+            // Per-line x shift comes from the first glyph's x, which
+            // the paragraph-aware layout already shifted by
+            // leftIndent + firstLineIndent + alignment.
+            let lineXShift: Double = (line.glyphStart < lay.glyphs.count)
+                ? lay.glyphs[line.glyphStart].x : 0.0
+            let lineX = v.x + lineXShift
             if rotRad == 0.0 {
                 // Fast path: single CTLine per line honors NSAttributedString.Key.kern.
                 let lineStr = NSAttributedString(string: segStr, attributes: attrs)
                 let ctLine = CTLineCreateWithAttributedString(lineStr)
-                ctx.textPosition = CGPoint(x: v.x, y: baselineY)
+                ctx.textPosition = CGPoint(x: lineX, y: baselineY)
                 CTLineDraw(ctLine, ctx)
             } else {
                 // Per-glyph rotation: draw each char with its own
                 // save / translate / rotate / restore. letter_spacing
                 // is folded into the manual advance since individual
                 // CTLines don't contribute to each other's kern.
-                var cx = v.x
+                var cx = lineX
                 for ch in segChars {
                     let chStr = NSAttributedString(string: String(ch), attributes: attrs)
                     let ctLine = CTLineCreateWithAttributedString(chStr)
