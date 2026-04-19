@@ -725,6 +725,51 @@ let paragraph_text_kind_tests = [
     sync_paragraph_panel_from_selection s ctrl;
     assert (get_panel s "paragraph_panel_content" "text_selected" = `Bool true);
     assert (get_panel s "paragraph_panel_content" "area_text_selected" = `Bool false));
+
+  (* Phase 3b: reading paragraph attrs from a wrapper tspan inside
+     the first selected text element. *)
+  Alcotest.test_case "phase3b_reads_para_wrapper_attrs" `Quick (fun () ->
+    let wrapper : Jas.Element.tspan =
+      { (Jas.Tspan.default_tspan ()) with
+        id = 0; content = "";
+        jas_role = Some "paragraph";
+        jas_left_indent = Some 18.0;
+        jas_right_indent = Some 9.0;
+        jas_hyphenate = Some true;
+        jas_hanging_punctuation = Some true;
+        jas_list_style = Some "bullet-disc" } in
+    let content_t : Jas.Element.tspan =
+      { (Jas.Tspan.default_tspan ()) with id = 1; content = "hello" } in
+    let area = match Jas.Element.make_text ~text_width:200.0 ~text_height:100.0
+                       0.0 0.0 "hello" with
+      | Jas.Element.Text r -> Jas.Element.Text { r with tspans = [| wrapper; content_t |] }
+      | _ -> assert false in
+    let layer = Jas.Element.make_layer [| area |] in
+    let selection = Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" [
+      ("text_selected", `Bool true);
+      ("area_text_selected", `Bool true);
+      ("left_indent", `Float 0.0);
+      ("right_indent", `Float 0.0);
+      ("hyphenate", `Bool false);
+      ("hanging_punctuation", `Bool false);
+      ("bullets", `String "");
+      ("numbered_list", `String "");
+    ];
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "text_selected" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "area_text_selected" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "left_indent" = `Float 18.0);
+    assert (get_panel s "paragraph_panel_content" "right_indent" = `Float 9.0);
+    assert (get_panel s "paragraph_panel_content" "hyphenate" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "hanging_punctuation" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "bullets" = `String "bullet-disc");
+    assert (get_panel s "paragraph_panel_content" "numbered_list" = `String ""));
 ]
 
 (* ── Preview snapshot/restore (Phase 0) ─────────────────────

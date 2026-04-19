@@ -94,6 +94,11 @@ let tspan_of_json v : tspan =
     jas_kerning_mode = opt "jas_kerning_mode" opt_string;
     jas_no_break = opt "jas_no_break" opt_bool;
     jas_role = opt "jas_role" opt_string;
+    jas_left_indent = opt "jas_left_indent" opt_float;
+    jas_right_indent = opt "jas_right_indent" opt_float;
+    jas_hyphenate = opt "jas_hyphenate" opt_bool;
+    jas_hanging_punctuation = opt "jas_hanging_punctuation" opt_bool;
+    jas_list_style = opt "jas_list_style" opt_string;
     letter_spacing = opt "letter_spacing" opt_float;
     line_height = opt "line_height" opt_float;
     rotate = opt "rotate" opt_float;
@@ -499,6 +504,42 @@ let () =
         match tspans_from_svg_fragment svg with
         | Some [| back |] ->
           assert (back.jas_role = Some "paragraph")
+        | _ -> assert false);
+    ];
+    "Phase 3b paragraph attrs", [
+      Alcotest.test_case "has_no_overrides_false_when_phase3b_attrs_set" `Quick (fun () ->
+        assert (not (has_no_overrides
+          { (default_tspan ()) with jas_left_indent = Some 12.0 }));
+        assert (not (has_no_overrides
+          { (default_tspan ()) with jas_hyphenate = Some true }));
+        assert (not (has_no_overrides
+          { (default_tspan ()) with jas_list_style = Some "bullet-disc" })));
+      Alcotest.test_case "svg_fragment_phase3b_attrs_round_trip" `Quick (fun () ->
+        let t = { (default_tspan ()) with
+                  content = "";
+                  jas_role = Some "paragraph";
+                  jas_left_indent = Some 18.0;
+                  jas_right_indent = Some 9.0;
+                  jas_hyphenate = Some true;
+                  jas_hanging_punctuation = Some true;
+                  jas_list_style = Some "bullet-disc" } in
+        let svg = tspans_to_svg_fragment [| t |] in
+        let contains pat =
+          try let _ : int = Str.search_forward (Str.regexp_string pat) svg 0
+              in true
+          with Not_found -> false in
+        assert (contains {|jas:left-indent="18"|});
+        assert (contains {|jas:right-indent="9"|});
+        assert (contains {|jas:hyphenate="true"|});
+        assert (contains {|jas:hanging-punctuation="true"|});
+        assert (contains {|jas:list-style="bullet-disc"|});
+        match tspans_from_svg_fragment svg with
+        | Some [| back |] ->
+          assert (back.jas_left_indent = Some 18.0);
+          assert (back.jas_right_indent = Some 9.0);
+          assert (back.jas_hyphenate = Some true);
+          assert (back.jas_hanging_punctuation = Some true);
+          assert (back.jas_list_style = Some "bullet-disc")
         | _ -> assert false);
     ];
   ]

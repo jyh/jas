@@ -23,6 +23,11 @@ let default_tspan () : tspan = {
   jas_kerning_mode = None;
   jas_no_break = None;
   jas_role = None;
+  jas_left_indent = None;
+  jas_right_indent = None;
+  jas_hyphenate = None;
+  jas_hanging_punctuation = None;
+  jas_list_style = None;
   letter_spacing = None;
   line_height = None;
   rotate = None;
@@ -47,6 +52,11 @@ let has_no_overrides (t : tspan) : bool =
   && t.jas_kerning_mode = None
   && t.jas_no_break = None
   && t.jas_role = None
+  && t.jas_left_indent = None
+  && t.jas_right_indent = None
+  && t.jas_hyphenate = None
+  && t.jas_hanging_punctuation = None
+  && t.jas_list_style = None
   && t.letter_spacing = None
   && t.line_height = None
   && t.rotate = None
@@ -91,6 +101,11 @@ let _tspan_to_json (t : tspan) : Yojson.Safe.t =
   (match t.jas_fractional_widths with Some v -> add "jas_fractional_widths" (`Bool v) | None -> ());
   (match t.jas_kerning_mode with Some v -> add "jas_kerning_mode" (`String v) | None -> ());
   (match t.jas_no_break with Some v -> add "jas_no_break" (`Bool v) | None -> ());
+  (match t.jas_left_indent with Some v -> add "jas_left_indent" (`Float v) | None -> ());
+  (match t.jas_right_indent with Some v -> add "jas_right_indent" (`Float v) | None -> ());
+  (match t.jas_hyphenate with Some v -> add "jas_hyphenate" (`Bool v) | None -> ());
+  (match t.jas_hanging_punctuation with Some v -> add "jas_hanging_punctuation" (`Bool v) | None -> ());
+  (match t.jas_list_style with Some v -> add "jas_list_style" (`String v) | None -> ());
   (match t.letter_spacing with Some v -> add "letter_spacing" (`Float v) | None -> ());
   (match t.line_height with Some v -> add "line_height" (`Float v) | None -> ());
   (match t.rotate with Some v -> add "rotate" (`Float v) | None -> ());
@@ -136,6 +151,11 @@ let _tspan_from_json (i : int) (j : Yojson.Safe.t) : tspan =
     jas_kerning_mode = get_str "jas_kerning_mode";
     jas_no_break = get_bool "jas_no_break";
     jas_role = get_str "jas_role";
+    jas_left_indent = get_float "jas_left_indent";
+    jas_right_indent = get_float "jas_right_indent";
+    jas_hyphenate = get_bool "jas_hyphenate";
+    jas_hanging_punctuation = get_bool "jas_hanging_punctuation";
+    jas_list_style = get_str "jas_list_style";
     letter_spacing = get_float "letter_spacing";
     line_height = get_float "line_height";
     rotate = get_float "rotate";
@@ -200,6 +220,11 @@ let tspans_to_svg_fragment (tspans : tspan array) : string =
     (match t.jas_kerning_mode with Some v -> add "jas:kerning-mode" v | None -> ());
     (match t.jas_no_break with Some v -> add "jas:no-break" (string_of_bool v) | None -> ());
     (match t.jas_role with Some v -> add "jas:role" v | None -> ());
+    (match t.jas_left_indent with Some v -> add "jas:left-indent" (_fmt_float v) | None -> ());
+    (match t.jas_right_indent with Some v -> add "jas:right-indent" (_fmt_float v) | None -> ());
+    (match t.jas_hyphenate with Some v -> add "jas:hyphenate" (string_of_bool v) | None -> ());
+    (match t.jas_hanging_punctuation with Some v -> add "jas:hanging-punctuation" (string_of_bool v) | None -> ());
+    (match t.jas_list_style with Some v -> add "jas:list-style" v | None -> ());
     (match t.letter_spacing with Some v -> add "letter-spacing" (_fmt_float v) | None -> ());
     (match t.line_height with Some v -> add "line-height" (_fmt_float v) | None -> ());
     (match t.rotate with Some v -> add "rotate" (_fmt_float v) | None -> ());
@@ -306,6 +331,11 @@ let tspans_from_svg_fragment (svg_str : string) : tspan array option =
             | "jas:kerning-mode" -> { cur with jas_kerning_mode = Some v }
             | "jas:no-break" -> { cur with jas_no_break = Some (v = "true") }
             | "jas:role" -> { cur with jas_role = Some v }
+            | "jas:left-indent" -> { cur with jas_left_indent = float_of_string_opt v }
+            | "jas:right-indent" -> { cur with jas_right_indent = float_of_string_opt v }
+            | "jas:hyphenate" -> { cur with jas_hyphenate = Some (v = "true") }
+            | "jas:hanging-punctuation" -> { cur with jas_hanging_punctuation = Some (v = "true") }
+            | "jas:list-style" -> { cur with jas_list_style = Some v }
             | "letter-spacing" -> { cur with letter_spacing = float_of_string_opt v }
             | "line-height" -> { cur with line_height = float_of_string_opt v }
             | "rotate" -> { cur with rotate = float_of_string_opt v }
@@ -344,6 +374,11 @@ let merge_tspan_overrides (target : tspan) (source : tspan) : tspan =
     jas_kerning_mode = or_some source.jas_kerning_mode target.jas_kerning_mode;
     jas_no_break = or_some source.jas_no_break target.jas_no_break;
     jas_role = or_some source.jas_role target.jas_role;
+    jas_left_indent = or_some source.jas_left_indent target.jas_left_indent;
+    jas_right_indent = or_some source.jas_right_indent target.jas_right_indent;
+    jas_hyphenate = or_some source.jas_hyphenate target.jas_hyphenate;
+    jas_hanging_punctuation = or_some source.jas_hanging_punctuation target.jas_hanging_punctuation;
+    jas_list_style = or_some source.jas_list_style target.jas_list_style;
     letter_spacing = or_some source.letter_spacing target.letter_spacing;
     line_height = or_some source.line_height target.line_height;
     rotate = or_some source.rotate target.rotate;
@@ -591,6 +626,11 @@ let _attrs_equal (a : tspan) (b : tspan) : bool =
   && a.jas_kerning_mode = b.jas_kerning_mode
   && a.jas_no_break = b.jas_no_break
   && a.jas_role = b.jas_role
+  && a.jas_left_indent = b.jas_left_indent
+  && a.jas_right_indent = b.jas_right_indent
+  && a.jas_hyphenate = b.jas_hyphenate
+  && a.jas_hanging_punctuation = b.jas_hanging_punctuation
+  && a.jas_list_style = b.jas_list_style
   && a.letter_spacing = b.letter_spacing
   && a.line_height = b.line_height
   && a.rotate = b.rotate

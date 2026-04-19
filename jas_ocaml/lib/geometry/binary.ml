@@ -170,6 +170,11 @@ let pack_tspan (t : Element.tspan) : Msgpck.t =
     transform;
     opt_str t.xml_lang;
     opt_str t.jas_role;
+    opt_f64 t.jas_left_indent;
+    opt_f64 t.jas_right_indent;
+    opt_bool t.jas_hyphenate;
+    opt_bool t.jas_hanging_punctuation;
+    opt_str t.jas_list_style;
   ]
 
 (** Inverse of [pack_tspan]. Tolerant of trailing field additions —
@@ -210,6 +215,11 @@ let unpack_tspan v : Element.tspan =
     transform;
     xml_lang = as_opt_str (get 21);
     jas_role = as_opt_str (get 22);
+    jas_left_indent = as_opt_f64 (get 23);
+    jas_right_indent = as_opt_f64 (get 24);
+    jas_hyphenate = as_opt_bool (get 25);
+    jas_hanging_punctuation = as_opt_bool (get 26);
+    jas_list_style = as_opt_str (get 27);
   }
 
 let pack_path_command = function
