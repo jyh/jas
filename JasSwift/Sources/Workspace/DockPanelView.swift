@@ -218,11 +218,27 @@ public struct PanelGroupView: View {
             let overrides = paragraphPanelLiveOverrides(model: m)
             for (k, v) in overrides { panelMap[k] = v }
         }
+        // Render-time layers-panel selection, if the layers panel is
+        // currently initialised in the shared store. buildPanelCtx runs
+        // for whichever panel is being rendered, so it may not be the
+        // layers panel; pass [] when absent — only the selection
+        // scalars (has_selection / selection_count / element_selection)
+        // are consulted by non-layers bind predicates.
+        let layersPanelSelection: [[Int]] = {
+            guard let sel = model?.stateStore.getPanel("layers", "layers_panel_selection") as? [[Int]] else {
+                return []
+            }
+            return sel
+        }()
         return [
             "state": stateMap,
             "panel": panelMap,
             "icons": icons,
-            "data": ["swatch_libraries": swatchLibs] as [String: Any]
+            "data": ["swatch_libraries": swatchLibs] as [String: Any],
+            "active_document": buildActiveDocumentView(
+                model: model,
+                layersPanelSelection: layersPanelSelection
+            )
         ]
     }
 

@@ -56,46 +56,10 @@ public enum LayersPanel {
               let effects = actionDef["effects"] as? [Any]
         else { return }
 
-        // Build active_document view from model.document.layers
-        var topLevelLayers: [[String: Any]] = []
-        var topLevelLayerPaths: [[String: Any]] = []
-        var layerNames: Set<String> = []
-        for (i, layer) in model.document.layers.enumerated() {
-            let vis: String
-            switch layer.visibility {
-            case .invisible: vis = "invisible"
-            case .outline: vis = "outline"
-            case .preview: vis = "preview"
-            }
-            let pathJson: [String: Any] = ["__path__": [i]]
-            topLevelLayers.append([
-                "kind": "Layer",
-                "name": layer.name,
-                "common": [
-                    "visibility": vis,
-                    "locked": layer.locked,
-                ],
-                "path": pathJson,
-            ])
-            topLevelLayerPaths.append(pathJson)
-            layerNames.insert(layer.name)
-        }
-        // Phase 3 Group C: next_layer_name + new_layer_insert_index for new_layer
-        var n = 1
-        while layerNames.contains("Layer \(n)") { n += 1 }
-        let nextLayerName = "Layer \(n)"
-        let topLevelSelected = panelSelection
-            .filter { $0.count == 1 }
-            .map { $0[0] }
-        let newLayerInsertIndex = topLevelSelected.min().map { $0 + 1 }
-            ?? model.document.layers.count
-        let activeDoc: [String: Any] = [
-            "top_level_layers": topLevelLayers,
-            "top_level_layer_paths": topLevelLayerPaths,
-            "layers_panel_selection_count": panelSelection.count,
-            "next_layer_name": nextLayerName,
-            "new_layer_insert_index": newLayerInsertIndex,
-        ]
+        let activeDoc = buildActiveDocumentView(
+            model: model,
+            layersPanelSelection: panelSelection
+        )
         // Inject panel.layers_panel_selection as list of __path__ markers
         // for Group B actions (delete/duplicate_layer_selection).
         let selectionMarkers: [[String: Any]] = panelSelection.map {
