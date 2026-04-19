@@ -650,6 +650,56 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
     }
 }
 
+/// Update a single paragraph panel field. Mutual exclusion side
+/// effects: writing one alignment radio clears the other six;
+/// writing a non-empty bullets value clears numbered_list (and vice
+/// versa). Phase 4 setter; called from widget onchange handlers and
+/// the toggle_hanging_punctuation action.
+fn set_paragraph_field(
+    pp: &mut crate::workspace::app_state::ParagraphPanelState,
+    key: &str,
+    val: &serde_json::Value,
+) {
+    fn clear_aligns(pp: &mut crate::workspace::app_state::ParagraphPanelState) {
+        pp.align_left = false;
+        pp.align_center = false;
+        pp.align_right = false;
+        pp.justify_left = false;
+        pp.justify_center = false;
+        pp.justify_right = false;
+        pp.justify_all = false;
+    }
+    match key {
+        "align_left"          => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.align_left = true; } } }
+        "align_center"        => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.align_center = true; } } }
+        "align_right"         => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.align_right = true; } } }
+        "justify_left"        => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_left = true; } } }
+        "justify_center"      => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_center = true; } } }
+        "justify_right"       => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_right = true; } } }
+        "justify_all"         => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_all = true; } } }
+        "bullets"             => {
+            if let Some(s) = val.as_str() {
+                pp.bullets = s.into();
+                if !s.is_empty() { pp.numbered_list.clear(); }
+            }
+        }
+        "numbered_list"       => {
+            if let Some(s) = val.as_str() {
+                pp.numbered_list = s.into();
+                if !s.is_empty() { pp.bullets.clear(); }
+            }
+        }
+        "left_indent"         => { if let Some(n) = val.as_f64() { pp.left_indent = n; } }
+        "right_indent"        => { if let Some(n) = val.as_f64() { pp.right_indent = n; } }
+        "first_line_indent"   => { if let Some(n) = val.as_f64() { pp.first_line_indent = n; } }
+        "space_before"        => { if let Some(n) = val.as_f64() { pp.space_before = n; } }
+        "space_after"         => { if let Some(n) = val.as_f64() { pp.space_after = n; } }
+        "hyphenate"           => { if let Some(b) = val.as_bool() { pp.hyphenate = b; } }
+        "hanging_punctuation" => { if let Some(b) = val.as_bool() { pp.hanging_punctuation = b; } }
+        _ => {}
+    }
+}
+
 /// Build an expression evaluation context from AppState + action params.
 fn build_appstate_ctx(
     params: &serde_json::Map<String, serde_json::Value>,
@@ -844,6 +894,31 @@ fn run_yaml_effect(
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
             tab.model.snapshot();
         }
+        return deferred;
+    }
+
+    // reset_paragraph_panel — Phase 4. Restores defaults across all
+    // Paragraph panel controls and removes the corresponding paragraph
+    // attrs from every wrapper tspan in the selection (identity rule).
+    if eff.get("reset_paragraph_panel").is_some() {
+        st.reset_paragraph_panel();
+        return deferred;
+    }
+
+    // toggle_paragraph_field: <field_name> — Phase 4. Flips the named
+    // bool on the typed paragraph panel state, then re-applies. Used by
+    // toggle_hanging_punctuation. Syncs from selection first so other
+    // panel fields don't overwrite the wrapper with stale defaults.
+    if let Some(name) = eff.get("toggle_paragraph_field").and_then(|v| v.as_str()) {
+        st.sync_paragraph_panel_from_selection();
+        let pp = &mut st.paragraph_panel;
+        let cur = match name {
+            "hyphenate" => pp.hyphenate,
+            "hanging_punctuation" => pp.hanging_punctuation,
+            _ => return deferred,
+        };
+        set_paragraph_field(pp, name, &serde_json::json!(!cur));
+        st.apply_paragraph_panel_to_selection();
         return deferred;
     }
 
@@ -2312,6 +2387,15 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
                             st.apply_character_panel_to_selection();
                         }
+                        Some(PanelKind::Paragraph) => {
+                            // Sync first so untouched fields hold the
+                            // selection's current values, not stale
+                            // panel state, before the new field is set
+                            // and the whole panel is re-applied.
+                            st.sync_paragraph_panel_from_selection();
+                            set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(new_val));
+                            st.apply_paragraph_panel_to_selection();
+                        }
                         Some(PanelKind::Stroke) | None => {
                             set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
                             if f == "weight" {
@@ -2448,10 +2532,15 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                                     set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
                                     st.apply_character_panel_to_selection();
                                 }
+                                Some(PanelKind::Paragraph) => {
+                                    st.sync_paragraph_panel_from_selection();
+                                    set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(v));
+                                    st.apply_paragraph_panel_to_selection();
+                                }
                                 Some(PanelKind::Stroke) | None => {
                                     set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
                                 }
-                                // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                                // Artboards, Layers, Color, Swatches, Properties:
                                 // no-op until their per-panel state lands.
                                 _ => {}
                             }
@@ -2534,11 +2623,16 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                                     set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
                                     st.apply_character_panel_to_selection();
                                 }
+                                Some(PanelKind::Paragraph) => {
+                                    st.sync_paragraph_panel_from_selection();
+                                    set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(v));
+                                    st.apply_paragraph_panel_to_selection();
+                                }
                                 Some(PanelKind::Stroke) | None => {
                                     set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
                                     st.apply_stroke_panel_to_selection();
                                 }
-                                // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                                // Artboards, Layers, Color, Swatches, Properties:
                                 // no-op until their per-panel state lands.
                                 _ => {}
                             }
@@ -2652,6 +2746,11 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     Some(PanelKind::Character) => {
                                         set_character_field(&mut st.character_panel, &f, &json_val);
                                         st.apply_character_panel_to_selection();
+                                    }
+                                    Some(PanelKind::Paragraph) => {
+                                        st.sync_paragraph_panel_from_selection();
+                                        set_paragraph_field(&mut st.paragraph_panel, &f, &json_val);
+                                        st.apply_paragraph_panel_to_selection();
                                     }
                                     Some(PanelKind::Stroke) | None => {
                                         set_stroke_field(&mut st.stroke_panel, &f, &json_val);
@@ -2780,6 +2879,15 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         Some(PanelKind::Character) => {
                             set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
                             st.apply_character_panel_to_selection();
+                        }
+                        Some(PanelKind::Paragraph) => {
+                            // Sync first so untouched fields hold the
+                            // selection's current values, not stale
+                            // panel state, before the new field is set
+                            // and the whole panel is re-applied.
+                            st.sync_paragraph_panel_from_selection();
+                            set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(new_val));
+                            st.apply_paragraph_panel_to_selection();
                         }
                         Some(PanelKind::Stroke) | None => {
                             set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
@@ -5122,5 +5230,201 @@ mod tests {
         assert_eq!(layers.len(), 2);
         assert_eq!(tab_layer(&st, 0).name, "B");
         assert_eq!(tab_layer(&st, 1).name, "D");
+    }
+
+    // ── Phase 4: Paragraph panel writes ─────────────────────────
+
+    #[test]
+    fn set_paragraph_field_radio_clears_others() {
+        use crate::workspace::app_state::ParagraphPanelState;
+        let mut pp = ParagraphPanelState::default();
+        // Default has align_left=true. Click justify_center.
+        set_paragraph_field(&mut pp, "justify_center", &serde_json::json!(true));
+        assert!(!pp.align_left);
+        assert!(pp.justify_center);
+        assert!(!pp.align_center);
+        assert!(!pp.justify_left);
+    }
+
+    #[test]
+    fn set_paragraph_field_bullets_clears_numbered_list() {
+        use crate::workspace::app_state::ParagraphPanelState;
+        let mut pp = ParagraphPanelState::default();
+        pp.numbered_list = "num-decimal".into();
+        set_paragraph_field(&mut pp, "bullets", &serde_json::json!("bullet-disc"));
+        assert_eq!(pp.bullets, "bullet-disc");
+        assert_eq!(pp.numbered_list, "");
+    }
+
+    #[test]
+    fn set_paragraph_field_numbered_clears_bullets() {
+        use crate::workspace::app_state::ParagraphPanelState;
+        let mut pp = ParagraphPanelState::default();
+        pp.bullets = "bullet-disc".into();
+        set_paragraph_field(&mut pp, "numbered_list", &serde_json::json!("num-decimal"));
+        assert_eq!(pp.numbered_list, "num-decimal");
+        assert_eq!(pp.bullets, "");
+    }
+
+    #[test]
+    fn set_paragraph_field_empty_string_does_not_clear_other() {
+        use crate::workspace::app_state::ParagraphPanelState;
+        let mut pp = ParagraphPanelState::default();
+        pp.numbered_list = "num-decimal".into();
+        // Setting bullets to "" (the "None" option) shouldn't blow away
+        // the user's chosen numbered_list value.
+        set_paragraph_field(&mut pp, "bullets", &serde_json::json!(""));
+        assert_eq!(pp.bullets, "");
+        assert_eq!(pp.numbered_list, "num-decimal");
+    }
+
+    #[test]
+    fn set_paragraph_field_indents_and_space() {
+        use crate::workspace::app_state::ParagraphPanelState;
+        let mut pp = ParagraphPanelState::default();
+        set_paragraph_field(&mut pp, "left_indent", &serde_json::json!(18.0));
+        set_paragraph_field(&mut pp, "right_indent", &serde_json::json!(9.0));
+        set_paragraph_field(&mut pp, "first_line_indent", &serde_json::json!(-12.0));
+        set_paragraph_field(&mut pp, "space_before", &serde_json::json!(6.0));
+        set_paragraph_field(&mut pp, "space_after", &serde_json::json!(3.0));
+        assert_eq!(pp.left_indent, 18.0);
+        assert_eq!(pp.right_indent, 9.0);
+        assert_eq!(pp.first_line_indent, -12.0);
+        assert_eq!(pp.space_before, 6.0);
+        assert_eq!(pp.space_after, 3.0);
+    }
+
+    fn select_first_text(st: &mut AppState) {
+        use crate::workspace::app_state::TabState;
+        use crate::document::document::ElementSelection;
+        use crate::geometry::tspan::Tspan;
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        // Build an area-text element with one paragraph wrapper and
+        // one body tspan. Start from empty_text_elem so the string
+        // fields default sanely.
+        let mut t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 200.0, 100.0);
+        let wrapper = Tspan {
+            id: 0, content: String::new(),
+            jas_role: Some("paragraph".into()),
+            ..Default::default()
+        };
+        let body = Tspan { id: 1, content: "hello".into(), ..Default::default() };
+        t.tspans = vec![wrapper, body];
+        let text_with_tspans = Element::Text(t);
+        // Place the text inside the first layer.
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        if let Some(Element::Layer(layer)) = new_doc.layers.get_mut(0) {
+            layer.children = vec![std::rc::Rc::new(text_with_tspans)];
+        }
+        new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        st.tabs[st.active_tab].model.set_document(new_doc);
+    }
+
+    #[test]
+    fn apply_paragraph_panel_writes_indents_to_wrapper() {
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        st.paragraph_panel.left_indent = 18.0;
+        st.paragraph_panel.right_indent = 9.0;
+        st.apply_paragraph_panel_to_selection();
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            let w = &t.tspans[0];
+            assert_eq!(w.jas_role.as_deref(), Some("paragraph"));
+            assert_eq!(w.jas_left_indent, Some(18.0));
+            assert_eq!(w.jas_right_indent, Some(9.0));
+        } else {
+            panic!("expected Text");
+        }
+    }
+
+    #[test]
+    fn apply_paragraph_panel_omits_defaults() {
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        // Defaults (everything 0 / false / empty) should produce all
+        // None on the wrapper — identity-value rule.
+        st.apply_paragraph_panel_to_selection();
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            let w = &t.tspans[0];
+            assert_eq!(w.jas_left_indent, None);
+            assert_eq!(w.jas_right_indent, None);
+            assert_eq!(w.jas_space_before, None);
+            assert_eq!(w.jas_space_after, None);
+            assert_eq!(w.jas_hyphenate, None);
+            assert_eq!(w.jas_hanging_punctuation, None);
+            assert_eq!(w.jas_list_style, None);
+            assert_eq!(w.text_align, None);  // align_left (default) → omit
+            assert_eq!(w.text_align_last, None);
+        }
+    }
+
+    #[test]
+    fn apply_paragraph_panel_alignment_radio() {
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        // Set justify_center via setter (clears align_left).
+        set_paragraph_field(&mut st.paragraph_panel, "justify_center", &serde_json::json!(true));
+        st.apply_paragraph_panel_to_selection();
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            assert_eq!(t.tspans[0].text_align.as_deref(), Some("justify"));
+            assert_eq!(t.tspans[0].text_align_last.as_deref(), Some("center"));
+        }
+    }
+
+    #[test]
+    fn reset_paragraph_panel_clears_wrapper_attrs() {
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        // First populate wrapper with attrs.
+        st.paragraph_panel.left_indent = 24.0;
+        st.paragraph_panel.hyphenate = true;
+        st.paragraph_panel.bullets = "bullet-disc".into();
+        st.apply_paragraph_panel_to_selection();
+        // Then reset.
+        st.reset_paragraph_panel();
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            let w = &t.tspans[0];
+            assert_eq!(w.jas_left_indent, None);
+            assert_eq!(w.jas_hyphenate, None);
+            assert_eq!(w.jas_list_style, None);
+        }
+        // Panel state itself reset to defaults.
+        assert_eq!(st.paragraph_panel.left_indent, 0.0);
+        assert!(!st.paragraph_panel.hyphenate);
+        assert_eq!(st.paragraph_panel.bullets, "");
+        assert!(st.paragraph_panel.align_left);  // back to default
+    }
+
+    #[test]
+    fn sync_paragraph_panel_reads_wrapper_into_typed_struct() {
+        use crate::geometry::element::Element;
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        // Hand-craft wrapper with attrs without going through apply.
+        let path = vec![0, 0];
+        let doc = st.tabs[st.active_tab].model.document().clone();
+        let new_elem = if let Some(Element::Text(t)) = doc.get_element(&path) {
+            let mut new_t = t.clone();
+            new_t.tspans[0].jas_left_indent = Some(36.0);
+            new_t.tspans[0].text_align = Some("justify".into());
+            new_t.tspans[0].text_align_last = Some("right".into());
+            new_t.tspans[0].jas_list_style = Some("num-decimal".into());
+            Element::Text(new_t)
+        } else { panic!() };
+        let new_doc = doc.replace_element(&path, new_elem);
+        st.tabs[st.active_tab].model.set_document(new_doc);
+        st.sync_paragraph_panel_from_selection();
+        assert_eq!(st.paragraph_panel.left_indent, 36.0);
+        assert!(st.paragraph_panel.justify_right);
+        assert!(!st.paragraph_panel.align_left);
+        assert_eq!(st.paragraph_panel.numbered_list, "num-decimal");
+        assert_eq!(st.paragraph_panel.bullets, "");
     }
 }

@@ -1577,12 +1577,13 @@ actions:
   toggle_hanging_punctuation:
     description: >
       Toggle the Hanging Punctuation flag on the current paragraph
-      selection. Phase 2 stub — real toggle of panel.hanging_punctuation
-      and the jas:hanging-punctuation attribute on the wrapper tspan
-      lands in Phase 4 alongside the panel-state mutation primitives.
+      selection. Flips panel.hanging_punctuation and writes the
+      jas:hanging-punctuation attribute on every paragraph wrapper
+      tspan in the selection (omitted when toggled off, per the
+      identity-value rule).
     category: paragraph
     effects:
-      - log: "toggle_hanging_punctuation (Phase 4 wiring pending)"
+      - toggle_paragraph_field: hanging_punctuation
   open_paragraph_justification:
     description: >
       Open the Justification dialog from the Paragraph panel menu.
@@ -1623,9 +1624,11 @@ actions:
   reset_paragraph_panel:
     description: >
       Reset every Paragraph panel control to its default per
-      PARAGRAPH.md §Reset Panel. Phase 2 stub — Phase 4 wires the real
-      reset (panel-local state plus jas:* attrs on the selection's
-      paragraph wrapper tspans).
+      PARAGRAPH.md §Reset Panel and remove the corresponding paragraph
+      attributes (jas:* and text-*) from the paragraph wrapper tspans
+      of the current selection. Per the identity-value rule, defaults
+      appear as absence — the attributes are removed rather than
+      written explicitly.
     category: paragraph
     effects:
-      - log: "reset_paragraph_panel (Phase 4 wiring pending)"
+      - reset_paragraph_panel: true

@@ -101,6 +101,10 @@ pub(crate) struct AppState {
     /// Character panel state — panel-local; pushed to selected Text /
     /// TextPath via apply_character_panel_to_selection.
     pub(crate) character_panel: CharacterPanelState,
+    /// Paragraph panel state — panel-local; pushed to paragraph wrapper
+    /// tspan(s) of selected Text / TextPath via
+    /// `apply_paragraph_panel_to_selection`.
+    pub(crate) paragraph_panel: ParagraphPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -238,6 +242,59 @@ pub(crate) struct CharacterPanelState {
     pub snap_anchor_point: bool,
 }
 
+/// Paragraph panel state fields — mirror the panel-local state
+/// declared in `workspace/panels/paragraph.yaml`. Written to by the
+/// renderer when the user edits a Paragraph panel control; read by
+/// `apply_paragraph_panel_to_selection` to push the attributes onto
+/// the paragraph wrapper tspan(s) inside the selected Text /
+/// TextPath element. Phase 4.
+#[derive(Debug, Clone)]
+pub(crate) struct ParagraphPanelState {
+    /// Alignment radio group — exactly one of these seven is true.
+    pub align_left: bool,
+    pub align_center: bool,
+    pub align_right: bool,
+    pub justify_left: bool,
+    pub justify_center: bool,
+    pub justify_right: bool,
+    pub justify_all: bool,
+    /// Single-attr-shared dropdowns; mutually exclusive at write time.
+    /// Empty string ⇒ no marker / clears the attribute.
+    pub bullets: String,
+    pub numbered_list: String,
+    pub left_indent: f64,
+    pub right_indent: f64,
+    /// Signed; negative ⇒ hanging indent.
+    pub first_line_indent: f64,
+    pub space_before: f64,
+    pub space_after: f64,
+    pub hyphenate: bool,
+    pub hanging_punctuation: bool,
+}
+
+impl Default for ParagraphPanelState {
+    fn default() -> Self {
+        Self {
+            align_left: true,
+            align_center: false,
+            align_right: false,
+            justify_left: false,
+            justify_center: false,
+            justify_right: false,
+            justify_all: false,
+            bullets: String::new(),
+            numbered_list: String::new(),
+            left_indent: 0.0,
+            right_indent: 0.0,
+            first_line_indent: 0.0,
+            space_before: 0.0,
+            space_after: 0.0,
+            hyphenate: false,
+            hanging_punctuation: false,
+        }
+    }
+}
+
 impl Default for CharacterPanelState {
     fn default() -> Self {
         Self {
@@ -302,6 +359,7 @@ impl AppState {
                 .unwrap_or(serde_json::json!({})),
             stroke_panel: StrokePanelState::default(),
             character_panel: CharacterPanelState::default(),
+            paragraph_panel: ParagraphPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
@@ -1068,6 +1126,256 @@ impl AppState {
                 tab.model.set_document(new_doc);
             }
         }
+    }
+
+    /// Push the typed paragraph panel state onto every paragraph
+    /// wrapper tspan inside the selection. The wrapper tspan is the
+    /// one whose `jas_role == "paragraph"`. Per the identity-value
+    /// rule, attributes equal to their default are *omitted* (set to
+    /// `None`) rather than written. Phase 4.
+    ///
+    /// The seven alignment radio bools collapse to one
+    /// `(text_align, text_align_last)` pair per the §Alignment
+    /// sub-mapping; for point text / text-on-path, the same selection
+    /// drives `text_anchor` on the parent `<text>` element instead.
+    /// Bullets and numbered_list both write the single
+    /// `jas_list_style` attribute (mutual exclusion is enforced by
+    /// the setter, so at most one is non-empty).
+    pub(crate) fn apply_paragraph_panel_to_selection(&mut self) {
+        use crate::geometry::element::Element;
+        let pp = self.paragraph_panel.clone();
+        let (text_align, text_align_last) = paragraph_align_attrs(&pp);
+        let text_anchor = paragraph_text_anchor(&pp);
+        let list_style = if !pp.bullets.is_empty() {
+            Some(pp.bullets.clone())
+        } else if !pp.numbered_list.is_empty() {
+            Some(pp.numbered_list.clone())
+        } else {
+            None
+        };
+        let opt_f = |v: f64| if v == 0.0 { None } else { Some(v) };
+        let opt_b = |v: bool| if !v { None } else { Some(true) };
+        let left_indent = opt_f(pp.left_indent);
+        let right_indent = opt_f(pp.right_indent);
+        let first_line_indent =
+            if pp.first_line_indent == 0.0 { None } else { Some(pp.first_line_indent) };
+        let space_before = opt_f(pp.space_before);
+        let space_after = opt_f(pp.space_after);
+        let hyph = opt_b(pp.hyphenate);
+        let hang_punct = opt_b(pp.hanging_punctuation);
+
+        let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
+        let target_paths: Vec<Vec<usize>> = {
+            let doc = tab.model.document();
+            doc.selection
+                .iter()
+                .filter_map(|es| {
+                    let elem = doc.get_element(&es.path)?;
+                    match elem {
+                        Element::Text(_) | Element::TextPath(_) => Some(es.path.clone()),
+                        _ => None,
+                    }
+                })
+                .collect()
+        };
+        if target_paths.is_empty() { return; }
+        tab.model.snapshot();
+        for path in target_paths {
+            let doc = tab.model.document().clone();
+            let new_elem = match doc.get_element(&path) {
+                Some(Element::Text(t)) => {
+                    let mut new_t = t.clone();
+                    let mut tspans = new_t.tspans.clone();
+                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
+                        .filter_map(|(i, ts)|
+                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
+                        .collect();
+                    if wrapper_idx.is_empty() {
+                        // Promote the first tspan to a paragraph wrapper.
+                        if !tspans.is_empty() {
+                            tspans[0].jas_role = Some("paragraph".into());
+                            wrapper_idx.push(0);
+                        }
+                    }
+                    for i in wrapper_idx {
+                        let w = &mut tspans[i];
+                        w.text_align = text_align.clone();
+                        w.text_align_last = text_align_last.clone();
+                        w.text_indent = first_line_indent;
+                        w.jas_left_indent = left_indent;
+                        w.jas_right_indent = right_indent;
+                        w.jas_space_before = space_before;
+                        w.jas_space_after = space_after;
+                        w.jas_hyphenate = hyph;
+                        w.jas_hanging_punctuation = hang_punct;
+                        w.jas_list_style = list_style.clone();
+                    }
+                    new_t.tspans = tspans;
+                    // Point text uses text-anchor on the <text> element
+                    // (not the wrapper tspan) — empty text_anchor means
+                    // omit per identity rule, but we store the panel
+                    // mapping on the panel-anchor field which Text
+                    // uses for `text-anchor`. Text element has no
+                    // text_anchor field today; defer to a Phase 5
+                    // rendering follow-up when text_anchor lands.
+                    let _ = text_anchor;
+                    Some(Element::Text(new_t))
+                }
+                Some(Element::TextPath(tp)) => {
+                    let mut new_tp = tp.clone();
+                    let mut tspans = new_tp.tspans.clone();
+                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
+                        .filter_map(|(i, ts)|
+                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
+                        .collect();
+                    if wrapper_idx.is_empty() && !tspans.is_empty() {
+                        tspans[0].jas_role = Some("paragraph".into());
+                        wrapper_idx.push(0);
+                    }
+                    for i in wrapper_idx {
+                        let w = &mut tspans[i];
+                        w.text_align = text_align.clone();
+                        w.text_align_last = text_align_last.clone();
+                        w.text_indent = first_line_indent;
+                        w.jas_left_indent = left_indent;
+                        w.jas_right_indent = right_indent;
+                        w.jas_space_before = space_before;
+                        w.jas_space_after = space_after;
+                        w.jas_hyphenate = hyph;
+                        w.jas_hanging_punctuation = hang_punct;
+                        w.jas_list_style = list_style.clone();
+                    }
+                    new_tp.tspans = tspans;
+                    Some(Element::TextPath(new_tp))
+                }
+                _ => None,
+            };
+            if let Some(elem) = new_elem {
+                let new_doc = doc.replace_element(&path, elem);
+                tab.model.set_document(new_doc);
+            }
+        }
+    }
+
+    /// Reset every Paragraph panel control to its default per
+    /// PARAGRAPH.md §Reset Panel and *remove* the corresponding
+    /// `jas:*` / `text-*` attributes from every paragraph wrapper
+    /// tspan in the selection (identity-value rule: defaults appear
+    /// as absence). Phase 4.
+    pub(crate) fn reset_paragraph_panel(&mut self) {
+        self.paragraph_panel = ParagraphPanelState::default();
+        self.apply_paragraph_panel_to_selection();
+    }
+
+    /// Mirror the selection's paragraph wrapper attributes into the
+    /// typed paragraph panel state. Called by the selection-change
+    /// observer so the panel reflects the selection. When wrappers
+    /// disagree the typed field stays at its prior value (the panel
+    /// renderer's mixed-state aggregator independently shows blank).
+    /// Phase 4.
+    pub(crate) fn sync_paragraph_panel_from_selection(&mut self) {
+        use crate::geometry::element::Element;
+        let mut wrappers: Vec<crate::geometry::tspan::Tspan> = Vec::new();
+        if let Some(tab) = self.tab() {
+            let doc = tab.model.document();
+            for es in doc.selection.iter() {
+                if let Some(el) = doc.get_element(&es.path) {
+                    let tspans: Option<&[crate::geometry::tspan::Tspan]> = match el {
+                        Element::Text(t) => Some(&t.tspans[..]),
+                        Element::TextPath(tp) => Some(&tp.tspans[..]),
+                        _ => None,
+                    };
+                    if let Some(tspans) = tspans {
+                        for ts in tspans {
+                            if ts.jas_role.as_deref() == Some("paragraph") {
+                                wrappers.push(ts.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if wrappers.is_empty() { return; }
+        fn agree<T: PartialEq + Clone>(values: &[T]) -> Option<T> {
+            let first = values.first()?.clone();
+            if values.iter().all(|v| *v == first) { Some(first) } else { None }
+        }
+        let pp = &mut self.paragraph_panel;
+        let lefts: Vec<f64> = wrappers.iter().map(|w| w.jas_left_indent.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&lefts) { pp.left_indent = v; }
+        let rights: Vec<f64> = wrappers.iter().map(|w| w.jas_right_indent.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&rights) { pp.right_indent = v; }
+        let firsts: Vec<f64> = wrappers.iter().map(|w| w.text_indent.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&firsts) { pp.first_line_indent = v; }
+        let sb: Vec<f64> = wrappers.iter().map(|w| w.jas_space_before.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&sb) { pp.space_before = v; }
+        let sa: Vec<f64> = wrappers.iter().map(|w| w.jas_space_after.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&sa) { pp.space_after = v; }
+        let hy: Vec<bool> = wrappers.iter().map(|w| w.jas_hyphenate.unwrap_or(false)).collect();
+        if let Some(v) = agree(&hy) { pp.hyphenate = v; }
+        let hp: Vec<bool> = wrappers.iter().map(|w| w.jas_hanging_punctuation.unwrap_or(false)).collect();
+        if let Some(v) = agree(&hp) { pp.hanging_punctuation = v; }
+        let styles: Vec<String> = wrappers.iter()
+            .map(|w| w.jas_list_style.clone().unwrap_or_default()).collect();
+        if let Some(ls) = agree(&styles) {
+            if ls.starts_with("bullet-") { pp.bullets = ls; pp.numbered_list.clear(); }
+            else if ls.starts_with("num-") { pp.numbered_list = ls; pp.bullets.clear(); }
+            else { pp.bullets.clear(); pp.numbered_list.clear(); }
+        }
+        let tas: Vec<String> = wrappers.iter()
+            .map(|w| w.text_align.clone().unwrap_or_else(|| "left".into())).collect();
+        let tals: Vec<String> = wrappers.iter()
+            .map(|w| w.text_align_last.clone().unwrap_or_default()).collect();
+        if let (Some(ta), Some(tal)) = (agree(&tas), agree(&tals)) {
+            apply_align_radio(pp, &ta, &tal);
+        }
+    }
+}
+
+/// Map the seven alignment radio bools to a `(text_align,
+/// text_align_last)` pair per PARAGRAPH.md §Alignment sub-mapping
+/// (area text). Returns `(None, None)` for the default
+/// `ALIGN_LEFT_BUTTON` so it is omitted per identity-value rule.
+fn paragraph_align_attrs(pp: &ParagraphPanelState)
+    -> (Option<String>, Option<String>) {
+    if pp.align_center { (Some("center".into()), None) }
+    else if pp.align_right { (Some("right".into()), None) }
+    else if pp.justify_left { (Some("justify".into()), Some("left".into())) }
+    else if pp.justify_center { (Some("justify".into()), Some("center".into())) }
+    else if pp.justify_right { (Some("justify".into()), Some("right".into())) }
+    else if pp.justify_all { (Some("justify".into()), Some("justify".into())) }
+    else { (None, None) }  // ALIGN_LEFT_BUTTON (default) → omit
+}
+
+/// Map the alignment radio bools to `text-anchor` for point text /
+/// text-on-path per the §Alignment sub-mapping (point text). Only
+/// the three non-justify buttons map; `JUSTIFY_*` falls through to
+/// the default `start` (those buttons are grayed for point text).
+fn paragraph_text_anchor(pp: &ParagraphPanelState) -> Option<String> {
+    if pp.align_center { Some("middle".into()) }
+    else if pp.align_right { Some("end".into()) }
+    else { None }  // ALIGN_LEFT_BUTTON → start (default; omit)
+}
+
+/// Inverse of `paragraph_align_attrs`: set the appropriate radio bool
+/// from a `(text_align, text_align_last)` pair. Used by
+/// `sync_paragraph_panel_from_selection` when reading wrappers.
+fn apply_align_radio(pp: &mut ParagraphPanelState, ta: &str, tal: &str) {
+    pp.align_left = false;
+    pp.align_center = false;
+    pp.align_right = false;
+    pp.justify_left = false;
+    pp.justify_center = false;
+    pp.justify_right = false;
+    pp.justify_all = false;
+    match (ta, tal) {
+        ("center", _) => pp.align_center = true,
+        ("right", _) => pp.align_right = true,
+        ("justify", "left") => pp.justify_left = true,
+        ("justify", "center") => pp.justify_center = true,
+        ("justify", "right") => pp.justify_right = true,
+        ("justify", "justify") => pp.justify_all = true,
+        _ => pp.align_left = true,
     }
 }
 
