@@ -2982,11 +2982,12 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         rsx! {
             div {
                 id: "{id}",
+                class: "jas-icon-toggle",
                 title: "{summary}",
                 style: "display:inline-flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;border-radius:2px;{bg_style}{dim}{style}",
                 onclick: onclick,
                 div {
-                    style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;",
+                    style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
                     dangerous_inner_html: "{icon_svg}",
                 }
             }
