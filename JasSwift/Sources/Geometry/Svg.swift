@@ -215,6 +215,27 @@ private func tspanSvg(_ t: Tspan) -> String {
     if let v = t.jasSingleWordJustify {
         attrs += " urn:jas:1:single-word-justify=\"\(escapeXml(v))\""
     }
+    if let v = t.jasHyphenateMinWord {
+        attrs += " urn:jas:1:hyphenate-min-word=\"\(fmt(v))\""
+    }
+    if let v = t.jasHyphenateMinBefore {
+        attrs += " urn:jas:1:hyphenate-min-before=\"\(fmt(v))\""
+    }
+    if let v = t.jasHyphenateMinAfter {
+        attrs += " urn:jas:1:hyphenate-min-after=\"\(fmt(v))\""
+    }
+    if let v = t.jasHyphenateLimit {
+        attrs += " urn:jas:1:hyphenate-limit=\"\(fmt(v))\""
+    }
+    if let v = t.jasHyphenateZone {
+        attrs += " urn:jas:1:hyphenate-zone=\"\(fmt(v))\""
+    }
+    if let v = t.jasHyphenateBias {
+        attrs += " urn:jas:1:hyphenate-bias=\"\(fmt(v))\""
+    }
+    if let v = t.jasHyphenateCapitalized {
+        attrs += " urn:jas:1:hyphenate-capitalized=\"\(v)\""
+    }
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
 
@@ -521,6 +542,20 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
     let jasAutoLeading = (node.attribute(forName: "urn:jas:1:auto-leading")?.stringValue)
         .flatMap(Double.init)
     let jasSingleWordJustify = node.attribute(forName: "urn:jas:1:single-word-justify")?.stringValue
+    let jasHyphenateMinWord = (node.attribute(forName: "urn:jas:1:hyphenate-min-word")?.stringValue)
+        .flatMap(Double.init)
+    let jasHyphenateMinBefore = (node.attribute(forName: "urn:jas:1:hyphenate-min-before")?.stringValue)
+        .flatMap(Double.init)
+    let jasHyphenateMinAfter = (node.attribute(forName: "urn:jas:1:hyphenate-min-after")?.stringValue)
+        .flatMap(Double.init)
+    let jasHyphenateLimit = (node.attribute(forName: "urn:jas:1:hyphenate-limit")?.stringValue)
+        .flatMap(Double.init)
+    let jasHyphenateZone = (node.attribute(forName: "urn:jas:1:hyphenate-zone")?.stringValue)
+        .flatMap(Double.init)
+    let jasHyphenateBias = (node.attribute(forName: "urn:jas:1:hyphenate-bias")?.stringValue)
+        .flatMap(Double.init)
+    let jasHyphenateCapitalized = (node.attribute(forName: "urn:jas:1:hyphenate-capitalized")?.stringValue)
+        .map { $0 == "true" }
     let chars = Array(content)
 
     // Fast paths: no rotate, or single-value rotate, or single char.
@@ -547,6 +582,13 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             jasGlyphScalingMax: jasGlyphScalingMax,
             jasAutoLeading: jasAutoLeading,
             jasSingleWordJustify: jasSingleWordJustify,
+            jasHyphenateMinWord: jasHyphenateMinWord,
+            jasHyphenateMinBefore: jasHyphenateMinBefore,
+            jasHyphenateMinAfter: jasHyphenateMinAfter,
+            jasHyphenateLimit: jasHyphenateLimit,
+            jasHyphenateZone: jasHyphenateZone,
+            jasHyphenateBias: jasHyphenateBias,
+            jasHyphenateCapitalized: jasHyphenateCapitalized,
             textDecoration: decoration)]
     }
     if rotateVals.count == 1 || chars.count <= 1 {
@@ -572,6 +614,13 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             jasGlyphScalingMax: jasGlyphScalingMax,
             jasAutoLeading: jasAutoLeading,
             jasSingleWordJustify: jasSingleWordJustify,
+            jasHyphenateMinWord: jasHyphenateMinWord,
+            jasHyphenateMinBefore: jasHyphenateMinBefore,
+            jasHyphenateMinAfter: jasHyphenateMinAfter,
+            jasHyphenateLimit: jasHyphenateLimit,
+            jasHyphenateZone: jasHyphenateZone,
+            jasHyphenateBias: jasHyphenateBias,
+            jasHyphenateCapitalized: jasHyphenateCapitalized,
             rotate: rotateVals[0],
             textDecoration: decoration)]
     }
@@ -603,6 +652,13 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             jasGlyphScalingMax: jasGlyphScalingMax,
             jasAutoLeading: jasAutoLeading,
             jasSingleWordJustify: jasSingleWordJustify,
+            jasHyphenateMinWord: jasHyphenateMinWord,
+            jasHyphenateMinBefore: jasHyphenateMinBefore,
+            jasHyphenateMinAfter: jasHyphenateMinAfter,
+            jasHyphenateLimit: jasHyphenateLimit,
+            jasHyphenateZone: jasHyphenateZone,
+            jasHyphenateBias: jasHyphenateBias,
+            jasHyphenateCapitalized: jasHyphenateCapitalized,
             rotate: i < rotateVals.count ? rotateVals[i] : lastAngle,
             textDecoration: decoration)
     }
@@ -640,6 +696,24 @@ private func collectTspanChildren(_ elem: XMLElement) -> [Tspan] {
             textAlign: t.textAlign, textAlignLast: t.textAlignLast,
             textIndent: t.textIndent,
             jasSpaceBefore: t.jasSpaceBefore, jasSpaceAfter: t.jasSpaceAfter,
+            jasWordSpacingMin: t.jasWordSpacingMin,
+            jasWordSpacingDesired: t.jasWordSpacingDesired,
+            jasWordSpacingMax: t.jasWordSpacingMax,
+            jasLetterSpacingMin: t.jasLetterSpacingMin,
+            jasLetterSpacingDesired: t.jasLetterSpacingDesired,
+            jasLetterSpacingMax: t.jasLetterSpacingMax,
+            jasGlyphScalingMin: t.jasGlyphScalingMin,
+            jasGlyphScalingDesired: t.jasGlyphScalingDesired,
+            jasGlyphScalingMax: t.jasGlyphScalingMax,
+            jasAutoLeading: t.jasAutoLeading,
+            jasSingleWordJustify: t.jasSingleWordJustify,
+            jasHyphenateMinWord: t.jasHyphenateMinWord,
+            jasHyphenateMinBefore: t.jasHyphenateMinBefore,
+            jasHyphenateMinAfter: t.jasHyphenateMinAfter,
+            jasHyphenateLimit: t.jasHyphenateLimit,
+            jasHyphenateZone: t.jasHyphenateZone,
+            jasHyphenateBias: t.jasHyphenateBias,
+            jasHyphenateCapitalized: t.jasHyphenateCapitalized,
             letterSpacing: t.letterSpacing, lineHeight: t.lineHeight,
             rotate: t.rotate, styleName: t.styleName,
             textDecoration: t.textDecoration, textRendering: t.textRendering,

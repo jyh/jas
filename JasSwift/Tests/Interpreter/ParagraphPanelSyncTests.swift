@@ -435,3 +435,58 @@ private func selectAreaTextWithWrapper(_ model: Model) {
         #expect(w.jasSingleWordJustify == nil)
     }
 }
+
+// MARK: - Phase 9 Hyphenation dialog OK commit
+
+@Test func applyHyphenationDialogWritesNonDefaultAttrs() {
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let store = StateStore()
+    store.initPanel("paragraph_panel_content", defaults: ["hyphenate": false])
+    let v = HyphenationDialogValues(
+        hyphenate: true,
+        minWord: 6, minBefore: 3, minAfter: 1,  // minAfter default -> omitted
+        limit: 2, zone: 36, bias: 0,            // bias default -> omitted
+        capitalized: true)
+    applyHyphenationDialogToSelection(v,
+        controller: Controller(model: model), store: store)
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        let w = t.tspans[0]
+        #expect(w.jasHyphenate == true)
+        #expect(w.jasHyphenateMinWord == 6)
+        #expect(w.jasHyphenateMinBefore == 3)
+        #expect(w.jasHyphenateMinAfter == nil)  // identity-omit
+        #expect(w.jasHyphenateLimit == 2)
+        #expect(w.jasHyphenateZone == 36)
+        #expect(w.jasHyphenateBias == nil)      // identity-omit
+        #expect(w.jasHyphenateCapitalized == true)
+    }
+    // Master mirror: panel.hyphenate updated to dialog value.
+    #expect(store.getPanel("paragraph_panel_content", "hyphenate") as? Bool == true)
+}
+
+@Test func applyHyphenationDialogAllDefaultsWritesNothing() {
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let store = StateStore()
+    store.initPanel("paragraph_panel_content", defaults: ["hyphenate": false])
+    let v = HyphenationDialogValues(
+        hyphenate: false,
+        minWord: 3, minBefore: 1, minAfter: 1,
+        limit: 0, zone: 0, bias: 0, capitalized: false)
+    applyHyphenationDialogToSelection(v,
+        controller: Controller(model: model), store: store)
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        let w = t.tspans[0]
+        #expect(w.jasHyphenate == nil)
+        #expect(w.jasHyphenateMinWord == nil)
+        #expect(w.jasHyphenateMinBefore == nil)
+        #expect(w.jasHyphenateMinAfter == nil)
+        #expect(w.jasHyphenateLimit == nil)
+        #expect(w.jasHyphenateZone == nil)
+        #expect(w.jasHyphenateBias == nil)
+        #expect(w.jasHyphenateCapitalized == nil)
+    }
+}

@@ -61,6 +61,13 @@ public func tspansToJsonClipboard(_ tspans: [Tspan]) -> String {
         if let v = t.jasGlyphScalingMax { obj["jas_glyph_scaling_max"] = v }
         if let v = t.jasAutoLeading { obj["jas_auto_leading"] = v }
         if let v = t.jasSingleWordJustify { obj["jas_single_word_justify"] = v }
+        if let v = t.jasHyphenateMinWord { obj["jas_hyphenate_min_word"] = v }
+        if let v = t.jasHyphenateMinBefore { obj["jas_hyphenate_min_before"] = v }
+        if let v = t.jasHyphenateMinAfter { obj["jas_hyphenate_min_after"] = v }
+        if let v = t.jasHyphenateLimit { obj["jas_hyphenate_limit"] = v }
+        if let v = t.jasHyphenateZone { obj["jas_hyphenate_zone"] = v }
+        if let v = t.jasHyphenateBias { obj["jas_hyphenate_bias"] = v }
+        if let v = t.jasHyphenateCapitalized { obj["jas_hyphenate_capitalized"] = v }
         if let v = t.letterSpacing { obj["letter_spacing"] = v }
         if let v = t.lineHeight { obj["line_height"] = v }
         if let v = t.rotate { obj["rotate"] = v }
@@ -122,6 +129,13 @@ public func tspansFromJsonClipboard(_ jsonStr: String) -> [Tspan]? {
             jasGlyphScalingMax: (obj["jas_glyph_scaling_max"] as? NSNumber)?.doubleValue,
             jasAutoLeading: (obj["jas_auto_leading"] as? NSNumber)?.doubleValue,
             jasSingleWordJustify: obj["jas_single_word_justify"] as? String,
+            jasHyphenateMinWord: (obj["jas_hyphenate_min_word"] as? NSNumber)?.doubleValue,
+            jasHyphenateMinBefore: (obj["jas_hyphenate_min_before"] as? NSNumber)?.doubleValue,
+            jasHyphenateMinAfter: (obj["jas_hyphenate_min_after"] as? NSNumber)?.doubleValue,
+            jasHyphenateLimit: (obj["jas_hyphenate_limit"] as? NSNumber)?.doubleValue,
+            jasHyphenateZone: (obj["jas_hyphenate_zone"] as? NSNumber)?.doubleValue,
+            jasHyphenateBias: (obj["jas_hyphenate_bias"] as? NSNumber)?.doubleValue,
+            jasHyphenateCapitalized: (obj["jas_hyphenate_capitalized"] as? NSNumber)?.boolValue,
             letterSpacing: (obj["letter_spacing"] as? NSNumber)?.doubleValue,
             lineHeight: (obj["line_height"] as? NSNumber)?.doubleValue,
             rotate: (obj["rotate"] as? NSNumber)?.doubleValue,
@@ -178,6 +192,13 @@ public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
         if let v = t.jasGlyphScalingMax { attrs.append(("jas:glyph-scaling-max", _fmtDouble(v))) }
         if let v = t.jasAutoLeading { attrs.append(("jas:auto-leading", _fmtDouble(v))) }
         if let v = t.jasSingleWordJustify { attrs.append(("jas:single-word-justify", v)) }
+        if let v = t.jasHyphenateMinWord { attrs.append(("jas:hyphenate-min-word", _fmtDouble(v))) }
+        if let v = t.jasHyphenateMinBefore { attrs.append(("jas:hyphenate-min-before", _fmtDouble(v))) }
+        if let v = t.jasHyphenateMinAfter { attrs.append(("jas:hyphenate-min-after", _fmtDouble(v))) }
+        if let v = t.jasHyphenateLimit { attrs.append(("jas:hyphenate-limit", _fmtDouble(v))) }
+        if let v = t.jasHyphenateZone { attrs.append(("jas:hyphenate-zone", _fmtDouble(v))) }
+        if let v = t.jasHyphenateBias { attrs.append(("jas:hyphenate-bias", _fmtDouble(v))) }
+        if let v = t.jasHyphenateCapitalized { attrs.append(("jas:hyphenate-capitalized", v ? "true" : "false")) }
         if let v = t.letterSpacing { attrs.append(("letter-spacing", _fmtDouble(v))) }
         if let v = t.lineHeight { attrs.append(("line-height", _fmtDouble(v))) }
         if let v = t.rotate { attrs.append(("rotate", _fmtDouble(v))) }
@@ -271,6 +292,13 @@ public func tspansFromSvgFragment(_ svgStr: String) -> [Tspan]? {
             case "jas:glyph-scaling-max": t = mergeFields(t, jasGlyphScalingMax: Double(v))
             case "jas:auto-leading": t = mergeFields(t, jasAutoLeading: Double(v))
             case "jas:single-word-justify": t = mergeFields(t, jasSingleWordJustify: v)
+            case "jas:hyphenate-min-word": t = mergeFields(t, jasHyphenateMinWord: Double(v))
+            case "jas:hyphenate-min-before": t = mergeFields(t, jasHyphenateMinBefore: Double(v))
+            case "jas:hyphenate-min-after": t = mergeFields(t, jasHyphenateMinAfter: Double(v))
+            case "jas:hyphenate-limit": t = mergeFields(t, jasHyphenateLimit: Double(v))
+            case "jas:hyphenate-zone": t = mergeFields(t, jasHyphenateZone: Double(v))
+            case "jas:hyphenate-bias": t = mergeFields(t, jasHyphenateBias: Double(v))
+            case "jas:hyphenate-capitalized": t = mergeFields(t, jasHyphenateCapitalized: v == "true")
             case "letter-spacing": t = mergeFields(t, letterSpacing: Double(v))
             case "line-height": t = mergeFields(t, lineHeight: Double(v))
             case "rotate": t = mergeFields(t, rotate: Double(v))
@@ -327,6 +355,13 @@ private func mergeFields(_ t: Tspan,
                          jasGlyphScalingMax: Double?? = .some(nil),
                          jasAutoLeading: Double?? = .some(nil),
                          jasSingleWordJustify: String?? = .some(nil),
+                         jasHyphenateMinWord: Double?? = .some(nil),
+                         jasHyphenateMinBefore: Double?? = .some(nil),
+                         jasHyphenateMinAfter: Double?? = .some(nil),
+                         jasHyphenateLimit: Double?? = .some(nil),
+                         jasHyphenateZone: Double?? = .some(nil),
+                         jasHyphenateBias: Double?? = .some(nil),
+                         jasHyphenateCapitalized: Bool?? = .some(nil),
                          letterSpacing: Double?? = .some(nil),
                          lineHeight: Double?? = .some(nil),
                          rotate: Double?? = .some(nil),
@@ -381,6 +416,13 @@ private func mergeFields(_ t: Tspan,
         jasGlyphScalingMax: pick(jasGlyphScalingMax, t.jasGlyphScalingMax),
         jasAutoLeading: pick(jasAutoLeading, t.jasAutoLeading),
         jasSingleWordJustify: pick(jasSingleWordJustify, t.jasSingleWordJustify),
+        jasHyphenateMinWord: pick(jasHyphenateMinWord, t.jasHyphenateMinWord),
+        jasHyphenateMinBefore: pick(jasHyphenateMinBefore, t.jasHyphenateMinBefore),
+        jasHyphenateMinAfter: pick(jasHyphenateMinAfter, t.jasHyphenateMinAfter),
+        jasHyphenateLimit: pick(jasHyphenateLimit, t.jasHyphenateLimit),
+        jasHyphenateZone: pick(jasHyphenateZone, t.jasHyphenateZone),
+        jasHyphenateBias: pick(jasHyphenateBias, t.jasHyphenateBias),
+        jasHyphenateCapitalized: pick(jasHyphenateCapitalized, t.jasHyphenateCapitalized),
         letterSpacing: pick(letterSpacing, t.letterSpacing),
         lineHeight: pick(lineHeight, t.lineHeight),
         rotate: pick(rotate, t.rotate),
@@ -474,6 +516,13 @@ public func mergeTspanOverrides(_ target: Tspan, _ source: Tspan) -> Tspan {
         jasGlyphScalingMax: source.jasGlyphScalingMax ?? target.jasGlyphScalingMax,
         jasAutoLeading: source.jasAutoLeading ?? target.jasAutoLeading,
         jasSingleWordJustify: source.jasSingleWordJustify ?? target.jasSingleWordJustify,
+        jasHyphenateMinWord: source.jasHyphenateMinWord ?? target.jasHyphenateMinWord,
+        jasHyphenateMinBefore: source.jasHyphenateMinBefore ?? target.jasHyphenateMinBefore,
+        jasHyphenateMinAfter: source.jasHyphenateMinAfter ?? target.jasHyphenateMinAfter,
+        jasHyphenateLimit: source.jasHyphenateLimit ?? target.jasHyphenateLimit,
+        jasHyphenateZone: source.jasHyphenateZone ?? target.jasHyphenateZone,
+        jasHyphenateBias: source.jasHyphenateBias ?? target.jasHyphenateBias,
+        jasHyphenateCapitalized: source.jasHyphenateCapitalized ?? target.jasHyphenateCapitalized,
         letterSpacing: source.letterSpacing ?? target.letterSpacing,
         lineHeight: source.lineHeight ?? target.lineHeight,
         rotate: source.rotate ?? target.rotate,

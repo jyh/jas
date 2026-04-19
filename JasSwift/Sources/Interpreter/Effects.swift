@@ -1368,6 +1368,166 @@ public func applyJustificationDialogToSelection(
     controller.setDocument(newDoc)
 }
 
+/// 8 Hyphenation-dialog field values (master + 7 sub-controls).
+/// `nil` means the dialog field was blank (mixed selection) and
+/// should not write. Phase 9.
+public struct HyphenationDialogValues {
+    public var hyphenate: Bool?
+    public var minWord: Double?
+    public var minBefore: Double?
+    public var minAfter: Double?
+    public var limit: Double?
+    public var zone: Double?
+    public var bias: Double?
+    public var capitalized: Bool?
+
+    public init(hyphenate: Bool? = nil,
+                minWord: Double? = nil, minBefore: Double? = nil,
+                minAfter: Double? = nil, limit: Double? = nil,
+                zone: Double? = nil, bias: Double? = nil,
+                capitalized: Bool? = nil) {
+        self.hyphenate = hyphenate
+        self.minWord = minWord
+        self.minBefore = minBefore
+        self.minAfter = minAfter
+        self.limit = limit
+        self.zone = zone
+        self.bias = bias
+        self.capitalized = capitalized
+    }
+}
+
+/// Commit the master + 7 Hyphenation-dialog fields onto every paragraph
+/// wrapper tspan in the selection. Per the identity-value rule each
+/// value at its spec default (master off, 3/1/1, 0, 0, 0, off) writes
+/// nil so the wrapper attr is omitted. Also mirrors the master toggle
+/// to the panel.hyphenate state so the main panel checkbox reflects
+/// the dialog commit immediately. Phase 9.
+public func applyHyphenationDialogToSelection(
+    _ v: HyphenationDialogValues, controller: Controller, store: StateStore
+) {
+    func optN(_ value: Double?, default def: Double) -> Double? {
+        value.flatMap { abs($0 - def) < 1e-6 ? nil : $0 }
+    }
+    func optB(_ value: Bool?) -> Bool? {
+        value.flatMap { $0 ? true : nil }
+    }
+    let hyph = optB(v.hyphenate)
+    let minWord = optN(v.minWord, default: 3)
+    let minBefore = optN(v.minBefore, default: 1)
+    let minAfter = optN(v.minAfter, default: 1)
+    let limit = optN(v.limit, default: 0)
+    let zone = optN(v.zone, default: 0)
+    let bias = optN(v.bias, default: 0)
+    let cap = optB(v.capitalized)
+
+    let model = controller.model
+    let doc = model.document
+    let targetPaths = doc.selection.compactMap { es -> [Int]? in
+        switch doc.getElement(es.path) {
+        case .text, .textPath: return es.path
+        default: return nil
+        }
+    }
+    if targetPaths.isEmpty { return }
+    model.snapshot()
+    var newDoc = doc
+    for path in targetPaths {
+        let elem = newDoc.getElement(path)
+        let newElem: Element?
+        switch elem {
+        case .text(let t):
+            var tspans = t.tspans
+            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
+            if wrapperIdx.isEmpty, !tspans.isEmpty {
+                tspans[0] = withJasRole(tspans[0], "paragraph")
+                wrapperIdx = [0]
+            }
+            for i in wrapperIdx {
+                tspans[i] = withHyphenationAttrs(
+                    tspans[i],
+                    hyphenate: hyph,
+                    minWord: minWord, minBefore: minBefore, minAfter: minAfter,
+                    limit: limit, zone: zone, bias: bias, capitalized: cap)
+            }
+            newElem = .text(t.withTspans(tspans))
+        case .textPath(let tp):
+            var tspans = tp.tspans
+            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
+            if wrapperIdx.isEmpty, !tspans.isEmpty {
+                tspans[0] = withJasRole(tspans[0], "paragraph")
+                wrapperIdx = [0]
+            }
+            for i in wrapperIdx {
+                tspans[i] = withHyphenationAttrs(
+                    tspans[i],
+                    hyphenate: hyph,
+                    minWord: minWord, minBefore: minBefore, minAfter: minAfter,
+                    limit: limit, zone: zone, bias: bias, capitalized: cap)
+            }
+            newElem = .textPath(tp.withTspans(tspans))
+        default:
+            newElem = nil
+        }
+        if let ne = newElem {
+            newDoc = newDoc.replaceElement(path, with: ne)
+        }
+    }
+    controller.setDocument(newDoc)
+    if let h = v.hyphenate {
+        store.setPanel("paragraph_panel_content", "hyphenate", h)
+    }
+}
+
+/// Replace the master + 7 Hyphenation-dialog attrs on a Tspan;
+/// preserve all other fields. Phase 9 helper.
+private func withHyphenationAttrs(
+    _ t: Tspan,
+    hyphenate: Bool?,
+    minWord: Double?, minBefore: Double?, minAfter: Double?,
+    limit: Double?, zone: Double?, bias: Double?, capitalized: Bool?
+) -> Tspan {
+    Tspan(
+        id: t.id, content: t.content,
+        baselineShift: t.baselineShift, dx: t.dx,
+        fontFamily: t.fontFamily, fontSize: t.fontSize,
+        fontStyle: t.fontStyle, fontVariant: t.fontVariant,
+        fontWeight: t.fontWeight,
+        jasAaMode: t.jasAaMode, jasFractionalWidths: t.jasFractionalWidths,
+        jasKerningMode: t.jasKerningMode, jasNoBreak: t.jasNoBreak,
+        jasRole: t.jasRole,
+        jasLeftIndent: t.jasLeftIndent, jasRightIndent: t.jasRightIndent,
+        jasHyphenate: hyphenate,
+        jasHangingPunctuation: t.jasHangingPunctuation,
+        jasListStyle: t.jasListStyle,
+        textAlign: t.textAlign, textAlignLast: t.textAlignLast,
+        textIndent: t.textIndent,
+        jasSpaceBefore: t.jasSpaceBefore, jasSpaceAfter: t.jasSpaceAfter,
+        jasWordSpacingMin: t.jasWordSpacingMin,
+        jasWordSpacingDesired: t.jasWordSpacingDesired,
+        jasWordSpacingMax: t.jasWordSpacingMax,
+        jasLetterSpacingMin: t.jasLetterSpacingMin,
+        jasLetterSpacingDesired: t.jasLetterSpacingDesired,
+        jasLetterSpacingMax: t.jasLetterSpacingMax,
+        jasGlyphScalingMin: t.jasGlyphScalingMin,
+        jasGlyphScalingDesired: t.jasGlyphScalingDesired,
+        jasGlyphScalingMax: t.jasGlyphScalingMax,
+        jasAutoLeading: t.jasAutoLeading,
+        jasSingleWordJustify: t.jasSingleWordJustify,
+        jasHyphenateMinWord: minWord,
+        jasHyphenateMinBefore: minBefore,
+        jasHyphenateMinAfter: minAfter,
+        jasHyphenateLimit: limit,
+        jasHyphenateZone: zone,
+        jasHyphenateBias: bias,
+        jasHyphenateCapitalized: capitalized,
+        letterSpacing: t.letterSpacing, lineHeight: t.lineHeight,
+        rotate: t.rotate, styleName: t.styleName,
+        textDecoration: t.textDecoration, textRendering: t.textRendering,
+        textTransform: t.textTransform, transform: t.transform,
+        xmlLang: t.xmlLang)
+}
+
 /// Replace the 11 Justification-dialog attrs on a Tspan; preserve all
 /// other fields. Phase 8 helper.
 private func withJustificationAttrs(
@@ -1400,6 +1560,13 @@ private func withJustificationAttrs(
         jasGlyphScalingMin: gsMin, jasGlyphScalingDesired: gsDes,
         jasGlyphScalingMax: gsMax,
         jasAutoLeading: autoLeading, jasSingleWordJustify: swj,
+        jasHyphenateMinWord: t.jasHyphenateMinWord,
+        jasHyphenateMinBefore: t.jasHyphenateMinBefore,
+        jasHyphenateMinAfter: t.jasHyphenateMinAfter,
+        jasHyphenateLimit: t.jasHyphenateLimit,
+        jasHyphenateZone: t.jasHyphenateZone,
+        jasHyphenateBias: t.jasHyphenateBias,
+        jasHyphenateCapitalized: t.jasHyphenateCapitalized,
         letterSpacing: t.letterSpacing, lineHeight: t.lineHeight,
         rotate: t.rotate, styleName: t.styleName,
         textDecoration: t.textDecoration, textRendering: t.textRendering,
