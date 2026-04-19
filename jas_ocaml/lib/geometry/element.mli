@@ -176,6 +176,13 @@ type tspan = {
   jas_glyph_scaling_max : float option;
   jas_auto_leading : float option;
   jas_single_word_justify : string option;
+  jas_hyphenate_min_word : float option;
+  jas_hyphenate_min_before : float option;
+  jas_hyphenate_min_after : float option;
+  jas_hyphenate_limit : float option;
+  jas_hyphenate_zone : float option;
+  jas_hyphenate_bias : float option;
+  jas_hyphenate_capitalized : bool option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;

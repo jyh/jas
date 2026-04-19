@@ -752,5 +752,39 @@ let () =
         assert (contains {|urn:jas:1:glyph-scaling-max="105"|});
         assert (contains {|urn:jas:1:auto-leading="140"|});
         assert (contains {|urn:jas:1:single-word-justify="left"|}));
+
+      Alcotest.test_case "Phase 9 Hyphenation attrs round-trip through document SVG" `Quick (fun () ->
+        let base = make_text 0.0 0.0 "X" in
+        let input = match base with
+          | Text r ->
+            let tspans = [|
+              { (Jas.Tspan.default_tspan ()) with
+                id = 0; content = "";
+                jas_role = Some "paragraph";
+                jas_hyphenate_min_word = Some 6.0;
+                jas_hyphenate_min_before = Some 3.0;
+                jas_hyphenate_min_after = Some 2.0;
+                jas_hyphenate_limit = Some 2.0;
+                jas_hyphenate_zone = Some 36.0;
+                jas_hyphenate_bias = Some 0.5;
+                jas_hyphenate_capitalized = Some true };
+              { (Jas.Tspan.default_tspan ()) with id = 1; content = "X" };
+            |] in
+            Text { r with tspans }
+          | _ -> assert false
+        in
+        let doc = make_document [|make_layer [| input |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains pat =
+          try let _ : int = Str.search_forward (Str.regexp_string pat) svg 0
+              in true
+          with Not_found -> false in
+        assert (contains {|urn:jas:1:hyphenate-min-word="6"|});
+        assert (contains {|urn:jas:1:hyphenate-min-before="3"|});
+        assert (contains {|urn:jas:1:hyphenate-min-after="2"|});
+        assert (contains {|urn:jas:1:hyphenate-limit="2"|});
+        assert (contains {|urn:jas:1:hyphenate-zone="36"|});
+        assert (contains {|urn:jas:1:hyphenate-bias="0.5"|});
+        assert (contains {|urn:jas:1:hyphenate-capitalized="true"|}));
     ];
   ]

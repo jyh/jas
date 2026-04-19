@@ -198,3 +198,26 @@ type justification_dialog_values = {
     is omitted. Phase 8. *)
 val apply_justification_dialog_to_selection :
   Controller.controller -> justification_dialog_values -> unit
+
+(** 8 Hyphenation-dialog field values (master + 7 sub-controls).
+    [None] means the field was blank (mixed selection) and should
+    not write. Phase 9. *)
+type hyphenation_dialog_values = {
+  hyphenate : bool option;
+  min_word : float option;
+  min_before : float option;
+  min_after : float option;
+  limit : float option;
+  zone : float option;
+  bias : float option;
+  capitalized : bool option;
+}
+
+(** Commit the master toggle + 7 Hyphenation-dialog fields onto every
+    paragraph wrapper tspan in the selection. Identity-value rule:
+    each value at its spec default (master off, 3/1/1, 0, 0, 0, off)
+    writes [None] so the wrapper attribute is omitted. Also mirrors
+    the master toggle to panel.hyphenate so the main panel checkbox
+    reflects the dialog commit. Phase 9. *)
+val apply_hyphenation_dialog_to_selection :
+  State_store.t -> Controller.controller -> hyphenation_dialog_values -> unit

@@ -185,7 +185,16 @@ let tspan_svg (t : Element.tspan) : string =
   let gsx_attr = attr_num "urn:jas:1:glyph-scaling-max" t.jas_glyph_scaling_max in
   let al_attr = attr_num "urn:jas:1:auto-leading" t.jas_auto_leading in
   let swj_attr = attr_str "urn:jas:1:single-word-justify" t.jas_single_word_justify in
-  Printf.sprintf "<tspan%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s>%s</tspan>"
+  (* Phase 1b3 / Phase 9: 7 Hyphenation dialog attrs. Number scalars
+     plus a boolean for capitalized-words. *)
+  let hmw_attr = attr_num "urn:jas:1:hyphenate-min-word" t.jas_hyphenate_min_word in
+  let hmb_attr = attr_num "urn:jas:1:hyphenate-min-before" t.jas_hyphenate_min_before in
+  let hma_attr = attr_num "urn:jas:1:hyphenate-min-after" t.jas_hyphenate_min_after in
+  let hl_attr = attr_num "urn:jas:1:hyphenate-limit" t.jas_hyphenate_limit in
+  let hz_attr = attr_num "urn:jas:1:hyphenate-zone" t.jas_hyphenate_zone in
+  let hb_attr = attr_num "urn:jas:1:hyphenate-bias" t.jas_hyphenate_bias in
+  let hc_attr = attr_bool "urn:jas:1:hyphenate-capitalized" t.jas_hyphenate_capitalized in
+  Printf.sprintf "<tspan%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s>%s</tspan>"
     (attr_str "font-family" t.font_family)
     (attr_f "font-size" t.font_size)
     (attr_str "font-weight" t.font_weight)
@@ -199,6 +208,7 @@ let tspan_svg (t : Element.tspan) : string =
     lsm_attr lsd_attr lsx_attr
     gsm_attr gsd_attr gsx_attr
     al_attr swj_attr
+    hmw_attr hmb_attr hma_attr hl_attr hz_attr hb_attr hc_attr
     (escape_xml t.content)
 
 let rec element_svg indent (elem : Element.element) =
@@ -819,6 +829,20 @@ and parse_tspan_body i attrs : Element.tspan list =
     jas_auto_leading = (match get_attr a "urn:jas:1:auto-leading" with
       | Some s -> float_of_string_opt s | None -> None);
     jas_single_word_justify = get_attr a "urn:jas:1:single-word-justify";
+    jas_hyphenate_min_word = (match get_attr a "urn:jas:1:hyphenate-min-word" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_hyphenate_min_before = (match get_attr a "urn:jas:1:hyphenate-min-before" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_hyphenate_min_after = (match get_attr a "urn:jas:1:hyphenate-min-after" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_hyphenate_limit = (match get_attr a "urn:jas:1:hyphenate-limit" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_hyphenate_zone = (match get_attr a "urn:jas:1:hyphenate-zone" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_hyphenate_bias = (match get_attr a "urn:jas:1:hyphenate-bias" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_hyphenate_capitalized = (match get_attr a "urn:jas:1:hyphenate-capitalized" with
+      | Some v -> Some (v = "true") | None -> None);
   } in
   match rotate_vals with
   | [] -> [base]

@@ -25,3 +25,7 @@
 (test
  (name text_layout_test)
  (libraries jas alcotest))
+
+(test
+ (name hyphenator_test)
+ (libraries jas alcotest))
