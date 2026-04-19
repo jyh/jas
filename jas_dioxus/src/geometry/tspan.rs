@@ -41,9 +41,28 @@ pub struct Tspan {
     /// Marks a tspan as a paragraph wrapper when set to `Some("paragraph")`.
     /// Wrapper tspans implicitly group subsequent content tspans (until
     /// the next wrapper) into one paragraph for the Paragraph panel.
-    /// Phase 1a only round-trips this marker; the paragraph attribute
-    /// fields and Enter/Backspace edit primitives land in Phase 1b.
     pub jas_role: Option<String>,
+    // ── Paragraph attributes (Phase 3b panel-surface subset) ────
+    // Per PARAGRAPH.md §SVG attribute mapping these live on the
+    // paragraph wrapper tspan (jas_role == Some("paragraph")). Phase 3b
+    // adds the five panel-surface attrs that the Paragraph panel reads
+    // when populating its controls; the dialog attrs (justification,
+    // hyphenation params) and the remaining panel-surface space-before /
+    // space-after / first-line-indent (CSS text-indent) land later.
+    /// `jas:left-indent` — pt, unsigned. Effective on paragraph wrapper tspans.
+    pub jas_left_indent: Option<f64>,
+    /// `jas:right-indent` — pt, unsigned. Effective on paragraph wrapper tspans.
+    pub jas_right_indent: Option<f64>,
+    /// `jas:hyphenate` — boolean master switch on the paragraph wrapper tspan.
+    pub jas_hyphenate: Option<bool>,
+    /// `jas:hanging-punctuation` — boolean on the paragraph wrapper tspan.
+    pub jas_hanging_punctuation: Option<bool>,
+    /// `jas:list-style` — single backing attr for both BULLETS_DROPDOWN
+    /// and NUMBERED_LIST_DROPDOWN. Values: bullet-disc, bullet-open-circle,
+    /// bullet-square, bullet-open-square, bullet-dash, bullet-check,
+    /// num-decimal, num-lower-alpha, num-upper-alpha, num-lower-roman,
+    /// num-upper-roman; absent = no marker.
+    pub jas_list_style: Option<String>,
     pub letter_spacing: Option<f64>,
     pub line_height: Option<f64>,
     pub rotate: Option<f64>,
@@ -81,6 +100,11 @@ impl Tspan {
             && self.jas_kerning_mode.is_none()
             && self.jas_no_break.is_none()
             && self.jas_role.is_none()
+            && self.jas_left_indent.is_none()
+            && self.jas_right_indent.is_none()
+            && self.jas_hyphenate.is_none()
+            && self.jas_hanging_punctuation.is_none()
+            && self.jas_list_style.is_none()
             && self.letter_spacing.is_none()
             && self.line_height.is_none()
             && self.rotate.is_none()
@@ -177,6 +201,11 @@ pub fn tspans_to_svg_fragment(tspans: &[Tspan]) -> String {
         if let Some(v) = &t.jas_kerning_mode { attrs.push(("jas:kerning-mode", v.clone())); }
         if let Some(v) = t.jas_no_break { attrs.push(("jas:no-break", v.to_string())); }
         if let Some(v) = &t.jas_role { attrs.push(("jas:role", v.clone())); }
+        if let Some(v) = t.jas_left_indent { attrs.push(("jas:left-indent", fmt_f64(v))); }
+        if let Some(v) = t.jas_right_indent { attrs.push(("jas:right-indent", fmt_f64(v))); }
+        if let Some(v) = t.jas_hyphenate { attrs.push(("jas:hyphenate", v.to_string())); }
+        if let Some(v) = t.jas_hanging_punctuation { attrs.push(("jas:hanging-punctuation", v.to_string())); }
+        if let Some(v) = &t.jas_list_style { attrs.push(("jas:list-style", v.clone())); }
         if let Some(v) = t.letter_spacing { attrs.push(("letter-spacing", fmt_f64(v))); }
         if let Some(v) = t.line_height { attrs.push(("line-height", fmt_f64(v))); }
         if let Some(v) = t.rotate { attrs.push(("rotate", fmt_f64(v))); }
@@ -259,6 +288,11 @@ pub fn tspans_from_svg_fragment(svg_str: &str) -> Option<Vec<Tspan>> {
                 "jas:kerning-mode" => t.jas_kerning_mode = Some(v),
                 "jas:no-break" => t.jas_no_break = Some(v == "true"),
                 "jas:role" => t.jas_role = Some(v),
+                "jas:left-indent" => t.jas_left_indent = v.parse().ok(),
+                "jas:right-indent" => t.jas_right_indent = v.parse().ok(),
+                "jas:hyphenate" => t.jas_hyphenate = Some(v == "true"),
+                "jas:hanging-punctuation" => t.jas_hanging_punctuation = Some(v == "true"),
+                "jas:list-style" => t.jas_list_style = Some(v),
                 "letter-spacing" => t.letter_spacing = v.parse().ok(),
                 "line-height" => t.line_height = v.parse().ok(),
                 "rotate" => t.rotate = v.parse().ok(),
@@ -348,9 +382,11 @@ pub fn merge_tspan_overrides(target: &mut Tspan, source: &Tspan) {
     copy_if_some!(
         baseline_shift, dx, font_family, font_size, font_style,
         font_variant, font_weight, jas_aa_mode, jas_fractional_widths,
-        jas_kerning_mode, jas_no_break, jas_role, letter_spacing,
-        line_height, rotate, style_name, text_decoration, text_rendering,
-        text_transform, transform, xml_lang
+        jas_kerning_mode, jas_no_break, jas_role,
+        jas_left_indent, jas_right_indent, jas_hyphenate,
+        jas_hanging_punctuation, jas_list_style,
+        letter_spacing, line_height, rotate, style_name, text_decoration,
+        text_rendering, text_transform, transform, xml_lang
     );
 }
 
@@ -1472,6 +1508,48 @@ mod tests {
         let back = tspans_from_svg_fragment(&svg).unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].jas_role.as_deref(), Some("paragraph"));
+    }
+
+    // ── Phase 3b panel-surface paragraph attrs ──────────────────────
+
+    #[test]
+    fn has_no_overrides_false_when_phase3b_attrs_set() {
+        let mut t = Tspan::default_tspan();
+        t.jas_left_indent = Some(12.0);
+        assert!(!t.has_no_overrides());
+
+        let mut t = Tspan::default_tspan();
+        t.jas_hyphenate = Some(true);
+        assert!(!t.has_no_overrides());
+
+        let mut t = Tspan::default_tspan();
+        t.jas_list_style = Some("bullet-disc".into());
+        assert!(!t.has_no_overrides());
+    }
+
+    #[test]
+    fn svg_fragment_phase3b_attrs_round_trip() {
+        let mut t = Tspan::default_tspan();
+        t.content = "".into();
+        t.jas_role = Some("paragraph".into());
+        t.jas_left_indent = Some(18.0);
+        t.jas_right_indent = Some(9.0);
+        t.jas_hyphenate = Some(true);
+        t.jas_hanging_punctuation = Some(true);
+        t.jas_list_style = Some("bullet-disc".into());
+        let svg = tspans_to_svg_fragment(&[t]);
+        assert!(svg.contains(r#"jas:left-indent="18""#), "got: {}", svg);
+        assert!(svg.contains(r#"jas:right-indent="9""#));
+        assert!(svg.contains(r#"jas:hyphenate="true""#));
+        assert!(svg.contains(r#"jas:hanging-punctuation="true""#));
+        assert!(svg.contains(r#"jas:list-style="bullet-disc""#));
+        let back = tspans_from_svg_fragment(&svg).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].jas_left_indent, Some(18.0));
+        assert_eq!(back[0].jas_right_indent, Some(9.0));
+        assert_eq!(back[0].jas_hyphenate, Some(true));
+        assert_eq!(back[0].jas_hanging_punctuation, Some(true));
+        assert_eq!(back[0].jas_list_style.as_deref(), Some("bullet-disc"));
     }
 
     // ── char_to_tspan_pos / Affinity ────────────────────────────────
