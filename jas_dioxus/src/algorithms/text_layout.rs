@@ -131,6 +131,15 @@ pub struct ParagraphSegment {
     /// PARAGRAPH.md §Marker rendering. Stored on the segment so
     /// future variants (e.g. wider markers like "iii.") can override.
     pub marker_gap: f64,
+    /// `jas:hanging-punctuation` — Phase 7. When true, certain
+    /// punctuation characters (per PARAGRAPH.md §Hanging
+    /// Punctuation) at the start / end of a rendered line offset
+    /// outside the effective paragraph edge by their own advance
+    /// width so the visible run aligns flush with the box edge.
+    /// Alignment interaction: left-aligned hangs only left-side
+    /// chars at line start; right-aligned hangs only right-side at
+    /// line end; centered hangs both sides.
+    pub hanging_punctuation: bool,
 }
 
 impl Default for ParagraphSegment {
@@ -141,6 +150,7 @@ impl Default for ParagraphSegment {
             space_before: 0.0, space_after: 0.0,
             text_align: TextAlign::Left,
             list_style: None, marker_gap: 0.0,
+            hanging_punctuation: false,
         }
     }
 }
@@ -435,13 +445,52 @@ pub fn layout_with_paragraphs(
             // Trim trailing-space contribution from the displayed
             // width: those glyphs visually disappear at end-of-line.
             let visible_w = trimmed_line_width(line, &para_layout.glyphs);
+            // Phase 7: hanging punctuation. When the segment has
+            // jas:hanging-punctuation=true, certain chars at line
+            // start / end offset outside the effective edge by their
+            // own advance width. Alignment per PARAGRAPH.md:
+            // left-aligned hangs only left side, right-aligned only
+            // right side, centered both. The hang advance is
+            // excluded from the effective_visible_w used for
+            // alignment so the visible-text run aligns flush with
+            // the box edge and the punctuation glyph sits in the
+            // margin.
+            let mut left_hang_w = 0.0_f64;
+            let mut right_hang_w = 0.0_f64;
+            if seg.hanging_punctuation {
+                let allow_left = matches!(seg.text_align,
+                    TextAlign::Left | TextAlign::Center);
+                let allow_right = matches!(seg.text_align,
+                    TextAlign::Right | TextAlign::Center);
+                if allow_left {
+                    if let Some(g) = first_visible_glyph(line, &para_layout.glyphs) {
+                        let c = chars[seg.char_start + g.idx];
+                        if is_left_hanger(c) {
+                            left_hang_w = g.right - g.x;
+                        }
+                    }
+                }
+                if allow_right {
+                    if let Some(g) = last_visible_glyph(line, &para_layout.glyphs) {
+                        let c = chars[seg.char_start + g.idx];
+                        if is_right_hanger(c) {
+                            right_hang_w = g.right - g.x;
+                        }
+                    }
+                }
+            }
+            let effective_visible_w = (visible_w - left_hang_w - right_hang_w).max(0.0);
             let align_shift = match seg.text_align {
-                TextAlign::Left => 0.0,
+                TextAlign::Left => -left_hang_w,
                 TextAlign::Center => {
-                    if line_avail > visible_w { (line_avail - visible_w) / 2.0 } else { 0.0 }
+                    if line_avail > effective_visible_w {
+                        (line_avail - effective_visible_w) / 2.0 - left_hang_w
+                    } else { -left_hang_w }
                 }
                 TextAlign::Right => {
-                    if line_avail > visible_w { line_avail - visible_w } else { 0.0 }
+                    if line_avail > effective_visible_w {
+                        line_avail - effective_visible_w
+                    } else { 0.0 }
                 }
             };
             let total_x_shift = x_shift + align_shift;
@@ -511,6 +560,43 @@ fn trimmed_line_width(line: &LineInfo, glyphs: &[Glyph]) -> f64 {
         }
     }
     w
+}
+
+/// True if `c` may hang into the *left* margin per PARAGRAPH.md
+/// §Hanging Punctuation. Straight quotes hang on either side; the
+/// curly directional variants hang only on their matching side.
+pub fn is_left_hanger(c: char) -> bool {
+    matches!(c,
+        '"' | '\''                  // straight quotes (both sides)
+        | '\u{201C}' | '\u{2018}'   // " ' (left curly quotes)
+        | '\u{00AB}' | '\u{2039}'   // « ‹ (left angle quotes)
+        | '(' | '[' | '{')
+}
+
+/// True if `c` may hang into the *right* margin per PARAGRAPH.md
+/// §Hanging Punctuation. Periods, commas, close quotes / brackets
+/// always qualify when at end-of-line; dashes qualify only at
+/// end-of-line (caller must pass `at_eol = true`).
+pub fn is_right_hanger(c: char) -> bool {
+    matches!(c,
+        '"' | '\''                  // straight quotes (both sides)
+        | '\u{201D}' | '\u{2019}'   // " ' (right curly quotes)
+        | '\u{00BB}' | '\u{203A}'   // » › (right angle quotes)
+        | ')' | ']' | '}'
+        | '.' | ','
+        | '-' | '\u{2013}' | '\u{2014}')  // - – —
+}
+
+/// First non-trailing-whitespace glyph of a line, or None if empty.
+fn first_visible_glyph<'a>(line: &LineInfo, glyphs: &'a [Glyph]) -> Option<&'a Glyph> {
+    glyphs[line.glyph_start..line.glyph_end].iter()
+        .find(|g| !g.is_trailing_space)
+}
+
+/// Last non-trailing-whitespace glyph of a line, or None if empty.
+fn last_visible_glyph<'a>(line: &LineInfo, glyphs: &'a [Glyph]) -> Option<&'a Glyph> {
+    glyphs[line.glyph_start..line.glyph_end].iter().rev()
+        .find(|g| !g.is_trailing_space)
 }
 
 /// Helper: 0.0 for the typical case. Reserved for future leading
@@ -1094,5 +1180,156 @@ mod tests {
         let line1_first = l.glyphs.iter().find(|g| g.line == 1).unwrap();
         assert_eq!(line0_first.x, 12.0);
         assert_eq!(line1_first.x, 12.0);
+    }
+
+    // ── Phase 7: hanging punctuation ─────────────────────────
+
+    #[test]
+    fn left_hanger_class_membership() {
+        for c in ['"', '\'', '\u{201C}', '\u{2018}', '\u{00AB}',
+                  '\u{2039}', '(', '[', '{'] {
+            assert!(is_left_hanger(c), "{} should be a left hanger", c);
+        }
+        for c in ['a', '.', ',', ')', ']', '}', '\u{201D}'] {
+            assert!(!is_left_hanger(c), "{} should not be a left hanger", c);
+        }
+    }
+
+    #[test]
+    fn right_hanger_class_membership() {
+        for c in ['"', '\'', '\u{201D}', '\u{2019}', '\u{00BB}',
+                  '\u{203A}', ')', ']', '}', '.', ',',
+                  '-', '\u{2013}', '\u{2014}'] {
+            assert!(is_right_hanger(c), "{} should be a right hanger", c);
+        }
+        for c in ['a', '\u{201C}', '\u{2018}', '(', '[', '{'] {
+            assert!(!is_right_hanger(c), "{} should not be a right hanger", c);
+        }
+    }
+
+    #[test]
+    fn hanging_off_no_effect() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 4,
+            text_align: TextAlign::Left,
+            hanging_punctuation: false,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("(ab)", 100.0, 16.0, &segs, m.as_ref());
+        assert_eq!(l.glyphs[0].x, 0.0);  // '(' at x=0, no shift
+    }
+
+    #[test]
+    fn left_aligned_left_hanger_shifts_into_left_margin() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 4,
+            text_align: TextAlign::Left,
+            hanging_punctuation: true,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("(abc", 100.0, 16.0, &segs, m.as_ref());
+        // '(' shifts left by its advance (10) so 'a' lands at x=0.
+        assert_eq!(l.glyphs[0].x, -10.0);
+        assert_eq!(l.glyphs[1].x, 0.0);
+    }
+
+    #[test]
+    fn left_aligned_right_hanger_does_not_shift() {
+        // Spec: left-aligned hangs only left side. A right-hanger
+        // at line end stays inside the box.
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 3,
+            text_align: TextAlign::Left,
+            hanging_punctuation: true,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("ab.", 100.0, 16.0, &segs, m.as_ref());
+        assert_eq!(l.glyphs[0].x, 0.0);
+        assert_eq!(l.glyphs[2].x, 20.0);  // '.' inside the box
+    }
+
+    #[test]
+    fn right_aligned_right_hanger_sticks_outside_right_edge() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 3,
+            text_align: TextAlign::Right,
+            hanging_punctuation: true,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("ab.", 100.0, 16.0, &segs, m.as_ref());
+        // 'b' (last non-hanger) right edge at x=100; '.' at x=100.
+        assert_eq!(l.glyphs[1].right, 100.0);
+        assert_eq!(l.glyphs[2].x, 100.0);
+    }
+
+    #[test]
+    fn right_aligned_left_hanger_does_not_shift() {
+        // Spec: right-aligned hangs only right side.
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 3,
+            text_align: TextAlign::Right,
+            hanging_punctuation: true,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("(ab", 100.0, 16.0, &segs, m.as_ref());
+        // '(' is part of the line; right-aligned places 'b' right
+        // edge at 100 — '(' just shifts uniformly.
+        assert_eq!(l.glyphs[2].right, 100.0);
+        assert_eq!(l.glyphs[0].x, 70.0);  // '(' inside (70..80)
+    }
+
+    #[test]
+    fn centered_both_sides_hang() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 4,
+            text_align: TextAlign::Center,
+            hanging_punctuation: true,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("(ab.", 100.0, 16.0, &segs, m.as_ref());
+        // effective_visible_w = 40 - 10 - 10 = 20.
+        // shift = (100 - 20)/2 - 10 = 30.
+        // '(' at 30 (sticking out left of "ab" centered run);
+        // 'a' at 40, 'b' at 50, '.' at 60.
+        assert_eq!(l.glyphs[0].x, 30.0);
+        assert_eq!(l.glyphs[1].x, 40.0);
+        assert_eq!(l.glyphs[2].x, 50.0);
+        assert_eq!(l.glyphs[3].x, 60.0);
+    }
+
+    #[test]
+    fn dash_hangs_at_eol_when_right_aligned() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 3,
+            text_align: TextAlign::Right,
+            hanging_punctuation: true,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("ab-", 100.0, 16.0, &segs, m.as_ref());
+        assert_eq!(l.glyphs[2].x, 100.0);  // '-' hangs right
+    }
+
+    #[test]
+    fn hanging_with_left_indent_offsets_relative_to_indent() {
+        // left_indent=20 + left-hanger '(': '(' goes to x=10 (20-10),
+        // 'a' to x=20.
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 3,
+            left_indent: 20.0,
+            text_align: TextAlign::Left,
+            hanging_punctuation: true,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("(ab", 100.0, 16.0, &segs, m.as_ref());
+        assert_eq!(l.glyphs[0].x, 10.0);
+        assert_eq!(l.glyphs[1].x, 20.0);
     }
 }
