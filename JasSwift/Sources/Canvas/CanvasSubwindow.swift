@@ -767,6 +767,27 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
                 }
             }
         }
+        // Phase 6: list markers. Walk the segments after laying out
+        // the body text and draw each list paragraph's marker glyph
+        // at x = element.x + leftIndent on the first-line baseline.
+        // Counter values are computed once across all segments so
+        // the run rule (consecutive same-style num-* paragraphs
+        // count up; anything else resets) holds across the element.
+        if !pSegs.isEmpty {
+            let counters = computeCounters(pSegs)
+            for (si, seg) in pSegs.enumerated() {
+                guard let style = seg.listStyle, !style.isEmpty else { continue }
+                let marker = markerText(style, counter: counters[si])
+                if marker.isEmpty { continue }
+                guard let firstLine = lay.lines.first(where: { $0.start >= seg.charStart }) else { continue }
+                let baselineY = v.y + firstLine.baselineY + yShift
+                let markerX = v.x + seg.leftIndent
+                let str = NSAttributedString(string: marker, attributes: attrs)
+                let ctLine = CTLineCreateWithAttributedString(str)
+                ctx.textPosition = CGPoint(x: markerX, y: baselineY)
+                CTLineDraw(ctLine, ctx)
+            }
+        }
         ctx.restoreGState()
 
     case .textPath(let v):

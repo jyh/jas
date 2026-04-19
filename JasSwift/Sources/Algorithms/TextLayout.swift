@@ -275,19 +275,30 @@ public struct ParagraphSegment: Equatable {
     public var rightIndent: Double
     /// `text-indent` — additional x offset on the *first* line only.
     /// Signed; negative produces a hanging indent. Phase 5 supports
-    /// non-negative values; negative falls back to 0 until Phase 6.
+    /// non-negative values; negative falls back to 0. Ignored when
+    /// `listStyle` is non-nil per PARAGRAPH.md §Marker rendering.
     public var firstLineIndent: Double
     /// `jas:space-before` — extra vertical gap above this paragraph.
     /// Always 0 for the first paragraph in the element.
     public var spaceBefore: Double
     public var spaceAfter: Double
     public var textAlign: TextAlign
+    /// `jas:list-style` — Phase 6. When non-nil, the paragraph is a
+    /// list item: layout pushes every line by an extra `markerGap`
+    /// (so the marker has room before the text) and ignores
+    /// `firstLineIndent`. The marker glyph itself is drawn at
+    /// `x = leftIndent` by the renderer.
+    public var listStyle: String?
+    /// Gap between marker and text. Phase 6 uses a fixed 12pt per
+    /// PARAGRAPH.md §Marker rendering.
+    public var markerGap: Double
 
     public init(charStart: Int = 0, charEnd: Int = 0,
                 leftIndent: Double = 0, rightIndent: Double = 0,
                 firstLineIndent: Double = 0,
                 spaceBefore: Double = 0, spaceAfter: Double = 0,
-                textAlign: TextAlign = .left) {
+                textAlign: TextAlign = .left,
+                listStyle: String? = nil, markerGap: Double = 0) {
         self.charStart = charStart
         self.charEnd = charEnd
         self.leftIndent = leftIndent
@@ -296,6 +307,8 @@ public struct ParagraphSegment: Equatable {
         self.spaceBefore = spaceBefore
         self.spaceAfter = spaceAfter
         self.textAlign = textAlign
+        self.listStyle = listStyle
+        self.markerGap = markerGap
     }
 }
 
@@ -365,13 +378,20 @@ public func layoutTextWithParagraphs(_ content: String,
     for (pi, seg) in segs.enumerated() {
         if pi > 0 { yOffset += seg.spaceBefore }
         let slice = String(chars[seg.charStart..<seg.charEnd])
+        // Phase 6: an active list adds markerGap to the effective
+        // left indent (so the marker has room before the text) AND
+        // suppresses firstLineIndent — the marker already occupies
+        // the first-line position so a separate first-line offset
+        // would push the text away from the marker.
+        let hasList = seg.listStyle != nil
+        let listIndent: Double = hasList ? seg.markerGap : 0
         let effectiveMax: Double = maxWidth > 0
-            ? max(0, maxWidth - seg.leftIndent - seg.rightIndent) : 0
+            ? max(0, maxWidth - seg.leftIndent - listIndent - seg.rightIndent) : 0
         let para = layoutText(slice, maxWidth: effectiveMax, fontSize: fontSize, measure: measure)
-        let firstLineExtra = max(0, seg.firstLineIndent)
+        let firstLineExtra: Double = hasList ? 0 : max(0, seg.firstLineIndent)
         let firstLineNoInCombined = allLines.count
         for (li, line) in para.lines.enumerated() {
-            let xShift = seg.leftIndent + (li == 0 ? firstLineExtra : 0)
+            let xShift = seg.leftIndent + listIndent + (li == 0 ? firstLineExtra : 0)
             let lineAvail: Double = effectiveMax > 0
                 ? max(0, effectiveMax - (li == 0 ? firstLineExtra : 0)) : 0
             let visibleW = trimmedLineWidth(line, para.glyphs)
