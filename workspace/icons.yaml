@@ -612,3 +612,107 @@ icons:
         stroke="currentColor" stroke-width="1" fill="none"/>
       <path d="M3,19 L5,17 L3,15 L1,17 Z M21,19 L23,17 L21,15 L19,17 Z M12,5 L14,3 L12,1 L10,3 Z"
         fill="currentColor"/>
+
+  # ── Paragraph panel icons ──────────────────────────────────
+  # Standard convention: 4 horizontal "text lines" at y=4/7/10/13,
+  # stroke-width 1.4, currentColor, rounded line caps. Margin /
+  # divider guides at stroke-width 0.5–1.5 and 0.5–0.6 opacity.
+
+  para_align_left:        # 4 lines flush-left, ragged right
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="4" x2="13" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="7" x2="10" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="13" x2="8" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_align_center:      # 4 lines centered, both edges ragged
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="4" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="5" y1="13" x2="11" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_align_right:       # 4 lines flush-right, ragged left
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="3" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="6" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="8" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_justify_left:      # 3 full lines + last short flush-left
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="13" x2="8" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_justify_center:    # 3 full lines + last short centered
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="5" y1="13" x2="11" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_justify_right:     # 3 full lines + last short flush-right
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="8" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_justify_all:       # 4 full lines, every line edge-to-edge
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_left_indent:       # left margin bar + lines indented from it
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="2" x2="2" y2="14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+      <line x1="6" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="6" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="6" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="6" y1="13" x2="12" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+
+  para_right_indent:      # right margin bar + lines indented from it
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="14" y1="2" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+      <line x1="2" y1="4" x2="10" y2="4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="3" y1="7" x2="10" y2="7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="10" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="4" y1="13" x2="10" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+
+  para_first_line_indent: # first line starts indented; rest flush-left
+    viewbox: "0 0 16 16"
+    svg: >
+      <polygon points="2,2.5 5,4 2,5.5" fill="currentColor" opacity="0.7"/>
+      <line x1="6" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="13" x2="11" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_space_before:      # divider on top, down-arrow into a paragraph below
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="2" x2="14" y2="2" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
+      <polyline points="6,4 8,7 10,4" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="2" y1="10" x2="13" y2="10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="13" x2="11" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+
+  para_space_after:       # paragraph on top, down-arrow into divider below
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="3" x2="13" y2="3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <polyline points="6,9 8,12 10,9" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="2" y1="14" x2="14" y2="14" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
