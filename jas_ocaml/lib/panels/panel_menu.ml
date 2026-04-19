@@ -160,64 +160,9 @@ let dispatch_yaml_action
          let effects = match List.assoc_opt "effects" action_def with
            | Some (`List e) -> e | _ -> []
          in
-         (* Build active_document view from model.document *)
-         let layers = m#document.Document.layers in
-         let top_level_layers = Array.to_list layers
-           |> List.mapi (fun i e -> (i, e))
-           |> List.filter_map (fun (i, e) ->
-             match e with
-             | Element.Layer le ->
-               let vis = match Element.get_visibility e with
-                 | Element.Invisible -> "invisible"
-                 | Element.Outline -> "outline"
-                 | Element.Preview -> "preview"
-               in
-               let path_json = `Assoc [("__path__", `List [`Int i])] in
-               Some (`Assoc [
-                 ("kind", `String "Layer");
-                 ("name", `String le.name);
-                 ("common", `Assoc [
-                   ("visibility", `String vis);
-                   ("locked", `Bool (Element.is_locked e));
-                 ]);
-                 ("path", path_json);
-               ])
-             | _ -> None)
+         let active_doc =
+           Active_document_view.build ~panel_selection (Some m)
          in
-         let top_level_layer_paths = List.mapi (fun i e ->
-           match e with
-           | Element.Layer _ -> Some (`Assoc [("__path__", `List [`Int i])])
-           | _ -> None
-         ) (Array.to_list layers) |> List.filter_map (fun x -> x) in
-         (* Phase 3 Group C: next_layer_name ("Layer N" for smallest
-            unused N) and new_layer_insert_index (min of selected
-            top-level indices + 1, else length). *)
-         let layer_names =
-           Array.to_list layers
-           |> List.filter_map (function
-             | Element.Layer le -> Some le.name
-             | _ -> None)
-         in
-         let rec find_n n =
-           let candidate = Printf.sprintf "Layer %d" n in
-           if List.mem candidate layer_names then find_n (n + 1)
-           else candidate
-         in
-         let next_layer_name = find_n 1 in
-         let top_level_selected = List.filter_map (function
-           | [i] -> Some i
-           | _ -> None) panel_selection in
-         let new_layer_insert_index = match List.sort compare top_level_selected with
-           | [] -> Array.length layers
-           | first :: _ -> first + 1
-         in
-         let active_doc = `Assoc [
-           ("top_level_layers", `List top_level_layers);
-           ("top_level_layer_paths", `List top_level_layer_paths);
-           ("layers_panel_selection_count", `Int (List.length panel_selection));
-           ("next_layer_name", `String next_layer_name);
-           ("new_layer_insert_index", `Int new_layer_insert_index);
-         ] in
          (* panel.layers_panel_selection: inject as list of __path__
             markers for Group B actions to iterate via reverse(...). *)
          let selection_json = `List (List.map (fun p ->
