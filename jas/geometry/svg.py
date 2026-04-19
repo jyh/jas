@@ -119,6 +119,19 @@ def _tspan_svg(t) -> str:
         attrs += f' urn:jas:1:hanging-punctuation="{"true" if t.jas_hanging_punctuation else "false"}"'
     if t.jas_list_style is not None:
         attrs += f' urn:jas:1:list-style="{escape(t.jas_list_style)}"'
+    # Phase 1b1 panel-surface remainder. text-align / text-align-last /
+    # text-indent serialise as bare CSS-style attribute names; the
+    # spacing pair is jas-namespaced.
+    if t.text_align is not None:
+        attrs += f' text-align="{escape(t.text_align)}"'
+    if t.text_align_last is not None:
+        attrs += f' text-align-last="{escape(t.text_align_last)}"'
+    if t.text_indent is not None:
+        attrs += f' text-indent="{_fmt(t.text_indent)}"'
+    if t.jas_space_before is not None:
+        attrs += f' urn:jas:1:space-before="{_fmt(t.jas_space_before)}"'
+    if t.jas_space_after is not None:
+        attrs += f' urn:jas:1:space-after="{_fmt(t.jas_space_after)}"'
     return f"<tspan{attrs}>{escape(t.content)}</tspan>"
 
 
@@ -686,6 +699,11 @@ def _parse_tspan(node) -> list:
     jas_hyphenate = _opt_bool(node.get("urn:jas:1:hyphenate"))
     jas_hanging_punctuation = _opt_bool(node.get("urn:jas:1:hanging-punctuation"))
     jas_list_style = node.get("urn:jas:1:list-style")
+    text_align = node.get("text-align")
+    text_align_last = node.get("text-align-last")
+    text_indent = _opt_float(node.get("text-indent"))
+    jas_space_before = _opt_float(node.get("urn:jas:1:space-before"))
+    jas_space_after = _opt_float(node.get("urn:jas:1:space-after"))
     base_kwargs = dict(
         font_family=font_family, font_size=font_size,
         font_style=font_style, font_weight=font_weight,
@@ -695,6 +713,11 @@ def _parse_tspan(node) -> list:
         jas_hyphenate=jas_hyphenate,
         jas_hanging_punctuation=jas_hanging_punctuation,
         jas_list_style=jas_list_style,
+        text_align=text_align,
+        text_align_last=text_align_last,
+        text_indent=text_indent,
+        jas_space_before=jas_space_before,
+        jas_space_after=jas_space_after,
     )
     if not rotate_vals:
         return [Tspan(id=0, content=content, **base_kwargs)]

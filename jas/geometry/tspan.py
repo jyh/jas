@@ -72,6 +72,16 @@ class Tspan:
     # num-decimal / num-lower-alpha / num-upper-alpha / num-lower-roman /
     # num-upper-roman; absent = no marker.
     jas_list_style: Optional[str] = None
+    # ── Phase 1b1 panel-surface remainder ───────────────────────
+    # text_align + text_align_last drive the seven-button alignment
+    # radio group via PARAGRAPH.md alignment sub-mapping. text_indent
+    # backs FIRST_LINE_INDENT_DROPDOWN and is signed (negative
+    # produces a hanging indent).
+    text_align: Optional[str] = None
+    text_align_last: Optional[str] = None
+    text_indent: Optional[float] = None
+    jas_space_before: Optional[float] = None
+    jas_space_after: Optional[float] = None
     letter_spacing: Optional[float] = None
     line_height: Optional[float] = None
     rotate: Optional[float] = None
@@ -107,6 +117,11 @@ class Tspan:
                 and self.jas_hyphenate is None
                 and self.jas_hanging_punctuation is None
                 and self.jas_list_style is None
+                and self.text_align is None
+                and self.text_align_last is None
+                and self.text_indent is None
+                and self.jas_space_before is None
+                and self.jas_space_after is None
                 and self.letter_spacing is None
                 and self.line_height is None
                 and self.rotate is None
@@ -175,6 +190,11 @@ def tspans_to_json_clipboard(tspans: list[Tspan]) -> str:
         if t.jas_hyphenate is not None: obj["jas_hyphenate"] = t.jas_hyphenate
         if t.jas_hanging_punctuation is not None: obj["jas_hanging_punctuation"] = t.jas_hanging_punctuation
         if t.jas_list_style is not None: obj["jas_list_style"] = t.jas_list_style
+        if t.text_align is not None: obj["text_align"] = t.text_align
+        if t.text_align_last is not None: obj["text_align_last"] = t.text_align_last
+        if t.text_indent is not None: obj["text_indent"] = t.text_indent
+        if t.jas_space_before is not None: obj["jas_space_before"] = t.jas_space_before
+        if t.jas_space_after is not None: obj["jas_space_after"] = t.jas_space_after
         if t.letter_spacing is not None: obj["letter_spacing"] = t.letter_spacing
         if t.line_height is not None: obj["line_height"] = t.line_height
         if t.rotate is not None: obj["rotate"] = t.rotate
@@ -228,6 +248,11 @@ def tspans_from_json_clipboard(json_str: str) -> Optional[tuple[Tspan, ...]]:
             jas_hyphenate=obj.get("jas_hyphenate"),
             jas_hanging_punctuation=obj.get("jas_hanging_punctuation"),
             jas_list_style=obj.get("jas_list_style"),
+            text_align=obj.get("text_align"),
+            text_align_last=obj.get("text_align_last"),
+            text_indent=obj.get("text_indent"),
+            jas_space_before=obj.get("jas_space_before"),
+            jas_space_after=obj.get("jas_space_after"),
             letter_spacing=obj.get("letter_spacing"),
             line_height=obj.get("line_height"),
             rotate=obj.get("rotate"),
@@ -289,6 +314,14 @@ def tspans_to_svg_fragment(tspans: list[Tspan]) -> str:
             attrs.append(("jas:hanging-punctuation", "true" if t.jas_hanging_punctuation else "false"))
         if t.jas_list_style is not None:
             attrs.append(("jas:list-style", t.jas_list_style))
+        if t.text_align is not None: attrs.append(("text-align", t.text_align))
+        if t.text_align_last is not None: attrs.append(("text-align-last", t.text_align_last))
+        if t.text_indent is not None:
+            attrs.append(("text-indent", _fmt_float_clipboard(t.text_indent)))
+        if t.jas_space_before is not None:
+            attrs.append(("jas:space-before", _fmt_float_clipboard(t.jas_space_before)))
+        if t.jas_space_after is not None:
+            attrs.append(("jas:space-after", _fmt_float_clipboard(t.jas_space_after)))
         if t.letter_spacing is not None: attrs.append(("letter-spacing", _fmt_float_clipboard(t.letter_spacing)))
         if t.line_height is not None: attrs.append(("line-height", _fmt_float_clipboard(t.line_height)))
         if t.rotate is not None: attrs.append(("rotate", _fmt_float_clipboard(t.rotate)))
@@ -362,6 +395,17 @@ def tspans_from_svg_fragment(svg_str: str) -> Optional[tuple[Tspan, ...]]:
             elif k == "jas:hyphenate": kw["jas_hyphenate"] = (v == "true")
             elif k == "jas:hanging-punctuation": kw["jas_hanging_punctuation"] = (v == "true")
             elif k == "jas:list-style": kw["jas_list_style"] = v
+            elif k == "text-align": kw["text_align"] = v
+            elif k == "text-align-last": kw["text_align_last"] = v
+            elif k == "text-indent":
+                try: kw["text_indent"] = float(v)
+                except ValueError: pass
+            elif k == "jas:space-before":
+                try: kw["jas_space_before"] = float(v)
+                except ValueError: pass
+            elif k == "jas:space-after":
+                try: kw["jas_space_after"] = float(v)
+                except ValueError: pass
             elif k == "letter-spacing":
                 try: kw["letter_spacing"] = float(v)
                 except ValueError: pass
@@ -408,6 +452,11 @@ def merge_tspan_overrides(target: Tspan, source: Tspan) -> Tspan:
         jas_hyphenate=source.jas_hyphenate if source.jas_hyphenate is not None else target.jas_hyphenate,
         jas_hanging_punctuation=source.jas_hanging_punctuation if source.jas_hanging_punctuation is not None else target.jas_hanging_punctuation,
         jas_list_style=source.jas_list_style if source.jas_list_style is not None else target.jas_list_style,
+        text_align=source.text_align if source.text_align is not None else target.text_align,
+        text_align_last=source.text_align_last if source.text_align_last is not None else target.text_align_last,
+        text_indent=source.text_indent if source.text_indent is not None else target.text_indent,
+        jas_space_before=source.jas_space_before if source.jas_space_before is not None else target.jas_space_before,
+        jas_space_after=source.jas_space_after if source.jas_space_after is not None else target.jas_space_after,
         letter_spacing=source.letter_spacing if source.letter_spacing is not None else target.letter_spacing,
         line_height=source.line_height if source.line_height is not None else target.line_height,
         rotate=source.rotate if source.rotate is not None else target.rotate,
@@ -589,6 +638,8 @@ _ATTR_SLOTS = (
     "jas_kerning_mode", "jas_no_break", "jas_role",
     "jas_left_indent", "jas_right_indent", "jas_hyphenate",
     "jas_hanging_punctuation", "jas_list_style",
+    "text_align", "text_align_last", "text_indent",
+    "jas_space_before", "jas_space_after",
     "letter_spacing", "line_height", "rotate", "style_name",
     "text_decoration", "text_rendering", "text_transform",
     "transform", "xml_lang",
