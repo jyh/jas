@@ -536,10 +536,19 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             } else {
                 crate::workspace::app_state::parse_pt(&e.line_height).unwrap_or(effective_fs)
             };
-            let layout = crate::algorithms::text_layout::layout(
+            // Phase 5: build paragraph segments from the wrapper
+            // tspans (jas_role == "paragraph"). The wrapper's
+            // [left/right/first-line] indent and [space-before/after]
+            // attributes are pt — convert to px (1pt == 1px in the
+            // canvas coordinate space we use). Alignment maps the
+            // §Alignment sub-mapping per area / point text.
+            let segments = crate::algorithms::text_layout_paragraph::
+                build_segments_from_text(&e.tspans, &content_str, e.is_area_text());
+            let layout = crate::algorithms::text_layout::layout_with_paragraphs(
                 &content_str,
                 max_w,
                 leading_px,
+                &segments,
                 measure.as_ref(),
             );
             let chars: Vec<char> = content_str.chars().collect();
@@ -549,11 +558,19 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 let s: String = chars[line.start..line.end].iter().collect();
                 let s = s.trim_end_matches('\n');
                 let baseline = e.y + line.baseline_y + y_shift;
+                // Per-line x shift comes from the first glyph's x,
+                // which the paragraph-aware layout already shifted
+                // by left_indent + first_line_indent + alignment.
+                let line_x_shift = layout.glyphs
+                    .get(line.glyph_start)
+                    .map(|g| g.x)
+                    .unwrap_or(0.0);
+                let line_x = e.x + line_x_shift;
                 if rotate_rad == 0.0 {
                     // Fast path: single fill_text per line. The CSS
                     // letterSpacing property set earlier handles the
                     // inter-glyph advance.
-                    ctx.fill_text(s, e.x, baseline).ok();
+                    ctx.fill_text(s, line_x, baseline).ok();
                 } else {
                     // Per-glyph rotation: each glyph rotates around
                     // its own (cx, baseline). fill_text takes only a
@@ -561,7 +578,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                     // advance cx manually. letter_spacing is folded
                     // into the advance the same way the fast path
                     // relies on CSS letterSpacing.
-                    let mut cx = e.x;
+                    let mut cx = line_x;
                     for ch in s.chars() {
                         let ch_str = ch.to_string();
                         ctx.save();
@@ -575,7 +592,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 if has_underline || has_strike {
                     let w = measure(s);
                     draw_text_decorations(
-                        ctx, e.x, baseline, w, effective_fs,
+                        ctx, line_x, baseline, w, effective_fs,
                         has_underline, has_strike, e.fill.as_ref(),
                     );
                 }
