@@ -191,3 +191,70 @@ class TestPhase3bParagraphAttrReads:
         assert store.get_panel("paragraph_panel_content", "left_indent") == 0
         assert store.get_panel("paragraph_panel_content", "bullets") == ""
         assert store.get_panel("paragraph_panel_content", "hyphenate") is False
+
+
+class TestPhase3cMixedStateAggregation:
+    """Phase 3c: aggregate paragraph attrs across multiple wrappers
+    in the selection. Agree → write; disagree → omit override
+    (panel keeps its prior value)."""
+
+    def test_agrees_across_wrappers(self):
+        from geometry.element import Text
+        from geometry.tspan import Tspan
+        w1 = Tspan(id=0, content="", jas_role="paragraph",
+                   jas_left_indent=12.0, jas_hyphenate=True,
+                   jas_list_style="bullet-disc")
+        c1 = Tspan(id=1, content="first ")
+        w2 = Tspan(id=2, content="", jas_role="paragraph",
+                   jas_left_indent=12.0, jas_hyphenate=True,
+                   jas_list_style="bullet-disc")
+        c2 = Tspan(id=3, content="second")
+        area = Text(x=0, y=0, content="first second",
+                    tspans=(w1, c1, w2, c2),
+                    font_family="sans-serif", font_size=12,
+                    width=200, height=100)
+        model = _Model([((0, 0), area)])
+        store = _store_with_phase3b_panel()
+        sync_paragraph_panel_from_selection(store, model)
+        assert store.get_panel("paragraph_panel_content", "left_indent") == 12.0
+        assert store.get_panel("paragraph_panel_content", "hyphenate") is True
+        assert store.get_panel("paragraph_panel_content", "bullets") == "bullet-disc"
+
+    def test_mixed_numeric_omits_key(self):
+        # Two wrappers disagreeing on left_indent → no write; panel
+        # keeps the YAML default 0.
+        from geometry.element import Text
+        from geometry.tspan import Tspan
+        w1 = Tspan(id=0, content="", jas_role="paragraph", jas_left_indent=12.0)
+        c1 = Tspan(id=1, content="first ")
+        w2 = Tspan(id=2, content="", jas_role="paragraph", jas_left_indent=24.0)
+        c2 = Tspan(id=3, content="second")
+        area = Text(x=0, y=0, content="first second",
+                    tspans=(w1, c1, w2, c2),
+                    font_family="sans-serif", font_size=12,
+                    width=200, height=100)
+        model = _Model([((0, 0), area)])
+        store = _store_with_phase3b_panel()
+        sync_paragraph_panel_from_selection(store, model)
+        assert store.get_panel("paragraph_panel_content", "left_indent") == 0
+
+    def test_mixed_list_style_clears_both_dropdowns(self):
+        # Wrappers split bullet vs numbered → no write; both
+        # dropdowns keep their YAML defaults of "".
+        from geometry.element import Text
+        from geometry.tspan import Tspan
+        w1 = Tspan(id=0, content="", jas_role="paragraph",
+                   jas_list_style="bullet-disc")
+        c1 = Tspan(id=1, content="•")
+        w2 = Tspan(id=2, content="", jas_role="paragraph",
+                   jas_list_style="num-decimal")
+        c2 = Tspan(id=3, content="1.")
+        area = Text(x=0, y=0, content="•1.",
+                    tspans=(w1, c1, w2, c2),
+                    font_family="sans-serif", font_size=12,
+                    width=200, height=100)
+        model = _Model([((0, 0), area)])
+        store = _store_with_phase3b_panel()
+        sync_paragraph_panel_from_selection(store, model)
+        assert store.get_panel("paragraph_panel_content", "bullets") == ""
+        assert store.get_panel("paragraph_panel_content", "numbered_list") == ""
