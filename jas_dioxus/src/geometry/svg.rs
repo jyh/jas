@@ -699,6 +699,27 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
     if let Some(v) = &t.jas_single_word_justify {
         attrs.push_str(&format!(" urn:jas:1:single-word-justify=\"{}\"", escape_xml(v)));
     }
+    if let Some(v) = t.jas_hyphenate_min_word {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate-min-word=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_hyphenate_min_before {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate-min-before=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_hyphenate_min_after {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate-min-after=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_hyphenate_limit {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate-limit=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_hyphenate_zone {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate-zone=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_hyphenate_bias {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate-bias=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_hyphenate_capitalized {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate-capitalized=\"{}\"", v));
+    }
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
 
@@ -770,6 +791,20 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
         jas_auto_leading: node.attrs.get("urn:jas:1:auto-leading")
             .and_then(|s| s.parse::<f64>().ok()),
         jas_single_word_justify: node.attrs.get("urn:jas:1:single-word-justify").cloned(),
+        jas_hyphenate_min_word: node.attrs.get("urn:jas:1:hyphenate-min-word")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_hyphenate_min_before: node.attrs.get("urn:jas:1:hyphenate-min-before")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_hyphenate_min_after: node.attrs.get("urn:jas:1:hyphenate-min-after")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_hyphenate_limit: node.attrs.get("urn:jas:1:hyphenate-limit")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_hyphenate_zone: node.attrs.get("urn:jas:1:hyphenate-zone")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_hyphenate_bias: node.attrs.get("urn:jas:1:hyphenate-bias")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_hyphenate_capitalized: node.attrs.get("urn:jas:1:hyphenate-capitalized")
+            .map(|v| v == "true"),
         ..Tspan::default_tspan()
     };
     // Multi-value rotate: SVG allows `rotate="a1 a2 a3 …"` on a tspan,
@@ -2334,5 +2369,49 @@ mod tests {
         assert_eq!(w.jas_glyph_scaling_max, Some(105.0));
         assert_eq!(w.jas_auto_leading, Some(140.0));
         assert_eq!(w.jas_single_word_justify.as_deref(), Some("left"));
+    }
+
+    #[test]
+    fn svg_phase9_hyphenation_attrs_round_trip_through_document() {
+        // Phase 1b3 / Phase 9: 7 Hyphenation dialog attrs on a
+        // paragraph wrapper round-trip through document SVG.
+        use crate::geometry::tspan::Tspan;
+        let mut doc = Document::default();
+        let mut t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut wrapper = Tspan::default_tspan();
+        wrapper.id = 0;
+        wrapper.jas_role = Some("paragraph".into());
+        wrapper.jas_hyphenate_min_word = Some(6.0);
+        wrapper.jas_hyphenate_min_before = Some(3.0);
+        wrapper.jas_hyphenate_min_after = Some(2.0);
+        wrapper.jas_hyphenate_limit = Some(2.0);
+        wrapper.jas_hyphenate_zone = Some(36.0);
+        wrapper.jas_hyphenate_bias = Some(0.5);
+        wrapper.jas_hyphenate_capitalized = Some(true);
+        t.tspans = vec![
+            wrapper,
+            Tspan { id: 1, content: "x".into(), ..Tspan::default_tspan() },
+        ];
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains(r#"urn:jas:1:hyphenate-min-word="6""#));
+        assert!(svg.contains(r#"urn:jas:1:hyphenate-min-before="3""#));
+        assert!(svg.contains(r#"urn:jas:1:hyphenate-min-after="2""#));
+        assert!(svg.contains(r#"urn:jas:1:hyphenate-limit="2""#));
+        assert!(svg.contains(r#"urn:jas:1:hyphenate-zone="36""#));
+        assert!(svg.contains(r#"urn:jas:1:hyphenate-bias="0.5""#));
+        assert!(svg.contains(r#"urn:jas:1:hyphenate-capitalized="true""#));
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        let w = &t.tspans[0];
+        assert_eq!(w.jas_hyphenate_min_word, Some(6.0));
+        assert_eq!(w.jas_hyphenate_min_before, Some(3.0));
+        assert_eq!(w.jas_hyphenate_min_after, Some(2.0));
+        assert_eq!(w.jas_hyphenate_limit, Some(2.0));
+        assert_eq!(w.jas_hyphenate_zone, Some(36.0));
+        assert_eq!(w.jas_hyphenate_bias, Some(0.5));
+        assert_eq!(w.jas_hyphenate_capitalized, Some(true));
     }
 }

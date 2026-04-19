@@ -624,6 +624,13 @@ fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
         jas_glyph_scaling_max: v["jas_glyph_scaling_max"].as_f64(),
         jas_auto_leading: v["jas_auto_leading"].as_f64(),
         jas_single_word_justify: parse_str_opt(&v["jas_single_word_justify"]),
+        jas_hyphenate_min_word: v["jas_hyphenate_min_word"].as_f64(),
+        jas_hyphenate_min_before: v["jas_hyphenate_min_before"].as_f64(),
+        jas_hyphenate_min_after: v["jas_hyphenate_min_after"].as_f64(),
+        jas_hyphenate_limit: v["jas_hyphenate_limit"].as_f64(),
+        jas_hyphenate_zone: v["jas_hyphenate_zone"].as_f64(),
+        jas_hyphenate_bias: v["jas_hyphenate_bias"].as_f64(),
+        jas_hyphenate_capitalized: v["jas_hyphenate_capitalized"].as_bool(),
     }
 }
 

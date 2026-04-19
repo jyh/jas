@@ -1376,6 +1376,116 @@ impl AppState {
         }
     }
 
+    /// Commit the 8 Hyphenation-dialog field values onto every
+    /// paragraph wrapper tspan in the selection. Per the
+    /// identity-value rule each value at its spec default
+    /// (master off, min-word 3, min-before 1, min-after 1,
+    /// limit 0, zone 0, bias 0, capitalized off) writes `None` so
+    /// the wrapper attribute is omitted. Master mirrors panel
+    /// state — sync_paragraph_panel_from_selection picks up the
+    /// new value next render. Phase 9.
+    pub(crate) fn apply_hyphenation_dialog_to_selection(
+        &mut self,
+        v: crate::interpreter::renderer::HyphenationDialogValues,
+    ) {
+        use crate::geometry::element::Element;
+        fn opt_n(value: Option<f64>, default: f64) -> Option<f64> {
+            value.and_then(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
+        }
+        fn opt_b(value: Option<bool>) -> Option<bool> {
+            value.and_then(|v| if !v { None } else { Some(true) })
+        }
+        let hyph = opt_b(v.hyphenate);
+        let min_word = opt_n(v.min_word, 3.0);
+        let min_before = opt_n(v.min_before, 1.0);
+        let min_after = opt_n(v.min_after, 1.0);
+        let limit = opt_n(v.limit, 0.0);
+        let zone = opt_n(v.zone, 0.0);
+        let bias = opt_n(v.bias, 0.0);
+        let capitalized = opt_b(v.capitalized);
+
+        let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
+        let target_paths: Vec<Vec<usize>> = {
+            let doc = tab.model.document();
+            doc.selection.iter()
+                .filter_map(|es| {
+                    let elem = doc.get_element(&es.path)?;
+                    matches!(elem, Element::Text(_) | Element::TextPath(_))
+                        .then(|| es.path.clone())
+                })
+                .collect()
+        };
+        if target_paths.is_empty() { return; }
+        tab.model.snapshot();
+        for path in target_paths {
+            let doc = tab.model.document().clone();
+            let new_elem = match doc.get_element(&path) {
+                Some(Element::Text(t)) => {
+                    let mut new_t = t.clone();
+                    let mut tspans = new_t.tspans.clone();
+                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
+                        .filter_map(|(i, ts)|
+                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
+                        .collect();
+                    if wrapper_idx.is_empty() && !tspans.is_empty() {
+                        tspans[0].jas_role = Some("paragraph".into());
+                        wrapper_idx.push(0);
+                    }
+                    for i in wrapper_idx {
+                        let w = &mut tspans[i];
+                        w.jas_hyphenate = hyph;
+                        w.jas_hyphenate_min_word = min_word;
+                        w.jas_hyphenate_min_before = min_before;
+                        w.jas_hyphenate_min_after = min_after;
+                        w.jas_hyphenate_limit = limit;
+                        w.jas_hyphenate_zone = zone;
+                        w.jas_hyphenate_bias = bias;
+                        w.jas_hyphenate_capitalized = capitalized;
+                    }
+                    new_t.tspans = tspans;
+                    Some(Element::Text(new_t))
+                }
+                Some(Element::TextPath(tp)) => {
+                    let mut new_tp = tp.clone();
+                    let mut tspans = new_tp.tspans.clone();
+                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
+                        .filter_map(|(i, ts)|
+                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
+                        .collect();
+                    if wrapper_idx.is_empty() && !tspans.is_empty() {
+                        tspans[0].jas_role = Some("paragraph".into());
+                        wrapper_idx.push(0);
+                    }
+                    for i in wrapper_idx {
+                        let w = &mut tspans[i];
+                        w.jas_hyphenate = hyph;
+                        w.jas_hyphenate_min_word = min_word;
+                        w.jas_hyphenate_min_before = min_before;
+                        w.jas_hyphenate_min_after = min_after;
+                        w.jas_hyphenate_limit = limit;
+                        w.jas_hyphenate_zone = zone;
+                        w.jas_hyphenate_bias = bias;
+                        w.jas_hyphenate_capitalized = capitalized;
+                    }
+                    new_tp.tspans = tspans;
+                    Some(Element::TextPath(new_tp))
+                }
+                _ => None,
+            };
+            if let Some(elem) = new_elem {
+                let new_doc = doc.replace_element(&path, elem);
+                tab.model.set_document(new_doc);
+            }
+        }
+        // Master mirror: keep the typed paragraph panel state in
+        // sync so the main panel's HYPHENATE_CHECKBOX reflects the
+        // dialog's commit immediately rather than waiting for the
+        // next selection-change sync.
+        if let Some(h) = v.hyphenate {
+            self.paragraph_panel.hyphenate = h;
+        }
+    }
+
     /// Mirror the selection's paragraph wrapper attributes into the
     /// typed paragraph panel state. Called by the selection-change
     /// observer so the panel reflects the selection. When wrappers

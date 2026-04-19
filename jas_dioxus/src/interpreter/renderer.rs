@@ -286,6 +286,26 @@ fn apply_dialog_confirm(
                 single_word_justify: s("single_word_justify"),
             });
         }
+        // Phase 9: Hyphenation dialog OK. Commits the master
+        // checkbox + 7 jas:hyphenate-* attributes onto every
+        // paragraph wrapper in the selection. The master mirrors
+        // panel.hyphenate so the main panel's checkbox stays in
+        // sync after the OK fires (panel.hyphenate read live from
+        // the wrapper next time the panel renders).
+        "paragraph_hyphenation_confirm" => {
+            let f = |k: &str| dialog.get(k).and_then(|v| v.as_f64());
+            let b = |k: &str| dialog.get(k).and_then(|v| v.as_bool());
+            st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
+                hyphenate: b("hyphenate"),
+                min_word: f("hyphenate_min_word"),
+                min_before: f("hyphenate_min_before"),
+                min_after: f("hyphenate_min_after"),
+                limit: f("hyphenate_limit"),
+                zone: f("hyphenate_zone"),
+                bias: f("hyphenate_bias"),
+                capitalized: b("hyphenate_capitalized"),
+            });
+        }
         _ => {}
     }
 }
@@ -305,6 +325,20 @@ pub(crate) struct JustificationDialogValues {
     pub glyph_scaling_max: Option<f64>,
     pub auto_leading: Option<f64>,
     pub single_word_justify: Option<String>,
+}
+
+/// 8 Hyphenation-dialog field values (master + 7 sub-controls).
+/// `None` means the dialog field was blank (mixed selection) and
+/// should not write. Phase 9.
+pub(crate) struct HyphenationDialogValues {
+    pub hyphenate: Option<bool>,
+    pub min_word: Option<f64>,
+    pub min_before: Option<f64>,
+    pub min_after: Option<f64>,
+    pub limit: Option<f64>,
+    pub zone: Option<f64>,
+    pub bias: Option<f64>,
+    pub capitalized: Option<bool>,
 }
 
 /// Dispatch a named action. Tries hardcoded handlers first, then falls
@@ -5542,6 +5576,70 @@ mod tests {
             assert_eq!(w.jas_glyph_scaling_max, None);
             assert_eq!(w.jas_auto_leading, None);
             assert_eq!(w.jas_single_word_justify, None);
+        }
+    }
+
+    // ── Phase 9: Hyphenation dialog OK commit ────────────────
+
+    #[test]
+    fn apply_hyphenation_dialog_writes_non_default_attrs() {
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
+            hyphenate: Some(true),
+            min_word: Some(6.0),
+            min_before: Some(3.0),
+            min_after: Some(1.0),  // default → omitted
+            limit: Some(2.0),
+            zone: Some(36.0),
+            bias: Some(0.0),  // default → omitted
+            capitalized: Some(true),
+        });
+        let elem = st.tabs[st.active_tab].model.document()
+            .get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            let w = &t.tspans[0];
+            assert_eq!(w.jas_hyphenate, Some(true));
+            assert_eq!(w.jas_hyphenate_min_word, Some(6.0));
+            assert_eq!(w.jas_hyphenate_min_before, Some(3.0));
+            assert_eq!(w.jas_hyphenate_min_after, None);  // identity-omit
+            assert_eq!(w.jas_hyphenate_limit, Some(2.0));
+            assert_eq!(w.jas_hyphenate_zone, Some(36.0));
+            assert_eq!(w.jas_hyphenate_bias, None);  // identity-omit
+            assert_eq!(w.jas_hyphenate_capitalized, Some(true));
+        }
+        // Master mirror: panel.hyphenate updated to dialog value.
+        assert!(st.paragraph_panel.hyphenate);
+    }
+
+    #[test]
+    fn apply_hyphenation_dialog_all_defaults_writes_nothing() {
+        // All spec defaults → every wrapper attr stays None per the
+        // identity-value rule.
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
+            hyphenate: Some(false),
+            min_word: Some(3.0),
+            min_before: Some(1.0),
+            min_after: Some(1.0),
+            limit: Some(0.0),
+            zone: Some(0.0),
+            bias: Some(0.0),
+            capitalized: Some(false),
+        });
+        let elem = st.tabs[st.active_tab].model.document()
+            .get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            let w = &t.tspans[0];
+            assert_eq!(w.jas_hyphenate, None);
+            assert_eq!(w.jas_hyphenate_min_word, None);
+            assert_eq!(w.jas_hyphenate_min_before, None);
+            assert_eq!(w.jas_hyphenate_min_after, None);
+            assert_eq!(w.jas_hyphenate_limit, None);
+            assert_eq!(w.jas_hyphenate_zone, None);
+            assert_eq!(w.jas_hyphenate_bias, None);
+            assert_eq!(w.jas_hyphenate_capitalized, None);
         }
     }
 }

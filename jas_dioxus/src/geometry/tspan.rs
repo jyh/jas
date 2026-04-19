@@ -107,6 +107,31 @@ pub struct Tspan {
     /// `right`. How a justified line containing only one word is
     /// rendered.
     pub jas_single_word_justify: Option<String>,
+    // ── Phase 1b3 / 9: Hyphenation-dialog attrs ────────────────
+    /// `jas:hyphenate-min-word` — Words Longer Than N letters
+    /// (range 2–25, default 3). Words shorter than this never
+    /// hyphenate.
+    pub jas_hyphenate_min_word: Option<f64>,
+    /// `jas:hyphenate-min-before` — at least N letters appear
+    /// before the hyphen (range 1–10, default 1).
+    pub jas_hyphenate_min_before: Option<f64>,
+    /// `jas:hyphenate-min-after` — at least N letters appear after
+    /// the hyphen (range 1–10, default 1).
+    pub jas_hyphenate_min_after: Option<f64>,
+    /// `jas:hyphenate-limit` — max consecutive hyphen line endings
+    /// (range 0–25, 0 = unlimited, default 0).
+    pub jas_hyphenate_limit: Option<f64>,
+    /// `jas:hyphenate-zone` — pt distance from right margin within
+    /// which hyphenation is considered (non-justified paragraphs
+    /// only, default 0).
+    pub jas_hyphenate_zone: Option<f64>,
+    /// `jas:hyphenate-bias` — discrete 7-step (0 = Better Spacing /
+    /// cheap hyphens; 6 = Fewer Hyphens / expensive). Wires into
+    /// the every-line composer's hyphen penalty.
+    pub jas_hyphenate_bias: Option<f64>,
+    /// `jas:hyphenate-capitalized` — whether to hyphenate words
+    /// starting with a capital letter (default false).
+    pub jas_hyphenate_capitalized: Option<bool>,
     pub letter_spacing: Option<f64>,
     pub line_height: Option<f64>,
     pub rotate: Option<f64>,
@@ -165,6 +190,13 @@ impl Tspan {
             && self.jas_glyph_scaling_max.is_none()
             && self.jas_auto_leading.is_none()
             && self.jas_single_word_justify.is_none()
+            && self.jas_hyphenate_min_word.is_none()
+            && self.jas_hyphenate_min_before.is_none()
+            && self.jas_hyphenate_min_after.is_none()
+            && self.jas_hyphenate_limit.is_none()
+            && self.jas_hyphenate_zone.is_none()
+            && self.jas_hyphenate_bias.is_none()
+            && self.jas_hyphenate_capitalized.is_none()
             && self.letter_spacing.is_none()
             && self.line_height.is_none()
             && self.rotate.is_none()
@@ -282,6 +314,13 @@ pub fn tspans_to_svg_fragment(tspans: &[Tspan]) -> String {
         if let Some(v) = t.jas_glyph_scaling_max { attrs.push(("jas:glyph-scaling-max", fmt_f64(v))); }
         if let Some(v) = t.jas_auto_leading { attrs.push(("jas:auto-leading", fmt_f64(v))); }
         if let Some(v) = &t.jas_single_word_justify { attrs.push(("jas:single-word-justify", v.clone())); }
+        if let Some(v) = t.jas_hyphenate_min_word { attrs.push(("jas:hyphenate-min-word", fmt_f64(v))); }
+        if let Some(v) = t.jas_hyphenate_min_before { attrs.push(("jas:hyphenate-min-before", fmt_f64(v))); }
+        if let Some(v) = t.jas_hyphenate_min_after { attrs.push(("jas:hyphenate-min-after", fmt_f64(v))); }
+        if let Some(v) = t.jas_hyphenate_limit { attrs.push(("jas:hyphenate-limit", fmt_f64(v))); }
+        if let Some(v) = t.jas_hyphenate_zone { attrs.push(("jas:hyphenate-zone", fmt_f64(v))); }
+        if let Some(v) = t.jas_hyphenate_bias { attrs.push(("jas:hyphenate-bias", fmt_f64(v))); }
+        if let Some(v) = t.jas_hyphenate_capitalized { attrs.push(("jas:hyphenate-capitalized", v.to_string())); }
         if let Some(v) = t.letter_spacing { attrs.push(("letter-spacing", fmt_f64(v))); }
         if let Some(v) = t.line_height { attrs.push(("line-height", fmt_f64(v))); }
         if let Some(v) = t.rotate { attrs.push(("rotate", fmt_f64(v))); }
@@ -385,6 +424,13 @@ pub fn tspans_from_svg_fragment(svg_str: &str) -> Option<Vec<Tspan>> {
                 "jas:glyph-scaling-max" => t.jas_glyph_scaling_max = v.parse().ok(),
                 "jas:auto-leading" => t.jas_auto_leading = v.parse().ok(),
                 "jas:single-word-justify" => t.jas_single_word_justify = Some(v),
+                "jas:hyphenate-min-word" => t.jas_hyphenate_min_word = v.parse().ok(),
+                "jas:hyphenate-min-before" => t.jas_hyphenate_min_before = v.parse().ok(),
+                "jas:hyphenate-min-after" => t.jas_hyphenate_min_after = v.parse().ok(),
+                "jas:hyphenate-limit" => t.jas_hyphenate_limit = v.parse().ok(),
+                "jas:hyphenate-zone" => t.jas_hyphenate_zone = v.parse().ok(),
+                "jas:hyphenate-bias" => t.jas_hyphenate_bias = v.parse().ok(),
+                "jas:hyphenate-capitalized" => t.jas_hyphenate_capitalized = Some(v == "true"),
                 "letter-spacing" => t.letter_spacing = v.parse().ok(),
                 "line-height" => t.line_height = v.parse().ok(),
                 "rotate" => t.rotate = v.parse().ok(),
@@ -483,6 +529,9 @@ pub fn merge_tspan_overrides(target: &mut Tspan, source: &Tspan) {
         jas_letter_spacing_min, jas_letter_spacing_desired, jas_letter_spacing_max,
         jas_glyph_scaling_min, jas_glyph_scaling_desired, jas_glyph_scaling_max,
         jas_auto_leading, jas_single_word_justify,
+        jas_hyphenate_min_word, jas_hyphenate_min_before, jas_hyphenate_min_after,
+        jas_hyphenate_limit, jas_hyphenate_zone, jas_hyphenate_bias,
+        jas_hyphenate_capitalized,
         letter_spacing, line_height, rotate, style_name, text_decoration,
         text_rendering, text_transform, transform, xml_lang
     );
