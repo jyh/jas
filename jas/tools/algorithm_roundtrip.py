@@ -29,7 +29,10 @@ from algorithms.shape_recognize import (
     RecognizedArrow, RecognizedLemniscate, RecognizedScribble,
 )
 from algorithms.planar import build as planar_build
-from algorithms.text_layout import layout as text_layout
+from algorithms.text_layout import (
+    layout as text_layout, layout_with_paragraphs,
+    ParagraphSegment, TextAlign,
+)
 from algorithms.path_text_layout import layout_path_text
 from geometry.element import MoveTo, LineTo, CurveTo, QuadTo, ClosePath
 from geometry.measure import Measure, Unit
@@ -65,6 +68,7 @@ def main():
         "shape_recognize": run_shape_recognize,
         "planar": run_planar,
         "text_layout": run_text_layout,
+        "text_layout_paragraph": run_text_layout_paragraph,
         "path_text_layout": run_path_text_layout,
     }
 
@@ -307,6 +311,69 @@ def run_text_layout(vectors):
         char_width = tc["char_width"]
         measure = lambda s, cw=char_width: len(s) * cw
         lay = text_layout(content, max_width, font_size, measure)
+        glyphs = [{"idx": g.idx, "line": g.line, "right": g.right, "x": g.x}
+                  for g in lay.glyphs]
+        results.append({"name": name, "result": {
+            "char_count": lay.char_count,
+            "glyphs": glyphs,
+            "line_count": len(lay.lines),
+        }})
+    return results
+
+
+# ---------------------------------------------------------------
+# Text Layout Paragraph (Phase 11 parity)
+# ---------------------------------------------------------------
+
+
+_ALIGN_MAP = {
+    "center": TextAlign.CENTER,
+    "right": TextAlign.RIGHT,
+    "justify": TextAlign.JUSTIFY,
+}
+
+
+def _parse_align(value):
+    return _ALIGN_MAP.get(value, TextAlign.LEFT)
+
+
+def _parse_seg(d):
+    dflt = ParagraphSegment()
+    return ParagraphSegment(
+        char_start=int(d.get("char_start", 0)),
+        char_end=int(d.get("char_end", 0)),
+        left_indent=float(d.get("left_indent", dflt.left_indent)),
+        right_indent=float(d.get("right_indent", dflt.right_indent)),
+        first_line_indent=float(d.get("first_line_indent", dflt.first_line_indent)),
+        space_before=float(d.get("space_before", dflt.space_before)),
+        space_after=float(d.get("space_after", dflt.space_after)),
+        text_align=_parse_align(d.get("text_align")),
+        list_style=d.get("list_style"),
+        marker_gap=float(d.get("marker_gap", dflt.marker_gap)),
+        hanging_punctuation=bool(d.get("hanging_punctuation", False)),
+        word_spacing_min=float(d.get("word_spacing_min", dflt.word_spacing_min)),
+        word_spacing_desired=float(d.get("word_spacing_desired", dflt.word_spacing_desired)),
+        word_spacing_max=float(d.get("word_spacing_max", dflt.word_spacing_max)),
+        last_line_align=_parse_align(d.get("last_line_align")),
+        hyphenate=bool(d.get("hyphenate", False)),
+        hyphenate_min_word=int(d.get("hyphenate_min_word", dflt.hyphenate_min_word)),
+        hyphenate_min_before=int(d.get("hyphenate_min_before", dflt.hyphenate_min_before)),
+        hyphenate_min_after=int(d.get("hyphenate_min_after", dflt.hyphenate_min_after)),
+        hyphenate_bias=int(d.get("hyphenate_bias", dflt.hyphenate_bias)),
+    )
+
+
+def run_text_layout_paragraph(vectors):
+    results = []
+    for tc in vectors:
+        name = tc["name"]
+        content = tc["content"]
+        max_width = tc["max_width"]
+        font_size = tc["font_size"]
+        char_width = tc["char_width"]
+        segs = [_parse_seg(s) for s in tc.get("paragraphs", [])]
+        measure = lambda s, cw=char_width: len(s) * cw
+        lay = layout_with_paragraphs(content, max_width, font_size, segs, measure)
         glyphs = [{"idx": g.idx, "line": g.line, "right": g.right, "x": g.x}
                   for g in lay.glyphs]
         results.append({"name": name, "result": {
