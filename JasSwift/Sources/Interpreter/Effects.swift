@@ -1250,6 +1250,163 @@ public func resetParagraphPanel(store: StateStore, controller: Controller) {
     applyParagraphPanelToSelection(store: store, controller: controller)
 }
 
+/// 11 Justification-dialog field values, packed for one commit pass.
+/// `nil` means the field was blank (mixed selection) and should not
+/// write — the existing wrapper attr stays. Phase 8.
+public struct JustificationDialogValues {
+    public var wordSpacingMin: Double?
+    public var wordSpacingDesired: Double?
+    public var wordSpacingMax: Double?
+    public var letterSpacingMin: Double?
+    public var letterSpacingDesired: Double?
+    public var letterSpacingMax: Double?
+    public var glyphScalingMin: Double?
+    public var glyphScalingDesired: Double?
+    public var glyphScalingMax: Double?
+    public var autoLeading: Double?
+    public var singleWordJustify: String?
+
+    public init(wordSpacingMin: Double? = nil, wordSpacingDesired: Double? = nil,
+                wordSpacingMax: Double? = nil,
+                letterSpacingMin: Double? = nil, letterSpacingDesired: Double? = nil,
+                letterSpacingMax: Double? = nil,
+                glyphScalingMin: Double? = nil, glyphScalingDesired: Double? = nil,
+                glyphScalingMax: Double? = nil,
+                autoLeading: Double? = nil, singleWordJustify: String? = nil) {
+        self.wordSpacingMin = wordSpacingMin
+        self.wordSpacingDesired = wordSpacingDesired
+        self.wordSpacingMax = wordSpacingMax
+        self.letterSpacingMin = letterSpacingMin
+        self.letterSpacingDesired = letterSpacingDesired
+        self.letterSpacingMax = letterSpacingMax
+        self.glyphScalingMin = glyphScalingMin
+        self.glyphScalingDesired = glyphScalingDesired
+        self.glyphScalingMax = glyphScalingMax
+        self.autoLeading = autoLeading
+        self.singleWordJustify = singleWordJustify
+    }
+}
+
+/// Commit the 11 Justification-dialog fields onto every paragraph
+/// wrapper tspan in the selection. Per the identity-value rule each
+/// value at its spec default (word-spacing 80/100/133, letter-
+/// spacing 0/0/0, glyph-scaling 100/100/100, auto-leading 120,
+/// single-word-justify 'justify') writes nil so the wrapper attr is
+/// omitted. Phase 8.
+public func applyJustificationDialogToSelection(
+    _ v: JustificationDialogValues, controller: Controller
+) {
+    func optN(_ value: Double?, default def: Double) -> Double? {
+        value.flatMap { abs($0 - def) < 1e-6 ? nil : $0 }
+    }
+    let wsMin = optN(v.wordSpacingMin, default: 80)
+    let wsDes = optN(v.wordSpacingDesired, default: 100)
+    let wsMax = optN(v.wordSpacingMax, default: 133)
+    let lsMin = optN(v.letterSpacingMin, default: 0)
+    let lsDes = optN(v.letterSpacingDesired, default: 0)
+    let lsMax = optN(v.letterSpacingMax, default: 0)
+    let gsMin = optN(v.glyphScalingMin, default: 100)
+    let gsDes = optN(v.glyphScalingDesired, default: 100)
+    let gsMax = optN(v.glyphScalingMax, default: 100)
+    let auto = optN(v.autoLeading, default: 120)
+    let swj = v.singleWordJustify.flatMap { $0 == "justify" ? nil : $0 }
+
+    let model = controller.model
+    let doc = model.document
+    let targetPaths = doc.selection.compactMap { es -> [Int]? in
+        switch doc.getElement(es.path) {
+        case .text, .textPath: return es.path
+        default: return nil
+        }
+    }
+    if targetPaths.isEmpty { return }
+    model.snapshot()
+    var newDoc = doc
+    for path in targetPaths {
+        let elem = newDoc.getElement(path)
+        let newElem: Element?
+        switch elem {
+        case .text(let t):
+            var tspans = t.tspans
+            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
+            if wrapperIdx.isEmpty, !tspans.isEmpty {
+                tspans[0] = withJasRole(tspans[0], "paragraph")
+                wrapperIdx = [0]
+            }
+            for i in wrapperIdx {
+                tspans[i] = withJustificationAttrs(
+                    tspans[i],
+                    wsMin: wsMin, wsDes: wsDes, wsMax: wsMax,
+                    lsMin: lsMin, lsDes: lsDes, lsMax: lsMax,
+                    gsMin: gsMin, gsDes: gsDes, gsMax: gsMax,
+                    autoLeading: auto, swj: swj)
+            }
+            newElem = .text(t.withTspans(tspans))
+        case .textPath(let tp):
+            var tspans = tp.tspans
+            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
+            if wrapperIdx.isEmpty, !tspans.isEmpty {
+                tspans[0] = withJasRole(tspans[0], "paragraph")
+                wrapperIdx = [0]
+            }
+            for i in wrapperIdx {
+                tspans[i] = withJustificationAttrs(
+                    tspans[i],
+                    wsMin: wsMin, wsDes: wsDes, wsMax: wsMax,
+                    lsMin: lsMin, lsDes: lsDes, lsMax: lsMax,
+                    gsMin: gsMin, gsDes: gsDes, gsMax: gsMax,
+                    autoLeading: auto, swj: swj)
+            }
+            newElem = .textPath(tp.withTspans(tspans))
+        default:
+            newElem = nil
+        }
+        if let ne = newElem {
+            newDoc = newDoc.replaceElement(path, with: ne)
+        }
+    }
+    controller.setDocument(newDoc)
+}
+
+/// Replace the 11 Justification-dialog attrs on a Tspan; preserve all
+/// other fields. Phase 8 helper.
+private func withJustificationAttrs(
+    _ t: Tspan,
+    wsMin: Double?, wsDes: Double?, wsMax: Double?,
+    lsMin: Double?, lsDes: Double?, lsMax: Double?,
+    gsMin: Double?, gsDes: Double?, gsMax: Double?,
+    autoLeading: Double?, swj: String?
+) -> Tspan {
+    Tspan(
+        id: t.id, content: t.content,
+        baselineShift: t.baselineShift, dx: t.dx,
+        fontFamily: t.fontFamily, fontSize: t.fontSize,
+        fontStyle: t.fontStyle, fontVariant: t.fontVariant,
+        fontWeight: t.fontWeight,
+        jasAaMode: t.jasAaMode, jasFractionalWidths: t.jasFractionalWidths,
+        jasKerningMode: t.jasKerningMode, jasNoBreak: t.jasNoBreak,
+        jasRole: t.jasRole,
+        jasLeftIndent: t.jasLeftIndent, jasRightIndent: t.jasRightIndent,
+        jasHyphenate: t.jasHyphenate,
+        jasHangingPunctuation: t.jasHangingPunctuation,
+        jasListStyle: t.jasListStyle,
+        textAlign: t.textAlign, textAlignLast: t.textAlignLast,
+        textIndent: t.textIndent,
+        jasSpaceBefore: t.jasSpaceBefore, jasSpaceAfter: t.jasSpaceAfter,
+        jasWordSpacingMin: wsMin, jasWordSpacingDesired: wsDes,
+        jasWordSpacingMax: wsMax,
+        jasLetterSpacingMin: lsMin, jasLetterSpacingDesired: lsDes,
+        jasLetterSpacingMax: lsMax,
+        jasGlyphScalingMin: gsMin, jasGlyphScalingDesired: gsDes,
+        jasGlyphScalingMax: gsMax,
+        jasAutoLeading: autoLeading, jasSingleWordJustify: swj,
+        letterSpacing: t.letterSpacing, lineHeight: t.lineHeight,
+        rotate: t.rotate, styleName: t.styleName,
+        textDecoration: t.textDecoration, textRendering: t.textRendering,
+        textTransform: t.textTransform, transform: t.transform,
+        xmlLang: t.xmlLang)
+}
+
 /// Dispatch a panel-state change to the matching apply-to-selection
 /// pipeline. Called after any widget write-back or `set: panel.X`
 /// batch so the downstream surface (selected element, other views)
