@@ -344,10 +344,32 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("text_selected".into(), J::Bool(any_text));
     m.insert("area_text_selected".into(), J::Bool(any_text && all_area));
 
+    // Always seed every paragraph control from the typed panel state
+    // first; selection-derived overrides below shadow these on agree.
+    // This way Phase 4 panel writes show up immediately even with no
+    // selection (the panel becomes self-consistent after a click).
+    let pp = &st.paragraph_panel;
+    m.insert("align_left".into(), J::Bool(pp.align_left));
+    m.insert("align_center".into(), J::Bool(pp.align_center));
+    m.insert("align_right".into(), J::Bool(pp.align_right));
+    m.insert("justify_left".into(), J::Bool(pp.justify_left));
+    m.insert("justify_center".into(), J::Bool(pp.justify_center));
+    m.insert("justify_right".into(), J::Bool(pp.justify_right));
+    m.insert("justify_all".into(), J::Bool(pp.justify_all));
+    m.insert("bullets".into(), J::String(pp.bullets.clone()));
+    m.insert("numbered_list".into(), J::String(pp.numbered_list.clone()));
+    m.insert("left_indent".into(), serde_json::json!(pp.left_indent));
+    m.insert("right_indent".into(), serde_json::json!(pp.right_indent));
+    m.insert("first_line_indent".into(), serde_json::json!(pp.first_line_indent));
+    m.insert("space_before".into(), serde_json::json!(pp.space_before));
+    m.insert("space_after".into(), serde_json::json!(pp.space_after));
+    m.insert("hyphenate".into(), J::Bool(pp.hyphenate));
+    m.insert("hanging_punctuation".into(), J::Bool(pp.hanging_punctuation));
+
     // Aggregate across all wrappers. Each wrapper's effective value
     // is the field if Some, else the panel/YAML default. We collect
     // distinct values; one distinct value → write it; >1 distinct or
-    // 0 wrappers → omit override.
+    // 0 wrappers → omit override (panel keeps the typed-struct seed).
     fn agree<T: PartialEq + Clone>(values: &[T]) -> Option<T> {
         let first = values.first()?.clone();
         if values.iter().all(|v| *v == first) { Some(first) } else { None }
@@ -362,6 +384,21 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
             .map(|w| w.jas_right_indent.unwrap_or(0.0)).collect();
         if let Some(v) = agree(&rights) {
             m.insert("right_indent".into(), serde_json::json!(v));
+        }
+        let firsts: Vec<f64> = wrappers.iter()
+            .map(|w| w.text_indent.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&firsts) {
+            m.insert("first_line_indent".into(), serde_json::json!(v));
+        }
+        let sb: Vec<f64> = wrappers.iter()
+            .map(|w| w.jas_space_before.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&sb) {
+            m.insert("space_before".into(), serde_json::json!(v));
+        }
+        let sa: Vec<f64> = wrappers.iter()
+            .map(|w| w.jas_space_after.unwrap_or(0.0)).collect();
+        if let Some(v) = agree(&sa) {
+            m.insert("space_after".into(), serde_json::json!(v));
         }
         let hyphs: Vec<bool> = wrappers.iter()
             .map(|w| w.jas_hyphenate.unwrap_or(false)).collect();
@@ -390,6 +427,28 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
                 m.insert("bullets".into(), J::String("".into()));
                 m.insert("numbered_list".into(), J::String("".into()));
             }
+        }
+        // Aggregate alignment from text_align + text_align_last.
+        let tas: Vec<String> = wrappers.iter()
+            .map(|w| w.text_align.clone().unwrap_or_else(|| "left".into())).collect();
+        let tals: Vec<String> = wrappers.iter()
+            .map(|w| w.text_align_last.clone().unwrap_or_default()).collect();
+        if let (Some(ta), Some(tal)) = (agree(&tas), agree(&tals)) {
+            // Reset all 7, then set the matching one.
+            for k in &["align_left", "align_center", "align_right",
+                       "justify_left", "justify_center", "justify_right", "justify_all"] {
+                m.insert((*k).into(), J::Bool(false));
+            }
+            let key = match (ta.as_str(), tal.as_str()) {
+                ("center", _) => "align_center",
+                ("right", _) => "align_right",
+                ("justify", "left") => "justify_left",
+                ("justify", "center") => "justify_center",
+                ("justify", "right") => "justify_right",
+                ("justify", "justify") => "justify_all",
+                _ => "align_left",
+            };
+            m.insert(key.into(), J::Bool(true));
         }
     }
 
