@@ -166,49 +166,14 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         return
     effects = action_def.get("effects", [])
 
-    # Build active_document rollups
-    from workspace_interpreter.expr_types import Value
-    top_level_layers = []
-    top_level_layer_paths = []
-    for i, elem in enumerate(model.document.layers):
-        if isinstance(elem, Layer):
-            vis_name = {
-                Visibility.INVISIBLE: "invisible",
-                Visibility.OUTLINE: "outline",
-                Visibility.PREVIEW: "preview",
-            }[elem.visibility]
-            path_val = Value.path((i,))
-            top_level_layers.append({
-                "kind": "Layer",
-                "name": elem.name,
-                "common": {"visibility": vis_name, "locked": elem.locked},
-                "path": path_val,
-            })
-            top_level_layer_paths.append(path_val)
-    # Phase 3 Group C: next_layer_name + new_layer_insert_index.
-    used_names = {l.name for l in model.document.layers if isinstance(l, Layer)}
-    n = 1
-    while f"Layer {n}" in used_names:
-        n += 1
-    next_layer_name = f"Layer {n}"
-    top_level_selected_indices = [
-        p[0] for p in panel_selection if len(p) == 1
-    ]
-    new_layer_insert_index = (min(top_level_selected_indices) + 1
-                               if top_level_selected_indices
-                               else len(model.document.layers))
+    from panels.active_document_view import build_active_document_view
+    active_doc = build_active_document_view(model, panel_selection=panel_selection)
     # Inject panel.layers_panel_selection as list of __path__ marker
     # dicts — matches the shape used by other apps so YAML expressions
     # like panel.layers_panel_selection[0] decode back to a Path value.
     selection_markers = [{"__path__": list(p)} for p in panel_selection]
     ctx = {
-        "active_document": {
-            "top_level_layers": top_level_layers,
-            "top_level_layer_paths": top_level_layer_paths,
-            "next_layer_name": next_layer_name,
-            "new_layer_insert_index": new_layer_insert_index,
-            "layers_panel_selection_count": len(panel_selection),
-        },
+        "active_document": active_doc,
         "panel": {"layers_panel_selection": selection_markers},
         "param": params,
     }

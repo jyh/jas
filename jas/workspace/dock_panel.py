@@ -270,6 +270,14 @@ class DockPanelWidget(QWidget):
             # Pass model accessor so panels (e.g. layers) can read/write the document
             if self._get_model:
                 ctx["_get_model"] = self._get_model
+                # active_document: exposes has_selection / selection_count /
+                # element_selection (plus layers rollups) to bind.disabled /
+                # bind.visible predicates during render. Built fresh per
+                # body creation; live panels re-render via store
+                # subscriptions when state changes.
+                from panels.active_document_view import build_active_document_view
+                model = self._get_model() if self._get_model else None
+                ctx["active_document"] = build_active_document_view(model)
             return YamlPanelView(
                 panel_spec=panel_spec,
                 store=self._state_store,
