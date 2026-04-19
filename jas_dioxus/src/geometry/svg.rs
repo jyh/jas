@@ -636,6 +636,21 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
     if let Some(v) = &t.jas_role {
         attrs.push_str(&format!(" urn:jas:1:role=\"{}\"", escape_xml(v)));
     }
+    if let Some(v) = t.jas_left_indent {
+        attrs.push_str(&format!(" urn:jas:1:left-indent=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_right_indent {
+        attrs.push_str(&format!(" urn:jas:1:right-indent=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_hyphenate {
+        attrs.push_str(&format!(" urn:jas:1:hyphenate=\"{}\"", v));
+    }
+    if let Some(v) = t.jas_hanging_punctuation {
+        attrs.push_str(&format!(" urn:jas:1:hanging-punctuation=\"{}\"", v));
+    }
+    if let Some(v) = &t.jas_list_style {
+        attrs.push_str(&format!(" urn:jas:1:list-style=\"{}\"", escape_xml(v)));
+    }
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
 
@@ -669,6 +684,15 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
             parts
         }),
         jas_role: node.attrs.get("urn:jas:1:role").cloned(),
+        jas_left_indent: node.attrs.get("urn:jas:1:left-indent")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_right_indent: node.attrs.get("urn:jas:1:right-indent")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_hyphenate: node.attrs.get("urn:jas:1:hyphenate")
+            .map(|v| v == "true"),
+        jas_hanging_punctuation: node.attrs.get("urn:jas:1:hanging-punctuation")
+            .map(|v| v == "true"),
+        jas_list_style: node.attrs.get("urn:jas:1:list-style").cloned(),
         ..Tspan::default_tspan()
     };
     // Multi-value rotate: SVG allows `rotate="a1 a2 a3 …"` on a tspan,
@@ -2037,6 +2061,47 @@ mod tests {
         assert_eq!(t.tspans[1].rotate, Some(90.0));
         assert_eq!(t.tspans[2].rotate, Some(90.0));
         assert_eq!(t.tspans[3].rotate, Some(90.0));
+    }
+
+    #[test]
+    fn svg_phase3b_attrs_round_trip_through_document() {
+        // Phase 3b: a wrapper tspan carrying the 5 panel-surface
+        // paragraph attrs round-trips through the document SVG.
+        use crate::geometry::tspan::Tspan;
+        let mut doc = Document::default();
+        let mut t = crate::tools::text_edit::empty_text_elem(10.0, 20.0, 0.0, 0.0);
+        let mut wrapper = Tspan::default_tspan();
+        wrapper.id = 0;
+        wrapper.jas_role = Some("paragraph".into());
+        wrapper.jas_left_indent = Some(18.0);
+        wrapper.jas_right_indent = Some(9.0);
+        wrapper.jas_hyphenate = Some(true);
+        wrapper.jas_hanging_punctuation = Some(true);
+        wrapper.jas_list_style = Some("num-decimal".into());
+        t.tspans = vec![
+            wrapper,
+            Tspan { id: 1, content: "hello".into(), ..Tspan::default_tspan() },
+        ];
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains(r#"urn:jas:1:left-indent="18""#),
+                "expected left-indent in serialised SVG, got: {}", svg);
+        assert!(svg.contains(r#"urn:jas:1:right-indent="9""#));
+        assert!(svg.contains(r#"urn:jas:1:hyphenate="true""#));
+        assert!(svg.contains(r#"urn:jas:1:hanging-punctuation="true""#));
+        assert!(svg.contains(r#"urn:jas:1:list-style="num-decimal""#));
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 2);
+        let w = &t.tspans[0];
+        assert_eq!(w.jas_role.as_deref(), Some("paragraph"));
+        assert_eq!(w.jas_left_indent, Some(18.0));
+        assert_eq!(w.jas_right_indent, Some(9.0));
+        assert_eq!(w.jas_hyphenate, Some(true));
+        assert_eq!(w.jas_hanging_punctuation, Some(true));
+        assert_eq!(w.jas_list_style.as_deref(), Some("num-decimal"));
     }
 
     #[test]

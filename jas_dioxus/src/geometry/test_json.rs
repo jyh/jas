@@ -603,6 +603,11 @@ fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
         transform: parse_transform_opt(&v["transform"]),
         xml_lang: parse_str_opt(&v["xml_lang"]),
         jas_role: parse_str_opt(&v["jas_role"]),
+        jas_left_indent: v["jas_left_indent"].as_f64(),
+        jas_right_indent: v["jas_right_indent"].as_f64(),
+        jas_hyphenate: v["jas_hyphenate"].as_bool(),
+        jas_hanging_punctuation: v["jas_hanging_punctuation"].as_bool(),
+        jas_list_style: parse_str_opt(&v["jas_list_style"]),
     }
 }
 
