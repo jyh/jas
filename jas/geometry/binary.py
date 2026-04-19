@@ -200,6 +200,11 @@ def _pack_tspan(t) -> list:
         t.jas_hyphenate,
         t.jas_hanging_punctuation,
         t.jas_list_style,
+        t.text_align,
+        t.text_align_last,
+        t.text_indent,
+        t.jas_space_before,
+        t.jas_space_after,
     ]
 
 
@@ -247,6 +252,11 @@ def _unpack_tspan(v):
         jas_hyphenate=get(25),
         jas_hanging_punctuation=get(26),
         jas_list_style=get(27),
+        text_align=get(28),
+        text_align_last=get(29),
+        text_indent=get(30),
+        jas_space_before=get(31),
+        jas_space_after=get(32),
     )
 
 

@@ -730,6 +730,29 @@ class SvgImportTest(absltest.TestCase):
         self.assertIn('urn:jas:1:role="paragraph"', svg)
         self.assertIn(">hello</tspan>", svg)
 
+    def test_svg_phase1b1_paragraph_attrs_emitted_on_tspan(self):
+        # text-align / text-align-last / text-indent serialise as bare
+        # CSS-style attribute names; jas:space-before / jas:space-after
+        # use the urn:jas:1: prefix to keep XML namespace-friendly.
+        from geometry.element import Layer, Text
+        t = Text(
+            x=10, y=20, content="X",
+            tspans=(
+                Tspan(id=0, content="", jas_role="paragraph",
+                      text_align="justify", text_align_last="left",
+                      text_indent=-12.0,
+                      jas_space_before=6.0, jas_space_after=3.0),
+                Tspan(id=1, content="X"),
+            ))
+        layer = Layer(children=(t,))
+        doc = Document(layers=(layer,))
+        svg = document_to_svg(doc)
+        self.assertIn('text-align="justify"', svg)
+        self.assertIn('text-align-last="left"', svg)
+        self.assertIn('text-indent="-12"', svg)
+        self.assertIn('urn:jas:1:space-before="6"', svg)
+        self.assertIn('urn:jas:1:space-after="3"', svg)
+
     # Full document SVG round-trip through ElementTree is deferred to
     # Phase 1b alongside the xmlns:jas namespace work — Python's
     # XML parser, like Foundation's XMLDocument and OCaml's Xmlm,

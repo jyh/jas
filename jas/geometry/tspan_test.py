@@ -545,3 +545,43 @@ class TestPhase3bParagraphAttrs:
         assert back[0].jas_hyphenate is True
         assert back[0].jas_hanging_punctuation is True
         assert back[0].jas_list_style == "bullet-disc"
+
+
+class TestPhase1b1ParagraphAttrs:
+    """Phase 1b1 remaining panel-surface paragraph attrs on Tspan
+    (text_align / text_align_last / text_indent + space_before /
+    space_after)."""
+
+    def test_has_no_overrides_false_when_phase1b1_attrs_set(self):
+        from geometry.tspan import default_tspan
+        from dataclasses import replace
+        assert not replace(default_tspan(), text_align="justify").has_no_overrides()
+        assert not replace(default_tspan(), text_align_last="left").has_no_overrides()
+        assert not replace(default_tspan(), text_indent=-12.0).has_no_overrides()
+        assert not replace(default_tspan(), jas_space_before=6.0).has_no_overrides()
+        assert not replace(default_tspan(), jas_space_after=6.0).has_no_overrides()
+
+    def test_svg_fragment_phase1b1_attrs_round_trip(self):
+        from geometry.tspan import (
+            default_tspan, tspans_to_svg_fragment, tspans_from_svg_fragment,
+        )
+        from dataclasses import replace
+        t = replace(default_tspan(),
+                    content="", jas_role="paragraph",
+                    text_align="justify", text_align_last="center",
+                    text_indent=-18.0,
+                    jas_space_before=12.0, jas_space_after=6.0)
+        svg = tspans_to_svg_fragment([t])
+        assert 'text-align="justify"' in svg
+        assert 'text-align-last="center"' in svg
+        assert 'text-indent="-18"' in svg
+        assert 'jas:space-before="12"' in svg
+        assert 'jas:space-after="6"' in svg
+        back = tspans_from_svg_fragment(svg)
+        assert back is not None
+        assert len(back) == 1
+        assert back[0].text_align == "justify"
+        assert back[0].text_align_last == "center"
+        assert back[0].text_indent == -18.0
+        assert back[0].jas_space_before == 12.0
+        assert back[0].jas_space_after == 6.0
