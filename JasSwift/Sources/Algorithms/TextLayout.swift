@@ -292,13 +292,21 @@ public struct ParagraphSegment: Equatable {
     /// Gap between marker and text. Phase 6 uses a fixed 12pt per
     /// PARAGRAPH.md §Marker rendering.
     public var markerGap: Double
+    /// `jas:hanging-punctuation` — Phase 7. When true, hangable
+    /// punctuation chars at line start / end offset outside the
+    /// effective edge by their own advance width per PARAGRAPH.md
+    /// §Hanging Punctuation. Alignment interaction: left-aligned
+    /// hangs only left side, right-aligned only right side,
+    /// centered both.
+    public var hangingPunctuation: Bool
 
     public init(charStart: Int = 0, charEnd: Int = 0,
                 leftIndent: Double = 0, rightIndent: Double = 0,
                 firstLineIndent: Double = 0,
                 spaceBefore: Double = 0, spaceAfter: Double = 0,
                 textAlign: TextAlign = .left,
-                listStyle: String? = nil, markerGap: Double = 0) {
+                listStyle: String? = nil, markerGap: Double = 0,
+                hangingPunctuation: Bool = false) {
         self.charStart = charStart
         self.charEnd = charEnd
         self.leftIndent = leftIndent
@@ -309,6 +317,39 @@ public struct ParagraphSegment: Equatable {
         self.textAlign = textAlign
         self.listStyle = listStyle
         self.markerGap = markerGap
+        self.hangingPunctuation = hangingPunctuation
+    }
+}
+
+/// True if `c` may hang into the *left* margin per PARAGRAPH.md
+/// §Hanging Punctuation. Straight quotes hang either side; the
+/// curly directional variants hang only on their matching side.
+public func isLeftHanger(_ c: Character) -> Bool {
+    switch c {
+    case "\"", "'",                                     // straight quotes (both)
+         "\u{201C}", "\u{2018}",                        // " ' (left curly)
+         "\u{00AB}", "\u{2039}",                        // « ‹
+         "(", "[", "{":
+        return true
+    default: return false
+    }
+}
+
+/// True if `c` may hang into the *right* margin per PARAGRAPH.md
+/// §Hanging Punctuation. Periods, commas, close quotes / brackets
+/// always qualify when at end-of-line; dashes qualify only at
+/// end-of-line (the layout consults this only on last visible
+/// glyph so the EOL constraint is implicit).
+public func isRightHanger(_ c: Character) -> Bool {
+    switch c {
+    case "\"", "'",                                     // straight quotes (both)
+         "\u{201D}", "\u{2019}",                        // " ' (right curly)
+         "\u{00BB}", "\u{203A}",                        // » ›
+         ")", "]", "}",
+         ".", ",",
+         "-", "\u{2013}", "\u{2014}":                   // - – —
+        return true
+    default: return false
     }
 }
 
@@ -395,13 +436,38 @@ public func layoutTextWithParagraphs(_ content: String,
             let lineAvail: Double = effectiveMax > 0
                 ? max(0, effectiveMax - (li == 0 ? firstLineExtra : 0)) : 0
             let visibleW = trimmedLineWidth(line, para.glyphs)
+            // Phase 7: hanging punctuation. Offset hangable chars
+            // at line start / end outside the effective edge per
+            // PARAGRAPH.md §Hanging Punctuation. Alignment per
+            // spec: left-aligned hangs only left, right-aligned
+            // only right, centered both.
+            var leftHangW: Double = 0
+            var rightHangW: Double = 0
+            if seg.hangingPunctuation {
+                let allowLeft = seg.textAlign == .left || seg.textAlign == .center
+                let allowRight = seg.textAlign == .right || seg.textAlign == .center
+                if allowLeft, let g = para.glyphs[line.glyphStart..<line.glyphEnd]
+                       .first(where: { !$0.isTrailingSpace }) {
+                    let c = chars[seg.charStart + g.idx]
+                    if isLeftHanger(c) { leftHangW = g.right - g.x }
+                }
+                if allowRight, let g = para.glyphs[line.glyphStart..<line.glyphEnd]
+                       .reversed().first(where: { !$0.isTrailingSpace }) {
+                    let c = chars[seg.charStart + g.idx]
+                    if isRightHanger(c) { rightHangW = g.right - g.x }
+                }
+            }
+            let effectiveVisibleW = max(0, visibleW - leftHangW - rightHangW)
             let alignShift: Double
             switch seg.textAlign {
-            case .left: alignShift = 0
+            case .left: alignShift = -leftHangW
             case .center:
-                alignShift = lineAvail > visibleW ? (lineAvail - visibleW) / 2 : 0
+                alignShift = lineAvail > effectiveVisibleW
+                    ? (lineAvail - effectiveVisibleW) / 2 - leftHangW
+                    : -leftHangW
             case .right:
-                alignShift = lineAvail > visibleW ? lineAvail - visibleW : 0
+                alignShift = lineAvail > effectiveVisibleW
+                    ? lineAvail - effectiveVisibleW : 0
             }
             let totalShift = xShift + alignShift
             let origStart = seg.charStart + line.start

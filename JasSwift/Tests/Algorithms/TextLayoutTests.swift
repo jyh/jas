@@ -330,3 +330,108 @@ private func fixedMeasure(_ width: Double) -> (String) -> Double {
     #expect(segs[0].listStyle == "bullet-disc")
     #expect(segs[0].markerGap == markerGapPt)
 }
+
+// MARK: - Phase 7 hanging punctuation
+
+@Test func leftHangerClassMembership() {
+    for c: Character in ["\"", "'", "\u{201C}", "\u{2018}",
+                          "\u{00AB}", "\u{2039}", "(", "[", "{"] {
+        #expect(isLeftHanger(c) == true)
+    }
+    for c: Character in ["a", ".", ",", ")", "]", "}", "\u{201D}"] {
+        #expect(isLeftHanger(c) == false)
+    }
+}
+
+@Test func rightHangerClassMembership() {
+    for c: Character in ["\"", "'", "\u{201D}", "\u{2019}",
+                          "\u{00BB}", "\u{203A}", ")", "]", "}",
+                          ".", ",", "-", "\u{2013}", "\u{2014}"] {
+        #expect(isRightHanger(c) == true)
+    }
+    for c: Character in ["a", "\u{201C}", "\u{2018}", "(", "[", "{"] {
+        #expect(isRightHanger(c) == false)
+    }
+}
+
+@Test func hangingOffNoEffect() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 4,
+                                  textAlign: .left, hangingPunctuation: false)]
+    let l = layoutTextWithParagraphs("(ab)", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 0)
+}
+
+@Test func leftAlignedLeftHangerShiftsIntoLeftMargin() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 4,
+                                  textAlign: .left, hangingPunctuation: true)]
+    let l = layoutTextWithParagraphs("(abc", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == -10)  // '(' in margin
+    #expect(l.glyphs[1].x == 0)    // 'a' at edge
+}
+
+@Test func leftAlignedRightHangerDoesNotShift() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 3,
+                                  textAlign: .left, hangingPunctuation: true)]
+    let l = layoutTextWithParagraphs("ab.", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 0)
+    #expect(l.glyphs[2].x == 20)  // '.' inside the box
+}
+
+@Test func rightAlignedRightHangerSticksOutsideRightEdge() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 3,
+                                  textAlign: .right, hangingPunctuation: true)]
+    let l = layoutTextWithParagraphs("ab.", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[1].right == 100)  // 'b' at the edge
+    #expect(l.glyphs[2].x == 100)      // '.' sticks out
+}
+
+@Test func rightAlignedLeftHangerDoesNotShift() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 3,
+                                  textAlign: .right, hangingPunctuation: true)]
+    let l = layoutTextWithParagraphs("(ab", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[2].right == 100)
+    #expect(l.glyphs[0].x == 70)  // '(' inside, normal right-align
+}
+
+@Test func centeredBothSidesHang() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 4,
+                                  textAlign: .center, hangingPunctuation: true)]
+    let l = layoutTextWithParagraphs("(ab.", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    // effective_visible_w = 20; shift = (100-20)/2 - 10 = 30.
+    #expect(l.glyphs[0].x == 30)
+    #expect(l.glyphs[1].x == 40)
+    #expect(l.glyphs[2].x == 50)
+    #expect(l.glyphs[3].x == 60)
+}
+
+@Test func dashHangsAtEolWhenRightAligned() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 3,
+                                  textAlign: .right, hangingPunctuation: true)]
+    let l = layoutTextWithParagraphs("ab-", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[2].x == 100)  // '-' hangs right
+}
+
+@Test func hangingWithLeftIndentOffsetsRelativeToIndent() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 3,
+                                  leftIndent: 20, textAlign: .left,
+                                  hangingPunctuation: true)]
+    let l = layoutTextWithParagraphs("(ab", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 10)  // '(' = 20 - 10
+    #expect(l.glyphs[1].x == 20)  // 'a' at left_indent edge
+}
