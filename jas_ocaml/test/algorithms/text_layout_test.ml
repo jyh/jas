@@ -138,6 +138,136 @@ let two_wrappers_split_content () =
   Alcotest.(check (float 0.001)) "p2 space_before" 6.0 s2.space_before;
   Alcotest.(check bool) "p2 center" true (s2.text_align = Text_layout.Center)
 
+(* ── Phase 6: list markers + counter run rule ──────────── *)
+
+let _list_wrapper style : Element.tspan =
+  { (Tspan.default_tspan ()) with
+    jas_role = Some "paragraph";
+    jas_list_style = Some style }
+
+let marker_text_bullets () =
+  Alcotest.(check string) "disc" "\xE2\x80\xA2"
+    (Text_layout_paragraph.marker_text "bullet-disc" 1);
+  Alcotest.(check string) "open-circle" "\xE2\x97\x8B"
+    (Text_layout_paragraph.marker_text "bullet-open-circle" 99);
+  Alcotest.(check string) "square" "\xE2\x96\xA0"
+    (Text_layout_paragraph.marker_text "bullet-square" 1);
+  Alcotest.(check string) "open-square" "\xE2\x96\xA1"
+    (Text_layout_paragraph.marker_text "bullet-open-square" 1);
+  Alcotest.(check string) "dash" "\xE2\x80\x93"
+    (Text_layout_paragraph.marker_text "bullet-dash" 1);
+  Alcotest.(check string) "check" "\xE2\x9C\x93"
+    (Text_layout_paragraph.marker_text "bullet-check" 1)
+
+let marker_text_decimal () =
+  Alcotest.(check string) "1" "1." (Text_layout_paragraph.marker_text "num-decimal" 1);
+  Alcotest.(check string) "42" "42." (Text_layout_paragraph.marker_text "num-decimal" 42)
+
+let marker_text_alpha () =
+  Alcotest.(check string) "a" "a." (Text_layout_paragraph.marker_text "num-lower-alpha" 1);
+  Alcotest.(check string) "z" "z." (Text_layout_paragraph.marker_text "num-lower-alpha" 26);
+  Alcotest.(check string) "aa" "aa." (Text_layout_paragraph.marker_text "num-lower-alpha" 27);
+  Alcotest.(check string) "AB" "AB." (Text_layout_paragraph.marker_text "num-upper-alpha" 28)
+
+let marker_text_roman () =
+  Alcotest.(check string) "i" "i." (Text_layout_paragraph.marker_text "num-lower-roman" 1);
+  Alcotest.(check string) "iv" "iv." (Text_layout_paragraph.marker_text "num-lower-roman" 4);
+  Alcotest.(check string) "ix" "ix." (Text_layout_paragraph.marker_text "num-lower-roman" 9);
+  Alcotest.(check string) "MCMXC" "MCMXC."
+    (Text_layout_paragraph.marker_text "num-upper-roman" 1990)
+
+let marker_text_unknown () =
+  Alcotest.(check string) "unknown" "" (Text_layout_paragraph.marker_text "invented" 1)
+
+let list_segment_carries_style_and_marker_gap () =
+  let segs = Text_layout_paragraph.build_segments_from_text
+    [| _list_wrapper "bullet-disc"; _body "hello" |] "hello" true in
+  let s = List.hd segs in
+  Alcotest.(check (option string)) "list_style" (Some "bullet-disc") s.list_style;
+  Alcotest.(check (float 0.001)) "marker_gap" 12.0 s.marker_gap
+
+let counters_consecutive_decimal () =
+  let mk () : Text_layout.paragraph_segment =
+    { Text_layout.default_segment with list_style = Some "num-decimal" } in
+  let cs = Text_layout_paragraph.compute_counters [mk (); mk (); mk ()] in
+  Alcotest.(check (list int)) "counters" [1; 2; 3] cs
+
+let counters_bullet_breaks_run () =
+  let dec : Text_layout.paragraph_segment =
+    { Text_layout.default_segment with list_style = Some "num-decimal" } in
+  let bul : Text_layout.paragraph_segment =
+    { Text_layout.default_segment with list_style = Some "bullet-disc" } in
+  let cs = Text_layout_paragraph.compute_counters [dec; dec; bul; dec] in
+  Alcotest.(check (list int)) "counters" [1; 2; 0; 1] cs
+
+let counters_different_num_style_resets () =
+  let dec : Text_layout.paragraph_segment =
+    { Text_layout.default_segment with list_style = Some "num-decimal" } in
+  let alpha : Text_layout.paragraph_segment =
+    { Text_layout.default_segment with list_style = Some "num-lower-alpha" } in
+  let cs = Text_layout_paragraph.compute_counters [dec; dec; alpha; alpha] in
+  Alcotest.(check (list int)) "counters" [1; 2; 1; 2] cs
+
+let counters_no_style_breaks_run () =
+  let dec : Text_layout.paragraph_segment =
+    { Text_layout.default_segment with list_style = Some "num-decimal" } in
+  let none : Text_layout.paragraph_segment = Text_layout.default_segment in
+  let cs = Text_layout_paragraph.compute_counters [dec; none; dec] in
+  Alcotest.(check (list int)) "counters" [1; 0; 1] cs
+
+let phase6_marker_tests = [
+  Alcotest.test_case "marker_text_bullets" `Quick marker_text_bullets;
+  Alcotest.test_case "marker_text_decimal" `Quick marker_text_decimal;
+  Alcotest.test_case "marker_text_alpha" `Quick marker_text_alpha;
+  Alcotest.test_case "marker_text_roman" `Quick marker_text_roman;
+  Alcotest.test_case "marker_text_unknown" `Quick marker_text_unknown;
+  Alcotest.test_case "list_segment_carries_style_and_marker_gap" `Quick
+    list_segment_carries_style_and_marker_gap;
+  Alcotest.test_case "counters_consecutive_decimal" `Quick
+    counters_consecutive_decimal;
+  Alcotest.test_case "counters_bullet_breaks_run" `Quick
+    counters_bullet_breaks_run;
+  Alcotest.test_case "counters_different_num_style_resets" `Quick
+    counters_different_num_style_resets;
+  Alcotest.test_case "counters_no_style_breaks_run" `Quick
+    counters_no_style_breaks_run;
+]
+
+let list_pushes_text_by_marker_gap () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 2;
+                list_style = Some "bullet-disc"; marker_gap = 12.0 }] in
+  let l = Text_layout.layout_with_paragraphs "hi" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "x" 12.0 l.glyphs.(0).x
+
+let list_combines_left_indent_and_marker_gap () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 2;
+                left_indent = 20.0;
+                list_style = Some "num-decimal"; marker_gap = 12.0 }] in
+  let l = Text_layout.layout_with_paragraphs "hi" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "x" 32.0 l.glyphs.(0).x
+
+let list_ignores_first_line_indent () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 2;
+                first_line_indent = 25.0;
+                list_style = Some "bullet-disc"; marker_gap = 12.0 }] in
+  let l = Text_layout.layout_with_paragraphs "hi" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "x" 12.0 l.glyphs.(0).x
+
+let phase6_layout_list_tests = [
+  Alcotest.test_case "list_pushes_text_by_marker_gap" `Quick
+    list_pushes_text_by_marker_gap;
+  Alcotest.test_case "list_combines_left_indent_and_marker_gap" `Quick
+    list_combines_left_indent_and_marker_gap;
+  Alcotest.test_case "list_ignores_first_line_indent" `Quick
+    list_ignores_first_line_indent;
+]
+
 let () =
   Alcotest.run "TextLayout" [
     "Phase 5 layout", [
@@ -168,4 +298,6 @@ let () =
       Alcotest.test_case "two_wrappers_split_content" `Quick
         two_wrappers_split_content;
     ];
+    "Phase 6 markers", phase6_marker_tests;
+    "Phase 6 layout list", phase6_layout_list_tests;
   ]

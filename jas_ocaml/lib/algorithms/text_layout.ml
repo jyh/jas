@@ -369,6 +369,8 @@ type paragraph_segment = {
   space_before : float;
   space_after : float;
   text_align : text_align;
+  list_style : string option;
+  marker_gap : float;
 }
 
 let default_segment = {
@@ -376,6 +378,7 @@ let default_segment = {
   left_indent = 0.0; right_indent = 0.0; first_line_indent = 0.0;
   space_before = 0.0; space_after = 0.0;
   text_align = Left;
+  list_style = None; marker_gap = 0.0;
 }
 
 (** Visible width of a line: max [right] of any non-trailing-space glyph. *)
@@ -422,16 +425,25 @@ let layout_with_paragraphs (content : string) (max_width : float)
   List.iteri (fun pi seg ->
     if pi > 0 then y_offset := !y_offset +. seg.space_before;
     let slice = utf8_sub content seg.char_start (seg.char_end - seg.char_start) in
+    (* Phase 6: an active list adds marker_gap to the effective left
+       indent (so the marker has room before the text) AND suppresses
+       first_line_indent — the marker already occupies the first-line
+       position so a separate first-line offset would push the text
+       away from the marker. *)
+    let has_list = seg.list_style <> None in
+    let list_indent = if has_list then seg.marker_gap else 0.0 in
     let effective_max =
       if max_width > 0.0
-      then Float.max 0.0 (max_width -. seg.left_indent -. seg.right_indent)
+      then Float.max 0.0
+             (max_width -. seg.left_indent -. list_indent -. seg.right_indent)
       else 0.0 in
     let para = layout slice effective_max font_size measure in
-    let first_line_extra = Float.max 0.0 seg.first_line_indent in
+    let first_line_extra =
+      if has_list then 0.0 else Float.max 0.0 seg.first_line_indent in
     let first_line_no_in_combined = !line_count in
     let para_lines = Array.length para.lines in
     Array.iteri (fun li (line : line_info) ->
-      let x_shift = seg.left_indent
+      let x_shift = seg.left_indent +. list_indent
                   +. (if li = 0 then first_line_extra else 0.0) in
       let line_avail =
         if effective_max > 0.0
