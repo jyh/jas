@@ -1,6 +1,10 @@
 """Tests for the word-wrap text layout."""
 
-from algorithms.text_layout import layout, ordered_range
+from algorithms.text_layout import (
+    layout, ordered_range,
+    layout_with_paragraphs, ParagraphSegment, TextAlign,
+    build_paragraph_segments,
+)
 
 
 def fixed(w):
@@ -119,3 +123,128 @@ def test_soft_wrap_trailing_space_skipped_in_hit_test():
     l = layout("ab cd", 30.0, 16.0, fixed(10.0))
     assert len(l.lines) == 2
     assert l.hit_test(99.0, 8.0) == 2
+
+
+# ── Phase 5: paragraph-aware layout ──────────────────────────
+
+def test_empty_paragraph_list_matches_plain():
+    m = fixed(10.0)
+    plain = layout("hello world", 100.0, 16.0, m)
+    para = layout_with_paragraphs("hello world", 100.0, 16.0, [], m)
+    assert len(plain.lines) == len(para.lines)
+    assert len(plain.glyphs) == len(para.glyphs)
+    for a, b in zip(plain.glyphs, para.glyphs):
+        assert a.x == b.x
+        assert a.right == b.right
+        assert a.line == b.line
+
+
+def test_left_indent_shifts_every_line():
+    segs = [ParagraphSegment(char_start=0, char_end=11, left_indent=20.0)]
+    l = layout_with_paragraphs("hello world", 60.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 20.0
+
+
+def test_right_indent_narrows_wrap_width():
+    segs = [ParagraphSegment(char_start=0, char_end=11, right_indent=60.0)]
+    l = layout_with_paragraphs("hello world", 110.0, 16.0, segs, fixed(10.0))
+    assert len(l.lines) >= 2
+
+
+def test_first_line_indent_only_shifts_first_line():
+    segs = [ParagraphSegment(char_start=0, char_end=11, first_line_indent=25.0)]
+    l = layout_with_paragraphs("hello world", 60.0, 16.0, segs, fixed(10.0))
+    first_line_first = next(g for g in l.glyphs if g.line == 0)
+    second_line_first = next(g for g in l.glyphs if g.line == 1)
+    assert first_line_first.x == 25.0
+    assert second_line_first.x == 0.0
+
+
+def test_alignment_center_shifts_to_center():
+    segs = [ParagraphSegment(char_start=0, char_end=2,
+                             text_align=TextAlign.CENTER)]
+    l = layout_with_paragraphs("hi", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 40.0
+
+
+def test_alignment_right_shifts_to_right_edge():
+    segs = [ParagraphSegment(char_start=0, char_end=2,
+                             text_align=TextAlign.RIGHT)]
+    l = layout_with_paragraphs("hi", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 80.0
+
+
+def test_space_before_skipped_for_first_paragraph():
+    segs = [
+        ParagraphSegment(char_start=0, char_end=2,
+                         space_before=50.0, space_after=0.0),
+        ParagraphSegment(char_start=2, char_end=4, space_before=30.0),
+    ]
+    l = layout_with_paragraphs("abcd", 100.0, 16.0, segs, fixed(10.0))
+    assert len(l.lines) == 2
+    assert l.lines[0].top == 0.0
+    # 16 (line height) + 30 (space_before of para 2) = 46.
+    assert l.lines[1].top == 46.0
+
+
+def test_space_after_inserts_gap():
+    segs = [
+        ParagraphSegment(char_start=0, char_end=2, space_after=20.0),
+        ParagraphSegment(char_start=2, char_end=4),
+    ]
+    l = layout_with_paragraphs("abcd", 100.0, 16.0, segs, fixed(10.0))
+    assert l.lines[1].top == 36.0
+
+
+def test_alignment_with_indent_uses_remaining_width():
+    # "hi" centered in box of effective width 80 (100-20 left).
+    # (80-20)/2 = 30; +20 left_indent → x=50.
+    segs = [ParagraphSegment(char_start=0, char_end=2,
+                             left_indent=20.0,
+                             text_align=TextAlign.CENTER)]
+    l = layout_with_paragraphs("hi", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 50.0
+
+
+# ── build_paragraph_segments ─────────────────────────────────
+
+def _wrapper(left=0.0, right=0.0, fli=0.0, sb=0.0, sa=0.0, ta=None):
+    from geometry.tspan import Tspan
+    return Tspan(id=0, content="", jas_role="paragraph",
+                 jas_left_indent=left if left else None,
+                 jas_right_indent=right if right else None,
+                 text_indent=fli if fli else None,
+                 jas_space_before=sb if sb else None,
+                 jas_space_after=sa if sa else None,
+                 text_align=ta)
+
+
+def _body(content):
+    from geometry.tspan import Tspan
+    return Tspan(id=0, content=content)
+
+
+def test_no_wrapper_yields_no_segments():
+    segs = build_paragraph_segments((_body("hello"),), "hello", True)
+    assert segs == []
+
+
+def test_single_wrapper_covers_content():
+    segs = build_paragraph_segments(
+        (_wrapper(left=12.0), _body("hello")), "hello", True)
+    assert len(segs) == 1
+    assert segs[0].char_start == 0
+    assert segs[0].char_end == 5
+    assert segs[0].left_indent == 12.0
+
+
+def test_two_wrappers_split_content():
+    segs = build_paragraph_segments((
+        _wrapper(), _body("ab"),
+        _wrapper(sb=6.0, ta="center"), _body("cde"),
+    ), "abcde", True)
+    assert len(segs) == 2
+    assert segs[1].char_start == 2
+    assert segs[1].char_end == 5
+    assert segs[1].space_before == 6.0
+    assert segs[1].text_align == TextAlign.CENTER

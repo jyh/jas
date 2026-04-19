@@ -240,3 +240,211 @@ def layout(content: str, max_width: float, font_size: float,
 
 def ordered_range(a: int, b: int) -> tuple[int, int]:
     return (a, b) if a <= b else (b, a)
+
+
+# ── Phase 5 paragraph-aware layout ──────────────────────────
+
+from enum import Enum
+
+
+class TextAlign(Enum):
+    """Horizontal alignment within a paragraph's effective box (the
+    box width minus left/right indents). Phase 5 supports the three
+    non-justify alignments; the four ``JUSTIFY_*`` variants land
+    with the composer in Phase 8 — they fall back to ``LEFT``."""
+    LEFT = "left"
+    CENTER = "center"
+    RIGHT = "right"
+
+
+@dataclass
+class ParagraphSegment:
+    """Per-paragraph layout constraints derived from the wrapper
+    tspan attributes (or panel defaults when there is no wrapper).
+    All indent / space values are in pixels."""
+    char_start: int = 0
+    char_end: int = 0
+    left_indent: float = 0.0
+    right_indent: float = 0.0
+    # text-indent — additional x offset on the *first* line only.
+    # Signed; negative produces a hanging indent. Phase 5 supports
+    # non-negative values; negative falls back to 0.
+    first_line_indent: float = 0.0
+    # jas:space-before — extra vertical gap above this paragraph.
+    # Always 0 for the first paragraph in the element.
+    space_before: float = 0.0
+    space_after: float = 0.0
+    text_align: TextAlign = TextAlign.LEFT
+
+
+def _trimmed_line_width(line: LineInfo, glyphs: list[Glyph]) -> float:
+    """Visible width of a line: max ``right`` of any non-trailing-
+    whitespace glyph, or 0 when the line has none."""
+    w = 0.0
+    for g in glyphs[line.glyph_start:line.glyph_end]:
+        if not g.is_trailing_space and g.right > w:
+            w = g.right
+    return w
+
+
+def layout_with_paragraphs(
+    content: str,
+    max_width: float,
+    font_size: float,
+    paragraphs: list[ParagraphSegment],
+    measure: Callable[[str], float],
+) -> TextLayout:
+    """Paragraph-aware layout. For each segment lays out the covered
+    slice with the segment's effective wrap width
+    (``max_width - left_indent - right_indent``), inserts
+    ``space_before`` / ``space_after`` vertical gaps between
+    paragraphs (the very first paragraph's ``space_before`` is
+    always skipped per PARAGRAPH.md §SVG attribute mapping), shifts
+    the first line by ``first_line_indent``, and applies the
+    segment's horizontal alignment.
+
+    ``paragraphs`` must be ordered by ``char_start``; gaps and
+    content past the last segment fall back to a default paragraph.
+    When empty the entire content is one default paragraph —
+    equivalent to calling :func:`layout`.
+
+    Phase 5: alignment supports ``LEFT`` / ``CENTER`` / ``RIGHT``.
+    The four ``JUSTIFY_*`` modes fall back to ``LEFT``."""
+    chars = list(content)
+    n = len(chars)
+    line_height = font_size
+    ascent = font_size * 0.8
+
+    # Build the effective segment list: gap-fill so every char is
+    # covered exactly once.
+    segs: list[ParagraphSegment] = []
+    cursor = 0
+    for p in paragraphs:
+        s = min(max(p.char_start, cursor), n)
+        e = min(max(p.char_end, s), n)
+        if s > cursor:
+            segs.append(ParagraphSegment(char_start=cursor, char_end=s))
+        if e > s:
+            seg = ParagraphSegment(
+                char_start=s, char_end=e,
+                left_indent=p.left_indent, right_indent=p.right_indent,
+                first_line_indent=p.first_line_indent,
+                space_before=p.space_before, space_after=p.space_after,
+                text_align=p.text_align)
+            segs.append(seg)
+        cursor = e
+    if cursor < n:
+        segs.append(ParagraphSegment(char_start=cursor, char_end=n))
+    if not segs:
+        segs.append(ParagraphSegment(char_start=0, char_end=n))
+
+    all_glyphs: list[Glyph] = []
+    all_lines: list[LineInfo] = []
+    y_offset = 0.0
+    line_count = 0
+
+    for pi, seg in enumerate(segs):
+        if pi > 0:
+            y_offset += seg.space_before
+        slice_str = ''.join(chars[seg.char_start:seg.char_end])
+        effective_max = max(0.0, max_width - seg.left_indent - seg.right_indent) \
+            if max_width > 0.0 else 0.0
+        para = layout(slice_str, effective_max, font_size, measure)
+        first_line_extra = max(0.0, seg.first_line_indent)
+        first_line_no_in_combined = line_count
+        for li, line in enumerate(para.lines):
+            x_shift = seg.left_indent + (first_line_extra if li == 0 else 0.0)
+            line_avail = max(0.0, effective_max - (first_line_extra if li == 0 else 0.0)) \
+                if effective_max > 0.0 else 0.0
+            visible_w = _trimmed_line_width(line, para.glyphs)
+            if seg.text_align == TextAlign.CENTER:
+                align_shift = (line_avail - visible_w) / 2.0 if line_avail > visible_w else 0.0
+            elif seg.text_align == TextAlign.RIGHT:
+                align_shift = line_avail - visible_w if line_avail > visible_w else 0.0
+            else:
+                align_shift = 0.0
+            total_shift = x_shift + align_shift
+            orig_start = seg.char_start + line.start
+            orig_end = seg.char_start + line.end
+            top = y_offset + line.top
+            baseline = y_offset + line.baseline_y
+            glyph_start = len(all_glyphs)
+            for g in para.glyphs[line.glyph_start:line.glyph_end]:
+                all_glyphs.append(Glyph(
+                    idx=seg.char_start + g.idx,
+                    line=first_line_no_in_combined + li,
+                    x=g.x + total_shift,
+                    right=g.right + total_shift,
+                    baseline_y=g.baseline_y + y_offset,
+                    top=g.top + y_offset,
+                    height=g.height,
+                    is_trailing_space=g.is_trailing_space))
+            glyph_end = len(all_glyphs)
+            all_lines.append(LineInfo(
+                start=orig_start, end=orig_end,
+                hard_break=line.hard_break,
+                top=top, baseline_y=baseline,
+                height=line.height,
+                width=visible_w + total_shift,
+                glyph_start=glyph_start, glyph_end=glyph_end))
+            line_count += 1
+        if para.lines:
+            y_offset += len(para.lines) * line_height
+        y_offset += seg.space_after
+
+    if not all_lines:
+        # Empty content — keep single-empty-line invariant.
+        all_lines.append(LineInfo(
+            start=0, end=0, hard_break=False,
+            top=0.0, baseline_y=ascent, height=line_height, width=0.0))
+
+    return TextLayout(glyphs=all_glyphs, lines=all_lines,
+                      font_size=font_size, char_count=n)
+
+
+def build_paragraph_segments(
+    tspans: tuple,  # tuple[Tspan, ...] — avoid circular import
+    content: str,
+    is_area: bool,
+) -> list[ParagraphSegment]:
+    """Build [ParagraphSegment] list from a Text/TextPath's tspans.
+    Each tspan whose ``jas_role == "paragraph"`` is a wrapper that
+    opens a new segment. Returns ``[]`` when no wrapper is present
+    (caller falls back to default-paragraph layout)."""
+    total_chars = len(content)
+    segs: list[ParagraphSegment] = []
+    cursor = 0
+    current: ParagraphSegment | None = None
+    for t in tspans:
+        body_chars = len(t.content)
+        if t.jas_role == "paragraph":
+            if current is not None:
+                current.char_end = cursor
+                if current.char_end > current.char_start:
+                    segs.append(current)
+            current = ParagraphSegment(
+                char_start=cursor, char_end=cursor,
+                left_indent=t.jas_left_indent or 0.0,
+                right_indent=t.jas_right_indent or 0.0,
+                first_line_indent=t.text_indent or 0.0,
+                space_before=t.jas_space_before or 0.0,
+                space_after=t.jas_space_after or 0.0,
+                text_align=_text_align_from(t.text_align, is_area))
+        else:
+            cursor += body_chars
+    if current is not None:
+        current.char_end = min(cursor, total_chars)
+        if current.char_end > current.char_start:
+            segs.append(current)
+    return segs
+
+
+def _text_align_from(value: str | None, is_area: bool) -> TextAlign:
+    """Map the wrapper tspan's ``text-align`` string to a TextAlign.
+    Phase 5 supports ``left`` / ``center`` / ``right``; the four
+    ``justify*`` values fall back to LEFT until the composer lands."""
+    if value == "center":
+        return TextAlign.CENTER
+    if value == "right":
+        return TextAlign.RIGHT
+    return TextAlign.LEFT
