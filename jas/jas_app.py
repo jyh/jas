@@ -270,6 +270,15 @@ class MainWindow(QMainWindow):
         from panels.character_panel_state import subscribe as _subscribe_character_panel
         _subscribe_character_panel(self._yaml_state, self.active_model)
 
+        # Paragraph panel → selection apply pipeline (Phase 4). Same
+        # subscribe pattern as character — every write into the
+        # paragraph_panel_content scope triggers
+        # ``apply_paragraph_panel_to_selection`` so widget changes
+        # flow through to every paragraph wrapper tspan in the
+        # selected text element.
+        from panels.paragraph_panel_state import subscribe as _subscribe_paragraph_panel
+        _subscribe_paragraph_panel(self._yaml_state, self.active_model)
+
         # Dock pane
         self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model,
                                           state_store=self._yaml_state)
