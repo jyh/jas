@@ -28,6 +28,11 @@ let default_tspan () : tspan = {
   jas_hyphenate = None;
   jas_hanging_punctuation = None;
   jas_list_style = None;
+  text_align = None;
+  text_align_last = None;
+  text_indent = None;
+  jas_space_before = None;
+  jas_space_after = None;
   letter_spacing = None;
   line_height = None;
   rotate = None;
@@ -57,6 +62,11 @@ let has_no_overrides (t : tspan) : bool =
   && t.jas_hyphenate = None
   && t.jas_hanging_punctuation = None
   && t.jas_list_style = None
+  && t.text_align = None
+  && t.text_align_last = None
+  && t.text_indent = None
+  && t.jas_space_before = None
+  && t.jas_space_after = None
   && t.letter_spacing = None
   && t.line_height = None
   && t.rotate = None
@@ -106,6 +116,11 @@ let _tspan_to_json (t : tspan) : Yojson.Safe.t =
   (match t.jas_hyphenate with Some v -> add "jas_hyphenate" (`Bool v) | None -> ());
   (match t.jas_hanging_punctuation with Some v -> add "jas_hanging_punctuation" (`Bool v) | None -> ());
   (match t.jas_list_style with Some v -> add "jas_list_style" (`String v) | None -> ());
+  (match t.text_align with Some v -> add "text_align" (`String v) | None -> ());
+  (match t.text_align_last with Some v -> add "text_align_last" (`String v) | None -> ());
+  (match t.text_indent with Some v -> add "text_indent" (`Float v) | None -> ());
+  (match t.jas_space_before with Some v -> add "jas_space_before" (`Float v) | None -> ());
+  (match t.jas_space_after with Some v -> add "jas_space_after" (`Float v) | None -> ());
   (match t.letter_spacing with Some v -> add "letter_spacing" (`Float v) | None -> ());
   (match t.line_height with Some v -> add "line_height" (`Float v) | None -> ());
   (match t.rotate with Some v -> add "rotate" (`Float v) | None -> ());
@@ -156,6 +171,11 @@ let _tspan_from_json (i : int) (j : Yojson.Safe.t) : tspan =
     jas_hyphenate = get_bool "jas_hyphenate";
     jas_hanging_punctuation = get_bool "jas_hanging_punctuation";
     jas_list_style = get_str "jas_list_style";
+    text_align = get_str "text_align";
+    text_align_last = get_str "text_align_last";
+    text_indent = get_float "text_indent";
+    jas_space_before = get_float "jas_space_before";
+    jas_space_after = get_float "jas_space_after";
     letter_spacing = get_float "letter_spacing";
     line_height = get_float "line_height";
     rotate = get_float "rotate";
@@ -225,6 +245,11 @@ let tspans_to_svg_fragment (tspans : tspan array) : string =
     (match t.jas_hyphenate with Some v -> add "jas:hyphenate" (string_of_bool v) | None -> ());
     (match t.jas_hanging_punctuation with Some v -> add "jas:hanging-punctuation" (string_of_bool v) | None -> ());
     (match t.jas_list_style with Some v -> add "jas:list-style" v | None -> ());
+    (match t.text_align with Some v -> add "text-align" v | None -> ());
+    (match t.text_align_last with Some v -> add "text-align-last" v | None -> ());
+    (match t.text_indent with Some v -> add "text-indent" (_fmt_float v) | None -> ());
+    (match t.jas_space_before with Some v -> add "jas:space-before" (_fmt_float v) | None -> ());
+    (match t.jas_space_after with Some v -> add "jas:space-after" (_fmt_float v) | None -> ());
     (match t.letter_spacing with Some v -> add "letter-spacing" (_fmt_float v) | None -> ());
     (match t.line_height with Some v -> add "line-height" (_fmt_float v) | None -> ());
     (match t.rotate with Some v -> add "rotate" (_fmt_float v) | None -> ());
@@ -336,6 +361,11 @@ let tspans_from_svg_fragment (svg_str : string) : tspan array option =
             | "jas:hyphenate" -> { cur with jas_hyphenate = Some (v = "true") }
             | "jas:hanging-punctuation" -> { cur with jas_hanging_punctuation = Some (v = "true") }
             | "jas:list-style" -> { cur with jas_list_style = Some v }
+            | "text-align" -> { cur with text_align = Some v }
+            | "text-align-last" -> { cur with text_align_last = Some v }
+            | "text-indent" -> { cur with text_indent = float_of_string_opt v }
+            | "jas:space-before" -> { cur with jas_space_before = float_of_string_opt v }
+            | "jas:space-after" -> { cur with jas_space_after = float_of_string_opt v }
             | "letter-spacing" -> { cur with letter_spacing = float_of_string_opt v }
             | "line-height" -> { cur with line_height = float_of_string_opt v }
             | "rotate" -> { cur with rotate = float_of_string_opt v }
@@ -379,6 +409,11 @@ let merge_tspan_overrides (target : tspan) (source : tspan) : tspan =
     jas_hyphenate = or_some source.jas_hyphenate target.jas_hyphenate;
     jas_hanging_punctuation = or_some source.jas_hanging_punctuation target.jas_hanging_punctuation;
     jas_list_style = or_some source.jas_list_style target.jas_list_style;
+    text_align = or_some source.text_align target.text_align;
+    text_align_last = or_some source.text_align_last target.text_align_last;
+    text_indent = or_some source.text_indent target.text_indent;
+    jas_space_before = or_some source.jas_space_before target.jas_space_before;
+    jas_space_after = or_some source.jas_space_after target.jas_space_after;
     letter_spacing = or_some source.letter_spacing target.letter_spacing;
     line_height = or_some source.line_height target.line_height;
     rotate = or_some source.rotate target.rotate;
@@ -631,6 +666,11 @@ let _attrs_equal (a : tspan) (b : tspan) : bool =
   && a.jas_hyphenate = b.jas_hyphenate
   && a.jas_hanging_punctuation = b.jas_hanging_punctuation
   && a.jas_list_style = b.jas_list_style
+  && a.text_align = b.text_align
+  && a.text_align_last = b.text_align_last
+  && a.text_indent = b.text_indent
+  && a.jas_space_before = b.jas_space_before
+  && a.jas_space_after = b.jas_space_after
   && a.letter_spacing = b.letter_spacing
   && a.line_height = b.line_height
   && a.rotate = b.rotate

@@ -151,6 +151,15 @@ type tspan = {
       [num-decimal]/[num-lower-alpha]/[num-upper-alpha]/[num-lower-roman]/
       [num-upper-roman]; absent = no marker. *)
   jas_list_style : string option;
+  (** Phase 1b1 panel-surface remainder. text_align + text_align_last
+      drive the 7-button alignment radio group via PARAGRAPH.md
+      alignment sub-mapping. text_indent backs FIRST_LINE_INDENT_DROPDOWN
+      and is signed (negative produces hanging indent). *)
+  text_align : string option;
+  text_align_last : string option;
+  text_indent : float option;
+  jas_space_before : float option;
+  jas_space_after : float option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;

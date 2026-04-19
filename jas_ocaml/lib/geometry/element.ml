@@ -264,6 +264,11 @@ type tspan = {
   jas_hyphenate : bool option;
   jas_hanging_punctuation : bool option;
   jas_list_style : string option;
+  text_align : string option;
+  text_align_last : string option;
+  text_indent : float option;
+  jas_space_before : float option;
+  jas_space_after : float option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;
@@ -710,6 +715,8 @@ let tspans_from_content (content : string) : tspan array =
     jas_left_indent = None; jas_right_indent = None;
     jas_hyphenate = None; jas_hanging_punctuation = None;
     jas_list_style = None;
+    text_align = None; text_align_last = None; text_indent = None;
+    jas_space_before = None; jas_space_after = None;
     letter_spacing = None; line_height = None;
     rotate = None; style_name = None;
     text_decoration = None; text_rendering = None;
