@@ -142,3 +142,35 @@ val subscribe_character_panel :
     model as the user switches tabs. *)
 val subscribe_stroke_panel :
   State_store.t -> (unit -> Controller.controller) -> unit
+
+(** Push the YAML-stored paragraph panel state onto every paragraph
+    wrapper tspan inside the selection. Per the identity-value rule,
+    attrs equal to their default are omitted (set to [None]). The
+    seven alignment radio bools collapse to a [(text_align,
+    text_align_last)] pair per the §Alignment sub-mapping; bullets
+    and numbered_list both write the single [jas_list_style] attr.
+    Promotes the first tspan to a paragraph wrapper if none exists.
+    No-op when the selection is empty or contains no text. Phase 4. *)
+val apply_paragraph_panel_to_selection :
+  State_store.t -> Controller.controller -> unit
+
+(** Reset every Paragraph panel control to its default per
+    PARAGRAPH.md §Reset Panel and remove the corresponding paragraph
+    attributes from every wrapper tspan in the selection. Phase 4. *)
+val reset_paragraph_panel :
+  State_store.t -> Controller.controller -> unit
+
+(** Apply mutual exclusion side effects for a paragraph panel write.
+    Setting one of the seven alignment radio bools to [true] clears
+    the other six; setting [bullets] or [numbered_list] to a
+    non-empty string clears the sibling. Phase 4. *)
+val apply_paragraph_panel_mutual_exclusion :
+  State_store.t -> string -> Yojson.Safe.t -> unit
+
+(** Sync from selection → mutual exclusion → set field → apply.
+    The full pipeline a widget write should call so untouched fields
+    keep the selection's current values, the radio / list-style
+    invariants hold, and the wrappers receive the full updated state
+    in one snapshot. Phase 4. *)
+val set_paragraph_panel_field :
+  State_store.t -> Controller.controller -> string -> Yojson.Safe.t -> unit

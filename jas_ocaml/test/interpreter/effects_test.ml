@@ -834,6 +834,175 @@ let paragraph_text_kind_tests = [
     assert (get_panel s "paragraph_panel_content" "left_indent" = `Float 0.0));
 ]
 
+(* ── Paragraph panel — Phase 4 panel→selection writes ─────── *)
+
+let _make_area_text_with_wrapper () =
+  let wrapper : Jas.Element.tspan = { (Jas.Tspan.default_tspan ()) with
+    id = 0; content = ""; jas_role = Some "paragraph" } in
+  let body : Jas.Element.tspan = { (Jas.Tspan.default_tspan ()) with
+    id = 1; content = "hello" } in
+  let text = match Jas.Element.make_text ~text_width:200.0 ~text_height:100.0
+                     0.0 0.0 "hello" with
+    | Jas.Element.Text r ->
+      Jas.Element.Text { r with tspans = [| wrapper; body |] }
+    | _ -> assert false in
+  let layer = Jas.Element.make_layer [| text |] in
+  let selection = Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.element_selection_all [0; 0]) in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let _paragraph_panel_defaults () = [
+  ("align_left", `Bool true);
+  ("align_center", `Bool false); ("align_right", `Bool false);
+  ("justify_left", `Bool false); ("justify_center", `Bool false);
+  ("justify_right", `Bool false); ("justify_all", `Bool false);
+  ("bullets", `String ""); ("numbered_list", `String "");
+  ("left_indent", `Float 0.0); ("right_indent", `Float 0.0);
+  ("first_line_indent", `Float 0.0);
+  ("space_before", `Float 0.0); ("space_after", `Float 0.0);
+  ("hyphenate", `Bool false); ("hanging_punctuation", `Bool false);
+]
+
+let paragraph_phase4_tests = [
+  Alcotest.test_case "mutual_exclusion_radio_clears_others" `Quick (fun () ->
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    Jas.Effects.apply_paragraph_panel_mutual_exclusion s
+      "justify_center" (`Bool true);
+    assert (get_panel s "paragraph_panel_content" "align_left" = `Bool false);
+    assert (get_panel s "paragraph_panel_content" "align_center" = `Bool false);
+    assert (get_panel s "paragraph_panel_content" "justify_left" = `Bool false);
+    (* The function clears siblings only; caller writes the new value. *));
+
+  Alcotest.test_case "mutual_exclusion_bullets_clears_numbered" `Quick (fun () ->
+    let s = create () in
+    init_panel s "paragraph_panel_content" [
+      ("bullets", `String ""); ("numbered_list", `String "num-decimal");
+    ];
+    Jas.Effects.apply_paragraph_panel_mutual_exclusion s
+      "bullets" (`String "bullet-disc");
+    assert (get_panel s "paragraph_panel_content" "numbered_list" = `String ""));
+
+  Alcotest.test_case "mutual_exclusion_empty_string_does_not_clear" `Quick (fun () ->
+    (* "" (the None option) should not blow away the user's other
+       dropdown choice. *)
+    let s = create () in
+    init_panel s "paragraph_panel_content" [
+      ("bullets", `String ""); ("numbered_list", `String "num-decimal");
+    ];
+    Jas.Effects.apply_paragraph_panel_mutual_exclusion s
+      "bullets" (`String "");
+    assert (get_panel s "paragraph_panel_content" "numbered_list"
+            = `String "num-decimal"));
+
+  Alcotest.test_case "apply_writes_indent_to_wrapper" `Quick (fun () ->
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    set_panel s "paragraph_panel_content" "left_indent" (`Float 18.0);
+    set_panel s "paragraph_panel_content" "right_indent" (`Float 9.0);
+    Jas.Effects.apply_paragraph_panel_to_selection s ctrl;
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.jas_role = Some "paragraph");
+       assert (w.jas_left_indent = Some 18.0);
+       assert (w.jas_right_indent = Some 9.0)
+     | _ -> assert false));
+
+  Alcotest.test_case "apply_omits_defaults" `Quick (fun () ->
+    (* Identity rule: zero / false / "" produces None on the wrapper. *)
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    Jas.Effects.apply_paragraph_panel_to_selection s ctrl;
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.jas_left_indent = None);
+       assert (w.jas_right_indent = None);
+       assert (w.jas_space_before = None);
+       assert (w.jas_space_after = None);
+       assert (w.jas_hyphenate = None);
+       assert (w.jas_hanging_punctuation = None);
+       assert (w.jas_list_style = None);
+       assert (w.text_align = None);
+       assert (w.text_align_last = None)
+     | _ -> assert false));
+
+  Alcotest.test_case "apply_alignment_radio_writes_text_align_pair" `Quick (fun () ->
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    set_panel s "paragraph_panel_content" "align_left" (`Bool false);
+    set_panel s "paragraph_panel_content" "justify_center" (`Bool true);
+    Jas.Effects.apply_paragraph_panel_to_selection s ctrl;
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.text_align = Some "justify");
+       assert (w.text_align_last = Some "center")
+     | _ -> assert false));
+
+  Alcotest.test_case "reset_clears_wrapper_attrs_and_panel_state" `Quick (fun () ->
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    (* Populate wrapper via apply. *)
+    set_panel s "paragraph_panel_content" "left_indent" (`Float 24.0);
+    set_panel s "paragraph_panel_content" "hyphenate" (`Bool true);
+    set_panel s "paragraph_panel_content" "bullets" (`String "bullet-disc");
+    Jas.Effects.apply_paragraph_panel_to_selection s ctrl;
+    (* Reset. *)
+    Jas.Effects.reset_paragraph_panel s ctrl;
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.jas_left_indent = None);
+       assert (w.jas_hyphenate = None);
+       assert (w.jas_list_style = None)
+     | _ -> assert false);
+    (* Panel state itself reset. *)
+    assert (get_panel s "paragraph_panel_content" "left_indent" = `Float 0.0);
+    assert (get_panel s "paragraph_panel_content" "hyphenate" = `Bool false);
+    assert (get_panel s "paragraph_panel_content" "bullets" = `String "");
+    assert (get_panel s "paragraph_panel_content" "align_left" = `Bool true));
+
+  Alcotest.test_case "sync_reads_wrapper_alignment_into_radio" `Quick (fun () ->
+    (* Wrapper carries text_align="justify" + text_align_last="right"
+       → live overrides set justify_right=true, others false. *)
+    let wrapper : Jas.Element.tspan = { (Jas.Tspan.default_tspan ()) with
+      id = 0; content = ""; jas_role = Some "paragraph";
+      text_align = Some "justify"; text_align_last = Some "right" } in
+    let body = { (Jas.Tspan.default_tspan ()) with id = 1; content = "hi" } in
+    let text = match Jas.Element.make_text ~text_width:200.0 ~text_height:100.0
+                       0.0 0.0 "hi" with
+      | Jas.Element.Text r ->
+        Jas.Element.Text { r with tspans = [| wrapper; body |] }
+      | _ -> assert false in
+    let layer = Jas.Element.make_layer [| text |] in
+    let selection = Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "justify_right" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "align_left" = `Bool false);
+    assert (get_panel s "paragraph_panel_content" "align_center" = `Bool false));
+]
+
 (* ── Preview snapshot/restore (Phase 0) ─────────────────────
 
    open_dialog captures a snapshot of every state key referenced by
@@ -930,5 +1099,6 @@ let () =
     "Stroke subscribe", stroke_subscribe_tests;
     "Phase3 pending", phase3_pending_tests;
     "Paragraph text-kind", paragraph_text_kind_tests;
+    "Paragraph Phase 4", paragraph_phase4_tests;
     "Preview snapshot", preview_snapshot_tests;
   ]
