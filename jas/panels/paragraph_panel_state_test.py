@@ -534,3 +534,57 @@ class TestPhase8JustificationDialog:
         assert w.jas_glyph_scaling_max is None
         assert w.jas_auto_leading is None
         assert w.jas_single_word_justify is None
+
+
+# ── Phase 9: Hyphenation dialog OK commit ──────────────────
+
+from panels.paragraph_panel_state import (
+    apply_hyphenation_dialog_to_selection,
+    HyphenationDialogValues,
+)
+from workspace_interpreter.state_store import StateStore
+
+
+class TestPhase9HyphenationDialog:
+    def test_writes_non_default_attrs(self):
+        text = _area_text_with_wrapper()
+        model = _make_apply_model(text)
+        store = StateStore()
+        store.init_panel("paragraph_panel_content", {"hyphenate": False})
+        v = HyphenationDialogValues(
+            hyphenate=True,
+            min_word=6, min_before=3, min_after=1,  # min_after default → omit
+            limit=2, zone=36, bias=0,                # bias default → omit
+            capitalized=True)
+        apply_hyphenation_dialog_to_selection(model, store, v)
+        w = model.document.get_element((0, 0)).tspans[0]
+        assert w.jas_hyphenate is True
+        assert w.jas_hyphenate_min_word == 6
+        assert w.jas_hyphenate_min_before == 3
+        assert w.jas_hyphenate_min_after is None  # identity-omit
+        assert w.jas_hyphenate_limit == 2
+        assert w.jas_hyphenate_zone == 36
+        assert w.jas_hyphenate_bias is None       # identity-omit
+        assert w.jas_hyphenate_capitalized is True
+        # Master mirror.
+        assert store.get_panel("paragraph_panel_content", "hyphenate") is True
+
+    def test_all_defaults_writes_nothing(self):
+        text = _area_text_with_wrapper()
+        model = _make_apply_model(text)
+        store = StateStore()
+        store.init_panel("paragraph_panel_content", {"hyphenate": False})
+        v = HyphenationDialogValues(
+            hyphenate=False,
+            min_word=3, min_before=1, min_after=1,
+            limit=0, zone=0, bias=0, capitalized=False)
+        apply_hyphenation_dialog_to_selection(model, store, v)
+        w = model.document.get_element((0, 0)).tspans[0]
+        assert w.jas_hyphenate is None
+        assert w.jas_hyphenate_min_word is None
+        assert w.jas_hyphenate_min_before is None
+        assert w.jas_hyphenate_min_after is None
+        assert w.jas_hyphenate_limit is None
+        assert w.jas_hyphenate_zone is None
+        assert w.jas_hyphenate_bias is None
+        assert w.jas_hyphenate_capitalized is None

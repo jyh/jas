@@ -155,6 +155,20 @@ def _tspan_svg(t) -> str:
         attrs += f' urn:jas:1:auto-leading="{_fmt(t.jas_auto_leading)}"'
     if t.jas_single_word_justify is not None:
         attrs += f' urn:jas:1:single-word-justify="{escape(t.jas_single_word_justify)}"'
+    if t.jas_hyphenate_min_word is not None:
+        attrs += f' urn:jas:1:hyphenate-min-word="{_fmt(t.jas_hyphenate_min_word)}"'
+    if t.jas_hyphenate_min_before is not None:
+        attrs += f' urn:jas:1:hyphenate-min-before="{_fmt(t.jas_hyphenate_min_before)}"'
+    if t.jas_hyphenate_min_after is not None:
+        attrs += f' urn:jas:1:hyphenate-min-after="{_fmt(t.jas_hyphenate_min_after)}"'
+    if t.jas_hyphenate_limit is not None:
+        attrs += f' urn:jas:1:hyphenate-limit="{_fmt(t.jas_hyphenate_limit)}"'
+    if t.jas_hyphenate_zone is not None:
+        attrs += f' urn:jas:1:hyphenate-zone="{_fmt(t.jas_hyphenate_zone)}"'
+    if t.jas_hyphenate_bias is not None:
+        attrs += f' urn:jas:1:hyphenate-bias="{_fmt(t.jas_hyphenate_bias)}"'
+    if t.jas_hyphenate_capitalized is not None:
+        attrs += f' urn:jas:1:hyphenate-capitalized="{"true" if t.jas_hyphenate_capitalized else "false"}"'
     return f"<tspan{attrs}>{escape(t.content)}</tspan>"
 
 
@@ -738,6 +752,13 @@ def _parse_tspan(node) -> list:
     jas_glyph_scaling_max = _opt_float(node.get("urn:jas:1:glyph-scaling-max"))
     jas_auto_leading = _opt_float(node.get("urn:jas:1:auto-leading"))
     jas_single_word_justify = node.get("urn:jas:1:single-word-justify")
+    jas_hyphenate_min_word = _opt_float(node.get("urn:jas:1:hyphenate-min-word"))
+    jas_hyphenate_min_before = _opt_float(node.get("urn:jas:1:hyphenate-min-before"))
+    jas_hyphenate_min_after = _opt_float(node.get("urn:jas:1:hyphenate-min-after"))
+    jas_hyphenate_limit = _opt_float(node.get("urn:jas:1:hyphenate-limit"))
+    jas_hyphenate_zone = _opt_float(node.get("urn:jas:1:hyphenate-zone"))
+    jas_hyphenate_bias = _opt_float(node.get("urn:jas:1:hyphenate-bias"))
+    jas_hyphenate_capitalized = _opt_bool(node.get("urn:jas:1:hyphenate-capitalized"))
     base_kwargs = dict(
         font_family=font_family, font_size=font_size,
         font_style=font_style, font_weight=font_weight,
@@ -763,6 +784,13 @@ def _parse_tspan(node) -> list:
         jas_glyph_scaling_max=jas_glyph_scaling_max,
         jas_auto_leading=jas_auto_leading,
         jas_single_word_justify=jas_single_word_justify,
+        jas_hyphenate_min_word=jas_hyphenate_min_word,
+        jas_hyphenate_min_before=jas_hyphenate_min_before,
+        jas_hyphenate_min_after=jas_hyphenate_min_after,
+        jas_hyphenate_limit=jas_hyphenate_limit,
+        jas_hyphenate_zone=jas_hyphenate_zone,
+        jas_hyphenate_bias=jas_hyphenate_bias,
+        jas_hyphenate_capitalized=jas_hyphenate_capitalized,
     )
     if not rotate_vals:
         return [Tspan(id=0, content=content, **base_kwargs)]
