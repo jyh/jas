@@ -205,6 +205,17 @@ def _pack_tspan(t) -> list:
         t.text_indent,
         t.jas_space_before,
         t.jas_space_after,
+        t.jas_word_spacing_min,
+        t.jas_word_spacing_desired,
+        t.jas_word_spacing_max,
+        t.jas_letter_spacing_min,
+        t.jas_letter_spacing_desired,
+        t.jas_letter_spacing_max,
+        t.jas_glyph_scaling_min,
+        t.jas_glyph_scaling_desired,
+        t.jas_glyph_scaling_max,
+        t.jas_auto_leading,
+        t.jas_single_word_justify,
     ]
 
 
@@ -257,6 +268,17 @@ def _unpack_tspan(v):
         text_indent=get(30),
         jas_space_before=get(31),
         jas_space_after=get(32),
+        jas_word_spacing_min=get(33),
+        jas_word_spacing_desired=get(34),
+        jas_word_spacing_max=get(35),
+        jas_letter_spacing_min=get(36),
+        jas_letter_spacing_desired=get(37),
+        jas_letter_spacing_max=get(38),
+        jas_glyph_scaling_min=get(39),
+        jas_glyph_scaling_desired=get(40),
+        jas_glyph_scaling_max=get(41),
+        jas_auto_leading=get(42),
+        jas_single_word_justify=get(43),
     )
 
 

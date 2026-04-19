@@ -478,3 +478,59 @@ class TestPhase4SetParagraphField:
         w = model.document.get_element((0, 0)).tspans[0]
         assert w.jas_left_indent == 12.0
         assert w.jas_right_indent == 24.0  # preserved by sync
+
+
+# ── Phase 8: Justification dialog OK commit ──────────────────
+
+from panels.paragraph_panel_state import (
+    apply_justification_dialog_to_selection,
+    JustificationDialogValues,
+)
+
+
+class TestPhase8JustificationDialog:
+    def test_writes_non_default_attrs(self):
+        text = _area_text_with_wrapper()
+        model = _make_apply_model(text)
+        v = JustificationDialogValues(
+            word_spacing_min=75, word_spacing_desired=95, word_spacing_max=150,
+            letter_spacing_min=-5, letter_spacing_desired=0,  # default → omit
+            letter_spacing_max=10,
+            glyph_scaling_min=95, glyph_scaling_desired=100,  # default → omit
+            glyph_scaling_max=105,
+            auto_leading=140, single_word_justify="left")
+        apply_justification_dialog_to_selection(model, v)
+        w = model.document.get_element((0, 0)).tspans[0]
+        assert w.jas_word_spacing_min == 75
+        assert w.jas_word_spacing_desired == 95
+        assert w.jas_word_spacing_max == 150
+        assert w.jas_letter_spacing_min == -5
+        assert w.jas_letter_spacing_desired is None  # identity-omit
+        assert w.jas_letter_spacing_max == 10
+        assert w.jas_glyph_scaling_min == 95
+        assert w.jas_glyph_scaling_desired is None   # identity-omit
+        assert w.jas_glyph_scaling_max == 105
+        assert w.jas_auto_leading == 140
+        assert w.jas_single_word_justify == "left"
+
+    def test_all_defaults_writes_nothing(self):
+        text = _area_text_with_wrapper()
+        model = _make_apply_model(text)
+        v = JustificationDialogValues(
+            word_spacing_min=80, word_spacing_desired=100, word_spacing_max=133,
+            letter_spacing_min=0, letter_spacing_desired=0, letter_spacing_max=0,
+            glyph_scaling_min=100, glyph_scaling_desired=100, glyph_scaling_max=100,
+            auto_leading=120, single_word_justify="justify")
+        apply_justification_dialog_to_selection(model, v)
+        w = model.document.get_element((0, 0)).tspans[0]
+        assert w.jas_word_spacing_min is None
+        assert w.jas_word_spacing_desired is None
+        assert w.jas_word_spacing_max is None
+        assert w.jas_letter_spacing_min is None
+        assert w.jas_letter_spacing_desired is None
+        assert w.jas_letter_spacing_max is None
+        assert w.jas_glyph_scaling_min is None
+        assert w.jas_glyph_scaling_desired is None
+        assert w.jas_glyph_scaling_max is None
+        assert w.jas_auto_leading is None
+        assert w.jas_single_word_justify is None

@@ -132,6 +132,29 @@ def _tspan_svg(t) -> str:
         attrs += f' urn:jas:1:space-before="{_fmt(t.jas_space_before)}"'
     if t.jas_space_after is not None:
         attrs += f' urn:jas:1:space-after="{_fmt(t.jas_space_after)}"'
+    # Phase 1b2 / Phase 8 Justification dialog attrs.
+    if t.jas_word_spacing_min is not None:
+        attrs += f' urn:jas:1:word-spacing-min="{_fmt(t.jas_word_spacing_min)}"'
+    if t.jas_word_spacing_desired is not None:
+        attrs += f' urn:jas:1:word-spacing-desired="{_fmt(t.jas_word_spacing_desired)}"'
+    if t.jas_word_spacing_max is not None:
+        attrs += f' urn:jas:1:word-spacing-max="{_fmt(t.jas_word_spacing_max)}"'
+    if t.jas_letter_spacing_min is not None:
+        attrs += f' urn:jas:1:letter-spacing-min="{_fmt(t.jas_letter_spacing_min)}"'
+    if t.jas_letter_spacing_desired is not None:
+        attrs += f' urn:jas:1:letter-spacing-desired="{_fmt(t.jas_letter_spacing_desired)}"'
+    if t.jas_letter_spacing_max is not None:
+        attrs += f' urn:jas:1:letter-spacing-max="{_fmt(t.jas_letter_spacing_max)}"'
+    if t.jas_glyph_scaling_min is not None:
+        attrs += f' urn:jas:1:glyph-scaling-min="{_fmt(t.jas_glyph_scaling_min)}"'
+    if t.jas_glyph_scaling_desired is not None:
+        attrs += f' urn:jas:1:glyph-scaling-desired="{_fmt(t.jas_glyph_scaling_desired)}"'
+    if t.jas_glyph_scaling_max is not None:
+        attrs += f' urn:jas:1:glyph-scaling-max="{_fmt(t.jas_glyph_scaling_max)}"'
+    if t.jas_auto_leading is not None:
+        attrs += f' urn:jas:1:auto-leading="{_fmt(t.jas_auto_leading)}"'
+    if t.jas_single_word_justify is not None:
+        attrs += f' urn:jas:1:single-word-justify="{escape(t.jas_single_word_justify)}"'
     return f"<tspan{attrs}>{escape(t.content)}</tspan>"
 
 
@@ -704,6 +727,17 @@ def _parse_tspan(node) -> list:
     text_indent = _opt_float(node.get("text-indent"))
     jas_space_before = _opt_float(node.get("urn:jas:1:space-before"))
     jas_space_after = _opt_float(node.get("urn:jas:1:space-after"))
+    jas_word_spacing_min = _opt_float(node.get("urn:jas:1:word-spacing-min"))
+    jas_word_spacing_desired = _opt_float(node.get("urn:jas:1:word-spacing-desired"))
+    jas_word_spacing_max = _opt_float(node.get("urn:jas:1:word-spacing-max"))
+    jas_letter_spacing_min = _opt_float(node.get("urn:jas:1:letter-spacing-min"))
+    jas_letter_spacing_desired = _opt_float(node.get("urn:jas:1:letter-spacing-desired"))
+    jas_letter_spacing_max = _opt_float(node.get("urn:jas:1:letter-spacing-max"))
+    jas_glyph_scaling_min = _opt_float(node.get("urn:jas:1:glyph-scaling-min"))
+    jas_glyph_scaling_desired = _opt_float(node.get("urn:jas:1:glyph-scaling-desired"))
+    jas_glyph_scaling_max = _opt_float(node.get("urn:jas:1:glyph-scaling-max"))
+    jas_auto_leading = _opt_float(node.get("urn:jas:1:auto-leading"))
+    jas_single_word_justify = node.get("urn:jas:1:single-word-justify")
     base_kwargs = dict(
         font_family=font_family, font_size=font_size,
         font_style=font_style, font_weight=font_weight,
@@ -718,6 +752,17 @@ def _parse_tspan(node) -> list:
         text_indent=text_indent,
         jas_space_before=jas_space_before,
         jas_space_after=jas_space_after,
+        jas_word_spacing_min=jas_word_spacing_min,
+        jas_word_spacing_desired=jas_word_spacing_desired,
+        jas_word_spacing_max=jas_word_spacing_max,
+        jas_letter_spacing_min=jas_letter_spacing_min,
+        jas_letter_spacing_desired=jas_letter_spacing_desired,
+        jas_letter_spacing_max=jas_letter_spacing_max,
+        jas_glyph_scaling_min=jas_glyph_scaling_min,
+        jas_glyph_scaling_desired=jas_glyph_scaling_desired,
+        jas_glyph_scaling_max=jas_glyph_scaling_max,
+        jas_auto_leading=jas_auto_leading,
+        jas_single_word_justify=jas_single_word_justify,
     )
     if not rotate_vals:
         return [Tspan(id=0, content=content, **base_kwargs)]
