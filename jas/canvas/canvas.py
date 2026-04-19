@@ -873,7 +873,22 @@ def _draw_element(painter: QPainter, elem: Element,
             measure = make_measurer(ff, fw, fst, effective_fs)
             max_w = tw if (tw > 0 and th > 0) else 0.0
             line_h = _parse_pt(t.line_height)
-            layout_fs = line_h if line_h is not None else effective_fs
+            if line_h is not None:
+                layout_fs = line_h
+            else:
+                # Phase 8: when Character lineHeight is empty (Auto)
+                # and the first paragraph wrapper carries
+                # jas:auto-leading, override the Auto default with
+                # auto_leading% of the font size. V1 applies one
+                # Auto override element-wide using the first
+                # wrapper's value.
+                auto_pct = next(
+                    (ts.jas_auto_leading for ts in t.tspans
+                     if ts.jas_role == "paragraph"
+                     and ts.jas_auto_leading is not None),
+                    None)
+                layout_fs = (effective_fs * auto_pct / 100.0
+                             if auto_pct is not None else effective_fs)
             # Phase 5: paragraph-aware layout. The wrapper tspans
             # (jas_role == "paragraph") inside the element provide
             # per-paragraph indent / space / alignment attrs; absent

@@ -318,6 +318,106 @@ def set_paragraph_panel_field(store, model, key, value) -> None:
     apply_paragraph_panel_to_selection(store, model)
 
 
+# ── Phase 8: Justification dialog OK commit ────────────────
+
+
+from dataclasses import dataclass
+
+
+@dataclass
+class JustificationDialogValues:
+    """11 Justification-dialog field values, packed for one commit
+    pass. ``None`` means the field was blank (mixed selection) and
+    should not write — the existing wrapper attribute stays."""
+    word_spacing_min: float | None = None
+    word_spacing_desired: float | None = None
+    word_spacing_max: float | None = None
+    letter_spacing_min: float | None = None
+    letter_spacing_desired: float | None = None
+    letter_spacing_max: float | None = None
+    glyph_scaling_min: float | None = None
+    glyph_scaling_desired: float | None = None
+    glyph_scaling_max: float | None = None
+    auto_leading: float | None = None
+    single_word_justify: str | None = None
+
+
+def apply_justification_dialog_to_selection(model, v: JustificationDialogValues) -> None:
+    """Commit the 11 Justification-dialog fields onto every paragraph
+    wrapper tspan in the selection. Per the identity-value rule,
+    each value at its spec default (word-spacing 80/100/133,
+    letter-spacing 0/0/0, glyph-scaling 100/100/100, auto-leading
+    120, single-word-justify 'justify') writes None so the wrapper
+    attribute stays absent. Phase 8."""
+    if model is None:
+        return
+    doc = getattr(model, "document", None)
+    if doc is None or not doc.selection:
+        return
+
+    def _opt_n(value, default):
+        if value is None:
+            return None
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return None
+        return None if abs(f - default) < 1e-6 else f
+
+    ws_min = _opt_n(v.word_spacing_min, 80.0)
+    ws_des = _opt_n(v.word_spacing_desired, 100.0)
+    ws_max = _opt_n(v.word_spacing_max, 133.0)
+    ls_min = _opt_n(v.letter_spacing_min, 0.0)
+    ls_des = _opt_n(v.letter_spacing_desired, 0.0)
+    ls_max = _opt_n(v.letter_spacing_max, 0.0)
+    gs_min = _opt_n(v.glyph_scaling_min, 100.0)
+    gs_des = _opt_n(v.glyph_scaling_desired, 100.0)
+    gs_max = _opt_n(v.glyph_scaling_max, 100.0)
+    auto = _opt_n(v.auto_leading, 120.0)
+    swj = (v.single_word_justify
+           if v.single_word_justify and v.single_word_justify != "justify"
+           else None)
+
+    from dataclasses import replace
+    new_doc = doc
+    any_change = False
+    for es in doc.selection:
+        path = getattr(es, "path", None)
+        if path is None:
+            continue
+        elem = new_doc.get_element(path)
+        if not isinstance(elem, (Text, TextPath)):
+            continue
+        tspans = list(elem.tspans)
+        wrapper_idx = [i for i, t in enumerate(tspans)
+                       if t.jas_role == "paragraph"]
+        if not wrapper_idx and tspans:
+            tspans[0] = replace(tspans[0], jas_role="paragraph")
+            wrapper_idx = [0]
+        if not wrapper_idx:
+            continue
+        for i in wrapper_idx:
+            tspans[i] = replace(tspans[i],
+                jas_word_spacing_min=ws_min,
+                jas_word_spacing_desired=ws_des,
+                jas_word_spacing_max=ws_max,
+                jas_letter_spacing_min=ls_min,
+                jas_letter_spacing_desired=ls_des,
+                jas_letter_spacing_max=ls_max,
+                jas_glyph_scaling_min=gs_min,
+                jas_glyph_scaling_desired=gs_des,
+                jas_glyph_scaling_max=gs_max,
+                jas_auto_leading=auto,
+                jas_single_word_justify=swj)
+        new_elem = replace(elem, tspans=tuple(tspans))
+        new_doc = new_doc.replace_element(path, new_elem)
+        any_change = True
+    if any_change:
+        if hasattr(model, "snapshot"):
+            model.snapshot()
+        model.document = new_doc
+
+
 def subscribe(store, model_getter) -> None:
     """Wire ``apply_paragraph_panel_to_selection`` to fire after any
     write into the ``paragraph_panel_content`` scope of ``store``.

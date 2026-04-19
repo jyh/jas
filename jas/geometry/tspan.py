@@ -82,6 +82,18 @@ class Tspan:
     text_indent: Optional[float] = None
     jas_space_before: Optional[float] = None
     jas_space_after: Optional[float] = None
+    # Phase 1b2 / Phase 8 — Justification dialog attrs.
+    jas_word_spacing_min: Optional[float] = None
+    jas_word_spacing_desired: Optional[float] = None
+    jas_word_spacing_max: Optional[float] = None
+    jas_letter_spacing_min: Optional[float] = None
+    jas_letter_spacing_desired: Optional[float] = None
+    jas_letter_spacing_max: Optional[float] = None
+    jas_glyph_scaling_min: Optional[float] = None
+    jas_glyph_scaling_desired: Optional[float] = None
+    jas_glyph_scaling_max: Optional[float] = None
+    jas_auto_leading: Optional[float] = None
+    jas_single_word_justify: Optional[str] = None
     letter_spacing: Optional[float] = None
     line_height: Optional[float] = None
     rotate: Optional[float] = None
@@ -122,6 +134,17 @@ class Tspan:
                 and self.text_indent is None
                 and self.jas_space_before is None
                 and self.jas_space_after is None
+                and self.jas_word_spacing_min is None
+                and self.jas_word_spacing_desired is None
+                and self.jas_word_spacing_max is None
+                and self.jas_letter_spacing_min is None
+                and self.jas_letter_spacing_desired is None
+                and self.jas_letter_spacing_max is None
+                and self.jas_glyph_scaling_min is None
+                and self.jas_glyph_scaling_desired is None
+                and self.jas_glyph_scaling_max is None
+                and self.jas_auto_leading is None
+                and self.jas_single_word_justify is None
                 and self.letter_spacing is None
                 and self.line_height is None
                 and self.rotate is None
@@ -195,6 +218,17 @@ def tspans_to_json_clipboard(tspans: list[Tspan]) -> str:
         if t.text_indent is not None: obj["text_indent"] = t.text_indent
         if t.jas_space_before is not None: obj["jas_space_before"] = t.jas_space_before
         if t.jas_space_after is not None: obj["jas_space_after"] = t.jas_space_after
+        if t.jas_word_spacing_min is not None: obj["jas_word_spacing_min"] = t.jas_word_spacing_min
+        if t.jas_word_spacing_desired is not None: obj["jas_word_spacing_desired"] = t.jas_word_spacing_desired
+        if t.jas_word_spacing_max is not None: obj["jas_word_spacing_max"] = t.jas_word_spacing_max
+        if t.jas_letter_spacing_min is not None: obj["jas_letter_spacing_min"] = t.jas_letter_spacing_min
+        if t.jas_letter_spacing_desired is not None: obj["jas_letter_spacing_desired"] = t.jas_letter_spacing_desired
+        if t.jas_letter_spacing_max is not None: obj["jas_letter_spacing_max"] = t.jas_letter_spacing_max
+        if t.jas_glyph_scaling_min is not None: obj["jas_glyph_scaling_min"] = t.jas_glyph_scaling_min
+        if t.jas_glyph_scaling_desired is not None: obj["jas_glyph_scaling_desired"] = t.jas_glyph_scaling_desired
+        if t.jas_glyph_scaling_max is not None: obj["jas_glyph_scaling_max"] = t.jas_glyph_scaling_max
+        if t.jas_auto_leading is not None: obj["jas_auto_leading"] = t.jas_auto_leading
+        if t.jas_single_word_justify is not None: obj["jas_single_word_justify"] = t.jas_single_word_justify
         if t.letter_spacing is not None: obj["letter_spacing"] = t.letter_spacing
         if t.line_height is not None: obj["line_height"] = t.line_height
         if t.rotate is not None: obj["rotate"] = t.rotate
@@ -253,6 +287,17 @@ def tspans_from_json_clipboard(json_str: str) -> Optional[tuple[Tspan, ...]]:
             text_indent=obj.get("text_indent"),
             jas_space_before=obj.get("jas_space_before"),
             jas_space_after=obj.get("jas_space_after"),
+            jas_word_spacing_min=obj.get("jas_word_spacing_min"),
+            jas_word_spacing_desired=obj.get("jas_word_spacing_desired"),
+            jas_word_spacing_max=obj.get("jas_word_spacing_max"),
+            jas_letter_spacing_min=obj.get("jas_letter_spacing_min"),
+            jas_letter_spacing_desired=obj.get("jas_letter_spacing_desired"),
+            jas_letter_spacing_max=obj.get("jas_letter_spacing_max"),
+            jas_glyph_scaling_min=obj.get("jas_glyph_scaling_min"),
+            jas_glyph_scaling_desired=obj.get("jas_glyph_scaling_desired"),
+            jas_glyph_scaling_max=obj.get("jas_glyph_scaling_max"),
+            jas_auto_leading=obj.get("jas_auto_leading"),
+            jas_single_word_justify=obj.get("jas_single_word_justify"),
             letter_spacing=obj.get("letter_spacing"),
             line_height=obj.get("line_height"),
             rotate=obj.get("rotate"),
@@ -322,6 +367,28 @@ def tspans_to_svg_fragment(tspans: list[Tspan]) -> str:
             attrs.append(("jas:space-before", _fmt_float_clipboard(t.jas_space_before)))
         if t.jas_space_after is not None:
             attrs.append(("jas:space-after", _fmt_float_clipboard(t.jas_space_after)))
+        if t.jas_word_spacing_min is not None:
+            attrs.append(("jas:word-spacing-min", _fmt_float_clipboard(t.jas_word_spacing_min)))
+        if t.jas_word_spacing_desired is not None:
+            attrs.append(("jas:word-spacing-desired", _fmt_float_clipboard(t.jas_word_spacing_desired)))
+        if t.jas_word_spacing_max is not None:
+            attrs.append(("jas:word-spacing-max", _fmt_float_clipboard(t.jas_word_spacing_max)))
+        if t.jas_letter_spacing_min is not None:
+            attrs.append(("jas:letter-spacing-min", _fmt_float_clipboard(t.jas_letter_spacing_min)))
+        if t.jas_letter_spacing_desired is not None:
+            attrs.append(("jas:letter-spacing-desired", _fmt_float_clipboard(t.jas_letter_spacing_desired)))
+        if t.jas_letter_spacing_max is not None:
+            attrs.append(("jas:letter-spacing-max", _fmt_float_clipboard(t.jas_letter_spacing_max)))
+        if t.jas_glyph_scaling_min is not None:
+            attrs.append(("jas:glyph-scaling-min", _fmt_float_clipboard(t.jas_glyph_scaling_min)))
+        if t.jas_glyph_scaling_desired is not None:
+            attrs.append(("jas:glyph-scaling-desired", _fmt_float_clipboard(t.jas_glyph_scaling_desired)))
+        if t.jas_glyph_scaling_max is not None:
+            attrs.append(("jas:glyph-scaling-max", _fmt_float_clipboard(t.jas_glyph_scaling_max)))
+        if t.jas_auto_leading is not None:
+            attrs.append(("jas:auto-leading", _fmt_float_clipboard(t.jas_auto_leading)))
+        if t.jas_single_word_justify is not None:
+            attrs.append(("jas:single-word-justify", t.jas_single_word_justify))
         if t.letter_spacing is not None: attrs.append(("letter-spacing", _fmt_float_clipboard(t.letter_spacing)))
         if t.line_height is not None: attrs.append(("line-height", _fmt_float_clipboard(t.line_height)))
         if t.rotate is not None: attrs.append(("rotate", _fmt_float_clipboard(t.rotate)))
@@ -406,6 +473,37 @@ def tspans_from_svg_fragment(svg_str: str) -> Optional[tuple[Tspan, ...]]:
             elif k == "jas:space-after":
                 try: kw["jas_space_after"] = float(v)
                 except ValueError: pass
+            elif k == "jas:word-spacing-min":
+                try: kw["jas_word_spacing_min"] = float(v)
+                except ValueError: pass
+            elif k == "jas:word-spacing-desired":
+                try: kw["jas_word_spacing_desired"] = float(v)
+                except ValueError: pass
+            elif k == "jas:word-spacing-max":
+                try: kw["jas_word_spacing_max"] = float(v)
+                except ValueError: pass
+            elif k == "jas:letter-spacing-min":
+                try: kw["jas_letter_spacing_min"] = float(v)
+                except ValueError: pass
+            elif k == "jas:letter-spacing-desired":
+                try: kw["jas_letter_spacing_desired"] = float(v)
+                except ValueError: pass
+            elif k == "jas:letter-spacing-max":
+                try: kw["jas_letter_spacing_max"] = float(v)
+                except ValueError: pass
+            elif k == "jas:glyph-scaling-min":
+                try: kw["jas_glyph_scaling_min"] = float(v)
+                except ValueError: pass
+            elif k == "jas:glyph-scaling-desired":
+                try: kw["jas_glyph_scaling_desired"] = float(v)
+                except ValueError: pass
+            elif k == "jas:glyph-scaling-max":
+                try: kw["jas_glyph_scaling_max"] = float(v)
+                except ValueError: pass
+            elif k == "jas:auto-leading":
+                try: kw["jas_auto_leading"] = float(v)
+                except ValueError: pass
+            elif k == "jas:single-word-justify": kw["jas_single_word_justify"] = v
             elif k == "letter-spacing":
                 try: kw["letter_spacing"] = float(v)
                 except ValueError: pass
@@ -457,6 +555,17 @@ def merge_tspan_overrides(target: Tspan, source: Tspan) -> Tspan:
         text_indent=source.text_indent if source.text_indent is not None else target.text_indent,
         jas_space_before=source.jas_space_before if source.jas_space_before is not None else target.jas_space_before,
         jas_space_after=source.jas_space_after if source.jas_space_after is not None else target.jas_space_after,
+        jas_word_spacing_min=source.jas_word_spacing_min if source.jas_word_spacing_min is not None else target.jas_word_spacing_min,
+        jas_word_spacing_desired=source.jas_word_spacing_desired if source.jas_word_spacing_desired is not None else target.jas_word_spacing_desired,
+        jas_word_spacing_max=source.jas_word_spacing_max if source.jas_word_spacing_max is not None else target.jas_word_spacing_max,
+        jas_letter_spacing_min=source.jas_letter_spacing_min if source.jas_letter_spacing_min is not None else target.jas_letter_spacing_min,
+        jas_letter_spacing_desired=source.jas_letter_spacing_desired if source.jas_letter_spacing_desired is not None else target.jas_letter_spacing_desired,
+        jas_letter_spacing_max=source.jas_letter_spacing_max if source.jas_letter_spacing_max is not None else target.jas_letter_spacing_max,
+        jas_glyph_scaling_min=source.jas_glyph_scaling_min if source.jas_glyph_scaling_min is not None else target.jas_glyph_scaling_min,
+        jas_glyph_scaling_desired=source.jas_glyph_scaling_desired if source.jas_glyph_scaling_desired is not None else target.jas_glyph_scaling_desired,
+        jas_glyph_scaling_max=source.jas_glyph_scaling_max if source.jas_glyph_scaling_max is not None else target.jas_glyph_scaling_max,
+        jas_auto_leading=source.jas_auto_leading if source.jas_auto_leading is not None else target.jas_auto_leading,
+        jas_single_word_justify=source.jas_single_word_justify if source.jas_single_word_justify is not None else target.jas_single_word_justify,
         letter_spacing=source.letter_spacing if source.letter_spacing is not None else target.letter_spacing,
         line_height=source.line_height if source.line_height is not None else target.line_height,
         rotate=source.rotate if source.rotate is not None else target.rotate,
@@ -640,6 +749,10 @@ _ATTR_SLOTS = (
     "jas_hanging_punctuation", "jas_list_style",
     "text_align", "text_align_last", "text_indent",
     "jas_space_before", "jas_space_after",
+    "jas_word_spacing_min", "jas_word_spacing_desired", "jas_word_spacing_max",
+    "jas_letter_spacing_min", "jas_letter_spacing_desired", "jas_letter_spacing_max",
+    "jas_glyph_scaling_min", "jas_glyph_scaling_desired", "jas_glyph_scaling_max",
+    "jas_auto_leading", "jas_single_word_justify",
     "letter_spacing", "line_height", "rotate", "style_name",
     "text_decoration", "text_rendering", "text_transform",
     "transform", "xml_lang",

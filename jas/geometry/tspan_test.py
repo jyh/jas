@@ -585,3 +585,51 @@ class TestPhase1b1ParagraphAttrs:
         assert back[0].text_indent == -18.0
         assert back[0].jas_space_before == 12.0
         assert back[0].jas_space_after == 6.0
+
+
+class TestPhase8JustificationAttrs:
+    """Phase 1b2 / Phase 8 Justification dialog attrs round-trip."""
+
+    def test_has_no_overrides_false_when_phase8_attrs_set(self):
+        from geometry.tspan import default_tspan
+        from dataclasses import replace
+        assert not replace(default_tspan(), jas_word_spacing_min=75).has_no_overrides()
+        assert not replace(default_tspan(), jas_letter_spacing_desired=5).has_no_overrides()
+        assert not replace(default_tspan(), jas_glyph_scaling_max=105).has_no_overrides()
+        assert not replace(default_tspan(), jas_auto_leading=140).has_no_overrides()
+        assert not replace(default_tspan(), jas_single_word_justify="left").has_no_overrides()
+
+    def test_svg_fragment_phase8_attrs_round_trip(self):
+        from geometry.tspan import (
+            default_tspan, tspans_to_svg_fragment, tspans_from_svg_fragment,
+        )
+        from dataclasses import replace
+        t = replace(default_tspan(),
+                    content="", jas_role="paragraph",
+                    jas_word_spacing_min=75, jas_word_spacing_desired=95,
+                    jas_word_spacing_max=150,
+                    jas_letter_spacing_min=-5, jas_letter_spacing_desired=0,
+                    jas_letter_spacing_max=10,
+                    jas_glyph_scaling_min=95, jas_glyph_scaling_desired=100,
+                    jas_glyph_scaling_max=105,
+                    jas_auto_leading=140, jas_single_word_justify="left")
+        svg = tspans_to_svg_fragment([t])
+        assert 'jas:word-spacing-min="75"' in svg
+        assert 'jas:letter-spacing-desired="0"' in svg
+        assert 'jas:glyph-scaling-max="105"' in svg
+        assert 'jas:auto-leading="140"' in svg
+        assert 'jas:single-word-justify="left"' in svg
+        back = tspans_from_svg_fragment(svg)
+        assert back is not None
+        assert len(back) == 1
+        assert back[0].jas_word_spacing_min == 75.0
+        assert back[0].jas_word_spacing_desired == 95.0
+        assert back[0].jas_word_spacing_max == 150.0
+        assert back[0].jas_letter_spacing_min == -5.0
+        assert back[0].jas_letter_spacing_desired == 0.0
+        assert back[0].jas_letter_spacing_max == 10.0
+        assert back[0].jas_glyph_scaling_min == 95.0
+        assert back[0].jas_glyph_scaling_desired == 100.0
+        assert back[0].jas_glyph_scaling_max == 105.0
+        assert back[0].jas_auto_leading == 140.0
+        assert back[0].jas_single_word_justify == "left"
