@@ -245,7 +245,7 @@ re-initialised from it on panel open (see `init:` in the yaml):
 | Panel key                        | Source state key                  | Type    | Default                  |
 |----------------------------------|-----------------------------------|---------|--------------------------|
 | `panel.align_to`                 | `state.align_to`                  | enum    | `selection`              |
-| `panel.key_object_id`            | `state.align_key_object_id`       | element ID or null | null          |
+| `panel.key_object_path`          | `state.align_key_object_path`     | element path or null | null        |
 | `panel.distribute_spacing_value` | `state.align_distribute_spacing`  | pt      | 0                        |
 | `panel.use_preview_bounds`       | `state.align_use_preview_bounds`  | boolean | false                    |
 
@@ -262,7 +262,7 @@ panel's immediate visual state and the document's authoritative
 state in sync without round-tripping through a re-init — same
 pattern the other panels use.
 
-`panel.key_object_id` is cleared automatically (written to
+`panel.key_object_path` is cleared automatically (written to
 null) when any of the following conditions hold:
 
 - `panel.align_to` changes away from `key_object`.
@@ -283,7 +283,7 @@ updating the translation component of each moved element's
 when the element previously had none).
 
 The "Align To" target, "Use Preview Bounds" flag, the
-designated key object ID, and the Distribute Spacing value all
+designated key object path, and the Distribute Spacing value all
 live in panel / shared state (see §Panel state), not on the
 document. None of them are persisted in the saved SVG.
 

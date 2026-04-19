@@ -386,6 +386,10 @@ class StateStore:
         new_layer_insert_index — derived from current layers + panel state.
         """
         from workspace_interpreter.expr_types import Value
+        canvas_sel = self._canvas_selection_paths()
+        has_selection = len(canvas_sel) > 0
+        selection_count = len(canvas_sel)
+        element_selection = [Value.path(p) for p in canvas_sel]
         if self._document is None:
             sel_count = 0
             if self._active_panel == "layers":
@@ -399,6 +403,9 @@ class StateStore:
                 "next_layer_name": "Layer 1",
                 "new_layer_insert_index": 0,
                 "layers_panel_selection_count": sel_count,
+                "has_selection": has_selection,
+                "selection_count": selection_count,
+                "element_selection": element_selection,
             }
         layers = self._document.get("layers", [])
         top_level_layers = []
@@ -456,4 +463,32 @@ class StateStore:
             "next_layer_name": next_layer_name,
             "new_layer_insert_index": insert_idx,
             "layers_panel_selection_count": sel_count,
+            "has_selection": has_selection,
+            "selection_count": selection_count,
+            "element_selection": element_selection,
         }
+
+    def _canvas_selection_paths(self) -> list[tuple[int, ...]]:
+        """Extract canvas selection from the document as a list of path
+        tuples. Accepts entries that are tuples, lists, dicts with a
+        "path" field, or ``__path__`` markers. Missing / malformed
+        entries are skipped silently."""
+        if self._document is None:
+            return []
+        sel = self._document.get("selection")
+        if not isinstance(sel, list):
+            return []
+        out: list[tuple[int, ...]] = []
+        for entry in sel:
+            if isinstance(entry, tuple):
+                out.append(entry)
+            elif isinstance(entry, list):
+                out.append(tuple(entry))
+            elif isinstance(entry, dict):
+                if "__path__" in entry:
+                    out.append(tuple(entry["__path__"]))
+                elif "path" in entry:
+                    p = entry["path"]
+                    if isinstance(p, (list, tuple)):
+                        out.append(tuple(p))
+        return out

@@ -854,6 +854,9 @@ fn build_active_document_view(
             "next_layer_name": "Layer 1",
             "new_layer_insert_index": 0,
             "layers_panel_selection_count": 0,
+            "has_selection": false,
+            "selection_count": 0,
+            "element_selection": [],
         });
     };
     let mut top_level_layers = Vec::new();
@@ -897,12 +900,25 @@ fn build_active_document_view(
         Some(&i) => i + 1,
         None => tab.model.document().layers.len(),
     };
+    // Canvas selection rollup (Phase 0a, Align panel): scalar/boolean
+    // plus path markers for downstream predicates and list operations.
+    let canvas_selection = &tab.model.document().selection;
+    let element_selection: Vec<serde_json::Value> = canvas_selection
+        .iter()
+        .map(|es| {
+            let path_ints: Vec<u64> = es.path.iter().map(|&i| i as u64).collect();
+            serde_json::json!({"__path__": path_ints})
+        })
+        .collect();
     serde_json::json!({
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
         "next_layer_name": next_layer_name,
         "new_layer_insert_index": new_layer_insert_index,
         "layers_panel_selection_count": st.layers_panel_selection.len(),
+        "has_selection": !canvas_selection.is_empty(),
+        "selection_count": canvas_selection.len(),
+        "element_selection": element_selection,
     })
 }
 
@@ -5793,5 +5809,64 @@ mod tests {
             assert_eq!(w.jas_hyphenate_bias, None);
             assert_eq!(w.jas_hyphenate_capitalized, None);
         }
+    }
+
+    // ── active_document canvas-selection view ─────────────────
+    //
+    // Exposes has_selection / selection_count / element_selection for
+    // bind.disabled predicates (Align panel Phase 0a).
+
+    use crate::document::document::ElementSelection;
+
+    #[test]
+    fn active_document_view_no_tabs_yields_no_selection() {
+        let mut st = AppState::new();
+        st.tabs.clear();
+        st.active_tab = 0;
+        let view = build_active_document_view(&st);
+        assert_eq!(view["has_selection"], serde_json::json!(false));
+        assert_eq!(view["selection_count"], serde_json::json!(0));
+        assert_eq!(view["element_selection"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn active_document_view_empty_selection_yields_no_selection() {
+        let st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let view = build_active_document_view(&st);
+        assert_eq!(view["has_selection"], serde_json::json!(false));
+        assert_eq!(view["selection_count"], serde_json::json!(0));
+        assert_eq!(view["element_selection"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn active_document_view_selection_count_matches_selection_length() {
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        doc.selection = vec![
+            ElementSelection::all(vec![0]),
+            ElementSelection::all(vec![0, 1]),
+            ElementSelection::all(vec![0, 2]),
+        ];
+        st.tabs[st.active_tab].model.set_document(doc);
+        let view = build_active_document_view(&st);
+        assert_eq!(view["has_selection"], serde_json::json!(true));
+        assert_eq!(view["selection_count"], serde_json::json!(3));
+    }
+
+    #[test]
+    fn active_document_view_element_selection_contains_path_markers() {
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        doc.selection = vec![
+            ElementSelection::all(vec![0]),
+            ElementSelection::all(vec![0, 2]),
+        ];
+        st.tabs[st.active_tab].model.set_document(doc);
+        let view = build_active_document_view(&st);
+        let expected = serde_json::json!([
+            {"__path__": [0]},
+            {"__path__": [0, 2]},
+        ]);
+        assert_eq!(view["element_selection"], expected);
     }
 }
