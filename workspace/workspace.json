@@ -2812,6 +2812,14 @@
     "para_space_after": {
       "viewbox": "0 0 16 16",
       "svg": "<line x1=\"2\" y1=\"3\" x2=\"13\" y2=\"3\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"6\" x2=\"11\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <polyline points=\"6,9 8,12 10,9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/> <line x1=\"2\" y1=\"14\" x2=\"14\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"0.8\" opacity=\"0.5\"/>\n"
+    },
+    "para_bullets": {
+      "viewbox": "0 0 16 16",
+      "svg": "<circle cx=\"2.5\" cy=\"4\" r=\"1.2\" fill=\"currentColor\"/> <line x1=\"5\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <circle cx=\"2.5\" cy=\"8\" r=\"1.2\" fill=\"currentColor\"/> <line x1=\"5\" y1=\"8\" x2=\"13\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <circle cx=\"2.5\" cy=\"12\" r=\"1.2\" fill=\"currentColor\"/> <line x1=\"5\" y1=\"12\" x2=\"14\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_numbered": {
+      "viewbox": "0 0 16 16",
+      "svg": "<text x=\"0.5\" y=\"5.7\" font-size=\"4.5\" font-family=\"sans-serif\" font-weight=\"600\" fill=\"currentColor\">1.</text> <line x1=\"5\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <text x=\"0.5\" y=\"9.7\" font-size=\"4.5\" font-family=\"sans-serif\" font-weight=\"600\" fill=\"currentColor\">2.</text> <line x1=\"5\" y1=\"8\" x2=\"13\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <text x=\"0.5\" y=\"13.7\" font-size=\"4.5\" font-family=\"sans-serif\" font-weight=\"600\" fill=\"currentColor\">3.</text> <line x1=\"5\" y1=\"12\" x2=\"14\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
     }
   },
   "layout": {
@@ -12820,6 +12828,7 @@
                   {
                     "id": "pg_bullets",
                     "type": "icon_select",
+                    "icon": "para_bullets",
                     "summary": "Bullets",
                     "description": "Bullet marker for each paragraph. Mutually exclusive with Numbered List via shared jas:list-style attribute.\n",
                     "style": {
@@ -12880,6 +12889,7 @@
                   {
                     "id": "pg_numbered_list",
                     "type": "icon_select",
+                    "icon": "para_numbered",
                     "summary": "Numbered List",
                     "description": "Numbering style. Counter resets when a paragraph with a different (or absent) jas:list-style breaks the run.\n",
                     "style": {

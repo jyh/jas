@@ -273,6 +273,7 @@ content:
           children:
             - id: pg_bullets
               type: icon_select
+              icon: para_bullets
               summary: "Bullets"
               description: >
                 Bullet marker for each paragraph. Mutually exclusive with
@@ -295,6 +296,7 @@ content:
           children:
             - id: pg_numbered_list
               type: icon_select
+              icon: para_numbered
               summary: "Numbered List"
               description: >
                 Numbering style. Counter resets when a paragraph with a
