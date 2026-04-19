@@ -40,7 +40,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .stroke: StrokePanel.dispatch(cmd, addr: addr, layout: &layout)
     case .properties: PropertiesPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .character: CharacterPanel.dispatch(cmd, addr: addr, layout: &layout)
-    case .paragraph: ParagraphPanel.dispatch(cmd, addr: addr, layout: &layout)
+    case .paragraph: ParagraphPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .artboards: ArtboardsPanel.dispatch(cmd, addr: addr, layout: &layout)
     }
 }

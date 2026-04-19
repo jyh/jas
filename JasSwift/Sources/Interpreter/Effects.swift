@@ -1112,6 +1112,144 @@ func isCharacterPanelKey(_ key: String) -> Bool {
     characterPanelKeys.contains(key)
 }
 
+/// Push the YAML-stored paragraph panel state onto every paragraph
+/// wrapper tspan inside the selection. Per the identity-value rule,
+/// attrs equal to their default are *omitted* (set to nil) rather
+/// than written. The seven alignment radio bools collapse to one
+/// `(text-align, text-align-last)` pair per the §Alignment
+/// sub-mapping; bullets and numbered_list both write the single
+/// `jasListStyle` attribute. Phase 4.
+public func applyParagraphPanelToSelection(store: StateStore, controller: Controller) {
+    let p = store.getPanelState("paragraph_panel_content")
+    let pid = "paragraph_panel_content"
+    _ = pid
+
+    let leftIndent = (p["left_indent"] as? NSNumber)?.doubleValue ?? 0
+    let rightIndent = (p["right_indent"] as? NSNumber)?.doubleValue ?? 0
+    let firstLineIndent = (p["first_line_indent"] as? NSNumber)?.doubleValue ?? 0
+    let spaceBefore = (p["space_before"] as? NSNumber)?.doubleValue ?? 0
+    let spaceAfter = (p["space_after"] as? NSNumber)?.doubleValue ?? 0
+    let hyph = (p["hyphenate"] as? Bool) ?? false
+    let hangPunct = (p["hanging_punctuation"] as? Bool) ?? false
+    let bullets = (p["bullets"] as? String) ?? ""
+    let numbered = (p["numbered_list"] as? String) ?? ""
+    let listStyle: String? = !bullets.isEmpty ? bullets
+        : (!numbered.isEmpty ? numbered : nil)
+
+    // Alignment radio → (text-align, text-align-last). Default
+    // ALIGN_LEFT_BUTTON omits both attrs per identity rule.
+    let alignCenter = (p["align_center"] as? Bool) ?? false
+    let alignRight = (p["align_right"] as? Bool) ?? false
+    let justifyLeft = (p["justify_left"] as? Bool) ?? false
+    let justifyCenter = (p["justify_center"] as? Bool) ?? false
+    let justifyRight = (p["justify_right"] as? Bool) ?? false
+    let justifyAll = (p["justify_all"] as? Bool) ?? false
+    let textAlign: String?
+    let textAlignLast: String?
+    if alignCenter { textAlign = "center"; textAlignLast = nil }
+    else if alignRight { textAlign = "right"; textAlignLast = nil }
+    else if justifyLeft { textAlign = "justify"; textAlignLast = "left" }
+    else if justifyCenter { textAlign = "justify"; textAlignLast = "center" }
+    else if justifyRight { textAlign = "justify"; textAlignLast = "right" }
+    else if justifyAll { textAlign = "justify"; textAlignLast = "justify" }
+    else { textAlign = nil; textAlignLast = nil }
+
+    func optD(_ v: Double) -> Double? { v == 0 ? nil : v }
+    func optB(_ v: Bool) -> Bool? { v ? true : nil }
+
+    let model = controller.model
+    let doc = model.document
+    let targetPaths = doc.selection.compactMap { es -> [Int]? in
+        switch doc.getElement(es.path) {
+        case .text, .textPath: return es.path
+        default: return nil
+        }
+    }
+    if targetPaths.isEmpty { return }
+    model.snapshot()
+    var newDoc = doc
+    for path in targetPaths {
+        let elem = newDoc.getElement(path)
+        let newElem: Element?
+        switch elem {
+        case .text(let t):
+            var tspans = t.tspans
+            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
+            if wrapperIdx.isEmpty, !tspans.isEmpty {
+                tspans[0] = withJasRole(tspans[0], "paragraph")
+                wrapperIdx = [0]
+            }
+            for i in wrapperIdx {
+                tspans[i] = withParagraphAttrs(
+                    tspans[i],
+                    textAlign: textAlign, textAlignLast: textAlignLast,
+                    textIndent: firstLineIndent == 0 ? nil : firstLineIndent,
+                    jasLeftIndent: optD(leftIndent),
+                    jasRightIndent: optD(rightIndent),
+                    jasSpaceBefore: optD(spaceBefore),
+                    jasSpaceAfter: optD(spaceAfter),
+                    jasHyphenate: optB(hyph),
+                    jasHangingPunctuation: optB(hangPunct),
+                    jasListStyle: listStyle)
+            }
+            newElem = .text(t.withTspans(tspans))
+        case .textPath(let tp):
+            var tspans = tp.tspans
+            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
+            if wrapperIdx.isEmpty, !tspans.isEmpty {
+                tspans[0] = withJasRole(tspans[0], "paragraph")
+                wrapperIdx = [0]
+            }
+            for i in wrapperIdx {
+                tspans[i] = withParagraphAttrs(
+                    tspans[i],
+                    textAlign: textAlign, textAlignLast: textAlignLast,
+                    textIndent: firstLineIndent == 0 ? nil : firstLineIndent,
+                    jasLeftIndent: optD(leftIndent),
+                    jasRightIndent: optD(rightIndent),
+                    jasSpaceBefore: optD(spaceBefore),
+                    jasSpaceAfter: optD(spaceAfter),
+                    jasHyphenate: optB(hyph),
+                    jasHangingPunctuation: optB(hangPunct),
+                    jasListStyle: listStyle)
+            }
+            newElem = .textPath(tp.withTspans(tspans))
+        default:
+            newElem = nil
+        }
+        if let ne = newElem {
+            newDoc = newDoc.replaceElement(path, with: ne)
+        }
+    }
+    controller.setDocument(newDoc)
+}
+
+/// Reset every Paragraph panel control to its default per
+/// PARAGRAPH.md §Reset Panel and remove the corresponding
+/// `jas:*` / `text-*` attributes from every paragraph wrapper tspan
+/// in the selection (defaults appear as absence, identity rule).
+public func resetParagraphPanel(store: StateStore, controller: Controller) {
+    let pid = "paragraph_panel_content"
+    // Reset panel-local fields to their YAML defaults.
+    store.setPanel(pid, "align_left", true)
+    store.setPanel(pid, "align_center", false)
+    store.setPanel(pid, "align_right", false)
+    store.setPanel(pid, "justify_left", false)
+    store.setPanel(pid, "justify_center", false)
+    store.setPanel(pid, "justify_right", false)
+    store.setPanel(pid, "justify_all", false)
+    store.setPanel(pid, "bullets", "")
+    store.setPanel(pid, "numbered_list", "")
+    store.setPanel(pid, "left_indent", 0.0)
+    store.setPanel(pid, "right_indent", 0.0)
+    store.setPanel(pid, "first_line_indent", 0.0)
+    store.setPanel(pid, "space_before", 0.0)
+    store.setPanel(pid, "space_after", 0.0)
+    store.setPanel(pid, "hyphenate", false)
+    store.setPanel(pid, "hanging_punctuation", false)
+    applyParagraphPanelToSelection(store: store, controller: controller)
+}
+
 /// Dispatch a panel-state change to the matching apply-to-selection
 /// pipeline. Called after any widget write-back or `set: panel.X`
 /// batch so the downstream surface (selected element, other views)
@@ -1120,6 +1258,8 @@ public func notifyPanelStateChanged(_ panelId: String, store: StateStore, model:
     switch panelId {
     case "character_panel":
         applyCharacterPanelToSelection(store: store, controller: Controller(model: model))
+    case "paragraph_panel_content":
+        applyParagraphPanelToSelection(store: store, controller: Controller(model: model))
     default:
         break
     }

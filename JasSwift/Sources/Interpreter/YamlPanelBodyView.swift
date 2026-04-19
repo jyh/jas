@@ -117,6 +117,18 @@ struct YamlElementView: View {
            let overrides = characterPanelLiveOverrides(model: model) {
             for (k, v) in overrides { model.stateStore.setPanel(pid, k, v) }
         }
+        // Paragraph panel — Phase 4. Sync the live wrapper attrs
+        // first so untouched fields hold the selection's current
+        // values, then apply mutual exclusion side effects (clear
+        // sibling alignment radios; clear bullets / numbered_list
+        // sibling) so the panel state is internally coherent before
+        // the apply pipeline writes it back to the wrappers.
+        if pid == "paragraph_panel_content" {
+            let overrides = paragraphPanelLiveOverrides(model: model)
+            for (k, v) in overrides { model.stateStore.setPanel(pid, k, v) }
+            applyParagraphPanelMutualExclusion(
+                store: model.stateStore, key: key, value: value)
+        }
         model.stateStore.setPanel(pid, key, value)
         model.panelStateVersion &+= 1
         notifyPanelStateChanged(pid, store: model.stateStore, model: model)
