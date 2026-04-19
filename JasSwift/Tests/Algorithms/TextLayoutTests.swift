@@ -79,3 +79,140 @@ private func fixedMeasure(_ width: Double) -> (String) -> Double {
     let (a, b) = orderedRange(5, 2)
     #expect(a == 2 && b == 5)
 }
+
+// MARK: - Phase 5 paragraph-aware layout
+
+@Test func emptyParagraphListMatchesPlainLayout() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let plain = layoutText("hello world", maxWidth: 100, fontSize: 16, measure: m)
+    let para = layoutTextWithParagraphs("hello world", maxWidth: 100,
+                                         fontSize: 16, paragraphs: [], measure: m)
+    #expect(plain.lines.count == para.lines.count)
+    #expect(plain.glyphs.count == para.glyphs.count)
+    for (a, b) in zip(plain.glyphs, para.glyphs) {
+        #expect(a.x == b.x)
+        #expect(a.right == b.right)
+        #expect(a.line == b.line)
+    }
+}
+
+@Test func leftIndentShiftsEveryLine() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    // "hello world" at width 60 with leftIndent 20 → effective 40 → wraps.
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 11, leftIndent: 20)]
+    let l = layoutTextWithParagraphs("hello world", maxWidth: 60,
+                                      fontSize: 16, paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 20)
+}
+
+@Test func rightIndentNarrowsWrapWidth() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 11, rightIndent: 60)]
+    let l = layoutTextWithParagraphs("hello world", maxWidth: 110,
+                                      fontSize: 16, paragraphs: segs, measure: m)
+    #expect(l.lines.count >= 2)
+}
+
+@Test func firstLineIndentOnlyShiftsFirstLine() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 11,
+                                  firstLineIndent: 25)]
+    let l = layoutTextWithParagraphs("hello world", maxWidth: 60,
+                                      fontSize: 16, paragraphs: segs, measure: m)
+    let firstLineFirst = l.glyphs.first(where: { $0.line == 0 })!
+    let secondLineFirst = l.glyphs.first(where: { $0.line == 1 })!
+    #expect(firstLineFirst.x == 25)
+    #expect(secondLineFirst.x == 0)
+}
+
+@Test func alignmentCenterShiftsToCenter() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    // "hi" (20 wide) centered in 100 → x = (100-20)/2 = 40.
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 2, textAlign: .center)]
+    let l = layoutTextWithParagraphs("hi", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 40)
+}
+
+@Test func alignmentRightShiftsToRightEdge() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 2, textAlign: .right)]
+    let l = layoutTextWithParagraphs("hi", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 80)
+}
+
+@Test func spaceBeforeSkippedForFirstParagraph() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [
+        ParagraphSegment(charStart: 0, charEnd: 2, spaceBefore: 50, spaceAfter: 0),
+        ParagraphSegment(charStart: 2, charEnd: 4, spaceBefore: 30),
+    ]
+    let l = layoutTextWithParagraphs("abcd", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.lines.count == 2)
+    #expect(l.lines[0].top == 0)        // first para: no space_before
+    #expect(l.lines[1].top == 46)       // 16 (line) + 30 (space_before)
+}
+
+@Test func spaceAfterInsertsGap() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [
+        ParagraphSegment(charStart: 0, charEnd: 2, spaceAfter: 20),
+        ParagraphSegment(charStart: 2, charEnd: 4),
+    ]
+    let l = layoutTextWithParagraphs("abcd", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.lines[1].top == 36)       // 16 + 20
+}
+
+@Test func alignmentWithIndentUsesRemainingWidth() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    // "hi" centered in box of effective width 80 (100-20 left).
+    // (80-20)/2 = 30; +20 leftIndent → x=50.
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 2,
+                                  leftIndent: 20, textAlign: .center)]
+    let l = layoutTextWithParagraphs("hi", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 50)
+}
+
+// MARK: - buildParagraphSegments
+
+@Test func buildSegmentsNoWrapperYieldsEmpty() {
+    let segs = buildParagraphSegments(
+        tspans: [Tspan(id: 0, content: "hello")],
+        content: "hello", isArea: true)
+    #expect(segs.isEmpty)
+}
+
+@Test func buildSegmentsSingleWrapperCoversContent() {
+    let segs = buildParagraphSegments(
+        tspans: [
+            Tspan(id: 0, content: "", jasRole: "paragraph", jasLeftIndent: 12),
+            Tspan(id: 1, content: "hello"),
+        ],
+        content: "hello", isArea: true)
+    #expect(segs.count == 1)
+    #expect(segs[0].charStart == 0)
+    #expect(segs[0].charEnd == 5)
+    #expect(segs[0].leftIndent == 12)
+}
+
+@Test func buildSegmentsTwoWrappersSplitContent() {
+    let segs = buildParagraphSegments(
+        tspans: [
+            Tspan(id: 0, content: "", jasRole: "paragraph"),
+            Tspan(id: 1, content: "ab"),
+            Tspan(id: 2, content: "", jasRole: "paragraph",
+                  textAlign: "center", jasSpaceBefore: 6),
+            Tspan(id: 3, content: "cde"),
+        ],
+        content: "abcde", isArea: true)
+    #expect(segs.count == 2)
+    #expect(segs[0].charEnd == 2)
+    #expect(segs[1].charStart == 2)
+    #expect(segs[1].charEnd == 5)
+    #expect(segs[1].spaceBefore == 6)
+    #expect(segs[1].textAlign == TextAlign.center)
+}

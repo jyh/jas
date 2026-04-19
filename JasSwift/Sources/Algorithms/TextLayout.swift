@@ -254,3 +254,176 @@ public extension TextLayout {
 public func orderedRange(_ a: Int, _ b: Int) -> (Int, Int) {
     a <= b ? (a, b) : (b, a)
 }
+
+// MARK: - Phase 5 paragraph-aware layout
+
+/// Horizontal alignment within a paragraph's effective box (the
+/// box width minus left/right indents). Phase 5 supports the three
+/// non-justify alignments; the four `JUSTIFY_*` variants land with
+/// the composer in Phase 8 — they fall back to `.left` for now.
+public enum TextAlign: Equatable {
+    case left, center, right
+}
+
+/// Per-paragraph layout constraints derived from the wrapper tspan
+/// attributes (or panel defaults when there is no wrapper). All
+/// indent / space values are in pixels.
+public struct ParagraphSegment: Equatable {
+    public var charStart: Int
+    public var charEnd: Int
+    public var leftIndent: Double
+    public var rightIndent: Double
+    /// `text-indent` — additional x offset on the *first* line only.
+    /// Signed; negative produces a hanging indent. Phase 5 supports
+    /// non-negative values; negative falls back to 0 until Phase 6.
+    public var firstLineIndent: Double
+    /// `jas:space-before` — extra vertical gap above this paragraph.
+    /// Always 0 for the first paragraph in the element.
+    public var spaceBefore: Double
+    public var spaceAfter: Double
+    public var textAlign: TextAlign
+
+    public init(charStart: Int = 0, charEnd: Int = 0,
+                leftIndent: Double = 0, rightIndent: Double = 0,
+                firstLineIndent: Double = 0,
+                spaceBefore: Double = 0, spaceAfter: Double = 0,
+                textAlign: TextAlign = .left) {
+        self.charStart = charStart
+        self.charEnd = charEnd
+        self.leftIndent = leftIndent
+        self.rightIndent = rightIndent
+        self.firstLineIndent = firstLineIndent
+        self.spaceBefore = spaceBefore
+        self.spaceAfter = spaceAfter
+        self.textAlign = textAlign
+    }
+}
+
+/// Visible width of a line: max `right` of any non-trailing-space glyph.
+private func trimmedLineWidth(_ line: LineInfo, _ glyphs: [TextGlyph]) -> Double {
+    var w: Double = 0
+    for g in glyphs[line.glyphStart..<line.glyphEnd] {
+        if !g.isTrailingSpace && g.right > w { w = g.right }
+    }
+    return w
+}
+
+/// Paragraph-aware layout. For each segment lays out the covered
+/// slice with the segment's effective wrap width
+/// (`maxWidth - leftIndent - rightIndent`), inserts spaceBefore /
+/// spaceAfter vertical gaps between paragraphs (the very first
+/// paragraph's spaceBefore is always skipped per PARAGRAPH.md
+/// §SVG attribute mapping), shifts the first line by
+/// firstLineIndent, and applies the segment's horizontal alignment.
+///
+/// `paragraphs` must be ordered by `charStart`; gaps between
+/// segments and content past the last segment fall back to a
+/// default paragraph (left-aligned, no indents, no extra spacing).
+/// When `paragraphs` is empty the entire content is treated as one
+/// default paragraph — equivalent to calling `layoutText`.
+///
+/// Phase 5: alignment supports `.left` / `.center` / `.right`. The
+/// four `JUSTIFY_*` modes fall back to `.left`.
+public func layoutTextWithParagraphs(_ content: String,
+                                     maxWidth: Double,
+                                     fontSize: Double,
+                                     paragraphs: [ParagraphSegment],
+                                     measure: (String) -> Double) -> TextLayout {
+    let chars = Array(content)
+    let n = chars.count
+    let lineHeight = fontSize
+    let ascent = fontSize * 0.8
+
+    // Build the effective segment list: gap-fill so every char is
+    // covered exactly once.
+    var segs: [ParagraphSegment] = []
+    var cursor = 0
+    for p in paragraphs {
+        let start = max(p.charStart, cursor); let s = min(start, n)
+        let end = min(max(p.charEnd, s), n)
+        if s > cursor {
+            segs.append(ParagraphSegment(charStart: cursor, charEnd: s))
+        }
+        if end > s {
+            var seg = p
+            seg.charStart = s; seg.charEnd = end
+            segs.append(seg)
+        }
+        cursor = end
+    }
+    if cursor < n {
+        segs.append(ParagraphSegment(charStart: cursor, charEnd: n))
+    }
+    if segs.isEmpty {
+        segs.append(ParagraphSegment(charStart: 0, charEnd: n))
+    }
+
+    var allGlyphs: [TextGlyph] = []
+    var allLines: [LineInfo] = []
+    var yOffset: Double = 0
+
+    for (pi, seg) in segs.enumerated() {
+        if pi > 0 { yOffset += seg.spaceBefore }
+        let slice = String(chars[seg.charStart..<seg.charEnd])
+        let effectiveMax: Double = maxWidth > 0
+            ? max(0, maxWidth - seg.leftIndent - seg.rightIndent) : 0
+        let para = layoutText(slice, maxWidth: effectiveMax, fontSize: fontSize, measure: measure)
+        let firstLineExtra = max(0, seg.firstLineIndent)
+        let firstLineNoInCombined = allLines.count
+        for (li, line) in para.lines.enumerated() {
+            let xShift = seg.leftIndent + (li == 0 ? firstLineExtra : 0)
+            let lineAvail: Double = effectiveMax > 0
+                ? max(0, effectiveMax - (li == 0 ? firstLineExtra : 0)) : 0
+            let visibleW = trimmedLineWidth(line, para.glyphs)
+            let alignShift: Double
+            switch seg.textAlign {
+            case .left: alignShift = 0
+            case .center:
+                alignShift = lineAvail > visibleW ? (lineAvail - visibleW) / 2 : 0
+            case .right:
+                alignShift = lineAvail > visibleW ? lineAvail - visibleW : 0
+            }
+            let totalShift = xShift + alignShift
+            let origStart = seg.charStart + line.start
+            let origEnd = seg.charStart + line.end
+            let baseline = yOffset + line.baselineY
+            let top = yOffset + line.top
+            let glyphStart = allGlyphs.count
+            for g in para.glyphs[line.glyphStart..<line.glyphEnd] {
+                allGlyphs.append(TextGlyph(
+                    idx: seg.charStart + g.idx,
+                    line: firstLineNoInCombined + li,
+                    x: g.x + totalShift,
+                    right: g.right + totalShift,
+                    baselineY: g.baselineY + yOffset,
+                    top: g.top + yOffset,
+                    height: g.height,
+                    isTrailingSpace: g.isTrailingSpace))
+            }
+            let glyphEnd = allGlyphs.count
+            var info = LineInfo(start: origStart, end: origEnd,
+                                hardBreak: line.hardBreak,
+                                top: top, baselineY: baseline,
+                                height: line.height,
+                                width: visibleW + totalShift)
+            info.glyphStart = glyphStart
+            info.glyphEnd = glyphEnd
+            allLines.append(info)
+        }
+        if !para.lines.isEmpty {
+            yOffset += Double(para.lines.count) * lineHeight
+        }
+        yOffset += seg.spaceAfter
+    }
+
+    if allLines.isEmpty {
+        // Empty content — keep the single-empty-line invariant.
+        var info = LineInfo(start: 0, end: 0, hardBreak: false,
+                            top: 0, baselineY: ascent, height: lineHeight, width: 0)
+        info.glyphStart = 0; info.glyphEnd = 0
+        allLines.append(info)
+    }
+
+    return TextLayout(glyphs: allGlyphs, lines: allLines,
+                      fontSize: fontSize, charCount: n)
+}
