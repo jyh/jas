@@ -355,3 +355,140 @@ let cursor_down t cursor =
     cursor_at_line_x t (line_no + 1) x
 
 let ordered_range a b = if a <= b then (a, b) else (b, a)
+
+(* ── Phase 5 paragraph-aware layout ─────────────────────── *)
+
+type text_align = Left | Center | Right
+
+type paragraph_segment = {
+  char_start : int;
+  char_end : int;
+  left_indent : float;
+  right_indent : float;
+  first_line_indent : float;
+  space_before : float;
+  space_after : float;
+  text_align : text_align;
+}
+
+let default_segment = {
+  char_start = 0; char_end = 0;
+  left_indent = 0.0; right_indent = 0.0; first_line_indent = 0.0;
+  space_before = 0.0; space_after = 0.0;
+  text_align = Left;
+}
+
+(** Visible width of a line: max [right] of any non-trailing-space glyph. *)
+let _trimmed_line_width (line : line_info) (glyphs : glyph array) : float =
+  let w = ref 0.0 in
+  for gi = line.glyph_start to line.glyph_end - 1 do
+    let g = glyphs.(gi) in
+    if not g.is_trailing_space && g.right > !w then w := g.right
+  done;
+  !w
+
+let layout_with_paragraphs (content : string) (max_width : float)
+    (font_size : float) (paragraphs : paragraph_segment list)
+    (measure : string -> float) : t =
+  let n = utf8_char_count content in
+  let line_height = font_size in
+  let ascent = font_size *. 0.8 in
+
+  (* Build effective segment list: gap-fill so every char is covered. *)
+  let segs = ref [] in
+  let cursor = ref 0 in
+  List.iter (fun (p : paragraph_segment) ->
+    let start = max p.char_start !cursor in
+    let s = min start n in
+    let e = min (max p.char_end s) n in
+    if s > !cursor then
+      segs := { default_segment with char_start = !cursor; char_end = s } :: !segs;
+    if e > s then
+      segs := { p with char_start = s; char_end = e } :: !segs;
+    cursor := e
+  ) paragraphs;
+  if !cursor < n then
+    segs := { default_segment with char_start = !cursor; char_end = n } :: !segs;
+  if !segs = [] then
+    segs := [{ default_segment with char_start = 0; char_end = n }];
+  let segs = List.rev !segs in
+
+  let all_glyphs = ref [] in
+  let all_lines = ref [] in
+  let glyph_count = ref 0 in
+  let line_count = ref 0 in
+  let y_offset = ref 0.0 in
+
+  List.iteri (fun pi seg ->
+    if pi > 0 then y_offset := !y_offset +. seg.space_before;
+    let slice = utf8_sub content seg.char_start (seg.char_end - seg.char_start) in
+    let effective_max =
+      if max_width > 0.0
+      then Float.max 0.0 (max_width -. seg.left_indent -. seg.right_indent)
+      else 0.0 in
+    let para = layout slice effective_max font_size measure in
+    let first_line_extra = Float.max 0.0 seg.first_line_indent in
+    let first_line_no_in_combined = !line_count in
+    let para_lines = Array.length para.lines in
+    Array.iteri (fun li (line : line_info) ->
+      let x_shift = seg.left_indent
+                  +. (if li = 0 then first_line_extra else 0.0) in
+      let line_avail =
+        if effective_max > 0.0
+        then Float.max 0.0 (effective_max
+                            -. (if li = 0 then first_line_extra else 0.0))
+        else 0.0 in
+      let visible_w = _trimmed_line_width line para.glyphs in
+      let align_shift = match seg.text_align with
+        | Left -> 0.0
+        | Center ->
+          if line_avail > visible_w then (line_avail -. visible_w) /. 2.0 else 0.0
+        | Right ->
+          if line_avail > visible_w then line_avail -. visible_w else 0.0
+      in
+      let total_shift = x_shift +. align_shift in
+      let orig_start = seg.char_start + line.start in
+      let orig_end = seg.char_start + line.end_ in
+      let baseline = !y_offset +. line.baseline_y in
+      let top = !y_offset +. line.top in
+      let glyph_start_combined = !glyph_count in
+      for gi = line.glyph_start to line.glyph_end - 1 do
+        let g = para.glyphs.(gi) in
+        all_glyphs := {
+          idx = seg.char_start + g.idx;
+          line = first_line_no_in_combined + li;
+          x = g.x +. total_shift;
+          right = g.right +. total_shift;
+          baseline_y = g.baseline_y +. !y_offset;
+          top = g.top +. !y_offset;
+          height = g.height;
+          is_trailing_space = g.is_trailing_space;
+        } :: !all_glyphs;
+        incr glyph_count
+      done;
+      let glyph_end_combined = !glyph_count in
+      all_lines := {
+        start = orig_start; end_ = orig_end;
+        hard_break = line.hard_break;
+        top; baseline_y = baseline;
+        height = line.height;
+        width = visible_w +. total_shift;
+        glyph_start = glyph_start_combined;
+        glyph_end = glyph_end_combined;
+      } :: !all_lines;
+      incr line_count
+    ) para.lines;
+    if para_lines > 0 then
+      y_offset := !y_offset +. (Float.of_int para_lines) *. line_height;
+    y_offset := !y_offset +. seg.space_after
+  ) segs;
+
+  let lines = Array.of_list (List.rev !all_lines) in
+  let glyphs = Array.of_list (List.rev !all_glyphs) in
+  let lines = if Array.length lines = 0 then
+    (* Empty content — keep single-empty-line invariant. *)
+    [| { start = 0; end_ = 0; hard_break = false;
+         top = 0.0; baseline_y = ascent; height = line_height;
+         width = 0.0; glyph_start = 0; glyph_end = 0 } |]
+  else lines in
+  { glyphs; lines; font_size; char_count = n }

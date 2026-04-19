@@ -67,3 +67,49 @@ val cursor_down : t -> int -> int
 
 (** Order two indices ascending. *)
 val ordered_range : int -> int -> int * int
+
+(** {2 Phase 5 paragraph-aware layout} *)
+
+(** Horizontal alignment within a paragraph's effective box (the
+    box width minus left/right indents). Phase 5 supports the three
+    non-justify alignments; the four [JUSTIFY_*] variants land with
+    the composer in Phase 8 — they fall back to [Left] for now. *)
+type text_align = Left | Center | Right
+
+(** Per-paragraph layout constraints derived from the wrapper tspan
+    attributes (or panel defaults when there is no wrapper). All
+    indent / space values are in pixels. *)
+type paragraph_segment = {
+  char_start : int;
+  char_end : int;
+  left_indent : float;
+  right_indent : float;
+  (** [text-indent] — additional x offset on the *first* line only.
+      Signed; negative produces a hanging indent. Phase 5 supports
+      non-negative values; negative falls back to 0. *)
+  first_line_indent : float;
+  (** [jas:space-before] — extra vertical gap above this paragraph.
+      Always 0 for the first paragraph in the element. *)
+  space_before : float;
+  space_after : float;
+  text_align : text_align;
+}
+
+val default_segment : paragraph_segment
+
+(** Paragraph-aware layout. Lays out each segment in turn with the
+    segment's effective wrap width ([max_width - left_indent -
+    right_indent]), inserts [space_before] / [space_after] vertical
+    gaps between paragraphs (the very first paragraph's
+    [space_before] is always skipped per PARAGRAPH.md), shifts the
+    first line by [first_line_indent], and applies the segment's
+    horizontal alignment.
+
+    [paragraphs] must be ordered by [char_start]; gaps and content
+    past the last segment fall back to a default paragraph. When
+    empty the entire content is one default paragraph — equivalent
+    to [layout]. *)
+val layout_with_paragraphs :
+  string -> float -> float ->
+  paragraph_segment list ->
+  (string -> float) -> t

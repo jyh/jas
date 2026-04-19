@@ -21,3 +21,7 @@
 (test
  (name shape_recognize_test)
  (libraries jas alcotest))
+
+(test
+ (name text_layout_test)
+ (libraries jas alcotest))
