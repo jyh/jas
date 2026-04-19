@@ -9,3 +9,4 @@ pub mod shape_recognize;
 pub mod text_layout;
 pub mod text_layout_paragraph;
 pub mod offset_path;
+pub mod hyphenator;

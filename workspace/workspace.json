@@ -2229,12 +2229,9 @@
       ]
     },
     "paragraph_hyphenation_confirm": {
-      "description": "OK handler for the Hyphenation dialog. Clears the preview snapshot so close_dialog will not restore (commits the user's edits). Phase 2 stub \u2014 Phase 9 wires the actual write of jas:hyphenate-* attributes to the selection's paragraph wrapper tspans plus the panel.hyphenate mirror.\n",
+      "description": "OK handler for the Hyphenation dialog. The native apps intercept this action via apply_dialog_confirm, reading the 7 dialog state fields (min-word, after-first-N, before-last-N, hyphen-limit, zone, better/faster bias, capitalized-words) plus the master hyphenate toggle, and writing them as jas:hyphenate-* attributes onto every paragraph wrapper tspan in the selection. Also mirrors the master toggle to panel.hyphenate so the main Paragraph panel checkbox reflects the dialog commit. Then clears the preview snapshot so close_dialog does not restore (commits the user's edits) and closes the dialog. Per the identity-value rule, fields equal to their spec defaults (master off, min-word 6, after-first 3, before-last 2, limit 0, zone 0, bias 0, capitalized off) are omitted from the wrapper.\n",
       "category": "paragraph",
       "effects": [
-        {
-          "log": "paragraph_hyphenation_confirm (Phase 9 wiring pending)"
-        },
         {
           "clear_dialog_snapshot": null
         },
