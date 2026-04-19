@@ -167,6 +167,21 @@ private func tspanSvg(_ t: Tspan) -> String {
     if let v = t.jasListStyle {
         attrs += " urn:jas:1:list-style=\"\(escapeXml(v))\""
     }
+    if let v = t.textAlign {
+        attrs += " text-align=\"\(escapeXml(v))\""
+    }
+    if let v = t.textAlignLast {
+        attrs += " text-align-last=\"\(escapeXml(v))\""
+    }
+    if let v = t.textIndent {
+        attrs += " text-indent=\"\(fmt(v))\""
+    }
+    if let v = t.jasSpaceBefore {
+        attrs += " urn:jas:1:space-before=\"\(fmt(v))\""
+    }
+    if let v = t.jasSpaceAfter {
+        attrs += " urn:jas:1:space-after=\"\(fmt(v))\""
+    }
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
 
@@ -444,6 +459,14 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
     let jasHangingPunctuation = (node.attribute(forName: "urn:jas:1:hanging-punctuation")?.stringValue)
         .map { $0 == "true" }
     let jasListStyle = node.attribute(forName: "urn:jas:1:list-style")?.stringValue
+    let textAlign = node.attribute(forName: "text-align")?.stringValue
+    let textAlignLast = node.attribute(forName: "text-align-last")?.stringValue
+    let textIndent = (node.attribute(forName: "text-indent")?.stringValue)
+        .flatMap(Double.init)
+    let jasSpaceBefore = (node.attribute(forName: "urn:jas:1:space-before")?.stringValue)
+        .flatMap(Double.init)
+    let jasSpaceAfter = (node.attribute(forName: "urn:jas:1:space-after")?.stringValue)
+        .flatMap(Double.init)
     let chars = Array(content)
 
     // Fast paths: no rotate, or single-value rotate, or single char.
@@ -456,6 +479,9 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             jasLeftIndent: jasLeftIndent, jasRightIndent: jasRightIndent,
             jasHyphenate: jasHyphenate, jasHangingPunctuation: jasHangingPunctuation,
             jasListStyle: jasListStyle,
+            textAlign: textAlign, textAlignLast: textAlignLast,
+            textIndent: textIndent,
+            jasSpaceBefore: jasSpaceBefore, jasSpaceAfter: jasSpaceAfter,
             textDecoration: decoration)]
     }
     if rotateVals.count == 1 || chars.count <= 1 {
@@ -467,6 +493,9 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             jasLeftIndent: jasLeftIndent, jasRightIndent: jasRightIndent,
             jasHyphenate: jasHyphenate, jasHangingPunctuation: jasHangingPunctuation,
             jasListStyle: jasListStyle,
+            textAlign: textAlign, textAlignLast: textAlignLast,
+            textIndent: textIndent,
+            jasSpaceBefore: jasSpaceBefore, jasSpaceAfter: jasSpaceAfter,
             rotate: rotateVals[0],
             textDecoration: decoration)]
     }
@@ -484,6 +513,9 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             jasLeftIndent: jasLeftIndent, jasRightIndent: jasRightIndent,
             jasHyphenate: jasHyphenate, jasHangingPunctuation: jasHangingPunctuation,
             jasListStyle: jasListStyle,
+            textAlign: textAlign, textAlignLast: textAlignLast,
+            textIndent: textIndent,
+            jasSpaceBefore: jasSpaceBefore, jasSpaceAfter: jasSpaceAfter,
             rotate: i < rotateVals.count ? rotateVals[i] : lastAngle,
             textDecoration: decoration)
     }
@@ -518,6 +550,9 @@ private func collectTspanChildren(_ elem: XMLElement) -> [Tspan] {
             jasHyphenate: t.jasHyphenate,
             jasHangingPunctuation: t.jasHangingPunctuation,
             jasListStyle: t.jasListStyle,
+            textAlign: t.textAlign, textAlignLast: t.textAlignLast,
+            textIndent: t.textIndent,
+            jasSpaceBefore: t.jasSpaceBefore, jasSpaceAfter: t.jasSpaceAfter,
             letterSpacing: t.letterSpacing, lineHeight: t.lineHeight,
             rotate: t.rotate, styleName: t.styleName,
             textDecoration: t.textDecoration, textRendering: t.textRendering,

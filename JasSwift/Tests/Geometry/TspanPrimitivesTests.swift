@@ -552,6 +552,37 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     #expect(!Tspan(jasListStyle: "bullet-disc").hasNoOverrides)
 }
 
+// MARK: - Phase 1b1 remaining panel-surface paragraph attrs
+
+@Test func hasNoOverridesFalseWhenPhase1b1AttrsSet() {
+    #expect(!Tspan(textAlign: "justify").hasNoOverrides)
+    #expect(!Tspan(textIndent: -12).hasNoOverrides)
+    #expect(!Tspan(jasSpaceBefore: 6).hasNoOverrides)
+}
+
+@Test func svgFragmentPhase1b1AttrsRoundTrip() {
+    let t = Tspan(content: "",
+                  jasRole: "paragraph",
+                  textAlign: "justify",
+                  textAlignLast: "center",
+                  textIndent: -18,
+                  jasSpaceBefore: 6,
+                  jasSpaceAfter: 12)
+    let svg = tspansToSvgFragment([t])
+    #expect(svg.contains(#"text-align="justify""#))
+    #expect(svg.contains(#"text-align-last="center""#))
+    #expect(svg.contains(#"text-indent="-18""#))
+    #expect(svg.contains(#"jas:space-before="6""#))
+    #expect(svg.contains(#"jas:space-after="12""#))
+    let back = tspansFromSvgFragment(svg)!
+    #expect(back.count == 1)
+    #expect(back[0].textAlign == "justify")
+    #expect(back[0].textAlignLast == "center")
+    #expect(back[0].textIndent == -18)
+    #expect(back[0].jasSpaceBefore == 6)
+    #expect(back[0].jasSpaceAfter == 12)
+}
+
 @Test func svgFragmentPhase3bAttrsRoundTrip() {
     let t = Tspan(content: "",
                   jasRole: "paragraph",
