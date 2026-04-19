@@ -138,6 +138,45 @@ state:
     default: false
     description: "Active stroke profile is flipped"
 
+  # ── Align panel ───────────────────────────────────────────────
+  # Mirror state for the Align panel's four persistent fields.
+  # See transcripts/ALIGN.md §Panel state.
+
+  align_to:
+    type: enum
+    values: [selection, artboard, key_object]
+    default: selection
+    description: >
+      Align-To target mode. 'selection' uses the current selection
+      bounding box; 'artboard' uses the active artboard rectangle;
+      'key_object' uses a designated element from the selection as
+      the fixed reference.
+
+  align_key_object_path:
+    type: path
+    default: null
+    nullable: true
+    description: >
+      Path of the designated key object while align_to == 'key_object'.
+      Null when no key has been designated or while align_to is not
+      in key_object mode.
+
+  align_distribute_spacing:
+    type: number
+    default: 0
+    description: >
+      Explicit gap in points applied by Distribute Spacing operations
+      when align_to == 'key_object' and a key has been designated.
+      Otherwise the two spacing buttons average existing gaps.
+
+  align_use_preview_bounds:
+    type: bool
+    default: false
+    description: >
+      When true, Align / Distribute / Distribute Spacing operations
+      consult each element's preview bounds (stroke-inclusive);
+      otherwise they consult geometric bounds.
+
   fill_on_top:
     type: bool
     default: true
