@@ -40,9 +40,6 @@ ALGORITHMS = {
 # Known per-language algorithm exclusions (pre-existing bugs to fix separately)
 SKIP_LANG_ALGO = {
     ("swift", "boolean_normalize"),  # Range crash in Swift normalize()
-    # Phase 11: Python runner is added in its own commit; until then
-    # python skips text_layout_paragraph.
-    ("python", "text_layout_paragraph"),
 }
 
 
