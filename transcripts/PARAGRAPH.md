@@ -564,6 +564,18 @@ dictionaries is tracked separately; until a dictionary ships for a
 given language, `HYPHENATE_CHECKBOX` can be toggled and dialog
 parameters stored, but no hyphens appear in rendered output.
 
+**Algorithm**
+
+Each native app ships a Knuth-Liang TeX-pattern hyphenator
+(`algorithms/hyphenator.{rs,swift,ml,py}`) plus a small en-US
+pattern subset for testing. The algorithm takes the word and a
+pattern list and returns the set of valid break points; per-
+language full TeX dictionaries package as a separate resource.
+The dialog's `min_before` / `min_after` map directly onto the
+hyphenator's break-suppression windows; `bias` feeds the every-
+line composer's hyphen-penalty (a follow-up patch wires the
+penalty in to consume the break points).
+
 **OK / Cancel / Preview** — identical to the Justification dialog,
 with the snapshot scoped to `jas:hyphenate` and `jas:hyphenate-*`
 attributes.
