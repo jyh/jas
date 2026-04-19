@@ -2764,6 +2764,54 @@
     "char_snap_anchor": {
       "viewbox": "0 0 24 24",
       "svg": "<path d=\"M3,19 C8,3 16,3 21,19\"\n  stroke=\"currentColor\" stroke-width=\"1\" fill=\"none\"/>\n<path d=\"M3,19 L5,17 L3,15 L1,17 Z M21,19 L23,17 L21,15 L19,17 Z M12,5 L14,3 L12,1 L10,3 Z\"\n  fill=\"currentColor\"/>\n"
+    },
+    "para_align_left": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"13\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"7\" x2=\"10\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"13\" x2=\"8\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_align_center": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"4\" y1=\"7\" x2=\"12\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"5\" y1=\"13\" x2=\"11\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_align_right": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"3\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"7\" x2=\"14\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"8\" y1=\"13\" x2=\"14\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_justify_left": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"7\" x2=\"14\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"13\" x2=\"8\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_justify_center": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"7\" x2=\"14\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"5\" y1=\"13\" x2=\"11\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_justify_right": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"7\" x2=\"14\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"8\" y1=\"13\" x2=\"14\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_justify_all": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"7\" x2=\"14\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"13\" x2=\"14\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_left_indent": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"2\" x2=\"2\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.5\" opacity=\"0.6\"/> <line x1=\"6\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"7\" x2=\"13\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"13\" x2=\"12\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_right_indent": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"14\" y1=\"2\" x2=\"14\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.5\" opacity=\"0.6\"/> <line x1=\"2\" y1=\"4\" x2=\"10\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/> <line x1=\"3\" y1=\"7\" x2=\"10\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"10\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/> <line x1=\"4\" y1=\"13\" x2=\"10\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_first_line_indent": {
+      "viewbox": "0 0 16 16",
+      "svg": "<polygon points=\"2,2.5 5,4 2,5.5\" fill=\"currentColor\" opacity=\"0.7\"/> <line x1=\"6\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"7\" x2=\"13\" y2=\"7\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"14\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"13\" x2=\"11\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_space_before": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"2\" x2=\"14\" y2=\"2\" stroke=\"currentColor\" stroke-width=\"0.8\" opacity=\"0.5\"/> <polyline points=\"6,4 8,7 10,4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/> <line x1=\"2\" y1=\"10\" x2=\"13\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"13\" x2=\"11\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "para_space_after": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"3\" x2=\"13\" y2=\"3\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"2\" y1=\"6\" x2=\"11\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <polyline points=\"6,9 8,12 10,9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/> <line x1=\"2\" y1=\"14\" x2=\"14\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"0.8\" opacity=\"0.5\"/>\n"
     }
   },
   "layout": {
