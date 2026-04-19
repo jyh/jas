@@ -249,12 +249,13 @@ from enum import Enum
 
 class TextAlign(Enum):
     """Horizontal alignment within a paragraph's effective box (the
-    box width minus left/right indents). Phase 5 supports the three
-    non-justify alignments; the four ``JUSTIFY_*`` variants land
-    with the composer in Phase 8 — they fall back to ``LEFT``."""
+    box width minus left/right indents). Phase 10 lights up
+    ``JUSTIFY`` for area text via the every-line composer; point
+    text and text-on-path coerce ``justify`` back to ``LEFT``."""
     LEFT = "left"
     CENTER = "center"
     RIGHT = "right"
+    JUSTIFY = "justify"
 
 
 @dataclass
@@ -291,6 +292,18 @@ class ParagraphSegment:
     # Alignment interaction: left-aligned hangs only left side,
     # right-aligned only right, centered both.
     hanging_punctuation: bool = False
+    # ── Phase 10: Justification dialog soft constraints ──
+    word_spacing_min: float = 80.0
+    word_spacing_desired: float = 100.0
+    word_spacing_max: float = 133.0
+    last_line_align: "TextAlign" = TextAlign.LEFT
+    # ── Phase 10: Hyphenation dialog wiring ──
+    hyphenate: bool = False
+    hyphenate_min_word: int = 3
+    hyphenate_min_before: int = 1
+    hyphenate_min_after: int = 1
+    # 0 (Better Spacing) ... 6 (Fewer Hyphens)
+    hyphenate_bias: int = 0
 
 
 def _trimmed_line_width(line: LineInfo, glyphs: list[Glyph]) -> float:
@@ -348,7 +361,16 @@ def layout_with_paragraphs(
                 space_before=p.space_before, space_after=p.space_after,
                 text_align=p.text_align,
                 list_style=p.list_style, marker_gap=p.marker_gap,
-                hanging_punctuation=p.hanging_punctuation)
+                hanging_punctuation=p.hanging_punctuation,
+                word_spacing_min=p.word_spacing_min,
+                word_spacing_desired=p.word_spacing_desired,
+                word_spacing_max=p.word_spacing_max,
+                last_line_align=p.last_line_align,
+                hyphenate=p.hyphenate,
+                hyphenate_min_word=p.hyphenate_min_word,
+                hyphenate_min_before=p.hyphenate_min_before,
+                hyphenate_min_after=p.hyphenate_min_after,
+                hyphenate_bias=p.hyphenate_bias)
             segs.append(seg)
         cursor = e
     if cursor < n:
@@ -375,7 +397,17 @@ def layout_with_paragraphs(
         effective_max = max(
             0.0, max_width - seg.left_indent - list_indent - seg.right_indent
         ) if max_width > 0.0 else 0.0
-        para = layout(slice_str, effective_max, font_size, measure)
+        # Phase 10: justify segments go through the every-line composer
+        # instead of greedy first-fit. Falls back to greedy when the
+        # composer can't find a feasible composition.
+        para: TextLayout
+        if seg.text_align == TextAlign.JUSTIFY and effective_max > 0.0:
+            kp_para = _justify_layout_segment(slice_str, effective_max,
+                                                font_size, seg, measure)
+            para = kp_para if kp_para is not None else layout(
+                slice_str, effective_max, font_size, measure)
+        else:
+            para = layout(slice_str, effective_max, font_size, measure)
         first_line_extra = 0.0 if has_list else max(0.0, seg.first_line_indent)
         first_line_no_in_combined = line_count
         for li, line in enumerate(para.lines):
@@ -413,6 +445,8 @@ def layout_with_paragraphs(
                 align_shift = line_avail - effective_visible_w \
                     if line_avail > effective_visible_w else 0.0
             else:
+                # LEFT or JUSTIFY: ragged left edge (or justify-already-
+                # applied-by-composer to fill the box).
                 align_shift = -left_hang_w
             total_shift = x_shift + align_shift
             orig_start = seg.char_start + line.start
@@ -475,6 +509,8 @@ def build_paragraph_segments(
                     segs.append(current)
             list_style = t.jas_list_style
             marker_gap = MARKER_GAP_PT if list_style is not None else 0.0
+            ta = _text_align_from(t.text_align, is_area)
+            lla = _last_line_align_from(t.text_align_last, ta, is_area)
             current = ParagraphSegment(
                 char_start=cursor, char_end=cursor,
                 left_indent=t.jas_left_indent or 0.0,
@@ -482,9 +518,18 @@ def build_paragraph_segments(
                 first_line_indent=t.text_indent or 0.0,
                 space_before=t.jas_space_before or 0.0,
                 space_after=t.jas_space_after or 0.0,
-                text_align=_text_align_from(t.text_align, is_area),
+                text_align=ta,
                 list_style=list_style, marker_gap=marker_gap,
-                hanging_punctuation=bool(t.jas_hanging_punctuation))
+                hanging_punctuation=bool(t.jas_hanging_punctuation),
+                word_spacing_min=t.jas_word_spacing_min if t.jas_word_spacing_min is not None else 80.0,
+                word_spacing_desired=t.jas_word_spacing_desired if t.jas_word_spacing_desired is not None else 100.0,
+                word_spacing_max=t.jas_word_spacing_max if t.jas_word_spacing_max is not None else 133.0,
+                last_line_align=lla,
+                hyphenate=bool(t.jas_hyphenate),
+                hyphenate_min_word=int(t.jas_hyphenate_min_word) if t.jas_hyphenate_min_word is not None else 3,
+                hyphenate_min_before=int(t.jas_hyphenate_min_before) if t.jas_hyphenate_min_before is not None else 1,
+                hyphenate_min_after=int(t.jas_hyphenate_min_after) if t.jas_hyphenate_min_after is not None else 1,
+                hyphenate_bias=int(t.jas_hyphenate_bias) if t.jas_hyphenate_bias is not None else 0)
         else:
             cursor += body_chars
     if current is not None:
@@ -496,12 +541,30 @@ def build_paragraph_segments(
 
 def _text_align_from(value: str | None, is_area: bool) -> TextAlign:
     """Map the wrapper tspan's ``text-align`` string to a TextAlign.
-    Phase 5 supports ``left`` / ``center`` / ``right``; the four
-    ``justify*`` values fall back to LEFT until the composer lands."""
+    Phase 10 promotes ``justify`` to ``JUSTIFY`` for area text;
+    point text and text-on-path coerce ``justify`` back to LEFT."""
     if value == "center":
         return TextAlign.CENTER
     if value == "right":
         return TextAlign.RIGHT
+    if value == "justify" and is_area:
+        return TextAlign.JUSTIFY
+    return TextAlign.LEFT
+
+
+def _last_line_align_from(value: str | None, base: TextAlign,
+                           is_area: bool) -> TextAlign:
+    """Map the wrapper tspan's ``text-align-last`` string to the
+    last-line alignment of a justified paragraph. Ignored when the
+    paragraph isn't justified."""
+    if base != TextAlign.JUSTIFY or not is_area:
+        return TextAlign.LEFT
+    if value == "center":
+        return TextAlign.CENTER
+    if value == "right":
+        return TextAlign.RIGHT
+    if value == "justify":
+        return TextAlign.JUSTIFY
     return TextAlign.LEFT
 
 
@@ -631,3 +694,246 @@ def compute_counters(segs: list[ParagraphSegment]) -> list[int]:
             prev_num = None
             current = 0
     return counters
+
+
+# ── Phase 10: Justify path via Knuth-Plass composer ─────────
+
+
+def _hyphen_penalty_from_bias(bias: int) -> float:
+    """Map the dialog bias slider (0..6) to a KP penalty value.
+    0 (Better Spacing) is cheap, 6 (Fewer Hyphens) is expensive."""
+    return 50.0 + max(0, min(6, bias)) * (950.0 / 6.0)
+
+
+def _last_line_justify_ratio(items: list, from_: int, to_: int,
+                               line_width: float) -> float:
+    """Custom ratio for the last line of a JUSTIFY_ALL paragraph.
+    Excludes the fil-glue terminator so regular inter-word glues
+    stretch / shrink to fill the line."""
+    from algorithms.knuth_plass import KPBox, KPGlue
+    nat = 0.0
+    stretch_total = 0.0
+    shrink_total = 0.0
+    for ii in range(from_, to_):  # exclude trailing item `to_`
+        item = items[ii]
+        if isinstance(item, KPBox):
+            nat += item.width
+        elif isinstance(item, KPGlue):
+            if item.stretch >= 1e8:  # fil-glue terminator, ignore
+                continue
+            nat += item.width
+            stretch_total += item.stretch
+            shrink_total += item.shrink
+    slack = line_width - nat
+    if slack > 0 and stretch_total > 0:
+        return slack / stretch_total
+    if slack < 0 and shrink_total > 0:
+        return slack / shrink_total
+    return 0.0
+
+
+def _justify_layout_segment(
+    content: str,
+    max_width: float,
+    font_size: float,
+    seg: ParagraphSegment,
+    measure: Callable[[str], float],
+) -> TextLayout | None:
+    """Justify-mode line layout via the every-line composer. Returns
+    ``None`` when no feasible composition exists (caller falls back
+    to greedy first-fit). Mirrors Rust ``justify_layout``."""
+    from algorithms.knuth_plass import (
+        compose, KPBox, KPGlue, KPPenalty, PENALTY_INFINITY,
+    )
+    from algorithms.hyphenator import (
+        EN_US_PATTERNS_SAMPLE, hyphenate as _hyphenate,
+    )
+
+    line_height = font_size
+    ascent = font_size * 0.8
+    chars = list(content)
+    n = len(chars)
+    if n == 0:
+        info = LineInfo(start=0, end=0, hard_break=False,
+                         top=0.0, baseline_y=ascent,
+                         height=line_height, width=0.0,
+                         glyph_start=0, glyph_end=0)
+        return TextLayout(glyphs=[], lines=[info],
+                          font_size=font_size, char_count=0)
+
+    space_w = measure(" ")
+    desired_w = space_w * seg.word_spacing_desired / 100.0
+    stretch_w = space_w * (seg.word_spacing_max - seg.word_spacing_desired) / 100.0
+    shrink_w = space_w * (seg.word_spacing_desired - seg.word_spacing_min) / 100.0
+    hyphen_w = measure("-")
+    hyphen_pen = _hyphen_penalty_from_bias(seg.hyphenate_bias)
+
+    # Sub-paragraphs split on '\n'.
+    para_starts = [0]
+    for i, c in enumerate(chars):
+        if c == "\n":
+            para_starts.append(i + 1)
+    para_starts.append(n + 1)
+
+    all_glyphs: list[Glyph] = []
+    all_lines: list[LineInfo] = []
+    next_line_no = 0
+
+    for k in range(len(para_starts) - 1):
+        para_start = para_starts[k]
+        para_end_excl = min(max(0, para_starts[k + 1] - 1), n)
+        if para_start > n:
+            break
+        slice_chars = chars[para_start:para_end_excl]
+
+        items: list = []
+        i = 0
+        while i < len(slice_chars):
+            if slice_chars[i].isspace():
+                j = i
+                while j < len(slice_chars) and slice_chars[j].isspace():
+                    j += 1
+                items.append(KPGlue(width=desired_w, stretch=stretch_w,
+                                     shrink=shrink_w,
+                                     char_idx=para_start + i))
+                i = j
+                continue
+            word_start = i
+            while i < len(slice_chars) and not slice_chars[i].isspace():
+                i += 1
+            word = "".join(slice_chars[word_start:i])
+            word_w = measure(word)
+            if seg.hyphenate and len(word) >= seg.hyphenate_min_word:
+                breaks = _hyphenate(word, EN_US_PATTERNS_SAMPLE,
+                                     seg.hyphenate_min_before,
+                                     seg.hyphenate_min_after)
+                cur = 0
+                for bi, is_break in enumerate(breaks):
+                    if not is_break or bi == 0 or bi >= len(breaks) - 1:
+                        continue
+                    pre = word[cur:bi]
+                    pre_w = measure(pre)
+                    items.append(KPBox(width=pre_w,
+                                        char_idx=para_start + word_start + cur))
+                    items.append(KPPenalty(width=hyphen_w, value=hyphen_pen,
+                                            flagged=True,
+                                            char_idx=para_start + word_start + bi))
+                    cur = bi
+                tail = word[cur:]
+                items.append(KPBox(width=measure(tail),
+                                    char_idx=para_start + word_start + cur))
+            else:
+                items.append(KPBox(width=word_w,
+                                    char_idx=para_start + word_start))
+        # End-of-paragraph terminator.
+        items.append(KPGlue(width=0.0, stretch=1e9, shrink=0.0,
+                             char_idx=para_start + len(slice_chars)))
+        items.append(KPPenalty(width=0.0, value=-PENALTY_INFINITY,
+                                flagged=False,
+                                char_idx=para_start + len(slice_chars)))
+
+        breaks = compose(items, [max_width])
+        if breaks is None or not breaks:
+            return None
+
+        prev_break: int | None = None
+        line_count = len(breaks)
+        for lidx, br in enumerate(breaks):
+            is_last = lidx == line_count - 1
+            from_ = (prev_break + 1) if prev_break is not None else 0
+            to_ = br.item_idx
+            x = 0.0
+            line_start_char = items[from_].char_idx
+            line_end_char = items[from_].char_idx
+            glyph_start = len(all_glyphs)
+            top = next_line_no * line_height
+            baseline_y = top + ascent
+            for ii in range(from_, to_ + 1):
+                item = items[ii]
+                is_trailing = ii == to_
+                if isinstance(item, KPBox):
+                    chunk_end = (items[ii + 1].char_idx
+                                  if ii + 1 < len(items)
+                                  else (n + para_start))
+                    ci = item.char_idx
+                    while ci < min(chunk_end, para_start + len(slice_chars)):
+                        ch = chars[ci]
+                        cw = measure(ch)
+                        all_glyphs.append(Glyph(
+                            idx=ci, line=next_line_no,
+                            x=x, right=x + cw,
+                            baseline_y=baseline_y, top=top,
+                            height=line_height,
+                            is_trailing_space=False))
+                        x += cw
+                        line_end_char = ci + 1
+                        ci += 1
+                elif isinstance(item, KPGlue):
+                    run_end = (items[ii + 1].char_idx
+                                if ii + 1 < len(items)
+                                else (para_start + len(slice_chars)))
+                    if is_trailing:
+                        wi = item.char_idx
+                        while wi < run_end:
+                            all_glyphs.append(Glyph(
+                                idx=wi, line=next_line_no,
+                                x=x, right=x,
+                                baseline_y=baseline_y, top=top,
+                                height=line_height,
+                                is_trailing_space=True))
+                            wi += 1
+                        line_end_char = run_end
+                    else:
+                        if is_last and seg.last_line_align != TextAlign.JUSTIFY:
+                            r = 0.0
+                        elif is_last and seg.last_line_align == TextAlign.JUSTIFY:
+                            r = _last_line_justify_ratio(
+                                items, from_, to_, max_width)
+                        else:
+                            r = br.ratio
+                        adj = (item.width + r * item.stretch
+                               if r >= 0 else item.width + r * item.shrink)
+                        wi = item.char_idx
+                        placed_first = False
+                        while wi < run_end:
+                            cw = adj if not placed_first else 0.0
+                            all_glyphs.append(Glyph(
+                                idx=wi, line=next_line_no,
+                                x=x, right=x + cw,
+                                baseline_y=baseline_y, top=top,
+                                height=line_height,
+                                is_trailing_space=False))
+                            if not placed_first:
+                                x += cw
+                                placed_first = True
+                            wi += 1
+                        line_end_char = run_end
+                elif isinstance(item, KPPenalty):
+                    if is_trailing and item.width > 0:
+                        all_glyphs.append(Glyph(
+                            idx=item.char_idx, line=next_line_no,
+                            x=x, right=x + item.width,
+                            baseline_y=baseline_y, top=top,
+                            height=line_height,
+                            is_trailing_space=False))
+                        x += item.width
+            glyph_end = len(all_glyphs)
+            hard_break = (is_last and para_end_excl < n
+                          and chars[para_end_excl] == "\n")
+            all_lines.append(LineInfo(
+                start=line_start_char, end=line_end_char,
+                hard_break=hard_break,
+                top=top, baseline_y=baseline_y,
+                height=line_height, width=x,
+                glyph_start=glyph_start, glyph_end=glyph_end))
+            next_line_no += 1
+            prev_break = to_
+
+    if not all_lines:
+        all_lines.append(LineInfo(
+            start=0, end=0, hard_break=False,
+            top=0.0, baseline_y=ascent, height=line_height,
+            width=0.0, glyph_start=0, glyph_end=0))
+
+    return TextLayout(glyphs=all_glyphs, lines=all_lines,
+                      font_size=font_size, char_count=n)

@@ -463,3 +463,49 @@ def test_hanging_with_left_indent():
     l = layout_with_paragraphs("(ab", 100.0, 16.0, segs, fixed(10.0))
     assert l.glyphs[0].x == 10.0  # '(' = 20 - 10
     assert l.glyphs[1].x == 20.0  # 'a' at left_indent edge
+
+
+# ── Phase 10: Justify path via Knuth-Plass composer ──
+
+
+def test_justify_ragged_last_line_keeps_natural_glue():
+    segs = [ParagraphSegment(char_start=0, char_end=8,
+                              text_align=TextAlign.JUSTIFY)]
+    l = layout_with_paragraphs("ab cd ef", 100.0, 16.0, segs, fixed(10.0))
+    # Single-line paragraph = "last line" => uses ragged-Left default.
+    last = l.glyphs[-1]
+    assert abs(last.right - 80.0) < 1e-6
+
+
+def test_justify_all_stretches_last_line_to_fill_box():
+    segs = [ParagraphSegment(char_start=0, char_end=8,
+                              text_align=TextAlign.JUSTIFY,
+                              last_line_align=TextAlign.JUSTIFY)]
+    l = layout_with_paragraphs("ab cd ef", 100.0, 16.0, segs, fixed(10.0))
+    last = l.glyphs[-1]
+    assert abs(last.right - 100.0) < 1.0
+
+
+def test_justify_two_lines_first_fills_second_ragged():
+    segs = [ParagraphSegment(char_start=0, char_end=17,
+                              text_align=TextAlign.JUSTIFY)]
+    l = layout_with_paragraphs("ab cd ef gh ij kl", 100.0, 16.0, segs,
+                                fixed(10.0))
+    assert len(l.lines) >= 2
+    line0 = l.lines[0]
+    line0_right = max((g.right for g in l.glyphs[line0.glyph_start:line0.glyph_end]),
+                       default=0.0)
+    assert line0_right > 80.0
+    last_line = l.lines[-1]
+    last_right = max((g.right for g in l.glyphs[last_line.glyph_start:last_line.glyph_end]),
+                      default=0.0)
+    assert last_right <= 100.0 + 1e-6
+
+
+def test_justify_preserves_char_count():
+    segs = [ParagraphSegment(char_start=0, char_end=17,
+                              text_align=TextAlign.JUSTIFY)]
+    l = layout_with_paragraphs("ab cd ef gh ij kl", 100.0, 16.0, segs,
+                                fixed(10.0))
+    assert l.char_count == 17
+    assert len(l.glyphs) == 17
