@@ -88,6 +88,7 @@ fn render_el(
         "number_input" => render_number_input(el, ctx, rctx),
         "text_input" => render_text_input(el, ctx, rctx),
         "select" => render_select(el, ctx, rctx),
+        "icon_select" => render_icon_select(el, ctx, rctx),
         "toggle" | "checkbox" => render_toggle(el, ctx, rctx),
         "combo_box" => render_combo_box(el, ctx, rctx),
         "color_swatch" => render_color_swatch(el, ctx, rctx),
@@ -2749,6 +2750,123 @@ fn render_select_option(opt: &serde_json::Value, current_value: &str) -> Element
                 value: "{value}",
                 selected: selected,
                 "{value}"
+            }
+        }
+    }
+}
+
+/// `icon_select`: an icon-button-sized chooser that visually shows
+/// the selected option's `glyph` (a single Unicode marker), with a
+/// transparent native `<select>` overlaid for click-to-popup. The
+/// OS handles the dropdown rendering, click-outside dismissal, and
+/// keyboard nav for free.
+///
+/// Each option must carry: `value`, `label` (full readable text in
+/// the native popup), and `glyph` (the icon-sized character shown
+/// when collapsed). Falls back to first non-space char of `label`
+/// when `glyph` is missing.
+fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+    let style = build_style(el, ctx);
+    let options = el.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let current_value = if !bind_expr.is_empty() {
+        match expr::eval(bind_expr, ctx) {
+            Value::Str(s) => s,
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
+
+    let disabled = if let Some(dis_expr) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
+        expr::eval(dis_expr, ctx).to_bool()
+    } else {
+        false
+    };
+
+    // Resolve the visible glyph from the currently-selected option.
+    let visible_glyph = options.iter()
+        .find(|o| o.get("value").and_then(|v| v.as_str()) == Some(current_value.as_str()))
+        .and_then(|o| {
+            o.get("glyph").and_then(|v| v.as_str()).map(String::from).or_else(|| {
+                o.get("label").and_then(|v| v.as_str()).and_then(|l| {
+                    l.split_whitespace().next().map(String::from)
+                })
+            })
+        })
+        .unwrap_or_else(|| "—".to_string());
+
+    let bind_target = classify_bind(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+    let cv = current_value.clone();
+    let panel_kind = rctx.panel_kind;
+
+    let dim = if disabled { "opacity:0.4;" } else { "" };
+
+    rsx! {
+        div {
+            id: "{id}",
+            class: "jas-icon-toggle",
+            title: "{summary}",
+            style: "position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;border-radius:2px;{dim}{style}",
+            // Visible glyph + tiny chevron hint.
+            div {
+                style: "display:flex;align-items:center;gap:2px;font-size:14px;color:var(--jas-text,#ccc);pointer-events:none;line-height:1;",
+                "{visible_glyph}"
+                span { style: "font-size:7px;opacity:0.6;", "▾" }
+            }
+            // Native select overlaid invisibly so clicks hit it and
+            // the OS handles the popup. Options use the full label
+            // (e.g. "•   Disc") so the popup reads naturally.
+            select {
+                value: "{current_value}",
+                disabled: disabled,
+                style: "position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:none;background:transparent;color:transparent;font-size:0;",
+                onchange: move |evt: Event<FormData>| {
+                    let new_val = evt.value();
+                    match &bind_target {
+                        BindTarget::Dialog(field) => {
+                            if let Some(mut ds) = dialog_signal() {
+                                ds.set_value(field, serde_json::json!(new_val));
+                                dialog_signal.set(Some(ds));
+                            }
+                        }
+                        BindTarget::Panel(field) => {
+                            let f = field.clone();
+                            let v = new_val.clone();
+                            let app = app.clone();
+                            spawn(async move {
+                                let mut st = app.borrow_mut();
+                                match panel_kind {
+                                    Some(PanelKind::Character) => {
+                                        set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
+                                        st.apply_character_panel_to_selection();
+                                    }
+                                    Some(PanelKind::Paragraph) => {
+                                        st.sync_paragraph_panel_from_selection();
+                                        set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(v));
+                                        st.apply_paragraph_panel_to_selection();
+                                    }
+                                    Some(PanelKind::Stroke) | None => {
+                                        set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
+                                        st.apply_stroke_panel_to_selection();
+                                    }
+                                    _ => {}
+                                }
+                            });
+                        }
+                        BindTarget::None => { return; }
+                    }
+                    revision += 1;
+                },
+                for opt in options.iter() {
+                    {render_select_option(opt, &cv)}
+                }
             }
         }
     }
