@@ -259,3 +259,117 @@ class TestAlignActions:
             ("align_use_preview_bounds", "false"),
         ]:
             assert {"set": {state_key: value}} in effects
+
+
+class TestAlignBindDisabled:
+    """Stage 1d: every operation button carries bind.disabled that
+    evaluates selection-count thresholds (>=2 for Align, >=3 for
+    Distribute / Distribute Spacing) plus the key-object guard
+    (no key designated while align_to == key_object). Align To
+    toggles dispatch set_align_to, which preserves the radio
+    group semantics via panel.align_to updates."""
+
+    ALIGN_BUTTONS = [
+        "align_left_button", "align_horizontal_center_button",
+        "align_right_button", "align_top_button",
+        "align_vertical_center_button", "align_bottom_button",
+    ]
+
+    DISTRIBUTE_BUTTONS = [
+        "distribute_left_button", "distribute_horizontal_center_button",
+        "distribute_right_button", "distribute_top_button",
+        "distribute_vertical_center_button", "distribute_bottom_button",
+        "distribute_vertical_spacing_button",
+        "distribute_horizontal_spacing_button",
+    ]
+
+    ALIGN_TO_BUTTONS = [
+        "align_to_artboard_button", "align_to_selection_button",
+        "align_to_key_object_button",
+    ]
+
+    @pytest.mark.parametrize("button_id", ALIGN_BUTTONS)
+    def test_align_button_disabled_below_two_selected_or_unkeyed(
+            self, workspace_path, button_id):
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        widget = _find_by_id(spec["content"], button_id)
+        expected = (
+            'active_document.selection_count < 2 or '
+            '(panel.align_to == "key_object" and panel.key_object_path == null)'
+        )
+        assert widget["bind"]["disabled"] == expected
+
+    @pytest.mark.parametrize("button_id", DISTRIBUTE_BUTTONS)
+    def test_distribute_button_disabled_below_three_selected_or_unkeyed(
+            self, workspace_path, button_id):
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        widget = _find_by_id(spec["content"], button_id)
+        expected = (
+            'active_document.selection_count < 3 or '
+            '(panel.align_to == "key_object" and panel.key_object_path == null)'
+        )
+        assert widget["bind"]["disabled"] == expected
+
+    def test_distribute_spacing_value_disabled_unless_key_mode_with_key(
+            self, workspace_path):
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        widget = _find_by_id(spec["content"], "distribute_spacing_value")
+        expected = (
+            'not (panel.align_to == "key_object" and '
+            'panel.key_object_path != null)'
+        )
+        assert widget["bind"]["disabled"] == expected
+
+    @pytest.mark.parametrize("button_id,action_name", [
+        ("align_left_button", "align_left"),
+        ("align_horizontal_center_button", "align_horizontal_center"),
+        ("align_right_button", "align_right"),
+        ("align_top_button", "align_top"),
+        ("align_vertical_center_button", "align_vertical_center"),
+        ("align_bottom_button", "align_bottom"),
+        ("distribute_left_button", "distribute_left"),
+        ("distribute_horizontal_center_button", "distribute_horizontal_center"),
+        ("distribute_right_button", "distribute_right"),
+        ("distribute_top_button", "distribute_top"),
+        ("distribute_vertical_center_button", "distribute_vertical_center"),
+        ("distribute_bottom_button", "distribute_bottom"),
+        ("distribute_vertical_spacing_button", "distribute_vertical_spacing"),
+        ("distribute_horizontal_spacing_button", "distribute_horizontal_spacing"),
+    ])
+    def test_operation_button_dispatches_same_named_action(
+            self, workspace_path, button_id, action_name):
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        widget = _find_by_id(spec["content"], button_id)
+        click = widget["behavior"][0]
+        assert click["event"] == "click"
+        assert click["effects"] == [{"dispatch": action_name}]
+
+    @pytest.mark.parametrize("button_id,target", [
+        ("align_to_artboard_button", "artboard"),
+        ("align_to_selection_button", "selection"),
+        ("align_to_key_object_button", "key_object"),
+    ])
+    def test_align_to_button_dispatches_set_align_to_with_target(
+            self, workspace_path, button_id, target):
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        widget = _find_by_id(spec["content"], button_id)
+        click = widget["behavior"][0]
+        assert click["event"] == "click"
+        assert click["effects"] == [
+            {"dispatch": {"action": "set_align_to", "params": {"target": target}}}
+        ]
+
+    @pytest.mark.parametrize("button_id", ALIGN_TO_BUTTONS)
+    def test_align_to_button_has_no_disabled_predicate(
+            self, workspace_path, button_id):
+        """Align To toggles are always available. Any disabled
+        predicate would undermine the radio group."""
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        widget = _find_by_id(spec["content"], button_id)
+        assert "disabled" not in widget.get("bind", {})

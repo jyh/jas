@@ -40,6 +40,15 @@ description: >
   panel.align_to matches their target. Per ALIGN.md §Widget
   types.
 
+  Enable / disable rules:
+  - Align operations require at least 2 elements selected.
+  - Distribute and Distribute Spacing operations require at
+    least 3 elements selected.
+  - When align_to == "key_object" and no key has been designated,
+    every operation button disables.
+  - DISTRIBUTE_SPACING_VALUE enables only when align_to ==
+    "key_object" and a key has been designated.
+
 state:
   align_to:
     type: enum
@@ -106,6 +115,12 @@ content:
                 ALIGN_LEFT_BUTTON. Move elements so their left
                 edges coincide along the horizontal axis.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 2 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: align_left
             - id: align_horizontal_center_button
               type: icon_button
               icon: align_horizontal_center
@@ -114,6 +129,12 @@ content:
                 ALIGN_HORIZONTAL_CENTER_BUTTON. Move elements so
                 their horizontal centers coincide.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 2 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: align_horizontal_center
             - id: align_right_button
               type: icon_button
               icon: align_right
@@ -122,6 +143,12 @@ content:
                 ALIGN_RIGHT_BUTTON. Move elements so their right
                 edges coincide along the horizontal axis.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 2 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: align_right
         # Vertical-axis alignment: top / vertical-center / bottom.
         - type: container
           layout: row
@@ -135,6 +162,12 @@ content:
                 ALIGN_TOP_BUTTON. Move elements so their top
                 edges coincide along the vertical axis.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 2 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: align_top
             - id: align_vertical_center_button
               type: icon_button
               icon: align_vertical_center
@@ -143,6 +176,12 @@ content:
                 ALIGN_VERTICAL_CENTER_BUTTON. Move elements so
                 their vertical centers coincide.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 2 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: align_vertical_center
             - id: align_bottom_button
               type: icon_button
               icon: align_bottom
@@ -151,6 +190,12 @@ content:
                 ALIGN_BOTTOM_BUTTON. Move elements so their
                 bottom edges coincide along the vertical axis.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 2 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: align_bottom
 
     # ── Distribute Objects ───────────────────────────────────
     - type: container
@@ -178,6 +223,12 @@ content:
                 horizontally so the left coordinates of their
                 bounding boxes are evenly spaced.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: distribute_left
             - id: distribute_horizontal_center_button
               type: icon_button
               icon: distribute_horizontal_center
@@ -187,6 +238,12 @@ content:
                 elements horizontally so their horizontal centers
                 are evenly spaced.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: distribute_horizontal_center
             - id: distribute_right_button
               type: icon_button
               icon: distribute_right
@@ -196,6 +253,12 @@ content:
                 horizontally so the right coordinates of their
                 bounding boxes are evenly spaced.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: distribute_right
         # Vertical-axis distribution: top / vertical-center / bottom.
         - type: container
           layout: row
@@ -210,6 +273,12 @@ content:
                 vertically so the top coordinates of their
                 bounding boxes are evenly spaced.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: distribute_top
             - id: distribute_vertical_center_button
               type: icon_button
               icon: distribute_vertical_center
@@ -219,6 +288,12 @@ content:
                 elements vertically so their vertical centers
                 are evenly spaced.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: distribute_vertical_center
             - id: distribute_bottom_button
               type: icon_button
               icon: distribute_bottom
@@ -228,6 +303,12 @@ content:
                 vertically so the bottom coordinates of their
                 bounding boxes are evenly spaced.
               style: { size: 20 }
+              bind:
+                disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+              behavior:
+                - event: click
+                  effects:
+                    - dispatch: distribute_bottom
 
     # ── Distribute Spacing + Align To ────────────────────────
     - type: container
@@ -259,6 +340,12 @@ content:
                     elements vertically so gaps between them are
                     uniform.
                   style: { size: 20 }
+                  bind:
+                    disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+                  behavior:
+                    - event: click
+                      effects:
+                        - dispatch: distribute_vertical_spacing
                 - id: distribute_horizontal_spacing_button
                   type: icon_button
                   icon: distribute_spacing_horizontal
@@ -268,6 +355,12 @@ content:
                     elements horizontally so gaps between them
                     are uniform.
                   style: { size: 20 }
+                  bind:
+                    disabled: 'active_document.selection_count < 3 or (panel.align_to == "key_object" and panel.key_object_path == null)'
+                  behavior:
+                    - event: click
+                      effects:
+                        - dispatch: distribute_horizontal_spacing
                 - id: distribute_spacing_value
                   type: number_input
                   summary: "Explicit spacing"
@@ -281,6 +374,7 @@ content:
                   style: { flex: 1 }
                   bind:
                     value: "panel.distribute_spacing_value"
+                    disabled: 'not (panel.align_to == "key_object" and panel.key_object_path != null)'
 
         # Right half: Align To.
         - type: container
@@ -311,8 +405,7 @@ content:
                   behavior:
                     - event: click
                       effects:
-                        - set_panel_state: { key: align_to, value: '"artboard"' }
-                        - set: { align_to: '"artboard"' }
+                        - dispatch: { action: set_align_to, params: { target: artboard } }
                 - id: align_to_selection_button
                   type: icon_button
                   icon: align_to_selection
@@ -327,8 +420,7 @@ content:
                   behavior:
                     - event: click
                       effects:
-                        - set_panel_state: { key: align_to, value: '"selection"' }
-                        - set: { align_to: '"selection"' }
+                        - dispatch: { action: set_align_to, params: { target: selection } }
                 - id: align_to_key_object_button
                   type: icon_button
                   icon: align_to_key_object
@@ -344,5 +436,4 @@ content:
                   behavior:
                     - event: click
                       effects:
-                        - set_panel_state: { key: align_to, value: '"key_object"' }
-                        - set: { align_to: '"key_object"' }
+                        - dispatch: { action: set_align_to, params: { target: key_object } }
