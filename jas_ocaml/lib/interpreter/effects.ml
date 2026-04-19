@@ -652,6 +652,22 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
      | Some v -> State_store.set_panel store "paragraph_panel_content"
                    "right_indent" (`Float v)
      | None -> ());
+    (* Phase 1b1: first-line indent (signed), space-before / -after. *)
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
+              match t.text_indent with Some v -> v | None -> 0.0) ws) with
+     | Some v -> State_store.set_panel store "paragraph_panel_content"
+                   "first_line_indent" (`Float v)
+     | None -> ());
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
+              match t.jas_space_before with Some v -> v | None -> 0.0) ws) with
+     | Some v -> State_store.set_panel store "paragraph_panel_content"
+                   "space_before" (`Float v)
+     | None -> ());
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
+              match t.jas_space_after with Some v -> v | None -> 0.0) ws) with
+     | Some v -> State_store.set_panel store "paragraph_panel_content"
+                   "space_after" (`Float v)
+     | None -> ());
     (match agree f_eq (List.map (fun (t : Element.tspan) ->
               match t.jas_hyphenate with Some v -> v | None -> false) ws) with
      | Some v -> State_store.set_panel store "paragraph_panel_content"
@@ -664,7 +680,7 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
      | None -> ());
     (* Single backing attr split into two panel dropdowns. Aggregate
        first, then route by prefix. *)
-    match agree f_eq (List.map (fun (t : Element.tspan) ->
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
             match t.jas_list_style with Some v -> v | None -> "") ws) with
     | None -> ()
     | Some ls ->
@@ -684,7 +700,32 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
           "bullets" (`String "");
         State_store.set_panel store "paragraph_panel_content"
           "numbered_list" (`String "")
-      end
+      end);
+    (* Phase 4: alignment radio aggregation. text_align +
+       text_align_last together drive which of the seven radio bools
+       is set per the §Alignment sub-mapping; agreement on both
+       fields is required. *)
+    let tas = List.map (fun (t : Element.tspan) ->
+                match t.text_align with Some v -> v | None -> "left") ws in
+    let tals = List.map (fun (t : Element.tspan) ->
+                 match t.text_align_last with Some v -> v | None -> "") ws in
+    (match agree f_eq tas, agree f_eq tals with
+     | Some ta, Some tal ->
+       List.iter (fun k -> State_store.set_panel store
+                  "paragraph_panel_content" k (`Bool false))
+         ["align_left"; "align_center"; "align_right";
+          "justify_left"; "justify_center"; "justify_right"; "justify_all"];
+       let key = match ta, tal with
+         | "center", _ -> "align_center"
+         | "right", _ -> "align_right"
+         | "justify", "left" -> "justify_left"
+         | "justify", "center" -> "justify_center"
+         | "justify", "right" -> "justify_right"
+         | "justify", "justify" -> "justify_all"
+         | _ -> "align_left"
+       in
+       State_store.set_panel store "paragraph_panel_content" key (`Bool true)
+     | _ -> ())
   end
 
 (* ── Character panel apply-to-selection pipeline (Layer B) ─── *)
@@ -1316,3 +1357,211 @@ let subscribe_stroke_panel (store : State_store.t)
   State_store.subscribe_global store (fun key _value ->
     if is_stroke_render_key key then
       apply_stroke_panel_to_selection store (ctrl_getter ()))
+
+(* ── Phase 4: paragraph panel→selection writes ──────────── *)
+
+let _opt_f v = if Float.equal v 0.0 then None else Some v
+let _opt_b v = if v then Some true else None
+let _bool_of_json = function `Bool b -> b | _ -> false
+let _str_of_json = function `String s -> s | _ -> ""
+let _float_of_json = function `Float f -> f | `Int n -> Float.of_int n | _ -> 0.0
+
+(** Map the seven alignment radio bools to a [(text_align,
+    text_align_last)] pair per PARAGRAPH.md §Alignment sub-mapping.
+    Default ALIGN_LEFT_BUTTON omits both per identity-value rule. *)
+let _paragraph_align_attrs (panel : (string * Yojson.Safe.t) list)
+  : string option * string option =
+  let read k = match List.assoc_opt k panel with
+    | Some v -> _bool_of_json v | None -> false in
+  if read "align_center" then (Some "center", None)
+  else if read "align_right" then (Some "right", None)
+  else if read "justify_left" then (Some "justify", Some "left")
+  else if read "justify_center" then (Some "justify", Some "center")
+  else if read "justify_right" then (Some "justify", Some "right")
+  else if read "justify_all" then (Some "justify", Some "justify")
+  else (None, None)
+
+(** Push the YAML-stored paragraph panel state onto every paragraph
+    wrapper tspan inside the selection. Per the identity-value rule,
+    attrs equal to their default are *omitted* (set to [None]) rather
+    than written. The seven alignment radio bools collapse to one
+    [(text_align, text_align_last)] pair per the §Alignment
+    sub-mapping; [bullets] and [numbered_list] both write the single
+    [jas_list_style] attribute. Phase 4. *)
+let apply_paragraph_panel_to_selection (store : State_store.t)
+    (ctrl : Controller.controller) : unit =
+  let pid = "paragraph_panel_content" in
+  let read_panel k = State_store.get_panel store pid k in
+  let panel = List.map (fun k -> (k, read_panel k)) [
+    "align_left"; "align_center"; "align_right";
+    "justify_left"; "justify_center"; "justify_right"; "justify_all";
+    "bullets"; "numbered_list";
+    "left_indent"; "right_indent"; "first_line_indent";
+    "space_before"; "space_after";
+    "hyphenate"; "hanging_punctuation";
+  ] in
+  let read_b k = match List.assoc_opt k panel with
+    | Some v -> _bool_of_json v | None -> false in
+  let read_s k = match List.assoc_opt k panel with
+    | Some v -> _str_of_json v | None -> "" in
+  let read_f k = match List.assoc_opt k panel with
+    | Some v -> _float_of_json v | None -> 0.0 in
+  let (text_align, text_align_last) = _paragraph_align_attrs panel in
+  let bullets = read_s "bullets" in
+  let numbered = read_s "numbered_list" in
+  let list_style =
+    if String.length bullets > 0 then Some bullets
+    else if String.length numbered > 0 then Some numbered
+    else None in
+  let li = _opt_f (read_f "left_indent") in
+  let ri = _opt_f (read_f "right_indent") in
+  let fli = let v = read_f "first_line_indent" in
+    if Float.equal v 0.0 then None else Some v in
+  let sb = _opt_f (read_f "space_before") in
+  let sa = _opt_f (read_f "space_after") in
+  let hyph = _opt_b (read_b "hyphenate") in
+  let hang = _opt_b (read_b "hanging_punctuation") in
+  let doc = ctrl#document in
+  if Document.PathMap.is_empty doc.Document.selection then () else begin
+    let any_change = ref false in
+    let new_doc = Document.PathMap.fold (fun path _ acc ->
+      let elem = Document.get_element acc path in
+      match elem with
+      | Element.Text r ->
+        let tspans = Array.copy r.tspans in
+        let wrapper_indices = ref [] in
+        Array.iteri (fun i (t : Element.tspan) ->
+          if t.jas_role = Some "paragraph" then
+            wrapper_indices := i :: !wrapper_indices
+        ) tspans;
+        let indices =
+          if !wrapper_indices = [] && Array.length tspans > 0 then begin
+            (* Promote first tspan to paragraph wrapper. *)
+            tspans.(0) <- { tspans.(0) with jas_role = Some "paragraph" };
+            [0]
+          end else List.rev !wrapper_indices in
+        if indices = [] then acc
+        else begin
+          List.iter (fun i ->
+            tspans.(i) <- { tspans.(i) with
+              text_align;
+              text_align_last;
+              text_indent = fli;
+              jas_left_indent = li;
+              jas_right_indent = ri;
+              jas_space_before = sb;
+              jas_space_after = sa;
+              jas_hyphenate = hyph;
+              jas_hanging_punctuation = hang;
+              jas_list_style = list_style;
+            }
+          ) indices;
+          any_change := true;
+          Document.replace_element acc path (Element.Text { r with tspans })
+        end
+      | Element.Text_path r ->
+        let tspans = Array.copy r.tspans in
+        let wrapper_indices = ref [] in
+        Array.iteri (fun i (t : Element.tspan) ->
+          if t.jas_role = Some "paragraph" then
+            wrapper_indices := i :: !wrapper_indices
+        ) tspans;
+        let indices =
+          if !wrapper_indices = [] && Array.length tspans > 0 then begin
+            tspans.(0) <- { tspans.(0) with jas_role = Some "paragraph" };
+            [0]
+          end else List.rev !wrapper_indices in
+        if indices = [] then acc
+        else begin
+          List.iter (fun i ->
+            tspans.(i) <- { tspans.(i) with
+              text_align;
+              text_align_last;
+              text_indent = fli;
+              jas_left_indent = li;
+              jas_right_indent = ri;
+              jas_space_before = sb;
+              jas_space_after = sa;
+              jas_hyphenate = hyph;
+              jas_hanging_punctuation = hang;
+              jas_list_style = list_style;
+            }
+          ) indices;
+          any_change := true;
+          Document.replace_element acc path (Element.Text_path { r with tspans })
+        end
+      | _ -> acc
+    ) doc.Document.selection doc in
+    if !any_change then begin
+      ctrl#model#snapshot;
+      ctrl#model#set_document new_doc
+    end
+  end
+
+(** Reset every Paragraph panel control to its default per
+    PARAGRAPH.md §Reset Panel and remove the corresponding
+    [jas:*] / [text-*] attributes from every paragraph wrapper tspan
+    in the selection (defaults appear as absence, identity rule). *)
+let reset_paragraph_panel (store : State_store.t)
+    (ctrl : Controller.controller) : unit =
+  let pid = "paragraph_panel_content" in
+  let set k v = State_store.set_panel store pid k v in
+  set "align_left" (`Bool true);
+  set "align_center" (`Bool false);
+  set "align_right" (`Bool false);
+  set "justify_left" (`Bool false);
+  set "justify_center" (`Bool false);
+  set "justify_right" (`Bool false);
+  set "justify_all" (`Bool false);
+  set "bullets" (`String "");
+  set "numbered_list" (`String "");
+  set "left_indent" (`Float 0.0);
+  set "right_indent" (`Float 0.0);
+  set "first_line_indent" (`Float 0.0);
+  set "space_before" (`Float 0.0);
+  set "space_after" (`Float 0.0);
+  set "hyphenate" (`Bool false);
+  set "hanging_punctuation" (`Bool false);
+  apply_paragraph_panel_to_selection store ctrl
+
+(** Apply mutual exclusion side effects for a paragraph panel write.
+    Called by [set_paragraph_panel_field] before the user's value
+    lands so the seven alignment radio bools collapse to one and
+    [bullets] / [numbered_list] never both hold a non-empty value. *)
+let apply_paragraph_panel_mutual_exclusion (store : State_store.t)
+    (key : string) (value : Yojson.Safe.t) : unit =
+  let pid = "paragraph_panel_content" in
+  let align_keys = ["align_left"; "align_center"; "align_right";
+                    "justify_left"; "justify_center";
+                    "justify_right"; "justify_all"] in
+  if List.mem key align_keys then begin
+    match value with
+    | `Bool true ->
+      List.iter (fun k ->
+        if k <> key then State_store.set_panel store pid k (`Bool false)
+      ) align_keys
+    | _ -> ()
+  end else if key = "bullets" then begin
+    match value with
+    | `String s when String.length s > 0 ->
+      State_store.set_panel store pid "numbered_list" (`String "")
+    | _ -> ()
+  end else if key = "numbered_list" then begin
+    match value with
+    | `String s when String.length s > 0 ->
+      State_store.set_panel store pid "bullets" (`String "")
+    | _ -> ()
+  end
+
+(** Sync from selection → mutual exclusion → set field → apply.
+    Called by [_write_back_bind] for every paragraph_panel_content
+    widget write so untouched fields keep the selection's current
+    values, the radio / list-style invariants hold, and the wrappers
+    receive the full updated state in one snapshot. *)
+let set_paragraph_panel_field (store : State_store.t)
+    (ctrl : Controller.controller) (key : string)
+    (value : Yojson.Safe.t) : unit =
+  sync_paragraph_panel_from_selection store ctrl;
+  apply_paragraph_panel_mutual_exclusion store key value;
+  State_store.set_panel store "paragraph_panel_content" key value;
+  apply_paragraph_panel_to_selection store ctrl

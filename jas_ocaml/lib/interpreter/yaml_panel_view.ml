@@ -31,7 +31,18 @@ let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
     let parts = String.split_on_char '.' bind_expr in
     (match parts with
      | "panel" :: field :: _ ->
-       State_store.set_panel store panel_id field value
+       (* Phase 4: paragraph writes route through the dedicated
+          setter so mutual exclusion + sync + apply happen atomically.
+          Skipped when no model is threaded (test harness). *)
+       if panel_id = "paragraph_panel_content" then begin
+         match !_get_model_ref () with
+         | Some model ->
+           let ctrl = new Controller.controller ~model () in
+           Effects.set_paragraph_panel_field store ctrl field value
+         | None ->
+           State_store.set_panel store panel_id field value
+       end else
+         State_store.set_panel store panel_id field value
      | "state" :: field :: _ ->
        State_store.set store field value
      | _ -> ())
@@ -1454,4 +1465,19 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          widget changes reach the selected element. *)
       (if kind = Stroke then
          Effects.subscribe_stroke_panel store (make_ctrl_getter ()));
+      (* Paragraph panel — Phase 4. Stash the store handle in
+         panel_menu so the hamburger-menu commands
+         (toggle_hanging_punctuation, reset_paragraph_panel) can
+         reach it without creating a yaml_panel_view ↔ panel_menu
+         dep cycle. Also sync from the current selection so the
+         widgets reflect the selected paragraph attrs rather than
+         the YAML defaults. *)
+      (if kind = Paragraph then begin
+         Panel_menu.paragraph_store_ref := Some store;
+         (match get_model () with
+          | Some m ->
+            let ctrl = new Controller.controller ~model:m () in
+            Effects.sync_paragraph_panel_from_selection store ctrl
+          | None -> ())
+       end);
       render_element ~packing ~ctx content

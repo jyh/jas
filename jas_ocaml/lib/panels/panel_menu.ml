@@ -12,6 +12,37 @@ type panel_menu_item =
 (** All panel kinds, for iteration. *)
 let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards |]
 
+(** Paragraph panel state-store handle. The yaml_panel_view sets
+    this ref to the panel's [State_store.t] when rendering the
+    Paragraph panel so menu commands like
+    [toggle_hanging_punctuation] / [reset_paragraph_panel] can
+    reach back into it (panel_menu cannot import yaml_panel_view —
+    that would create a module dep cycle). [None] means the
+    Paragraph panel isn't currently mounted. Phase 4. *)
+let paragraph_store_ref : State_store.t option ref = ref None
+
+(** Helper: dispatch a Paragraph menu command through the live
+    State_store + Controller. No-op when the store ref is unset
+    (panel not mounted) or the model thunk yields [None]. *)
+let paragraph_menu_dispatch (cmd : [< `Toggle of string | `Reset ])
+    (get_model : unit -> Model.model) : unit =
+  match !paragraph_store_ref with
+  | None -> ()
+  | Some store ->
+    let m = get_model () in
+    let ctrl = new Controller.controller ~model:m () in
+    (match cmd with
+     | `Toggle field ->
+       Effects.sync_paragraph_panel_from_selection store ctrl;
+       let cur = match State_store.get_panel store
+                         "paragraph_panel_content" field with
+         | `Bool b -> b | _ -> false in
+       State_store.set_panel store "paragraph_panel_content"
+         field (`Bool (not cur));
+       Effects.apply_paragraph_panel_to_selection store ctrl
+     | `Reset ->
+       Effects.reset_paragraph_panel store ctrl)
+
 (** Human-readable label for a panel kind. *)
 let panel_label = function
   | Layers -> "Layers"
@@ -63,7 +94,15 @@ let panel_menu = function
       Toggle { label = "Subscript"; command = "toggle_subscript" };
       Separator;
       Action { label = "Close Character"; command = "close_panel"; shortcut = "" } ]
-  | Paragraph -> [Action { label = "Close Paragraph"; command = "close_panel"; shortcut = "" }]
+  | Paragraph -> [
+      Toggle { label = "Hanging Punctuation"; command = "toggle_hanging_punctuation" };
+      Separator;
+      Action { label = "Justification…"; command = "open_paragraph_justification"; shortcut = "" };
+      Action { label = "Hyphenation…"; command = "open_paragraph_hyphenation"; shortcut = "" };
+      Separator;
+      Action { label = "Reset Panel"; command = "reset_paragraph_panel"; shortcut = "" };
+      Separator;
+      Action { label = "Close Paragraph"; command = "close_panel"; shortcut = "" } ]
   | Artboards -> [Action { label = "Close Artboards"; command = "close_panel"; shortcut = "" }]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
@@ -680,6 +719,10 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
          set_active_color complemented ~fill_on_top m
        end
      | None -> ())
+  | "toggle_hanging_punctuation" when kind = Paragraph ->
+    paragraph_menu_dispatch (`Toggle "hanging_punctuation") get_model
+  | "reset_paragraph_panel" when kind = Paragraph ->
+    paragraph_menu_dispatch `Reset get_model
   | _ -> ()
 
 (** Query whether a toggle/radio command is checked. *)
