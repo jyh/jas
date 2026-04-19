@@ -39,6 +39,9 @@ public func buildParagraphSegments(
             // chars at line edges.
             let listStyle = t.jasListStyle
             let markerGap: Double = listStyle != nil ? markerGapPt : 0
+            let ta = textAlignFrom(t.textAlign, isArea: isArea)
+            let lla = lastLineAlignFrom(t.textAlignLast, baseAlign: ta,
+                                         isArea: isArea)
             current = ParagraphSegment(
                 charStart: cursor, charEnd: cursor,
                 leftIndent: t.jasLeftIndent ?? 0,
@@ -46,9 +49,18 @@ public func buildParagraphSegments(
                 firstLineIndent: t.textIndent ?? 0,
                 spaceBefore: t.jasSpaceBefore ?? 0,
                 spaceAfter: t.jasSpaceAfter ?? 0,
-                textAlign: textAlignFrom(t.textAlign, isArea: isArea),
+                textAlign: ta,
                 listStyle: listStyle, markerGap: markerGap,
-                hangingPunctuation: t.jasHangingPunctuation ?? false)
+                hangingPunctuation: t.jasHangingPunctuation ?? false,
+                wordSpacingMin: t.jasWordSpacingMin ?? 80,
+                wordSpacingDesired: t.jasWordSpacingDesired ?? 100,
+                wordSpacingMax: t.jasWordSpacingMax ?? 133,
+                lastLineAlign: lla,
+                hyphenate: t.jasHyphenate ?? false,
+                hyphenateMinWord: Int(t.jasHyphenateMinWord ?? 3),
+                hyphenateMinBefore: Int(t.jasHyphenateMinBefore ?? 1),
+                hyphenateMinAfter: Int(t.jasHyphenateMinAfter ?? 1),
+                hyphenateBias: Int(t.jasHyphenateBias ?? 0))
         } else {
             cursor += bodyChars
         }
@@ -61,15 +73,29 @@ public func buildParagraphSegments(
 }
 
 /// Map the wrapper tspan's `text-align` string to a `TextAlign`.
-/// Phase 5 supports `left` / `center` / `right`; the four `justify*`
-/// values fall back to `.left` until the composer lands. Point text
-/// passes alignment through unchanged — the renderer's text-anchor
-/// channel typically takes over for single-line caret positioning.
+/// Phase 10 promotes `justify` to `.justify` for area text. Point
+/// text and text-on-path coerce `justify` back to `.left` because
+/// there's no usable line width to fill.
 private func textAlignFrom(_ value: String?, isArea: Bool) -> TextAlign {
     switch value {
     case "center": return .center
     case "right": return .right
-    case "justify": return isArea ? .left : .left  // Phase 5 placeholder
+    case "justify": return isArea ? .justify : .left
+    default: return .left
+    }
+}
+
+/// Map the wrapper tspan's `text-align-last` string to the
+/// alignment used for the *last* line of a justified paragraph.
+/// `JUSTIFY_ALL` -> `.justify`; `JUSTIFY_LEFT` -> `.left`; etc.
+/// Ignored when the paragraph isn't justified.
+private func lastLineAlignFrom(_ value: String?, baseAlign: TextAlign,
+                                isArea: Bool) -> TextAlign {
+    if baseAlign != .justify || !isArea { return .left }
+    switch value {
+    case "center": return .center
+    case "right": return .right
+    case "justify": return .justify
     default: return .left
     }
 }

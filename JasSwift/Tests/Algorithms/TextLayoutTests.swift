@@ -435,3 +435,51 @@ private func fixedMeasure(_ width: Double) -> (String) -> Double {
     #expect(l.glyphs[0].x == 10)  // '(' = 20 - 10
     #expect(l.glyphs[1].x == 20)  // 'a' at left_indent edge
 }
+
+// MARK: - Phase 10: Justify path via Knuth-Plass composer
+
+@Test func justifyRaggedLastLineKeepsNaturalGlue() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 8, textAlign: .justify)]
+    let l = layoutTextWithParagraphs("ab cd ef", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    let last = l.glyphs.last!
+    #expect(abs(last.right - 80.0) < 1e-6)
+}
+
+@Test func justifyAllStretchesLastLineToFillBox() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 8,
+                                  textAlign: .justify, lastLineAlign: .justify)]
+    let l = layoutTextWithParagraphs("ab cd ef", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    let last = l.glyphs.last!
+    #expect(abs(last.right - 100.0) < 1.0)
+}
+
+@Test func justifyTwoLinesFirstFillsSecondRagged() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 17, textAlign: .justify)]
+    let l = layoutTextWithParagraphs("ab cd ef gh ij kl",
+                                      maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.lines.count >= 2)
+    let line0 = l.lines[0]
+    let line0Right = l.glyphs[line0.glyphStart..<line0.glyphEnd]
+        .map { $0.right }.max() ?? 0
+    #expect(line0Right > 80)
+    let lastLine = l.lines.last!
+    let lastRight = l.glyphs[lastLine.glyphStart..<lastLine.glyphEnd]
+        .map { $0.right }.max() ?? 0
+    #expect(lastRight <= 100 + 1e-6)
+}
+
+@Test func justifyPreservesCharCount() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 17, textAlign: .justify)]
+    let l = layoutTextWithParagraphs("ab cd ef gh ij kl",
+                                      maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.charCount == 17)
+    #expect(l.glyphs.count == 17)
+}
