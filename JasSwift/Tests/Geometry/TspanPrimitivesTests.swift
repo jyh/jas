@@ -543,3 +543,34 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     #expect(back.count == 1)
     #expect(back[0].jasRole == "paragraph")
 }
+
+// MARK: - Phase 3b panel-surface paragraph attrs
+
+@Test func hasNoOverridesFalseWhenPhase3bAttrsSet() {
+    #expect(!Tspan(jasLeftIndent: 12).hasNoOverrides)
+    #expect(!Tspan(jasHyphenate: true).hasNoOverrides)
+    #expect(!Tspan(jasListStyle: "bullet-disc").hasNoOverrides)
+}
+
+@Test func svgFragmentPhase3bAttrsRoundTrip() {
+    let t = Tspan(content: "",
+                  jasRole: "paragraph",
+                  jasLeftIndent: 18,
+                  jasRightIndent: 9,
+                  jasHyphenate: true,
+                  jasHangingPunctuation: true,
+                  jasListStyle: "bullet-disc")
+    let svg = tspansToSvgFragment([t])
+    #expect(svg.contains(#"jas:left-indent="18""#))
+    #expect(svg.contains(#"jas:right-indent="9""#))
+    #expect(svg.contains(#"jas:hyphenate="true""#))
+    #expect(svg.contains(#"jas:hanging-punctuation="true""#))
+    #expect(svg.contains(#"jas:list-style="bullet-disc""#))
+    let back = tspansFromSvgFragment(svg)!
+    #expect(back.count == 1)
+    #expect(back[0].jasLeftIndent == 18)
+    #expect(back[0].jasRightIndent == 9)
+    #expect(back[0].jasHyphenate == true)
+    #expect(back[0].jasHangingPunctuation == true)
+    #expect(back[0].jasListStyle == "bullet-disc")
+}

@@ -28,9 +28,28 @@ public struct Tspan: Equatable {
     /// Marks a tspan as a paragraph wrapper when set to `"paragraph"`.
     /// Wrapper tspans implicitly group subsequent content tspans (until
     /// the next wrapper) into one paragraph for the Paragraph panel.
-    /// Phase 1a only round-trips this marker; the paragraph attribute
-    /// fields and Enter/Backspace edit primitives land in Phase 1b.
     public let jasRole: String?
+    // ── Paragraph attributes (Phase 3b panel-surface subset) ────
+    // Per PARAGRAPH.md §SVG attribute mapping these live on the
+    // paragraph wrapper tspan (jasRole == "paragraph"). Phase 3b
+    // adds the five panel-surface attrs that the Paragraph panel
+    // reads when populating its controls; the dialog attrs and the
+    // remaining panel-surface space-before / space-after /
+    // first-line-indent (CSS text-indent) land later.
+    /// `jas:left-indent` — pt, unsigned. Effective on paragraph wrappers.
+    public let jasLeftIndent: Double?
+    /// `jas:right-indent` — pt, unsigned. Effective on paragraph wrappers.
+    public let jasRightIndent: Double?
+    /// `jas:hyphenate` — boolean master switch on the paragraph wrapper.
+    public let jasHyphenate: Bool?
+    /// `jas:hanging-punctuation` — boolean on the paragraph wrapper.
+    public let jasHangingPunctuation: Bool?
+    /// `jas:list-style` — single backing attr for both BULLETS_DROPDOWN
+    /// and NUMBERED_LIST_DROPDOWN. Values: bullet-disc / bullet-open-circle
+    /// / bullet-square / bullet-open-square / bullet-dash / bullet-check
+    /// / num-decimal / num-lower-alpha / num-upper-alpha / num-lower-roman
+    /// / num-upper-roman; absent = no marker.
+    public let jasListStyle: String?
     public let letterSpacing: Double?
     public let lineHeight: Double?
     public let rotate: Double?
@@ -52,6 +71,9 @@ public struct Tspan: Equatable {
                 jasAaMode: String? = nil, jasFractionalWidths: Bool? = nil,
                 jasKerningMode: String? = nil, jasNoBreak: Bool? = nil,
                 jasRole: String? = nil,
+                jasLeftIndent: Double? = nil, jasRightIndent: Double? = nil,
+                jasHyphenate: Bool? = nil, jasHangingPunctuation: Bool? = nil,
+                jasListStyle: String? = nil,
                 letterSpacing: Double? = nil, lineHeight: Double? = nil,
                 rotate: Double? = nil, styleName: String? = nil,
                 textDecoration: [String]? = nil, textRendering: String? = nil,
@@ -65,6 +87,11 @@ public struct Tspan: Equatable {
         self.jasAaMode = jasAaMode; self.jasFractionalWidths = jasFractionalWidths
         self.jasKerningMode = jasKerningMode; self.jasNoBreak = jasNoBreak
         self.jasRole = jasRole
+        self.jasLeftIndent = jasLeftIndent
+        self.jasRightIndent = jasRightIndent
+        self.jasHyphenate = jasHyphenate
+        self.jasHangingPunctuation = jasHangingPunctuation
+        self.jasListStyle = jasListStyle
         self.letterSpacing = letterSpacing; self.lineHeight = lineHeight
         self.rotate = rotate; self.styleName = styleName
         self.textDecoration = textDecoration; self.textRendering = textRendering
@@ -85,6 +112,9 @@ public struct Tspan: Equatable {
             && jasAaMode == nil && jasFractionalWidths == nil
             && jasKerningMode == nil && jasNoBreak == nil
             && jasRole == nil
+            && jasLeftIndent == nil && jasRightIndent == nil
+            && jasHyphenate == nil && jasHangingPunctuation == nil
+            && jasListStyle == nil
             && letterSpacing == nil && lineHeight == nil
             && rotate == nil && styleName == nil
             && textDecoration == nil && textRendering == nil
