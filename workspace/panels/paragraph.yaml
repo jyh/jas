@@ -259,47 +259,54 @@ content:
                 disabled: "not panel.area_text_selected"
         # 5-column right-padding intentional.
 
-    # ── Row 2: Bullets dropdown + Numbered list dropdown ─────
+    # ── Row 2: Bullets icon-select + Numbered list icon-select ─
+    # Compact icon-style chooser per PARAGRAPH.md §Layout — the
+    # collapsed state shows the marker glyph, the popup lists every
+    # option with its glyph + name. Each option carries an explicit
+    # `glyph` (the icon-sized character shown when collapsed) plus
+    # `label` (the name shown in the popup row).
     - type: row
       children:
         - type: container
-          col: 6
+          col: 1
+          style: { alignment: center }
           children:
             - id: pg_bullets
-              type: select
+              type: icon_select
               summary: "Bullets"
               description: >
                 Bullet marker for each paragraph. Mutually exclusive with
                 Numbered List via shared jas:list-style attribute.
-              style: { width: "100%" }
+              style: { width: 36, height: 22 }
               options:
-                - { value: "",                  label: "None" }
-                - { value: "bullet-disc",       label: "•   Disc" }
-                - { value: "bullet-open-circle", label: "○   Open Circle" }
-                - { value: "bullet-square",     label: "■   Square" }
-                - { value: "bullet-open-square", label: "□   Open Square" }
-                - { value: "bullet-dash",       label: "–   Dash" }
-                - { value: "bullet-check",      label: "✓   Check" }
+                - { value: "",                  glyph: "—", label: "None" }
+                - { value: "bullet-disc",       glyph: "•", label: "Disc" }
+                - { value: "bullet-open-circle", glyph: "○", label: "Open Circle" }
+                - { value: "bullet-square",     glyph: "■", label: "Square" }
+                - { value: "bullet-open-square", glyph: "□", label: "Open Square" }
+                - { value: "bullet-dash",       glyph: "–", label: "Dash" }
+                - { value: "bullet-check",      glyph: "✓", label: "Check" }
               bind:
                 value: "panel.bullets"
                 disabled: "not panel.text_selected"
         - type: container
-          col: 6
+          col: 1
+          style: { alignment: center }
           children:
             - id: pg_numbered_list
-              type: select
+              type: icon_select
               summary: "Numbered List"
               description: >
                 Numbering style. Counter resets when a paragraph with a
                 different (or absent) jas:list-style breaks the run.
-              style: { width: "100%" }
+              style: { width: 36, height: 22 }
               options:
-                - { value: "",                label: "None" }
-                - { value: "num-decimal",     label: "1.   Decimal" }
-                - { value: "num-lower-alpha", label: "a.   Lower Alpha" }
-                - { value: "num-upper-alpha", label: "A.   Upper Alpha" }
-                - { value: "num-lower-roman", label: "i.   Lower Roman" }
-                - { value: "num-upper-roman", label: "I.   Upper Roman" }
+                - { value: "",                glyph: "—",  label: "None" }
+                - { value: "num-decimal",     glyph: "1.", label: "Decimal" }
+                - { value: "num-lower-alpha", glyph: "a.", label: "Lower Alpha" }
+                - { value: "num-upper-alpha", glyph: "A.", label: "Upper Alpha" }
+                - { value: "num-lower-roman", glyph: "i.", label: "Lower Roman" }
+                - { value: "num-upper-roman", glyph: "I.", label: "Upper Roman" }
               bind:
                 value: "panel.numbered_list"
                 disabled: "not panel.text_selected"

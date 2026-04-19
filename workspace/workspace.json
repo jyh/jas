@@ -12812,44 +12812,55 @@
             "children": [
               {
                 "type": "container",
-                "col": 6,
+                "col": 1,
+                "style": {
+                  "alignment": "center"
+                },
                 "children": [
                   {
                     "id": "pg_bullets",
-                    "type": "select",
+                    "type": "icon_select",
                     "summary": "Bullets",
                     "description": "Bullet marker for each paragraph. Mutually exclusive with Numbered List via shared jas:list-style attribute.\n",
                     "style": {
-                      "width": "100%"
+                      "width": 36,
+                      "height": 22
                     },
                     "options": [
                       {
                         "value": "",
+                        "glyph": "\u2014",
                         "label": "None"
                       },
                       {
                         "value": "bullet-disc",
-                        "label": "\u2022   Disc"
+                        "glyph": "\u2022",
+                        "label": "Disc"
                       },
                       {
                         "value": "bullet-open-circle",
-                        "label": "\u25cb   Open Circle"
+                        "glyph": "\u25cb",
+                        "label": "Open Circle"
                       },
                       {
                         "value": "bullet-square",
-                        "label": "\u25a0   Square"
+                        "glyph": "\u25a0",
+                        "label": "Square"
                       },
                       {
                         "value": "bullet-open-square",
-                        "label": "\u25a1   Open Square"
+                        "glyph": "\u25a1",
+                        "label": "Open Square"
                       },
                       {
                         "value": "bullet-dash",
-                        "label": "\u2013   Dash"
+                        "glyph": "\u2013",
+                        "label": "Dash"
                       },
                       {
                         "value": "bullet-check",
-                        "label": "\u2713   Check"
+                        "glyph": "\u2713",
+                        "label": "Check"
                       }
                     ],
                     "bind": {
@@ -12861,40 +12872,50 @@
               },
               {
                 "type": "container",
-                "col": 6,
+                "col": 1,
+                "style": {
+                  "alignment": "center"
+                },
                 "children": [
                   {
                     "id": "pg_numbered_list",
-                    "type": "select",
+                    "type": "icon_select",
                     "summary": "Numbered List",
                     "description": "Numbering style. Counter resets when a paragraph with a different (or absent) jas:list-style breaks the run.\n",
                     "style": {
-                      "width": "100%"
+                      "width": 36,
+                      "height": 22
                     },
                     "options": [
                       {
                         "value": "",
+                        "glyph": "\u2014",
                         "label": "None"
                       },
                       {
                         "value": "num-decimal",
-                        "label": "1.   Decimal"
+                        "glyph": "1.",
+                        "label": "Decimal"
                       },
                       {
                         "value": "num-lower-alpha",
-                        "label": "a.   Lower Alpha"
+                        "glyph": "a.",
+                        "label": "Lower Alpha"
                       },
                       {
                         "value": "num-upper-alpha",
-                        "label": "A.   Upper Alpha"
+                        "glyph": "A.",
+                        "label": "Upper Alpha"
                       },
                       {
                         "value": "num-lower-roman",
-                        "label": "i.   Lower Roman"
+                        "glyph": "i.",
+                        "label": "Lower Roman"
                       },
                       {
                         "value": "num-upper-roman",
-                        "label": "I.   Upper Roman"
+                        "glyph": "I.",
+                        "label": "Upper Roman"
                       }
                     ],
                     "bind": {
