@@ -29,3 +29,7 @@
 (test
  (name hyphenator_test)
  (libraries jas alcotest))
+
+(test
+ (name knuth_plass_test)
+ (libraries jas alcotest))

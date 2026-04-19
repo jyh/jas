@@ -392,6 +392,68 @@ let phase7_tests = [
   Alcotest.test_case "hanging_with_left_indent" `Quick hanging_with_left_indent;
 ]
 
+(* Phase 10: justify path via Knuth-Plass composer. *)
+let m_fixed = (fun s -> Float.of_int (Text_layout.utf8_char_count s) *. 10.0)
+
+let justify_ragged_last_line_keeps_natural () =
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 8;
+                text_align = Text_layout.Justify }] in
+  let l = Text_layout.layout_with_paragraphs "ab cd ef" 100.0 16.0 segs m_fixed in
+  let last = l.glyphs.(Array.length l.glyphs - 1) in
+  Alcotest.(check (float 1e-6)) "natural last-line right" 80.0 last.right
+
+let justify_all_stretches_last_line () =
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 8;
+                text_align = Text_layout.Justify;
+                last_line_align = Text_layout.Justify }] in
+  let l = Text_layout.layout_with_paragraphs "ab cd ef" 100.0 16.0 segs m_fixed in
+  let last = l.glyphs.(Array.length l.glyphs - 1) in
+  Alcotest.(check (float 1.0)) "stretched to box" 100.0 last.right
+
+let justify_two_lines_first_fills_second_ragged () =
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 17;
+                text_align = Text_layout.Justify }] in
+  let l = Text_layout.layout_with_paragraphs
+            "ab cd ef gh ij kl" 100.0 16.0 segs m_fixed in
+  Alcotest.(check bool) "two+ lines" true (Array.length l.lines >= 2);
+  (* First line stretches near box. *)
+  let line0 = l.lines.(0) in
+  let line0_right = ref 0.0 in
+  for gi = line0.glyph_start to line0.glyph_end - 1 do
+    if l.glyphs.(gi).right > !line0_right then line0_right := l.glyphs.(gi).right
+  done;
+  Alcotest.(check bool) "first line stretches" true (!line0_right > 80.0);
+  (* Last line stays within box. *)
+  let last_line = l.lines.(Array.length l.lines - 1) in
+  let last_right = ref 0.0 in
+  for gi = last_line.glyph_start to last_line.glyph_end - 1 do
+    if l.glyphs.(gi).right > !last_right then last_right := l.glyphs.(gi).right
+  done;
+  Alcotest.(check bool) "last line within box" true (!last_right <= 100.0 +. 1e-6)
+
+let justify_preserves_char_count () =
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 17;
+                text_align = Text_layout.Justify }] in
+  let l = Text_layout.layout_with_paragraphs
+            "ab cd ef gh ij kl" 100.0 16.0 segs m_fixed in
+  Alcotest.(check int) "char count" 17 l.char_count;
+  Alcotest.(check int) "glyph count" 17 (Array.length l.glyphs)
+
+let phase10_tests = [
+  Alcotest.test_case "justify_ragged_last_line_keeps_natural" `Quick
+    justify_ragged_last_line_keeps_natural;
+  Alcotest.test_case "justify_all_stretches_last_line" `Quick
+    justify_all_stretches_last_line;
+  Alcotest.test_case "justify_two_lines_first_fills_second_ragged" `Quick
+    justify_two_lines_first_fills_second_ragged;
+  Alcotest.test_case "justify_preserves_char_count" `Quick
+    justify_preserves_char_count;
+]
+
 let () =
   Alcotest.run "TextLayout" [
     "Phase 5 layout", [
@@ -425,4 +487,5 @@ let () =
     "Phase 6 markers", phase6_marker_tests;
     "Phase 6 layout list", phase6_layout_list_tests;
     "Phase 7 hanging punctuation", phase7_tests;
+    "Phase 10 justify", phase10_tests;
   ]
