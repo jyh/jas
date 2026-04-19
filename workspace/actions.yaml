@@ -1593,13 +1593,19 @@ actions:
       - open_dialog: { id: paragraph_justification }
   paragraph_justification_confirm:
     description: >
-      OK handler for the Justification dialog. Clears the preview
-      snapshot so close_dialog will not restore (commits the user's
-      edits). Phase 2 stub — Phase 8 wires the actual write of jas:*
-      attributes to the selection's paragraph wrapper tspans.
+      OK handler for the Justification dialog. The native apps
+      intercept this action via apply_dialog_confirm, reading the 11
+      dialog state fields (word/letter/glyph spacing min/desired/max
+      + auto-leading + single-word-justify) and writing them as
+      jas:* attributes onto every paragraph wrapper tspan in the
+      selection. Then clears the preview snapshot so close_dialog
+      doesn't restore (commits the user's edits) and closes the
+      dialog. Per the identity-value rule, fields equal to their
+      spec defaults (word-spacing 80/100/133, letter-spacing 0/0/0,
+      glyph-scaling 100/100/100, auto-leading 120, single-word-
+      justify 'justify') are omitted from the wrapper.
     category: paragraph
     effects:
-      - log: "paragraph_justification_confirm (Phase 8 wiring pending)"
       - clear_dialog_snapshot: null
       - close_dialog: null
   open_paragraph_hyphenation:

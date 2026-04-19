@@ -261,8 +261,50 @@ fn apply_dialog_confirm(
                 }
             }
         }
+        // Phase 8: Justification dialog OK. Commit the 11 dialog
+        // fields as jas:* attributes onto every paragraph wrapper
+        // tspan in the selection. Mixed-selection semantics: each
+        // field writes to all selected wrappers (untouched fields
+        // commit their displayed value too — the panel's mixed
+        // aggregator already shows blank for disagree, so the
+        // implementation can write the dialog's current value
+        // unconditionally).
+        "paragraph_justification_confirm" => {
+            let f = |k: &str| dialog.get(k).and_then(|v| v.as_f64());
+            let s = |k: &str| dialog.get(k).and_then(|v| v.as_str()).map(String::from);
+            st.apply_justification_dialog_to_selection(JustificationDialogValues {
+                word_spacing_min: f("word_spacing_min"),
+                word_spacing_desired: f("word_spacing_desired"),
+                word_spacing_max: f("word_spacing_max"),
+                letter_spacing_min: f("letter_spacing_min"),
+                letter_spacing_desired: f("letter_spacing_desired"),
+                letter_spacing_max: f("letter_spacing_max"),
+                glyph_scaling_min: f("glyph_scaling_min"),
+                glyph_scaling_desired: f("glyph_scaling_desired"),
+                glyph_scaling_max: f("glyph_scaling_max"),
+                auto_leading: f("auto_leading"),
+                single_word_justify: s("single_word_justify"),
+            });
+        }
         _ => {}
     }
+}
+
+/// 11 Justification-dialog field values, packed for one commit pass.
+/// `None` means the dialog field was blank (mixed selection) and
+/// should not write — the existing wrapper attr stays. Phase 8.
+pub(crate) struct JustificationDialogValues {
+    pub word_spacing_min: Option<f64>,
+    pub word_spacing_desired: Option<f64>,
+    pub word_spacing_max: Option<f64>,
+    pub letter_spacing_min: Option<f64>,
+    pub letter_spacing_desired: Option<f64>,
+    pub letter_spacing_max: Option<f64>,
+    pub glyph_scaling_min: Option<f64>,
+    pub glyph_scaling_desired: Option<f64>,
+    pub glyph_scaling_max: Option<f64>,
+    pub auto_leading: Option<f64>,
+    pub single_word_justify: Option<String>,
 }
 
 /// Dispatch a named action. Tries hardcoded handlers first, then falls
@@ -921,6 +963,7 @@ fn run_yaml_effect(
         st.apply_paragraph_panel_to_selection();
         return deferred;
     }
+
 
     // foreach: { source, as } do: [...] — PHASE3 §5.3
     if let Some(spec) = eff.get("foreach").and_then(|v| v.as_object()) {
@@ -5426,5 +5469,79 @@ mod tests {
         assert!(!st.paragraph_panel.align_left);
         assert_eq!(st.paragraph_panel.numbered_list, "num-decimal");
         assert_eq!(st.paragraph_panel.bullets, "");
+    }
+
+    // ── Phase 8: Justification dialog OK commit ──────────────
+
+    #[test]
+    fn apply_justification_dialog_writes_non_default_attrs() {
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        st.apply_justification_dialog_to_selection(JustificationDialogValues {
+            word_spacing_min: Some(75.0),
+            word_spacing_desired: Some(95.0),
+            word_spacing_max: Some(150.0),
+            letter_spacing_min: Some(-5.0),
+            letter_spacing_desired: Some(0.0),  // default → omitted
+            letter_spacing_max: Some(10.0),
+            glyph_scaling_min: Some(95.0),
+            glyph_scaling_desired: Some(100.0),  // default → omitted
+            glyph_scaling_max: Some(105.0),
+            auto_leading: Some(140.0),
+            single_word_justify: Some("left".into()),
+        });
+        let elem = st.tabs[st.active_tab].model.document()
+            .get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            let w = &t.tspans[0];
+            assert_eq!(w.jas_word_spacing_min, Some(75.0));
+            assert_eq!(w.jas_word_spacing_desired, Some(95.0));
+            assert_eq!(w.jas_word_spacing_max, Some(150.0));
+            assert_eq!(w.jas_letter_spacing_min, Some(-5.0));
+            assert_eq!(w.jas_letter_spacing_desired, None);  // identity-omit
+            assert_eq!(w.jas_letter_spacing_max, Some(10.0));
+            assert_eq!(w.jas_glyph_scaling_min, Some(95.0));
+            assert_eq!(w.jas_glyph_scaling_desired, None);  // identity-omit
+            assert_eq!(w.jas_glyph_scaling_max, Some(105.0));
+            assert_eq!(w.jas_auto_leading, Some(140.0));
+            assert_eq!(w.jas_single_word_justify.as_deref(), Some("left"));
+        }
+    }
+
+    #[test]
+    fn apply_justification_dialog_all_defaults_writes_nothing() {
+        // All spec defaults → every wrapper attr stays None per the
+        // identity-value rule.
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        st.apply_justification_dialog_to_selection(JustificationDialogValues {
+            word_spacing_min: Some(80.0),
+            word_spacing_desired: Some(100.0),
+            word_spacing_max: Some(133.0),
+            letter_spacing_min: Some(0.0),
+            letter_spacing_desired: Some(0.0),
+            letter_spacing_max: Some(0.0),
+            glyph_scaling_min: Some(100.0),
+            glyph_scaling_desired: Some(100.0),
+            glyph_scaling_max: Some(100.0),
+            auto_leading: Some(120.0),
+            single_word_justify: Some("justify".into()),
+        });
+        let elem = st.tabs[st.active_tab].model.document()
+            .get_element(&vec![0usize, 0]).unwrap();
+        if let crate::geometry::element::Element::Text(t) = elem {
+            let w = &t.tspans[0];
+            assert_eq!(w.jas_word_spacing_min, None);
+            assert_eq!(w.jas_word_spacing_desired, None);
+            assert_eq!(w.jas_word_spacing_max, None);
+            assert_eq!(w.jas_letter_spacing_min, None);
+            assert_eq!(w.jas_letter_spacing_desired, None);
+            assert_eq!(w.jas_letter_spacing_max, None);
+            assert_eq!(w.jas_glyph_scaling_min, None);
+            assert_eq!(w.jas_glyph_scaling_desired, None);
+            assert_eq!(w.jas_glyph_scaling_max, None);
+            assert_eq!(w.jas_auto_leading, None);
+            assert_eq!(w.jas_single_word_justify, None);
+        }
     }
 }

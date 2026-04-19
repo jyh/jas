@@ -1267,6 +1267,115 @@ impl AppState {
         self.apply_paragraph_panel_to_selection();
     }
 
+    /// Commit the 11 Justification-dialog field values onto every
+    /// paragraph wrapper tspan in the selection. Per the
+    /// identity-value rule each numeric value at its spec default
+    /// (word-spacing 80/100/133, letter-spacing 0/0/0, glyph-scaling
+    /// 100/100/100, auto-leading 120) writes `None` so the wrapper
+    /// attribute is omitted. Phase 8.
+    pub(crate) fn apply_justification_dialog_to_selection(
+        &mut self,
+        v: crate::interpreter::renderer::JustificationDialogValues,
+    ) {
+        use crate::geometry::element::Element;
+        // Identity-value defaults from PARAGRAPH.md §Justification Dialog.
+        fn opt_n(value: Option<f64>, default: f64) -> Option<f64> {
+            value.and_then(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
+        }
+        let ws_min = opt_n(v.word_spacing_min, 80.0);
+        let ws_des = opt_n(v.word_spacing_desired, 100.0);
+        let ws_max = opt_n(v.word_spacing_max, 133.0);
+        let ls_min = opt_n(v.letter_spacing_min, 0.0);
+        let ls_des = opt_n(v.letter_spacing_desired, 0.0);
+        let ls_max = opt_n(v.letter_spacing_max, 0.0);
+        let gs_min = opt_n(v.glyph_scaling_min, 100.0);
+        let gs_des = opt_n(v.glyph_scaling_desired, 100.0);
+        let gs_max = opt_n(v.glyph_scaling_max, 100.0);
+        let auto_leading = opt_n(v.auto_leading, 120.0);
+        let single_word_justify = v.single_word_justify
+            .filter(|s| s != "justify");
+
+        let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
+        let target_paths: Vec<Vec<usize>> = {
+            let doc = tab.model.document();
+            doc.selection.iter()
+                .filter_map(|es| {
+                    let elem = doc.get_element(&es.path)?;
+                    matches!(elem, Element::Text(_) | Element::TextPath(_))
+                        .then(|| es.path.clone())
+                })
+                .collect()
+        };
+        if target_paths.is_empty() { return; }
+        tab.model.snapshot();
+        for path in target_paths {
+            let doc = tab.model.document().clone();
+            let new_elem = match doc.get_element(&path) {
+                Some(Element::Text(t)) => {
+                    let mut new_t = t.clone();
+                    let mut tspans = new_t.tspans.clone();
+                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
+                        .filter_map(|(i, ts)|
+                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
+                        .collect();
+                    if wrapper_idx.is_empty() && !tspans.is_empty() {
+                        tspans[0].jas_role = Some("paragraph".into());
+                        wrapper_idx.push(0);
+                    }
+                    for i in wrapper_idx {
+                        let w = &mut tspans[i];
+                        w.jas_word_spacing_min = ws_min;
+                        w.jas_word_spacing_desired = ws_des;
+                        w.jas_word_spacing_max = ws_max;
+                        w.jas_letter_spacing_min = ls_min;
+                        w.jas_letter_spacing_desired = ls_des;
+                        w.jas_letter_spacing_max = ls_max;
+                        w.jas_glyph_scaling_min = gs_min;
+                        w.jas_glyph_scaling_desired = gs_des;
+                        w.jas_glyph_scaling_max = gs_max;
+                        w.jas_auto_leading = auto_leading;
+                        w.jas_single_word_justify = single_word_justify.clone();
+                    }
+                    new_t.tspans = tspans;
+                    Some(Element::Text(new_t))
+                }
+                Some(Element::TextPath(tp)) => {
+                    let mut new_tp = tp.clone();
+                    let mut tspans = new_tp.tspans.clone();
+                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
+                        .filter_map(|(i, ts)|
+                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
+                        .collect();
+                    if wrapper_idx.is_empty() && !tspans.is_empty() {
+                        tspans[0].jas_role = Some("paragraph".into());
+                        wrapper_idx.push(0);
+                    }
+                    for i in wrapper_idx {
+                        let w = &mut tspans[i];
+                        w.jas_word_spacing_min = ws_min;
+                        w.jas_word_spacing_desired = ws_des;
+                        w.jas_word_spacing_max = ws_max;
+                        w.jas_letter_spacing_min = ls_min;
+                        w.jas_letter_spacing_desired = ls_des;
+                        w.jas_letter_spacing_max = ls_max;
+                        w.jas_glyph_scaling_min = gs_min;
+                        w.jas_glyph_scaling_desired = gs_des;
+                        w.jas_glyph_scaling_max = gs_max;
+                        w.jas_auto_leading = auto_leading;
+                        w.jas_single_word_justify = single_word_justify.clone();
+                    }
+                    new_tp.tspans = tspans;
+                    Some(Element::TextPath(new_tp))
+                }
+                _ => None,
+            };
+            if let Some(elem) = new_elem {
+                let new_doc = doc.replace_element(&path, elem);
+                tab.model.set_document(new_doc);
+            }
+        }
+    }
+
     /// Mirror the selection's paragraph wrapper attributes into the
     /// typed paragraph panel state. Called by the selection-change
     /// observer so the panel reflects the selection. When wrappers

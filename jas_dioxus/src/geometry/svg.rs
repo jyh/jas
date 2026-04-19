@@ -666,6 +666,39 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
     if let Some(v) = t.jas_space_after {
         attrs.push_str(&format!(" urn:jas:1:space-after=\"{}\"", fmt(v)));
     }
+    if let Some(v) = t.jas_word_spacing_min {
+        attrs.push_str(&format!(" urn:jas:1:word-spacing-min=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_word_spacing_desired {
+        attrs.push_str(&format!(" urn:jas:1:word-spacing-desired=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_word_spacing_max {
+        attrs.push_str(&format!(" urn:jas:1:word-spacing-max=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_letter_spacing_min {
+        attrs.push_str(&format!(" urn:jas:1:letter-spacing-min=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_letter_spacing_desired {
+        attrs.push_str(&format!(" urn:jas:1:letter-spacing-desired=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_letter_spacing_max {
+        attrs.push_str(&format!(" urn:jas:1:letter-spacing-max=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_glyph_scaling_min {
+        attrs.push_str(&format!(" urn:jas:1:glyph-scaling-min=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_glyph_scaling_desired {
+        attrs.push_str(&format!(" urn:jas:1:glyph-scaling-desired=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_glyph_scaling_max {
+        attrs.push_str(&format!(" urn:jas:1:glyph-scaling-max=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = t.jas_auto_leading {
+        attrs.push_str(&format!(" urn:jas:1:auto-leading=\"{}\"", fmt(v)));
+    }
+    if let Some(v) = &t.jas_single_word_justify {
+        attrs.push_str(&format!(" urn:jas:1:single-word-justify=\"{}\"", escape_xml(v)));
+    }
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
 
@@ -716,6 +749,27 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
             .and_then(|s| s.parse::<f64>().ok()),
         jas_space_after: node.attrs.get("urn:jas:1:space-after")
             .and_then(|s| s.parse::<f64>().ok()),
+        jas_word_spacing_min: node.attrs.get("urn:jas:1:word-spacing-min")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_word_spacing_desired: node.attrs.get("urn:jas:1:word-spacing-desired")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_word_spacing_max: node.attrs.get("urn:jas:1:word-spacing-max")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_letter_spacing_min: node.attrs.get("urn:jas:1:letter-spacing-min")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_letter_spacing_desired: node.attrs.get("urn:jas:1:letter-spacing-desired")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_letter_spacing_max: node.attrs.get("urn:jas:1:letter-spacing-max")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_glyph_scaling_min: node.attrs.get("urn:jas:1:glyph-scaling-min")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_glyph_scaling_desired: node.attrs.get("urn:jas:1:glyph-scaling-desired")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_glyph_scaling_max: node.attrs.get("urn:jas:1:glyph-scaling-max")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_auto_leading: node.attrs.get("urn:jas:1:auto-leading")
+            .and_then(|s| s.parse::<f64>().ok()),
+        jas_single_word_justify: node.attrs.get("urn:jas:1:single-word-justify").cloned(),
         ..Tspan::default_tspan()
     };
     // Multi-value rotate: SVG allows `rotate="a1 a2 a3 …"` on a tspan,
@@ -2229,5 +2283,56 @@ mod tests {
         assert_eq!(t.tspans[0].rotate, Some(45.0));
         assert_eq!(t.tspans[1].rotate, Some(90.0));
         assert_eq!(t.tspans[2].rotate, Some(0.0));
+    }
+
+    #[test]
+    fn svg_phase8_justification_attrs_round_trip_through_document() {
+        // Phase 1b2 / Phase 8: 11 Justification dialog attrs on a
+        // paragraph wrapper round-trip through document SVG.
+        use crate::geometry::tspan::Tspan;
+        let mut doc = Document::default();
+        let mut t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut wrapper = Tspan::default_tspan();
+        wrapper.id = 0;
+        wrapper.jas_role = Some("paragraph".into());
+        wrapper.jas_word_spacing_min = Some(75.0);
+        wrapper.jas_word_spacing_desired = Some(95.0);
+        wrapper.jas_word_spacing_max = Some(150.0);
+        wrapper.jas_letter_spacing_min = Some(-5.0);
+        wrapper.jas_letter_spacing_desired = Some(0.0);
+        wrapper.jas_letter_spacing_max = Some(10.0);
+        wrapper.jas_glyph_scaling_min = Some(95.0);
+        wrapper.jas_glyph_scaling_desired = Some(100.0);
+        wrapper.jas_glyph_scaling_max = Some(105.0);
+        wrapper.jas_auto_leading = Some(140.0);
+        wrapper.jas_single_word_justify = Some("left".into());
+        t.tspans = vec![
+            wrapper,
+            Tspan { id: 1, content: "x".into(), ..Tspan::default_tspan() },
+        ];
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        let svg = document_to_svg(&doc);
+        // Spot-check a few attributes appear with the urn:jas:1: prefix.
+        assert!(svg.contains(r#"urn:jas:1:word-spacing-min="75""#));
+        assert!(svg.contains(r#"urn:jas:1:letter-spacing-desired="0""#));
+        assert!(svg.contains(r#"urn:jas:1:glyph-scaling-max="105""#));
+        assert!(svg.contains(r#"urn:jas:1:auto-leading="140""#));
+        assert!(svg.contains(r#"urn:jas:1:single-word-justify="left""#));
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        let w = &t.tspans[0];
+        assert_eq!(w.jas_word_spacing_min, Some(75.0));
+        assert_eq!(w.jas_word_spacing_desired, Some(95.0));
+        assert_eq!(w.jas_word_spacing_max, Some(150.0));
+        assert_eq!(w.jas_letter_spacing_min, Some(-5.0));
+        assert_eq!(w.jas_letter_spacing_desired, Some(0.0));
+        assert_eq!(w.jas_letter_spacing_max, Some(10.0));
+        assert_eq!(w.jas_glyph_scaling_min, Some(95.0));
+        assert_eq!(w.jas_glyph_scaling_desired, Some(100.0));
+        assert_eq!(w.jas_glyph_scaling_max, Some(105.0));
+        assert_eq!(w.jas_auto_leading, Some(140.0));
+        assert_eq!(w.jas_single_word_justify.as_deref(), Some("left"));
     }
 }
