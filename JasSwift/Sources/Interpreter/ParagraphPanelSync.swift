@@ -14,22 +14,23 @@
 
 import Foundation
 
-/// Compute the text-kind override map plus, in Phase 3b, paragraph
-/// attribute overrides read from the first paragraph wrapper tspan
-/// in the first selected text element. Always returns a dict (even
-/// for empty selections) so the caller doesn't need to special-case
+/// Compute the text-kind override map plus paragraph attribute
+/// overrides aggregated across every paragraph wrapper tspan in
+/// every selected text element. Always returns a dict (even for
+/// empty selections) so the caller doesn't need to special-case
 /// "no overrides"; the booleans default to false (matching "fully
 /// disabled" when nothing is selected).
 ///
-/// Mixed-state aggregation across multiple wrappers / multiple text
-/// elements is deferred to Phase 3c. For now the reader takes the
-/// first wrapper's values verbatim; absent wrapper leaves the
-/// caller's panel-state defaults intact (we only insert keys for
-/// fields actually present on the wrapper).
+/// Phase 3c: for each panel-surface paragraph attr, collect every
+/// wrapper's effective value (Some(v) or the type's default). If
+/// all wrappers agree the agreed value flows to the matching panel
+/// key; if they disagree the key is omitted so the caller's panel
+/// state retains its prior / YAML-default value. A future phase
+/// polishes mixed into proper visual indication.
 public func paragraphPanelLiveOverrides(model: Model) -> [String: Any] {
     var anyText = false
     var allArea = true
-    var firstPara: Tspan? = nil
+    var wrappers: [Tspan] = []
     for es in model.document.selection {
         let elem = model.document.getElement(es.path)
         switch elem {
@@ -38,8 +39,8 @@ public func paragraphPanelLiveOverrides(model: Model) -> [String: Any] {
             if !(t.width > 0 && t.height > 0) {
                 allArea = false
             }
-            if firstPara == nil {
-                firstPara = t.tspans.first(where: { $0.jasRole == "paragraph" })
+            for tspan in t.tspans where tspan.jasRole == "paragraph" {
+                wrappers.append(tspan)
             }
         case .textPath:
             anyText = true
@@ -52,22 +53,37 @@ public func paragraphPanelLiveOverrides(model: Model) -> [String: Any] {
         "text_selected": anyText,
         "area_text_selected": anyText && allArea,
     ]
-    if let p = firstPara {
-        if let v = p.jasLeftIndent { out["left_indent"] = v }
-        if let v = p.jasRightIndent { out["right_indent"] = v }
-        if let v = p.jasHyphenate { out["hyphenate"] = v }
-        if let v = p.jasHangingPunctuation { out["hanging_punctuation"] = v }
-        // Single backing attr split into two panel dropdowns. bullet-*
-        // populates panel.bullets; num-* populates panel.numbered_list.
-        // The other dropdown shows None (matching the spec's mutual
-        // exclusion in PARAGRAPH.md §Bullets and numbered lists).
-        if let ls = p.jasListStyle {
+    if !wrappers.isEmpty {
+        // Returns the agreed value when all wrappers' effective values
+        // are equal, nil when they differ.
+        func agree<T: Equatable>(_ values: [T]) -> T? {
+            guard let first = values.first else { return nil }
+            return values.allSatisfy({ $0 == first }) ? first : nil
+        }
+        if let v = agree(wrappers.map { $0.jasLeftIndent ?? 0 }) {
+            out["left_indent"] = v
+        }
+        if let v = agree(wrappers.map { $0.jasRightIndent ?? 0 }) {
+            out["right_indent"] = v
+        }
+        if let v = agree(wrappers.map { $0.jasHyphenate ?? false }) {
+            out["hyphenate"] = v
+        }
+        if let v = agree(wrappers.map { $0.jasHangingPunctuation ?? false }) {
+            out["hanging_punctuation"] = v
+        }
+        // Single backing attr split into two panel dropdowns; aggregate
+        // first, then route by prefix.
+        if let ls = agree(wrappers.map { $0.jasListStyle ?? "" }) {
             if ls.hasPrefix("bullet-") {
                 out["bullets"] = ls
                 out["numbered_list"] = ""
             } else if ls.hasPrefix("num-") {
                 out["numbered_list"] = ls
                 out["bullets"] = ""
+            } else {
+                out["bullets"] = ""
+                out["numbered_list"] = ""
             }
         }
     }
