@@ -73,6 +73,14 @@ public struct Tspan: Equatable {
     public let jasGlyphScalingMax: Double?
     public let jasAutoLeading: Double?
     public let jasSingleWordJustify: String?
+    // ── Phase 1b3 / 9: Hyphenation dialog attrs ──────────────
+    public let jasHyphenateMinWord: Double?
+    public let jasHyphenateMinBefore: Double?
+    public let jasHyphenateMinAfter: Double?
+    public let jasHyphenateLimit: Double?
+    public let jasHyphenateZone: Double?
+    public let jasHyphenateBias: Double?
+    public let jasHyphenateCapitalized: Bool?
     public let letterSpacing: Double?
     public let lineHeight: Double?
     public let rotate: Double?
@@ -111,6 +119,13 @@ public struct Tspan: Equatable {
                 jasGlyphScalingMax: Double? = nil,
                 jasAutoLeading: Double? = nil,
                 jasSingleWordJustify: String? = nil,
+                jasHyphenateMinWord: Double? = nil,
+                jasHyphenateMinBefore: Double? = nil,
+                jasHyphenateMinAfter: Double? = nil,
+                jasHyphenateLimit: Double? = nil,
+                jasHyphenateZone: Double? = nil,
+                jasHyphenateBias: Double? = nil,
+                jasHyphenateCapitalized: Bool? = nil,
                 letterSpacing: Double? = nil, lineHeight: Double? = nil,
                 rotate: Double? = nil, styleName: String? = nil,
                 textDecoration: [String]? = nil, textRendering: String? = nil,
@@ -145,6 +160,13 @@ public struct Tspan: Equatable {
         self.jasGlyphScalingMax = jasGlyphScalingMax
         self.jasAutoLeading = jasAutoLeading
         self.jasSingleWordJustify = jasSingleWordJustify
+        self.jasHyphenateMinWord = jasHyphenateMinWord
+        self.jasHyphenateMinBefore = jasHyphenateMinBefore
+        self.jasHyphenateMinAfter = jasHyphenateMinAfter
+        self.jasHyphenateLimit = jasHyphenateLimit
+        self.jasHyphenateZone = jasHyphenateZone
+        self.jasHyphenateBias = jasHyphenateBias
+        self.jasHyphenateCapitalized = jasHyphenateCapitalized
         self.letterSpacing = letterSpacing; self.lineHeight = lineHeight
         self.rotate = rotate; self.styleName = styleName
         self.textDecoration = textDecoration; self.textRendering = textRendering
@@ -178,6 +200,10 @@ public struct Tspan: Equatable {
             && jasGlyphScalingMin == nil && jasGlyphScalingDesired == nil
             && jasGlyphScalingMax == nil
             && jasAutoLeading == nil && jasSingleWordJustify == nil
+            && jasHyphenateMinWord == nil && jasHyphenateMinBefore == nil
+            && jasHyphenateMinAfter == nil && jasHyphenateLimit == nil
+            && jasHyphenateZone == nil && jasHyphenateBias == nil
+            && jasHyphenateCapitalized == nil
             && letterSpacing == nil && lineHeight == nil
             && rotate == nil && styleName == nil
             && textDecoration == nil && textRendering == nil

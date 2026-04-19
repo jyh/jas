@@ -649,3 +649,42 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     #expect(back[0].jasAutoLeading == 140)
     #expect(back[0].jasSingleWordJustify == "left")
 }
+
+// MARK: - Phase 1b3 / Phase 9 Hyphenation dialog attrs
+
+@Test func hasNoOverridesFalseWhenPhase9AttrsSet() {
+    #expect(!Tspan(jasHyphenateMinWord: 6).hasNoOverrides)
+    #expect(!Tspan(jasHyphenateMinBefore: 3).hasNoOverrides)
+    #expect(!Tspan(jasHyphenateLimit: 2).hasNoOverrides)
+    #expect(!Tspan(jasHyphenateZone: 36).hasNoOverrides)
+    #expect(!Tspan(jasHyphenateBias: 0.5).hasNoOverrides)
+    #expect(!Tspan(jasHyphenateCapitalized: true).hasNoOverrides)
+}
+
+@Test func svgFragmentPhase9AttrsRoundTrip() {
+    let t = Tspan(content: "", jasRole: "paragraph",
+                  jasHyphenateMinWord: 6,
+                  jasHyphenateMinBefore: 3,
+                  jasHyphenateMinAfter: 2,
+                  jasHyphenateLimit: 2,
+                  jasHyphenateZone: 36,
+                  jasHyphenateBias: 0.5,
+                  jasHyphenateCapitalized: true)
+    let svg = tspansToSvgFragment([t])
+    #expect(svg.contains(#"jas:hyphenate-min-word="6""#))
+    #expect(svg.contains(#"jas:hyphenate-min-before="3""#))
+    #expect(svg.contains(#"jas:hyphenate-min-after="2""#))
+    #expect(svg.contains(#"jas:hyphenate-limit="2""#))
+    #expect(svg.contains(#"jas:hyphenate-zone="36""#))
+    #expect(svg.contains(#"jas:hyphenate-bias="0.5""#))
+    #expect(svg.contains(#"jas:hyphenate-capitalized="true""#))
+    let back = tspansFromSvgFragment(svg)!
+    #expect(back.count == 1)
+    #expect(back[0].jasHyphenateMinWord == 6)
+    #expect(back[0].jasHyphenateMinBefore == 3)
+    #expect(back[0].jasHyphenateMinAfter == 2)
+    #expect(back[0].jasHyphenateLimit == 2)
+    #expect(back[0].jasHyphenateZone == 36)
+    #expect(back[0].jasHyphenateBias == 0.5)
+    #expect(back[0].jasHyphenateCapitalized == true)
+}
