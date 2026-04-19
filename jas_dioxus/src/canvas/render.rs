@@ -597,6 +597,36 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                     );
                 }
             }
+            // Phase 6: list markers. Walk the segments and draw each
+            // active list paragraph's marker glyph at x = element.x +
+            // segment.left_indent, baseline = first-line baseline.
+            // Counter values are computed once across all segments so
+            // the run rule (consecutive same-style num-* paragraphs
+            // count up; anything else resets) holds across the
+            // element's whole content.
+            if !segments.is_empty() {
+                let counters = crate::algorithms::text_layout_paragraph::
+                    compute_counters(&segments);
+                for (si, seg) in segments.iter().enumerate() {
+                    let style = match &seg.list_style {
+                        Some(s) if !s.is_empty() => s,
+                        _ => continue,
+                    };
+                    let marker = crate::algorithms::text_layout_paragraph::
+                        marker_text(style, counters[si]);
+                    if marker.is_empty() { continue; }
+                    // First-line baseline: find the first layout line
+                    // that starts at or after this segment's char range.
+                    let first_line = layout.lines.iter()
+                        .find(|l| l.start >= seg.char_start);
+                    let baseline = match first_line {
+                        Some(l) => e.y + l.baseline_y + y_shift,
+                        None => continue,
+                    };
+                    let marker_x = e.x + seg.left_indent;
+                    ctx.fill_text(&marker, marker_x, baseline).ok();
+                }
+            }
             // Reset letterSpacing so subsequent text elements without
             // the attribute draw without inheriting this one's value.
             if ls_px != 0.0 {

@@ -110,8 +110,8 @@ pub struct ParagraphSegment {
     pub right_indent: f64,
     /// `text-indent` — additional x offset on the *first* line only.
     /// Signed; negative produces a hanging indent. Phase 5 supports
-    /// non-negative values; negative falls back to 0 until Phase 6
-    /// list rendering needs the hanging form.
+    /// non-negative values; negative falls back to 0. Ignored when
+    /// `list_style` is `Some(_)` per PARAGRAPH.md §Marker rendering.
     pub first_line_indent: f64,
     /// `jas:space-before` — extra vertical gap above this paragraph.
     /// Always 0 for the first paragraph in the element.
@@ -120,6 +120,17 @@ pub struct ParagraphSegment {
     pub space_after: f64,
     /// Alignment within the paragraph's effective box.
     pub text_align: TextAlign,
+    /// `jas:list-style` — Phase 6. When `Some(_)`, this paragraph
+    /// is a list item: the layout pushes every line's start x by an
+    /// extra `marker_gap` (so the marker has room before the text)
+    /// and ignores `first_line_indent`. The marker glyph itself is
+    /// drawn at `x = left_indent` by the renderer (not by this
+    /// pure-layout function).
+    pub list_style: Option<String>,
+    /// Gap between marker and text. Phase 6 uses a fixed 12pt per
+    /// PARAGRAPH.md §Marker rendering. Stored on the segment so
+    /// future variants (e.g. wider markers like "iii.") can override.
+    pub marker_gap: f64,
 }
 
 impl Default for ParagraphSegment {
@@ -129,6 +140,7 @@ impl Default for ParagraphSegment {
             left_indent: 0.0, right_indent: 0.0, first_line_indent: 0.0,
             space_before: 0.0, space_after: 0.0,
             text_align: TextAlign::Left,
+            list_style: None, marker_gap: 0.0,
         }
     }
 }
@@ -385,22 +397,29 @@ pub fn layout_with_paragraphs(
             // the element per PARAGRAPH.md.
             y_offset += seg.space_before;
         }
+        // Phase 6: an active list adds marker_gap to the effective
+        // left indent (so the marker has room before the text) AND
+        // suppresses first_line_indent — the marker already occupies
+        // the first-line position so a separate first-line offset
+        // would push the text away from the marker.
+        let has_list = seg.list_style.is_some();
+        let list_indent = if has_list { seg.marker_gap } else { 0.0 };
         let slice: String = chars[seg.char_start..seg.char_end].iter().collect();
         let effective_max_w = if max_width > 0.0 {
-            (max_width - seg.left_indent - seg.right_indent).max(0.0)
+            (max_width - seg.left_indent - list_indent - seg.right_indent).max(0.0)
         } else {
             0.0
         };
         let para_layout = layout(&slice, effective_max_w, font_size, measure);
         // Indent shift: each line's start x is pushed right by
-        // `left_indent`; the first line gets the additional
-        // `first_line_indent` (clamped non-negative until Phase 6
-        // hanging-indent rendering lands).
-        let first_line_extra = seg.first_line_indent.max(0.0);
+        // `left_indent` (+ list marker gap when active); the first
+        // line gets the additional `first_line_indent` only when no
+        // list is present.
+        let first_line_extra = if has_list { 0.0 } else { seg.first_line_indent.max(0.0) };
         let lines_n = para_layout.lines.len();
         let first_line_no_in_combined = all_lines.len();
         for (li, line) in para_layout.lines.iter().enumerate() {
-            let x_shift = seg.left_indent
+            let x_shift = seg.left_indent + list_indent
                 + (if li == 0 { first_line_extra } else { 0.0 });
             // text-align horizontal shift within the effective box.
             // Center / right need the line's measured width vs the
@@ -1006,5 +1025,74 @@ mod tests {
         }];
         let l = layout_with_paragraphs("hi", 100.0, 16.0, &segs, m.as_ref());
         assert_eq!(l.glyphs[0].x, 50.0);
+    }
+
+    // ── Phase 6: list marker indent semantics ─────────────────
+
+    #[test]
+    fn list_style_pushes_text_by_marker_gap() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 2,
+            list_style: Some("bullet-disc".into()),
+            marker_gap: 12.0,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("hi", 100.0, 16.0, &segs, m.as_ref());
+        // No left_indent set, but marker_gap=12 → text starts at x=12.
+        assert_eq!(l.glyphs[0].x, 12.0);
+    }
+
+    #[test]
+    fn list_style_combines_left_indent_and_marker_gap() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 2,
+            left_indent: 20.0,
+            list_style: Some("num-decimal".into()),
+            marker_gap: 12.0,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("hi", 100.0, 16.0, &segs, m.as_ref());
+        // Text x = left_indent + marker_gap = 32.
+        assert_eq!(l.glyphs[0].x, 32.0);
+    }
+
+    #[test]
+    fn list_style_ignores_first_line_indent() {
+        let m = fixed(10.0);
+        // first_line_indent would normally shift line 0 by 25, but
+        // PARAGRAPH.md §Marker rendering says the panel control is
+        // ignored when a list is active.
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 2,
+            first_line_indent: 25.0,
+            list_style: Some("bullet-disc".into()),
+            marker_gap: 12.0,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("hi", 100.0, 16.0, &segs, m.as_ref());
+        assert_eq!(l.glyphs[0].x, 12.0);  // not 12 + 25
+    }
+
+    #[test]
+    fn list_style_continuation_lines_align_with_first_line_text() {
+        let m = fixed(10.0);
+        // "abcdef ghijk" with effective width 50 (100 - 12 marker_gap
+        // - other) wraps; both lines should start at x = 12 (marker_gap)
+        // — the standard hanging-indent effect for lists.
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 12,
+            list_style: Some("bullet-disc".into()),
+            marker_gap: 12.0,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("abcdef ghijk", 60.0, 16.0,
+                                        &segs, m.as_ref());
+        assert!(l.lines.len() >= 2);
+        let line0_first = l.glyphs.iter().find(|g| g.line == 0).unwrap();
+        let line1_first = l.glyphs.iter().find(|g| g.line == 1).unwrap();
+        assert_eq!(line0_first.x, 12.0);
+        assert_eq!(line1_first.x, 12.0);
     }
 }
