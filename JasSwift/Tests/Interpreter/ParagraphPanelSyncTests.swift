@@ -212,3 +212,170 @@ import Testing
     #expect(o["bullets"] == nil)
     #expect(o["numbered_list"] == nil)
 }
+
+// MARK: - Phase 4 panel→selection writes
+
+private func selectAreaTextWithWrapper(_ model: Model) {
+    let wrapper = Tspan(id: 0, content: "", jasRole: "paragraph")
+    let body = Tspan(id: 1, content: "hello")
+    let area = Element.text(Text(
+        x: 0, y: 0, tspans: [wrapper, body],
+        fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+}
+
+@Test func setParagraphPanelMutualExclusionRadio() {
+    // Writing one of the seven alignment radio bools clears the
+    // other six so the panel state can hold only one at a time.
+    let store = StateStore()
+    store.initPanel("paragraph_panel_content", defaults: [
+        "align_left": true, "align_center": false, "align_right": false,
+        "justify_left": false, "justify_center": false,
+        "justify_right": false, "justify_all": false,
+    ])
+    applyParagraphPanelMutualExclusion(
+        store: store, key: "justify_center", value: true)
+    #expect(store.getPanel("paragraph_panel_content", "align_left") as? Bool == false)
+    #expect(store.getPanel("paragraph_panel_content", "align_center") as? Bool == false)
+    #expect(store.getPanel("paragraph_panel_content", "justify_left") as? Bool == false)
+    // The function clears siblings only — the caller writes the new
+    // value for `justify_center` itself.
+}
+
+@Test func setParagraphPanelMutualExclusionBulletsNumbered() {
+    let store = StateStore()
+    store.initPanel("paragraph_panel_content", defaults: [
+        "bullets": "", "numbered_list": "num-decimal",
+    ])
+    applyParagraphPanelMutualExclusion(
+        store: store, key: "bullets", value: "bullet-disc")
+    #expect(store.getPanel("paragraph_panel_content", "numbered_list") as? String == "")
+    // The reverse case.
+    store.setPanel("paragraph_panel_content", "bullets", "bullet-disc")
+    applyParagraphPanelMutualExclusion(
+        store: store, key: "numbered_list", value: "num-decimal")
+    #expect(store.getPanel("paragraph_panel_content", "bullets") as? String == "")
+}
+
+@Test func setParagraphPanelEmptyDoesNotClearOther() {
+    // Setting bullets to "" (the "None" option) shouldn't blow away
+    // the user's chosen numbered_list value.
+    let store = StateStore()
+    store.initPanel("paragraph_panel_content", defaults: [
+        "bullets": "", "numbered_list": "num-decimal",
+    ])
+    applyParagraphPanelMutualExclusion(
+        store: store, key: "bullets", value: "")
+    #expect(store.getPanel("paragraph_panel_content", "numbered_list") as? String == "num-decimal")
+}
+
+@Test func applyParagraphPanelWritesIndentToWrapper() {
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let store = model.stateStore
+    store.initPanel("paragraph_panel_content", defaults: [
+        "left_indent": 18.0, "right_indent": 9.0,
+    ])
+    applyParagraphPanelToSelection(
+        store: store, controller: Controller(model: model))
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        #expect(t.tspans[0].jasLeftIndent == 18.0)
+        #expect(t.tspans[0].jasRightIndent == 9.0)
+        #expect(t.tspans[0].jasRole == "paragraph")
+    } else {
+        #expect(Bool(false), "expected Text")
+    }
+}
+
+@Test func applyParagraphPanelOmitsDefaults() {
+    // Identity rule: zero / false / empty values produce nil on the
+    // wrapper, not explicit zeros.
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let store = model.stateStore
+    store.initPanel("paragraph_panel_content", defaults: [
+        "align_left": true, "left_indent": 0.0, "right_indent": 0.0,
+        "first_line_indent": 0.0, "space_before": 0.0, "space_after": 0.0,
+        "hyphenate": false, "hanging_punctuation": false,
+        "bullets": "", "numbered_list": "",
+    ])
+    applyParagraphPanelToSelection(
+        store: store, controller: Controller(model: model))
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        let w = t.tspans[0]
+        #expect(w.jasLeftIndent == nil)
+        #expect(w.jasRightIndent == nil)
+        #expect(w.jasSpaceBefore == nil)
+        #expect(w.jasSpaceAfter == nil)
+        #expect(w.jasHyphenate == nil)
+        #expect(w.jasHangingPunctuation == nil)
+        #expect(w.jasListStyle == nil)
+        #expect(w.textAlign == nil)
+        #expect(w.textAlignLast == nil)
+    }
+}
+
+@Test func applyParagraphPanelAlignmentRadio() {
+    // justify_center → text-align="justify", text-align-last="center".
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let store = model.stateStore
+    store.initPanel("paragraph_panel_content", defaults: [
+        "align_left": false, "justify_center": true,
+    ])
+    applyParagraphPanelToSelection(
+        store: store, controller: Controller(model: model))
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        #expect(t.tspans[0].textAlign == "justify")
+        #expect(t.tspans[0].textAlignLast == "center")
+    }
+}
+
+@Test func resetParagraphPanelClearsWrapperAttrs() {
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let store = model.stateStore
+    // Populate wrapper via apply.
+    store.initPanel("paragraph_panel_content", defaults: [
+        "left_indent": 24.0, "hyphenate": true, "bullets": "bullet-disc",
+    ])
+    applyParagraphPanelToSelection(
+        store: store, controller: Controller(model: model))
+    // Reset.
+    resetParagraphPanel(store: store, controller: Controller(model: model))
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        let w = t.tspans[0]
+        #expect(w.jasLeftIndent == nil)
+        #expect(w.jasHyphenate == nil)
+        #expect(w.jasListStyle == nil)
+    }
+    // Panel state itself reset.
+    #expect(store.getPanel("paragraph_panel_content", "left_indent") as? Double == 0.0)
+    #expect(store.getPanel("paragraph_panel_content", "hyphenate") as? Bool == false)
+    #expect(store.getPanel("paragraph_panel_content", "bullets") as? String == "")
+    #expect(store.getPanel("paragraph_panel_content", "align_left") as? Bool == true)
+}
+
+@Test func paragraphPanelSyncReadsWrapperAlignment() {
+    // Wrapper carries text_align="justify", text_align_last="right"
+    // → live overrides set justify_right=true, others false.
+    let model = Model()
+    let wrapper = Tspan(id: 0, content: "", jasRole: "paragraph",
+                        textAlign: "justify", textAlignLast: "right")
+    let body = Tspan(id: 1, content: "hi")
+    let area = Element.text(Text(x: 0, y: 0, tspans: [wrapper, body],
+                                  fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = paragraphPanelLiveOverrides(model: model)
+    #expect(o["justify_right"] as? Bool == true)
+    #expect(o["align_left"] as? Bool == false)
+    #expect(o["align_center"] as? Bool == false)
+}
