@@ -40,9 +40,8 @@ ALGORITHMS = {
 # Known per-language algorithm exclusions (pre-existing bugs to fix separately)
 SKIP_LANG_ALGO = {
     ("swift", "boolean_normalize"),  # Range crash in Swift normalize()
-    # Phase 11: Swift / OCaml / Python runners are added in their own
-    # commits; until then those languages skip text_layout_paragraph.
-    ("swift", "text_layout_paragraph"),
+    # Phase 11: OCaml / Python runners are added in their own commits;
+    # until then those languages skip text_layout_paragraph.
     ("ocaml", "text_layout_paragraph"),
     ("python", "text_layout_paragraph"),
 }

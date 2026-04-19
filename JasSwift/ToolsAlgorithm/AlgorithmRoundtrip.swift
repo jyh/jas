@@ -52,6 +52,7 @@ case "fit_curve":         results = runFitCurve(activeVectors)
 case "shape_recognize":   results = runShapeRecognize(activeVectors)
 case "planar":            results = runPlanar(activeVectors)
 case "text_layout":       results = runTextLayout(activeVectors)
+case "text_layout_paragraph": results = runTextLayoutParagraph(activeVectors)
 case "path_text_layout":  results = runPathTextLayout(activeVectors)
 default:
     fputs("Unknown algorithm: \(algo)\n", stderr)
@@ -285,6 +286,73 @@ func runTextLayout(_ vectors: [[String: Any]]) -> [[String: Any]] {
                                 measure: measure)
         let glyphs: [[String: Any]] = layout.glyphs.map { g in
             ["idx": g.idx, "line": g.line, "x": g.x, "right": g.right] as [String: Any]
+        }
+        return ["name": name, "result": [
+            "line_count": layout.lines.count,
+            "char_count": layout.charCount,
+            "glyphs": glyphs
+        ] as [String: Any]] as [String: Any]
+    }
+}
+
+// MARK: - Text Layout Paragraph (Phase 11 parity)
+
+private func parseAlign(_ value: Any?) -> TextAlign {
+    switch value as? String {
+    case "center": return .center
+    case "right": return .right
+    case "justify": return .justify
+    default: return .left
+    }
+}
+
+private func parseSeg(_ d: [String: Any]) -> ParagraphSegment {
+    let dflt = ParagraphSegment()
+    func dbl(_ k: String, _ def: Double) -> Double {
+        (d[k] as? Double) ?? def
+    }
+    func bl(_ k: String) -> Bool { (d[k] as? Bool) ?? false }
+    func it(_ k: String, _ def: Int) -> Int { (d[k] as? Int) ?? def }
+    return ParagraphSegment(
+        charStart: it("char_start", 0),
+        charEnd: it("char_end", 0),
+        leftIndent: dbl("left_indent", dflt.leftIndent),
+        rightIndent: dbl("right_indent", dflt.rightIndent),
+        firstLineIndent: dbl("first_line_indent", dflt.firstLineIndent),
+        spaceBefore: dbl("space_before", dflt.spaceBefore),
+        spaceAfter: dbl("space_after", dflt.spaceAfter),
+        textAlign: parseAlign(d["text_align"]),
+        listStyle: d["list_style"] as? String,
+        markerGap: dbl("marker_gap", dflt.markerGap),
+        hangingPunctuation: bl("hanging_punctuation"),
+        wordSpacingMin: dbl("word_spacing_min", dflt.wordSpacingMin),
+        wordSpacingDesired: dbl("word_spacing_desired", dflt.wordSpacingDesired),
+        wordSpacingMax: dbl("word_spacing_max", dflt.wordSpacingMax),
+        lastLineAlign: parseAlign(d["last_line_align"]),
+        hyphenate: bl("hyphenate"),
+        hyphenateMinWord: it("hyphenate_min_word", dflt.hyphenateMinWord),
+        hyphenateMinBefore: it("hyphenate_min_before", dflt.hyphenateMinBefore),
+        hyphenateMinAfter: it("hyphenate_min_after", dflt.hyphenateMinAfter),
+        hyphenateBias: it("hyphenate_bias", dflt.hyphenateBias))
+}
+
+func runTextLayoutParagraph(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as! String
+        let content = tc["content"] as! String
+        let maxWidth = tc["max_width"] as! Double
+        let fontSize = tc["font_size"] as! Double
+        let charWidth = tc["char_width"] as! Double
+        let segs: [ParagraphSegment] = (tc["paragraphs"] as? [[String: Any]] ?? [])
+            .map(parseSeg)
+        let measure: (String) -> Double = { s in Double(s.count) * charWidth }
+        let layout = layoutTextWithParagraphs(content, maxWidth: maxWidth,
+                                                fontSize: fontSize,
+                                                paragraphs: segs,
+                                                measure: measure)
+        let glyphs: [[String: Any]] = layout.glyphs.map { g in
+            ["idx": g.idx, "line": g.line, "x": g.x, "right": g.right]
+                as [String: Any]
         }
         return ["name": name, "result": [
             "line_count": layout.lines.count,
