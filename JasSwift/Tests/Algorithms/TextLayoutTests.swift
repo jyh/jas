@@ -216,3 +216,117 @@ private func fixedMeasure(_ width: Double) -> (String) -> Double {
     #expect(segs[1].spaceBefore == 6)
     #expect(segs[1].textAlign == TextAlign.center)
 }
+
+// MARK: - Phase 6 list markers
+
+@Test func markerTextBullets() {
+    #expect(markerText("bullet-disc", counter: 1) == "\u{2022}")
+    #expect(markerText("bullet-open-circle", counter: 99) == "\u{25CB}")
+    #expect(markerText("bullet-square", counter: 1) == "\u{25A0}")
+    #expect(markerText("bullet-open-square", counter: 1) == "\u{25A1}")
+    #expect(markerText("bullet-dash", counter: 1) == "\u{2013}")
+    #expect(markerText("bullet-check", counter: 1) == "\u{2713}")
+}
+
+@Test func markerTextDecimal() {
+    #expect(markerText("num-decimal", counter: 1) == "1.")
+    #expect(markerText("num-decimal", counter: 42) == "42.")
+}
+
+@Test func markerTextAlpha() {
+    #expect(markerText("num-lower-alpha", counter: 1) == "a.")
+    #expect(markerText("num-lower-alpha", counter: 26) == "z.")
+    #expect(markerText("num-lower-alpha", counter: 27) == "aa.")
+    #expect(markerText("num-upper-alpha", counter: 28) == "AB.")
+}
+
+@Test func markerTextRoman() {
+    #expect(markerText("num-lower-roman", counter: 1) == "i.")
+    #expect(markerText("num-lower-roman", counter: 4) == "iv.")
+    #expect(markerText("num-lower-roman", counter: 9) == "ix.")
+    #expect(markerText("num-upper-roman", counter: 1990) == "MCMXC.")
+}
+
+@Test func markerTextUnknownStyleReturnsEmpty() {
+    #expect(markerText("invented-style", counter: 1) == "")
+}
+
+@Test func computeCountersConsecutiveDecimalRun() {
+    let segs = (0..<3).map { _ in
+        ParagraphSegment(charStart: 0, charEnd: 0, listStyle: "num-decimal")
+    }
+    #expect(computeCounters(segs) == [1, 2, 3])
+}
+
+@Test func computeCountersBulletBreaksRun() {
+    let segs = [
+        ParagraphSegment(listStyle: "num-decimal"),
+        ParagraphSegment(listStyle: "num-decimal"),
+        ParagraphSegment(listStyle: "bullet-disc"),
+        ParagraphSegment(listStyle: "num-decimal"),
+    ]
+    #expect(computeCounters(segs) == [1, 2, 0, 1])
+}
+
+@Test func computeCountersDifferentNumStyleResets() {
+    let segs = [
+        ParagraphSegment(listStyle: "num-decimal"),
+        ParagraphSegment(listStyle: "num-decimal"),
+        ParagraphSegment(listStyle: "num-lower-alpha"),
+        ParagraphSegment(listStyle: "num-lower-alpha"),
+    ]
+    #expect(computeCounters(segs) == [1, 2, 1, 2])
+}
+
+@Test func computeCountersNoStyleBreaksRun() {
+    let segs = [
+        ParagraphSegment(listStyle: "num-decimal"),
+        ParagraphSegment(listStyle: nil),
+        ParagraphSegment(listStyle: "num-decimal"),
+    ]
+    #expect(computeCounters(segs) == [1, 0, 1])
+}
+
+@Test func listStylePushesTextByMarkerGap() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 2,
+                                  listStyle: "bullet-disc",
+                                  markerGap: 12)]
+    let l = layoutTextWithParagraphs("hi", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 12)
+}
+
+@Test func listStyleCombinesLeftIndentAndMarkerGap() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 2,
+                                  leftIndent: 20,
+                                  listStyle: "num-decimal",
+                                  markerGap: 12)]
+    let l = layoutTextWithParagraphs("hi", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 32)
+}
+
+@Test func listStyleIgnoresFirstLineIndent() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 2,
+                                  firstLineIndent: 25,
+                                  listStyle: "bullet-disc",
+                                  markerGap: 12)]
+    let l = layoutTextWithParagraphs("hi", maxWidth: 100, fontSize: 16,
+                                      paragraphs: segs, measure: m)
+    #expect(l.glyphs[0].x == 12)  // not 12 + 25
+}
+
+@Test func listSegmentCarriesStyleAndMarkerGap() {
+    let segs = buildParagraphSegments(
+        tspans: [
+            Tspan(id: 0, content: "", jasRole: "paragraph",
+                  jasListStyle: "bullet-disc"),
+            Tspan(id: 1, content: "hello"),
+        ],
+        content: "hello", isArea: true)
+    #expect(segs[0].listStyle == "bullet-disc")
+    #expect(segs[0].markerGap == markerGapPt)
+}
