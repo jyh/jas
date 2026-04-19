@@ -34,7 +34,9 @@ public func buildParagraphSegments(
             }
             // Phase 6: jas:list-style propagates to the segment so
             // the renderer can draw the marker and the layout can
-            // shift the text by markerGap.
+            // shift the text by markerGap. Phase 7 carries
+            // jas:hanging-punctuation so layout can offset hanging
+            // chars at line edges.
             let listStyle = t.jasListStyle
             let markerGap: Double = listStyle != nil ? markerGapPt : 0
             current = ParagraphSegment(
@@ -45,7 +47,8 @@ public func buildParagraphSegments(
                 spaceBefore: t.jasSpaceBefore ?? 0,
                 spaceAfter: t.jasSpaceAfter ?? 0,
                 textAlign: textAlignFrom(t.textAlign, isArea: isArea),
-                listStyle: listStyle, markerGap: markerGap)
+                listStyle: listStyle, markerGap: markerGap,
+                hangingPunctuation: t.jasHangingPunctuation ?? false)
         } else {
             cursor += bodyChars
         }
