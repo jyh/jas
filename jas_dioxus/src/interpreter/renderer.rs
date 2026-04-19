@@ -2806,27 +2806,23 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let cv = current_value.clone();
     let panel_kind = rctx.panel_kind;
 
-    let dim = if disabled { "opacity:0.4;" } else { "" };
+    let dim = if disabled { "opacity:0.4;cursor:not-allowed;" } else { "" };
+    let select_cursor = if disabled { "not-allowed" } else { "pointer" };
 
     rsx! {
         div {
             id: "{id}",
             class: "jas-icon-toggle",
             title: "{summary}",
-            style: "position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;border-radius:2px;{dim}{style}",
-            // Visible glyph + tiny chevron hint.
-            div {
-                style: "display:flex;align-items:center;gap:2px;font-size:14px;color:var(--jas-text,#ccc);pointer-events:none;line-height:1;",
-                "{visible_glyph}"
-                span { style: "font-size:7px;opacity:0.6;", "▾" }
-            }
-            // Native select overlaid invisibly so clicks hit it and
-            // the OS handles the popup. Options use the full label
-            // (e.g. "•   Disc") so the popup reads naturally.
+            style: "position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;border-radius:2px;overflow:hidden;{dim}{style}",
+            // Native select FIRST in source order so it sits at the
+            // base of the stacking context; visible glyph div on top
+            // with pointer-events:none so clicks pass through to the
+            // select. The OS then handles the popup natively.
             select {
                 value: "{current_value}",
                 disabled: disabled,
-                style: "position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:none;background:transparent;color:transparent;font-size:0;",
+                style: "position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:{select_cursor};border:none;background:transparent;font-size:11px;",
                 onchange: move |evt: Event<FormData>| {
                     let new_val = evt.value();
                     match &bind_target {
@@ -2867,6 +2863,13 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                 for opt in options.iter() {
                     {render_select_option(opt, &cv)}
                 }
+            }
+            // Visible glyph + chevron sits ABOVE the select; pointer-
+            // events:none so the click reaches the select underneath.
+            div {
+                style: "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:3px;font-size:18px;color:var(--jas-text,#ccc);pointer-events:none;line-height:1;",
+                "{visible_glyph}"
+                span { style: "font-size:9px;opacity:0.65;", "▾" }
             }
         }
     }
