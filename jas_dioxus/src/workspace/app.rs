@@ -636,6 +636,7 @@ pub fn App() -> Element {
             .jas-border-handle {{ background: transparent; }}
             .jas-border-handle:hover {{ background: rgba(74,144,217,0.3); }}
             .jas-border-handle:active {{ background: rgba(74,144,217,0.5); }}
+            .jas-icon-toggle:hover {{ background: var(--jas-button-hover, #3a3a3a); }}
         "#  }
         div {
             tabindex: "0",
