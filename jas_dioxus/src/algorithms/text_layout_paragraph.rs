@@ -152,6 +152,12 @@ pub fn build_segments_from_text(
             // chars at line edges.
             let list_style = t.jas_list_style.clone();
             let marker_gap = if list_style.is_some() { MARKER_GAP_PT } else { 0.0 };
+            let text_align = text_align_from(t.text_align.as_deref(), is_area);
+            let last_line_align = last_line_align_from(
+                t.text_align_last.as_deref(),
+                text_align,
+                is_area,
+            );
             current = Some(ParagraphSegment {
                 char_start: cursor,
                 char_end: cursor,
@@ -160,10 +166,19 @@ pub fn build_segments_from_text(
                 first_line_indent: t.text_indent.unwrap_or(0.0),
                 space_before: t.jas_space_before.unwrap_or(0.0),
                 space_after: t.jas_space_after.unwrap_or(0.0),
-                text_align: text_align_from(t.text_align.as_deref(), is_area),
+                text_align,
                 list_style,
                 marker_gap,
                 hanging_punctuation: t.jas_hanging_punctuation.unwrap_or(false),
+                word_spacing_min: t.jas_word_spacing_min.unwrap_or(80.0),
+                word_spacing_desired: t.jas_word_spacing_desired.unwrap_or(100.0),
+                word_spacing_max: t.jas_word_spacing_max.unwrap_or(133.0),
+                last_line_align,
+                hyphenate: t.jas_hyphenate.unwrap_or(false),
+                hyphenate_min_word: t.jas_hyphenate_min_word.unwrap_or(3.0) as usize,
+                hyphenate_min_before: t.jas_hyphenate_min_before.unwrap_or(1.0) as usize,
+                hyphenate_min_after: t.jas_hyphenate_min_after.unwrap_or(1.0) as usize,
+                hyphenate_bias: t.jas_hyphenate_bias.unwrap_or(0.0) as u8,
             });
         } else {
             cursor += body_chars;
@@ -180,15 +195,37 @@ pub fn build_segments_from_text(
 }
 
 /// Map the wrapper tspan's `text-align` string to a `TextAlign`.
-/// Phase 5 supports `left` / `center` / `right`; the four `justify*`
-/// values fall back to `Left` for now (the composer in Phase 8 will
-/// promote them). For point text every alignment maps to `Left` —
-/// the renderer doesn't visibly justify a single-line caret.
+/// Phase 5 added `left` / `center` / `right`; Phase 10 promotes
+/// `justify` to [`TextAlign::Justify`] for area text. Point text
+/// and text-on-path coerce `justify` back to `Left` because there's
+/// no usable line width to fill.
 fn text_align_from(value: Option<&str>, is_area: bool) -> TextAlign {
     match value {
         Some("center") => TextAlign::Center,
         Some("right") => TextAlign::Right,
-        Some("justify") if is_area => TextAlign::Left,  // placeholder
+        Some("justify") if is_area => TextAlign::Justify,
+        _ => TextAlign::Left,
+    }
+}
+
+/// Map the wrapper tspan's `text-align-last` string to the
+/// alignment used for the *last* line of a justified paragraph.
+/// `JUSTIFY_ALL` ⇒ `Justify` (last line stretched to both edges);
+/// `JUSTIFY_LEFT` ⇒ `Left`; etc. When the paragraph isn't
+/// justified the field is ignored — the segment carries
+/// [`TextAlign::Left`] as a benign default.
+fn last_line_align_from(
+    value: Option<&str>,
+    base_align: TextAlign,
+    is_area: bool,
+) -> TextAlign {
+    if base_align != TextAlign::Justify || !is_area {
+        return TextAlign::Left;
+    }
+    match value {
+        Some("center") => TextAlign::Center,
+        Some("right") => TextAlign::Right,
+        Some("justify") => TextAlign::Justify,
         _ => TextAlign::Left,
     }
 }
@@ -251,10 +288,20 @@ mod tests {
     }
 
     #[test]
-    fn justify_falls_back_to_left_in_phase5() {
+    fn justify_promoted_to_justify_for_area_text() {
+        // Phase 10: justify maps to TextAlign::Justify for area text
+        // (point text still falls back to Left — see test below).
         let segs = build_segments_from_text(
             &[wrapper(0.0, 0.0, 0.0, 0.0, 0.0, Some("justify")), body("x")],
             "x", true);
+        assert_eq!(segs[0].text_align, TextAlign::Justify);
+    }
+
+    #[test]
+    fn justify_point_text_still_falls_back_to_left() {
+        let segs = build_segments_from_text(
+            &[wrapper(0.0, 0.0, 0.0, 0.0, 0.0, Some("justify")), body("x")],
+            "x", false);
         assert_eq!(segs[0].text_align, TextAlign::Left);
     }
 
