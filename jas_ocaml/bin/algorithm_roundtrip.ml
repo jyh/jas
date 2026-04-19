@@ -406,6 +406,88 @@ let run_text_layout vectors =
     ]
   ) vectors
 
+let _parse_align value : Jas.Text_layout.text_align =
+  match value with
+  | `String "center" -> Jas.Text_layout.Center
+  | `String "right" -> Jas.Text_layout.Right
+  | `String "justify" -> Jas.Text_layout.Justify
+  | _ -> Jas.Text_layout.Left
+
+let run_text_layout_paragraph vectors =
+  let dflt = Jas.Text_layout.default_segment in
+  let parse_seg j =
+    let f k def =
+      match member k j with
+      | `Null -> def
+      | x -> to_float_lenient x
+    in
+    let i k def =
+      match member k j with
+      | `Null -> def
+      | x -> int_of_float (to_float_lenient x)
+    in
+    let b k = match member k j with
+      | `Bool v -> v
+      | _ -> false
+    in
+    let s k = match member k j with
+      | `String v -> Some v
+      | _ -> None
+    in
+    {
+      Jas.Text_layout.char_start = i "char_start" 0;
+      char_end = i "char_end" 0;
+      left_indent = f "left_indent" dflt.left_indent;
+      right_indent = f "right_indent" dflt.right_indent;
+      first_line_indent = f "first_line_indent" dflt.first_line_indent;
+      space_before = f "space_before" dflt.space_before;
+      space_after = f "space_after" dflt.space_after;
+      text_align = _parse_align (member "text_align" j);
+      list_style = s "list_style";
+      marker_gap = f "marker_gap" dflt.marker_gap;
+      hanging_punctuation = b "hanging_punctuation";
+      word_spacing_min = f "word_spacing_min" dflt.word_spacing_min;
+      word_spacing_desired = f "word_spacing_desired" dflt.word_spacing_desired;
+      word_spacing_max = f "word_spacing_max" dflt.word_spacing_max;
+      last_line_align = _parse_align (member "last_line_align" j);
+      hyphenate = b "hyphenate";
+      hyphenate_min_word = i "hyphenate_min_word" dflt.hyphenate_min_word;
+      hyphenate_min_before = i "hyphenate_min_before" dflt.hyphenate_min_before;
+      hyphenate_min_after = i "hyphenate_min_after" dflt.hyphenate_min_after;
+      hyphenate_bias = i "hyphenate_bias" dflt.hyphenate_bias;
+    }
+  in
+  List.map (fun tc ->
+    let name = member "name" tc |> to_string in
+    let content = member "content" tc |> to_string in
+    let max_width = member "max_width" tc |> to_float_lenient in
+    let font_size = member "font_size" tc |> to_float_lenient in
+    let char_width = member "char_width" tc |> to_float_lenient in
+    let segs = match member "paragraphs" tc with
+      | `List xs -> List.map parse_seg xs
+      | _ -> []
+    in
+    let measure s = Float.of_int (Jas.Text_layout.utf8_char_count s) *. char_width in
+    let layout = Jas.Text_layout.layout_with_paragraphs content max_width
+                   font_size segs measure in
+    let glyphs = Array.to_list layout.glyphs |> List.map (fun g ->
+      `Assoc [
+        ("idx", json_of_int g.Jas.Text_layout.idx);
+        ("line", json_of_int g.Jas.Text_layout.line);
+        ("right", json_of_float g.Jas.Text_layout.right);
+        ("x", json_of_float g.Jas.Text_layout.x)
+      ]
+    ) in
+    `Assoc [
+      ("name", json_of_string name);
+      ("result", `Assoc [
+        ("char_count", json_of_int layout.char_count);
+        ("glyphs", `List glyphs);
+        ("line_count", json_of_int (Array.length layout.lines))
+      ])
+    ]
+  ) vectors
+
 let run_path_text_layout vectors =
   List.map (fun tc ->
     let name = member "name" tc |> to_string in
@@ -464,6 +546,7 @@ let () =
     | "shape_recognize" -> run_shape_recognize vectors
     | "planar" -> run_planar vectors
     | "text_layout" -> run_text_layout vectors
+    | "text_layout_paragraph" -> run_text_layout_paragraph vectors
     | "path_text_layout" -> run_path_text_layout vectors
     | _ -> Printf.eprintf "Unknown algorithm: %s\n" algo; exit 1
   in
