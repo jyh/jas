@@ -26,9 +26,9 @@ paragraph_justification:
     Cancel can restore live-applied edits. Until that lands, leave
     Preview off when you might want to bail out.
 
-    Defaults match examples/justification.png (Adobe parity):
-    word spacing 80 / 100 / 133 %; letter spacing 0 / 0 / 0 %;
-    glyph scaling 100 / 100 / 100 %; auto leading 120 %; single word
+    Defaults per PARAGRAPH.md §Reset Panel: word spacing
+    80 / 100 / 133 %; letter spacing 0 / 0 / 0 %; glyph scaling
+    100 / 100 / 100 %; auto leading 120 %; single word
     justification = Full Justify.
   modal: true
   width: 460

@@ -16,15 +16,25 @@ paragraph_hyphenation:
     - Hyphenate Capitalized Words checkbox
     - Footer: Preview | Cancel | OK
 
-    The master HYPHENATE_MASTER_CHECKBOX mirrors the Paragraph panel's
-    HYPHENATE_CHECKBOX (both write panel.hyphenate). Phase 2 keeps
-    the dialog field as dialog-local state; Phase 8/9 wires the
-    cross-scope mirror via deep-path preview_targets and proper
-    panel-state synchronisation.
+    The master HYPHENATE_MASTER_CHECKBOX mirrors the Paragraph
+    panel's HYPHENATE_CHECKBOX (both write panel.hyphenate). The
+    OK action commits the master and the 7 sub-fields onto every
+    paragraph wrapper tspan in the selection (per-app
+    apply_hyphenation_dialog_to_selection handles the identity-
+    value rule, omitting attrs that match the spec defaults). The
+    apply path also writes the master back to panel.hyphenate so
+    the main panel checkbox reflects the dialog commit. Cancel
+    closes without committing.
 
-    Defaults match examples/hyphenation.png (Adobe parity):
-    master off, 3 / 1 / 1 letters, 0 hyphens (unlimited), 0 pt zone,
-    bias 0 (Better Spacing), capitalized off.
+    Preview-on rollback is still on the to-do list: the Phase 0
+    snapshot harness only captures top-level state keys, and this
+    dialog needs a per-wrapper attr snapshot so Cancel can restore
+    live-applied edits. Until that lands, leave Preview off when
+    you might want to bail out.
+
+    Defaults per PARAGRAPH.md §Reset Panel: master off, 3 / 1 / 1
+    letters, 0 hyphens (unlimited), 0 pt zone, bias 0 (Better
+    Spacing), capitalized off.
 
     The hyphenation language is inherited from the character-level
     xml:lang (set via LANGUAGE_DROPDOWN in CHARACTER.md); this dialog
@@ -37,8 +47,10 @@ paragraph_hyphenation:
       default: false
       description: >
         HYPHENATE_MASTER_CHECKBOX — master switch. When off, every
-        other field in the dialog renders dimmed/non-interactive (via
-        bind.disabled). Mirrors panel.hyphenate (Phase 8 wiring).
+        other field in the dialog renders dimmed/non-interactive
+        (via bind.disabled). The apply pipeline mirrors this back
+        to panel.hyphenate so the main Paragraph panel checkbox
+        stays in sync with the dialog commit.
     hyphenate_min_word:
       type: number
       default: 3
@@ -79,9 +91,10 @@ paragraph_hyphenation:
       max: 6
       description: >
         Bias slider — discrete 7-step (0 = Better Spacing / cheap
-        hyphens; 6 = Fewer Hyphens / expensive hyphens). Wires into
-        the every-line composer's hyphen penalty in Phase 10.
-        jas:hyphenate-bias.
+        hyphens; 6 = Fewer Hyphens / expensive hyphens). Wires
+        into the every-line composer hyphen penalty as part of the
+        layout work that consumes the Knuth-Liang break points
+        landed in Phase 9. jas:hyphenate-bias.
     hyphenate_capitalized:
       type: bool
       default: false
@@ -95,10 +108,12 @@ paragraph_hyphenation:
         selected paragraphs. Cancel always rolls back to the on-open
         snapshot via the Phase 0 preview snapshot/restore harness.
 
-  # Preview snapshot/restore wiring (Phase 0 schema slot). Empty for
-  # Phase 2 because the document write path doesn't exist yet —
-  # Phase 9 populates this with the dialog-state-key →
-  # document-state-path mapping for each hyphenation attribute.
+  # Preview snapshot/restore wiring (Phase 0 schema slot). Stays
+  # empty: the harness only handles top-level state keys, but the
+  # Hyphenation dialog needs to snapshot per-paragraph-wrapper
+  # attrs across the selection. A future patch extends the harness
+  # to capture attr maps keyed by element path and wires each
+  # dialog field's restore here.
   preview_targets: {}
 
   content:
