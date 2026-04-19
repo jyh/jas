@@ -102,7 +102,19 @@ type paragraph_segment = {
   (** Gap between marker and text. Phase 6 uses a fixed 12pt per
       PARAGRAPH.md §Marker rendering. *)
   marker_gap : float;
+  (** [jas:hanging-punctuation] — Phase 7. When true, hangable
+      punctuation chars at line start / end offset outside the
+      effective edge by their own advance width per PARAGRAPH.md
+      §Hanging Punctuation. *)
+  hanging_punctuation : bool;
 }
+
+(** True if [c] may hang into the *left* margin. *)
+val is_left_hanger : Uchar.t -> bool
+
+(** True if [c] may hang into the *right* margin (caller passes
+    last visible glyph; dashes only ever hang at line end). *)
+val is_right_hanger : Uchar.t -> bool
 
 val default_segment : paragraph_segment
 

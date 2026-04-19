@@ -371,6 +371,7 @@ type paragraph_segment = {
   text_align : text_align;
   list_style : string option;
   marker_gap : float;
+  hanging_punctuation : bool;
 }
 
 let default_segment = {
@@ -379,7 +380,26 @@ let default_segment = {
   space_before = 0.0; space_after = 0.0;
   text_align = Left;
   list_style = None; marker_gap = 0.0;
+  hanging_punctuation = false;
 }
+
+(* ── Phase 7: hanging punctuation char-class predicates ── *)
+
+let is_left_hanger (c : Uchar.t) : bool =
+  let v = Uchar.to_int c in
+  v = 0x0022 || v = 0x0027                         (* straight quotes *)
+  || v = 0x201C || v = 0x2018                      (* left curly quotes *)
+  || v = 0x00AB || v = 0x2039                      (* left angle quotes *)
+  || v = 0x0028 || v = 0x005B || v = 0x007B        (* open brackets *)
+
+let is_right_hanger (c : Uchar.t) : bool =
+  let v = Uchar.to_int c in
+  v = 0x0022 || v = 0x0027                         (* straight quotes *)
+  || v = 0x201D || v = 0x2019                      (* right curly quotes *)
+  || v = 0x00BB || v = 0x203A                      (* right angle quotes *)
+  || v = 0x0029 || v = 0x005D || v = 0x007D        (* close brackets *)
+  || v = 0x002E || v = 0x002C                      (* period and comma *)
+  || v = 0x002D || v = 0x2013 || v = 0x2014        (* hyphen, en dash, em dash *)
 
 (** Visible width of a line: max [right] of any non-trailing-space glyph. *)
 let _trimmed_line_width (line : line_info) (glyphs : glyph array) : float =
@@ -451,12 +471,53 @@ let layout_with_paragraphs (content : string) (max_width : float)
                             -. (if li = 0 then first_line_extra else 0.0))
         else 0.0 in
       let visible_w = _trimmed_line_width line para.glyphs in
+      (* Phase 7: hanging punctuation. Offset hangable chars at line
+         start / end outside the effective edge. Alignment per spec:
+         left-aligned hangs only left, right-aligned only right,
+         centered both. *)
+      let first_visible = ref None in
+      let last_visible = ref None in
+      for gi = line.glyph_start to line.glyph_end - 1 do
+        let g = para.glyphs.(gi) in
+        if not g.is_trailing_space then begin
+          if !first_visible = None then first_visible := Some g;
+          last_visible := Some g
+        end
+      done;
+      let char_at idx =
+        let byte = char_to_byte content (seg.char_start + idx) in
+        let d = String.get_utf_8_uchar content byte in
+        Uchar.utf_decode_uchar d
+      in
+      let left_hang_w = ref 0.0 in
+      let right_hang_w = ref 0.0 in
+      if seg.hanging_punctuation then begin
+        let allow_left = seg.text_align = Left || seg.text_align = Center in
+        let allow_right = seg.text_align = Right || seg.text_align = Center in
+        if allow_left then
+          (match !first_visible with
+           | Some g ->
+             let c = char_at g.idx in
+             if is_left_hanger c then left_hang_w := g.right -. g.x
+           | None -> ());
+        if allow_right then
+          (match !last_visible with
+           | Some g ->
+             let c = char_at g.idx in
+             if is_right_hanger c then right_hang_w := g.right -. g.x
+           | None -> ())
+      end;
+      let effective_visible_w =
+        Float.max 0.0 (visible_w -. !left_hang_w -. !right_hang_w) in
       let align_shift = match seg.text_align with
-        | Left -> 0.0
+        | Left -> -. !left_hang_w
         | Center ->
-          if line_avail > visible_w then (line_avail -. visible_w) /. 2.0 else 0.0
+          if line_avail > effective_visible_w
+          then (line_avail -. effective_visible_w) /. 2.0 -. !left_hang_w
+          else -. !left_hang_w
         | Right ->
-          if line_avail > visible_w then line_avail -. visible_w else 0.0
+          if line_avail > effective_visible_w
+          then line_avail -. effective_visible_w else 0.0
       in
       let total_shift = x_shift +. align_shift in
       let orig_start = seg.char_start + line.start in
