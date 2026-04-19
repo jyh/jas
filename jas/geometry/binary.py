@@ -216,6 +216,13 @@ def _pack_tspan(t) -> list:
         t.jas_glyph_scaling_max,
         t.jas_auto_leading,
         t.jas_single_word_justify,
+        t.jas_hyphenate_min_word,
+        t.jas_hyphenate_min_before,
+        t.jas_hyphenate_min_after,
+        t.jas_hyphenate_limit,
+        t.jas_hyphenate_zone,
+        t.jas_hyphenate_bias,
+        t.jas_hyphenate_capitalized,
     ]
 
 
@@ -279,6 +286,13 @@ def _unpack_tspan(v):
         jas_glyph_scaling_max=get(41),
         jas_auto_leading=get(42),
         jas_single_word_justify=get(43),
+        jas_hyphenate_min_word=get(44),
+        jas_hyphenate_min_before=get(45),
+        jas_hyphenate_min_after=get(46),
+        jas_hyphenate_limit=get(47),
+        jas_hyphenate_zone=get(48),
+        jas_hyphenate_bias=get(49),
+        jas_hyphenate_capitalized=get(50),
     )
 
 

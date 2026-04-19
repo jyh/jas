@@ -418,6 +418,99 @@ def apply_justification_dialog_to_selection(model, v: JustificationDialogValues)
         model.document = new_doc
 
 
+# ── Phase 9: Hyphenation dialog OK commit ──────────────────
+
+
+@dataclass
+class HyphenationDialogValues:
+    """8 Hyphenation-dialog field values (master + 7 sub-controls).
+    ``None`` means the field was blank (mixed selection) and should
+    not write — the existing wrapper attribute stays. Phase 9."""
+    hyphenate: bool | None = None
+    min_word: float | None = None
+    min_before: float | None = None
+    min_after: float | None = None
+    limit: float | None = None
+    zone: float | None = None
+    bias: float | None = None
+    capitalized: bool | None = None
+
+
+def apply_hyphenation_dialog_to_selection(model, store, v: HyphenationDialogValues) -> None:
+    """Commit the master toggle + 7 Hyphenation-dialog fields onto
+    every paragraph wrapper tspan in the selection. Per the
+    identity-value rule, each value at its spec default (master off,
+    3/1/1, 0, 0, 0, off) writes None so the wrapper attribute stays
+    absent. Master toggle also mirrors to panel.hyphenate via
+    ``store.set_panel`` so the main panel checkbox reflects the
+    dialog commit. Phase 9."""
+    def _opt_n(value, default):
+        if value is None:
+            return None
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return None
+        return None if abs(f - default) < 1e-6 else f
+
+    def _opt_b(value):
+        if value is None:
+            return None
+        return True if value else None
+
+    hyph = _opt_b(v.hyphenate)
+    min_word = _opt_n(v.min_word, 3.0)
+    min_before = _opt_n(v.min_before, 1.0)
+    min_after = _opt_n(v.min_after, 1.0)
+    limit = _opt_n(v.limit, 0.0)
+    zone = _opt_n(v.zone, 0.0)
+    bias = _opt_n(v.bias, 0.0)
+    cap = _opt_b(v.capitalized)
+
+    if model is not None:
+        doc = getattr(model, "document", None)
+        if doc is not None and doc.selection:
+            from dataclasses import replace
+            new_doc = doc
+            any_change = False
+            for es in doc.selection:
+                path = getattr(es, "path", None)
+                if path is None:
+                    continue
+                elem = new_doc.get_element(path)
+                if not isinstance(elem, (Text, TextPath)):
+                    continue
+                tspans = list(elem.tspans)
+                wrapper_idx = [i for i, t in enumerate(tspans)
+                               if t.jas_role == "paragraph"]
+                if not wrapper_idx and tspans:
+                    tspans[0] = replace(tspans[0], jas_role="paragraph")
+                    wrapper_idx = [0]
+                if not wrapper_idx:
+                    continue
+                for i in wrapper_idx:
+                    tspans[i] = replace(tspans[i],
+                        jas_hyphenate=hyph,
+                        jas_hyphenate_min_word=min_word,
+                        jas_hyphenate_min_before=min_before,
+                        jas_hyphenate_min_after=min_after,
+                        jas_hyphenate_limit=limit,
+                        jas_hyphenate_zone=zone,
+                        jas_hyphenate_bias=bias,
+                        jas_hyphenate_capitalized=cap)
+                new_elem = replace(elem, tspans=tuple(tspans))
+                new_doc = new_doc.replace_element(path, new_elem)
+                any_change = True
+            if any_change:
+                if hasattr(model, "snapshot"):
+                    model.snapshot()
+                model.document = new_doc
+
+    # Master mirror to panel state for HYPHENATE_CHECKBOX.
+    if v.hyphenate is not None and store is not None:
+        store.set_panel("paragraph_panel_content", "hyphenate", bool(v.hyphenate))
+
+
 def subscribe(store, model_getter) -> None:
     """Wire ``apply_paragraph_panel_to_selection`` to fire after any
     write into the ``paragraph_panel_content`` scope of ``store``.

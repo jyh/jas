@@ -94,6 +94,14 @@ class Tspan:
     jas_glyph_scaling_max: Optional[float] = None
     jas_auto_leading: Optional[float] = None
     jas_single_word_justify: Optional[str] = None
+    # Phase 1b3 / Phase 9 — Hyphenation dialog attrs.
+    jas_hyphenate_min_word: Optional[float] = None
+    jas_hyphenate_min_before: Optional[float] = None
+    jas_hyphenate_min_after: Optional[float] = None
+    jas_hyphenate_limit: Optional[float] = None
+    jas_hyphenate_zone: Optional[float] = None
+    jas_hyphenate_bias: Optional[float] = None
+    jas_hyphenate_capitalized: Optional[bool] = None
     letter_spacing: Optional[float] = None
     line_height: Optional[float] = None
     rotate: Optional[float] = None
@@ -145,6 +153,13 @@ class Tspan:
                 and self.jas_glyph_scaling_max is None
                 and self.jas_auto_leading is None
                 and self.jas_single_word_justify is None
+                and self.jas_hyphenate_min_word is None
+                and self.jas_hyphenate_min_before is None
+                and self.jas_hyphenate_min_after is None
+                and self.jas_hyphenate_limit is None
+                and self.jas_hyphenate_zone is None
+                and self.jas_hyphenate_bias is None
+                and self.jas_hyphenate_capitalized is None
                 and self.letter_spacing is None
                 and self.line_height is None
                 and self.rotate is None
@@ -229,6 +244,13 @@ def tspans_to_json_clipboard(tspans: list[Tspan]) -> str:
         if t.jas_glyph_scaling_max is not None: obj["jas_glyph_scaling_max"] = t.jas_glyph_scaling_max
         if t.jas_auto_leading is not None: obj["jas_auto_leading"] = t.jas_auto_leading
         if t.jas_single_word_justify is not None: obj["jas_single_word_justify"] = t.jas_single_word_justify
+        if t.jas_hyphenate_min_word is not None: obj["jas_hyphenate_min_word"] = t.jas_hyphenate_min_word
+        if t.jas_hyphenate_min_before is not None: obj["jas_hyphenate_min_before"] = t.jas_hyphenate_min_before
+        if t.jas_hyphenate_min_after is not None: obj["jas_hyphenate_min_after"] = t.jas_hyphenate_min_after
+        if t.jas_hyphenate_limit is not None: obj["jas_hyphenate_limit"] = t.jas_hyphenate_limit
+        if t.jas_hyphenate_zone is not None: obj["jas_hyphenate_zone"] = t.jas_hyphenate_zone
+        if t.jas_hyphenate_bias is not None: obj["jas_hyphenate_bias"] = t.jas_hyphenate_bias
+        if t.jas_hyphenate_capitalized is not None: obj["jas_hyphenate_capitalized"] = t.jas_hyphenate_capitalized
         if t.letter_spacing is not None: obj["letter_spacing"] = t.letter_spacing
         if t.line_height is not None: obj["line_height"] = t.line_height
         if t.rotate is not None: obj["rotate"] = t.rotate
@@ -298,6 +320,13 @@ def tspans_from_json_clipboard(json_str: str) -> Optional[tuple[Tspan, ...]]:
             jas_glyph_scaling_max=obj.get("jas_glyph_scaling_max"),
             jas_auto_leading=obj.get("jas_auto_leading"),
             jas_single_word_justify=obj.get("jas_single_word_justify"),
+            jas_hyphenate_min_word=obj.get("jas_hyphenate_min_word"),
+            jas_hyphenate_min_before=obj.get("jas_hyphenate_min_before"),
+            jas_hyphenate_min_after=obj.get("jas_hyphenate_min_after"),
+            jas_hyphenate_limit=obj.get("jas_hyphenate_limit"),
+            jas_hyphenate_zone=obj.get("jas_hyphenate_zone"),
+            jas_hyphenate_bias=obj.get("jas_hyphenate_bias"),
+            jas_hyphenate_capitalized=obj.get("jas_hyphenate_capitalized"),
             letter_spacing=obj.get("letter_spacing"),
             line_height=obj.get("line_height"),
             rotate=obj.get("rotate"),
@@ -389,6 +418,20 @@ def tspans_to_svg_fragment(tspans: list[Tspan]) -> str:
             attrs.append(("jas:auto-leading", _fmt_float_clipboard(t.jas_auto_leading)))
         if t.jas_single_word_justify is not None:
             attrs.append(("jas:single-word-justify", t.jas_single_word_justify))
+        if t.jas_hyphenate_min_word is not None:
+            attrs.append(("jas:hyphenate-min-word", _fmt_float_clipboard(t.jas_hyphenate_min_word)))
+        if t.jas_hyphenate_min_before is not None:
+            attrs.append(("jas:hyphenate-min-before", _fmt_float_clipboard(t.jas_hyphenate_min_before)))
+        if t.jas_hyphenate_min_after is not None:
+            attrs.append(("jas:hyphenate-min-after", _fmt_float_clipboard(t.jas_hyphenate_min_after)))
+        if t.jas_hyphenate_limit is not None:
+            attrs.append(("jas:hyphenate-limit", _fmt_float_clipboard(t.jas_hyphenate_limit)))
+        if t.jas_hyphenate_zone is not None:
+            attrs.append(("jas:hyphenate-zone", _fmt_float_clipboard(t.jas_hyphenate_zone)))
+        if t.jas_hyphenate_bias is not None:
+            attrs.append(("jas:hyphenate-bias", _fmt_float_clipboard(t.jas_hyphenate_bias)))
+        if t.jas_hyphenate_capitalized is not None:
+            attrs.append(("jas:hyphenate-capitalized", "true" if t.jas_hyphenate_capitalized else "false"))
         if t.letter_spacing is not None: attrs.append(("letter-spacing", _fmt_float_clipboard(t.letter_spacing)))
         if t.line_height is not None: attrs.append(("line-height", _fmt_float_clipboard(t.line_height)))
         if t.rotate is not None: attrs.append(("rotate", _fmt_float_clipboard(t.rotate)))
@@ -504,6 +547,25 @@ def tspans_from_svg_fragment(svg_str: str) -> Optional[tuple[Tspan, ...]]:
                 try: kw["jas_auto_leading"] = float(v)
                 except ValueError: pass
             elif k == "jas:single-word-justify": kw["jas_single_word_justify"] = v
+            elif k == "jas:hyphenate-min-word":
+                try: kw["jas_hyphenate_min_word"] = float(v)
+                except ValueError: pass
+            elif k == "jas:hyphenate-min-before":
+                try: kw["jas_hyphenate_min_before"] = float(v)
+                except ValueError: pass
+            elif k == "jas:hyphenate-min-after":
+                try: kw["jas_hyphenate_min_after"] = float(v)
+                except ValueError: pass
+            elif k == "jas:hyphenate-limit":
+                try: kw["jas_hyphenate_limit"] = float(v)
+                except ValueError: pass
+            elif k == "jas:hyphenate-zone":
+                try: kw["jas_hyphenate_zone"] = float(v)
+                except ValueError: pass
+            elif k == "jas:hyphenate-bias":
+                try: kw["jas_hyphenate_bias"] = float(v)
+                except ValueError: pass
+            elif k == "jas:hyphenate-capitalized": kw["jas_hyphenate_capitalized"] = (v == "true")
             elif k == "letter-spacing":
                 try: kw["letter_spacing"] = float(v)
                 except ValueError: pass
@@ -566,6 +628,13 @@ def merge_tspan_overrides(target: Tspan, source: Tspan) -> Tspan:
         jas_glyph_scaling_max=source.jas_glyph_scaling_max if source.jas_glyph_scaling_max is not None else target.jas_glyph_scaling_max,
         jas_auto_leading=source.jas_auto_leading if source.jas_auto_leading is not None else target.jas_auto_leading,
         jas_single_word_justify=source.jas_single_word_justify if source.jas_single_word_justify is not None else target.jas_single_word_justify,
+        jas_hyphenate_min_word=source.jas_hyphenate_min_word if source.jas_hyphenate_min_word is not None else target.jas_hyphenate_min_word,
+        jas_hyphenate_min_before=source.jas_hyphenate_min_before if source.jas_hyphenate_min_before is not None else target.jas_hyphenate_min_before,
+        jas_hyphenate_min_after=source.jas_hyphenate_min_after if source.jas_hyphenate_min_after is not None else target.jas_hyphenate_min_after,
+        jas_hyphenate_limit=source.jas_hyphenate_limit if source.jas_hyphenate_limit is not None else target.jas_hyphenate_limit,
+        jas_hyphenate_zone=source.jas_hyphenate_zone if source.jas_hyphenate_zone is not None else target.jas_hyphenate_zone,
+        jas_hyphenate_bias=source.jas_hyphenate_bias if source.jas_hyphenate_bias is not None else target.jas_hyphenate_bias,
+        jas_hyphenate_capitalized=source.jas_hyphenate_capitalized if source.jas_hyphenate_capitalized is not None else target.jas_hyphenate_capitalized,
         letter_spacing=source.letter_spacing if source.letter_spacing is not None else target.letter_spacing,
         line_height=source.line_height if source.line_height is not None else target.line_height,
         rotate=source.rotate if source.rotate is not None else target.rotate,
