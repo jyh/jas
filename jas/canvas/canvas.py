@@ -865,26 +865,41 @@ def _draw_element(painter: QPainter, elem: Element,
                 painter.translate(-x, -y)
             # Layout: line_height (when non-empty) overrides the
             # default line stride (which equals font_size).
-            from algorithms.text_layout import layout as _layout
+            from algorithms.text_layout import (
+                layout_with_paragraphs as _layout_para,
+                build_paragraph_segments as _build_segments,
+            )
             from tools.text_measure import make_measurer
             measure = make_measurer(ff, fw, fst, effective_fs)
             max_w = tw if (tw > 0 and th > 0) else 0.0
             line_h = _parse_pt(t.line_height)
             layout_fs = line_h if line_h is not None else effective_fs
-            lay = _layout(content, max_w, layout_fs, measure)
+            # Phase 5: paragraph-aware layout. The wrapper tspans
+            # (jas_role == "paragraph") inside the element provide
+            # per-paragraph indent / space / alignment attrs; absent
+            # wrappers fall through to a single default segment so
+            # plain text without wrappers renders identically.
+            psegs = _build_segments(t.tspans, content, max_w > 0)
+            lay = _layout_para(content, max_w, layout_fs, psegs, measure)
             for line in lay.lines:
                 s = content[line.start:line.end].rstrip('\n')
                 baseline = y + line.baseline_y + y_shift
+                # Per-line x shift comes from the first glyph's x —
+                # the paragraph-aware layout already shifted it by
+                # left_indent + first_line_indent + alignment.
+                line_x_shift = lay.glyphs[line.glyph_start].x \
+                    if line.glyph_start < len(lay.glyphs) else 0.0
+                line_x = x + line_x_shift
                 if rot_deg == 0.0:
                     # Fast path: QFont.setLetterSpacing handles inter-
                     # glyph advance for a single drawText call.
-                    painter.drawText(QPointF(x, baseline), s)
+                    painter.drawText(QPointF(line_x, baseline), s)
                 else:
                     # Per-glyph rotation: draw each char with its own
                     # translate/rotate/restore. letter_spacing is
                     # folded into the manual advance since drawText
                     # per char doesn't chain kern.
-                    cx = x
+                    cx = line_x
                     for ch in s:
                         painter.save()
                         painter.translate(cx, baseline)
