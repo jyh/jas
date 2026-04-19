@@ -601,12 +601,19 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
   let doc = ctrl#document in
   let any_text = ref false in
   let all_area = ref true in
+  let first_para : Element.tspan option ref = ref None in
   Document.PathMap.iter (fun path _ ->
     let elem = Document.get_element doc path in
     match elem with
-    | Element.Text { text_width; text_height; _ } ->
+    | Element.Text { text_width; text_height; tspans; _ } ->
       any_text := true;
-      if not (text_width > 0.0 && text_height > 0.0) then all_area := false
+      if not (text_width > 0.0 && text_height > 0.0) then all_area := false;
+      if !first_para = None then begin
+        Array.iter (fun (t : Element.tspan) ->
+          if !first_para = None && t.jas_role = Some "paragraph" then
+            first_para := Some t
+        ) tspans
+      end
     | Element.Text_path _ ->
       any_text := true;
       all_area := false
@@ -617,7 +624,49 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
   State_store.set_panel store "paragraph_panel_content"
     "text_selected" (`Bool text_selected);
   State_store.set_panel store "paragraph_panel_content"
-    "area_text_selected" (`Bool area_text_selected)
+    "area_text_selected" (`Bool area_text_selected);
+  (* Phase 3b paragraph attribute reads. The reader takes the first
+     wrapper's values verbatim (mixed-state aggregation deferred to
+     Phase 3c). Absent wrapper leaves the panel's existing values
+     intact — we only call set_panel for fields actually present on
+     the wrapper. *)
+  match !first_para with
+  | None -> ()
+  | Some p ->
+    (match p.jas_left_indent with
+     | Some v -> State_store.set_panel store "paragraph_panel_content"
+                   "left_indent" (`Float v)
+     | None -> ());
+    (match p.jas_right_indent with
+     | Some v -> State_store.set_panel store "paragraph_panel_content"
+                   "right_indent" (`Float v)
+     | None -> ());
+    (match p.jas_hyphenate with
+     | Some v -> State_store.set_panel store "paragraph_panel_content"
+                   "hyphenate" (`Bool v)
+     | None -> ());
+    (match p.jas_hanging_punctuation with
+     | Some v -> State_store.set_panel store "paragraph_panel_content"
+                   "hanging_punctuation" (`Bool v)
+     | None -> ());
+    (* Single backing attr split into two panel dropdowns. bullet-*
+       populates panel.bullets; num-* populates panel.numbered_list.
+       The other dropdown shows "" (matching the spec's mutual
+       exclusion in PARAGRAPH.md §Bullets and numbered lists). *)
+    match p.jas_list_style with
+    | None -> ()
+    | Some ls ->
+      if String.length ls >= 7 && String.sub ls 0 7 = "bullet-" then begin
+        State_store.set_panel store "paragraph_panel_content"
+          "bullets" (`String ls);
+        State_store.set_panel store "paragraph_panel_content"
+          "numbered_list" (`String "")
+      end else if String.length ls >= 4 && String.sub ls 0 4 = "num-" then begin
+        State_store.set_panel store "paragraph_panel_content"
+          "numbered_list" (`String ls);
+        State_store.set_panel store "paragraph_panel_content"
+          "bullets" (`String "")
+      end
 
 (* ── Character panel apply-to-selection pipeline (Layer B) ─── *)
 

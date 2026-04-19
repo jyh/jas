@@ -134,10 +134,23 @@ type tspan = {
   jas_no_break : bool option;
   (** Marks a tspan as a paragraph wrapper when set to [Some "paragraph"].
       Wrapper tspans implicitly group subsequent content tspans (until
-      the next wrapper) into one paragraph for the Paragraph panel.
-      Phase 1a only round-trips this marker; the paragraph attribute
-      fields and Enter/Backspace edit primitives land in Phase 1b. *)
+      the next wrapper) into one paragraph for the Paragraph panel. *)
   jas_role : string option;
+  (** Phase 3b panel-surface paragraph attributes — effective on
+      paragraph wrapper tspans (those whose [jas_role] is
+      [Some "paragraph"]). The dialog attrs and the remaining
+      panel-surface space-before / space-after / first-line-indent
+      (CSS text-indent) land later. *)
+  jas_left_indent : float option;
+  jas_right_indent : float option;
+  jas_hyphenate : bool option;
+  jas_hanging_punctuation : bool option;
+  (** Single backing attr for both BULLETS_DROPDOWN and
+      NUMBERED_LIST_DROPDOWN. Values: [bullet-disc]/[bullet-open-circle]/
+      [bullet-square]/[bullet-open-square]/[bullet-dash]/[bullet-check]/
+      [num-decimal]/[num-lower-alpha]/[num-upper-alpha]/[num-lower-roman]/
+      [num-upper-roman]; absent = no marker. *)
+  jas_list_style : string option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;
