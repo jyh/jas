@@ -770,6 +770,68 @@ let paragraph_text_kind_tests = [
     assert (get_panel s "paragraph_panel_content" "hanging_punctuation" = `Bool true);
     assert (get_panel s "paragraph_panel_content" "bullets" = `String "bullet-disc");
     assert (get_panel s "paragraph_panel_content" "numbered_list" = `String ""));
+
+  (* Phase 3c: aggregation across multiple wrappers. *)
+  Alcotest.test_case "phase3c_agrees_across_wrappers" `Quick (fun () ->
+    let mk i li : Jas.Element.tspan =
+      { (Jas.Tspan.default_tspan ()) with
+        id = i; content = "";
+        jas_role = Some "paragraph";
+        jas_left_indent = Some li;
+        jas_hyphenate = Some true } in
+    let w1 = mk 0 12.0 in
+    let c1 = { (Jas.Tspan.default_tspan ()) with id = 1; content = "a" } in
+    let w2 = mk 2 12.0 in
+    let c2 = { (Jas.Tspan.default_tspan ()) with id = 3; content = "b" } in
+    let area = match Jas.Element.make_text ~text_width:200.0 ~text_height:100.0
+                       0.0 0.0 "ab" with
+      | Jas.Element.Text r -> Jas.Element.Text { r with tspans = [| w1; c1; w2; c2 |] }
+      | _ -> assert false in
+    let layer = Jas.Element.make_layer [| area |] in
+    let selection = Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" [
+      ("text_selected", `Bool true); ("area_text_selected", `Bool true);
+      ("left_indent", `Float 0.0); ("hyphenate", `Bool false);
+    ];
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "left_indent" = `Float 12.0);
+    assert (get_panel s "paragraph_panel_content" "hyphenate" = `Bool true));
+
+  Alcotest.test_case "phase3c_mixed_numeric_omits_key" `Quick (fun () ->
+    (* Two wrappers disagreeing on left_indent (12 vs 24) — the
+       override is omitted so panel.left_indent retains its
+       initialised default (0.0). *)
+    let w1 : Jas.Element.tspan = { (Jas.Tspan.default_tspan ()) with
+      id = 0; content = ""; jas_role = Some "paragraph";
+      jas_left_indent = Some 12.0 } in
+    let c1 = { (Jas.Tspan.default_tspan ()) with id = 1; content = "a" } in
+    let w2 : Jas.Element.tspan = { (Jas.Tspan.default_tspan ()) with
+      id = 2; content = ""; jas_role = Some "paragraph";
+      jas_left_indent = Some 24.0 } in
+    let c2 = { (Jas.Tspan.default_tspan ()) with id = 3; content = "b" } in
+    let area = match Jas.Element.make_text ~text_width:200.0 ~text_height:100.0
+                       0.0 0.0 "ab" with
+      | Jas.Element.Text r -> Jas.Element.Text { r with tspans = [| w1; c1; w2; c2 |] }
+      | _ -> assert false in
+    let layer = Jas.Element.make_layer [| area |] in
+    let selection = Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" [
+      ("text_selected", `Bool true); ("area_text_selected", `Bool true);
+      ("left_indent", `Float 0.0);
+    ];
+    sync_paragraph_panel_from_selection s ctrl;
+    (* No write happened — default 0.0 stays. *)
+    assert (get_panel s "paragraph_panel_content" "left_indent" = `Float 0.0));
 ]
 
 (* ── Preview snapshot/restore (Phase 0) ─────────────────────
