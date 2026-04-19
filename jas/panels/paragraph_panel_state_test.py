@@ -114,3 +114,80 @@ class TestSyncParagraphPanelFromSelection:
         sync_paragraph_panel_from_selection(store, model)
         assert store.get_panel("paragraph_panel_content", "text_selected") is True
         assert store.get_panel("paragraph_panel_content", "area_text_selected") is False
+
+
+def _store_with_phase3b_panel():
+    """Init the panel scope with Phase 3a + 3b defaults so set_panel
+    has somewhere to write."""
+    from workspace_interpreter.state_store import StateStore
+    s = StateStore()
+    s.init_panel("paragraph_panel_content", {
+        "text_selected": True,
+        "area_text_selected": True,
+        "left_indent": 0,
+        "right_indent": 0,
+        "hyphenate": False,
+        "hanging_punctuation": False,
+        "bullets": "",
+        "numbered_list": "",
+    })
+    return s
+
+
+class TestPhase3bParagraphAttrReads:
+    """Phase 3b: read paragraph attrs from the first wrapper tspan
+    in the first selected text element."""
+
+    def test_reads_para_wrapper_attrs(self):
+        from geometry.element import Text
+        from geometry.tspan import Tspan
+        wrapper = Tspan(id=0, content="", jas_role="paragraph",
+                        jas_left_indent=18.0, jas_right_indent=9.0,
+                        jas_hyphenate=True, jas_hanging_punctuation=True,
+                        jas_list_style="bullet-disc")
+        content = Tspan(id=1, content="hello")
+        area = Text(x=0, y=0, content="hello",
+                    tspans=(wrapper, content),
+                    font_family="sans-serif", font_size=12,
+                    width=200, height=100)
+        model = _Model([((0, 0), area)])
+        store = _store_with_phase3b_panel()
+        sync_paragraph_panel_from_selection(store, model)
+        assert store.get_panel("paragraph_panel_content", "left_indent") == 18.0
+        assert store.get_panel("paragraph_panel_content", "right_indent") == 9.0
+        assert store.get_panel("paragraph_panel_content", "hyphenate") is True
+        assert store.get_panel("paragraph_panel_content", "hanging_punctuation") is True
+        assert store.get_panel("paragraph_panel_content", "bullets") == "bullet-disc"
+        assert store.get_panel("paragraph_panel_content", "numbered_list") == ""
+
+    def test_num_list_style_routes_to_numbered_dropdown(self):
+        from geometry.element import Text
+        from geometry.tspan import Tspan
+        wrapper = Tspan(id=0, content="", jas_role="paragraph",
+                        jas_list_style="num-decimal")
+        content = Tspan(id=1, content="1. item")
+        area = Text(x=0, y=0, content="hello",
+                    tspans=(wrapper, content),
+                    font_family="sans-serif", font_size=12,
+                    width=200, height=100)
+        model = _Model([((0, 0), area)])
+        store = _store_with_phase3b_panel()
+        sync_paragraph_panel_from_selection(store, model)
+        assert store.get_panel("paragraph_panel_content", "numbered_list") == "num-decimal"
+        assert store.get_panel("paragraph_panel_content", "bullets") == ""
+
+    def test_absent_wrapper_leaves_panel_defaults(self):
+        # Area text without any wrapper tspan — text-kind flags fire
+        # but no paragraph-attr writes happen.
+        from geometry.element import Text
+        area = Text(x=0, y=0, content="hi", font_family="sans-serif",
+                    font_size=12, width=200, height=100)
+        model = _Model([((0, 0), area)])
+        store = _store_with_phase3b_panel()
+        sync_paragraph_panel_from_selection(store, model)
+        assert store.get_panel("paragraph_panel_content", "text_selected") is True
+        assert store.get_panel("paragraph_panel_content", "area_text_selected") is True
+        # Defaults from init_panel preserved.
+        assert store.get_panel("paragraph_panel_content", "left_indent") == 0
+        assert store.get_panel("paragraph_panel_content", "bullets") == ""
+        assert store.get_panel("paragraph_panel_content", "hyphenate") is False

@@ -42,6 +42,7 @@ def sync_paragraph_panel_from_selection(store, model) -> None:
 
     any_text = False
     all_area = True
+    first_para = None
     for es in doc.selection:
         path = getattr(es, "path", None)
         if path is None:
@@ -51,6 +52,11 @@ def sync_paragraph_panel_from_selection(store, model) -> None:
             any_text = True
             if not (elem.width > 0 and elem.height > 0):
                 all_area = False
+            if first_para is None:
+                for t in elem.tspans:
+                    if t.jas_role == "paragraph":
+                        first_para = t
+                        break
         elif isinstance(elem, TextPath):
             any_text = True
             all_area = False
@@ -59,3 +65,35 @@ def sync_paragraph_panel_from_selection(store, model) -> None:
     area_text_selected = any_text and all_area
     store.set_panel("paragraph_panel_content", "text_selected", text_selected)
     store.set_panel("paragraph_panel_content", "area_text_selected", area_text_selected)
+
+    # Phase 3b paragraph attribute reads. The reader takes the first
+    # wrapper's values verbatim (mixed-state aggregation deferred to
+    # Phase 3c). Absent wrapper leaves the panel's existing values
+    # intact — we only call set_panel for fields actually present on
+    # the wrapper.
+    if first_para is None:
+        return
+    if first_para.jas_left_indent is not None:
+        store.set_panel("paragraph_panel_content", "left_indent",
+                        first_para.jas_left_indent)
+    if first_para.jas_right_indent is not None:
+        store.set_panel("paragraph_panel_content", "right_indent",
+                        first_para.jas_right_indent)
+    if first_para.jas_hyphenate is not None:
+        store.set_panel("paragraph_panel_content", "hyphenate",
+                        first_para.jas_hyphenate)
+    if first_para.jas_hanging_punctuation is not None:
+        store.set_panel("paragraph_panel_content", "hanging_punctuation",
+                        first_para.jas_hanging_punctuation)
+    # Single backing attr split into two panel dropdowns. bullet-*
+    # populates panel.bullets; num-* populates panel.numbered_list.
+    # The other dropdown shows "" (matching the spec's mutual
+    # exclusion in PARAGRAPH.md §Bullets and numbered lists).
+    ls = first_para.jas_list_style
+    if ls is not None:
+        if ls.startswith("bullet-"):
+            store.set_panel("paragraph_panel_content", "bullets", ls)
+            store.set_panel("paragraph_panel_content", "numbered_list", "")
+        elif ls.startswith("num-"):
+            store.set_panel("paragraph_panel_content", "numbered_list", ls)
+            store.set_panel("paragraph_panel_content", "bullets", "")

@@ -195,6 +195,11 @@ def _pack_tspan(t) -> list:
         transform,
         t.xml_lang,
         t.jas_role,
+        t.jas_left_indent,
+        t.jas_right_indent,
+        t.jas_hyphenate,
+        t.jas_hanging_punctuation,
+        t.jas_list_style,
     ]
 
 
@@ -237,6 +242,11 @@ def _unpack_tspan(v):
         transform=transform,
         xml_lang=get(21),
         jas_role=get(22),
+        jas_left_indent=get(23),
+        jas_right_indent=get(24),
+        jas_hyphenate=get(25),
+        jas_hanging_punctuation=get(26),
+        jas_list_style=get(27),
     )
 
 
