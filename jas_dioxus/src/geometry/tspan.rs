@@ -63,6 +63,26 @@ pub struct Tspan {
     /// num-decimal, num-lower-alpha, num-upper-alpha, num-lower-roman,
     /// num-upper-roman; absent = no marker.
     pub jas_list_style: Option<String>,
+    // ── Phase 1b1: remaining panel-surface paragraph attrs ──────
+    /// CSS `text-align` on the paragraph wrapper tspan. Values:
+    /// `left` / `center` / `right` / `justify`. Combined with
+    /// `text_align_last` to drive the 7-button alignment radio group
+    /// per PARAGRAPH.md alignment sub-mapping.
+    pub text_align: Option<String>,
+    /// CSS `text-align-last` on the paragraph wrapper tspan. Values:
+    /// `left` / `center` / `right` / `justify`. Only meaningful when
+    /// `text_align` is `justify` (otherwise omitted per the spec).
+    pub text_align_last: Option<String>,
+    /// CSS `text-indent` on the paragraph wrapper tspan — pt, signed.
+    /// Negative values produce hanging indents. Backs the
+    /// `FIRST_LINE_INDENT_DROPDOWN` panel control.
+    pub text_indent: Option<f64>,
+    /// `jas:space-before` — pt, unsigned. Vertical space above each
+    /// paragraph (omitted before the first paragraph in a text element).
+    pub jas_space_before: Option<f64>,
+    /// `jas:space-after` — pt, unsigned. Vertical space below each
+    /// paragraph.
+    pub jas_space_after: Option<f64>,
     pub letter_spacing: Option<f64>,
     pub line_height: Option<f64>,
     pub rotate: Option<f64>,
@@ -105,6 +125,11 @@ impl Tspan {
             && self.jas_hyphenate.is_none()
             && self.jas_hanging_punctuation.is_none()
             && self.jas_list_style.is_none()
+            && self.text_align.is_none()
+            && self.text_align_last.is_none()
+            && self.text_indent.is_none()
+            && self.jas_space_before.is_none()
+            && self.jas_space_after.is_none()
             && self.letter_spacing.is_none()
             && self.line_height.is_none()
             && self.rotate.is_none()
@@ -206,6 +231,11 @@ pub fn tspans_to_svg_fragment(tspans: &[Tspan]) -> String {
         if let Some(v) = t.jas_hyphenate { attrs.push(("jas:hyphenate", v.to_string())); }
         if let Some(v) = t.jas_hanging_punctuation { attrs.push(("jas:hanging-punctuation", v.to_string())); }
         if let Some(v) = &t.jas_list_style { attrs.push(("jas:list-style", v.clone())); }
+        if let Some(v) = &t.text_align { attrs.push(("text-align", v.clone())); }
+        if let Some(v) = &t.text_align_last { attrs.push(("text-align-last", v.clone())); }
+        if let Some(v) = t.text_indent { attrs.push(("text-indent", fmt_f64(v))); }
+        if let Some(v) = t.jas_space_before { attrs.push(("jas:space-before", fmt_f64(v))); }
+        if let Some(v) = t.jas_space_after { attrs.push(("jas:space-after", fmt_f64(v))); }
         if let Some(v) = t.letter_spacing { attrs.push(("letter-spacing", fmt_f64(v))); }
         if let Some(v) = t.line_height { attrs.push(("line-height", fmt_f64(v))); }
         if let Some(v) = t.rotate { attrs.push(("rotate", fmt_f64(v))); }
@@ -293,6 +323,11 @@ pub fn tspans_from_svg_fragment(svg_str: &str) -> Option<Vec<Tspan>> {
                 "jas:hyphenate" => t.jas_hyphenate = Some(v == "true"),
                 "jas:hanging-punctuation" => t.jas_hanging_punctuation = Some(v == "true"),
                 "jas:list-style" => t.jas_list_style = Some(v),
+                "text-align" => t.text_align = Some(v),
+                "text-align-last" => t.text_align_last = Some(v),
+                "text-indent" => t.text_indent = v.parse().ok(),
+                "jas:space-before" => t.jas_space_before = v.parse().ok(),
+                "jas:space-after" => t.jas_space_after = v.parse().ok(),
                 "letter-spacing" => t.letter_spacing = v.parse().ok(),
                 "line-height" => t.line_height = v.parse().ok(),
                 "rotate" => t.rotate = v.parse().ok(),
@@ -385,6 +420,8 @@ pub fn merge_tspan_overrides(target: &mut Tspan, source: &Tspan) {
         jas_kerning_mode, jas_no_break, jas_role,
         jas_left_indent, jas_right_indent, jas_hyphenate,
         jas_hanging_punctuation, jas_list_style,
+        text_align, text_align_last, text_indent,
+        jas_space_before, jas_space_after,
         letter_spacing, line_height, rotate, style_name, text_decoration,
         text_rendering, text_transform, transform, xml_lang
     );
@@ -1525,6 +1562,48 @@ mod tests {
         let mut t = Tspan::default_tspan();
         t.jas_list_style = Some("bullet-disc".into());
         assert!(!t.has_no_overrides());
+    }
+
+    // ── Phase 1b1 remaining panel-surface paragraph attrs ──────────
+
+    #[test]
+    fn has_no_overrides_false_when_phase1b1_attrs_set() {
+        let mut t = Tspan::default_tspan();
+        t.text_align = Some("justify".into());
+        assert!(!t.has_no_overrides());
+
+        let mut t = Tspan::default_tspan();
+        t.text_indent = Some(-12.0);
+        assert!(!t.has_no_overrides());
+
+        let mut t = Tspan::default_tspan();
+        t.jas_space_before = Some(6.0);
+        assert!(!t.has_no_overrides());
+    }
+
+    #[test]
+    fn svg_fragment_phase1b1_attrs_round_trip() {
+        let mut t = Tspan::default_tspan();
+        t.content = "".into();
+        t.jas_role = Some("paragraph".into());
+        t.text_align = Some("justify".into());
+        t.text_align_last = Some("center".into());
+        t.text_indent = Some(-18.0);
+        t.jas_space_before = Some(6.0);
+        t.jas_space_after = Some(12.0);
+        let svg = tspans_to_svg_fragment(&[t]);
+        assert!(svg.contains(r#"text-align="justify""#), "got: {}", svg);
+        assert!(svg.contains(r#"text-align-last="center""#));
+        assert!(svg.contains(r#"text-indent="-18""#));
+        assert!(svg.contains(r#"jas:space-before="6""#));
+        assert!(svg.contains(r#"jas:space-after="12""#));
+        let back = tspans_from_svg_fragment(&svg).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].text_align.as_deref(), Some("justify"));
+        assert_eq!(back[0].text_align_last.as_deref(), Some("center"));
+        assert_eq!(back[0].text_indent, Some(-18.0));
+        assert_eq!(back[0].jas_space_before, Some(6.0));
+        assert_eq!(back[0].jas_space_after, Some(12.0));
     }
 
     #[test]

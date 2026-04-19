@@ -608,6 +608,11 @@ fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
         jas_hyphenate: v["jas_hyphenate"].as_bool(),
         jas_hanging_punctuation: v["jas_hanging_punctuation"].as_bool(),
         jas_list_style: parse_str_opt(&v["jas_list_style"]),
+        text_align: parse_str_opt(&v["text_align"]),
+        text_align_last: parse_str_opt(&v["text_align_last"]),
+        text_indent: v["text_indent"].as_f64(),
+        jas_space_before: v["jas_space_before"].as_f64(),
+        jas_space_after: v["jas_space_after"].as_f64(),
     }
 }
 
