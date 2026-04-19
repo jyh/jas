@@ -12812,7 +12812,7 @@
             "children": [
               {
                 "type": "container",
-                "col": 1,
+                "col": 2,
                 "style": {
                   "alignment": "center"
                 },
@@ -12823,8 +12823,8 @@
                     "summary": "Bullets",
                     "description": "Bullet marker for each paragraph. Mutually exclusive with Numbered List via shared jas:list-style attribute.\n",
                     "style": {
-                      "width": 36,
-                      "height": 22
+                      "width": 48,
+                      "height": 26
                     },
                     "options": [
                       {
@@ -12872,7 +12872,7 @@
               },
               {
                 "type": "container",
-                "col": 1,
+                "col": 2,
                 "style": {
                   "alignment": "center"
                 },
@@ -12883,8 +12883,8 @@
                     "summary": "Numbered List",
                     "description": "Numbering style. Counter resets when a paragraph with a different (or absent) jas:list-style breaks the run.\n",
                     "style": {
-                      "width": 36,
-                      "height": 22
+                      "width": 48,
+                      "height": 26
                     },
                     "options": [
                       {

@@ -268,7 +268,7 @@ content:
     - type: row
       children:
         - type: container
-          col: 1
+          col: 2
           style: { alignment: center }
           children:
             - id: pg_bullets
@@ -277,7 +277,7 @@ content:
               description: >
                 Bullet marker for each paragraph. Mutually exclusive with
                 Numbered List via shared jas:list-style attribute.
-              style: { width: 36, height: 22 }
+              style: { width: 48, height: 26 }
               options:
                 - { value: "",                  glyph: "—", label: "None" }
                 - { value: "bullet-disc",       glyph: "•", label: "Disc" }
@@ -290,7 +290,7 @@ content:
                 value: "panel.bullets"
                 disabled: "not panel.text_selected"
         - type: container
-          col: 1
+          col: 2
           style: { alignment: center }
           children:
             - id: pg_numbered_list
@@ -299,7 +299,7 @@ content:
               description: >
                 Numbering style. Counter resets when a paragraph with a
                 different (or absent) jas:list-style breaks the run.
-              style: { width: 36, height: 22 }
+              style: { width: 48, height: 26 }
               options:
                 - { value: "",                glyph: "—",  label: "None" }
                 - { value: "num-decimal",     glyph: "1.", label: "Decimal" }
