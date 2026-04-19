@@ -98,6 +98,8 @@ let build_segments_from_text (tspans : Element.tspan array) (content : string)
        | None -> ());
       let list_style = t.jas_list_style in
       let marker_gap = if list_style <> None then marker_gap_pt else 0.0 in
+      let hanging_punctuation =
+        match t.jas_hanging_punctuation with Some v -> v | None -> false in
       current := Some {
         Text_layout.char_start = !cursor;
         char_end = !cursor;
@@ -109,6 +111,7 @@ let build_segments_from_text (tspans : Element.tspan array) (content : string)
         text_align = _text_align_from t.text_align is_area;
         list_style;
         marker_gap;
+        hanging_punctuation;
       }
     end else
       cursor := !cursor + body_chars

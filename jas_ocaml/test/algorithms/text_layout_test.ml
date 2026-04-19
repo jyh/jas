@@ -268,6 +268,130 @@ let phase6_layout_list_tests = [
     list_ignores_first_line_indent;
 ]
 
+(* ── Phase 7: hanging punctuation ───────────────────────── *)
+
+let _u (cp : int) = Uchar.of_int cp
+
+let left_hanger_class () =
+  List.iter (fun cp ->
+    Alcotest.(check bool) (Printf.sprintf "U+%04X is left hanger" cp)
+      true (Text_layout.is_left_hanger (_u cp))
+  ) [0x0022; 0x0027; 0x201C; 0x2018; 0x00AB; 0x2039;
+     0x0028; 0x005B; 0x007B];
+  List.iter (fun cp ->
+    Alcotest.(check bool) (Printf.sprintf "U+%04X not left hanger" cp)
+      false (Text_layout.is_left_hanger (_u cp))
+  ) [0x0061; 0x002E; 0x002C; 0x0029; 0x005D; 0x007D; 0x201D]
+
+let right_hanger_class () =
+  List.iter (fun cp ->
+    Alcotest.(check bool) (Printf.sprintf "U+%04X is right hanger" cp)
+      true (Text_layout.is_right_hanger (_u cp))
+  ) [0x0022; 0x0027; 0x201D; 0x2019; 0x00BB; 0x203A;
+     0x0029; 0x005D; 0x007D; 0x002E; 0x002C;
+     0x002D; 0x2013; 0x2014];
+  List.iter (fun cp ->
+    Alcotest.(check bool) (Printf.sprintf "U+%04X not right hanger" cp)
+      false (Text_layout.is_right_hanger (_u cp))
+  ) [0x0061; 0x201C; 0x2018; 0x0028; 0x005B; 0x007B]
+
+let hanging_off_no_effect () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 4;
+                text_align = Text_layout.Left;
+                hanging_punctuation = false }] in
+  let l = Text_layout.layout_with_paragraphs "(ab)" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "x" 0.0 l.glyphs.(0).x
+
+let left_aligned_left_hanger () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 4;
+                text_align = Text_layout.Left;
+                hanging_punctuation = true }] in
+  let l = Text_layout.layout_with_paragraphs "(abc" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "( in margin" (-10.0) l.glyphs.(0).x;
+  Alcotest.(check (float 0.001)) "a at edge" 0.0 l.glyphs.(1).x
+
+let left_aligned_right_hanger_no_shift () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 3;
+                text_align = Text_layout.Left;
+                hanging_punctuation = true }] in
+  let l = Text_layout.layout_with_paragraphs "ab." 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "a x" 0.0 l.glyphs.(0).x;
+  Alcotest.(check (float 0.001)) ". inside" 20.0 l.glyphs.(2).x
+
+let right_aligned_right_hanger () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 3;
+                text_align = Text_layout.Right;
+                hanging_punctuation = true }] in
+  let l = Text_layout.layout_with_paragraphs "ab." 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "b right" 100.0 l.glyphs.(1).right;
+  Alcotest.(check (float 0.001)) ". sticks out" 100.0 l.glyphs.(2).x
+
+let right_aligned_left_hanger_no_shift () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 3;
+                text_align = Text_layout.Right;
+                hanging_punctuation = true }] in
+  let l = Text_layout.layout_with_paragraphs "(ab" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "b right" 100.0 l.glyphs.(2).right;
+  Alcotest.(check (float 0.001)) "( inside" 70.0 l.glyphs.(0).x
+
+let centered_both_sides_hang () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 4;
+                text_align = Text_layout.Center;
+                hanging_punctuation = true }] in
+  let l = Text_layout.layout_with_paragraphs "(ab." 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "( x" 30.0 l.glyphs.(0).x;
+  Alcotest.(check (float 0.001)) "a x" 40.0 l.glyphs.(1).x;
+  Alcotest.(check (float 0.001)) "b x" 50.0 l.glyphs.(2).x;
+  Alcotest.(check (float 0.001)) ". x" 60.0 l.glyphs.(3).x
+
+let dash_hangs_at_eol_right_aligned () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 3;
+                text_align = Text_layout.Right;
+                hanging_punctuation = true }] in
+  let l = Text_layout.layout_with_paragraphs "ab-" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "- x" 100.0 l.glyphs.(2).x
+
+let hanging_with_left_indent () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 3;
+                left_indent = 20.0;
+                text_align = Text_layout.Left;
+                hanging_punctuation = true }] in
+  let l = Text_layout.layout_with_paragraphs "(ab" 100.0 16.0 segs m in
+  Alcotest.(check (float 0.001)) "( x" 10.0 l.glyphs.(0).x;
+  Alcotest.(check (float 0.001)) "a x" 20.0 l.glyphs.(1).x
+
+let phase7_tests = [
+  Alcotest.test_case "left_hanger_class" `Quick left_hanger_class;
+  Alcotest.test_case "right_hanger_class" `Quick right_hanger_class;
+  Alcotest.test_case "hanging_off_no_effect" `Quick hanging_off_no_effect;
+  Alcotest.test_case "left_aligned_left_hanger" `Quick left_aligned_left_hanger;
+  Alcotest.test_case "left_aligned_right_hanger_no_shift" `Quick
+    left_aligned_right_hanger_no_shift;
+  Alcotest.test_case "right_aligned_right_hanger" `Quick right_aligned_right_hanger;
+  Alcotest.test_case "right_aligned_left_hanger_no_shift" `Quick
+    right_aligned_left_hanger_no_shift;
+  Alcotest.test_case "centered_both_sides_hang" `Quick centered_both_sides_hang;
+  Alcotest.test_case "dash_hangs_at_eol_right_aligned" `Quick
+    dash_hangs_at_eol_right_aligned;
+  Alcotest.test_case "hanging_with_left_indent" `Quick hanging_with_left_indent;
+]
+
 let () =
   Alcotest.run "TextLayout" [
     "Phase 5 layout", [
@@ -300,4 +424,5 @@ let () =
     ];
     "Phase 6 markers", phase6_marker_tests;
     "Phase 6 layout list", phase6_layout_list_tests;
+    "Phase 7 hanging punctuation", phase7_tests;
   ]
