@@ -147,7 +147,9 @@ pub fn build_segments_from_text(
             }
             // Open a new one. Phase 6 carries jas:list-style through
             // so the renderer can draw the marker and the layout can
-            // shift the text by marker_gap.
+            // shift the text by marker_gap. Phase 7 carries
+            // jas:hanging-punctuation so layout can offset hanging
+            // chars at line edges.
             let list_style = t.jas_list_style.clone();
             let marker_gap = if list_style.is_some() { MARKER_GAP_PT } else { 0.0 };
             current = Some(ParagraphSegment {
@@ -161,6 +163,7 @@ pub fn build_segments_from_text(
                 text_align: text_align_from(t.text_align.as_deref(), is_area),
                 list_style,
                 marker_gap,
+                hanging_punctuation: t.jas_hanging_punctuation.unwrap_or(false),
             });
         } else {
             cursor += body_chars;
