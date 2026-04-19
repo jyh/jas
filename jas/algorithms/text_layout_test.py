@@ -367,3 +367,99 @@ def test_to_alpha_rollover():
 
 def test_to_roman_above_3999_falls_back():
     assert to_roman(4000, False) == "(4000)"
+
+
+# ── Phase 7: hanging punctuation ─────────────────────────────
+
+from algorithms.text_layout import is_left_hanger, is_right_hanger
+
+
+def test_left_hanger_class_membership():
+    for c in ['"', "'", "\u201C", "\u2018", "\u00AB", "\u2039",
+              "(", "[", "{"]:
+        assert is_left_hanger(c), c
+    for c in ['a', '.', ',', ')', ']', '}', "\u201D"]:
+        assert not is_left_hanger(c), c
+
+
+def test_right_hanger_class_membership():
+    for c in ['"', "'", "\u201D", "\u2019", "\u00BB", "\u203A",
+              ")", "]", "}", ".", ",",
+              "-", "\u2013", "\u2014"]:
+        assert is_right_hanger(c), c
+    for c in ['a', "\u201C", "\u2018", "(", "[", "{"]:
+        assert not is_right_hanger(c), c
+
+
+def test_hanging_off_no_effect():
+    segs = [ParagraphSegment(char_start=0, char_end=4,
+                              text_align=TextAlign.LEFT,
+                              hanging_punctuation=False)]
+    l = layout_with_paragraphs("(ab)", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 0.0
+
+
+def test_left_aligned_left_hanger_shifts_into_left_margin():
+    segs = [ParagraphSegment(char_start=0, char_end=4,
+                              text_align=TextAlign.LEFT,
+                              hanging_punctuation=True)]
+    l = layout_with_paragraphs("(abc", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == -10.0  # '(' in margin
+    assert l.glyphs[1].x == 0.0    # 'a' at edge
+
+
+def test_left_aligned_right_hanger_no_shift():
+    segs = [ParagraphSegment(char_start=0, char_end=3,
+                              text_align=TextAlign.LEFT,
+                              hanging_punctuation=True)]
+    l = layout_with_paragraphs("ab.", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 0.0
+    assert l.glyphs[2].x == 20.0  # '.' inside the box
+
+
+def test_right_aligned_right_hanger_sticks_outside():
+    segs = [ParagraphSegment(char_start=0, char_end=3,
+                              text_align=TextAlign.RIGHT,
+                              hanging_punctuation=True)]
+    l = layout_with_paragraphs("ab.", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[1].right == 100.0
+    assert l.glyphs[2].x == 100.0  # '.' sticks out
+
+
+def test_right_aligned_left_hanger_no_shift():
+    segs = [ParagraphSegment(char_start=0, char_end=3,
+                              text_align=TextAlign.RIGHT,
+                              hanging_punctuation=True)]
+    l = layout_with_paragraphs("(ab", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[2].right == 100.0
+    assert l.glyphs[0].x == 70.0  # '(' inside, normal right-align
+
+
+def test_centered_both_sides_hang():
+    segs = [ParagraphSegment(char_start=0, char_end=4,
+                              text_align=TextAlign.CENTER,
+                              hanging_punctuation=True)]
+    l = layout_with_paragraphs("(ab.", 100.0, 16.0, segs, fixed(10.0))
+    # effective_visible_w = 20; shift = (100-20)/2 - 10 = 30.
+    assert l.glyphs[0].x == 30.0
+    assert l.glyphs[1].x == 40.0
+    assert l.glyphs[2].x == 50.0
+    assert l.glyphs[3].x == 60.0
+
+
+def test_dash_hangs_at_eol_when_right_aligned():
+    segs = [ParagraphSegment(char_start=0, char_end=3,
+                              text_align=TextAlign.RIGHT,
+                              hanging_punctuation=True)]
+    l = layout_with_paragraphs("ab-", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[2].x == 100.0  # '-' hangs right
+
+
+def test_hanging_with_left_indent():
+    segs = [ParagraphSegment(char_start=0, char_end=3,
+                              left_indent=20.0,
+                              text_align=TextAlign.LEFT,
+                              hanging_punctuation=True)]
+    l = layout_with_paragraphs("(ab", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 10.0  # '(' = 20 - 10
+    assert l.glyphs[1].x == 20.0  # 'a' at left_indent edge

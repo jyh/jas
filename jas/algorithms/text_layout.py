@@ -285,6 +285,12 @@ class ParagraphSegment:
     # Gap between marker and text. Phase 6 uses a fixed 12pt per
     # PARAGRAPH.md §Marker rendering.
     marker_gap: float = 0.0
+    # jas:hanging-punctuation — Phase 7. When True, hangable chars
+    # at line start / end offset outside the effective edge by their
+    # own advance width per PARAGRAPH.md §Hanging Punctuation.
+    # Alignment interaction: left-aligned hangs only left side,
+    # right-aligned only right, centered both.
+    hanging_punctuation: bool = False
 
 
 def _trimmed_line_width(line: LineInfo, glyphs: list[Glyph]) -> float:
@@ -341,7 +347,8 @@ def layout_with_paragraphs(
                 first_line_indent=p.first_line_indent,
                 space_before=p.space_before, space_after=p.space_after,
                 text_align=p.text_align,
-                list_style=p.list_style, marker_gap=p.marker_gap)
+                list_style=p.list_style, marker_gap=p.marker_gap,
+                hanging_punctuation=p.hanging_punctuation)
             segs.append(seg)
         cursor = e
     if cursor < n:
@@ -377,12 +384,36 @@ def layout_with_paragraphs(
             line_avail = max(0.0, effective_max - (first_line_extra if li == 0 else 0.0)) \
                 if effective_max > 0.0 else 0.0
             visible_w = _trimmed_line_width(line, para.glyphs)
+            # Phase 7: hanging punctuation. Offset hangable chars at
+            # line start / end outside the effective edge per
+            # PARAGRAPH.md §Hanging Punctuation. Alignment per spec:
+            # left-aligned hangs only left, right-aligned only right,
+            # centered both.
+            left_hang_w = 0.0
+            right_hang_w = 0.0
+            if seg.hanging_punctuation:
+                allow_left = seg.text_align in (TextAlign.LEFT, TextAlign.CENTER)
+                allow_right = seg.text_align in (TextAlign.RIGHT, TextAlign.CENTER)
+                line_glyphs = para.glyphs[line.glyph_start:line.glyph_end]
+                first_g = next((g for g in line_glyphs if not g.is_trailing_space), None)
+                last_g = next((g for g in reversed(line_glyphs) if not g.is_trailing_space), None)
+                if allow_left and first_g is not None:
+                    c = chars[seg.char_start + first_g.idx]
+                    if is_left_hanger(c):
+                        left_hang_w = first_g.right - first_g.x
+                if allow_right and last_g is not None:
+                    c = chars[seg.char_start + last_g.idx]
+                    if is_right_hanger(c):
+                        right_hang_w = last_g.right - last_g.x
+            effective_visible_w = max(0.0, visible_w - left_hang_w - right_hang_w)
             if seg.text_align == TextAlign.CENTER:
-                align_shift = (line_avail - visible_w) / 2.0 if line_avail > visible_w else 0.0
+                align_shift = (line_avail - effective_visible_w) / 2.0 - left_hang_w \
+                    if line_avail > effective_visible_w else -left_hang_w
             elif seg.text_align == TextAlign.RIGHT:
-                align_shift = line_avail - visible_w if line_avail > visible_w else 0.0
+                align_shift = line_avail - effective_visible_w \
+                    if line_avail > effective_visible_w else 0.0
             else:
-                align_shift = 0.0
+                align_shift = -left_hang_w
             total_shift = x_shift + align_shift
             orig_start = seg.char_start + line.start
             orig_end = seg.char_start + line.end
@@ -452,7 +483,8 @@ def build_paragraph_segments(
                 space_before=t.jas_space_before or 0.0,
                 space_after=t.jas_space_after or 0.0,
                 text_align=_text_align_from(t.text_align, is_area),
-                list_style=list_style, marker_gap=marker_gap)
+                list_style=list_style, marker_gap=marker_gap,
+                hanging_punctuation=bool(t.jas_hanging_punctuation))
         else:
             cursor += body_chars
     if current is not None:
@@ -471,6 +503,43 @@ def _text_align_from(value: str | None, is_area: bool) -> TextAlign:
     if value == "right":
         return TextAlign.RIGHT
     return TextAlign.LEFT
+
+
+# ── Phase 7: hanging punctuation char-class predicates ──────
+
+# Open-side hangers: straight quotes (both sides), left curly /
+# angle quotes, open brackets.
+_LEFT_HANGERS = frozenset({
+    '"', "'",
+    "\u201C", "\u2018",      # left curly double / single quote
+    "\u00AB", "\u2039",      # left angle double / single
+    "(", "[", "{",
+})
+
+# Close-side hangers: straight quotes, right curly / angle quotes,
+# close brackets, period / comma, hyphen / en dash / em dash. Dashes
+# only ever hang at end-of-line — the layout consults this on the
+# last visible glyph so that constraint is implicit.
+_RIGHT_HANGERS = frozenset({
+    '"', "'",
+    "\u201D", "\u2019",      # right curly double / single quote
+    "\u00BB", "\u203A",      # right angle double / single
+    ")", "]", "}",
+    ".", ",",
+    "-", "\u2013", "\u2014",
+})
+
+
+def is_left_hanger(c: str) -> bool:
+    """True if ``c`` may hang into the left margin per
+    PARAGRAPH.md §Hanging Punctuation."""
+    return c in _LEFT_HANGERS
+
+
+def is_right_hanger(c: str) -> bool:
+    """True if ``c`` may hang into the right margin per
+    PARAGRAPH.md §Hanging Punctuation."""
+    return c in _RIGHT_HANGERS
 
 
 # ── Phase 6: list markers + counter run rule ────────────────
