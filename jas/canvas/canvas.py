@@ -907,6 +907,35 @@ def _draw_element(painter: QPainter, elem: Element,
                         painter.drawText(QPointF(0, 0), ch)
                         painter.restore()
                         cx += measure(ch) + ls_px
+            # Phase 6: list markers. Walk segments after the body
+            # text pass, drawing each list paragraph's marker glyph
+            # at x = element.x + segment.left_indent on the first-
+            # line baseline. Counter values are computed once across
+            # all segments so the run rule (consecutive same-style
+            # num-* paragraphs count up; bullets / no-style /
+            # different num style all reset) holds across the
+            # element.
+            if psegs:
+                from algorithms.text_layout import (
+                    compute_counters as _compute_counters,
+                    marker_text as _marker_text,
+                )
+                counters = _compute_counters(psegs)
+                for si, seg in enumerate(psegs):
+                    style = seg.list_style or ""
+                    if not style:
+                        continue
+                    marker = _marker_text(style, counters[si])
+                    if not marker:
+                        continue
+                    first_line = next(
+                        (l for l in lay.lines if l.start >= seg.char_start),
+                        None)
+                    if first_line is None:
+                        continue
+                    baseline = y + first_line.baseline_y + y_shift
+                    marker_x = x + seg.left_indent
+                    painter.drawText(QPointF(marker_x, baseline), marker)
             if needs_scale:
                 painter.restore()
 

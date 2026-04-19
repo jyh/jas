@@ -268,13 +268,23 @@ class ParagraphSegment:
     right_indent: float = 0.0
     # text-indent — additional x offset on the *first* line only.
     # Signed; negative produces a hanging indent. Phase 5 supports
-    # non-negative values; negative falls back to 0.
+    # non-negative values; negative falls back to 0. Ignored when
+    # ``list_style`` is non-None per PARAGRAPH.md §Marker rendering.
     first_line_indent: float = 0.0
     # jas:space-before — extra vertical gap above this paragraph.
     # Always 0 for the first paragraph in the element.
     space_before: float = 0.0
     space_after: float = 0.0
     text_align: TextAlign = TextAlign.LEFT
+    # jas:list-style — Phase 6. When non-None, the paragraph is a
+    # list item: the layout pushes every line by an extra
+    # ``marker_gap`` (so the marker has room before the text) and
+    # ignores ``first_line_indent``. The marker glyph itself is
+    # drawn at ``x = left_indent`` by the renderer.
+    list_style: str | None = None
+    # Gap between marker and text. Phase 6 uses a fixed 12pt per
+    # PARAGRAPH.md §Marker rendering.
+    marker_gap: float = 0.0
 
 
 def _trimmed_line_width(line: LineInfo, glyphs: list[Glyph]) -> float:
@@ -330,7 +340,8 @@ def layout_with_paragraphs(
                 left_indent=p.left_indent, right_indent=p.right_indent,
                 first_line_indent=p.first_line_indent,
                 space_before=p.space_before, space_after=p.space_after,
-                text_align=p.text_align)
+                text_align=p.text_align,
+                list_style=p.list_style, marker_gap=p.marker_gap)
             segs.append(seg)
         cursor = e
     if cursor < n:
@@ -347,13 +358,22 @@ def layout_with_paragraphs(
         if pi > 0:
             y_offset += seg.space_before
         slice_str = ''.join(chars[seg.char_start:seg.char_end])
-        effective_max = max(0.0, max_width - seg.left_indent - seg.right_indent) \
-            if max_width > 0.0 else 0.0
+        # Phase 6: an active list adds marker_gap to the effective
+        # left indent (so the marker has room before the text) AND
+        # suppresses first_line_indent — the marker already occupies
+        # the first-line position so a separate first-line offset
+        # would push the text away from the marker.
+        has_list = seg.list_style is not None
+        list_indent = seg.marker_gap if has_list else 0.0
+        effective_max = max(
+            0.0, max_width - seg.left_indent - list_indent - seg.right_indent
+        ) if max_width > 0.0 else 0.0
         para = layout(slice_str, effective_max, font_size, measure)
-        first_line_extra = max(0.0, seg.first_line_indent)
+        first_line_extra = 0.0 if has_list else max(0.0, seg.first_line_indent)
         first_line_no_in_combined = line_count
         for li, line in enumerate(para.lines):
-            x_shift = seg.left_indent + (first_line_extra if li == 0 else 0.0)
+            x_shift = seg.left_indent + list_indent \
+                + (first_line_extra if li == 0 else 0.0)
             line_avail = max(0.0, effective_max - (first_line_extra if li == 0 else 0.0)) \
                 if effective_max > 0.0 else 0.0
             visible_w = _trimmed_line_width(line, para.glyphs)
@@ -422,6 +442,8 @@ def build_paragraph_segments(
                 current.char_end = cursor
                 if current.char_end > current.char_start:
                     segs.append(current)
+            list_style = t.jas_list_style
+            marker_gap = MARKER_GAP_PT if list_style is not None else 0.0
             current = ParagraphSegment(
                 char_start=cursor, char_end=cursor,
                 left_indent=t.jas_left_indent or 0.0,
@@ -429,7 +451,8 @@ def build_paragraph_segments(
                 first_line_indent=t.text_indent or 0.0,
                 space_before=t.jas_space_before or 0.0,
                 space_after=t.jas_space_after or 0.0,
-                text_align=_text_align_from(t.text_align, is_area))
+                text_align=_text_align_from(t.text_align, is_area),
+                list_style=list_style, marker_gap=marker_gap)
         else:
             cursor += body_chars
     if current is not None:
@@ -448,3 +471,94 @@ def _text_align_from(value: str | None, is_area: bool) -> TextAlign:
     if value == "right":
         return TextAlign.RIGHT
     return TextAlign.LEFT
+
+
+# ── Phase 6: list markers + counter run rule ────────────────
+
+MARKER_GAP_PT: float = 12.0
+"""Gap between marker and text per PARAGRAPH.md §Marker rendering."""
+
+
+def to_alpha(n: int, upper: bool) -> str:
+    """1 → 'a', 26 → 'z', 27 → 'aa', 28 → 'ab', ... Spreadsheet-
+    style base-26 with no zero digit. ``upper`` capitalises."""
+    if n <= 0:
+        return ""
+    base = ord("A") if upper else ord("a")
+    chars = []
+    v = n
+    while v > 0:
+        v -= 1
+        chars.append(chr(base + (v % 26)))
+        v //= 26
+    return "".join(reversed(chars))
+
+
+def to_roman(n: int, upper: bool) -> str:
+    """1 → 'i', 4 → 'iv', 9 → 'ix', 1990 → 'mcmxc'. Above 3999
+    falls back to ``(N)`` since standard Roman tops out at MMMCMXCIX."""
+    if n <= 0:
+        return ""
+    if n > 3999:
+        return f"({n})"
+    pairs = [
+        (1000, "M", "m"), (900, "CM", "cm"),
+        (500, "D", "d"),  (400, "CD", "cd"),
+        (100, "C", "c"),  (90, "XC", "xc"),
+        (50, "L", "l"),   (40, "XL", "xl"),
+        (10, "X", "x"),   (9, "IX", "ix"),
+        (5, "V", "v"),    (4, "IV", "iv"),
+        (1, "I", "i"),
+    ]
+    out = []
+    v = n
+    for val, u, l in pairs:
+        while v >= val:
+            out.append(u if upper else l)
+            v -= val
+    return "".join(out)
+
+
+def marker_text(list_style: str, counter: int) -> str:
+    """The literal glyph string that renders as the marker for the
+    given ``jas:list-style`` value at 1-based ``counter``. Bullet
+    styles ignore the counter; numbered styles format it per the
+    §Bullets and numbered lists enumeration. Unknown styles return
+    an empty string so the renderer skips drawing."""
+    if list_style == "bullet-disc":         return "\u2022"
+    if list_style == "bullet-open-circle":  return "\u25CB"
+    if list_style == "bullet-square":       return "\u25A0"
+    if list_style == "bullet-open-square":  return "\u25A1"
+    if list_style == "bullet-dash":         return "\u2013"
+    if list_style == "bullet-check":        return "\u2713"
+    if list_style == "num-decimal":         return f"{counter}."
+    if list_style == "num-lower-alpha":     return f"{to_alpha(counter, False)}."
+    if list_style == "num-upper-alpha":     return f"{to_alpha(counter, True)}."
+    if list_style == "num-lower-roman":     return f"{to_roman(counter, False)}."
+    if list_style == "num-upper-roman":     return f"{to_roman(counter, True)}."
+    return ""
+
+
+def compute_counters(segs: list[ParagraphSegment]) -> list[int]:
+    """Compute the 1-based counter for each numbered-list paragraph
+    in ``segs``. Bullet and non-list paragraphs get 0. Per
+    PARAGRAPH.md §Counter run rule: consecutive paragraphs with the
+    same ``num-*`` list style continue counting; a different style
+    or a bullet / no-style paragraph breaks the run."""
+    counters: list[int] = []
+    prev_num: str | None = None
+    current = 0
+    for seg in segs:
+        style = seg.list_style
+        if style is not None and style.startswith("num-"):
+            if prev_num == style:
+                current += 1
+            else:
+                current = 1
+            counters.append(current)
+            prev_num = style
+        else:
+            counters.append(0)
+            prev_num = None
+            current = 0
+    return counters

@@ -248,3 +248,122 @@ def test_two_wrappers_split_content():
     assert segs[1].char_end == 5
     assert segs[1].space_before == 6.0
     assert segs[1].text_align == TextAlign.CENTER
+
+
+# ── Phase 6: list markers + counter run rule ─────────────────
+
+from algorithms.text_layout import (
+    marker_text, to_alpha, to_roman, compute_counters, MARKER_GAP_PT,
+)
+
+
+def test_marker_text_bullets():
+    assert marker_text("bullet-disc", 1) == "\u2022"
+    assert marker_text("bullet-open-circle", 99) == "\u25CB"
+    assert marker_text("bullet-square", 1) == "\u25A0"
+    assert marker_text("bullet-open-square", 1) == "\u25A1"
+    assert marker_text("bullet-dash", 1) == "\u2013"
+    assert marker_text("bullet-check", 1) == "\u2713"
+
+
+def test_marker_text_decimal():
+    assert marker_text("num-decimal", 1) == "1."
+    assert marker_text("num-decimal", 42) == "42."
+
+
+def test_marker_text_alpha():
+    assert marker_text("num-lower-alpha", 1) == "a."
+    assert marker_text("num-lower-alpha", 26) == "z."
+    assert marker_text("num-lower-alpha", 27) == "aa."
+    assert marker_text("num-upper-alpha", 28) == "AB."
+
+
+def test_marker_text_roman():
+    assert marker_text("num-lower-roman", 1) == "i."
+    assert marker_text("num-lower-roman", 4) == "iv."
+    assert marker_text("num-lower-roman", 9) == "ix."
+    assert marker_text("num-upper-roman", 1990) == "MCMXC."
+
+
+def test_marker_text_unknown_returns_empty():
+    assert marker_text("invented-style", 1) == ""
+
+
+def test_compute_counters_consecutive_decimal():
+    segs = [ParagraphSegment(list_style="num-decimal") for _ in range(3)]
+    assert compute_counters(segs) == [1, 2, 3]
+
+
+def test_compute_counters_bullet_breaks_run():
+    segs = [
+        ParagraphSegment(list_style="num-decimal"),
+        ParagraphSegment(list_style="num-decimal"),
+        ParagraphSegment(list_style="bullet-disc"),
+        ParagraphSegment(list_style="num-decimal"),
+    ]
+    assert compute_counters(segs) == [1, 2, 0, 1]
+
+
+def test_compute_counters_different_num_style_resets():
+    segs = [
+        ParagraphSegment(list_style="num-decimal"),
+        ParagraphSegment(list_style="num-decimal"),
+        ParagraphSegment(list_style="num-lower-alpha"),
+        ParagraphSegment(list_style="num-lower-alpha"),
+    ]
+    assert compute_counters(segs) == [1, 2, 1, 2]
+
+
+def test_compute_counters_no_style_breaks_run():
+    segs = [
+        ParagraphSegment(list_style="num-decimal"),
+        ParagraphSegment(list_style=None),
+        ParagraphSegment(list_style="num-decimal"),
+    ]
+    assert compute_counters(segs) == [1, 0, 1]
+
+
+def test_list_segment_carries_style_and_marker_gap():
+    from geometry.tspan import Tspan
+    segs = build_paragraph_segments(
+        (Tspan(id=0, content="", jas_role="paragraph",
+               jas_list_style="bullet-disc"),
+         Tspan(id=1, content="hello")),
+        "hello", True)
+    assert len(segs) == 1
+    assert segs[0].list_style == "bullet-disc"
+    assert segs[0].marker_gap == MARKER_GAP_PT
+
+
+def test_list_pushes_text_by_marker_gap():
+    segs = [ParagraphSegment(char_start=0, char_end=2,
+                              list_style="bullet-disc", marker_gap=12.0)]
+    l = layout_with_paragraphs("hi", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 12.0
+
+
+def test_list_combines_left_indent_and_marker_gap():
+    segs = [ParagraphSegment(char_start=0, char_end=2,
+                              left_indent=20.0,
+                              list_style="num-decimal", marker_gap=12.0)]
+    l = layout_with_paragraphs("hi", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 32.0
+
+
+def test_list_ignores_first_line_indent():
+    segs = [ParagraphSegment(char_start=0, char_end=2,
+                              first_line_indent=25.0,
+                              list_style="bullet-disc", marker_gap=12.0)]
+    l = layout_with_paragraphs("hi", 100.0, 16.0, segs, fixed(10.0))
+    assert l.glyphs[0].x == 12.0  # not 12 + 25
+
+
+def test_to_alpha_rollover():
+    assert to_alpha(1, False) == "a"
+    assert to_alpha(26, False) == "z"
+    assert to_alpha(27, False) == "aa"
+    assert to_alpha(703, False) == "aaa"
+
+
+def test_to_roman_above_3999_falls_back():
+    assert to_roman(4000, False) == "(4000)"
