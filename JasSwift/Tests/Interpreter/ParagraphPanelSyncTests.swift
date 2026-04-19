@@ -147,3 +147,68 @@ import Testing
     #expect(o["bullets"] == nil)
     #expect(o["hyphenate"] == nil)
 }
+
+// MARK: - Phase 3c mixed-state aggregation
+
+@Test func paragraphPanelLiveOverridesAgreesAcrossWrappers() {
+    // Two wrapper tspans inside one text element, agreeing on every
+    // attribute → those attributes appear in the override map.
+    let model = Model()
+    let w1 = Tspan(id: 0, content: "", jasRole: "paragraph",
+                   jasLeftIndent: 12, jasHyphenate: true,
+                   jasListStyle: "bullet-disc")
+    let c1 = Tspan(id: 1, content: "first ")
+    let w2 = Tspan(id: 2, content: "", jasRole: "paragraph",
+                   jasLeftIndent: 12, jasHyphenate: true,
+                   jasListStyle: "bullet-disc")
+    let c2 = Tspan(id: 3, content: "second")
+    let area = Element.text(Text(
+        x: 0, y: 0, tspans: [w1, c1, w2, c2],
+        fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = paragraphPanelLiveOverrides(model: model)
+    #expect(o["left_indent"] as? Double == 12)
+    #expect(o["hyphenate"] as? Bool == true)
+    #expect(o["bullets"] as? String == "bullet-disc")
+}
+
+@Test func paragraphPanelLiveOverridesMixedNumericOmitsKey() {
+    // Two wrappers disagreeing on left_indent (12 vs 24) — the
+    // override is omitted so the panel keeps its prior value rather
+    // than misleadingly showing one of the two.
+    let model = Model()
+    let w1 = Tspan(id: 0, content: "", jasRole: "paragraph", jasLeftIndent: 12)
+    let c1 = Tspan(id: 1, content: "first ")
+    let w2 = Tspan(id: 2, content: "", jasRole: "paragraph", jasLeftIndent: 24)
+    let c2 = Tspan(id: 3, content: "second")
+    let area = Element.text(Text(
+        x: 0, y: 0, tspans: [w1, c1, w2, c2],
+        fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = paragraphPanelLiveOverrides(model: model)
+    #expect(o["left_indent"] == nil)
+}
+
+@Test func paragraphPanelLiveOverridesMixedListStyleOmitsBothDropdowns() {
+    // Wrappers split bullet vs numbered → both dropdowns omitted.
+    let model = Model()
+    let w1 = Tspan(id: 0, content: "", jasRole: "paragraph",
+                   jasListStyle: "bullet-disc")
+    let c1 = Tspan(id: 1, content: "•")
+    let w2 = Tspan(id: 2, content: "", jasRole: "paragraph",
+                   jasListStyle: "num-decimal")
+    let c2 = Tspan(id: 3, content: "1.")
+    let area = Element.text(Text(
+        x: 0, y: 0, tspans: [w1, c1, w2, c2],
+        fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = paragraphPanelLiveOverrides(model: model)
+    #expect(o["bullets"] == nil)
+    #expect(o["numbered_list"] == nil)
+}
