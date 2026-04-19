@@ -542,7 +542,37 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
         let base_x = x +. line_x_shift in
         show_with_spacing seg base_x base_y;
         draw_line_decorations seg base_x base_y
-      ) lay.lines
+      ) lay.lines;
+      (* Phase 6: list markers. Walk the paragraph segments after
+         laying out body text and draw each list paragraph's marker
+         at x = element.x + segment.left_indent on the first-line
+         baseline. Counter values are computed once across all
+         segments so the run rule (consecutive same-style num-*
+         paragraphs count up; bullets / no-style / different num
+         style all reset) holds across the element's content. *)
+      if psegs <> [] then begin
+        let counters = Text_layout_paragraph.compute_counters psegs in
+        List.iter2 (fun (seg : Text_layout.paragraph_segment) cnt ->
+          match seg.list_style with
+          | None -> ()
+          | Some style when style = "" -> ()
+          | Some style ->
+            let marker = Text_layout_paragraph.marker_text style cnt in
+            if String.length marker > 0 then begin
+              let first_line = ref None in
+              Array.iter (fun (l : Text_layout.line_info) ->
+                if !first_line = None && l.start >= seg.char_start then
+                  first_line := Some l
+              ) lay.lines;
+              match !first_line with
+              | None -> ()
+              | Some l ->
+                let baseline = y +. l.baseline_y +. y_shift in
+                let marker_x = x +. seg.left_indent in
+                show_with_spacing marker marker_x baseline
+            end
+        ) psegs counters
+      end
     end else begin
       let lines = String.split_on_char '\n' content in
       List.iteri (fun i line ->

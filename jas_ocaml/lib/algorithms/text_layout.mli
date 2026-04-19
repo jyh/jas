@@ -86,13 +86,22 @@ type paragraph_segment = {
   right_indent : float;
   (** [text-indent] — additional x offset on the *first* line only.
       Signed; negative produces a hanging indent. Phase 5 supports
-      non-negative values; negative falls back to 0. *)
+      non-negative values; negative falls back to 0. Ignored when
+      [list_style] is [Some _] per PARAGRAPH.md §Marker rendering. *)
   first_line_indent : float;
   (** [jas:space-before] — extra vertical gap above this paragraph.
       Always 0 for the first paragraph in the element. *)
   space_before : float;
   space_after : float;
   text_align : text_align;
+  (** [jas:list-style] — Phase 6. When [Some _], the paragraph is
+      a list item: the layout pushes every line by an extra
+      [marker_gap] and ignores [first_line_indent]. The marker
+      glyph itself is drawn at [x = left_indent] by the renderer. *)
+  list_style : string option;
+  (** Gap between marker and text. Phase 6 uses a fixed 12pt per
+      PARAGRAPH.md §Marker rendering. *)
+  marker_gap : float;
 }
 
 val default_segment : paragraph_segment
