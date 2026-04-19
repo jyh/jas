@@ -80,3 +80,70 @@ import Testing
     #expect(o["text_selected"] as? Bool == true)
     #expect(o["area_text_selected"] as? Bool == false)
 }
+
+// MARK: - Phase 3b paragraph attribute reads
+
+@Test func paragraphPanelLiveOverridesReadsParaWrapper() {
+    // Area text whose tspans contain a wrapper carrying the 5
+    // panel-surface paragraph attrs. The reader picks them up and
+    // populates panel.left_indent / panel.right_indent / etc.
+    let model = Model()
+    let wrapper = Tspan(id: 0, content: "",
+                        jasRole: "paragraph",
+                        jasLeftIndent: 18,
+                        jasRightIndent: 9,
+                        jasHyphenate: true,
+                        jasHangingPunctuation: true,
+                        jasListStyle: "bullet-disc")
+    let content = Tspan(id: 1, content: "hello")
+    let area = Element.text(Text(
+        x: 0, y: 0, tspans: [wrapper, content],
+        fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = paragraphPanelLiveOverrides(model: model)
+    #expect(o["text_selected"] as? Bool == true)
+    #expect(o["area_text_selected"] as? Bool == true)
+    #expect(o["left_indent"] as? Double == 18)
+    #expect(o["right_indent"] as? Double == 9)
+    #expect(o["hyphenate"] as? Bool == true)
+    #expect(o["hanging_punctuation"] as? Bool == true)
+    #expect(o["bullets"] as? String == "bullet-disc")
+    #expect(o["numbered_list"] as? String == "")
+}
+
+@Test func paragraphPanelLiveOverridesNumListPopulatesNumberedDropdown() {
+    // jas:list-style "num-*" routes to panel.numbered_list and
+    // clears panel.bullets.
+    let model = Model()
+    let wrapper = Tspan(id: 0, content: "", jasRole: "paragraph",
+                        jasListStyle: "num-decimal")
+    let content = Tspan(id: 1, content: "1. item")
+    let area = Element.text(Text(x: 0, y: 0, tspans: [wrapper, content],
+                                  fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = paragraphPanelLiveOverrides(model: model)
+    #expect(o["numbered_list"] as? String == "num-decimal")
+    #expect(o["bullets"] as? String == "")
+}
+
+@Test func paragraphPanelLiveOverridesAbsentWrapperLeavesDefaults() {
+    // Area text without any wrapper tspan — text-kind flags fire,
+    // but no paragraph-attr keys are inserted (panel keeps its
+    // YAML defaults).
+    let model = Model()
+    let area = Element.text(Text(x: 0, y: 0, content: "hi",
+                                  fontSize: 16, width: 200, height: 100))
+    model.document = Document(layers: [Layer(children: [area])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = paragraphPanelLiveOverrides(model: model)
+    #expect(o["text_selected"] as? Bool == true)
+    #expect(o["area_text_selected"] as? Bool == true)
+    #expect(o["left_indent"] == nil)
+    #expect(o["bullets"] == nil)
+    #expect(o["hyphenate"] == nil)
+}
