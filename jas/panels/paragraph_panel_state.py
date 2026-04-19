@@ -42,7 +42,7 @@ def sync_paragraph_panel_from_selection(store, model) -> None:
 
     any_text = False
     all_area = True
-    first_para = None
+    wrappers = []
     for es in doc.selection:
         path = getattr(es, "path", None)
         if path is None:
@@ -52,11 +52,9 @@ def sync_paragraph_panel_from_selection(store, model) -> None:
             any_text = True
             if not (elem.width > 0 and elem.height > 0):
                 all_area = False
-            if first_para is None:
-                for t in elem.tspans:
-                    if t.jas_role == "paragraph":
-                        first_para = t
-                        break
+            for t in elem.tspans:
+                if t.jas_role == "paragraph":
+                    wrappers.append(t)
         elif isinstance(elem, TextPath):
             any_text = True
             all_area = False
@@ -66,30 +64,43 @@ def sync_paragraph_panel_from_selection(store, model) -> None:
     store.set_panel("paragraph_panel_content", "text_selected", text_selected)
     store.set_panel("paragraph_panel_content", "area_text_selected", area_text_selected)
 
-    # Phase 3b paragraph attribute reads. The reader takes the first
-    # wrapper's values verbatim (mixed-state aggregation deferred to
-    # Phase 3c). Absent wrapper leaves the panel's existing values
-    # intact — we only call set_panel for fields actually present on
-    # the wrapper.
-    if first_para is None:
+    # Phase 3c mixed-state aggregation. For each panel-surface
+    # paragraph attribute we collect every wrapper's effective value
+    # (the field value if set, else the type's default). If all
+    # wrappers agree the agreed value flows to the matching panel
+    # key; if they disagree the override is omitted so the panel
+    # keeps its prior / YAML-default value.
+    if not wrappers:
         return
-    if first_para.jas_left_indent is not None:
-        store.set_panel("paragraph_panel_content", "left_indent",
-                        first_para.jas_left_indent)
-    if first_para.jas_right_indent is not None:
-        store.set_panel("paragraph_panel_content", "right_indent",
-                        first_para.jas_right_indent)
-    if first_para.jas_hyphenate is not None:
-        store.set_panel("paragraph_panel_content", "hyphenate",
-                        first_para.jas_hyphenate)
-    if first_para.jas_hanging_punctuation is not None:
-        store.set_panel("paragraph_panel_content", "hanging_punctuation",
-                        first_para.jas_hanging_punctuation)
-    # Single backing attr split into two panel dropdowns. bullet-*
-    # populates panel.bullets; num-* populates panel.numbered_list.
-    # The other dropdown shows "" (matching the spec's mutual
-    # exclusion in PARAGRAPH.md §Bullets and numbered lists).
-    ls = first_para.jas_list_style
+
+    def _agree(values):
+        """Return the single shared value when all entries are equal,
+        else None. Empty list also returns None."""
+        if not values:
+            return None
+        first = values[0]
+        return first if all(v == first for v in values) else None
+
+    li = _agree([w.jas_left_indent if w.jas_left_indent is not None else 0
+                 for w in wrappers])
+    if li is not None:
+        store.set_panel("paragraph_panel_content", "left_indent", li)
+    ri = _agree([w.jas_right_indent if w.jas_right_indent is not None else 0
+                 for w in wrappers])
+    if ri is not None:
+        store.set_panel("paragraph_panel_content", "right_indent", ri)
+    hyph = _agree([w.jas_hyphenate if w.jas_hyphenate is not None else False
+                   for w in wrappers])
+    if hyph is not None:
+        store.set_panel("paragraph_panel_content", "hyphenate", hyph)
+    hp = _agree([w.jas_hanging_punctuation if w.jas_hanging_punctuation is not None else False
+                 for w in wrappers])
+    if hp is not None:
+        store.set_panel("paragraph_panel_content", "hanging_punctuation", hp)
+    # Single backing attr split into two panel dropdowns. Aggregate
+    # first, then route by prefix.
+    ls = _agree([w.jas_list_style if w.jas_list_style is not None else ""
+                 for w in wrappers])
     if ls is not None:
         if ls.startswith("bullet-"):
             store.set_panel("paragraph_panel_content", "bullets", ls)
@@ -97,3 +108,7 @@ def sync_paragraph_panel_from_selection(store, model) -> None:
         elif ls.startswith("num-"):
             store.set_panel("paragraph_panel_content", "numbered_list", ls)
             store.set_panel("paragraph_panel_content", "bullets", "")
+        else:
+            # Empty agreement (no marker) clears both dropdowns.
+            store.set_panel("paragraph_panel_content", "bullets", "")
+            store.set_panel("paragraph_panel_content", "numbered_list", "")
