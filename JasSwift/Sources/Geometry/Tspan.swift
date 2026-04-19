@@ -50,6 +50,17 @@ public struct Tspan: Equatable {
     /// / num-decimal / num-lower-alpha / num-upper-alpha / num-lower-roman
     /// / num-upper-roman; absent = no marker.
     public let jasListStyle: String?
+    // ── Phase 1b1: remaining panel-surface paragraph attrs ──────
+    /// CSS `text-align` on the paragraph wrapper tspan.
+    public let textAlign: String?
+    /// CSS `text-align-last` on the paragraph wrapper tspan.
+    public let textAlignLast: String?
+    /// CSS `text-indent` — pt, signed (negative = hanging indent).
+    public let textIndent: Double?
+    /// `jas:space-before` — pt, unsigned.
+    public let jasSpaceBefore: Double?
+    /// `jas:space-after` — pt, unsigned.
+    public let jasSpaceAfter: Double?
     public let letterSpacing: Double?
     public let lineHeight: Double?
     public let rotate: Double?
@@ -74,6 +85,9 @@ public struct Tspan: Equatable {
                 jasLeftIndent: Double? = nil, jasRightIndent: Double? = nil,
                 jasHyphenate: Bool? = nil, jasHangingPunctuation: Bool? = nil,
                 jasListStyle: String? = nil,
+                textAlign: String? = nil, textAlignLast: String? = nil,
+                textIndent: Double? = nil,
+                jasSpaceBefore: Double? = nil, jasSpaceAfter: Double? = nil,
                 letterSpacing: Double? = nil, lineHeight: Double? = nil,
                 rotate: Double? = nil, styleName: String? = nil,
                 textDecoration: [String]? = nil, textRendering: String? = nil,
@@ -92,6 +106,11 @@ public struct Tspan: Equatable {
         self.jasHyphenate = jasHyphenate
         self.jasHangingPunctuation = jasHangingPunctuation
         self.jasListStyle = jasListStyle
+        self.textAlign = textAlign
+        self.textAlignLast = textAlignLast
+        self.textIndent = textIndent
+        self.jasSpaceBefore = jasSpaceBefore
+        self.jasSpaceAfter = jasSpaceAfter
         self.letterSpacing = letterSpacing; self.lineHeight = lineHeight
         self.rotate = rotate; self.styleName = styleName
         self.textDecoration = textDecoration; self.textRendering = textRendering
@@ -115,6 +134,9 @@ public struct Tspan: Equatable {
             && jasLeftIndent == nil && jasRightIndent == nil
             && jasHyphenate == nil && jasHangingPunctuation == nil
             && jasListStyle == nil
+            && textAlign == nil && textAlignLast == nil
+            && textIndent == nil
+            && jasSpaceBefore == nil && jasSpaceAfter == nil
             && letterSpacing == nil && lineHeight == nil
             && rotate == nil && styleName == nil
             && textDecoration == nil && textRendering == nil

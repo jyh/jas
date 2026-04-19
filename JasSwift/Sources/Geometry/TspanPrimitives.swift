@@ -45,6 +45,11 @@ public func tspansToJsonClipboard(_ tspans: [Tspan]) -> String {
         if let v = t.jasHyphenate { obj["jas_hyphenate"] = v }
         if let v = t.jasHangingPunctuation { obj["jas_hanging_punctuation"] = v }
         if let v = t.jasListStyle { obj["jas_list_style"] = v }
+        if let v = t.textAlign { obj["text_align"] = v }
+        if let v = t.textAlignLast { obj["text_align_last"] = v }
+        if let v = t.textIndent { obj["text_indent"] = v }
+        if let v = t.jasSpaceBefore { obj["jas_space_before"] = v }
+        if let v = t.jasSpaceAfter { obj["jas_space_after"] = v }
         if let v = t.letterSpacing { obj["letter_spacing"] = v }
         if let v = t.lineHeight { obj["line_height"] = v }
         if let v = t.rotate { obj["rotate"] = v }
@@ -90,6 +95,11 @@ public func tspansFromJsonClipboard(_ jsonStr: String) -> [Tspan]? {
             jasHyphenate: (obj["jas_hyphenate"] as? NSNumber)?.boolValue,
             jasHangingPunctuation: (obj["jas_hanging_punctuation"] as? NSNumber)?.boolValue,
             jasListStyle: obj["jas_list_style"] as? String,
+            textAlign: obj["text_align"] as? String,
+            textAlignLast: obj["text_align_last"] as? String,
+            textIndent: (obj["text_indent"] as? NSNumber)?.doubleValue,
+            jasSpaceBefore: (obj["jas_space_before"] as? NSNumber)?.doubleValue,
+            jasSpaceAfter: (obj["jas_space_after"] as? NSNumber)?.doubleValue,
             letterSpacing: (obj["letter_spacing"] as? NSNumber)?.doubleValue,
             lineHeight: (obj["line_height"] as? NSNumber)?.doubleValue,
             rotate: (obj["rotate"] as? NSNumber)?.doubleValue,
@@ -130,6 +140,11 @@ public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
         if let v = t.jasHyphenate { attrs.append(("jas:hyphenate", v ? "true" : "false")) }
         if let v = t.jasHangingPunctuation { attrs.append(("jas:hanging-punctuation", v ? "true" : "false")) }
         if let v = t.jasListStyle { attrs.append(("jas:list-style", v)) }
+        if let v = t.textAlign { attrs.append(("text-align", v)) }
+        if let v = t.textAlignLast { attrs.append(("text-align-last", v)) }
+        if let v = t.textIndent { attrs.append(("text-indent", _fmtDouble(v))) }
+        if let v = t.jasSpaceBefore { attrs.append(("jas:space-before", _fmtDouble(v))) }
+        if let v = t.jasSpaceAfter { attrs.append(("jas:space-after", _fmtDouble(v))) }
         if let v = t.letterSpacing { attrs.append(("letter-spacing", _fmtDouble(v))) }
         if let v = t.lineHeight { attrs.append(("line-height", _fmtDouble(v))) }
         if let v = t.rotate { attrs.append(("rotate", _fmtDouble(v))) }
@@ -207,6 +222,11 @@ public func tspansFromSvgFragment(_ svgStr: String) -> [Tspan]? {
             case "jas:hyphenate": t = mergeFields(t, jasHyphenate: v == "true")
             case "jas:hanging-punctuation": t = mergeFields(t, jasHangingPunctuation: v == "true")
             case "jas:list-style": t = mergeFields(t, jasListStyle: v)
+            case "text-align": t = mergeFields(t, textAlign: v)
+            case "text-align-last": t = mergeFields(t, textAlignLast: v)
+            case "text-indent": t = mergeFields(t, textIndent: Double(v))
+            case "jas:space-before": t = mergeFields(t, jasSpaceBefore: Double(v))
+            case "jas:space-after": t = mergeFields(t, jasSpaceAfter: Double(v))
             case "letter-spacing": t = mergeFields(t, letterSpacing: Double(v))
             case "line-height": t = mergeFields(t, lineHeight: Double(v))
             case "rotate": t = mergeFields(t, rotate: Double(v))
@@ -247,6 +267,11 @@ private func mergeFields(_ t: Tspan,
                          jasHyphenate: Bool?? = .some(nil),
                          jasHangingPunctuation: Bool?? = .some(nil),
                          jasListStyle: String?? = .some(nil),
+                         textAlign: String?? = .some(nil),
+                         textAlignLast: String?? = .some(nil),
+                         textIndent: Double?? = .some(nil),
+                         jasSpaceBefore: Double?? = .some(nil),
+                         jasSpaceAfter: Double?? = .some(nil),
                          letterSpacing: Double?? = .some(nil),
                          lineHeight: Double?? = .some(nil),
                          rotate: Double?? = .some(nil),
@@ -285,6 +310,11 @@ private func mergeFields(_ t: Tspan,
         jasHyphenate: pick(jasHyphenate, t.jasHyphenate),
         jasHangingPunctuation: pick(jasHangingPunctuation, t.jasHangingPunctuation),
         jasListStyle: pick(jasListStyle, t.jasListStyle),
+        textAlign: pick(textAlign, t.textAlign),
+        textAlignLast: pick(textAlignLast, t.textAlignLast),
+        textIndent: pick(textIndent, t.textIndent),
+        jasSpaceBefore: pick(jasSpaceBefore, t.jasSpaceBefore),
+        jasSpaceAfter: pick(jasSpaceAfter, t.jasSpaceAfter),
         letterSpacing: pick(letterSpacing, t.letterSpacing),
         lineHeight: pick(lineHeight, t.lineHeight),
         rotate: pick(rotate, t.rotate),
@@ -362,6 +392,11 @@ public func mergeTspanOverrides(_ target: Tspan, _ source: Tspan) -> Tspan {
         jasHyphenate: source.jasHyphenate ?? target.jasHyphenate,
         jasHangingPunctuation: source.jasHangingPunctuation ?? target.jasHangingPunctuation,
         jasListStyle: source.jasListStyle ?? target.jasListStyle,
+        textAlign: source.textAlign ?? target.textAlign,
+        textAlignLast: source.textAlignLast ?? target.textAlignLast,
+        textIndent: source.textIndent ?? target.textIndent,
+        jasSpaceBefore: source.jasSpaceBefore ?? target.jasSpaceBefore,
+        jasSpaceAfter: source.jasSpaceAfter ?? target.jasSpaceAfter,
         letterSpacing: source.letterSpacing ?? target.letterSpacing,
         lineHeight: source.lineHeight ?? target.lineHeight,
         rotate: source.rotate ?? target.rotate,
