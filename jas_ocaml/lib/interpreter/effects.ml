@@ -601,19 +601,17 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
   let doc = ctrl#document in
   let any_text = ref false in
   let all_area = ref true in
-  let first_para : Element.tspan option ref = ref None in
+  let wrappers : Element.tspan list ref = ref [] in
   Document.PathMap.iter (fun path _ ->
     let elem = Document.get_element doc path in
     match elem with
     | Element.Text { text_width; text_height; tspans; _ } ->
       any_text := true;
       if not (text_width > 0.0 && text_height > 0.0) then all_area := false;
-      if !first_para = None then begin
-        Array.iter (fun (t : Element.tspan) ->
-          if !first_para = None && t.jas_role = Some "paragraph" then
-            first_para := Some t
-        ) tspans
-      end
+      Array.iter (fun (t : Element.tspan) ->
+        if t.jas_role = Some "paragraph" then
+          wrappers := t :: !wrappers
+      ) tspans
     | Element.Text_path _ ->
       any_text := true;
       all_area := false
@@ -625,35 +623,49 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
     "text_selected" (`Bool text_selected);
   State_store.set_panel store "paragraph_panel_content"
     "area_text_selected" (`Bool area_text_selected);
-  (* Phase 3b paragraph attribute reads. The reader takes the first
-     wrapper's values verbatim (mixed-state aggregation deferred to
-     Phase 3c). Absent wrapper leaves the panel's existing values
-     intact — we only call set_panel for fields actually present on
-     the wrapper. *)
-  match !first_para with
-  | None -> ()
-  | Some p ->
-    (match p.jas_left_indent with
+  (* Phase 3c mixed-state aggregation. For each panel-surface
+     paragraph attribute we collect every wrapper's effective value
+     (Some(v) or the type's default). If all wrappers agree the
+     agreed value flows to the matching panel key; if they disagree
+     the override is omitted so the panel keeps its prior /
+     YAML-default value. *)
+  let ws = !wrappers in
+  if ws = [] then () else begin
+    (* Universally quantified so each call instantiates fresh — OCaml
+       type inference would otherwise lock the helper to whatever type
+       the first call uses. *)
+    let agree : 'a. ('a -> 'a -> bool) -> 'a list -> 'a option =
+      fun eq vs ->
+        match vs with
+        | [] -> None
+        | first :: _ ->
+          if List.for_all (eq first) vs then Some first else None
+    in
+    let f_eq a b = a = b in
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
+              match t.jas_left_indent with Some v -> v | None -> 0.0) ws) with
      | Some v -> State_store.set_panel store "paragraph_panel_content"
                    "left_indent" (`Float v)
      | None -> ());
-    (match p.jas_right_indent with
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
+              match t.jas_right_indent with Some v -> v | None -> 0.0) ws) with
      | Some v -> State_store.set_panel store "paragraph_panel_content"
                    "right_indent" (`Float v)
      | None -> ());
-    (match p.jas_hyphenate with
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
+              match t.jas_hyphenate with Some v -> v | None -> false) ws) with
      | Some v -> State_store.set_panel store "paragraph_panel_content"
                    "hyphenate" (`Bool v)
      | None -> ());
-    (match p.jas_hanging_punctuation with
+    (match agree f_eq (List.map (fun (t : Element.tspan) ->
+              match t.jas_hanging_punctuation with Some v -> v | None -> false) ws) with
      | Some v -> State_store.set_panel store "paragraph_panel_content"
                    "hanging_punctuation" (`Bool v)
      | None -> ());
-    (* Single backing attr split into two panel dropdowns. bullet-*
-       populates panel.bullets; num-* populates panel.numbered_list.
-       The other dropdown shows "" (matching the spec's mutual
-       exclusion in PARAGRAPH.md §Bullets and numbered lists). *)
-    match p.jas_list_style with
+    (* Single backing attr split into two panel dropdowns. Aggregate
+       first, then route by prefix. *)
+    match agree f_eq (List.map (fun (t : Element.tspan) ->
+            match t.jas_list_style with Some v -> v | None -> "") ws) with
     | None -> ()
     | Some ls ->
       if String.length ls >= 7 && String.sub ls 0 7 = "bullet-" then begin
@@ -666,7 +678,14 @@ let sync_paragraph_panel_from_selection (store : State_store.t)
           "numbered_list" (`String ls);
         State_store.set_panel store "paragraph_panel_content"
           "bullets" (`String "")
+      end else begin
+        (* Empty agreement (no marker) clears both dropdowns. *)
+        State_store.set_panel store "paragraph_panel_content"
+          "bullets" (`String "");
+        State_store.set_panel store "paragraph_panel_content"
+          "numbered_list" (`String "")
       end
+  end
 
 (* ── Character panel apply-to-selection pipeline (Layer B) ─── *)
 
