@@ -17,3 +17,8 @@
  (name schema_test)
  (modules schema_test)
  (libraries jas alcotest))
+
+(test
+ (name active_document_view_test)
+ (modules active_document_view_test)
+ (libraries jas alcotest))

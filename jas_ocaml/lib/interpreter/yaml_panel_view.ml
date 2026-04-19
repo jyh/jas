@@ -1432,11 +1432,15 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       let icons_obj = Workspace_loader.icons ws in
       let swatch_libs = Workspace_loader.swatch_libraries ws in
       let data_obj = `Assoc [("swatch_libraries", swatch_libs)] in
+      let active_document_view =
+        Active_document_view.build (get_model ())
+      in
       let ctx = `Assoc [
         ("state", state_obj);
         ("panel", `Assoc panel_defaults);
         ("icons", icons_obj);
         ("data", data_obj);
+        ("active_document", active_document_view);
         ("_get_model", `Null)  (* Placeholder; actual model passed via closure *)
       ] in
       (* Panel-local state store: seeded with the yaml-declared
