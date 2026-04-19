@@ -51,10 +51,15 @@ state:
     description: "JUSTIFY_ALL_BUTTON — every line justified, including the last."
 
   # ── Bullets and numbered lists ─────────────────────────────
-  # Both dropdowns share one backing attribute (jas:list-style);
-  # they are mutually exclusive in the spec. Phase 2 keeps two
-  # independent string state fields; Phase 4 wires the mutual
-  # exclusion via action effects.
+  # Both dropdowns share one backing attribute (jas:list-style)
+  # and are mutually exclusive in the spec. The YAML declaration
+  # itself is the schema-level mutual exclusion — both fields point
+  # to the same backing attribute so a write to one logically
+  # overwrites the other. Native apps enforce this at write time
+  # in set_paragraph_panel_field (Phase 4) and render the marker
+  # glyph from the agreed value (Phase 6). Flask currently has no
+  # paragraph render or write path so the YAML schema is the only
+  # mutual-exclusion contract it carries.
   bullets:
     type: string
     default: ""
