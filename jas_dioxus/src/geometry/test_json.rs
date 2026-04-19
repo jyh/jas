@@ -613,6 +613,17 @@ fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
         text_indent: v["text_indent"].as_f64(),
         jas_space_before: v["jas_space_before"].as_f64(),
         jas_space_after: v["jas_space_after"].as_f64(),
+        jas_word_spacing_min: v["jas_word_spacing_min"].as_f64(),
+        jas_word_spacing_desired: v["jas_word_spacing_desired"].as_f64(),
+        jas_word_spacing_max: v["jas_word_spacing_max"].as_f64(),
+        jas_letter_spacing_min: v["jas_letter_spacing_min"].as_f64(),
+        jas_letter_spacing_desired: v["jas_letter_spacing_desired"].as_f64(),
+        jas_letter_spacing_max: v["jas_letter_spacing_max"].as_f64(),
+        jas_glyph_scaling_min: v["jas_glyph_scaling_min"].as_f64(),
+        jas_glyph_scaling_desired: v["jas_glyph_scaling_desired"].as_f64(),
+        jas_glyph_scaling_max: v["jas_glyph_scaling_max"].as_f64(),
+        jas_auto_leading: v["jas_auto_leading"].as_f64(),
+        jas_single_word_justify: parse_str_opt(&v["jas_single_word_justify"]),
     }
 }
 

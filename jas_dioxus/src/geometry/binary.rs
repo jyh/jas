@@ -239,6 +239,17 @@ fn pack_tspan(t: &crate::geometry::tspan::Tspan) -> Value {
         opt_f64(t.text_indent),
         opt_f64(t.jas_space_before),
         opt_f64(t.jas_space_after),
+        opt_f64(t.jas_word_spacing_min),
+        opt_f64(t.jas_word_spacing_desired),
+        opt_f64(t.jas_word_spacing_max),
+        opt_f64(t.jas_letter_spacing_min),
+        opt_f64(t.jas_letter_spacing_desired),
+        opt_f64(t.jas_letter_spacing_max),
+        opt_f64(t.jas_glyph_scaling_min),
+        opt_f64(t.jas_glyph_scaling_desired),
+        opt_f64(t.jas_glyph_scaling_max),
+        opt_f64(t.jas_auto_leading),
+        opt_str(t.jas_single_word_justify.as_ref()),
     ])
 }
 
@@ -295,6 +306,17 @@ fn unpack_tspan(v: &Value) -> crate::geometry::tspan::Tspan {
         text_indent: as_opt_f64(get(30)),
         jas_space_before: as_opt_f64(get(31)),
         jas_space_after: as_opt_f64(get(32)),
+        jas_word_spacing_min: as_opt_f64(get(33)),
+        jas_word_spacing_desired: as_opt_f64(get(34)),
+        jas_word_spacing_max: as_opt_f64(get(35)),
+        jas_letter_spacing_min: as_opt_f64(get(36)),
+        jas_letter_spacing_desired: as_opt_f64(get(37)),
+        jas_letter_spacing_max: as_opt_f64(get(38)),
+        jas_glyph_scaling_min: as_opt_f64(get(39)),
+        jas_glyph_scaling_desired: as_opt_f64(get(40)),
+        jas_glyph_scaling_max: as_opt_f64(get(41)),
+        jas_auto_leading: as_opt_f64(get(42)),
+        jas_single_word_justify: as_opt_str(get(43)),
     }
 }
 

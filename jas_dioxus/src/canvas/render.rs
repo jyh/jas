@@ -531,8 +531,21 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             // The text_layout::layout function uses its font_size
             // argument as the line height, so pass the leading value
             // there when set. Kept equal to font_size for Auto.
+            //
+            // Phase 8: when line_height is empty (Character Auto) and
+            // the first paragraph wrapper carries jas:auto-leading,
+            // override the Auto default with `auto_leading%` of the
+            // font size. Per-paragraph leading would need text_layout
+            // to take per-segment font_size; V1 applies one Auto
+            // override element-wide using the first wrapper's value.
             let leading_px = if e.line_height.is_empty() {
-                effective_fs
+                let auto_leading_pct = e.tspans.iter()
+                    .find(|t| t.jas_role.as_deref() == Some("paragraph"))
+                    .and_then(|t| t.jas_auto_leading);
+                match auto_leading_pct {
+                    Some(pct) => effective_fs * pct / 100.0,
+                    None => effective_fs,  // pre-existing: Auto = 100%
+                }
             } else {
                 crate::workspace::app_state::parse_pt(&e.line_height).unwrap_or(effective_fs)
             };

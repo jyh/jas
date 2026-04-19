@@ -83,6 +83,30 @@ pub struct Tspan {
     /// `jas:space-after` — pt, unsigned. Vertical space below each
     /// paragraph.
     pub jas_space_after: Option<f64>,
+    // ── Phase 1b2 / 8: Justification-dialog attrs ───────────────
+    /// `jas:word-spacing-{min,desired,max}` — percent (0–1000),
+    /// soft constraints fed to the every-line composer.
+    pub jas_word_spacing_min: Option<f64>,
+    pub jas_word_spacing_desired: Option<f64>,
+    pub jas_word_spacing_max: Option<f64>,
+    /// `jas:letter-spacing-{min,desired,max}` — percent (-100–500),
+    /// signed soft constraints for the composer.
+    pub jas_letter_spacing_min: Option<f64>,
+    pub jas_letter_spacing_desired: Option<f64>,
+    pub jas_letter_spacing_max: Option<f64>,
+    /// `jas:glyph-scaling-{min,desired,max}` — percent (50–200),
+    /// last-resort glyph-width scaling for the composer.
+    pub jas_glyph_scaling_min: Option<f64>,
+    pub jas_glyph_scaling_desired: Option<f64>,
+    pub jas_glyph_scaling_max: Option<f64>,
+    /// `jas:auto-leading` — percent of font size used when the
+    /// character has Auto leading. Overrides Character's 120% default
+    /// for paragraphs in the wrapping element.
+    pub jas_auto_leading: Option<f64>,
+    /// `jas:single-word-justify` — `justify` / `left` / `center` /
+    /// `right`. How a justified line containing only one word is
+    /// rendered.
+    pub jas_single_word_justify: Option<String>,
     pub letter_spacing: Option<f64>,
     pub line_height: Option<f64>,
     pub rotate: Option<f64>,
@@ -130,6 +154,17 @@ impl Tspan {
             && self.text_indent.is_none()
             && self.jas_space_before.is_none()
             && self.jas_space_after.is_none()
+            && self.jas_word_spacing_min.is_none()
+            && self.jas_word_spacing_desired.is_none()
+            && self.jas_word_spacing_max.is_none()
+            && self.jas_letter_spacing_min.is_none()
+            && self.jas_letter_spacing_desired.is_none()
+            && self.jas_letter_spacing_max.is_none()
+            && self.jas_glyph_scaling_min.is_none()
+            && self.jas_glyph_scaling_desired.is_none()
+            && self.jas_glyph_scaling_max.is_none()
+            && self.jas_auto_leading.is_none()
+            && self.jas_single_word_justify.is_none()
             && self.letter_spacing.is_none()
             && self.line_height.is_none()
             && self.rotate.is_none()
@@ -236,6 +271,17 @@ pub fn tspans_to_svg_fragment(tspans: &[Tspan]) -> String {
         if let Some(v) = t.text_indent { attrs.push(("text-indent", fmt_f64(v))); }
         if let Some(v) = t.jas_space_before { attrs.push(("jas:space-before", fmt_f64(v))); }
         if let Some(v) = t.jas_space_after { attrs.push(("jas:space-after", fmt_f64(v))); }
+        if let Some(v) = t.jas_word_spacing_min { attrs.push(("jas:word-spacing-min", fmt_f64(v))); }
+        if let Some(v) = t.jas_word_spacing_desired { attrs.push(("jas:word-spacing-desired", fmt_f64(v))); }
+        if let Some(v) = t.jas_word_spacing_max { attrs.push(("jas:word-spacing-max", fmt_f64(v))); }
+        if let Some(v) = t.jas_letter_spacing_min { attrs.push(("jas:letter-spacing-min", fmt_f64(v))); }
+        if let Some(v) = t.jas_letter_spacing_desired { attrs.push(("jas:letter-spacing-desired", fmt_f64(v))); }
+        if let Some(v) = t.jas_letter_spacing_max { attrs.push(("jas:letter-spacing-max", fmt_f64(v))); }
+        if let Some(v) = t.jas_glyph_scaling_min { attrs.push(("jas:glyph-scaling-min", fmt_f64(v))); }
+        if let Some(v) = t.jas_glyph_scaling_desired { attrs.push(("jas:glyph-scaling-desired", fmt_f64(v))); }
+        if let Some(v) = t.jas_glyph_scaling_max { attrs.push(("jas:glyph-scaling-max", fmt_f64(v))); }
+        if let Some(v) = t.jas_auto_leading { attrs.push(("jas:auto-leading", fmt_f64(v))); }
+        if let Some(v) = &t.jas_single_word_justify { attrs.push(("jas:single-word-justify", v.clone())); }
         if let Some(v) = t.letter_spacing { attrs.push(("letter-spacing", fmt_f64(v))); }
         if let Some(v) = t.line_height { attrs.push(("line-height", fmt_f64(v))); }
         if let Some(v) = t.rotate { attrs.push(("rotate", fmt_f64(v))); }
@@ -328,6 +374,17 @@ pub fn tspans_from_svg_fragment(svg_str: &str) -> Option<Vec<Tspan>> {
                 "text-indent" => t.text_indent = v.parse().ok(),
                 "jas:space-before" => t.jas_space_before = v.parse().ok(),
                 "jas:space-after" => t.jas_space_after = v.parse().ok(),
+                "jas:word-spacing-min" => t.jas_word_spacing_min = v.parse().ok(),
+                "jas:word-spacing-desired" => t.jas_word_spacing_desired = v.parse().ok(),
+                "jas:word-spacing-max" => t.jas_word_spacing_max = v.parse().ok(),
+                "jas:letter-spacing-min" => t.jas_letter_spacing_min = v.parse().ok(),
+                "jas:letter-spacing-desired" => t.jas_letter_spacing_desired = v.parse().ok(),
+                "jas:letter-spacing-max" => t.jas_letter_spacing_max = v.parse().ok(),
+                "jas:glyph-scaling-min" => t.jas_glyph_scaling_min = v.parse().ok(),
+                "jas:glyph-scaling-desired" => t.jas_glyph_scaling_desired = v.parse().ok(),
+                "jas:glyph-scaling-max" => t.jas_glyph_scaling_max = v.parse().ok(),
+                "jas:auto-leading" => t.jas_auto_leading = v.parse().ok(),
+                "jas:single-word-justify" => t.jas_single_word_justify = Some(v),
                 "letter-spacing" => t.letter_spacing = v.parse().ok(),
                 "line-height" => t.line_height = v.parse().ok(),
                 "rotate" => t.rotate = v.parse().ok(),
@@ -422,6 +479,10 @@ pub fn merge_tspan_overrides(target: &mut Tspan, source: &Tspan) {
         jas_hanging_punctuation, jas_list_style,
         text_align, text_align_last, text_indent,
         jas_space_before, jas_space_after,
+        jas_word_spacing_min, jas_word_spacing_desired, jas_word_spacing_max,
+        jas_letter_spacing_min, jas_letter_spacing_desired, jas_letter_spacing_max,
+        jas_glyph_scaling_min, jas_glyph_scaling_desired, jas_glyph_scaling_max,
+        jas_auto_leading, jas_single_word_justify,
         letter_spacing, line_height, rotate, style_name, text_decoration,
         text_rendering, text_transform, transform, xml_lang
     );
