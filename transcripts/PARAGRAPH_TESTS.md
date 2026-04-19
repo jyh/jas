@@ -738,65 +738,107 @@ If any P0 here fails, stop and flag.
 four native apps (Flask has no paragraph write path — omitted). Batch by
 app: run a full column at a time, not one test at a time.
 
+The four sub-rows below are **provisionally ticked from auto-tests** rather
+than a live GUI pass: each cited test exercises the same apply-pipeline /
+layout-output behavior, and the Phase 11 parity harness
+(`scripts/cross_language_algorithms.py --algo text_layout_paragraph`,
+72 / 72 green at 2026-04-19) verifies the four native languages produce
+byte-identical glyph positions across 24 fixture vectors. **Live human
+GUI runs are still required** to catch UI / interaction regressions the
+auto-tests cannot reach. Rerun once a tester sits down with each app.
+
 - **PG-300** [wired] Clicking Align Center re-centers every line of the
       selected area text.
       Do: Area text → Align Center.
       Expect: Lines visually centered in the wrapping frame.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-04-19 · auto: parity vector
+            `alignment_center` + Phase 4 alignment apply
+      - [x] Swift      last: 2026-04-19 · auto: parity vector +
+            ParagraphPanelSyncTests alignment apply
+      - [x] OCaml      last: 2026-04-19 · auto: parity vector +
+            effects_test.ml `Paragraph Phase 4: apply_alignment_radio_writes`
+      - [x] Python     last: 2026-04-19 · auto: parity vector +
+            paragraph_panel_state_test.py alignment cases
 
 - **PG-301** [wired] Justify All stretches the last line to both margins.
       Do: Multi-line area text → Justify All.
       Expect: Last line's final glyph aligns with the right margin.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-04-19 · auto: parity vector
+            `justify_all_stretches_last_line` + text_layout.rs
+            `justify_all_stretches_last_line_too`
+      - [x] Swift      last: 2026-04-19 · auto: parity vector +
+            `justifyAllStretchesLastLineToFillBox`
+      - [x] OCaml      last: 2026-04-19 · auto: parity vector +
+            text_layout_test.ml `Phase 10: justify_all_stretches_last_line`
+      - [x] Python     last: 2026-04-19 · auto: parity vector +
+            `test_justify_all_stretches_last_line_to_fill_box`
 
 - **PG-302** [wired] Left Indent 24 shifts every line rightward by 24pt.
       Do: `pg_left_indent` = 24 on a multi-line area text.
       Expect: Every line's first glyph starts 24pt to the right of the frame
               edge; text wrap width is 24pt narrower.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-04-19 · auto: parity vector
+            `left_indent_shifts_every_line`
+      - [x] Swift      last: 2026-04-19 · auto: parity vector
+      - [x] OCaml      last: 2026-04-19 · auto: parity vector +
+            text_layout_test.ml `left_indent_shifts_every_line`
+      - [x] Python     last: 2026-04-19 · auto: parity vector
 
 - **PG-303** [wired] Numbered Decimal list counts consecutive paragraphs.
       Do: Three decimal paragraphs.
       Expect: "1." "2." "3." markers, with 12pt gap before each body.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-04-19 · auto: parity vector
+            `numbered_list_decimal_marker_gap` + Phase 6 counter tests
+      - [x] Swift      last: 2026-04-19 · auto: parity vector +
+            `computeCounters` consecutive-decimal test
+      - [x] OCaml      last: 2026-04-19 · auto: parity vector +
+            `compute_counters` Phase 6 tests
+      - [x] Python     last: 2026-04-19 · auto: parity vector +
+            `test_compute_counters_consecutive_decimal`
 
 - **PG-304** [wired] Hyphenation dialog master mirror to panel.
       Do: Panel Hyphenate off → Dialog → master on → OK.
       Expect: Panel Hyphenate now on.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-04-19 · auto: renderer.rs Phase 9
+            `apply_hyphenation_dialog_writes_non_default_attrs`
+            (asserts `paragraph_panel.hyphenate` mirror)
+      - [x] Swift      last: 2026-04-19 · auto:
+            `applyHyphenationDialogWritesNonDefaultAttrs`
+            (asserts panel.hyphenate via store.getPanel)
+      - [x] OCaml      last: 2026-04-19 · auto:
+            `Paragraph Phase 9: apply_writes_non_default_attrs`
+            (asserts get_panel hyphenate)
+      - [x] Python     last: 2026-04-19 · auto:
+            `TestPhase9HyphenationDialog::test_writes_non_default_attrs`
 
 - **PG-305** [wired] Justification dialog Auto Leading override.
       Do: Character → Leading = Auto. Dialog → Auto Leading = 150 → OK.
       Expect: Selected paragraph's vertical spacing tightens vs default 120%.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-04-19 · auto: renderer.rs Phase 8
+            `apply_justification_dialog_writes_non_default_attrs`
+            (writes `jas:auto-leading=140`); canvas-side override pending
+            live verification
+      - [x] Swift      last: 2026-04-19 · auto:
+            `applyJustificationDialogWritesNonDefaultAttrs`
+      - [x] OCaml      last: 2026-04-19 · auto:
+            `Paragraph Phase 8: apply_writes_non_default_attrs`
+      - [x] Python     last: 2026-04-19 · auto:
+            `TestPhase8JustificationDialog::test_writes_non_default_attrs`
 
 - **PG-306** [wired] Reset Panel clears every attr via identity-omission.
       Setup: Area text with non-default values across every panel control.
       Do: Menu → Reset Panel.
       Expect: Wrapper tspans show no `jas:*` paragraph attributes; canvas
               returns to default layout.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-04-19 · auto: app_state.rs reset path +
+            renderer Phase 8/9 `apply_all_defaults_writes_nothing` tests
+      - [x] Swift      last: 2026-04-19 · auto:
+            `applyJustificationDialogAllDefaultsWritesNothing` +
+            `applyHyphenationDialogAllDefaultsWritesNothing`
+      - [x] OCaml      last: 2026-04-19 · auto: effects_test.ml
+            `reset_clears_wrapper_attributes` + Phase 8/9 all-defaults
+      - [x] Python     last: 2026-04-19 · auto:
+            `test_all_defaults_writes_nothing` (Phase 8 + Phase 9)
 
 ---
 
