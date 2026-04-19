@@ -1664,3 +1664,99 @@ let apply_justification_dialog_to_selection
       ctrl#model#set_document new_doc
     end
   end
+
+(** 8 Hyphenation-dialog field values (master + 7 sub-controls).
+    [None] means the field was blank (mixed selection) and should
+    not write. Phase 9. *)
+type hyphenation_dialog_values = {
+  hyphenate : bool option;
+  min_word : float option;
+  min_before : float option;
+  min_after : float option;
+  limit : float option;
+  zone : float option;
+  bias : float option;
+  capitalized : bool option;
+}
+
+(** Commit the master toggle + 7 Hyphenation-dialog fields onto every
+    paragraph wrapper tspan in the selection. Identity-value rule:
+    each value at its spec default (master off, 3/1/1, 0, 0, 0, off)
+    writes [None] so the wrapper attribute is omitted. Also mirrors
+    the master toggle to panel.hyphenate so the main panel checkbox
+    reflects the dialog commit. Phase 9. *)
+let apply_hyphenation_dialog_to_selection
+    (store : State_store.t) (ctrl : Controller.controller)
+    (v : hyphenation_dialog_values) : unit =
+  let opt_n value default =
+    match value with
+    | None -> None
+    | Some f -> if Float.abs (f -. default) < 1e-6 then None else Some f in
+  let opt_b value =
+    match value with
+    | None -> None
+    | Some b -> if b then Some true else None in
+  let hyph = opt_b v.hyphenate in
+  let min_word = opt_n v.min_word 3.0 in
+  let min_before = opt_n v.min_before 1.0 in
+  let min_after = opt_n v.min_after 1.0 in
+  let limit = opt_n v.limit 0.0 in
+  let zone = opt_n v.zone 0.0 in
+  let bias = opt_n v.bias 0.0 in
+  let cap = opt_b v.capitalized in
+  let doc = ctrl#document in
+  if not (Document.PathMap.is_empty doc.Document.selection) then begin
+    let any_change = ref false in
+    let new_doc = Document.PathMap.fold (fun path _ acc ->
+      let elem = Document.get_element acc path in
+      let update_wrappers tspans =
+        let arr = Array.copy tspans in
+        let wrapper_indices = ref [] in
+        Array.iteri (fun i (t : Element.tspan) ->
+          if t.jas_role = Some "paragraph" then
+            wrapper_indices := i :: !wrapper_indices
+        ) arr;
+        let indices =
+          if !wrapper_indices = [] && Array.length arr > 0 then begin
+            arr.(0) <- { arr.(0) with jas_role = Some "paragraph" };
+            [0]
+          end else List.rev !wrapper_indices in
+        List.iter (fun i ->
+          arr.(i) <- { arr.(i) with
+            jas_hyphenate = hyph;
+            jas_hyphenate_min_word = min_word;
+            jas_hyphenate_min_before = min_before;
+            jas_hyphenate_min_after = min_after;
+            jas_hyphenate_limit = limit;
+            jas_hyphenate_zone = zone;
+            jas_hyphenate_bias = bias;
+            jas_hyphenate_capitalized = cap;
+          }
+        ) indices;
+        (arr, indices <> [])
+      in
+      match elem with
+      | Element.Text r ->
+        let (tspans, changed) = update_wrappers r.tspans in
+        if changed then begin
+          any_change := true;
+          Document.replace_element acc path (Element.Text { r with tspans })
+        end else acc
+      | Element.Text_path r ->
+        let (tspans, changed) = update_wrappers r.tspans in
+        if changed then begin
+          any_change := true;
+          Document.replace_element acc path (Element.Text_path { r with tspans })
+        end else acc
+      | _ -> acc
+    ) doc.Document.selection doc in
+    if !any_change then begin
+      ctrl#model#snapshot;
+      ctrl#model#set_document new_doc
+    end
+  end;
+  (* Master mirror to panel state for HYPHENATE_CHECKBOX. *)
+  match v.hyphenate with
+  | Some h ->
+    State_store.set_panel store "paragraph_panel_content" "hyphenate" (`Bool h)
+  | None -> ()

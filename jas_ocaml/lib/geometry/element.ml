@@ -280,6 +280,13 @@ type tspan = {
   jas_glyph_scaling_max : float option;
   jas_auto_leading : float option;
   jas_single_word_justify : string option;
+  jas_hyphenate_min_word : float option;
+  jas_hyphenate_min_before : float option;
+  jas_hyphenate_min_after : float option;
+  jas_hyphenate_limit : float option;
+  jas_hyphenate_zone : float option;
+  jas_hyphenate_bias : float option;
+  jas_hyphenate_capitalized : bool option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;
@@ -735,6 +742,10 @@ let tspans_from_content (content : string) : tspan array =
     jas_glyph_scaling_min = None; jas_glyph_scaling_desired = None;
     jas_glyph_scaling_max = None;
     jas_auto_leading = None; jas_single_word_justify = None;
+    jas_hyphenate_min_word = None; jas_hyphenate_min_before = None;
+    jas_hyphenate_min_after = None; jas_hyphenate_limit = None;
+    jas_hyphenate_zone = None; jas_hyphenate_bias = None;
+    jas_hyphenate_capitalized = None;
     letter_spacing = None; line_height = None;
     rotate = None; style_name = None;
     text_decoration = None; text_rendering = None;

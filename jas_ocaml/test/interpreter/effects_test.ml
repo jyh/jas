@@ -1065,6 +1065,66 @@ let paragraph_phase8_tests = [
      | _ -> assert false));
 ]
 
+(* ── Paragraph panel — Phase 9 Hyphenation dialog OK ───── *)
+
+let paragraph_phase9_tests = [
+  Alcotest.test_case "apply_writes_non_default_attrs" `Quick (fun () ->
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create ~defaults:[("hyphenate", `Bool false)] () in
+    init_panel s "paragraph_panel_content" [("hyphenate", `Bool false)];
+    Jas.Effects.apply_hyphenation_dialog_to_selection s ctrl {
+      hyphenate = Some true;
+      min_word = Some 6.0;
+      min_before = Some 3.0;
+      min_after = Some 1.0;  (* default → omit *)
+      limit = Some 2.0;
+      zone = Some 36.0;
+      bias = Some 0.0;       (* default → omit *)
+      capitalized = Some true;
+    };
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.jas_hyphenate = Some true);
+       assert (w.jas_hyphenate_min_word = Some 6.0);
+       assert (w.jas_hyphenate_min_before = Some 3.0);
+       assert (w.jas_hyphenate_min_after = None);  (* identity-omit *)
+       assert (w.jas_hyphenate_limit = Some 2.0);
+       assert (w.jas_hyphenate_zone = Some 36.0);
+       assert (w.jas_hyphenate_bias = None);       (* identity-omit *)
+       assert (w.jas_hyphenate_capitalized = Some true)
+     | _ -> assert false);
+    (* Master mirror: panel.hyphenate updated. *)
+    assert (get_panel s "paragraph_panel_content" "hyphenate" = `Bool true));
+
+  Alcotest.test_case "apply_all_defaults_writes_nothing" `Quick (fun () ->
+    let model = _make_area_text_with_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create ~defaults:[("hyphenate", `Bool false)] () in
+    init_panel s "paragraph_panel_content" [("hyphenate", `Bool false)];
+    Jas.Effects.apply_hyphenation_dialog_to_selection s ctrl {
+      hyphenate = Some false;
+      min_word = Some 3.0; min_before = Some 1.0; min_after = Some 1.0;
+      limit = Some 0.0; zone = Some 0.0; bias = Some 0.0;
+      capitalized = Some false;
+    };
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let w = r.tspans.(0) in
+       assert (w.jas_hyphenate = None);
+       assert (w.jas_hyphenate_min_word = None);
+       assert (w.jas_hyphenate_min_before = None);
+       assert (w.jas_hyphenate_min_after = None);
+       assert (w.jas_hyphenate_limit = None);
+       assert (w.jas_hyphenate_zone = None);
+       assert (w.jas_hyphenate_bias = None);
+       assert (w.jas_hyphenate_capitalized = None)
+     | _ -> assert false));
+]
+
 (* ── Preview snapshot/restore (Phase 0) ─────────────────────
 
    open_dialog captures a snapshot of every state key referenced by
@@ -1163,5 +1223,6 @@ let () =
     "Paragraph text-kind", paragraph_text_kind_tests;
     "Paragraph Phase 4", paragraph_phase4_tests;
     "Paragraph Phase 8", paragraph_phase8_tests;
+    "Paragraph Phase 9", paragraph_phase9_tests;
     "Preview snapshot", preview_snapshot_tests;
   ]

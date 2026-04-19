@@ -191,6 +191,13 @@ let pack_tspan (t : Element.tspan) : Msgpck.t =
     opt_f64 t.jas_glyph_scaling_max;
     opt_f64 t.jas_auto_leading;
     opt_str t.jas_single_word_justify;
+    opt_f64 t.jas_hyphenate_min_word;
+    opt_f64 t.jas_hyphenate_min_before;
+    opt_f64 t.jas_hyphenate_min_after;
+    opt_f64 t.jas_hyphenate_limit;
+    opt_f64 t.jas_hyphenate_zone;
+    opt_f64 t.jas_hyphenate_bias;
+    opt_bool t.jas_hyphenate_capitalized;
   ]
 
 (** Inverse of [pack_tspan]. Tolerant of trailing field additions —
@@ -252,6 +259,13 @@ let unpack_tspan v : Element.tspan =
     jas_glyph_scaling_max = as_opt_f64 (get 41);
     jas_auto_leading = as_opt_f64 (get 42);
     jas_single_word_justify = as_opt_str (get 43);
+    jas_hyphenate_min_word = as_opt_f64 (get 44);
+    jas_hyphenate_min_before = as_opt_f64 (get 45);
+    jas_hyphenate_min_after = as_opt_f64 (get 46);
+    jas_hyphenate_limit = as_opt_f64 (get 47);
+    jas_hyphenate_zone = as_opt_f64 (get 48);
+    jas_hyphenate_bias = as_opt_f64 (get 49);
+    jas_hyphenate_capitalized = as_opt_bool (get 50);
   }
 
 let pack_path_command = function
