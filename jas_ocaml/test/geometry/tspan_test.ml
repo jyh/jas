@@ -99,6 +99,11 @@ let tspan_of_json v : tspan =
     jas_hyphenate = opt "jas_hyphenate" opt_bool;
     jas_hanging_punctuation = opt "jas_hanging_punctuation" opt_bool;
     jas_list_style = opt "jas_list_style" opt_string;
+    text_align = opt "text_align" opt_string;
+    text_align_last = opt "text_align_last" opt_string;
+    text_indent = opt "text_indent" opt_float;
+    jas_space_before = opt "jas_space_before" opt_float;
+    jas_space_after = opt "jas_space_after" opt_float;
     letter_spacing = opt "letter_spacing" opt_float;
     line_height = opt "line_height" opt_float;
     rotate = opt "rotate" opt_float;
@@ -540,6 +545,46 @@ let () =
           assert (back.jas_hyphenate = Some true);
           assert (back.jas_hanging_punctuation = Some true);
           assert (back.jas_list_style = Some "bullet-disc")
+        | _ -> assert false);
+    ];
+    "Phase 1b1 paragraph attrs", [
+      Alcotest.test_case "has_no_overrides_false_when_phase1b1_attrs_set" `Quick (fun () ->
+        assert (not (has_no_overrides
+          { (default_tspan ()) with text_align = Some "justify" }));
+        assert (not (has_no_overrides
+          { (default_tspan ()) with text_align_last = Some "left" }));
+        assert (not (has_no_overrides
+          { (default_tspan ()) with text_indent = Some (-12.0) }));
+        assert (not (has_no_overrides
+          { (default_tspan ()) with jas_space_before = Some 6.0 }));
+        assert (not (has_no_overrides
+          { (default_tspan ()) with jas_space_after = Some 6.0 })));
+      Alcotest.test_case "svg_fragment_phase1b1_attrs_round_trip" `Quick (fun () ->
+        let t = { (default_tspan ()) with
+                  content = "";
+                  jas_role = Some "paragraph";
+                  text_align = Some "justify";
+                  text_align_last = Some "center";
+                  text_indent = Some (-18.0);
+                  jas_space_before = Some 12.0;
+                  jas_space_after = Some 6.0 } in
+        let svg = tspans_to_svg_fragment [| t |] in
+        let contains pat =
+          try let _ : int = Str.search_forward (Str.regexp_string pat) svg 0
+              in true
+          with Not_found -> false in
+        assert (contains {|text-align="justify"|});
+        assert (contains {|text-align-last="center"|});
+        assert (contains {|text-indent="-18"|});
+        assert (contains {|jas:space-before="12"|});
+        assert (contains {|jas:space-after="6"|});
+        match tspans_from_svg_fragment svg with
+        | Some [| back |] ->
+          assert (back.text_align = Some "justify");
+          assert (back.text_align_last = Some "center");
+          assert (back.text_indent = Some (-18.0));
+          assert (back.jas_space_before = Some 12.0);
+          assert (back.jas_space_after = Some 6.0)
         | _ -> assert false);
     ];
   ]

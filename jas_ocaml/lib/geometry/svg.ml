@@ -162,7 +162,15 @@ let tspan_svg (t : Element.tspan) : string =
   let hyph_attr = attr_bool "urn:jas:1:hyphenate" t.jas_hyphenate in
   let hp_attr = attr_bool "urn:jas:1:hanging-punctuation" t.jas_hanging_punctuation in
   let ls_attr = attr_str "urn:jas:1:list-style" t.jas_list_style in
-  Printf.sprintf "<tspan%s%s%s%s%s%s%s%s%s%s%s%s>%s</tspan>"
+  (* Phase 1b1 panel-surface remainder. text-align / text-align-last /
+     text-indent serialise as bare CSS-style attribute names; space-before
+     / space-after are jas-namespaced. *)
+  let ta_attr = attr_str "text-align" t.text_align in
+  let tal_attr = attr_str "text-align-last" t.text_align_last in
+  let ti_attr = attr_num "text-indent" t.text_indent in
+  let sb_attr = attr_num "urn:jas:1:space-before" t.jas_space_before in
+  let sa_attr = attr_num "urn:jas:1:space-after" t.jas_space_after in
+  Printf.sprintf "<tspan%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s>%s</tspan>"
     (attr_str "font-family" t.font_family)
     (attr_f "font-size" t.font_size)
     (attr_str "font-weight" t.font_weight)
@@ -171,6 +179,7 @@ let tspan_svg (t : Element.tspan) : string =
     rotate_attr
     role_attr
     li_attr ri_attr hyph_attr hp_attr ls_attr
+    ta_attr tal_attr ti_attr sb_attr sa_attr
     (escape_xml t.content)
 
 let rec element_svg indent (elem : Element.element) =
@@ -762,6 +771,14 @@ and parse_tspan_body i attrs : Element.tspan list =
     jas_hanging_punctuation = (match get_attr a "urn:jas:1:hanging-punctuation" with
       | Some v -> Some (v = "true") | None -> None);
     jas_list_style = get_attr a "urn:jas:1:list-style";
+    text_align = get_attr a "text-align";
+    text_align_last = get_attr a "text-align-last";
+    text_indent = (match get_attr a "text-indent" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_space_before = (match get_attr a "urn:jas:1:space-before" with
+      | Some s -> float_of_string_opt s | None -> None);
+    jas_space_after = (match get_attr a "urn:jas:1:space-after" with
+      | Some s -> float_of_string_opt s | None -> None);
   } in
   match rotate_vals with
   | [] -> [base]

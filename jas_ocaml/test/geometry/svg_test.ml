@@ -682,5 +682,39 @@ let () =
         assert (try let _ : int = Str.search_forward
             (Str.regexp_string ">hello</tspan>") svg 0 in true
                 with Not_found -> false));
+
+      Alcotest.test_case "Phase 1b1 paragraph attrs emit on tspan in document SVG" `Quick (fun () ->
+        (* text-align / text-align-last / text-indent serialise as bare
+           CSS-style attribute names; jas:space-before / jas:space-after
+           use the urn:jas:1: prefix to keep XML namespace-friendly. *)
+        let base = make_text 0.0 0.0 "X" in
+        let input = match base with
+          | Text r ->
+            let tspans = [|
+              { (Jas.Tspan.default_tspan ()) with
+                id = 0; content = "";
+                jas_role = Some "paragraph";
+                text_align = Some "justify";
+                text_align_last = Some "left";
+                text_indent = Some (-12.0);
+                jas_space_before = Some 6.0;
+                jas_space_after = Some 3.0 };
+              { (Jas.Tspan.default_tspan ()) with
+                id = 1; content = "X" };
+            |] in
+            Text { r with tspans }
+          | _ -> assert false
+        in
+        let doc = make_document [|make_layer [| input |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains pat =
+          try let _ : int = Str.search_forward (Str.regexp_string pat) svg 0
+              in true
+          with Not_found -> false in
+        assert (contains {|text-align="justify"|});
+        assert (contains {|text-align-last="left"|});
+        assert (contains {|text-indent="-12"|});
+        assert (contains {|urn:jas:1:space-before="6"|});
+        assert (contains {|urn:jas:1:space-after="3"|}));
     ];
   ]
