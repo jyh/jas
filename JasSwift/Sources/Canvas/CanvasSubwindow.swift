@@ -720,7 +720,20 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
         let drawContent = applyTextTransform(v.textTransform, v.fontVariant, v.content)
         // line_height overrides the per-line stride in text_layout when
         // non-empty; empty = Auto = fontSize.
-        let layoutFs = parsePt(v.lineHeight) ?? effectiveFs
+        //
+        // Phase 8: when line_height is empty (Character Auto) and the
+        // first paragraph wrapper carries jas:auto-leading, override
+        // the Auto default with `auto_leading%` of the font size.
+        // V1 applies one Auto override element-wide using the first
+        // wrapper's value (per-paragraph leading would need
+        // layoutText to take per-segment fontSize).
+        let layoutFs: Double = {
+            if let lh = parsePt(v.lineHeight) { return lh }
+            let auto = v.tspans.first(where: { $0.jasRole == "paragraph" })?
+                .jasAutoLeading
+            if let pct = auto { return effectiveFs * pct / 100.0 }
+            return effectiveFs
+        }()
         // Phase 5: build paragraph segments from the wrapper tspans
         // (jas_role == "paragraph"). Each wrapper carries its
         // [left/right/first-line] indent and [space-before/after]

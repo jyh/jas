@@ -605,3 +605,47 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     #expect(back[0].jasHangingPunctuation == true)
     #expect(back[0].jasListStyle == "bullet-disc")
 }
+
+// MARK: - Phase 1b2 / Phase 8 Justification dialog attrs
+
+@Test func hasNoOverridesFalseWhenPhase8AttrsSet() {
+    #expect(!Tspan(jasWordSpacingMin: 75).hasNoOverrides)
+    #expect(!Tspan(jasLetterSpacingDesired: 5).hasNoOverrides)
+    #expect(!Tspan(jasGlyphScalingMax: 105).hasNoOverrides)
+    #expect(!Tspan(jasAutoLeading: 140).hasNoOverrides)
+    #expect(!Tspan(jasSingleWordJustify: "left").hasNoOverrides)
+}
+
+@Test func svgFragmentPhase8AttrsRoundTrip() {
+    let t = Tspan(content: "", jasRole: "paragraph",
+                  jasWordSpacingMin: 75,
+                  jasWordSpacingDesired: 95,
+                  jasWordSpacingMax: 150,
+                  jasLetterSpacingMin: -5,
+                  jasLetterSpacingDesired: 0,
+                  jasLetterSpacingMax: 10,
+                  jasGlyphScalingMin: 95,
+                  jasGlyphScalingDesired: 100,
+                  jasGlyphScalingMax: 105,
+                  jasAutoLeading: 140,
+                  jasSingleWordJustify: "left")
+    let svg = tspansToSvgFragment([t])
+    #expect(svg.contains(#"jas:word-spacing-min="75""#))
+    #expect(svg.contains(#"jas:letter-spacing-desired="0""#))
+    #expect(svg.contains(#"jas:glyph-scaling-max="105""#))
+    #expect(svg.contains(#"jas:auto-leading="140""#))
+    #expect(svg.contains(#"jas:single-word-justify="left""#))
+    let back = tspansFromSvgFragment(svg)!
+    #expect(back.count == 1)
+    #expect(back[0].jasWordSpacingMin == 75)
+    #expect(back[0].jasWordSpacingDesired == 95)
+    #expect(back[0].jasWordSpacingMax == 150)
+    #expect(back[0].jasLetterSpacingMin == -5)
+    #expect(back[0].jasLetterSpacingDesired == 0)
+    #expect(back[0].jasLetterSpacingMax == 10)
+    #expect(back[0].jasGlyphScalingMin == 95)
+    #expect(back[0].jasGlyphScalingDesired == 100)
+    #expect(back[0].jasGlyphScalingMax == 105)
+    #expect(back[0].jasAutoLeading == 140)
+    #expect(back[0].jasSingleWordJustify == "left")
+}

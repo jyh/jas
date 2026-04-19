@@ -379,3 +379,59 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     #expect(o["align_left"] as? Bool == false)
     #expect(o["align_center"] as? Bool == false)
 }
+
+// MARK: - Phase 8 Justification dialog OK commit
+
+@Test func applyJustificationDialogWritesNonDefaultAttrs() {
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let v = JustificationDialogValues(
+        wordSpacingMin: 75, wordSpacingDesired: 95, wordSpacingMax: 150,
+        letterSpacingMin: -5, letterSpacingDesired: 0, letterSpacingMax: 10,
+        glyphScalingMin: 95, glyphScalingDesired: 100, glyphScalingMax: 105,
+        autoLeading: 140, singleWordJustify: "left")
+    applyJustificationDialogToSelection(v,
+        controller: Controller(model: model))
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        let w = t.tspans[0]
+        #expect(w.jasWordSpacingMin == 75)
+        #expect(w.jasWordSpacingDesired == 95)
+        #expect(w.jasWordSpacingMax == 150)
+        #expect(w.jasLetterSpacingMin == -5)
+        #expect(w.jasLetterSpacingDesired == nil)  // identity-omit
+        #expect(w.jasLetterSpacingMax == 10)
+        #expect(w.jasGlyphScalingMin == 95)
+        #expect(w.jasGlyphScalingDesired == nil)   // identity-omit
+        #expect(w.jasGlyphScalingMax == 105)
+        #expect(w.jasAutoLeading == 140)
+        #expect(w.jasSingleWordJustify == "left")
+    }
+}
+
+@Test func applyJustificationDialogAllDefaultsWritesNothing() {
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let v = JustificationDialogValues(
+        wordSpacingMin: 80, wordSpacingDesired: 100, wordSpacingMax: 133,
+        letterSpacingMin: 0, letterSpacingDesired: 0, letterSpacingMax: 0,
+        glyphScalingMin: 100, glyphScalingDesired: 100, glyphScalingMax: 100,
+        autoLeading: 120, singleWordJustify: "justify")
+    applyJustificationDialogToSelection(v,
+        controller: Controller(model: model))
+    let elem = model.document.getElement([0, 0])
+    if case .text(let t) = elem {
+        let w = t.tspans[0]
+        #expect(w.jasWordSpacingMin == nil)
+        #expect(w.jasWordSpacingDesired == nil)
+        #expect(w.jasWordSpacingMax == nil)
+        #expect(w.jasLetterSpacingMin == nil)
+        #expect(w.jasLetterSpacingDesired == nil)
+        #expect(w.jasLetterSpacingMax == nil)
+        #expect(w.jasGlyphScalingMin == nil)
+        #expect(w.jasGlyphScalingDesired == nil)
+        #expect(w.jasGlyphScalingMax == nil)
+        #expect(w.jasAutoLeading == nil)
+        #expect(w.jasSingleWordJustify == nil)
+    }
+}

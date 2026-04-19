@@ -61,6 +61,18 @@ public struct Tspan: Equatable {
     public let jasSpaceBefore: Double?
     /// `jas:space-after` — pt, unsigned.
     public let jasSpaceAfter: Double?
+    // ── Phase 1b2 / 8: Justification dialog attrs ────────────
+    public let jasWordSpacingMin: Double?
+    public let jasWordSpacingDesired: Double?
+    public let jasWordSpacingMax: Double?
+    public let jasLetterSpacingMin: Double?
+    public let jasLetterSpacingDesired: Double?
+    public let jasLetterSpacingMax: Double?
+    public let jasGlyphScalingMin: Double?
+    public let jasGlyphScalingDesired: Double?
+    public let jasGlyphScalingMax: Double?
+    public let jasAutoLeading: Double?
+    public let jasSingleWordJustify: String?
     public let letterSpacing: Double?
     public let lineHeight: Double?
     public let rotate: Double?
@@ -88,6 +100,17 @@ public struct Tspan: Equatable {
                 textAlign: String? = nil, textAlignLast: String? = nil,
                 textIndent: Double? = nil,
                 jasSpaceBefore: Double? = nil, jasSpaceAfter: Double? = nil,
+                jasWordSpacingMin: Double? = nil,
+                jasWordSpacingDesired: Double? = nil,
+                jasWordSpacingMax: Double? = nil,
+                jasLetterSpacingMin: Double? = nil,
+                jasLetterSpacingDesired: Double? = nil,
+                jasLetterSpacingMax: Double? = nil,
+                jasGlyphScalingMin: Double? = nil,
+                jasGlyphScalingDesired: Double? = nil,
+                jasGlyphScalingMax: Double? = nil,
+                jasAutoLeading: Double? = nil,
+                jasSingleWordJustify: String? = nil,
                 letterSpacing: Double? = nil, lineHeight: Double? = nil,
                 rotate: Double? = nil, styleName: String? = nil,
                 textDecoration: [String]? = nil, textRendering: String? = nil,
@@ -111,6 +134,17 @@ public struct Tspan: Equatable {
         self.textIndent = textIndent
         self.jasSpaceBefore = jasSpaceBefore
         self.jasSpaceAfter = jasSpaceAfter
+        self.jasWordSpacingMin = jasWordSpacingMin
+        self.jasWordSpacingDesired = jasWordSpacingDesired
+        self.jasWordSpacingMax = jasWordSpacingMax
+        self.jasLetterSpacingMin = jasLetterSpacingMin
+        self.jasLetterSpacingDesired = jasLetterSpacingDesired
+        self.jasLetterSpacingMax = jasLetterSpacingMax
+        self.jasGlyphScalingMin = jasGlyphScalingMin
+        self.jasGlyphScalingDesired = jasGlyphScalingDesired
+        self.jasGlyphScalingMax = jasGlyphScalingMax
+        self.jasAutoLeading = jasAutoLeading
+        self.jasSingleWordJustify = jasSingleWordJustify
         self.letterSpacing = letterSpacing; self.lineHeight = lineHeight
         self.rotate = rotate; self.styleName = styleName
         self.textDecoration = textDecoration; self.textRendering = textRendering
@@ -137,6 +171,13 @@ public struct Tspan: Equatable {
             && textAlign == nil && textAlignLast == nil
             && textIndent == nil
             && jasSpaceBefore == nil && jasSpaceAfter == nil
+            && jasWordSpacingMin == nil && jasWordSpacingDesired == nil
+            && jasWordSpacingMax == nil
+            && jasLetterSpacingMin == nil && jasLetterSpacingDesired == nil
+            && jasLetterSpacingMax == nil
+            && jasGlyphScalingMin == nil && jasGlyphScalingDesired == nil
+            && jasGlyphScalingMax == nil
+            && jasAutoLeading == nil && jasSingleWordJustify == nil
             && letterSpacing == nil && lineHeight == nil
             && rotate == nil && styleName == nil
             && textDecoration == nil && textRendering == nil

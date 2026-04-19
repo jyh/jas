@@ -50,6 +50,17 @@ public func tspansToJsonClipboard(_ tspans: [Tspan]) -> String {
         if let v = t.textIndent { obj["text_indent"] = v }
         if let v = t.jasSpaceBefore { obj["jas_space_before"] = v }
         if let v = t.jasSpaceAfter { obj["jas_space_after"] = v }
+        if let v = t.jasWordSpacingMin { obj["jas_word_spacing_min"] = v }
+        if let v = t.jasWordSpacingDesired { obj["jas_word_spacing_desired"] = v }
+        if let v = t.jasWordSpacingMax { obj["jas_word_spacing_max"] = v }
+        if let v = t.jasLetterSpacingMin { obj["jas_letter_spacing_min"] = v }
+        if let v = t.jasLetterSpacingDesired { obj["jas_letter_spacing_desired"] = v }
+        if let v = t.jasLetterSpacingMax { obj["jas_letter_spacing_max"] = v }
+        if let v = t.jasGlyphScalingMin { obj["jas_glyph_scaling_min"] = v }
+        if let v = t.jasGlyphScalingDesired { obj["jas_glyph_scaling_desired"] = v }
+        if let v = t.jasGlyphScalingMax { obj["jas_glyph_scaling_max"] = v }
+        if let v = t.jasAutoLeading { obj["jas_auto_leading"] = v }
+        if let v = t.jasSingleWordJustify { obj["jas_single_word_justify"] = v }
         if let v = t.letterSpacing { obj["letter_spacing"] = v }
         if let v = t.lineHeight { obj["line_height"] = v }
         if let v = t.rotate { obj["rotate"] = v }
@@ -100,6 +111,17 @@ public func tspansFromJsonClipboard(_ jsonStr: String) -> [Tspan]? {
             textIndent: (obj["text_indent"] as? NSNumber)?.doubleValue,
             jasSpaceBefore: (obj["jas_space_before"] as? NSNumber)?.doubleValue,
             jasSpaceAfter: (obj["jas_space_after"] as? NSNumber)?.doubleValue,
+            jasWordSpacingMin: (obj["jas_word_spacing_min"] as? NSNumber)?.doubleValue,
+            jasWordSpacingDesired: (obj["jas_word_spacing_desired"] as? NSNumber)?.doubleValue,
+            jasWordSpacingMax: (obj["jas_word_spacing_max"] as? NSNumber)?.doubleValue,
+            jasLetterSpacingMin: (obj["jas_letter_spacing_min"] as? NSNumber)?.doubleValue,
+            jasLetterSpacingDesired: (obj["jas_letter_spacing_desired"] as? NSNumber)?.doubleValue,
+            jasLetterSpacingMax: (obj["jas_letter_spacing_max"] as? NSNumber)?.doubleValue,
+            jasGlyphScalingMin: (obj["jas_glyph_scaling_min"] as? NSNumber)?.doubleValue,
+            jasGlyphScalingDesired: (obj["jas_glyph_scaling_desired"] as? NSNumber)?.doubleValue,
+            jasGlyphScalingMax: (obj["jas_glyph_scaling_max"] as? NSNumber)?.doubleValue,
+            jasAutoLeading: (obj["jas_auto_leading"] as? NSNumber)?.doubleValue,
+            jasSingleWordJustify: obj["jas_single_word_justify"] as? String,
             letterSpacing: (obj["letter_spacing"] as? NSNumber)?.doubleValue,
             lineHeight: (obj["line_height"] as? NSNumber)?.doubleValue,
             rotate: (obj["rotate"] as? NSNumber)?.doubleValue,
@@ -145,6 +167,17 @@ public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
         if let v = t.textIndent { attrs.append(("text-indent", _fmtDouble(v))) }
         if let v = t.jasSpaceBefore { attrs.append(("jas:space-before", _fmtDouble(v))) }
         if let v = t.jasSpaceAfter { attrs.append(("jas:space-after", _fmtDouble(v))) }
+        if let v = t.jasWordSpacingMin { attrs.append(("jas:word-spacing-min", _fmtDouble(v))) }
+        if let v = t.jasWordSpacingDesired { attrs.append(("jas:word-spacing-desired", _fmtDouble(v))) }
+        if let v = t.jasWordSpacingMax { attrs.append(("jas:word-spacing-max", _fmtDouble(v))) }
+        if let v = t.jasLetterSpacingMin { attrs.append(("jas:letter-spacing-min", _fmtDouble(v))) }
+        if let v = t.jasLetterSpacingDesired { attrs.append(("jas:letter-spacing-desired", _fmtDouble(v))) }
+        if let v = t.jasLetterSpacingMax { attrs.append(("jas:letter-spacing-max", _fmtDouble(v))) }
+        if let v = t.jasGlyphScalingMin { attrs.append(("jas:glyph-scaling-min", _fmtDouble(v))) }
+        if let v = t.jasGlyphScalingDesired { attrs.append(("jas:glyph-scaling-desired", _fmtDouble(v))) }
+        if let v = t.jasGlyphScalingMax { attrs.append(("jas:glyph-scaling-max", _fmtDouble(v))) }
+        if let v = t.jasAutoLeading { attrs.append(("jas:auto-leading", _fmtDouble(v))) }
+        if let v = t.jasSingleWordJustify { attrs.append(("jas:single-word-justify", v)) }
         if let v = t.letterSpacing { attrs.append(("letter-spacing", _fmtDouble(v))) }
         if let v = t.lineHeight { attrs.append(("line-height", _fmtDouble(v))) }
         if let v = t.rotate { attrs.append(("rotate", _fmtDouble(v))) }
@@ -227,6 +260,17 @@ public func tspansFromSvgFragment(_ svgStr: String) -> [Tspan]? {
             case "text-indent": t = mergeFields(t, textIndent: Double(v))
             case "jas:space-before": t = mergeFields(t, jasSpaceBefore: Double(v))
             case "jas:space-after": t = mergeFields(t, jasSpaceAfter: Double(v))
+            case "jas:word-spacing-min": t = mergeFields(t, jasWordSpacingMin: Double(v))
+            case "jas:word-spacing-desired": t = mergeFields(t, jasWordSpacingDesired: Double(v))
+            case "jas:word-spacing-max": t = mergeFields(t, jasWordSpacingMax: Double(v))
+            case "jas:letter-spacing-min": t = mergeFields(t, jasLetterSpacingMin: Double(v))
+            case "jas:letter-spacing-desired": t = mergeFields(t, jasLetterSpacingDesired: Double(v))
+            case "jas:letter-spacing-max": t = mergeFields(t, jasLetterSpacingMax: Double(v))
+            case "jas:glyph-scaling-min": t = mergeFields(t, jasGlyphScalingMin: Double(v))
+            case "jas:glyph-scaling-desired": t = mergeFields(t, jasGlyphScalingDesired: Double(v))
+            case "jas:glyph-scaling-max": t = mergeFields(t, jasGlyphScalingMax: Double(v))
+            case "jas:auto-leading": t = mergeFields(t, jasAutoLeading: Double(v))
+            case "jas:single-word-justify": t = mergeFields(t, jasSingleWordJustify: v)
             case "letter-spacing": t = mergeFields(t, letterSpacing: Double(v))
             case "line-height": t = mergeFields(t, lineHeight: Double(v))
             case "rotate": t = mergeFields(t, rotate: Double(v))
@@ -272,6 +316,17 @@ private func mergeFields(_ t: Tspan,
                          textIndent: Double?? = .some(nil),
                          jasSpaceBefore: Double?? = .some(nil),
                          jasSpaceAfter: Double?? = .some(nil),
+                         jasWordSpacingMin: Double?? = .some(nil),
+                         jasWordSpacingDesired: Double?? = .some(nil),
+                         jasWordSpacingMax: Double?? = .some(nil),
+                         jasLetterSpacingMin: Double?? = .some(nil),
+                         jasLetterSpacingDesired: Double?? = .some(nil),
+                         jasLetterSpacingMax: Double?? = .some(nil),
+                         jasGlyphScalingMin: Double?? = .some(nil),
+                         jasGlyphScalingDesired: Double?? = .some(nil),
+                         jasGlyphScalingMax: Double?? = .some(nil),
+                         jasAutoLeading: Double?? = .some(nil),
+                         jasSingleWordJustify: String?? = .some(nil),
                          letterSpacing: Double?? = .some(nil),
                          lineHeight: Double?? = .some(nil),
                          rotate: Double?? = .some(nil),
@@ -315,6 +370,17 @@ private func mergeFields(_ t: Tspan,
         textIndent: pick(textIndent, t.textIndent),
         jasSpaceBefore: pick(jasSpaceBefore, t.jasSpaceBefore),
         jasSpaceAfter: pick(jasSpaceAfter, t.jasSpaceAfter),
+        jasWordSpacingMin: pick(jasWordSpacingMin, t.jasWordSpacingMin),
+        jasWordSpacingDesired: pick(jasWordSpacingDesired, t.jasWordSpacingDesired),
+        jasWordSpacingMax: pick(jasWordSpacingMax, t.jasWordSpacingMax),
+        jasLetterSpacingMin: pick(jasLetterSpacingMin, t.jasLetterSpacingMin),
+        jasLetterSpacingDesired: pick(jasLetterSpacingDesired, t.jasLetterSpacingDesired),
+        jasLetterSpacingMax: pick(jasLetterSpacingMax, t.jasLetterSpacingMax),
+        jasGlyphScalingMin: pick(jasGlyphScalingMin, t.jasGlyphScalingMin),
+        jasGlyphScalingDesired: pick(jasGlyphScalingDesired, t.jasGlyphScalingDesired),
+        jasGlyphScalingMax: pick(jasGlyphScalingMax, t.jasGlyphScalingMax),
+        jasAutoLeading: pick(jasAutoLeading, t.jasAutoLeading),
+        jasSingleWordJustify: pick(jasSingleWordJustify, t.jasSingleWordJustify),
         letterSpacing: pick(letterSpacing, t.letterSpacing),
         lineHeight: pick(lineHeight, t.lineHeight),
         rotate: pick(rotate, t.rotate),
@@ -397,6 +463,17 @@ public func mergeTspanOverrides(_ target: Tspan, _ source: Tspan) -> Tspan {
         textIndent: source.textIndent ?? target.textIndent,
         jasSpaceBefore: source.jasSpaceBefore ?? target.jasSpaceBefore,
         jasSpaceAfter: source.jasSpaceAfter ?? target.jasSpaceAfter,
+        jasWordSpacingMin: source.jasWordSpacingMin ?? target.jasWordSpacingMin,
+        jasWordSpacingDesired: source.jasWordSpacingDesired ?? target.jasWordSpacingDesired,
+        jasWordSpacingMax: source.jasWordSpacingMax ?? target.jasWordSpacingMax,
+        jasLetterSpacingMin: source.jasLetterSpacingMin ?? target.jasLetterSpacingMin,
+        jasLetterSpacingDesired: source.jasLetterSpacingDesired ?? target.jasLetterSpacingDesired,
+        jasLetterSpacingMax: source.jasLetterSpacingMax ?? target.jasLetterSpacingMax,
+        jasGlyphScalingMin: source.jasGlyphScalingMin ?? target.jasGlyphScalingMin,
+        jasGlyphScalingDesired: source.jasGlyphScalingDesired ?? target.jasGlyphScalingDesired,
+        jasGlyphScalingMax: source.jasGlyphScalingMax ?? target.jasGlyphScalingMax,
+        jasAutoLeading: source.jasAutoLeading ?? target.jasAutoLeading,
+        jasSingleWordJustify: source.jasSingleWordJustify ?? target.jasSingleWordJustify,
         letterSpacing: source.letterSpacing ?? target.letterSpacing,
         lineHeight: source.lineHeight ?? target.lineHeight,
         rotate: source.rotate ?? target.rotate,

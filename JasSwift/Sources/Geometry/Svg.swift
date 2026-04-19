@@ -182,6 +182,39 @@ private func tspanSvg(_ t: Tspan) -> String {
     if let v = t.jasSpaceAfter {
         attrs += " urn:jas:1:space-after=\"\(fmt(v))\""
     }
+    if let v = t.jasWordSpacingMin {
+        attrs += " urn:jas:1:word-spacing-min=\"\(fmt(v))\""
+    }
+    if let v = t.jasWordSpacingDesired {
+        attrs += " urn:jas:1:word-spacing-desired=\"\(fmt(v))\""
+    }
+    if let v = t.jasWordSpacingMax {
+        attrs += " urn:jas:1:word-spacing-max=\"\(fmt(v))\""
+    }
+    if let v = t.jasLetterSpacingMin {
+        attrs += " urn:jas:1:letter-spacing-min=\"\(fmt(v))\""
+    }
+    if let v = t.jasLetterSpacingDesired {
+        attrs += " urn:jas:1:letter-spacing-desired=\"\(fmt(v))\""
+    }
+    if let v = t.jasLetterSpacingMax {
+        attrs += " urn:jas:1:letter-spacing-max=\"\(fmt(v))\""
+    }
+    if let v = t.jasGlyphScalingMin {
+        attrs += " urn:jas:1:glyph-scaling-min=\"\(fmt(v))\""
+    }
+    if let v = t.jasGlyphScalingDesired {
+        attrs += " urn:jas:1:glyph-scaling-desired=\"\(fmt(v))\""
+    }
+    if let v = t.jasGlyphScalingMax {
+        attrs += " urn:jas:1:glyph-scaling-max=\"\(fmt(v))\""
+    }
+    if let v = t.jasAutoLeading {
+        attrs += " urn:jas:1:auto-leading=\"\(fmt(v))\""
+    }
+    if let v = t.jasSingleWordJustify {
+        attrs += " urn:jas:1:single-word-justify=\"\(escapeXml(v))\""
+    }
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
 
@@ -467,6 +500,27 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
         .flatMap(Double.init)
     let jasSpaceAfter = (node.attribute(forName: "urn:jas:1:space-after")?.stringValue)
         .flatMap(Double.init)
+    let jasWordSpacingMin = (node.attribute(forName: "urn:jas:1:word-spacing-min")?.stringValue)
+        .flatMap(Double.init)
+    let jasWordSpacingDesired = (node.attribute(forName: "urn:jas:1:word-spacing-desired")?.stringValue)
+        .flatMap(Double.init)
+    let jasWordSpacingMax = (node.attribute(forName: "urn:jas:1:word-spacing-max")?.stringValue)
+        .flatMap(Double.init)
+    let jasLetterSpacingMin = (node.attribute(forName: "urn:jas:1:letter-spacing-min")?.stringValue)
+        .flatMap(Double.init)
+    let jasLetterSpacingDesired = (node.attribute(forName: "urn:jas:1:letter-spacing-desired")?.stringValue)
+        .flatMap(Double.init)
+    let jasLetterSpacingMax = (node.attribute(forName: "urn:jas:1:letter-spacing-max")?.stringValue)
+        .flatMap(Double.init)
+    let jasGlyphScalingMin = (node.attribute(forName: "urn:jas:1:glyph-scaling-min")?.stringValue)
+        .flatMap(Double.init)
+    let jasGlyphScalingDesired = (node.attribute(forName: "urn:jas:1:glyph-scaling-desired")?.stringValue)
+        .flatMap(Double.init)
+    let jasGlyphScalingMax = (node.attribute(forName: "urn:jas:1:glyph-scaling-max")?.stringValue)
+        .flatMap(Double.init)
+    let jasAutoLeading = (node.attribute(forName: "urn:jas:1:auto-leading")?.stringValue)
+        .flatMap(Double.init)
+    let jasSingleWordJustify = node.attribute(forName: "urn:jas:1:single-word-justify")?.stringValue
     let chars = Array(content)
 
     // Fast paths: no rotate, or single-value rotate, or single char.
@@ -482,6 +536,17 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             textAlign: textAlign, textAlignLast: textAlignLast,
             textIndent: textIndent,
             jasSpaceBefore: jasSpaceBefore, jasSpaceAfter: jasSpaceAfter,
+            jasWordSpacingMin: jasWordSpacingMin,
+            jasWordSpacingDesired: jasWordSpacingDesired,
+            jasWordSpacingMax: jasWordSpacingMax,
+            jasLetterSpacingMin: jasLetterSpacingMin,
+            jasLetterSpacingDesired: jasLetterSpacingDesired,
+            jasLetterSpacingMax: jasLetterSpacingMax,
+            jasGlyphScalingMin: jasGlyphScalingMin,
+            jasGlyphScalingDesired: jasGlyphScalingDesired,
+            jasGlyphScalingMax: jasGlyphScalingMax,
+            jasAutoLeading: jasAutoLeading,
+            jasSingleWordJustify: jasSingleWordJustify,
             textDecoration: decoration)]
     }
     if rotateVals.count == 1 || chars.count <= 1 {
@@ -496,6 +561,17 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             textAlign: textAlign, textAlignLast: textAlignLast,
             textIndent: textIndent,
             jasSpaceBefore: jasSpaceBefore, jasSpaceAfter: jasSpaceAfter,
+            jasWordSpacingMin: jasWordSpacingMin,
+            jasWordSpacingDesired: jasWordSpacingDesired,
+            jasWordSpacingMax: jasWordSpacingMax,
+            jasLetterSpacingMin: jasLetterSpacingMin,
+            jasLetterSpacingDesired: jasLetterSpacingDesired,
+            jasLetterSpacingMax: jasLetterSpacingMax,
+            jasGlyphScalingMin: jasGlyphScalingMin,
+            jasGlyphScalingDesired: jasGlyphScalingDesired,
+            jasGlyphScalingMax: jasGlyphScalingMax,
+            jasAutoLeading: jasAutoLeading,
+            jasSingleWordJustify: jasSingleWordJustify,
             rotate: rotateVals[0],
             textDecoration: decoration)]
     }
@@ -516,6 +592,17 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             textAlign: textAlign, textAlignLast: textAlignLast,
             textIndent: textIndent,
             jasSpaceBefore: jasSpaceBefore, jasSpaceAfter: jasSpaceAfter,
+            jasWordSpacingMin: jasWordSpacingMin,
+            jasWordSpacingDesired: jasWordSpacingDesired,
+            jasWordSpacingMax: jasWordSpacingMax,
+            jasLetterSpacingMin: jasLetterSpacingMin,
+            jasLetterSpacingDesired: jasLetterSpacingDesired,
+            jasLetterSpacingMax: jasLetterSpacingMax,
+            jasGlyphScalingMin: jasGlyphScalingMin,
+            jasGlyphScalingDesired: jasGlyphScalingDesired,
+            jasGlyphScalingMax: jasGlyphScalingMax,
+            jasAutoLeading: jasAutoLeading,
+            jasSingleWordJustify: jasSingleWordJustify,
             rotate: i < rotateVals.count ? rotateVals[i] : lastAngle,
             textDecoration: decoration)
     }
