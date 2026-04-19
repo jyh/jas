@@ -2799,6 +2799,27 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         })
         .unwrap_or_else(|| "—".to_string());
 
+    // Optional SVG icon for the button face — when present, it
+    // takes precedence over the per-option glyph so the button
+    // identity matches the widget's purpose (e.g. para_bullets
+    // always renders the "list of bullets" pictogram regardless
+    // of which bullet is currently selected).
+    let icon_name = el.get("icon").and_then(|i| i.as_str()).unwrap_or("");
+    let ws_for_icons = super::workspace::Workspace::load();
+    let icon_svg = if !icon_name.is_empty() {
+        let icon_from_ctx = ctx.get("icons").and_then(|i| i.get(icon_name));
+        let icon_from_ws = ws_for_icons.as_ref().and_then(|ws| ws.icons().get(icon_name));
+        if let Some(icon_def) = icon_from_ctx.or(icon_from_ws) {
+            let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+            let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+            format!(r#"<svg viewBox="{viewbox}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
     let bind_target = classify_bind(bind_expr);
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
@@ -2864,11 +2885,20 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                     {render_select_option(opt, &cv)}
                 }
             }
-            // Visible glyph + chevron sits ABOVE the select; pointer-
-            // events:none so the click reaches the select underneath.
+            // Visible face sits ABOVE the select; pointer-events:none
+            // so clicks reach the select underneath. Two layouts:
+            //   - SVG icon present: 14x14 svg + tiny chevron
+            //   - Glyph fallback: text glyph + tiny chevron
             div {
-                style: "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:3px;font-size:18px;color:var(--jas-text,#ccc);pointer-events:none;line-height:1;",
-                "{visible_glyph}"
+                style: "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:3px;color:var(--jas-text,#ccc);pointer-events:none;line-height:1;",
+                if !icon_svg.is_empty() {
+                    div {
+                        style: "width:16px;height:16px;display:flex;align-items:center;justify-content:center;",
+                        dangerous_inner_html: "{icon_svg}",
+                    }
+                } else {
+                    span { style: "font-size:18px;", "{visible_glyph}" }
+                }
                 span { style: "font-size:9px;opacity:0.65;", "▾" }
             }
         }
