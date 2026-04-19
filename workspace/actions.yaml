@@ -1645,3 +1645,197 @@ actions:
     category: paragraph
     effects:
       - reset_paragraph_panel: true
+
+  # ── Align ────────────────────────────────────────────────
+  # Action names match their ALIGN_*/DISTRIBUTE_* button IDs in
+  # lowercase. Each operation action fires a platform effect of
+  # the same name (e.g. align_left: true); each native app wires
+  # the 14 handlers to its geometry engine. Flask ignores them.
+
+  align_left:
+    description: >
+      ALIGN_LEFT_BUTTON. Move every element in the selection
+      horizontally so their left bounding-box edges coincide with
+      the Align-To reference. See ALIGN.md §Align To target.
+    category: align
+    effects:
+      - snapshot
+      - align_left: true
+
+  align_horizontal_center:
+    description: >
+      ALIGN_HORIZONTAL_CENTER_BUTTON. Move every element
+      horizontally so their horizontal centers coincide with the
+      Align-To reference.
+    category: align
+    effects:
+      - snapshot
+      - align_horizontal_center: true
+
+  align_right:
+    description: >
+      ALIGN_RIGHT_BUTTON. Move every element horizontally so
+      their right bounding-box edges coincide with the Align-To
+      reference.
+    category: align
+    effects:
+      - snapshot
+      - align_right: true
+
+  align_top:
+    description: >
+      ALIGN_TOP_BUTTON. Move every element vertically so their
+      top bounding-box edges coincide with the Align-To reference.
+    category: align
+    effects:
+      - snapshot
+      - align_top: true
+
+  align_vertical_center:
+    description: >
+      ALIGN_VERTICAL_CENTER_BUTTON. Move every element vertically
+      so their vertical centers coincide with the Align-To
+      reference.
+    category: align
+    effects:
+      - snapshot
+      - align_vertical_center: true
+
+  align_bottom:
+    description: >
+      ALIGN_BOTTOM_BUTTON. Move every element vertically so their
+      bottom bounding-box edges coincide with the Align-To
+      reference.
+    category: align
+    effects:
+      - snapshot
+      - align_bottom: true
+
+  distribute_left:
+    description: >
+      DISTRIBUTE_LEFT_BUTTON. Redistribute elements horizontally
+      so the left coordinates of their bounding boxes are evenly
+      spaced along the horizontal extent of the Align-To
+      reference.
+    category: align
+    effects:
+      - snapshot
+      - distribute_left: true
+
+  distribute_horizontal_center:
+    description: >
+      DISTRIBUTE_HORIZONTAL_CENTER_BUTTON. Redistribute elements
+      horizontally so their horizontal centers are evenly spaced.
+    category: align
+    effects:
+      - snapshot
+      - distribute_horizontal_center: true
+
+  distribute_right:
+    description: >
+      DISTRIBUTE_RIGHT_BUTTON. Redistribute elements horizontally
+      so the right coordinates of their bounding boxes are evenly
+      spaced.
+    category: align
+    effects:
+      - snapshot
+      - distribute_right: true
+
+  distribute_top:
+    description: >
+      DISTRIBUTE_TOP_BUTTON. Redistribute elements vertically so
+      the top coordinates of their bounding boxes are evenly
+      spaced.
+    category: align
+    effects:
+      - snapshot
+      - distribute_top: true
+
+  distribute_vertical_center:
+    description: >
+      DISTRIBUTE_VERTICAL_CENTER_BUTTON. Redistribute elements
+      vertically so their vertical centers are evenly spaced.
+    category: align
+    effects:
+      - snapshot
+      - distribute_vertical_center: true
+
+  distribute_bottom:
+    description: >
+      DISTRIBUTE_BOTTOM_BUTTON. Redistribute elements vertically
+      so the bottom coordinates of their bounding boxes are
+      evenly spaced.
+    category: align
+    effects:
+      - snapshot
+      - distribute_bottom: true
+
+  distribute_vertical_spacing:
+    description: >
+      DISTRIBUTE_VERTICAL_SPACING_BUTTON. Move elements
+      vertically so gaps between them are uniform. When
+      align_to == 'key_object' and a key has been designated,
+      the gap equals panel.distribute_spacing_value; otherwise
+      the two extremal elements hold and interior gaps average
+      evenly. See ALIGN.md §Distribute Spacing.
+    category: align
+    effects:
+      - snapshot
+      - distribute_vertical_spacing: true
+
+  distribute_horizontal_spacing:
+    description: >
+      DISTRIBUTE_HORIZONTAL_SPACING_BUTTON. Move elements
+      horizontally so gaps between them are uniform. Semantics
+      parallel distribute_vertical_spacing along the horizontal
+      axis.
+    category: align
+    effects:
+      - snapshot
+      - distribute_horizontal_spacing: true
+
+  set_align_to:
+    description: >
+      Switch the Align-To target mode. Writes panel.align_to and
+      state.align_to in the dual-write pattern. Leaving key_object
+      mode also clears the designated key object path so it does
+      not linger. See ALIGN.md §Align To target.
+    category: align
+    params:
+      target: { type: enum, values: [selection, artboard, key_object] }
+    effects:
+      - set_panel_state: { key: align_to, value: "param.target" }
+      - set: { align_to: "param.target" }
+      - if:
+          condition: 'param.target != "key_object"'
+          then:
+            - set_panel_state: { key: key_object_path, value: "null" }
+            - set: { align_key_object_path: "null" }
+
+  toggle_use_preview_bounds:
+    description: >
+      Toggle the "Use Preview Bounds" flag from the panel menu.
+      When checked, every Align / Distribute / Distribute Spacing
+      operation reads preview (stroke-inclusive) bounds; when
+      unchecked, geometric bounds. See ALIGN.md §Bounding box
+      selection.
+    category: align
+    effects:
+      - set_panel_state: { key: use_preview_bounds, value: "not panel.use_preview_bounds" }
+      - set: { align_use_preview_bounds: "not state.align_use_preview_bounds" }
+
+  reset_align_panel:
+    description: >
+      Reset every Align panel control to its default per ALIGN.md
+      §Panel menu: align_to = selection, key_object_path cleared,
+      distribute_spacing_value = 0, use_preview_bounds = false.
+    category: align
+    effects:
+      - set_panel_state: { key: align_to, value: '"selection"' }
+      - set: { align_to: '"selection"' }
+      - set_panel_state: { key: key_object_path, value: "null" }
+      - set: { align_key_object_path: "null" }
+      - set_panel_state: { key: distribute_spacing_value, value: "0" }
+      - set: { align_distribute_spacing: "0" }
+      - set_panel_state: { key: use_preview_bounds, value: "false" }
+      - set: { align_use_preview_bounds: "false" }

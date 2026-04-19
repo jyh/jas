@@ -162,3 +162,100 @@ def _find_by_id(node, target_id):
             if result is not None:
                 return result
     return None
+
+
+class TestAlignActions:
+    """Stage 1c: 17 Align actions added to actions.yaml. Operation
+    actions fire same-named platform effects preceded by a snapshot;
+    mode actions write through the set_panel_state + set dual-write;
+    reset_align_panel resets every panel mirror + state field to
+    defaults."""
+
+    OPERATION_ACTIONS = [
+        "align_left", "align_horizontal_center", "align_right",
+        "align_top", "align_vertical_center", "align_bottom",
+        "distribute_left", "distribute_horizontal_center", "distribute_right",
+        "distribute_top", "distribute_vertical_center", "distribute_bottom",
+        "distribute_vertical_spacing", "distribute_horizontal_spacing",
+    ]
+
+    MODE_ACTIONS = [
+        "set_align_to", "toggle_use_preview_bounds", "reset_align_panel",
+    ]
+
+    @pytest.mark.parametrize("name", OPERATION_ACTIONS + MODE_ACTIONS)
+    def test_action_declared(self, workspace_path, name):
+        ws = load_workspace(workspace_path)
+        assert name in ws["actions"], f"action {name!r} not in actions.yaml"
+        assert ws["actions"][name].get("category") == "align"
+
+    @pytest.mark.parametrize("name", OPERATION_ACTIONS)
+    def test_operation_action_snapshots_and_fires_platform_effect(
+            self, workspace_path, name):
+        """Each operation fires: snapshot, then <name>: true."""
+        ws = load_workspace(workspace_path)
+        effects = ws["actions"][name].get("effects", [])
+        assert effects[0] == "snapshot"
+        assert effects[1] == {name: True}, (
+            f"{name} expected a same-named platform effect; got {effects[1]!r}"
+        )
+
+    def test_set_align_to_has_enum_target_param(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        params = ws["actions"]["set_align_to"].get("params", {})
+        target = params.get("target", {})
+        assert target.get("type") == "enum"
+        assert set(target.get("values", [])) == {"selection", "artboard", "key_object"}
+
+    def test_set_align_to_clears_key_object_when_leaving_key_mode(
+            self, workspace_path):
+        """When target != key_object, the action also clears
+        panel.key_object_path and state.align_key_object_path."""
+        ws = load_workspace(workspace_path)
+        effects = ws["actions"]["set_align_to"]["effects"]
+        # Third effect must be an if clause that clears the key when
+        # target is anything other than key_object.
+        cond_eff = effects[2]
+        assert "if" in cond_eff
+        assert cond_eff["if"]["condition"] == 'param.target != "key_object"'
+        then_effects = cond_eff["if"]["then"]
+        assert {"set_panel_state": {"key": "key_object_path", "value": "null"}} in then_effects
+        assert {"set": {"align_key_object_path": "null"}} in then_effects
+
+    def test_toggle_use_preview_bounds_toggles_both_mirrors(
+            self, workspace_path):
+        ws = load_workspace(workspace_path)
+        effects = ws["actions"]["toggle_use_preview_bounds"]["effects"]
+        assert {
+            "set_panel_state": {
+                "key": "use_preview_bounds",
+                "value": "not panel.use_preview_bounds",
+            }
+        } in effects
+        assert {
+            "set": {
+                "align_use_preview_bounds": "not state.align_use_preview_bounds"
+            }
+        } in effects
+
+    def test_reset_align_panel_resets_all_four_fields(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        effects = ws["actions"]["reset_align_panel"]["effects"]
+        # 4 panel-mirror writes + 4 state writes = 8 effects.
+        assert len(effects) == 8
+        # Four panel-state resets.
+        for key, value in [
+            ("align_to", '"selection"'),
+            ("key_object_path", "null"),
+            ("distribute_spacing_value", "0"),
+            ("use_preview_bounds", "false"),
+        ]:
+            assert {"set_panel_state": {"key": key, "value": value}} in effects
+        # Four global-state resets.
+        for state_key, value in [
+            ("align_to", '"selection"'),
+            ("align_key_object_path", "null"),
+            ("align_distribute_spacing", "0"),
+            ("align_use_preview_bounds", "false"),
+        ]:
+            assert {"set": {state_key: value}} in effects
