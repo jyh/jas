@@ -179,3 +179,86 @@ def align_vertical_center(elements, reference, bounds_fn):
 def align_bottom(elements, reference, bounds_fn):
     """ALIGN_BOTTOM_BUTTON."""
     return align_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.MAX, bounds_fn)
+
+
+def distribute_along_axis(
+    elements: list[tuple[ElementPath, Element]],
+    reference: AlignReference,
+    axis: Axis,
+    anchor: AxisAnchor,
+    bounds_fn: BoundsFn,
+) -> list[AlignTranslation]:
+    """Generic driver for the six Distribute operations.
+
+    Sorts the selection by current anchor position along the axis,
+    determines the span from the reference (extremal anchor for
+    Selection / KeyObject, axis extent for Artboard), and emits
+    translations placing each element's anchor at an evenly-spaced
+    position within the span. Requires at least 3 elements; fewer
+    yields an empty list. Elements matching reference.key_path are
+    skipped. Zero-delta translations are omitted. Output is sorted
+    by path.
+    """
+    n = len(elements)
+    if n < 3:
+        return []
+    indexed = [
+        (i, anchor_position(bounds_fn(e), axis, anchor))
+        for i, (_, e) in enumerate(elements)
+    ]
+    indexed.sort(key=lambda pair: pair[1])
+
+    if reference.kind == "artboard":
+        lo, hi, _ = axis_extent(reference.bbox, axis)
+        min_anchor, max_anchor = lo, hi
+    else:
+        min_anchor = indexed[0][1]
+        max_anchor = indexed[-1][1]
+
+    key_path = reference.key_path
+    out: list[AlignTranslation] = []
+    for sorted_idx, (original_idx, current_anchor) in enumerate(indexed):
+        t = sorted_idx / (n - 1)
+        new_anchor = min_anchor + (max_anchor - min_anchor) * t
+        delta = new_anchor - current_anchor
+        if delta == 0:
+            continue
+        path, _ = elements[original_idx]
+        if key_path is not None and tuple(path) == key_path:
+            continue
+        if axis == Axis.HORIZONTAL:
+            out.append(AlignTranslation(path=tuple(path), dx=delta, dy=0))
+        else:
+            out.append(AlignTranslation(path=tuple(path), dx=0, dy=delta))
+    out.sort(key=lambda t: t.path)
+    return out
+
+
+def distribute_left(elements, reference, bounds_fn):
+    """DISTRIBUTE_LEFT_BUTTON."""
+    return distribute_along_axis(elements, reference, Axis.HORIZONTAL, AxisAnchor.MIN, bounds_fn)
+
+
+def distribute_horizontal_center(elements, reference, bounds_fn):
+    """DISTRIBUTE_HORIZONTAL_CENTER_BUTTON."""
+    return distribute_along_axis(elements, reference, Axis.HORIZONTAL, AxisAnchor.CENTER, bounds_fn)
+
+
+def distribute_right(elements, reference, bounds_fn):
+    """DISTRIBUTE_RIGHT_BUTTON."""
+    return distribute_along_axis(elements, reference, Axis.HORIZONTAL, AxisAnchor.MAX, bounds_fn)
+
+
+def distribute_top(elements, reference, bounds_fn):
+    """DISTRIBUTE_TOP_BUTTON."""
+    return distribute_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.MIN, bounds_fn)
+
+
+def distribute_vertical_center(elements, reference, bounds_fn):
+    """DISTRIBUTE_VERTICAL_CENTER_BUTTON."""
+    return distribute_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.CENTER, bounds_fn)
+
+
+def distribute_bottom(elements, reference, bounds_fn):
+    """DISTRIBUTE_BOTTOM_BUTTON."""
+    return distribute_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.MAX, bounds_fn)
