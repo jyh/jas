@@ -62,16 +62,178 @@ public struct CompoundShape: Equatable {
 
     /// Evaluate the compound shape: flatten operands to polygon sets,
     /// apply the boolean operation, return the result.
-    ///
-    /// Phase 1 stub: returns an empty polygon set. Phase 2 wires the
-    /// actual boolean pipeline (port of Rust `CompoundShape::evaluate`).
     public func evaluate(precision: Double) -> BoolPolygonSet {
-        return []
+        let operandSets = operands.map { elementToPolygonSet($0, precision: precision) }
+        return applyOperation(operation, operandSets)
     }
 
-    /// Bounding box of the evaluated output (stroke-inclusive).
-    /// Phase 1 stub: empty. Phase 2 returns bounds of evaluated geometry.
-    public var bounds: BBox { (0, 0, 0, 0) }
+    /// Bounding box of the evaluated geometry.
+    public var bounds: BBox {
+        boundsOfPolygonSet(evaluate(precision: DEFAULT_PRECISION))
+    }
+}
+
+// MARK: - Geometry helpers
+
+/// Flatten a document element into a polygon set suitable for the
+/// boolean algorithm. See BOOLEAN.md § Geometry and precision.
+public func elementToPolygonSet(_ elem: Element, precision: Double) -> BoolPolygonSet {
+    switch elem {
+    case .rect(let r):
+        return [[
+            (r.x, r.y),
+            (r.x + r.width, r.y),
+            (r.x + r.width, r.y + r.height),
+            (r.x, r.y + r.height),
+        ]]
+    case .polygon(let p):
+        return p.points.isEmpty ? [] : [p.points]
+    case .polyline(let p):
+        // Implicitly closed for even-odd fill.
+        return p.points.isEmpty ? [] : [p.points]
+    case .circle(let c):
+        return [circleToRing(cx: c.cx, cy: c.cy, r: c.r, precision: precision)]
+    case .ellipse(let e):
+        return [ellipseToRing(cx: e.cx, cy: e.cy, rx: e.rx, ry: e.ry, precision: precision)]
+    case .group(let g):
+        return g.children.flatMap { elementToPolygonSet($0, precision: precision) }
+    case .layer(let l):
+        return l.children.flatMap { elementToPolygonSet($0, precision: precision) }
+    case .live(let v):
+        switch v {
+        case .compoundShape(let cs): return cs.evaluate(precision: precision)
+        }
+    case .path(let p):
+        return flattenPathToRings(p.d)
+    case .textPath(let tp):
+        return flattenPathToRings(tp.d)
+    case .line, .text:
+        // Line has zero area; Text glyph flattening is deferred.
+        return []
+    }
+}
+
+/// Dispatch a boolean operation across an arbitrary number of operands.
+public func applyOperation(
+    _ op: CompoundOperation, _ operandSets: [BoolPolygonSet]
+) -> BoolPolygonSet {
+    guard !operandSets.isEmpty else { return [] }
+    switch op {
+    case .union:
+        return operandSets.dropFirst().reduce(operandSets[0]) { acc, b in
+            booleanUnion(acc, b)
+        }
+    case .intersection:
+        return operandSets.dropFirst().reduce(operandSets[0]) { acc, b in
+            booleanIntersect(acc, b)
+        }
+    case .subtractFront:
+        if operandSets.count < 2 { return operandSets[0] }
+        let cutter = operandSets.last!
+        let survivors = operandSets.dropLast()
+        return survivors.reduce([]) { acc, s in
+            booleanUnion(acc, booleanSubtract(s, cutter))
+        }
+    case .exclude:
+        return operandSets.dropFirst().reduce(operandSets[0]) { acc, b in
+            booleanExclude(acc, b)
+        }
+    }
+}
+
+/// Tight bounding box of a polygon set. Returns (0, 0, 0, 0) for empty.
+public func boundsOfPolygonSet(_ ps: BoolPolygonSet) -> BBox {
+    var minX = Double.infinity, minY = Double.infinity
+    var maxX = -Double.infinity, maxY = -Double.infinity
+    for ring in ps {
+        for (x, y) in ring {
+            if x < minX { minX = x }
+            if y < minY { minY = y }
+            if x > maxX { maxX = x }
+            if y > maxY { maxY = y }
+        }
+    }
+    guard minX.isFinite else { return (0, 0, 0, 0) }
+    return (minX, minY, maxX - minX, maxY - minY)
+}
+
+// MARK: - Internal ring samplers
+
+private func segmentsForArc(radius: Double, precision: Double) -> Int {
+    guard radius > 0, precision > 0 else { return 32 }
+    let n = Double.pi * (radius / (2.0 * precision)).squareRoot()
+    return max(8, Int(n.rounded(.up)))
+}
+
+private func circleToRing(cx: Double, cy: Double, r: Double, precision: Double) -> BoolRing {
+    let n = segmentsForArc(radius: r, precision: precision)
+    return (0..<n).map { i in
+        let theta = 2.0 * Double.pi * Double(i) / Double(n)
+        return (cx + r * cos(theta), cy + r * sin(theta))
+    }
+}
+
+private func ellipseToRing(cx: Double, cy: Double, rx: Double, ry: Double, precision: Double) -> BoolRing {
+    let n = segmentsForArc(radius: max(rx, ry), precision: precision)
+    return (0..<n).map { i in
+        let theta = 2.0 * Double.pi * Double(i) / Double(n)
+        return (cx + rx * cos(theta), cy + ry * sin(theta))
+    }
+}
+
+/// Ring-aware path flattening. MoveTo starts a new ring; ClosePath
+/// finalizes. Open subpaths finalize at next MoveTo or end. Rings
+/// with fewer than 3 points are dropped. Bezier / quad segments use
+/// 20 steps; Smooth / Arc approximate as line-to-endpoint.
+private func flattenPathToRings(_ d: [PathCommand]) -> BoolPolygonSet {
+    let steps = 20
+    var rings: BoolPolygonSet = []
+    var cur: BoolRing = []
+    var cx: Double = 0, cy: Double = 0
+
+    func flush() {
+        if cur.count >= 3 { rings.append(cur) }
+        cur = []
+    }
+
+    for cmd in d {
+        switch cmd {
+        case .moveTo(let x, let y):
+            flush()
+            cur.append((x, y))
+            cx = x; cy = y
+        case .lineTo(let x, let y):
+            cur.append((x, y))
+            cx = x; cy = y
+        case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+            for i in 1...steps {
+                let t = Double(i) / Double(steps)
+                let mt = 1 - t
+                let px = mt*mt*mt*cx + 3*mt*mt*t*x1 + 3*mt*t*t*x2 + t*t*t*x
+                let py = mt*mt*mt*cy + 3*mt*mt*t*y1 + 3*mt*t*t*y2 + t*t*t*y
+                cur.append((px, py))
+            }
+            cx = x; cy = y
+        case .quadTo(let x1, let y1, let x, let y):
+            for i in 1...steps {
+                let t = Double(i) / Double(steps)
+                let mt = 1 - t
+                let px = mt*mt*cx + 2*mt*t*x1 + t*t*x
+                let py = mt*mt*cy + 2*mt*t*y1 + t*t*y
+                cur.append((px, py))
+            }
+            cx = x; cy = y
+        case .closePath:
+            flush()
+        case .smoothCurveTo(_, _, let x, let y),
+             .smoothQuadTo(let x, let y),
+             .arcTo(_, _, _, _, _, let x, let y):
+            cur.append((x, y))
+            cx = x; cy = y
+        }
+    }
+    flush()
+    return rings
 }
 
 // MARK: - LiveVariant
