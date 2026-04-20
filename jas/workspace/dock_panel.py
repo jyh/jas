@@ -323,9 +323,48 @@ class DockPanelWidget(QWidget):
                 timer_id = data if isinstance(data, str) else ""
                 TimerManager.shared().cancel_timer(timer_id)
 
+            # Boolean panel destructive ops. See BOOLEAN.md §Panel actions.
+            # Each effect key (e.g. `boolean_union: true`) calls the shared
+            # apply_destructive_boolean routine with the matching op name.
+            # DIVIDE / TRIM / MERGE ship in phase 9e.
+            def _make_boolean_handler(op_name):
+                def handle(data, ctx, store):
+                    from panels.boolean_apply import apply_destructive_boolean
+                    model = self._get_model() if self._get_model else None
+                    if model is not None:
+                        apply_destructive_boolean(model, op_name)
+                return handle
+
+            def handle_make_compound_shape(data, ctx, store):
+                from panels.boolean_apply import apply_make_compound_shape
+                model = self._get_model() if self._get_model else None
+                if model is not None:
+                    apply_make_compound_shape(model)
+
+            def handle_release_compound_shape(data, ctx, store):
+                from panels.boolean_apply import apply_release_compound_shape
+                model = self._get_model() if self._get_model else None
+                if model is not None:
+                    apply_release_compound_shape(model)
+
+            def handle_expand_compound_shape(data, ctx, store):
+                from panels.boolean_apply import apply_expand_compound_shape
+                model = self._get_model() if self._get_model else None
+                if model is not None:
+                    apply_expand_compound_shape(model)
+
             platform_effects = {
                 "start_timer": handle_start_timer,
                 "cancel_timer": handle_cancel_timer,
+                "boolean_union": _make_boolean_handler("union"),
+                "boolean_intersection": _make_boolean_handler("intersection"),
+                "boolean_exclude": _make_boolean_handler("exclude"),
+                "boolean_subtract_front": _make_boolean_handler("subtract_front"),
+                "boolean_subtract_back": _make_boolean_handler("subtract_back"),
+                "boolean_crop": _make_boolean_handler("crop"),
+                "make_compound_shape": handle_make_compound_shape,
+                "release_compound_shape": handle_release_compound_shape,
+                "expand_compound_shape": handle_expand_compound_shape,
             }
 
             run_effects(action_def.get("effects", []), ctx, self._state_store,
