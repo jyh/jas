@@ -8,6 +8,7 @@ pub mod panel_menu;
 pub mod panel_menu_state;
 pub mod panel_menu_view;
 
+pub mod align_panel;
 pub mod artboards_panel;
 pub mod character_panel;
 pub mod color_panel;
@@ -32,6 +33,7 @@ pub fn panel_label(kind: PanelKind) -> &'static str {
         PanelKind::Character => character_panel::LABEL,
         PanelKind::Paragraph => paragraph_panel::LABEL,
         PanelKind::Artboards => artboards_panel::LABEL,
+        PanelKind::Align => align_panel::LABEL,
     }
 }
 
@@ -46,6 +48,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Character => character_panel::menu_items(),
         PanelKind::Paragraph => paragraph_panel::menu_items(),
         PanelKind::Artboards => artboards_panel::menu_items(),
+        PanelKind::Align => align_panel::menu_items(),
     }
 }
 
@@ -65,6 +68,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Character => character_panel::dispatch(cmd, addr, state),
         PanelKind::Paragraph => paragraph_panel::dispatch(cmd, addr, state),
         PanelKind::Artboards => artboards_panel::dispatch(cmd, addr, state),
+        PanelKind::Align => align_panel::dispatch(cmd, addr, state),
     }
 }
 
@@ -79,6 +83,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Character => character_panel::is_checked(cmd, state),
         PanelKind::Paragraph => paragraph_panel::is_checked(cmd, state),
         PanelKind::Artboards => artboards_panel::is_checked(cmd, state),
+        PanelKind::Align => align_panel::is_checked(cmd, state),
     }
 }
 
@@ -95,6 +100,28 @@ mod tests {
         assert_eq!(panel_label(PanelKind::Color), "Color");
         assert_eq!(panel_label(PanelKind::Stroke), "Stroke");
         assert_eq!(panel_label(PanelKind::Properties), "Properties");
+        assert_eq!(panel_label(PanelKind::Align), "Align");
+    }
+
+    #[test]
+    fn align_panel_menu_has_expected_entries() {
+        let items = panel_menu(PanelKind::Align);
+        // Three entries + two separators = 5 total per ALIGN.md.
+        assert_eq!(items.len(), 5);
+        assert!(matches!(
+            items[0],
+            PanelMenuItem::Toggle { command: "toggle_use_preview_bounds", .. }
+        ));
+        assert!(matches!(items[1], PanelMenuItem::Separator));
+        assert!(matches!(
+            items[2],
+            PanelMenuItem::Action { command: "reset_align_panel", .. }
+        ));
+        assert!(matches!(items[3], PanelMenuItem::Separator));
+        assert!(matches!(
+            items[4],
+            PanelMenuItem::Action { command: "close_panel", label: "Close Align", .. }
+        ));
     }
 
     #[test]

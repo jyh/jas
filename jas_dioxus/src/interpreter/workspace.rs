@@ -154,6 +154,7 @@ pub fn panel_kind_to_content_id(kind: crate::workspace::workspace::PanelKind) ->
         PanelKind::Character => "character_panel_content",
         PanelKind::Paragraph => "paragraph_panel_content",
         PanelKind::Artboards => "artboards_panel_content",
+        PanelKind::Align => "align_panel_content",
     }
 }
 
