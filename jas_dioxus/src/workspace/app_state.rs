@@ -105,6 +105,10 @@ pub(crate) struct AppState {
     /// tspan(s) of selected Text / TextPath via
     /// `apply_paragraph_panel_to_selection`.
     pub(crate) paragraph_panel: ParagraphPanelState,
+    /// Align panel state — mirrors state.align_* and drives the
+    /// selection / artboard / key-object Align To mode. See
+    /// transcripts/ALIGN.md §Panel state.
+    pub(crate) align_panel: AlignPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -295,6 +299,61 @@ impl Default for ParagraphPanelState {
     }
 }
 
+/// Align panel state — mirrors the four fields documented in
+/// `transcripts/ALIGN.md` §Panel state:
+/// - `align_to`: selection target mode.
+/// - `key_object_path`: path of the designated key object while
+///   in key_object mode; `None` when no key is designated.
+/// - `distribute_spacing`: explicit gap in points for Distribute
+///   Spacing operations in key-object mode.
+/// - `use_preview_bounds`: whether operations consult preview
+///   (stroke-inclusive) bounds instead of geometric bounds.
+#[derive(Debug, Clone)]
+pub(crate) struct AlignPanelState {
+    pub align_to: AlignTo,
+    pub key_object_path: Option<crate::document::document::ElementPath>,
+    pub distribute_spacing: f64,
+    pub use_preview_bounds: bool,
+}
+
+/// Align-To target mode. See ALIGN.md §Align To target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AlignTo {
+    Selection,
+    Artboard,
+    KeyObject,
+}
+
+impl Default for AlignPanelState {
+    fn default() -> Self {
+        Self {
+            align_to: AlignTo::Selection,
+            key_object_path: None,
+            distribute_spacing: 0.0,
+            use_preview_bounds: false,
+        }
+    }
+}
+
+impl AlignTo {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlignTo::Selection => "selection",
+            AlignTo::Artboard => "artboard",
+            AlignTo::KeyObject => "key_object",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "selection" => Some(AlignTo::Selection),
+            "artboard" => Some(AlignTo::Artboard),
+            "key_object" => Some(AlignTo::KeyObject),
+            _ => None,
+        }
+    }
+}
+
 impl Default for CharacterPanelState {
     fn default() -> Self {
         Self {
@@ -360,6 +419,7 @@ impl AppState {
             stroke_panel: StrokePanelState::default(),
             character_panel: CharacterPanelState::default(),
             paragraph_panel: ParagraphPanelState::default(),
+            align_panel: AlignPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
@@ -2345,5 +2405,49 @@ mod pending_override_tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].content, "foo");
         assert!(out[0].font_weight.is_none());
+    }
+}
+
+#[cfg(test)]
+mod align_panel_state_tests {
+    use super::*;
+
+    #[test]
+    fn align_panel_state_defaults_match_spec() {
+        let s = AlignPanelState::default();
+        assert_eq!(s.align_to, AlignTo::Selection);
+        assert!(s.key_object_path.is_none());
+        assert_eq!(s.distribute_spacing, 0.0);
+        assert!(!s.use_preview_bounds);
+    }
+
+    #[test]
+    fn align_to_round_trip_string() {
+        for mode in [AlignTo::Selection, AlignTo::Artboard, AlignTo::KeyObject] {
+            let s = mode.as_str();
+            assert_eq!(AlignTo::from_str(s), Some(mode));
+        }
+    }
+
+    #[test]
+    fn align_to_from_str_rejects_unknown() {
+        assert_eq!(AlignTo::from_str("bogus"), None);
+        assert_eq!(AlignTo::from_str(""), None);
+    }
+
+    #[test]
+    fn align_to_as_str_values_match_yaml_enum() {
+        assert_eq!(AlignTo::Selection.as_str(), "selection");
+        assert_eq!(AlignTo::Artboard.as_str(), "artboard");
+        assert_eq!(AlignTo::KeyObject.as_str(), "key_object");
+    }
+
+    #[test]
+    fn app_state_default_includes_align_panel_with_defaults() {
+        let st = AppState::new();
+        assert_eq!(st.align_panel.align_to, AlignTo::Selection);
+        assert!(st.align_panel.key_object_path.is_none());
+        assert_eq!(st.align_panel.distribute_spacing, 0.0);
+        assert!(!st.align_panel.use_preview_bounds);
     }
 }
