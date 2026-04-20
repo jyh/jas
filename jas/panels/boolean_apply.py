@@ -67,12 +67,22 @@ def _replace_layer_children(doc, layer_idx: int, new_children: tuple):
 
 # ── Make ────────────────────────────────────────────────────────
 
-def apply_make_compound_shape(model) -> None:
-    """Make a Union compound shape from the current selection.
-    Selected elements must be siblings; at least 2 required. Paint
-    inherits from the frontmost (last-in-path-order) operand. The
-    new compound replaces its operands in place and becomes the
-    selection.
+_COMPOUND_OP_BY_NAME = {
+    "union": CompoundOperation.UNION,
+    "subtract_front": CompoundOperation.SUBTRACT_FRONT,
+    "intersection": CompoundOperation.INTERSECTION,
+    "exclude": CompoundOperation.EXCLUDE,
+}
+
+
+def apply_make_compound_shape(model, operation: CompoundOperation = CompoundOperation.UNION) -> None:
+    """Make a compound shape from the current selection using
+    [operation]. Selected elements must be siblings; at least 2
+    required. Paint inherits from the frontmost (last-in-path-order)
+    operand. The new compound replaces its operands in place and
+    becomes the selection. Default operation is UNION; Alt/Option+
+    click on the four Shape Mode buttons dispatches the three
+    non-UNION variants via apply_compound_creation.
     """
     doc = model.document
     if not doc.selection:
@@ -89,7 +99,7 @@ def apply_make_compound_shape(model) -> None:
     fill, stroke, opacity, transform, locked, visibility = _frontmost_paint(frontmost)
 
     fields = {
-        "operation": CompoundOperation.UNION,
+        "operation": operation,
         "operands": elements,
         "fill": fill,
         "stroke": stroke,
@@ -117,6 +127,17 @@ def apply_make_compound_shape(model) -> None:
         new_doc, selection=frozenset([ElementSelection.all(insert_path)])
     )
     model.document = new_doc
+
+
+def apply_compound_creation(model, op_name: str) -> None:
+    """Alt/Option+click variant on the four Shape Mode buttons.
+    Creates a live compound shape with the chosen [op_name] instead
+    of applying the destructive op. Unknown op names are no-ops. See
+    BOOLEAN.md §Compound shapes."""
+    operation = _COMPOUND_OP_BY_NAME.get(op_name)
+    if operation is None:
+        return
+    apply_make_compound_shape(model, operation)
 
 
 # ── Release ─────────────────────────────────────────────────────
