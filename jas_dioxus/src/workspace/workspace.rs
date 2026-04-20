@@ -52,6 +52,7 @@ pub enum PanelKind {
     Paragraph,
     Artboards,
     Align,
+    Boolean,
 }
 
 impl PanelKind {
@@ -66,6 +67,7 @@ impl PanelKind {
         Self::Paragraph,
         Self::Artboards,
         Self::Align,
+        Self::Boolean,
     ];
 }
 
@@ -1800,7 +1802,7 @@ mod tests {
 
     #[test]
     fn panel_kind_all_count() {
-        assert_eq!(PanelKind::ALL.len(), 9);
+        assert_eq!(PanelKind::ALL.len(), 10);
     }
 
     #[test]
