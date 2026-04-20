@@ -63,18 +63,76 @@ The **Make Compound Shape** menu item is equivalent to Alt+clicking UNION: it cr
 
 The **Release Compound Shape** menu item is the inverse of Make: it removes the compound-shape container and restores its operand paths as independent elements, each keeping its original fill / stroke / opacity. Enabled only when the selection contains at least one compound shape.
 
+## Live element framework
+
+CompoundShape is the first instance of a broader pattern we call **LiveElement**: an element kind that stores source inputs, evaluates them on demand via a per-feature function, and caches the result. Future live features (Live Effects like drop shadow, Blends, similar) will implement the same contract, so that adding a new live feature does not require editing the top-level element enum in every app.
+
+### Contract
+
+```
+struct Source {
+    children: Vec<Element>,        // element-valued inputs; embedded in the document tree
+    params: Map<String, Value>,    // scalar-valued inputs (number, color, enum, string)
+}
+
+trait LiveElement {
+    kind() -> LiveKind              // discriminator: CompoundShape, DropShadow, Blend, ...
+    source() -> &Source
+    source_mut() -> &mut Source
+    invalidate()                    // marks per-feature internal cache dirty on source change
+    render(canvas)                  // per-feature rendering; uses its own cache
+    hit_test(point) -> HitResult
+    bounds() -> Rect
+    expand() -> Vec<Element>        // one-way flatten to static element(s)
+    release() -> Vec<Element>       // inverse of Make: children returned to parent
+    isolation_enter() / exit()      // optional; default no-op for features without canvas source editing
+}
+```
+
+Design choices:
+
+- **No shared cached-output type.** Each feature caches internally. A compound shape caches a polygon set; a future drop shadow would cache a rasterized buffer — unifying these under one type would either force a least-common-denominator or a tagged union that leaks per-feature knowledge. The trait only exposes `invalidate()` and `render()`.
+- **`source.children` is a flat Vec.** Per-feature conventions dictate indexing (compound shape: operands in z-order; blend: `[a, b, spine?]`; drop shadow: `[source]`). No named slots. Children are embedded in the document tree and participate in per-element undo.
+- **`source.params` values are a tagged union** of number / color / enum / string. Snapshot-undoable as a unit (distinct from children edits).
+- **Optional isolation.** Features whose source is edited via a panel or dialog (drop shadow's scalar params) rather than on the canvas return a no-op from `isolation_enter()`.
+
+### Dry-run against future candidates
+
+The contract was pressure-tested against three hypothetical future live features before committing:
+
+- **Drop Shadow** (a Live Effect): fits. Source = `[source_element]`, params = `{offset_x, offset_y, blur, color, opacity}`. Caches a rasterized buffer at render time. Hit-test delegates to source (shadow passes through). Forced the "no shared CachedOutput" decision.
+- **Blend** (interpolate between two elements across N steps): fits. Source = `[a, b]` or `[a, b, spine]`, params = `{steps, easing}`. Caches N interpolated path elements. Renders each path in z-order.
+- **Symbol** (reusable instance of a shared master): **does not fit.** Symbol instances reference a master in an external library, not embedded in the instance. Force-fitting would duplicate the master per instance or require external references that break `Source` embedding. Symbols belong in a separate linked/referenced-element abstraction, implemented whenever they are added to the app.
+
+### Serialization (LiveElement)
+
+A LiveElement serializes as:
+
+```
+{
+  "type": "live",
+  "kind": "compound_shape",        // or "drop_shadow", "blend", ...
+  "kind_schema_version": 1,
+  "children": [ ... embedded element objects ... ],
+  "params": { ... feature-specific scalars ... },
+  // plus standard paint and transform properties on the LiveElement itself
+}
+```
+
+The `kind_schema_version` lets each feature's params schema evolve independently across releases.
+
 ## Compound shape data model
 
-Compound shapes are a new element kind. This section specifies their storage, selection, rendering, hit-testing, and serialization, and how they integrate with the existing element system. The design targets parity across all five apps.
+CompoundShape is the first LiveElement conformer (see Live element framework above). This section specifies its kind-specific storage, evaluation, rendering, hit-testing, and lifecycle. Cross-cutting concerns — selection plumbing, transform propagation, bounds computation, isolation entry/exit infrastructure, serialization skeleton, and render/hit-test dispatch — are inherited from the LiveElement infrastructure.
 
 ### Element structure
 
-A CompoundShape stores:
+As a LiveElement conformer, a CompoundShape populates Source as follows:
 
-- `operation`: one of `union`, `subtract_front`, `intersection`, `exclude` — the four Shape Mode operations. The destructive-only operations never produce compound shapes.
-- `operands`: an ordered list of child elements, recursive (operands can themselves be compound shapes, groups, paths, text, etc.). List order mirrors canvas z-order: index 0 is backmost, last index is frontmost.
-- Standard paint and placement properties (`fill`, `stroke`, `opacity`, `blend_mode`, `transform`). At creation these inherit from the frontmost operand per the Operand and paint rules; afterward they are independently editable.
-- `cached_geometry`: a polygon set produced by evaluating `operation` over `operands`. Derived, not serialized. Invalidated on any operand geometry or z-order change.
+- **`source.children`**: the operand list, in z-order (index 0 = backmost, last index = frontmost). Recursive — operands can be paths, groups, text, or nested LiveElements (including other compound shapes).
+- **`source.params`**: `{ operation: "union" | "subtract_front" | "intersection" | "exclude" }`. Only the four Shape Mode operations can be compound; the destructive-only pathfinder operations never produce compound shapes.
+- **Standard paint and placement properties** (`fill`, `stroke`, `opacity`, `blend_mode`, `transform`) live on the LiveElement wrapper. At creation these inherit from the frontmost child per the Operand and paint rules; afterward they are independently editable.
+- **Internal cache**: a polygon set produced by evaluating `source.params.operation` over `source.children`, refit to a Bézier path via `algorithms/fit_curve` for rendering. Derived, not serialized. Invalidated on any child geometry or z-order change, or on an `operation` param edit.
 
 ### Selection and isolation
 
@@ -90,11 +148,13 @@ Outside isolation: one hit test against `cached_geometry`. Inside isolation: per
 
 ### Serialization
 
-Save the operand tree verbatim, together with `type: compound_shape` and `operation`. Never serialize `cached_geometry`; recompute on load. This keeps documents resilient to Precision changes — opening the same file with different Precision re-evaluates every compound shape.
+Serialized via the LiveElement schema above with `kind: "compound_shape"`, `kind_schema_version: 1`, `children` = operands, and `params.operation` = one of the four Shape Mode operations. Never serialize the internal polygon-set cache; recompute on load. This keeps documents resilient to Precision changes — opening the same file with a different Precision re-evaluates every compound shape.
 
 ### Undo / redo
 
-Operand edits land in the undo stack at operand granularity, not compound-shape-snapshot granularity. Re-evaluating `cached_geometry` after an undo or redo step is cheap (polygon ops on already-flattened inputs) and happens lazily on next render.
+- **Children edits** (geometry, z-order, paint of an operand) land in the undo stack at per-element granularity via the existing per-element undo system, not as a compound-shape snapshot.
+- **Params edits** (switching the operation) snapshot as a single unit.
+- Re-evaluating the cache after an undo or redo step is cheap (polygon ops on already-flattened inputs) and happens lazily on next render.
 
 ### Transforms
 
@@ -115,20 +175,24 @@ Compound shapes appear as expandable containers, visually distinguished from gro
 
 ### Implementation sequence
 
-Per project convention: flask first, then jas_dioxus, JasSwift, jas_ocaml, jas. Within each app:
+Compound shapes are canvas-dependent. Flask gets only the panel-UI / menu / dialog yaml wiring (no element type or renderer, since flask has no canvas subsystem). The recommended starting app for the compound-shape implementation itself is **jas_dioxus** (Rust), as the most canonical native target; JasSwift, jas_ocaml, and jas port from it.
 
-1. Add the `compound_shape` element type to the schema and element enum.
-2. Implement evaluation over the operand tree using the existing boolean algorithm.
-3. Render and hit-test (non-isolated path first).
-4. Serialization round-trip, with a cross-app parity test.
-5. Selection, transform, and bounds integration.
-6. Isolation mode: enter/exit, operand-level selection and editing, dimmed operand display.
-7. Layers panel: icon, expansion, drag-reorder.
-8. Undo/redo at operand granularity.
-9. Expand and Release implementations.
-10. Alt/Option+click on the four Shape Mode buttons; Make Compound Shape menu item wiring.
+Within each native app, 10 phases:
 
-Scope estimate: 2–3 weeks per app, 8–12 weeks across all five. The first four phases constitute the minimum viable compound shape (read, evaluate, render, save); the remaining phases ship incrementally.
+1. Define the LiveElement trait and `Source` type. Add a single `live` element variant to the element enum. Implement the shared infrastructure: render dispatch, hit-test dispatch, serialization skeleton, isolation-mode plumbing, expand/release plumbing, bounds/transform propagation.
+2. Register CompoundShape as the first LiveKind. Implement its evaluate (existing boolean algorithm over operands), compound-shape-specific render (filled + stroked Bézier refit from cached polygon_set), and hit-test (point-in-polygon against cached geometry).
+3. Serialization round-trip for the `{"type": "live", "kind": "compound_shape", ...}` schema; cross-app parity test.
+4. Selection, transform, and bounds integration (largely inherited from LiveElement infrastructure).
+5. Isolation mode: enter/exit, operand-level selection and editing, dimmed operand display.
+6. Layers panel: icon, expansion, drag-reorder of children.
+7. Undo/redo: children edits via existing per-element undo; param edits (operation switch) snapshot as a unit.
+8. Expand and Release implementations.
+9. Alt/Option+click wiring on the four Shape Mode buttons; Make Compound Shape menu item wiring.
+10. BOOLEAN_TESTS.md coverage: every compound-shape scenario passes.
+
+Scope estimate: ~2–3 weeks per native app, ~8–12 weeks across the four native apps. Phases 1–3 constitute the minimum viable compound shape (read, evaluate, render, save); remaining phases ship incrementally.
+
+**Flask scope** (separate, ~1 week): yaml wiring for the Make / Release / Expand Compound Shape menu items, the Boolean Options dialog, Alt+click modifier detection on the four Shape Mode buttons (dispatches to the destructive action as a no-op until compound shapes exist), and panel-state plumbing for `last_operation`. None of this requires compound shapes to exist in flask's document model.
 
 ## Geometry and precision
 
