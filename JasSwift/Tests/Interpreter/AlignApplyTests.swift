@@ -92,10 +92,11 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
         "distribute_left", "distribute_horizontal_center", "distribute_right",
         "distribute_top", "distribute_vertical_center", "distribute_bottom",
         "distribute_vertical_spacing", "distribute_horizontal_spacing",
-        // Boolean panel effects registered in phase 9d; DIVIDE / TRIM
-        // / MERGE ship in phase 9e.
+        // Boolean panel effects per BOOLEAN.md -- all nine destructive
+        // ops registered in phases 9d + 9e.
         "boolean_union", "boolean_intersection", "boolean_exclude",
         "boolean_subtract_front", "boolean_subtract_back", "boolean_crop",
+        "boolean_divide", "boolean_trim", "boolean_merge",
         "make_compound_shape", "release_compound_shape",
         "expand_compound_shape",
     ]
