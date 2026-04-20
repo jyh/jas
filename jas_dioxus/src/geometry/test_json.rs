@@ -5,6 +5,7 @@
 //! string representation, so byte-for-byte comparison of the output is a
 //! valid equivalence check.
 
+use crate::document::artboard::{Artboard, ArtboardFill, ArtboardOptions};
 use crate::document::document::{Document, ElementPath, ElementSelection, Selection, SelectionKind, SortedCps};
 use crate::geometry::element::*;
 
@@ -544,13 +545,55 @@ fn selection_json(sel: &[ElementSelection]) -> String {
 // Document serializer (public API)
 // ---------------------------------------------------------------------------
 
+/// Serialize a single Artboard to canonical JSON. Field order is
+/// alphabetical (id, name, ...); the shared `JsonObj` builder sorts.
+fn artboard_json(ab: &Artboard) -> String {
+    let mut o = JsonObj::new();
+    o.str_val("id", &ab.id);
+    o.str_val("name", &ab.name);
+    o.num("x", ab.x);
+    o.num("y", ab.y);
+    o.num("width", ab.width);
+    o.num("height", ab.height);
+    o.str_val("fill", &ab.fill.as_canonical());
+    o.bool_val("show_center_mark", ab.show_center_mark);
+    o.bool_val("show_cross_hairs", ab.show_cross_hairs);
+    o.bool_val("show_video_safe_areas", ab.show_video_safe_areas);
+    o.num("video_ruler_pixel_aspect_ratio", ab.video_ruler_pixel_aspect_ratio);
+    o.build()
+}
+
+fn artboards_json(artboards: &[Artboard]) -> String {
+    let items: Vec<String> = artboards.iter().map(artboard_json).collect();
+    json_array(&items)
+}
+
+fn artboard_options_json(opts: &ArtboardOptions) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("fade_region_outside_artboard", opts.fade_region_outside_artboard);
+    o.bool_val("update_while_dragging", opts.update_while_dragging);
+    o.build()
+}
+
 /// Serialize a Document to canonical test JSON.
 ///
 /// The output is a compact JSON string with sorted keys and normalized
 /// floats, suitable for byte-for-byte cross-language comparison.
+///
+/// Artboards and artboard_options are **omitted** from the output when
+/// they carry their defaults (empty list, default options) so that
+/// the byte-for-byte contract with legacy Python fixtures (which
+/// predate the artboards feature) still holds. Native docs authored
+/// with artboards or non-default options serialize them explicitly.
 pub fn document_to_test_json(doc: &Document) -> String {
     let layers: Vec<String> = doc.layers.iter().map(|l| element_json(l)).collect();
     let mut o = JsonObj::new();
+    if doc.artboard_options != ArtboardOptions::default() {
+        o.raw("artboard_options", artboard_options_json(&doc.artboard_options));
+    }
+    if !doc.artboards.is_empty() {
+        o.raw("artboards", artboards_json(&doc.artboards));
+    }
     o.raw("layers", json_array(&layers));
     o.int("selected_layer", doc.selected_layer);
     o.raw("selection", selection_json(&doc.selection));
@@ -919,6 +962,45 @@ fn parse_selection(v: &serde_json::Value) -> Selection {
 /// Parse canonical test JSON into a Document.
 ///
 /// This is the inverse of [`document_to_test_json`].
+fn parse_artboard(v: &serde_json::Value) -> Artboard {
+    Artboard {
+        id: v["id"].as_str().unwrap_or("").to_string(),
+        name: v["name"].as_str().unwrap_or("").to_string(),
+        x: parse_f(&v["x"]),
+        y: parse_f(&v["y"]),
+        width: parse_f(&v["width"]),
+        height: parse_f(&v["height"]),
+        fill: ArtboardFill::from_canonical(v["fill"].as_str().unwrap_or("transparent")),
+        show_center_mark: v["show_center_mark"].as_bool().unwrap_or(false),
+        show_cross_hairs: v["show_cross_hairs"].as_bool().unwrap_or(false),
+        show_video_safe_areas: v["show_video_safe_areas"].as_bool().unwrap_or(false),
+        video_ruler_pixel_aspect_ratio: {
+            let raw = parse_f(&v["video_ruler_pixel_aspect_ratio"]);
+            if raw == 0.0 { 1.0 } else { raw }
+        },
+    }
+}
+
+fn parse_artboards(v: &serde_json::Value) -> Vec<Artboard> {
+    // Missing key → return empty; the Document constructor applies the
+    // at-least-one invariant separately. An empty array also takes the
+    // invariant path at load time in the app layer.
+    match v.as_array() {
+        Some(arr) => arr.iter().map(parse_artboard).collect(),
+        None => Vec::new(),
+    }
+}
+
+fn parse_artboard_options(v: &serde_json::Value) -> ArtboardOptions {
+    if v.is_null() || !v.is_object() {
+        return ArtboardOptions::default();
+    }
+    ArtboardOptions {
+        fade_region_outside_artboard: v["fade_region_outside_artboard"].as_bool().unwrap_or(true),
+        update_while_dragging: v["update_while_dragging"].as_bool().unwrap_or(true),
+    }
+}
+
 pub fn test_json_to_document(json: &str) -> Document {
     let v: serde_json::Value = serde_json::from_str(json)
         .expect("Failed to parse test JSON");
@@ -926,7 +1008,15 @@ pub fn test_json_to_document(json: &str) -> Document {
         .iter().map(|l| parse_element(l)).collect();
     let selected_layer = v["selected_layer"].as_u64().unwrap_or(0) as usize;
     let selection = parse_selection(&v["selection"]);
-    Document { layers, selected_layer, selection }
+    let artboards = parse_artboards(&v["artboards"]);
+    let artboard_options = parse_artboard_options(&v["artboard_options"]);
+    Document {
+        layers,
+        selected_layer,
+        selection,
+        artboards,
+        artboard_options,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,5 +1141,104 @@ mod tests {
         let json = transform_json(&t);
         assert!(json.contains("\"e\":10.0"));
         assert!(json.contains("\"f\":20.0"));
+    }
+
+    // ----- Artboard serialization (ART-441 cross-app contract) -----
+
+    fn make_artboard(id: &str, name: &str) -> Artboard {
+        Artboard {
+            id: id.to_string(),
+            name: name.to_string(),
+            ..Artboard::default_with_id(id.to_string())
+        }
+    }
+
+    #[test]
+    fn document_with_no_artboards_omits_keys() {
+        // Fresh empty artboards list must not emit the new JSON keys,
+        // preserving byte-for-byte compatibility with legacy Python
+        // fixtures that predate artboards.
+        let mut d = Document::default();
+        d.artboards = Vec::new();
+        let json = document_to_test_json(&d);
+        assert!(!json.contains("\"artboards\""));
+        assert!(!json.contains("\"artboard_options\""));
+    }
+
+    #[test]
+    fn document_with_artboards_emits_them() {
+        let mut d = Document::default();
+        d.artboards = vec![make_artboard("aaa12345", "Artboard 1")];
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"artboards\":["));
+        assert!(json.contains("\"id\":\"aaa12345\""));
+        assert!(json.contains("\"name\":\"Artboard 1\""));
+        assert!(json.contains("\"fill\":\"transparent\""));
+    }
+
+    #[test]
+    fn artboards_roundtrip_preserves_ids() {
+        let mut d = Document::default();
+        d.artboards = vec![
+            make_artboard("aaa00001", "Artboard 1"),
+            make_artboard("bbb00002", "Cover"),
+        ];
+        let json1 = document_to_test_json(&d);
+        let d2 = test_json_to_document(&json1);
+        assert_eq!(d2.artboards.len(), 2);
+        assert_eq!(d2.artboards[0].id, "aaa00001");
+        assert_eq!(d2.artboards[1].name, "Cover");
+        let json2 = document_to_test_json(&d2);
+        assert_eq!(json1, json2);
+    }
+
+    #[test]
+    fn artboard_fill_color_roundtrip() {
+        let mut d = Document::default();
+        d.artboards = vec![Artboard {
+            id: "ccc33333".to_string(),
+            name: "Red".to_string(),
+            fill: ArtboardFill::Color("#ff0000".to_string()),
+            ..Artboard::default_with_id("ccc33333".to_string())
+        }];
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"fill\":\"#ff0000\""));
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.artboards[0].fill, ArtboardFill::Color("#ff0000".to_string()));
+    }
+
+    #[test]
+    fn artboard_options_only_emitted_when_non_default() {
+        let mut d = Document::default();
+        d.artboards = Vec::new();
+        d.artboard_options.fade_region_outside_artboard = false;
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"artboard_options\""));
+        assert!(json.contains("\"fade_region_outside_artboard\":false"));
+    }
+
+    #[test]
+    fn artboard_options_roundtrip() {
+        let mut d = Document::default();
+        d.artboards = Vec::new();
+        d.artboard_options = ArtboardOptions {
+            fade_region_outside_artboard: false,
+            update_while_dragging: false,
+        };
+        let json = document_to_test_json(&d);
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.artboard_options.fade_region_outside_artboard, false);
+        assert_eq!(d2.artboard_options.update_while_dragging, false);
+    }
+
+    #[test]
+    fn legacy_fixture_without_artboards_parses_clean() {
+        let legacy = r#"{"layers":[],"selected_layer":0,"selection":[]}"#;
+        let d = test_json_to_document(legacy);
+        assert!(d.artboards.is_empty());
+        assert_eq!(d.artboard_options, ArtboardOptions::default());
+        // Re-serializing yields the same bytes.
+        let json2 = document_to_test_json(&d);
+        assert_eq!(legacy, json2);
     }
 }

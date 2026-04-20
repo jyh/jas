@@ -250,7 +250,7 @@ mod tests {
             layers: vec![layer],
             selected_layer: 0,
             selection: Vec::new(),
-        };
+         ..Document::default()};
         Model::new(doc, None)
     }
 
