@@ -721,14 +721,36 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             }
         }
         Element::Live(v) => {
-            // Phase 1: render each operand individually so the user
-            // can still see the source artwork. Phase 2 replaces this
-            // with the evaluated geometry (boolean op cached in the
-            // LiveElement's internal cache).
             match v {
                 crate::geometry::live::LiveVariant::CompoundShape(cs) => {
-                    for child in &cs.operands {
-                        draw_element(ctx, child, effective);
+                    let ps = cs.evaluate(crate::geometry::live::DEFAULT_PRECISION);
+                    let (mut fill_op, mut stroke_op, mut stroke_align) =
+                        (1.0, 1.0, StrokeAlign::Center);
+                    if outline {
+                        apply_outline_style(ctx);
+                    } else {
+                        fill_op = apply_fill(ctx, cs.fill.as_ref());
+                        (stroke_op, stroke_align) =
+                            apply_stroke(ctx, cs.stroke.as_ref());
+                    }
+                    if ps.iter().any(|r| r.len() >= 2) {
+                        ctx.begin_path();
+                        for ring in &ps {
+                            if ring.len() < 2 { continue; }
+                            ctx.move_to(ring[0].0, ring[0].1);
+                            for &(x, y) in &ring[1..] {
+                                ctx.line_to(x, y);
+                            }
+                            ctx.close_path();
+                        }
+                        if !outline && cs.fill.is_some() {
+                            ctx.set_global_alpha(base_alpha * fill_op);
+                            ctx.fill();
+                        }
+                        if outline || cs.stroke.is_some() {
+                            ctx.set_global_alpha(base_alpha * stroke_op);
+                            stroke_aligned(ctx, stroke_align);
+                        }
                     }
                 }
             }
@@ -956,12 +978,23 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
         Element::Text(_)
         | Element::TextPath(_)
         | Element::Group(_)
-        | Element::Layer(_)
-        | Element::Live(_) => {
-            // Handled separately. Live elements: phase 2 will trace
-            // the evaluated geometry; phase 1 renders operands via
-            // draw_element and skips path tracing here.
+        | Element::Layer(_) => {
+            // Handled separately via bounding-box overlays or
+            // descendant highlights.
         }
+        Element::Live(v) => match v {
+            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                let ps = cs.evaluate(crate::geometry::live::DEFAULT_PRECISION);
+                for ring in &ps {
+                    if ring.len() < 2 { continue; }
+                    ctx.move_to(ring[0].0, ring[0].1);
+                    for &(x, y) in &ring[1..] {
+                        ctx.line_to(x, y);
+                    }
+                    ctx.close_path();
+                }
+            }
+        },
     }
 }
 
