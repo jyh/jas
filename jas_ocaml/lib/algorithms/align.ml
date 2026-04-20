@@ -138,3 +138,76 @@ let align_vertical_center elements reference bounds_fn =
 (** ALIGN_BOTTOM_BUTTON. *)
 let align_bottom elements reference bounds_fn =
   align_along_axis elements reference Vertical Anchor_max bounds_fn
+
+(** Generic driver for the six Distribute operations. Sorts the
+    selection by current anchor position along the axis,
+    determines the span from the reference (extremal anchors
+    for Selection or Key_object, artboard extent for Artboard),
+    and emits translations that place each element's anchor at
+    an evenly-spaced position within the span.
+
+    Distribute operations require at least 3 elements per
+    ALIGN.md Enable and disable rules; fewer yields an empty
+    output. Key objects are skipped; zero-delta translations
+    are omitted. Output is sorted by path for determinism. *)
+let distribute_along_axis elements reference axis anchor bounds_fn =
+  let n = List.length elements in
+  if n < 3 then []
+  else begin
+    let elements_arr = Array.of_list elements in
+    let indexed = Array.init n (fun i ->
+      let (_, e) = elements_arr.(i) in
+      (i, anchor_position (bounds_fn e) axis anchor)
+    ) in
+    Array.sort (fun (_, a) (_, b) -> compare a b) indexed;
+    let (min_anchor, max_anchor) =
+      match reference with
+      | Selection _ | Key_object _ ->
+        (snd indexed.(0), snd indexed.(n - 1))
+      | Artboard bbox ->
+        let (lo, hi, _) = axis_extent bbox axis in
+        (lo, hi)
+    in
+    let key_path = reference_key_path reference in
+    let out = ref [] in
+    Array.iteri (fun sorted_idx (original_idx, current) ->
+      let t = float_of_int sorted_idx /. float_of_int (n - 1) in
+      let new_anchor = min_anchor +. (max_anchor -. min_anchor) *. t in
+      let delta = new_anchor -. current in
+      if delta <> 0.0 then begin
+        let (path, _) = elements_arr.(original_idx) in
+        if Some path <> key_path then begin
+          let (dx, dy) = match axis with
+            | Horizontal -> (delta, 0.0)
+            | Vertical -> (0.0, delta)
+          in
+          out := { path; dx; dy } :: !out
+        end
+      end
+    ) indexed;
+    List.sort (fun a b -> compare a.path b.path) !out
+  end
+
+(** DISTRIBUTE_LEFT_BUTTON. *)
+let distribute_left elements reference bounds_fn =
+  distribute_along_axis elements reference Horizontal Anchor_min bounds_fn
+
+(** DISTRIBUTE_HORIZONTAL_CENTER_BUTTON. *)
+let distribute_horizontal_center elements reference bounds_fn =
+  distribute_along_axis elements reference Horizontal Anchor_center bounds_fn
+
+(** DISTRIBUTE_RIGHT_BUTTON. *)
+let distribute_right elements reference bounds_fn =
+  distribute_along_axis elements reference Horizontal Anchor_max bounds_fn
+
+(** DISTRIBUTE_TOP_BUTTON. *)
+let distribute_top elements reference bounds_fn =
+  distribute_along_axis elements reference Vertical Anchor_min bounds_fn
+
+(** DISTRIBUTE_VERTICAL_CENTER_BUTTON. *)
+let distribute_vertical_center elements reference bounds_fn =
+  distribute_along_axis elements reference Vertical Anchor_center bounds_fn
+
+(** DISTRIBUTE_BOTTOM_BUTTON. *)
+let distribute_bottom elements reference bounds_fn =
+  distribute_along_axis elements reference Vertical Anchor_max bounds_fn
