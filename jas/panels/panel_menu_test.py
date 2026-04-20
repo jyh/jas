@@ -18,7 +18,7 @@ def test_panel_label_all_kinds():
 
 
 def test_all_panel_kinds_count():
-    assert len(ALL_PANEL_KINDS) == 8
+    assert len(ALL_PANEL_KINDS) == 9
 
 
 def test_all_panel_kinds_contains_all():
@@ -30,6 +30,25 @@ def test_all_panel_kinds_contains_all():
     assert PanelKind.CHARACTER in ALL_PANEL_KINDS
     assert PanelKind.PARAGRAPH in ALL_PANEL_KINDS
     assert PanelKind.ARTBOARDS in ALL_PANEL_KINDS
+    assert PanelKind.ALIGN in ALL_PANEL_KINDS
+
+
+def test_panel_label_align():
+    assert panel_label(PanelKind.ALIGN) == "Align"
+
+
+def test_align_menu_has_expected_entries():
+    items = panel_menu(PanelKind.ALIGN)
+    assert len(items) == 5
+    assert items[0].kind == PanelMenuItemKind.TOGGLE
+    assert items[0].command == "toggle_use_preview_bounds"
+    assert items[1].kind == PanelMenuItemKind.SEPARATOR
+    assert items[2].kind == PanelMenuItemKind.ACTION
+    assert items[2].command == "reset_align_panel"
+    assert items[3].kind == PanelMenuItemKind.SEPARATOR
+    assert items[4].kind == PanelMenuItemKind.ACTION
+    assert items[4].label == "Close Align"
+    assert items[4].command == "close_panel"
 
 
 def test_panel_menu_non_empty():

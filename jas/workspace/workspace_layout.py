@@ -48,11 +48,13 @@ class PanelKind(Enum):
     CHARACTER = auto()
     PARAGRAPH = auto()
     ARTBOARDS = auto()
+    ALIGN = auto()
 
 ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
+    PanelKind.ALIGN,
 ]
 
 @dataclass
@@ -458,6 +460,7 @@ class WorkspaceLayout:
             PanelKind.CHARACTER: "Character",
             PanelKind.PARAGRAPH: "Paragraph",
             PanelKind.ARTBOARDS: "Artboards",
+            PanelKind.ALIGN: "Align",
         }[kind]
 
     # -- Close / show panels --
