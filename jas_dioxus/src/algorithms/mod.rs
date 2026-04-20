@@ -1,3 +1,4 @@
+pub mod align;
 pub mod boolean;
 pub mod fit_curve;
 pub mod hit_test;
