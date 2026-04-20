@@ -51,6 +51,7 @@ ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
+    PanelKind.ALIGN,
 ]
 
 # Color panel mode commands
@@ -78,6 +79,7 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.CHARACTER: "Character",
     PanelKind.PARAGRAPH: "Paragraph",
     PanelKind.ARTBOARDS: "Artboards",
+    PanelKind.ALIGN: "Align",
 }
 
 
@@ -128,6 +130,14 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.toggle("Subscript", "toggle_subscript"),
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Character", "close_panel"),
+        ]
+    if kind == PanelKind.ALIGN:
+        return [
+            PanelMenuItem.toggle("Use Preview Bounds", "toggle_use_preview_bounds"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Reset Panel", "reset_align_panel"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Align", "close_panel"),
         ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 

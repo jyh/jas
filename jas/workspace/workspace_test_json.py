@@ -94,6 +94,7 @@ def _panel_kind_str(k: PanelKind) -> str:
         PanelKind.CHARACTER: "character",
         PanelKind.PARAGRAPH: "paragraph",
         PanelKind.ARTBOARDS: "artboards",
+        PanelKind.ALIGN: "align",
     }[k]
 
 
@@ -569,6 +570,7 @@ def _parse_panel_kind(v) -> PanelKind:
         "character": PanelKind.CHARACTER,
         "paragraph": PanelKind.PARAGRAPH,
         "artboards": PanelKind.ARTBOARDS,
+        "align": PanelKind.ALIGN,
     }.get(v, PanelKind.LAYERS)
 
 
