@@ -363,6 +363,226 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Make a compound shape from the current selection using UNION.
+    /// All selected elements must be siblings. The frontmost (last in
+    /// path order) operand's fill, stroke, and common attributes are
+    /// copied onto the new compound shape. Selection becomes the new
+    /// compound shape. See BOOLEAN.md §Compound shapes.
+    pub fn make_compound_shape(model: &mut Model) {
+        use crate::geometry::live::{CompoundOperation, CompoundShape, LiveVariant};
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut paths: Vec<ElementPath> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        paths.sort();
+        if paths.len() < 2 {
+            return;
+        }
+        // Siblings only.
+        let parent: ElementPath = paths[0][..paths[0].len() - 1].to_vec();
+        if !paths.iter().all(|p| {
+            p.len() == paths[0].len() && p[..p.len() - 1] == parent[..]
+        }) {
+            return;
+        }
+        let elements: Vec<Rc<Element>> = paths
+            .iter()
+            .filter_map(|p| doc.get_element(p).cloned().map(Rc::new))
+            .collect();
+        if elements.len() != paths.len() {
+            return;
+        }
+        // Inherit the frontmost operand's paint (last in path order).
+        let frontmost = elements.last().unwrap();
+        let fill = frontmost.fill().copied();
+        let stroke = frontmost.stroke().copied();
+        let common = frontmost.common().clone();
+
+        let compound = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: elements,
+            fill,
+            stroke,
+            common,
+        }));
+
+        let mut new_doc = doc.clone();
+        for p in paths.iter().rev() {
+            new_doc = new_doc.delete_element(p);
+        }
+        let insert_path = paths[0].clone();
+        new_doc = new_doc.insert_element_at(&insert_path, compound);
+        new_doc.selection = vec![ElementSelection::all(insert_path)];
+        model.set_document(new_doc);
+    }
+
+    /// Release every selected compound shape: replace it in place with
+    /// its operand children. Each operand keeps its own paint. The
+    /// compound shape's paint is discarded. Selection becomes the
+    /// restored operands.
+    pub fn release_compound_shape(model: &mut Model) {
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut cs_paths: Vec<ElementPath> = Vec::new();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path)
+                && matches!(elem, Element::Live(_))
+            {
+                cs_paths.push(es.path.clone());
+            }
+        }
+        if cs_paths.is_empty() {
+            return;
+        }
+        cs_paths.sort();
+
+        let orig_doc = doc.clone();
+        let mut new_doc = doc.clone();
+        // Process in reverse to preserve sibling indices.
+        for cs_path in cs_paths.iter().rev() {
+            let cs_elem = match new_doc.get_element(cs_path).cloned() {
+                Some(e) => e,
+                None => continue,
+            };
+            let operands: Vec<Rc<Element>> = match &cs_elem {
+                Element::Live(crate::geometry::live::LiveVariant::CompoundShape(cs)) => {
+                    cs.operands.clone()
+                }
+                _ => continue,
+            };
+            new_doc = new_doc.delete_element(cs_path);
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = cs_path[1];
+                if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
+                    for (j, op) in operands.iter().enumerate() {
+                        let insert_idx = child_idx + j;
+                        if insert_idx <= layer_children.len() {
+                            layer_children.insert(insert_idx, op.clone());
+                        } else {
+                            layer_children.push(op.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build selection of released operands.
+        let mut new_selection = Vec::new();
+        let mut offset: i64 = 0;
+        for cs_path in &cs_paths {
+            let orig_elem = match orig_doc.get_element(cs_path) {
+                Some(e) => e,
+                None => continue,
+            };
+            let n = match orig_elem {
+                Element::Live(crate::geometry::live::LiveVariant::CompoundShape(cs)) => {
+                    cs.operands.len()
+                }
+                _ => continue,
+            };
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = (cs_path[1] as i64 + offset) as usize;
+                for j in 0..n {
+                    let path = vec![layer_idx, child_idx + j];
+                    if new_doc.get_element(&path).is_some() {
+                        new_selection.push(ElementSelection::all(path));
+                    }
+                }
+            }
+            offset += n as i64 - 1;
+        }
+        new_doc.selection = new_selection;
+        model.set_document(new_doc);
+    }
+
+    /// Expand every selected compound shape into static Polygon
+    /// elements derived from its evaluated geometry. The expanded
+    /// polygons carry the compound shape's own paint. Operand tree
+    /// is discarded.
+    pub fn expand_compound_shape(model: &mut Model) {
+        use crate::geometry::live::{DEFAULT_PRECISION, LiveElement, LiveVariant};
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut cs_paths: Vec<ElementPath> = Vec::new();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path)
+                && matches!(elem, Element::Live(_))
+            {
+                cs_paths.push(es.path.clone());
+            }
+        }
+        if cs_paths.is_empty() {
+            return;
+        }
+        cs_paths.sort();
+
+        let orig_doc = doc.clone();
+        let mut new_doc = doc.clone();
+        let mut expanded_counts: Vec<usize> = Vec::with_capacity(cs_paths.len());
+
+        for cs_path in cs_paths.iter().rev() {
+            let cs_elem = match new_doc.get_element(cs_path).cloned() {
+                Some(e) => e,
+                None => {
+                    expanded_counts.push(0);
+                    continue;
+                }
+            };
+            let expanded: Vec<Rc<Element>> = match &cs_elem {
+                Element::Live(LiveVariant::CompoundShape(cs)) => cs.expand(DEFAULT_PRECISION),
+                _ => {
+                    expanded_counts.push(0);
+                    continue;
+                }
+            };
+            expanded_counts.push(expanded.len());
+            new_doc = new_doc.delete_element(cs_path);
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = cs_path[1];
+                if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
+                    for (j, poly) in expanded.iter().enumerate() {
+                        let insert_idx = child_idx + j;
+                        if insert_idx <= layer_children.len() {
+                            layer_children.insert(insert_idx, poly.clone());
+                        } else {
+                            layer_children.push(poly.clone());
+                        }
+                    }
+                }
+            }
+        }
+        expanded_counts.reverse(); // restore forward order
+
+        // Build selection of expanded polygons.
+        let mut new_selection = Vec::new();
+        let mut offset: i64 = 0;
+        for (cs_path, &n) in cs_paths.iter().zip(expanded_counts.iter()) {
+            let _orig = orig_doc.get_element(cs_path);
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = (cs_path[1] as i64 + offset) as usize;
+                for j in 0..n {
+                    let path = vec![layer_idx, child_idx + j];
+                    if new_doc.get_element(&path).is_some() {
+                        new_selection.push(ElementSelection::all(path));
+                    }
+                }
+            }
+            offset += n as i64 - 1;
+        }
+        new_doc.selection = new_selection;
+        model.set_document(new_doc);
+    }
+
     /// Ungroup all unlocked Group elements in the entire document.
     pub fn ungroup_all(model: &mut Model) {
         let doc = model.document().clone();
@@ -1103,6 +1323,74 @@ mod tests {
         // No more groups (the original group should be ungrouped)
         let group_count = children.iter().filter(|c| matches!(***c, Element::Group(_))).count();
         assert_eq!(group_count, 0);
+    }
+
+    #[test]
+    fn make_compound_shape_wraps_selection_in_one_live_element() {
+        let mut model = setup_model();
+        // Select rect (0,0) and line (0,2) — siblings at layer 0.
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 2]),
+        ]);
+        Controller::make_compound_shape(&mut model);
+        let children = model.document().layers[0].children().unwrap();
+        // Originally 3 siblings; now rect+line merged into 1 compound
+        // plus the group, so 2 total.
+        assert_eq!(children.len(), 2);
+        // One of them must be the new Live element.
+        let live_count = children.iter().filter(|c| matches!(***c, Element::Live(_))).count();
+        assert_eq!(live_count, 1);
+        // The compound is selected.
+        assert_eq!(model.document().selection.len(), 1);
+    }
+
+    #[test]
+    fn release_compound_shape_restores_operands() {
+        let mut model = setup_model();
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 2]),
+        ]);
+        Controller::make_compound_shape(&mut model);
+        // Now release the compound (still selected).
+        Controller::release_compound_shape(&mut model);
+        let children = model.document().layers[0].children().unwrap();
+        // Back to a rect + group + line (three siblings).
+        let live_count = children.iter().filter(|c| matches!(***c, Element::Live(_))).count();
+        assert_eq!(live_count, 0);
+        assert_eq!(children.len(), 3);
+        // Released operands are the new selection.
+        assert_eq!(model.document().selection.len(), 2);
+    }
+
+    #[test]
+    fn expand_compound_shape_replaces_with_polygons() {
+        // Build a fresh doc with two overlapping rects so the boolean
+        // evaluates to one merged polygon.
+        let rect_a = make_rect(0.0, 0.0, 10.0, 10.0);
+        let rect_b = make_rect(5.0, 0.0, 10.0, 10.0);
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![Rc::new(rect_a), Rc::new(rect_b)],
+            common: CommonProps::default(),
+        });
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let mut model = Model::new(doc, None);
+
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ]);
+        Controller::make_compound_shape(&mut model);
+        Controller::expand_compound_shape(&mut model);
+
+        let children = model.document().layers[0].children().unwrap();
+        // Union of overlapping rects = 1 ring = 1 Polygon element.
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&*children[0], Element::Polygon(_)));
+        // The polygon is selected.
+        assert_eq!(model.document().selection.len(), 1);
     }
 
     #[test]

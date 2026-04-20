@@ -1335,6 +1335,32 @@ impl AppState {
         self.align_panel = AlignPanelState::default();
     }
 
+    /// Make a compound shape from the current selection. Wraps
+    /// `Controller::make_compound_shape`; a snapshot effect runs
+    /// first per the yaml dispatch order, so each click is one
+    /// undoable transaction.
+    pub(crate) fn apply_make_compound_shape(&mut self) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::make_compound_shape(&mut tab.model);
+        }
+    }
+
+    /// Release every selected compound shape, restoring its
+    /// operands. See `Controller::release_compound_shape`.
+    pub(crate) fn apply_release_compound_shape(&mut self) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::release_compound_shape(&mut tab.model);
+        }
+    }
+
+    /// Expand every selected compound shape to static polygons.
+    /// See `Controller::expand_compound_shape`.
+    pub(crate) fn apply_expand_compound_shape(&mut self) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::expand_compound_shape(&mut tab.model);
+        }
+    }
+
     /// Execute one of the 14 Align panel operations by name. The
     /// operation reads the current selection, builds an
     /// [`crate::algorithms::align::AlignReference`] from

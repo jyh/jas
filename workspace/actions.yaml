@@ -1839,3 +1839,41 @@ actions:
       - set: { align_distribute_spacing: "0" }
       - set_panel_state: { key: use_preview_bounds, value: "false" }
       - set: { align_use_preview_bounds: "false" }
+
+  # ── Boolean panel ─────────────────────────────────────────────
+
+  make_compound_shape:
+    description: >
+      Equivalent to Alt+click on UNION. Replaces the current selection
+      with a single compound shape (live, non-destructive) whose
+      operand list is the selected elements in their original z-order
+      and whose operation is Union. The new compound shape is selected
+      and inserted at the frontmost operand's position. Enabled when
+      selection_count >= 2. See BOOLEAN.md §Compound shapes.
+    category: boolean
+    effects:
+      - snapshot
+      - make_compound_shape: true
+
+  release_compound_shape:
+    description: >
+      Inverse of Make. For every compound shape in the selection,
+      replaces it with its operand children (each keeping its own
+      paint). The compound shape's own paint is discarded. Enabled
+      when the selection contains at least one compound shape.
+    category: boolean
+    effects:
+      - snapshot
+      - release_compound_shape: true
+
+  expand_compound_shape:
+    description: >
+      Flattens every compound shape in the selection into static
+      Polygon element(s) derived from its evaluated geometry, using
+      the compound shape's own paint. The operand tree is discarded.
+      Enabled when the selection contains at least one compound
+      shape. See BOOLEAN.md §Expand and Release semantics.
+    category: boolean
+    effects:
+      - snapshot
+      - expand_compound_shape: true
