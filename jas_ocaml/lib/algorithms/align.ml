@@ -88,3 +88,53 @@ let anchor_position bbox axis anchor =
   | Anchor_min -> lo
   | Anchor_center -> mid
   | Anchor_max -> hi
+
+(** Generic alignment driver used by the six public Align
+    operations. For each selected element whose bbox anchor
+    differs from the reference bbox anchor along the given axis,
+    emit a translation that moves it onto the target.
+
+    Elements whose path matches [reference_key_path reference]
+    are skipped — the key object never moves, per ALIGN.md Align
+    To target. Zero-delta translations are omitted per the
+    identity-value rule. *)
+let align_along_axis elements reference axis anchor bounds_fn =
+  let target = anchor_position (reference_bbox reference) axis anchor in
+  let key_path = reference_key_path reference in
+  List.filter_map (fun (path, elem) ->
+    if Some path = key_path then None
+    else
+      let pos = anchor_position (bounds_fn elem) axis anchor in
+      let delta = target -. pos in
+      if delta = 0.0 then None
+      else
+        let (dx, dy) = match axis with
+          | Horizontal -> (delta, 0.0)
+          | Vertical -> (0.0, delta)
+        in
+        Some { path; dx; dy }
+  ) elements
+
+(** ALIGN_LEFT_BUTTON. *)
+let align_left elements reference bounds_fn =
+  align_along_axis elements reference Horizontal Anchor_min bounds_fn
+
+(** ALIGN_HORIZONTAL_CENTER_BUTTON. *)
+let align_horizontal_center elements reference bounds_fn =
+  align_along_axis elements reference Horizontal Anchor_center bounds_fn
+
+(** ALIGN_RIGHT_BUTTON. *)
+let align_right elements reference bounds_fn =
+  align_along_axis elements reference Horizontal Anchor_max bounds_fn
+
+(** ALIGN_TOP_BUTTON. *)
+let align_top elements reference bounds_fn =
+  align_along_axis elements reference Vertical Anchor_min bounds_fn
+
+(** ALIGN_VERTICAL_CENTER_BUTTON. *)
+let align_vertical_center elements reference bounds_fn =
+  align_along_axis elements reference Vertical Anchor_center bounds_fn
+
+(** ALIGN_BOTTOM_BUTTON. *)
+let align_bottom elements reference bounds_fn =
+  align_along_axis elements reference Vertical Anchor_max bounds_fn

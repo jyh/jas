@@ -63,5 +63,94 @@ let tests = [
     assert (Align.geometric_bounds r = Element.geometric_bounds r));
 ]
 
+let ref_of rects =
+  Align.Selection (Align.union_bounds rects Align.geometric_bounds)
+
+let pair path e = (path, e)
+
+let op_tests = [
+  Alcotest.test_case "align_left_moves_two_rects_to_left_edge" `Quick (fun () ->
+    let rs = [rect 10.0 0.0 10.0 10.0; rect 30.0 0.0 10.0 10.0;
+              rect 60.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.align_left input r Align.geometric_bounds in
+    assert (List.length out = 2);
+    let t1 = List.nth out 0 in
+    assert (t1.Align.path = [1] && t1.Align.dx = -20.0 && t1.Align.dy = 0.0);
+    let t2 = List.nth out 1 in
+    assert (t2.Align.path = [2] && t2.Align.dx = -50.0 && t2.Align.dy = 0.0));
+
+  Alcotest.test_case "align_right_moves_to_right_edge" `Quick (fun () ->
+    let rs = [rect 10.0 0.0 10.0 10.0; rect 30.0 0.0 10.0 10.0;
+              rect 60.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.align_right input r Align.geometric_bounds in
+    assert (List.length out = 2);
+    assert ((List.nth out 0).Align.dx = 50.0);
+    assert ((List.nth out 1).Align.dx = 30.0));
+
+  Alcotest.test_case "align_horizontal_center_moves_to_midpoint" `Quick (fun () ->
+    let rs = [rect 10.0 0.0 10.0 10.0; rect 30.0 0.0 10.0 10.0;
+              rect 60.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.align_horizontal_center input r Align.geometric_bounds in
+    assert (List.length out = 3);
+    assert ((List.nth out 0).Align.dx = 25.0);
+    assert ((List.nth out 1).Align.dx = 5.0);
+    assert ((List.nth out 2).Align.dx = -25.0));
+
+  Alcotest.test_case "align_top_only_affects_y" `Quick (fun () ->
+    let rs = [rect 0.0 10.0 10.0 10.0; rect 20.0 30.0 10.0 10.0;
+              rect 40.0 50.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.align_top input r Align.geometric_bounds in
+    List.iter (fun t -> assert (t.Align.dx = 0.0)) out;
+    assert (List.length out = 2));
+
+  Alcotest.test_case "align_vertical_center_moves_to_midline" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 20.0 20.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.align_vertical_center input r Align.geometric_bounds in
+    assert (List.length out = 2);
+    assert ((List.nth out 0).Align.dy = 10.0);
+    assert ((List.nth out 1).Align.dy = -10.0));
+
+  Alcotest.test_case "align_bottom_moves_to_bottom_edge" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 20.0; rect 20.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.align_bottom input r Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.path = [1]);
+    assert ((List.nth out 0).Align.dy = 10.0));
+
+  Alcotest.test_case "align_left_with_key_object_does_not_move_key" `Quick (fun () ->
+    let rs = [rect 10.0 0.0 10.0 10.0; rect 30.0 0.0 10.0 10.0;
+              rect 60.0 0.0 10.0 10.0] in
+    let key = Align.Key_object {
+      bbox = Element.geometric_bounds (List.nth rs 1); path = [1] } in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.align_left input key Align.geometric_bounds in
+    List.iter (fun t -> assert (t.Align.path <> [1])) out;
+    assert (List.length out = 2);
+    let t0 = List.nth out 0 in
+    assert (t0.Align.path = [0] && t0.Align.dx = 20.0);
+    let t2 = List.nth out 1 in
+    assert (t2.Align.path = [2] && t2.Align.dx = -30.0));
+
+  Alcotest.test_case "align_left_empty_input_yields_empty_output" `Quick (fun () ->
+    let r = Align.Selection (0.0, 0.0, 10.0, 10.0) in
+    let out = Align.align_left [] r Align.geometric_bounds in
+    assert (out = []));
+]
+
 let () =
-  Alcotest.run "align" [ "primitives", tests ]
+  Alcotest.run "align" [
+    "primitives", tests;
+    "align_ops", op_tests;
+  ]

@@ -30,3 +30,27 @@ type axis_anchor = Anchor_min | Anchor_center | Anchor_max
 
 val axis_extent : bounds -> axis -> float * float * float
 val anchor_position : bounds -> axis -> axis_anchor -> float
+
+val align_along_axis
+  : (element_path * Element.element) list
+  -> align_reference -> axis -> axis_anchor -> bounds_fn
+  -> align_translation list
+
+val align_left
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val align_horizontal_center
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val align_right
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val align_top
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val align_vertical_center
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val align_bottom
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
