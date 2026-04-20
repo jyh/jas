@@ -243,3 +243,64 @@ private func refOf(_ rects: [Element]) -> AlignReference {
     for t in out { #expect(t.path != keyPath) }
 }
 
+// MARK: - Distribute Spacing operations
+
+@Test func distributeSpacingRequiresAtLeastThreeElements() {
+    let rs = [rect(0, 0, 10, 10), rect(50, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1])]
+    #expect(distributeHorizontalSpacing(input, r, nil, alignGeometricBounds).isEmpty)
+}
+
+@Test func distributeHorizontalSpacingAverageEqualisesGaps() {
+    let rs = [rect(0, 0, 10, 10), rect(20, 0, 10, 10), rect(90, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeHorizontalSpacing(input, r, nil, alignGeometricBounds)
+    #expect(out.count == 1)
+    #expect(out[0].path == [1])
+    #expect(out[0].dx == 25)
+}
+
+@Test func distributeVerticalSpacingAverageEqualisesGaps() {
+    let rs = [rect(0, 0, 10, 10), rect(0, 20, 10, 10), rect(0, 90, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeVerticalSpacing(input, r, nil, alignGeometricBounds)
+    #expect(out.count == 1)
+    #expect(out[0].path == [1])
+    #expect(out[0].dy == 25)
+}
+
+@Test func distributeSpacingExplicitWithoutKeyReturnsEmpty() {
+    let rs = [rect(0, 0, 10, 10), rect(50, 0, 10, 10), rect(100, 0, 10, 10)]
+    let r = refOf(rs)  // Selection ref, no key.
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeHorizontalSpacing(input, r, 12, alignGeometricBounds)
+    #expect(out.isEmpty)
+}
+
+@Test func distributeHorizontalSpacingExplicitAppliesExactGap() {
+    let rs = [rect(0, 0, 10, 10), rect(100, 0, 10, 10), rect(200, 0, 10, 10)]
+    let keyPath: ElementPath = [1]
+    let r = AlignReference.keyObject(bbox: rs[1].geometricBounds, path: keyPath)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeHorizontalSpacing(input, r, 20, alignGeometricBounds)
+    #expect(out.count == 2)
+    #expect(out[0].path == [0])
+    #expect(out[0].dx == 70)
+    #expect(out[1].path == [2])
+    #expect(out[1].dx == -70)
+}
+
+@Test func distributeSpacingExplicitZeroGapMakesElementsTouch() {
+    let rs = [rect(0, 0, 10, 10), rect(100, 0, 10, 10), rect(200, 0, 10, 10)]
+    let keyPath: ElementPath = [1]
+    let r = AlignReference.keyObject(bbox: rs[1].geometricBounds, path: keyPath)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeHorizontalSpacing(input, r, 0, alignGeometricBounds)
+    #expect(out.count == 2)
+    #expect(out[0].dx == 90)
+    #expect(out[1].dx == -90)
+}
+
