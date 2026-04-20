@@ -212,3 +212,109 @@ public func alignBottom(
 ) -> [AlignTranslation] {
     alignAlongAxis(elements, reference, .vertical, .max, boundsFn)
 }
+
+/// Generic driver for the six Distribute operations. Sorts the
+/// selection by current anchor position along the axis, determines
+/// the span from the reference (extremal anchors for Selection or
+/// KeyObject, artboard extent for Artboard), and emits translations
+/// that place each element's anchor at an evenly-spaced position
+/// within the span.
+///
+/// Distribute operations require at least 3 elements per ALIGN.md
+/// §Enable and disable rules; fewer yields an empty output. Key
+/// objects are skipped; zero-delta translations are omitted.
+public func distributeAlongAxis(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ axis: AlignAxis,
+    _ anchor: AlignAxisAnchor,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    let n = elements.count
+    if n < 3 { return [] }
+    // (original_index, current_anchor).
+    var indexed: [(Int, Double)] = elements.enumerated().map { (i, pair) in
+        (i, alignAnchorPosition(boundsFn(pair.1), axis, anchor))
+    }
+    indexed.sort { $0.1 < $1.1 }
+
+    let (minAnchor, maxAnchor): (Double, Double) = switch reference {
+    case .selection, .keyObject:
+        (indexed.first!.1, indexed.last!.1)
+    case .artboard(let bbox):
+        { let (lo, hi, _) = alignAxisExtent(bbox, axis); return (lo, hi) }()
+    }
+
+    let keyPath = reference.keyPath
+    var out: [AlignTranslation] = []
+    for (sortedIdx, (originalIdx, current)) in indexed.enumerated() {
+        let t = Double(sortedIdx) / Double(n - 1)
+        let newAnchor = minAnchor + (maxAnchor - minAnchor) * t
+        let delta = newAnchor - current
+        if delta == 0 { continue }
+        let (path, _) = elements[originalIdx]
+        if path == keyPath { continue }
+        let (dx, dy): (Double, Double) = switch axis {
+        case .horizontal: (delta, 0)
+        case .vertical: (0, delta)
+        }
+        out.append(AlignTranslation(path: path, dx: dx, dy: dy))
+    }
+    // Emit in path order for deterministic output.
+    out.sort { $0.path.lexicographicallyPrecedes($1.path) }
+    return out
+}
+
+/// DISTRIBUTE_LEFT_BUTTON. Redistribute left-edge anchors evenly.
+public func distributeLeft(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeAlongAxis(elements, reference, .horizontal, .min, boundsFn)
+}
+
+/// DISTRIBUTE_HORIZONTAL_CENTER_BUTTON.
+public func distributeHorizontalCenter(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeAlongAxis(elements, reference, .horizontal, .center, boundsFn)
+}
+
+/// DISTRIBUTE_RIGHT_BUTTON.
+public func distributeRight(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeAlongAxis(elements, reference, .horizontal, .max, boundsFn)
+}
+
+/// DISTRIBUTE_TOP_BUTTON.
+public func distributeTop(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeAlongAxis(elements, reference, .vertical, .min, boundsFn)
+}
+
+/// DISTRIBUTE_VERTICAL_CENTER_BUTTON.
+public func distributeVerticalCenter(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeAlongAxis(elements, reference, .vertical, .center, boundsFn)
+}
+
+/// DISTRIBUTE_BOTTOM_BUTTON.
+public func distributeBottom(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeAlongAxis(elements, reference, .vertical, .max, boundsFn)
+}

@@ -167,3 +167,79 @@ private func refOf(_ rects: [Element]) -> AlignReference {
     #expect(out.isEmpty)
 }
 
+// MARK: - Distribute operations
+
+@Test func distributeRequiresAtLeastThreeElements() {
+    let rs = [rect(0, 0, 10, 10), rect(50, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1])]
+    #expect(distributeLeft(input, r, alignGeometricBounds).isEmpty)
+}
+
+@Test func distributeLeftAlreadyEvenEmitsNoTranslations() {
+    let rs = [rect(0, 0, 10, 10), rect(50, 0, 10, 10), rect(100, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    #expect(distributeLeft(input, r, alignGeometricBounds).isEmpty)
+}
+
+@Test func distributeLeftUnevenMovesMiddleToCenter() {
+    let rs = [rect(0, 0, 10, 10), rect(30, 0, 10, 10), rect(100, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeLeft(input, r, alignGeometricBounds)
+    #expect(out.count == 1)
+    #expect(out[0] == AlignTranslation(path: [1], dx: 20, dy: 0))
+}
+
+@Test func distributeHorizontalCenterEvenlySpacesCenters() {
+    let rs = [rect(0, 0, 10, 10), rect(20, 0, 10, 10), rect(100, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeHorizontalCenter(input, r, alignGeometricBounds)
+    #expect(out.count == 1)
+    #expect(out[0].path == [1])
+    #expect(out[0].dx == 30)
+}
+
+@Test func distributeTopMovesOnlyY() {
+    let rs = [rect(0, 0, 10, 10), rect(5, 30, 10, 10), rect(10, 100, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeTop(input, r, alignGeometricBounds)
+    #expect(out.count == 1)
+    #expect(out[0].path == [1])
+    #expect(out[0].dx == 0)
+    #expect(out[0].dy == 20)
+}
+
+@Test func distributeHandlesUnsortedInput() {
+    let rs = [rect(100, 0, 10, 10), rect(30, 0, 10, 10), rect(0, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeLeft(input, r, alignGeometricBounds)
+    #expect(out.count == 1)
+    #expect(out[0].path == [1])
+    #expect(out[0].dx == 20)
+}
+
+@Test func distributeArtboardReferenceUsesArtboardExtent() {
+    let rs = [rect(20, 0, 10, 10), rect(40, 0, 10, 10), rect(60, 0, 10, 10)]
+    let r: AlignReference = .artboard((0, 0, 200, 100))
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeLeft(input, r, alignGeometricBounds)
+    #expect(out.count == 3)
+    #expect(out[0].dx == -20)
+    #expect(out[1].dx == 60)
+    #expect(out[2].dx == 140)
+}
+
+@Test func distributeVerticalCenterWithKeySkipsKey() {
+    let rs = [rect(0, 0, 10, 10), rect(0, 30, 10, 10), rect(0, 100, 10, 10)]
+    let keyPath: ElementPath = [1]
+    let r = AlignReference.keyObject(bbox: rs[1].geometricBounds, path: keyPath)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = distributeVerticalCenter(input, r, alignGeometricBounds)
+    for t in out { #expect(t.path != keyPath) }
+}
+
