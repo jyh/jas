@@ -220,6 +220,49 @@ let test_compound_creation_unknown_op_is_noop () =
   Boolean_apply.apply_compound_creation m "nonexistent";
   Alcotest.(check int) "rects unchanged" 2 (top_children_count m)
 
+(* ── Boolean options / Repeat / Reset tests ─────────────────── *)
+
+let test_collapse_collinear_drops_midpoint () =
+  let ring = [| (0.0, 0.0); (5.0, 0.0); (10.0, 0.0);
+                (10.0, 10.0); (0.0, 10.0) |] in
+  let collapsed = Boolean_apply.collapse_collinear_points ring 0.01 in
+  (* (5, 0) is collinear and should drop. *)
+  Alcotest.(check int) "one point dropped" 4 (Array.length collapsed)
+
+let test_collapse_preserves_triangle_corners () =
+  let ring = [| (0.0, 0.0); (10.0, 0.0); (5.0, 10.0) |] in
+  let collapsed = Boolean_apply.collapse_collinear_points ring 0.01 in
+  Alcotest.(check int) "triangle preserved" 3 (Array.length collapsed)
+
+let test_divide_remove_unpainted_drops_unfilled () =
+  let m = two_overlapping () in
+  let opts = { Boolean_apply.default_boolean_options with
+               divide_remove_unpainted = true } in
+  Boolean_apply.apply_destructive_boolean ~options:opts m "divide";
+  Alcotest.(check int) "all fragments dropped" 0 (top_children_count m)
+
+let test_repeat_destructive_replays_op () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_repeat_boolean_operation m (Some "union");
+  Alcotest.(check int) "one polygon" 1 (top_children_count m)
+
+let test_repeat_compound_replays_compound_creation () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_repeat_boolean_operation m (Some "intersection_compound");
+  match cs_operation m with
+  | Some Op_intersection -> ()
+  | _ -> Alcotest.fail "expected intersection compound"
+
+let test_repeat_none_is_noop () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_repeat_boolean_operation m None;
+  Alcotest.(check int) "unchanged" 2 (top_children_count m)
+
+let test_repeat_empty_string_is_noop () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_repeat_boolean_operation m (Some "");
+  Alcotest.(check int) "unchanged" 2 (top_children_count m)
+
 let () =
   Alcotest.run "Boolean_apply"
     [ "compound shape", [
@@ -275,5 +318,21 @@ let () =
           test_exclude_compound_uses_exclude;
         Alcotest.test_case "unknown op is noop" `Quick
           test_compound_creation_unknown_op_is_noop;
+      ];
+      "boolean options and repeat", [
+        Alcotest.test_case "collapse collinear drops midpoint" `Quick
+          test_collapse_collinear_drops_midpoint;
+        Alcotest.test_case "collapse preserves triangle corners" `Quick
+          test_collapse_preserves_triangle_corners;
+        Alcotest.test_case "divide remove unpainted drops unfilled" `Quick
+          test_divide_remove_unpainted_drops_unfilled;
+        Alcotest.test_case "repeat destructive replays op" `Quick
+          test_repeat_destructive_replays_op;
+        Alcotest.test_case "repeat compound replays compound creation" `Quick
+          test_repeat_compound_replays_compound_creation;
+        Alcotest.test_case "repeat none is noop" `Quick
+          test_repeat_none_is_noop;
+        Alcotest.test_case "repeat empty string is noop" `Quick
+          test_repeat_empty_string_is_noop;
       ]
     ]

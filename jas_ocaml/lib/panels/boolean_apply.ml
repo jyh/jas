@@ -182,6 +182,48 @@ let apply_release_compound_shape (model : Model.model) : unit =
     end
   end
 
+(* ── Boolean options ─────────────────────────────────────────── *)
+
+type boolean_options = {
+  precision : float;
+  remove_redundant_points : bool;
+  divide_remove_unpainted : bool;
+}
+
+let default_boolean_options = {
+  precision = Live.default_precision;
+  remove_redundant_points = true;
+  divide_remove_unpainted = false;
+}
+
+(** Single-pass removal of collinear / near-duplicate points within
+    [tol]. Returns the original ring if collapse would leave fewer
+    than 3 points. *)
+let collapse_collinear_points ring tol =
+  let n = Array.length ring in
+  if n < 3 then ring
+  else begin
+    let keep = Array.make n true in
+    for i = 0 to n - 1 do
+      let (px, py) = ring.((i - 1 + n) mod n) in
+      let (cx, cy) = ring.(i) in
+      let (nx, ny) = ring.((i + 1) mod n) in
+      let dx = nx -. px in
+      let dy = ny -. py in
+      let seg_len = sqrt (dx *. dx +. dy *. dy) in
+      if seg_len = 0.0 then keep.(i) <- false
+      else begin
+        let num = abs_float (dy *. cx -. dx *. cy +. nx *. py -. ny *. px) in
+        if num /. seg_len < tol then keep.(i) <- false
+      end
+    done;
+    let buf = Array.to_list ring |> List.mapi (fun i p -> (i, p))
+              |> List.filter (fun (i, _) -> keep.(i))
+              |> List.map snd in
+    if List.length buf < 3 then ring
+    else Array.of_list buf
+  end
+
 (* ── Destructive boolean operations ──────────────────────────── *)
 
 (** Return (fill, stroke, opacity, transform, locked, visibility) for
@@ -348,7 +390,8 @@ let compute_destructive_outputs op_name elements precision =
     end
   | _ -> None
 
-let apply_destructive_boolean (model : Model.model) (op_name : string) : unit =
+let apply_destructive_boolean ?(options = default_boolean_options)
+    (model : Model.model) (op_name : string) : unit =
   let doc = model#document in
   let sel = doc.Document.selection in
   if Document.PathMap.is_empty sel then ()
@@ -364,15 +407,26 @@ let apply_destructive_boolean (model : Model.model) (op_name : string) : unit =
       if not (List.for_all (fun p -> parent p = first_parent) paths) then ()
       else begin
         let elements = List.map (fun p -> Document.get_element doc p) paths in
-        match compute_destructive_outputs op_name elements Live.default_precision with
+        match compute_destructive_outputs op_name elements options.precision with
         | None -> ()
         | Some outputs ->
-          (* Flatten to Polygon elements; drop rings with < 3 pts. *)
+          (* Flatten to Polygon elements; drop rings with < 3 pts.
+             Apply BooleanOptions: divide_remove_unpainted drops
+             unpainted DIVIDE fragments; remove_redundant_points
+             collapses near-collinear vertices. *)
           let new_elements = List.concat_map (fun (ps, paint) ->
-            List.filter_map (fun ring ->
-              if Array.length ring < 3 then None
-              else Some (polygon_from_ring ring paint)
-            ) ps
+            let (fill, stroke, _, _, _, _) = paint in
+            if op_name = "divide" && options.divide_remove_unpainted
+               && fill = None && stroke = None then []
+            else
+              List.filter_map (fun ring ->
+                let r = if options.remove_redundant_points
+                  then collapse_collinear_points ring options.precision
+                  else ring
+                in
+                if Array.length r < 3 then None
+                else Some (polygon_from_ring r paint)
+              ) ps
           ) outputs in
           model#snapshot;
           let rev_paths = List.sort (fun a b -> compare b a) paths in
@@ -458,3 +512,22 @@ let apply_expand_compound_shape (model : Model.model) : unit =
       model#set_document { new_doc with Document.selection = !new_sel }
     end
   end
+
+(* ── Repeat + Reset ──────────────────────────────────────────── *)
+
+let compound_suffix = "_compound"
+
+let apply_repeat_boolean_operation ?(options = default_boolean_options)
+    (model : Model.model) (last_op : string option) : unit =
+  match last_op with
+  | None | Some "" -> ()
+  | Some op ->
+    let suffix_len = String.length compound_suffix in
+    let op_len = String.length op in
+    if op_len > suffix_len
+       && String.sub op (op_len - suffix_len) suffix_len = compound_suffix
+    then
+      let base = String.sub op 0 (op_len - suffix_len) in
+      apply_compound_creation model base
+    else
+      apply_destructive_boolean ~options model op
