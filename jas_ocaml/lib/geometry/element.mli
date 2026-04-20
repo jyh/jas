@@ -362,6 +362,12 @@ type element =
 (** Return the bounding box as (x, y, width, height). *)
 val bounds : element -> float * float * float * float
 
+(** Geometric bounding box — the bbox of the path / shape geometry
+    alone, ignoring stroke width. Used by Align operations when
+    Use Preview Bounds is off (the default) per ALIGN.md Bounding
+    box selection. *)
+val geometric_bounds : element -> float * float * float * float
+
 (** {2 Helper constructors} *)
 
 val make_color : ?a:float -> float -> float -> float -> color

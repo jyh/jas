@@ -640,6 +640,41 @@ let rec bounds = function
       let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all_bounds in
       (min_x, min_y, max_x -. min_x, max_y -. min_y)
 
+(** Geometric bounding box — bbox of the path / shape geometry
+    alone, ignoring stroke width and any fill bleed. Align
+    operations read it when Use Preview Bounds is off, the
+    default per ALIGN.md Bounding box selection. *)
+let rec geometric_bounds = function
+  | Line { x1; y1; x2; y2; _ } ->
+    let min_x = min x1 x2 in
+    let min_y = min y1 y2 in
+    (min_x, min_y, abs_float (x2 -. x1), abs_float (y2 -. y1))
+  | Rect { x; y; width; height; _ } -> (x, y, width, height)
+  | Circle { cx; cy; r; _ } -> (cx -. r, cy -. r, r *. 2.0, r *. 2.0)
+  | Ellipse { cx; cy; rx; ry; _ } -> (cx -. rx, cy -. ry, rx *. 2.0, ry *. 2.0)
+  | Polyline { points; _ } | Polygon { points; _ } ->
+    begin match points with
+    | [] -> (0.0, 0.0, 0.0, 0.0)
+    | _ ->
+      let xs = List.map fst points in
+      let ys = List.map snd points in
+      let min_f = List.fold_left min infinity in
+      let max_f = List.fold_left max neg_infinity in
+      let min_x = min_f xs and min_y = min_f ys in
+      (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
+    end
+  | Path { d; _ } | Text_path { d; _ } -> path_cmd_bounds d
+  | Text _ as e -> bounds e
+  | Group { children; _ } | Layer { children; _ } ->
+    if Array.length children = 0 then (0.0, 0.0, 0.0, 0.0)
+    else
+      let all = Array.map geometric_bounds children in
+      let min_x = Array.fold_left (fun acc (x, _, _, _) -> min acc x) infinity all in
+      let min_y = Array.fold_left (fun acc (_, y, _, _) -> min acc y) infinity all in
+      let max_x = Array.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all in
+      let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all in
+      (min_x, min_y, max_x -. min_x, max_y -. min_y)
+
 (** Helper constructors. *)
 
 let make_color ?(a = 1.0) r g b = Rgb { r; g; b; a }
