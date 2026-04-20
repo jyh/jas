@@ -1842,6 +1842,74 @@ actions:
 
   # ── Boolean panel ─────────────────────────────────────────────
 
+  boolean_union:
+    description: >
+      UNION_BUTTON. Destructively merge every selected element into a
+      single path taking the union of their geometries. All operands
+      are consumed; the result carries the frontmost operand's paint.
+      See BOOLEAN.md §Operand and paint rules.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_union: true
+      - set: { last_boolean_op: '"union"' }
+
+  boolean_subtract_front:
+    description: >
+      SUBTRACT_FRONT_BUTTON. Subtract the frontmost selected element
+      (the cutter) from each remaining element. Cutter is consumed;
+      each remaining element keeps its own paint.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_subtract_front: true
+      - set: { last_boolean_op: '"subtract_front"' }
+
+  boolean_intersection:
+    description: >
+      INTERSECTION_BUTTON. Destructively reduce the selection to the
+      region covered by every element. All operands are consumed;
+      result carries the frontmost operand's paint.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_intersection: true
+      - set: { last_boolean_op: '"intersection"' }
+
+  boolean_exclude:
+    description: >
+      EXCLUDE_BUTTON. Destructively reduce the selection to the
+      symmetric difference (region covered by exactly one operand).
+      All operands are consumed; result carries the frontmost
+      operand's paint.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_exclude: true
+      - set: { last_boolean_op: '"exclude"' }
+
+  boolean_crop:
+    description: >
+      CROP_BUTTON. Use the frontmost selected element as a mask and
+      crop every other element to its interior. The mask is consumed;
+      each cropped survivor keeps its own paint.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_crop: true
+      - set: { last_boolean_op: '"crop"' }
+
+  boolean_subtract_back:
+    description: >
+      SUBTRACT_BACK_BUTTON. Subtract the backmost selected element
+      from each remaining element. Backmost is consumed; each
+      remaining element keeps its own paint.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_subtract_back: true
+      - set: { last_boolean_op: '"subtract_back"' }
+
   make_compound_shape:
     description: >
       Equivalent to Alt+click on UNION. Replaces the current selection

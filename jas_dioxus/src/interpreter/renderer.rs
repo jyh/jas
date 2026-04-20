@@ -952,6 +952,7 @@ fn build_active_document_view(
             "layers_panel_selection_count": 0,
             "has_selection": false,
             "selection_count": 0,
+            "selection_has_compound_shape": false,
             "element_selection": [],
         });
     };
@@ -1006,6 +1007,17 @@ fn build_active_document_view(
             serde_json::json!({"__path__": path_ints})
         })
         .collect();
+    // True if any selected element is an Element::Live (currently
+    // only compound shapes). Consumed by the Boolean panel's Expand
+    // button and Release/Expand Compound Shape menu items.
+    let selection_has_compound_shape = canvas_selection
+        .iter()
+        .any(|es| {
+            matches!(
+                tab.model.document().get_element(&es.path),
+                Some(Element::Live(_))
+            )
+        });
     serde_json::json!({
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
@@ -1014,6 +1026,7 @@ fn build_active_document_view(
         "layers_panel_selection_count": st.layers_panel_selection.len(),
         "has_selection": !canvas_selection.is_empty(),
         "selection_count": canvas_selection.len(),
+        "selection_has_compound_shape": selection_has_compound_shape,
         "element_selection": element_selection,
     })
 }
@@ -1121,10 +1134,8 @@ fn run_yaml_effect(
         }
     }
 
-    // Boolean panel — compound-shape menu actions. The destructive
-    // pathfinder operations (union, intersection, etc.) land in a
-    // later phase; only the three compound-shape menu entries fire
-    // here today. See BOOLEAN.md §Panel actions.
+    // Boolean panel — compound-shape menu actions. See BOOLEAN.md
+    // §Panel actions.
     if eff.get("make_compound_shape").is_some() {
         st.apply_make_compound_shape();
         return deferred;
@@ -1136,6 +1147,19 @@ fn run_yaml_effect(
     if eff.get("expand_compound_shape").is_some() {
         st.apply_expand_compound_shape();
         return deferred;
+    }
+
+    // Boolean panel — destructive operations. The six below are
+    // implemented; DIVIDE / TRIM / MERGE land in a follow-up phase.
+    for &op in &[
+        "union", "subtract_front", "intersection", "exclude",
+        "crop", "subtract_back",
+    ] {
+        let key = format!("boolean_{op}");
+        if eff.get(&key).is_some() {
+            st.apply_boolean_operation(op);
+            return deferred;
+        }
     }
 
     // toggle_paragraph_field: <field_name> — Phase 4. Flips the named
