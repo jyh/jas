@@ -54,3 +54,27 @@ val align_vertical_center
 val align_bottom
   : (element_path * Element.element) list -> align_reference -> bounds_fn
   -> align_translation list
+
+val distribute_along_axis
+  : (element_path * Element.element) list
+  -> align_reference -> axis -> axis_anchor -> bounds_fn
+  -> align_translation list
+
+val distribute_left
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val distribute_horizontal_center
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val distribute_right
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val distribute_top
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val distribute_vertical_center
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list
+val distribute_bottom
+  : (element_path * Element.element) list -> align_reference -> bounds_fn
+  -> align_translation list

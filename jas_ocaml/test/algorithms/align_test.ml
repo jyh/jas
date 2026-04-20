@@ -149,8 +149,92 @@ let op_tests = [
     assert (out = []));
 ]
 
+let dist_tests = [
+  Alcotest.test_case "distribute_requires_at_least_three" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 50.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    assert (Align.distribute_left input r Align.geometric_bounds = []));
+
+  Alcotest.test_case "distribute_left_already_even_no_translations" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 50.0 0.0 10.0 10.0;
+              rect 100.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    assert (Align.distribute_left input r Align.geometric_bounds = []));
+
+  Alcotest.test_case "distribute_left_uneven_moves_middle" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 30.0 0.0 10.0 10.0;
+              rect 100.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_left input r Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.path = [1]);
+    assert ((List.nth out 0).Align.dx = 20.0));
+
+  Alcotest.test_case "distribute_horizontal_center_evenly_spaces" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 20.0 0.0 10.0 10.0;
+              rect 100.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_horizontal_center input r Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.dx = 30.0));
+
+  Alcotest.test_case "distribute_right_distributes_right_edges" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 20.0 0.0 10.0 10.0;
+              rect 100.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_right input r Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.dx = 30.0));
+
+  Alcotest.test_case "distribute_top_moves_only_y" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 5.0 30.0 10.0 10.0;
+              rect 10.0 100.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_top input r Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.dx = 0.0);
+    assert ((List.nth out 0).Align.dy = 20.0));
+
+  Alcotest.test_case "distribute_handles_unsorted_input" `Quick (fun () ->
+    let rs = [rect 100.0 0.0 10.0 10.0; rect 30.0 0.0 10.0 10.0;
+              rect 0.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_left input r Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.path = [1]);
+    assert ((List.nth out 0).Align.dx = 20.0));
+
+  Alcotest.test_case "distribute_artboard_uses_artboard_extent" `Quick (fun () ->
+    let rs = [rect 20.0 0.0 10.0 10.0; rect 40.0 0.0 10.0 10.0;
+              rect 60.0 0.0 10.0 10.0] in
+    let r = Align.Artboard (0.0, 0.0, 200.0, 100.0) in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_left input r Align.geometric_bounds in
+    assert (List.length out = 3);
+    assert ((List.nth out 0).Align.dx = -20.0);
+    assert ((List.nth out 1).Align.dx = 60.0);
+    assert ((List.nth out 2).Align.dx = 140.0));
+
+  Alcotest.test_case "distribute_vertical_center_with_key_skips_key" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 0.0 30.0 10.0 10.0;
+              rect 0.0 100.0 10.0 10.0] in
+    let key = Align.Key_object {
+      bbox = Element.geometric_bounds (List.nth rs 1); path = [1] } in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_vertical_center input key Align.geometric_bounds in
+    List.iter (fun t -> assert (t.Align.path <> [1])) out);
+]
+
 let () =
   Alcotest.run "align" [
     "primitives", tests;
     "align_ops", op_tests;
+    "distribute_ops", dist_tests;
   ]
