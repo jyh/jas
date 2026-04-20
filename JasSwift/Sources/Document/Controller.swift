@@ -643,6 +643,95 @@ public class Controller {
                                   selection: newSelection)
     }
 
+    /// Destructively apply one of the six implemented boolean ops to
+    /// the current selection. Supported: "union", "intersection",
+    /// "exclude", "subtract_front", "subtract_back", "crop". DIVIDE /
+    /// TRIM / MERGE live in phase 9e.
+    ///
+    /// Semantics per BOOLEAN.md §Operand and paint rules:
+    /// - UNION / INTERSECTION / EXCLUDE: all operands consumed;
+    ///   result carries the frontmost operand's paint.
+    /// - SUBTRACT_FRONT: frontmost is consumed as cutter; each
+    ///   survivor keeps its own paint.
+    /// - SUBTRACT_BACK: backmost is consumed as cutter.
+    /// - CROP: frontmost is consumed as mask; survivors clipped to
+    ///   its interior and keep their own paint.
+    public func applyDestructiveBoolean(_ opName: String) {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
+        guard paths.count >= 2 else { return }
+        let parent = Array(paths[0].dropLast())
+        guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
+        let elements = paths.map { doc.getElement($0) }
+        let precision = DEFAULT_PRECISION
+
+        // outputs: one (polygonSet, element-for-paint) pair per fragment.
+        var outputs: [(BoolPolygonSet, Element)] = []
+        switch opName {
+        case "union", "intersection", "exclude":
+            let sets = elements.map { elementToPolygonSet($0, precision: precision) }
+            let op: CompoundOperation = opName == "union" ? .union
+                : opName == "intersection" ? .intersection : .exclude
+            outputs.append((applyOperation(op, sets), elements.last!))
+        case "subtract_front", "crop":
+            let cutter = elementToPolygonSet(elements.last!, precision: precision)
+            for survivor in elements.dropLast() {
+                let sSet = elementToPolygonSet(survivor, precision: precision)
+                let res = opName == "crop"
+                    ? booleanIntersect(sSet, cutter)
+                    : booleanSubtract(sSet, cutter)
+                outputs.append((res, survivor))
+            }
+        case "subtract_back":
+            let cutter = elementToPolygonSet(elements.first!, precision: precision)
+            for survivor in elements.dropFirst() {
+                let sSet = elementToPolygonSet(survivor, precision: precision)
+                outputs.append((booleanSubtract(sSet, cutter), survivor))
+            }
+        default:
+            return
+        }
+
+        // Flatten to Polygon elements; drop rings with < 3 points.
+        var newElements: [Element] = []
+        for (ps, paintSrc) in outputs {
+            for ring in ps where ring.count >= 3 {
+                newElements.append(.polygon(Polygon(
+                    points: ring,
+                    fill: paintSrc.fill,
+                    stroke: paintSrc.stroke,
+                    opacity: 1.0,
+                    transform: paintSrc.transform,
+                    locked: false,
+                    visibility: paintSrc.visibility
+                )))
+            }
+        }
+
+        var newDoc = doc
+        for path in paths.reversed() {
+            newDoc = newDoc.deleteElement(path)
+        }
+        let insertPath = paths[0]
+        let layerIdx = insertPath[0]
+        let childIdx = insertPath.count > 1 ? insertPath[1] : 0
+        let layer = newDoc.layers[layerIdx]
+        var newChildren = layer.children
+        newChildren.insert(contentsOf: newElements, at: childIdx)
+        let newLayer = Layer(name: layer.name, children: newChildren,
+                            opacity: layer.opacity, transform: layer.transform)
+        var newLayers = newDoc.layers
+        newLayers[layerIdx] = newLayer
+        var newSelection: Selection = []
+        for i in 0..<newElements.count {
+            newSelection.insert(ElementSelection.all([layerIdx, childIdx + i]))
+        }
+        model.document = Document(layers: newLayers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
     /// Set the fill of every element in the current selection.
     public func setSelectionFill(_ fill: Fill?) {
         var doc = model.document

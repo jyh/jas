@@ -59,7 +59,7 @@ private func topChildrenCount(_ model: Model) -> Int {
 }
 
 @Test func expandCompoundShapeReplacesWithPolygons() {
-    // Two overlapping rects → Union → one polygon.
+    // Two overlapping rects to Union to one polygon.
     let model = modelWithRects([rectAt(0, 0), rectAt(5, 0)],
                                selected: [[0, 0], [0, 1]])
     let ctrl = Controller(model: model)
@@ -70,4 +70,55 @@ private func topChildrenCount(_ model: Model) -> Int {
     } else {
         Issue.record("expected polygon element")
     }
+}
+
+// MARK: - Destructive boolean ops
+
+private func twoOverlapping() -> Model {
+    modelWithRects([rectAt(0, 0), rectAt(5, 0)], selected: [[0, 0], [0, 1]])
+}
+
+@Test func destructiveUnionProducesOnePolygon() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("union")
+    #expect(topChildrenCount(m) == 1)
+    if case .polygon = m.document.layers[0].children[0] {
+    } else { Issue.record("expected polygon") }
+}
+
+@Test func destructiveIntersectionProducesOnePolygon() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("intersection")
+    #expect(topChildrenCount(m) == 1)
+}
+
+@Test func destructiveExcludeProducesTwoPolygons() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("exclude")
+    #expect(topChildrenCount(m) == 2)
+}
+
+@Test func destructiveSubtractFrontConsumesFront() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("subtract_front")
+    #expect(topChildrenCount(m) == 1)
+}
+
+@Test func destructiveSubtractBackConsumesBack() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("subtract_back")
+    #expect(topChildrenCount(m) == 1)
+}
+
+@Test func destructiveCropUsesFrontmostAsMask() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("crop")
+    #expect(topChildrenCount(m) == 1)
+}
+
+@Test func destructiveUnknownOpIsNoop() {
+    let m = twoOverlapping()
+    let before = topChildrenCount(m)
+    Controller(model: m).applyDestructiveBoolean("nonexistent")
+    #expect(topChildrenCount(m) == before)
 }
