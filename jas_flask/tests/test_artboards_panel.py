@@ -268,3 +268,34 @@ class TestArtboardsPanel:
         }
         html = render_element(dock_el, theme, state, mode="normal")
         assert "ap_list" in html or "Artboards" in html
+
+    # ── Appearance theming ────────────────────────────────────
+
+    def test_panel_does_not_hardcode_colors(self, panel):
+        """Theming contract: every color in the panel yaml should
+        come from a {{theme.colors.*}} token (or be a literal used
+        in an expression like a fill-preset comparator). A user-
+        visible hardcoded hex color in style / bind would break
+        theme switching."""
+        import json as _json
+        import re
+        # Serialize panel back to a string and scan for hex colors
+        # that sit in style / bind / content positions.
+        yaml_dump = _json.dumps(panel)
+        # Strip known-safe usages: color comparators in conditional
+        # expressions (`dialog.fill == '#ffffff'`).
+        cleaned = re.sub(r"dialog\.fill == '#[0-9a-fA-F]+'", "", yaml_dump)
+        offenders = re.findall(r"#[0-9a-fA-F]{6}", cleaned)
+        assert offenders == [], (
+            "Panel yaml contains hardcoded hex colors outside of "
+            "known comparator expressions: " + ", ".join(offenders)
+        )
+
+    def test_reset_panel_action_present(self, panel):
+        menu = panel.get("menu", [])
+        entry = next(
+            (m for m in menu if isinstance(m, dict) and m.get("label") == "Reset Panel"),
+            None,
+        )
+        assert entry is not None
+        assert entry.get("action") == "reset_artboards_panel"
