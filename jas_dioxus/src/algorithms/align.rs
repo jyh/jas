@@ -377,6 +377,137 @@ pub fn distribute_bottom(
     distribute_along_axis(elements, reference, Axis::Vertical, AxisAnchor::Max, bounds_fn)
 }
 
+/// Generic driver for the two Distribute Spacing operations. Sorts
+/// the selection along the axis by min-edge and equalises the gaps
+/// between consecutive bboxes.
+///
+/// Behaviour depends on `explicit_gap`:
+/// - `None` (average mode): the two extremal elements hold their
+///   positions; interior gaps average to (span − Σ element sizes)
+///   / (n − 1). Used when the panel has no key object.
+/// - `Some(gap)` (explicit mode): the key object holds its
+///   position; other elements are placed so every consecutive pair
+///   has exactly `gap` points of space between them. Requires a
+///   key object reference — returns an empty output otherwise.
+///
+/// Fewer than 3 selected elements yield an empty output per
+/// ALIGN.md §Enable and disable rules. Key objects are skipped.
+/// Zero-delta translations are omitted.
+pub fn distribute_spacing_along_axis(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    axis: Axis,
+    explicit_gap: Option<f64>,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    let n = elements.len();
+    if n < 3 {
+        return Vec::new();
+    }
+
+    // Axis range (lo, hi) for each element, tagged with its
+    // original index for path lookup.
+    let mut sorted: Vec<(usize, f64, f64)> = elements
+        .iter()
+        .enumerate()
+        .map(|(i, (_, e))| {
+            let (lo, hi, _) = axis_extent(bounds_fn(e), axis);
+            (i, lo, hi)
+        })
+        .collect();
+    sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Compute each element's target min position along the axis.
+    let new_mins: Vec<f64> = match explicit_gap {
+        Some(gap) => {
+            // Explicit mode: walk from the key object outward.
+            let Some(key_path) = reference.key_path() else {
+                return Vec::new();
+            };
+            let Some(key_original_idx) = elements.iter().position(|(p, _)| p == key_path) else {
+                return Vec::new();
+            };
+            let Some(key_sorted_idx) = sorted.iter().position(|(oi, _, _)| *oi == key_original_idx) else {
+                return Vec::new();
+            };
+            let mut positions: Vec<f64> = vec![0.0; n];
+            positions[key_sorted_idx] = sorted[key_sorted_idx].1;
+            // Walk forward: each element's min = previous element's
+            // (new) max + gap.
+            for i in (key_sorted_idx + 1)..n {
+                let prev_size = sorted[i - 1].2 - sorted[i - 1].1;
+                positions[i] = positions[i - 1] + prev_size + gap;
+            }
+            // Walk backward: each element's max = next element's
+            // (new) min − gap; so its min = next.min − gap − size.
+            for i in (0..key_sorted_idx).rev() {
+                let size = sorted[i].2 - sorted[i].1;
+                positions[i] = positions[i + 1] - gap - size;
+            }
+            positions
+        }
+        None => {
+            // Average mode: first and last hold; gap = (span − Σ
+            // sizes) / (n − 1).
+            let total_span = sorted[n - 1].2 - sorted[0].1;
+            let total_sizes: f64 = sorted.iter().map(|(_, lo, hi)| hi - lo).sum();
+            let gap = (total_span - total_sizes) / (n as f64 - 1.0);
+            let mut positions: Vec<f64> = Vec::with_capacity(n);
+            let mut cursor = sorted[0].1;
+            for (_, lo, hi) in sorted.iter() {
+                positions.push(cursor);
+                cursor += (hi - lo) + gap;
+            }
+            positions
+        }
+    };
+
+    let key_path = reference.key_path();
+    let mut out: Vec<AlignTranslation> = Vec::new();
+    for (sorted_idx, (original_idx, old_min, _)) in sorted.iter().enumerate() {
+        let delta = new_mins[sorted_idx] - old_min;
+        if delta == 0.0 {
+            continue;
+        }
+        let (path, _) = &elements[*original_idx];
+        if Some(path) == key_path {
+            continue;
+        }
+        let (dx, dy) = match axis {
+            Axis::Horizontal => (delta, 0.0),
+            Axis::Vertical => (0.0, delta),
+        };
+        out.push(AlignTranslation { path: path.clone(), dx, dy });
+    }
+    out.sort_by_key(|t| t.path.clone());
+    out
+}
+
+/// DISTRIBUTE_VERTICAL_SPACING_BUTTON. Equalise vertical gaps
+/// between consecutive elements' bboxes. See
+/// [`distribute_spacing_along_axis`] for explicit / average mode
+/// semantics.
+pub fn distribute_vertical_spacing(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    explicit_gap: Option<f64>,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_spacing_along_axis(elements, reference, Axis::Vertical, explicit_gap, bounds_fn)
+}
+
+/// DISTRIBUTE_HORIZONTAL_SPACING_BUTTON. Equalise horizontal gaps
+/// between consecutive elements' bboxes. Semantics parallel
+/// [`distribute_vertical_spacing`] along the horizontal axis.
+pub fn distribute_horizontal_spacing(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    explicit_gap: Option<f64>,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_spacing_along_axis(elements, reference, Axis::Horizontal, explicit_gap, bounds_fn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -835,5 +966,138 @@ mod tests {
         for t in &out {
             assert_ne!(t.path, key_path);
         }
+    }
+
+    // ── distribute-spacing operations ────────────────────────
+
+    #[test]
+    fn distribute_spacing_requires_at_least_three_elements() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(50.0, 0.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+        ];
+        assert!(distribute_horizontal_spacing(&input, &r, None, geometric_bounds).is_empty());
+    }
+
+    #[test]
+    fn distribute_horizontal_spacing_average_equalises_gaps() {
+        // Rects widths 10 each; total span 0..100. Sum of sizes
+        // 30. Gap = (100 − 30) / 2 = 35 pt.
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(20.0, 0.0, 10.0, 10.0),   // gap from [0] = 10 pt (should become 35)
+            rect(90.0, 0.0, 10.0, 10.0),   // span ends at 100
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_horizontal_spacing(&input, &r, None, geometric_bounds);
+        // Expected new positions: 0, 45, 90.
+        // rs[0] at 0 (no move), rs[1] 20 → 45 (Δ +25), rs[2] at 90 (no move).
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, vec![1]);
+        assert_eq!(out[0].dx, 25.0);
+    }
+
+    #[test]
+    fn distribute_vertical_spacing_average_equalises_gaps() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(0.0, 20.0, 10.0, 10.0),
+            rect(0.0, 90.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_vertical_spacing(&input, &r, None, geometric_bounds);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, vec![1]);
+        assert_eq!(out[0].dy, 25.0);
+    }
+
+    #[test]
+    fn distribute_spacing_explicit_without_key_returns_empty() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(50.0, 0.0, 10.0, 10.0),
+            rect(100.0, 0.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs); // Selection ref, no key.
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        // Explicit gap without key object — no-op.
+        let out = distribute_horizontal_spacing(&input, &r, Some(12.0), geometric_bounds);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn distribute_horizontal_spacing_explicit_applies_exact_gap() {
+        // Three rects widths 10; key is the middle one. Explicit
+        // gap 20. Expected new positions: rs[0] at key.min − 20 −
+        // 10 = key_min − 30; rs[2] at key.max + 20 = key_max + 20.
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),    // left = 0
+            rect(100.0, 0.0, 10.0, 10.0),  // middle key, stays
+            rect(200.0, 0.0, 10.0, 10.0),  // right = 200
+        ];
+        let key_path = vec![1];
+        let r = AlignReference::KeyObject {
+            bbox: rs[1].geometric_bounds(),
+            path: key_path.clone(),
+        };
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_horizontal_spacing(&input, &r, Some(20.0), geometric_bounds);
+        // Key (rs[1]) at left=100; no move for key.
+        // rs[0]: new left = 100 − 20 − 10 = 70; old 0; Δ +70.
+        // rs[2]: new left = 110 + 20 = 130; old 200; Δ −70.
+        assert_eq!(out.len(), 2);
+        // Output is sorted by path.
+        assert_eq!(out[0].path, vec![0]);
+        assert_eq!(out[0].dx, 70.0);
+        assert_eq!(out[1].path, vec![2]);
+        assert_eq!(out[1].dx, -70.0);
+    }
+
+    #[test]
+    fn distribute_spacing_explicit_zero_gap_makes_elements_touch() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(100.0, 0.0, 10.0, 10.0),  // key
+            rect(200.0, 0.0, 10.0, 10.0),
+        ];
+        let key_path = vec![1];
+        let r = AlignReference::KeyObject {
+            bbox: rs[1].geometric_bounds(),
+            path: key_path.clone(),
+        };
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_horizontal_spacing(&input, &r, Some(0.0), geometric_bounds);
+        // rs[0] new left = 100 − 10 = 90; Δ +90.
+        // rs[2] new left = 110; Δ −90.
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].dx, 90.0);
+        assert_eq!(out[1].dx, -90.0);
     }
 }
