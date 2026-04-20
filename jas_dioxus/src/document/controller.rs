@@ -18,6 +18,25 @@ use crate::geometry::element::{
 use crate::algorithms::hit_test::{element_intersects_polygon, element_intersects_rect, point_in_rect};
 
 // ---------------------------------------------------------------------------
+// Helpers — shared by the Controller's boolean ops
+// ---------------------------------------------------------------------------
+
+/// MERGE predicate per BOOLEAN.md §Operand and paint rules.
+/// Two fills merge when both are solid colors with exactly equal
+/// `color` components. `None` fills never match anything — including
+/// other `None` fills. Gradients and patterns, once they exist,
+/// likewise never match; the current `Fill` type holds only a
+/// solid-color enum so every `Some(_)` is eligible today.
+/// Only the color is inspected; opacity / stroke / blend_mode do not
+/// participate.
+fn fills_merge_equal(a: &Option<Fill>, b: &Option<Fill>) -> bool {
+    match (a, b) {
+        (Some(fa), Some(fb)) => fa.color == fb.color,
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------------
 
@@ -597,7 +616,7 @@ impl Controller {
     /// emits the intersection carrying its own paint.
     pub fn apply_destructive_boolean(model: &mut Model, op_name: &str) {
         use crate::algorithms::boolean::{
-            boolean_intersect, boolean_subtract, PolygonSet,
+            boolean_intersect, boolean_subtract, boolean_union, PolygonSet,
         };
         use crate::geometry::element::{CommonProps, Fill, PolygonElem, Stroke};
         use crate::geometry::live::{
@@ -687,6 +706,106 @@ impl Controller {
                         survivor.stroke().copied(),
                         survivor.common().clone(),
                     ));
+                }
+            }
+            "divide" => {
+                // Walk operands back-to-front, maintaining a partition
+                // of the union-so-far into (region, frontmost-covering
+                // operand index) pairs. Each incoming operand splits
+                // every existing region into overlap / non-overlap; the
+                // overlap relabels to the incoming index (now frontmost).
+                let mut accumulator: Vec<(PolygonSet, usize)> = Vec::new();
+                for (i, op_elem) in elements.iter().enumerate() {
+                    let op_set = element_to_polygon_set(op_elem, precision);
+                    let mut new_acc: Vec<(PolygonSet, usize)> = Vec::new();
+                    let mut remaining = op_set.clone();
+                    for (existing_region, existing_idx) in &accumulator {
+                        let overlap = boolean_intersect(existing_region, &op_set);
+                        if !overlap.is_empty() {
+                            new_acc.push((overlap, i));
+                        }
+                        let non_overlap = boolean_subtract(existing_region, &op_set);
+                        if !non_overlap.is_empty() {
+                            new_acc.push((non_overlap, *existing_idx));
+                        }
+                        remaining = boolean_subtract(&remaining, existing_region);
+                    }
+                    if !remaining.is_empty() {
+                        new_acc.push((remaining, i));
+                    }
+                    accumulator = new_acc;
+                }
+                for (region, paint_idx) in accumulator {
+                    let src = &elements[paint_idx];
+                    outputs.push((
+                        region,
+                        src.fill().copied(),
+                        src.stroke().copied(),
+                        src.common().clone(),
+                    ));
+                }
+            }
+            "trim" | "merge" => {
+                // TRIM: for each operand i, emit (operand[i] - union
+                // of all later operands) keeping operand[i]'s own
+                // paint. Frontmost (i = N-1) is untouched.
+                let operand_sets: Vec<PolygonSet> = elements
+                    .iter()
+                    .map(|e| element_to_polygon_set(e, precision))
+                    .collect();
+                let mut trimmed: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, CommonProps)> =
+                    Vec::new();
+                for i in 0..elements.len() {
+                    let mut region = operand_sets[i].clone();
+                    for later in operand_sets.iter().skip(i + 1) {
+                        region = boolean_subtract(&region, later);
+                    }
+                    if !region.is_empty() {
+                        trimmed.push((
+                            region,
+                            elements[i].fill().copied(),
+                            elements[i].stroke().copied(),
+                            elements[i].common().clone(),
+                        ));
+                    }
+                }
+                if op_name == "trim" {
+                    outputs.extend(trimmed);
+                } else {
+                    // MERGE: union touching trimmed survivors that
+                    // share an exactly-equal solid-color fill. None
+                    // fills never merge (predicate per BOOLEAN.md).
+                    // Grouping is O(N^2) by linear scan; acceptable for
+                    // the selection sizes this panel handles.
+                    let mut consumed = vec![false; trimmed.len()];
+                    for i in 0..trimmed.len() {
+                        if consumed[i] {
+                            continue;
+                        }
+                        consumed[i] = true;
+                        let (region_i, fill_i, stroke_i, common_i) =
+                            trimmed[i].clone();
+                        let mut merged = region_i;
+                        let mut stroke_winner = stroke_i;
+                        let mut common_winner = common_i;
+                        if fill_i.is_some() {
+                            for (j, trim_j) in trimmed.iter().enumerate().skip(i + 1) {
+                                if consumed[j] {
+                                    continue;
+                                }
+                                if fills_merge_equal(&fill_i, &trim_j.1) {
+                                    merged = boolean_union(&merged, &trim_j.0);
+                                    // j > i in operand z-order, so j
+                                    // is frontmost; its stroke/common
+                                    // wins on the merged output.
+                                    stroke_winner = trim_j.2;
+                                    common_winner = trim_j.3.clone();
+                                    consumed[j] = true;
+                                }
+                            }
+                        }
+                        outputs.push((merged, fill_i, stroke_winner, common_winner));
+                    }
                 }
             }
             _ => return,
@@ -1602,10 +1721,71 @@ mod tests {
     }
 
     #[test]
+    fn destructive_divide_produces_three_fragments() {
+        // Two overlapping rects → 3 fragments (left-only, overlap,
+        // right-only). All three get polygon-typed elements.
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "divide");
+        assert_eq!(top_children_count(&model), 3);
+        for child in model.document().layers[0].children().unwrap() {
+            assert!(matches!(&**child, Element::Polygon(_)));
+        }
+    }
+
+    #[test]
+    fn destructive_trim_keeps_operands_with_own_paint() {
+        // Two overlapping rects: front untouched; back has overlap
+        // removed. Expect 2 polygons.
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "trim");
+        assert_eq!(top_children_count(&model), 2);
+    }
+
+    #[test]
+    fn destructive_merge_unions_matching_fills() {
+        // Both rects default to Color::BLACK fill (see make_rect
+        // helper). MERGE performs TRIM, then unions the two touching
+        // same-fill survivors. Expected: 1 polygon covering both.
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "merge");
+        // TRIM would leave 2; MERGE collapses to 1.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_merge_does_not_union_different_fills() {
+        use crate::geometry::element::Color;
+        let red = Fill::new(Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 });
+        let blue = Fill::new(Color::Rgb { r: 0.0, g: 0.0, b: 1.0, a: 1.0 });
+        let r1 = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(red), stroke: None, common: CommonProps::default(),
+        });
+        let r2 = Element::Rect(RectElem {
+            x: 5.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(blue), stroke: None, common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![Rc::new(r1), Rc::new(r2)],
+            common: CommonProps::default(),
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        doc.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        let mut model = Model::new(doc, None);
+        Controller::apply_destructive_boolean(&mut model, "merge");
+        // Different fills → no merge; TRIM output of 2 survives.
+        assert_eq!(top_children_count(&model), 2);
+    }
+
+    #[test]
     fn destructive_unknown_op_is_noop() {
         let mut model = two_overlapping_rects();
         let before = top_children_count(&model);
-        Controller::apply_destructive_boolean(&mut model, "divide");
+        Controller::apply_destructive_boolean(&mut model, "nonexistent");
         assert_eq!(top_children_count(&model), before);
     }
 

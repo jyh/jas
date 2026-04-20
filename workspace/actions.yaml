@@ -1910,6 +1910,42 @@ actions:
       - boolean_subtract_back: true
       - set: { last_boolean_op: '"subtract_back"' }
 
+  boolean_divide:
+    description: >
+      DIVIDE_BUTTON. Cut every selected element apart so no two
+      overlap. Each resulting fragment inherits the paint of the
+      frontmost original element that covered its area. All operands
+      are consumed.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_divide: true
+      - set: { last_boolean_op: '"divide"' }
+
+  boolean_trim:
+    description: >
+      TRIM_BUTTON. Remove the parts of each element hidden behind
+      elements in front of it. Each remaining element keeps its own
+      paint. Frontmost operand is untouched.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_trim: true
+      - set: { last_boolean_op: '"trim"' }
+
+  boolean_merge:
+    description: >
+      MERGE_BUTTON. Perform TRIM, then union any two touching
+      survivors whose fills are exactly equal (solid colors only;
+      gradients, patterns, and None never match). The merged path
+      carries the frontmost contributor's full paint. See BOOLEAN.md
+      §Operand and paint rules for the merge predicate.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_merge: true
+      - set: { last_boolean_op: '"merge"' }
+
   make_compound_shape:
     description: >
       Equivalent to Alt+click on UNION. Replaces the current selection
