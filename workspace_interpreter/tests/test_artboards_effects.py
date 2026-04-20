@@ -498,3 +498,421 @@ class TestDefaultSeededFixture:
         assert ab["fill"] == "transparent"
         assert fixture_data["artboard_options"]["fade_region_outside_artboard"] is True
         assert fixture_data["artboard_options"]["update_while_dragging"] is True
+
+
+# ══════════════════════════════════════════════════════════════════
+# StateStore artboard helpers (find / delete / set / duplicate)
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestStoreArtboardHelpers:
+    def _store(self, ids: list[str]) -> StateStore:
+        doc = {"artboards": [_default_artboard(i, f"Artboard {n}") for n, i in enumerate(ids, 1)]}
+        return StateStore(document=doc, artboard_id_generator=_seeded_rng(77))
+
+    def test_find_by_id_returns_live_reference(self):
+        s = self._store(["aaa", "bbb"])
+        ab = s.find_artboard_by_id("bbb")
+        assert ab is not None
+        assert ab["id"] == "bbb"
+        ab["name"] = "Mutated"
+        assert s.find_artboard_by_id("bbb")["name"] == "Mutated"
+
+    def test_find_by_id_missing_returns_none(self):
+        s = self._store(["aaa"])
+        assert s.find_artboard_by_id("does-not-exist") is None
+
+    def test_delete_by_id_removes_and_returns(self):
+        s = self._store(["aaa", "bbb", "ccc"])
+        deleted = s.delete_artboard_by_id("bbb")
+        assert deleted is not None
+        assert deleted["id"] == "bbb"
+        ids = [a["id"] for a in s.document()["artboards"]]
+        assert ids == ["aaa", "ccc"]
+
+    def test_delete_by_id_missing_returns_none(self):
+        s = self._store(["aaa"])
+        assert s.delete_artboard_by_id("zzz") is None
+        assert len(s.document()["artboards"]) == 1
+
+    def test_set_field_writes_and_returns_true(self):
+        s = self._store(["aaa"])
+        ok = s.set_artboard_field("aaa", "name", "Cover")
+        assert ok is True
+        assert s.find_artboard_by_id("aaa")["name"] == "Cover"
+
+    def test_set_field_missing_returns_false(self):
+        s = self._store(["aaa"])
+        ok = s.set_artboard_field("zzz", "name", "Cover")
+        assert ok is False
+
+    def test_duplicate_offsets_and_renames(self):
+        s = self._store(["aaa"])
+        s.find_artboard_by_id("aaa")["x"] = 100
+        s.find_artboard_by_id("aaa")["y"] = 200
+        dup = s.duplicate_artboard("aaa")
+        assert dup is not None
+        assert dup["id"] != "aaa"
+        # name is not "Artboard 1 copy"; it's the next unused default
+        assert dup["name"] == "Artboard 2"
+        assert dup["x"] == 120
+        assert dup["y"] == 220
+        assert len(s.document()["artboards"]) == 2
+
+    def test_duplicate_missing_returns_none(self):
+        s = self._store(["aaa"])
+        assert s.duplicate_artboard("zzz") is None
+
+
+# ══════════════════════════════════════════════════════════════════
+# doc.* effects
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestDocArtboardEffects:
+    def test_delete_by_id_effect(self):
+        store = StateStore(
+            document={"artboards": [
+                _default_artboard("aaa00001", "Artboard 1"),
+                _default_artboard("bbb00002", "Artboard 2"),
+            ]},
+        )
+        run_effects(
+            [{"doc.delete_artboard_by_id": "'bbb00002'"}],
+            {}, store,
+        )
+        assert [a["id"] for a in store.document()["artboards"]] == ["aaa00001"]
+
+    def test_delete_by_id_binds_via_as(self):
+        store = StateStore(
+            document={"artboards": [_default_artboard("aaa00001", "Cover")]},
+        )
+        # Create an extra artboard so we can delete one without tripping invariant.
+        run_effects([{"doc.create_artboard": {}}], {}, store, schema=None)
+        run_effects(
+            [
+                {"doc.delete_artboard_by_id": "'aaa00001'", "as": "deleted"},
+                {"set": {"deleted_name": "deleted.name"}},
+            ],
+            {}, store,
+        )
+        assert store.get("deleted_name") == "Cover"
+
+    def test_duplicate_effect(self):
+        store = StateStore(
+            document={"artboards": [_default_artboard("aaa00001", "Artboard 1")]},
+            artboard_id_generator=_seeded_rng(5),
+        )
+        run_effects(
+            [{"doc.duplicate_artboard": "'aaa00001'"}],
+            {}, store,
+        )
+        assert len(store.document()["artboards"]) == 2
+        new_ab = store.document()["artboards"][-1]
+        assert new_ab["name"] == "Artboard 2"
+
+    def test_set_field_effect(self):
+        store = StateStore(
+            document={"artboards": [_default_artboard("aaa00001", "Artboard 1")]},
+        )
+        run_effects(
+            [{"doc.set_artboard_field": {
+                "id": "'aaa00001'",
+                "field": "name",
+                "value": "'Cover'",
+            }}],
+            {}, store,
+        )
+        assert store.find_artboard_by_id("aaa00001")["name"] == "Cover"
+
+
+# ══════════════════════════════════════════════════════════════════
+# current_artboard field in active_document view
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestCurrentArtboardView:
+    def test_current_is_first_when_no_selection(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+        ]})
+        view = store._active_document_view()
+        assert view["current_artboard"]["id"] == "aaa"
+        assert view["current_artboard"]["width"] == 612
+
+    def test_current_follows_panel_selection(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+            _default_artboard("ccc", "Artboard 3"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb", "ccc"],
+        })
+        view = store._active_document_view()
+        # Topmost panel-selected in list order is bbb.
+        assert view["current_artboard"]["id"] == "bbb"
+
+    def test_current_empty_dict_when_no_document(self):
+        store = StateStore()
+        view = store._active_document_view()
+        assert view["current_artboard"] == {}
+
+
+# ══════════════════════════════════════════════════════════════════
+# CRUD action dispatch (loads real workspace/actions.yaml)
+# ══════════════════════════════════════════════════════════════════
+
+
+import yaml
+
+
+_ACTIONS_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml",
+)
+
+
+def _load_actions() -> dict:
+    with open(_ACTIONS_PATH) as f:
+        data = yaml.safe_load(f)
+    return data.get("actions", {})
+
+
+ACTIONS = _load_actions()
+
+
+def _run_action(store: StateStore, name: str, params: dict | None = None):
+    action = ACTIONS[name]
+    effects = action.get("effects", [])
+    ctx = {"param": params} if params else {}
+    run_effects(effects, ctx, store, actions=ACTIONS)
+
+
+class TestNewArtboardAction:
+    def test_silent_create_offset_when_selection_empty(self):
+        store = StateStore(
+            document={},  # repaired to 1 default
+            artboard_id_generator=_seeded_rng(100),
+        )
+        store.init_panel("artboards", {"artboards_panel_selection": []})
+        store.set_active_panel("artboards")
+        _run_action(store, "new_artboard")
+        abs_list = store.document()["artboards"]
+        assert len(abs_list) == 2
+        new_ab = abs_list[-1]
+        # No selection → position (0, 0), inherited size from current (first).
+        assert new_ab["x"] == 0
+        assert new_ab["y"] == 0
+        assert new_ab["width"] == 612
+        assert new_ab["height"] == 792
+        assert new_ab["name"] == "Artboard 2"
+
+    def test_silent_create_inherits_size_from_selected(self):
+        store = StateStore(
+            document={"artboards": [_default_artboard("aaa", "Artboard 1")]},
+            artboard_id_generator=_seeded_rng(101),
+        )
+        # Resize the existing artboard, then New with it panel-selected.
+        store.set_artboard_field("aaa", "width", 400)
+        store.set_artboard_field("aaa", "height", 300)
+        store.init_panel("artboards", {"artboards_panel_selection": ["aaa"]})
+        store.set_active_panel("artboards")
+        _run_action(store, "new_artboard")
+        abs_list = store.document()["artboards"]
+        new_ab = abs_list[-1]
+        assert new_ab["width"] == 400
+        assert new_ab["height"] == 300
+        # Selection non-empty → offset (20, 20) from current.x/y.
+        assert new_ab["x"] == 20
+        assert new_ab["y"] == 20
+
+    def test_takes_one_snapshot(self):
+        store = StateStore(document={}, artboard_id_generator=_seeded_rng(102))
+        store.init_panel("artboards", {"artboards_panel_selection": []})
+        store.set_active_panel("artboards")
+        _run_action(store, "new_artboard")
+        assert len(store.snapshots()) == 1
+
+    def test_sets_rearrange_dirty(self):
+        store = StateStore(document={}, artboard_id_generator=_seeded_rng(103))
+        store.init_panel("artboards", {
+            "artboards_panel_selection": [],
+            "rearrange_dirty": False,
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "new_artboard")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+
+class TestDeleteArtboardsAction:
+    def test_deletes_selected(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+            _default_artboard("ccc", "Artboard 3"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb"],
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "delete_artboards")
+        ids = [a["id"] for a in store.document()["artboards"]]
+        assert ids == ["aaa", "ccc"]
+
+    def test_clears_panel_selection_after_delete(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb"],
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "delete_artboards")
+        assert store.get_panel("artboards", "artboards_panel_selection") == []
+
+    def test_deletes_multiple(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+            _default_artboard("ccc", "Artboard 3"),
+            _default_artboard("ddd", "Artboard 4"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb", "ddd"],
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "delete_artboards")
+        ids = [a["id"] for a in store.document()["artboards"]]
+        assert ids == ["aaa", "ccc"]
+
+    def test_snapshot_captured_for_undo(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb"],
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "delete_artboards")
+        snap = store.snapshots()[-1]
+        assert [a["id"] for a in snap["artboards"]] == ["aaa", "bbb"]
+
+
+class TestDuplicateArtboardsAction:
+    def test_duplicates_selected(self):
+        store = StateStore(
+            document={"artboards": [_default_artboard("aaa", "Artboard 1")]},
+            artboard_id_generator=_seeded_rng(200),
+        )
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["aaa"],
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "duplicate_artboards")
+        abs_list = store.document()["artboards"]
+        assert len(abs_list) == 2
+        dup = abs_list[-1]
+        assert dup["id"] != "aaa"
+        assert dup["name"] == "Artboard 2"
+        assert dup["x"] == 20
+        assert dup["y"] == 20
+
+
+class TestRenameActions:
+    def test_rename_artboard_sets_renaming_panel_key(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["aaa"],
+            "renaming_artboard": None,
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "rename_artboard", {"artboard_id": "aaa"})
+        assert store.get_panel("artboards", "renaming_artboard") == "aaa"
+
+    def test_confirm_writes_new_name_and_clears_renaming(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+        ]})
+        store.init_panel("artboards", {
+            "renaming_artboard": "aaa",
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "confirm_artboard_rename", {
+            "artboard_id": "aaa",
+            "new_name": "Cover",
+        })
+        assert store.find_artboard_by_id("aaa")["name"] == "Cover"
+        assert store.get_panel("artboards", "renaming_artboard") is None
+
+    def test_confirm_takes_one_snapshot(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+        ]})
+        store.init_panel("artboards", {"renaming_artboard": "aaa"})
+        store.set_active_panel("artboards")
+        _run_action(store, "confirm_artboard_rename", {
+            "artboard_id": "aaa",
+            "new_name": "Cover",
+        })
+        assert len(store.snapshots()) == 1
+
+    def test_cancel_clears_renaming_without_mutating_name(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+        ]})
+        store.init_panel("artboards", {"renaming_artboard": "aaa"})
+        store.set_active_panel("artboards")
+        _run_action(store, "cancel_artboard_rename")
+        assert store.get_panel("artboards", "renaming_artboard") is None
+        assert store.find_artboard_by_id("aaa")["name"] == "Artboard 1"
+
+
+class TestPanelSelectActions:
+    def test_select_none_replaces(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa"), _default_artboard("bbb"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["aaa"],
+            "panel_selection_anchor": "aaa",
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "artboards_panel_select", {
+            "artboard_id": "bbb",
+            "modifier": "none",
+        })
+        assert store.get_panel("artboards", "artboards_panel_selection") == ["bbb"]
+        assert store.get_panel("artboards", "panel_selection_anchor") == "bbb"
+
+    def test_select_all(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa"),
+            _default_artboard("bbb"),
+            _default_artboard("ccc"),
+        ]})
+        store.init_panel("artboards", {"artboards_panel_selection": []})
+        store.set_active_panel("artboards")
+        _run_action(store, "artboards_select_all")
+        assert sorted(store.get_panel("artboards", "artboards_panel_selection")) == [
+            "aaa", "bbb", "ccc"
+        ]
+
+
+class TestResetPanelAction:
+    def test_reset_clears_selection_and_restores_reference_point(self):
+        store = StateStore(document={"artboards": [_default_artboard("aaa")]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["aaa"],
+            "panel_selection_anchor": "aaa",
+            "reference_point": "top_left",
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "reset_artboards_panel")
+        assert store.get_panel("artboards", "artboards_panel_selection") == []
+        assert store.get_panel("artboards", "panel_selection_anchor") is None
+        assert store.get_panel("artboards", "reference_point") == "center"
