@@ -1722,6 +1722,71 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
     model.document = newDoc
 }
 
+/// Canvas-click intercept for key-object designation. Per
+/// ALIGN.md §Align To target, when `align_to == "key_object"`
+/// a canvas click at (x, y) designates the hit selected element
+/// as the key, toggles off if it hits the current key, or clears
+/// the key when the click falls outside any selected element.
+///
+/// Returns `true` when the click was consumed (the canvas tool
+/// should not see it) and `false` when Align To is not in
+/// key-object mode (click falls through).
+public func tryDesignateAlignKeyObject(model: Model, store: StateStore,
+                                        x: Double, y: Double) -> Bool {
+    let alignTo = (store.get("align_to") as? String) ?? "selection"
+    if alignTo != "key_object" { return false }
+    let doc = model.document
+    // Hit-test against the current selection using preview bounds
+    // (matches what the user sees).
+    var hit: ElementPath? = nil
+    for es in doc.selection {
+        let b = doc.getElement(es.path).bounds
+        if x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height {
+            hit = es.path
+            break
+        }
+    }
+    let currentKey: ElementPath? = {
+        if let dict = store.get("align_key_object_path") as? [String: Any],
+           let arr = dict["__path__"] as? [Int] { return arr }
+        return nil
+    }()
+    let pid = "align_panel_content"
+    if let p = hit {
+        // Toggle: clicking the current key clears it.
+        if let ck = currentKey, ck == p {
+            store.set("align_key_object_path", NSNull())
+            store.setPanel(pid, "key_object_path", NSNull())
+        } else {
+            let marker: [String: Any] = ["__path__": p]
+            store.set("align_key_object_path", marker)
+            store.setPanel(pid, "key_object_path", marker)
+        }
+    } else {
+        // Click outside any selected element clears the key.
+        store.set("align_key_object_path", NSNull())
+        store.setPanel(pid, "key_object_path", NSNull())
+    }
+    return true
+}
+
+/// Clear the key-object path if the previously-designated key is
+/// no longer part of the current selection. Call after any
+/// selection change to uphold the spec guarantee that selection
+/// changes clear a dangling designation automatically. Idempotent
+/// — safe to call when no key is designated.
+public func syncAlignKeyObjectFromSelection(model: Model, store: StateStore) {
+    guard let dict = store.get("align_key_object_path") as? [String: Any],
+          let keyPath = dict["__path__"] as? [Int] else { return }
+    let stillSelected = model.document.selection.contains {
+        $0.path == keyPath
+    }
+    if !stillSelected {
+        store.set("align_key_object_path", NSNull())
+        store.setPanel("align_panel_content", "key_object_path", NSNull())
+    }
+}
+
 /// Build the platform-effects dictionary consumed by
 /// `runEffects` when the Align panel fires operation or reset
 /// actions. Registered per-call with a captured model reference.

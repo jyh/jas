@@ -1658,6 +1658,15 @@ class CanvasNSView: NSView {
         }
         let shift = event.modifierFlags.contains(.shift)
         let alt = event.modifierFlags.contains(.option)
+        // Align panel key-object intercept (Phase 3i, ALIGN.md
+        // §Align To target). While the panel is in key-object
+        // mode, canvas clicks designate / redesignate / clear the
+        // key object instead of going through the active tool.
+        if tryDesignateAlignKeyObject(model: ctx.model, store: ctx.model.stateStore,
+                                       x: pt.x, y: pt.y) {
+            ensureBlinkTimer()
+            return
+        }
         activeTool.onPress(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
         ensureBlinkTimer()
     }
