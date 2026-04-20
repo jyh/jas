@@ -35,6 +35,7 @@ ALGORITHMS = {
     "text_layout":       ("tolerance", 1e-4),
     "text_layout_paragraph": ("tolerance", 1e-4),
     "path_text_layout":  ("tolerance", 1e-4),
+    "align":             ("tolerance", 1e-4),
 }
 
 # Known per-language algorithm exclusions (pre-existing bugs to fix separately)
@@ -263,22 +264,45 @@ def main():
                 errors += 1
                 continue
 
-            # Compare each vector
-            for ref_vec, lang_vec in zip(ref_output, lang_output):
-                vec_name = ref_vec["name"]
-                if ref_vec["name"] != lang_vec["name"]:
-                    print(f"  FAIL: {algo}/{vec_name} name mismatch "
-                          f"({ref_lang}={ref_vec['name']}, {lang}={lang_vec['name']})")
-                    failed += 1
-                    continue
+            # Determine comparison wrapper: some algos (align) emit bare
+            # per-vector dicts without a {name, result} wrapper. For
+            # those we pair by position and read names from the fixture.
+            has_name_wrapper = (
+                len(ref_output) == 0
+                or (isinstance(ref_output[0], dict) and "name" in ref_output[0])
+            )
+            fixture_names = []
+            if not has_name_wrapper:
+                with open(fixture_path) as fh:
+                    fixture_names = [v.get("name", f"#{i}")
+                                     for i, v in enumerate(json.load(fh)["vectors"])]
 
-                if compare(strategy, ref_vec, lang_vec, tol):
+            # Compare each vector
+            for idx, (ref_vec, lang_vec) in enumerate(zip(ref_output, lang_output)):
+                if has_name_wrapper:
+                    vec_name = ref_vec["name"]
+                    if ref_vec["name"] != lang_vec["name"]:
+                        print(f"  FAIL: {algo}/{vec_name} name mismatch "
+                              f"({ref_lang}={ref_vec['name']}, {lang}={lang_vec['name']})")
+                        failed += 1
+                        continue
+                    ok = compare(strategy, ref_vec, lang_vec, tol)
+                    ref_body = ref_vec["result"]
+                    lang_body = lang_vec["result"]
+                else:
+                    vec_name = fixture_names[idx] if idx < len(fixture_names) else f"#{idx}"
+                    ok = values_close(ref_vec, lang_vec, tol) if strategy == "tolerance" \
+                        else (ref_vec == lang_vec)
+                    ref_body = ref_vec
+                    lang_body = lang_vec
+
+                if ok:
                     passed += 1
                 else:
                     print(f"  FAIL: {algo}/{vec_name} [{ref_lang} vs {lang}]")
                     if args.verbose:
-                        print(f"    {ref_lang}: {json.dumps(ref_vec['result'], sort_keys=True)[:200]}")
-                        print(f"    {lang}:   {json.dumps(lang_vec['result'], sort_keys=True)[:200]}")
+                        print(f"    {ref_lang}: {json.dumps(ref_body, sort_keys=True)[:200]}")
+                        print(f"    {lang}:   {json.dumps(lang_body, sort_keys=True)[:200]}")
                     failed += 1
 
     total = passed + failed + errors
