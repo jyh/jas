@@ -1161,6 +1161,16 @@ fn run_yaml_effect(
         }
     }
 
+    // Boolean panel — compound-creating variants (Alt+click on the
+    // four Shape Mode buttons).
+    for &op in &["union", "subtract_front", "intersection", "exclude"] {
+        let key = format!("boolean_{op}_compound");
+        if eff.get(&key).is_some() {
+            st.apply_compound_creation(op);
+            return deferred;
+        }
+    }
+
     // toggle_paragraph_field: <field_name> — Phase 4. Flips the named
     // bool on the typed paragraph panel state, then re-applies. Used by
     // toggle_hanging_punctuation. Syncs from selection first so other
@@ -1905,10 +1915,24 @@ fn build_mouse_event_handler(
     let ctx_snapshot = ctx.clone();
     let mut dialog_signal = rctx.dialog_ctx.0;
 
-    Some(EventHandler::new(move |_evt: Event<MouseData>| {
+    Some(EventHandler::new(move |evt: Event<MouseData>| {
         let app = app.clone();
         let actions = resolved_actions.clone();
-        let ctx_snap = ctx_snapshot.clone();
+        let mut ctx_snap = ctx_snapshot.clone();
+        // Expose click-time modifier state to yaml condition
+        // expressions as `event.alt` / `event.shift` / `event.meta` /
+        // `event.ctrl`. The Boolean panel uses `event.alt` to route
+        // Shape Mode buttons between destructive and compound-creating
+        // dispatches; future panels can consume the same namespace.
+        let mods = evt.data().modifiers();
+        if let serde_json::Value::Object(obj) = &mut ctx_snap {
+            obj.insert("event".to_string(), serde_json::json!({
+                "alt": mods.alt(),
+                "shift": mods.shift(),
+                "meta": mods.meta(),
+                "ctrl": mods.ctrl(),
+            }));
+        }
         spawn(async move {
             let mut deferred_dialog_effects = Vec::new();
             {

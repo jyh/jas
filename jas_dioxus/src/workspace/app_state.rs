@@ -1361,11 +1361,30 @@ impl AppState {
         }
     }
 
-    /// Apply one of the six implemented destructive boolean
-    /// operations. See `Controller::apply_destructive_boolean`.
+    /// Apply one of the nine destructive boolean operations.
+    /// See `Controller::apply_destructive_boolean`.
     pub(crate) fn apply_boolean_operation(&mut self, op: &str) {
         if let Some(tab) = self.tab_mut() {
             crate::document::controller::Controller::apply_destructive_boolean(
+                &mut tab.model, op,
+            );
+        }
+    }
+
+    /// Create a compound shape from the current selection using the
+    /// named operation (one of union / subtract_front / intersection
+    /// / exclude). Fired by Alt+click on the four Shape Mode buttons.
+    pub(crate) fn apply_compound_creation(&mut self, op_name: &str) {
+        use crate::geometry::live::CompoundOperation;
+        let op = match op_name {
+            "union" => CompoundOperation::Union,
+            "subtract_front" => CompoundOperation::SubtractFront,
+            "intersection" => CompoundOperation::Intersection,
+            "exclude" => CompoundOperation::Exclude,
+            _ => return,
+        };
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::make_compound_shape_with_op(
                 &mut tab.model, op,
             );
         }

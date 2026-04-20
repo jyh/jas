@@ -1946,6 +1946,50 @@ actions:
       - boolean_merge: true
       - set: { last_boolean_op: '"merge"' }
 
+  # Alt/Option+click variants of the four Shape Mode buttons. Same
+  # semantics as Make Compound Shape but with the chosen operation
+  # instead of UNION. See BOOLEAN.md §Compound shapes.
+  boolean_union_compound:
+    description: >
+      Alt/Option+click UNION. Creates a live compound shape with the
+      Union operation from the selection instead of applying UNION
+      destructively.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_union_compound: true
+      - set: { last_boolean_op: '"union_compound"' }
+
+  boolean_subtract_front_compound:
+    description: >
+      Alt/Option+click SUBTRACT_FRONT. Creates a live compound shape
+      with the SubtractFront operation from the selection.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_subtract_front_compound: true
+      - set: { last_boolean_op: '"subtract_front_compound"' }
+
+  boolean_intersection_compound:
+    description: >
+      Alt/Option+click INTERSECTION. Creates a live compound shape
+      with the Intersection operation from the selection.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_intersection_compound: true
+      - set: { last_boolean_op: '"intersection_compound"' }
+
+  boolean_exclude_compound:
+    description: >
+      Alt/Option+click EXCLUDE. Creates a live compound shape with
+      the Exclude operation from the selection.
+    category: boolean
+    effects:
+      - snapshot
+      - boolean_exclude_compound: true
+      - set: { last_boolean_op: '"exclude_compound"' }
+
   make_compound_shape:
     description: >
       Equivalent to Alt+click on UNION. Replaces the current selection
