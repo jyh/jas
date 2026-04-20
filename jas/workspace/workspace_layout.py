@@ -220,6 +220,7 @@ class WorkspaceLayout:
                 id=0,
                 groups=[
                     PanelGroup(panels=[PanelKind.COLOR, PanelKind.SWATCHES]),
+                    PanelGroup(panels=[PanelKind.ALIGN, PanelKind.BOOLEAN]),
                     PanelGroup(panels=[PanelKind.CHARACTER, PanelKind.PARAGRAPH]),
                     PanelGroup(panels=[PanelKind.STROKE, PanelKind.PROPERTIES]),
                     PanelGroup(panels=[PanelKind.ARTBOARDS, PanelKind.LAYERS]),

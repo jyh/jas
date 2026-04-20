@@ -494,6 +494,8 @@ let parse_panel_kind_str s =
   | "character" -> Character
   | "paragraph" -> Paragraph
   | "artboards" -> Artboards
+  | "align" -> Align
+  | "boolean" -> Boolean
   | _ -> Layers
 
 let parse_panel_kind j = parse_panel_kind_str (to_string j)
