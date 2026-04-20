@@ -358,6 +358,37 @@ type element =
       locked : bool;
       visibility : visibility;
     }
+  (** A non-destructive element whose geometry is evaluated on demand
+      from its source inputs. See [live_variant] below and
+      [transcripts/BOOLEAN.md] §Live element framework. *)
+  | Live of live_variant
+
+(** Closed-world enum over all known LiveKinds. Adding a new kind
+    adds one constructor here; the top-level [element] variant only
+    ever has one [Live] arm. *)
+and live_variant =
+  | Compound_shape of compound_shape
+
+(** Which boolean operation a compound shape evaluates to. Only the
+    four Shape Mode operations can be compound. *)
+and compound_operation =
+  | Op_union
+  | Op_subtract_front
+  | Op_intersection
+  | Op_exclude
+
+(** A live, non-destructive boolean element: stores the operation
+    and its operand tree. See BOOLEAN.md §Compound shape data model. *)
+and compound_shape = {
+  operation : compound_operation;
+  operands : element array;
+  fill : fill option;
+  stroke : stroke option;
+  opacity : float;
+  transform : transform option;
+  locked : bool;
+  visibility : visibility;
+}
 
 (** Return the bounding box as (x, y, width, height). *)
 val bounds : element -> float * float * float * float
