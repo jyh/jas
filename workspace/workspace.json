@@ -702,7 +702,8 @@
             "layers",
             "color",
             "stroke",
-            "properties"
+            "properties",
+            "align"
           ]
         }
       },
@@ -1025,7 +1026,8 @@
             "layers",
             "color",
             "stroke",
-            "properties"
+            "properties",
+            "align"
           ]
         }
       },
@@ -1047,7 +1049,8 @@
             "layers",
             "color",
             "stroke",
-            "properties"
+            "properties",
+            "align"
           ]
         }
       },
@@ -2248,6 +2251,258 @@
           "reset_paragraph_panel": true
         }
       ]
+    },
+    "align_left": {
+      "description": "ALIGN_LEFT_BUTTON. Move every element in the selection horizontally so their left bounding-box edges coincide with the Align-To reference. See ALIGN.md \u00a7Align To target.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "align_left": true
+        }
+      ]
+    },
+    "align_horizontal_center": {
+      "description": "ALIGN_HORIZONTAL_CENTER_BUTTON. Move every element horizontally so their horizontal centers coincide with the Align-To reference.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "align_horizontal_center": true
+        }
+      ]
+    },
+    "align_right": {
+      "description": "ALIGN_RIGHT_BUTTON. Move every element horizontally so their right bounding-box edges coincide with the Align-To reference.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "align_right": true
+        }
+      ]
+    },
+    "align_top": {
+      "description": "ALIGN_TOP_BUTTON. Move every element vertically so their top bounding-box edges coincide with the Align-To reference.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "align_top": true
+        }
+      ]
+    },
+    "align_vertical_center": {
+      "description": "ALIGN_VERTICAL_CENTER_BUTTON. Move every element vertically so their vertical centers coincide with the Align-To reference.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "align_vertical_center": true
+        }
+      ]
+    },
+    "align_bottom": {
+      "description": "ALIGN_BOTTOM_BUTTON. Move every element vertically so their bottom bounding-box edges coincide with the Align-To reference.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "align_bottom": true
+        }
+      ]
+    },
+    "distribute_left": {
+      "description": "DISTRIBUTE_LEFT_BUTTON. Redistribute elements horizontally so the left coordinates of their bounding boxes are evenly spaced along the horizontal extent of the Align-To reference.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_left": true
+        }
+      ]
+    },
+    "distribute_horizontal_center": {
+      "description": "DISTRIBUTE_HORIZONTAL_CENTER_BUTTON. Redistribute elements horizontally so their horizontal centers are evenly spaced.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_horizontal_center": true
+        }
+      ]
+    },
+    "distribute_right": {
+      "description": "DISTRIBUTE_RIGHT_BUTTON. Redistribute elements horizontally so the right coordinates of their bounding boxes are evenly spaced.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_right": true
+        }
+      ]
+    },
+    "distribute_top": {
+      "description": "DISTRIBUTE_TOP_BUTTON. Redistribute elements vertically so the top coordinates of their bounding boxes are evenly spaced.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_top": true
+        }
+      ]
+    },
+    "distribute_vertical_center": {
+      "description": "DISTRIBUTE_VERTICAL_CENTER_BUTTON. Redistribute elements vertically so their vertical centers are evenly spaced.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_vertical_center": true
+        }
+      ]
+    },
+    "distribute_bottom": {
+      "description": "DISTRIBUTE_BOTTOM_BUTTON. Redistribute elements vertically so the bottom coordinates of their bounding boxes are evenly spaced.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_bottom": true
+        }
+      ]
+    },
+    "distribute_vertical_spacing": {
+      "description": "DISTRIBUTE_VERTICAL_SPACING_BUTTON. Move elements vertically so gaps between them are uniform. When align_to == 'key_object' and a key has been designated, the gap equals panel.distribute_spacing_value; otherwise the two extremal elements hold and interior gaps average evenly. See ALIGN.md \u00a7Distribute Spacing.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_vertical_spacing": true
+        }
+      ]
+    },
+    "distribute_horizontal_spacing": {
+      "description": "DISTRIBUTE_HORIZONTAL_SPACING_BUTTON. Move elements horizontally so gaps between them are uniform. Semantics parallel distribute_vertical_spacing along the horizontal axis.\n",
+      "category": "align",
+      "effects": [
+        "snapshot",
+        {
+          "distribute_horizontal_spacing": true
+        }
+      ]
+    },
+    "set_align_to": {
+      "description": "Switch the Align-To target mode. Writes panel.align_to and state.align_to in the dual-write pattern. Leaving key_object mode also clears the designated key object path so it does not linger. See ALIGN.md \u00a7Align To target.\n",
+      "category": "align",
+      "params": {
+        "target": {
+          "type": "enum",
+          "values": [
+            "selection",
+            "artboard",
+            "key_object"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "set_panel_state": {
+            "key": "align_to",
+            "value": "param.target"
+          }
+        },
+        {
+          "set": {
+            "align_to": "param.target"
+          }
+        },
+        {
+          "if": {
+            "condition": "param.target != \"key_object\"",
+            "then": [
+              {
+                "set_panel_state": {
+                  "key": "key_object_path",
+                  "value": "null"
+                }
+              },
+              {
+                "set": {
+                  "align_key_object_path": "null"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "toggle_use_preview_bounds": {
+      "description": "Toggle the \"Use Preview Bounds\" flag from the panel menu. When checked, every Align / Distribute / Distribute Spacing operation reads preview (stroke-inclusive) bounds; when unchecked, geometric bounds. See ALIGN.md \u00a7Bounding box selection.\n",
+      "category": "align",
+      "effects": [
+        {
+          "set_panel_state": {
+            "key": "use_preview_bounds",
+            "value": "not panel.use_preview_bounds"
+          }
+        },
+        {
+          "set": {
+            "align_use_preview_bounds": "not state.align_use_preview_bounds"
+          }
+        }
+      ]
+    },
+    "reset_align_panel": {
+      "description": "Reset every Align panel control to its default per ALIGN.md \u00a7Panel menu: align_to = selection, key_object_path cleared, distribute_spacing_value = 0, use_preview_bounds = false.\n",
+      "category": "align",
+      "effects": [
+        {
+          "set_panel_state": {
+            "key": "align_to",
+            "value": "\"selection\""
+          }
+        },
+        {
+          "set": {
+            "align_to": "\"selection\""
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "key_object_path",
+            "value": "null"
+          }
+        },
+        {
+          "set": {
+            "align_key_object_path": "null"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "distribute_spacing_value",
+            "value": "0"
+          }
+        },
+        {
+          "set": {
+            "align_distribute_spacing": "0"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "use_preview_bounds",
+            "value": "false"
+          }
+        },
+        {
+          "set": {
+            "align_use_preview_bounds": "false"
+          }
+        }
+      ]
     }
   },
   "version": 1,
@@ -2820,6 +3075,74 @@
     "para_numbered": {
       "viewbox": "0 0 16 16",
       "svg": "<text x=\"0.5\" y=\"5.7\" font-size=\"4.5\" font-family=\"sans-serif\" font-weight=\"600\" fill=\"currentColor\">1.</text> <line x1=\"5\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <text x=\"0.5\" y=\"9.7\" font-size=\"4.5\" font-family=\"sans-serif\" font-weight=\"600\" fill=\"currentColor\">2.</text> <line x1=\"5\" y1=\"8\" x2=\"13\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <text x=\"0.5\" y=\"13.7\" font-size=\"4.5\" font-family=\"sans-serif\" font-weight=\"600\" fill=\"currentColor\">3.</text> <line x1=\"5\" y1=\"12\" x2=\"14\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "align_left": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"2\" x2=\"2\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <rect x=\"2\" y=\"3\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"2\" y=\"7\" width=\"7\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"2\" y=\"11\" width=\"12\" height=\"2.2\" fill=\"currentColor\"/>\n"
+    },
+    "align_horizontal_center": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"8\" y1=\"2\" x2=\"8\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-dasharray=\"2 1\"/> <rect x=\"3\" y=\"3\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"4.5\" y=\"7\" width=\"7\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"2\" y=\"11\" width=\"12\" height=\"2.2\" fill=\"currentColor\"/>\n"
+    },
+    "align_right": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"14\" y1=\"2\" x2=\"14\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <rect x=\"4\" y=\"3\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"7\" y=\"7\" width=\"7\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"2\" y=\"11\" width=\"12\" height=\"2.2\" fill=\"currentColor\"/>\n"
+    },
+    "align_top": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"2\" x2=\"14\" y2=\"2\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <rect x=\"3\" y=\"2\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"7\" y=\"2\" width=\"2.2\" height=\"7\" fill=\"currentColor\"/> <rect x=\"11\" y=\"2\" width=\"2.2\" height=\"12\" fill=\"currentColor\"/>\n"
+    },
+    "align_vertical_center": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"8\" x2=\"14\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-dasharray=\"2 1\"/> <rect x=\"3\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"7\" y=\"4.5\" width=\"2.2\" height=\"7\" fill=\"currentColor\"/> <rect x=\"11\" y=\"2\" width=\"2.2\" height=\"12\" fill=\"currentColor\"/>\n"
+    },
+    "align_bottom": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"14\" x2=\"14\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <rect x=\"3\" y=\"4\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"7\" y=\"7\" width=\"2.2\" height=\"7\" fill=\"currentColor\"/> <rect x=\"11\" y=\"2\" width=\"2.2\" height=\"12\" fill=\"currentColor\"/>\n"
+    },
+    "distribute_left": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"1\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"7\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"13\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/>\n"
+    },
+    "distribute_horizontal_center": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"6.9\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"11.8\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <line x1=\"3.1\" y1=\"15\" x2=\"3.1\" y2=\"15.5\" stroke=\"currentColor\" stroke-width=\"0.8\"/> <line x1=\"8\" y1=\"15\" x2=\"8\" y2=\"15.5\" stroke=\"currentColor\" stroke-width=\"0.8\"/> <line x1=\"12.9\" y1=\"15\" x2=\"12.9\" y2=\"15.5\" stroke=\"currentColor\" stroke-width=\"0.8\"/>\n"
+    },
+    "distribute_right": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"0.8\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"6.8\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"12.8\" y=\"3\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/>\n"
+    },
+    "distribute_top": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"3\" y=\"1\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"3\" y=\"7\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"3\" y=\"13\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/>\n"
+    },
+    "distribute_vertical_center": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"3\" y=\"2\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"3\" y=\"6.9\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"3\" y=\"11.8\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/>\n"
+    },
+    "distribute_bottom": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"3\" y=\"0.8\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"3\" y=\"6.8\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"3\" y=\"12.8\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/>\n"
+    },
+    "distribute_spacing_vertical": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"2\" y=\"6.9\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <rect x=\"2\" y=\"11.8\" width=\"10\" height=\"2.2\" fill=\"currentColor\"/> <line x1=\"14\" y1=\"4.2\" x2=\"14\" y2=\"6.9\" stroke=\"currentColor\" stroke-width=\"0.8\" stroke-linecap=\"round\"/> <line x1=\"14\" y1=\"9.1\" x2=\"14\" y2=\"11.8\" stroke=\"currentColor\" stroke-width=\"0.8\" stroke-linecap=\"round\"/>\n"
+    },
+    "distribute_spacing_horizontal": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"6.9\" y=\"2\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <rect x=\"11.8\" y=\"2\" width=\"2.2\" height=\"10\" fill=\"currentColor\"/> <line x1=\"4.2\" y1=\"14\" x2=\"6.9\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"0.8\" stroke-linecap=\"round\"/> <line x1=\"9.1\" y1=\"14\" x2=\"11.8\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"0.8\" stroke-linecap=\"round\"/>\n"
+    },
+    "align_to_artboard": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/> <line x1=\"2\" y1=\"5\" x2=\"14\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"0.8\" opacity=\"0.5\"/>\n"
+    },
+    "align_to_selection": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-dasharray=\"1.8 1.2\"/> <rect x=\"1\" y=\"1\" width=\"2\" height=\"2\" fill=\"currentColor\"/> <rect x=\"13\" y=\"1\" width=\"2\" height=\"2\" fill=\"currentColor\"/> <rect x=\"1\" y=\"13\" width=\"2\" height=\"2\" fill=\"currentColor\"/> <rect x=\"13\" y=\"13\" width=\"2\" height=\"2\" fill=\"currentColor\"/>\n"
+    },
+    "align_to_key_object": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"1.5\" y=\"1.5\" width=\"13\" height=\"13\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-dasharray=\"1.4 1\"/> <rect x=\"5\" y=\"5\" width=\"6\" height=\"6\" fill=\"currentColor\"/>\n"
     }
   },
   "layout": {
@@ -4234,6 +4557,14 @@
           "params": {
             "panel": "paragraph"
           }
+        },
+        {
+          "id": "menu_align",
+          "label": "Ali&gn",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "align"
+          }
         }
       ]
     }
@@ -4882,6 +5213,32 @@
       "type": "bool",
       "default": false,
       "description": "Active stroke profile is flipped"
+    },
+    "align_to": {
+      "type": "enum",
+      "values": [
+        "selection",
+        "artboard",
+        "key_object"
+      ],
+      "default": "selection",
+      "description": "Align-To target mode. 'selection' uses the current selection bounding box; 'artboard' uses the active artboard rectangle; 'key_object' uses a designated element from the selection as the fixed reference.\n"
+    },
+    "align_key_object_path": {
+      "type": "path",
+      "default": null,
+      "nullable": true,
+      "description": "Path of the designated key object while align_to == 'key_object'. Null when no key has been designated or while align_to is not in key_object mode.\n"
+    },
+    "align_distribute_spacing": {
+      "type": "number",
+      "default": 0,
+      "description": "Explicit gap in points applied by Distribute Spacing operations when align_to == 'key_object' and a key has been designated. Otherwise the two spacing buttons average existing gaps.\n"
+    },
+    "align_use_preview_bounds": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, Align / Distribute / Distribute Spacing operations consult each element's preview bounds (stroke-inclusive); otherwise they consult geometric bounds.\n"
     },
     "fill_on_top": {
       "type": "bool",
@@ -9137,6 +9494,657 @@
     }
   },
   "panels": {
+    "align_panel_content": {
+      "id": "align_panel_content",
+      "type": "panel",
+      "summary": "Align",
+      "description": "Align and distribute operations on the current selection. The panel performs three families of operations:\n- Alignment: move elements so their edges or centers coincide\n  along a chosen axis.\n- Distribute: move elements so a chosen edge or center is\n  evenly spaced along an axis.\n- Distribute Spacing: move elements so the gaps between them\n  are uniform along an axis.\n\nAll three families share a single Align To target: selection, artboard, or a designated key object from the selection. The Use Preview Bounds panel-menu toggle selects whether operations consult geometric or preview (stroke-inclusive) bounding boxes.\nLayout (top to bottom):\nRow 1 \u2014 \"Align Objects:\" label. Row 2 \u2014 six icon buttons: left, horizontal-center, right\n  (horizontal-axis alignment) on the left half; top, vertical-\n  center, bottom (vertical-axis alignment) on the right half.\nRow 3 \u2014 \"Distribute Objects:\" label. Row 4 \u2014 six icon buttons: distribute-left, distribute-\n  horizontal-center, distribute-right on the left half;\n  distribute-top, distribute-vertical-center, distribute-\n  bottom on the right half.\nRow 5 \u2014 two halves. Left half: \"Distribute Spacing:\" label,\n  two spacing icon buttons (vertical, horizontal), and a pt\n  value input. Right half: \"Align To:\" label and three\n  mutually-exclusive icon_button toggles (artboard, selection,\n  key-object).\n\nAction buttons behave as one-shot operations \u2014 clicking fires the alignment and never leaves a persistent checked state. Align To toggles form a radio group and are checked when panel.align_to matches their target. Per ALIGN.md \u00a7Widget types.\nEnable / disable rules: - Align operations require at least 2 elements selected. - Distribute and Distribute Spacing operations require at\n  least 3 elements selected.\n- When align_to == \"key_object\" and no key has been designated,\n  every operation button disables.\n- DISTRIBUTE_SPACING_VALUE enables only when align_to ==\n  \"key_object\" and a key has been designated.\n",
+      "state": {
+        "align_to": {
+          "type": "enum",
+          "values": [
+            "selection",
+            "artboard",
+            "key_object"
+          ],
+          "default": "selection",
+          "description": "Align-To target mode. Mirrors state.align_to. Per ALIGN.md \u00a7Align To target.\n"
+        },
+        "key_object_path": {
+          "type": "path",
+          "default": null,
+          "nullable": true,
+          "description": "Path of the designated key object while align_to == 'key_object'. Null when no key is designated.\n"
+        },
+        "distribute_spacing_value": {
+          "type": "number",
+          "default": 0,
+          "description": "Explicit gap in points for Distribute Spacing operations when a key object is designated. Otherwise unused.\n"
+        },
+        "use_preview_bounds": {
+          "type": "bool",
+          "default": false,
+          "description": "When true, operations consult preview (stroke-inclusive) bounds; otherwise geometric bounds.\n"
+        }
+      },
+      "init": {
+        "align_to": "state.align_to",
+        "key_object_path": "state.align_key_object_path",
+        "distribute_spacing_value": "state.align_distribute_spacing",
+        "use_preview_bounds": "state.align_use_preview_bounds"
+      },
+      "menu": [
+        {
+          "label": "Use Preview Bounds",
+          "action": "toggle_use_preview_bounds",
+          "checked": "panel.use_preview_bounds"
+        },
+        "separator",
+        {
+          "label": "Reset Panel",
+          "action": "reset_align_panel"
+        },
+        "separator",
+        {
+          "label": "Close Align",
+          "action": "close_panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "align_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "row",
+            "children": [
+              {
+                "type": "text",
+                "content": "Align Objects:",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 2,
+                  "flex": 1
+                },
+                "children": [
+                  {
+                    "id": "align_left_button",
+                    "type": "icon_button",
+                    "icon": "align_left",
+                    "summary": "Align left",
+                    "description": "ALIGN_LEFT_BUTTON. Move elements so their left edges coincide along the horizontal axis.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 2 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "align_left"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "align_horizontal_center_button",
+                    "type": "icon_button",
+                    "icon": "align_horizontal_center",
+                    "summary": "Align horizontal center",
+                    "description": "ALIGN_HORIZONTAL_CENTER_BUTTON. Move elements so their horizontal centers coincide.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 2 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "align_horizontal_center"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "align_right_button",
+                    "type": "icon_button",
+                    "icon": "align_right",
+                    "summary": "Align right",
+                    "description": "ALIGN_RIGHT_BUTTON. Move elements so their right edges coincide along the horizontal axis.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 2 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "align_right"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 2,
+                  "flex": 1
+                },
+                "children": [
+                  {
+                    "id": "align_top_button",
+                    "type": "icon_button",
+                    "icon": "align_top",
+                    "summary": "Align top",
+                    "description": "ALIGN_TOP_BUTTON. Move elements so their top edges coincide along the vertical axis.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 2 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "align_top"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "align_vertical_center_button",
+                    "type": "icon_button",
+                    "icon": "align_vertical_center",
+                    "summary": "Align vertical center",
+                    "description": "ALIGN_VERTICAL_CENTER_BUTTON. Move elements so their vertical centers coincide.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 2 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "align_vertical_center"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "align_bottom_button",
+                    "type": "icon_button",
+                    "icon": "align_bottom",
+                    "summary": "Align bottom",
+                    "description": "ALIGN_BOTTOM_BUTTON. Move elements so their bottom edges coincide along the vertical axis.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 2 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "align_bottom"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "children": [
+              {
+                "type": "text",
+                "content": "Distribute Objects:",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 2,
+                  "flex": 1
+                },
+                "children": [
+                  {
+                    "id": "distribute_left_button",
+                    "type": "icon_button",
+                    "icon": "distribute_left",
+                    "summary": "Distribute by left edge",
+                    "description": "DISTRIBUTE_LEFT_BUTTON. Redistribute elements horizontally so the left coordinates of their bounding boxes are evenly spaced.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "distribute_left"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "distribute_horizontal_center_button",
+                    "type": "icon_button",
+                    "icon": "distribute_horizontal_center",
+                    "summary": "Distribute by horizontal center",
+                    "description": "DISTRIBUTE_HORIZONTAL_CENTER_BUTTON. Redistribute elements horizontally so their horizontal centers are evenly spaced.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "distribute_horizontal_center"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "distribute_right_button",
+                    "type": "icon_button",
+                    "icon": "distribute_right",
+                    "summary": "Distribute by right edge",
+                    "description": "DISTRIBUTE_RIGHT_BUTTON. Redistribute elements horizontally so the right coordinates of their bounding boxes are evenly spaced.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "distribute_right"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 2,
+                  "flex": 1
+                },
+                "children": [
+                  {
+                    "id": "distribute_top_button",
+                    "type": "icon_button",
+                    "icon": "distribute_top",
+                    "summary": "Distribute by top edge",
+                    "description": "DISTRIBUTE_TOP_BUTTON. Redistribute elements vertically so the top coordinates of their bounding boxes are evenly spaced.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "distribute_top"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "distribute_vertical_center_button",
+                    "type": "icon_button",
+                    "icon": "distribute_vertical_center",
+                    "summary": "Distribute by vertical center",
+                    "description": "DISTRIBUTE_VERTICAL_CENTER_BUTTON. Redistribute elements vertically so their vertical centers are evenly spaced.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "distribute_vertical_center"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "distribute_bottom_button",
+                    "type": "icon_button",
+                    "icon": "distribute_bottom",
+                    "summary": "Distribute by bottom edge",
+                    "description": "DISTRIBUTE_BOTTOM_BUTTON. Redistribute elements vertically so the bottom coordinates of their bounding boxes are evenly spaced.\n",
+                    "style": {
+                      "size": 20
+                    },
+                    "bind": {
+                      "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "dispatch": "distribute_bottom"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "top"
+            },
+            "children": [
+              {
+                "type": "container",
+                "layout": "column",
+                "style": {
+                  "gap": 4,
+                  "flex": 1
+                },
+                "children": [
+                  {
+                    "type": "container",
+                    "layout": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Distribute Spacing:",
+                        "style": {
+                          "font_size": 10
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "container",
+                    "layout": "row",
+                    "style": {
+                      "gap": 2,
+                      "alignment": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "distribute_vertical_spacing_button",
+                        "type": "icon_button",
+                        "icon": "distribute_spacing_vertical",
+                        "summary": "Distribute vertical spacing",
+                        "description": "DISTRIBUTE_VERTICAL_SPACING_BUTTON. Move elements vertically so gaps between them are uniform.\n",
+                        "style": {
+                          "size": 20
+                        },
+                        "bind": {
+                          "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "effects": [
+                              {
+                                "dispatch": "distribute_vertical_spacing"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": "distribute_horizontal_spacing_button",
+                        "type": "icon_button",
+                        "icon": "distribute_spacing_horizontal",
+                        "summary": "Distribute horizontal spacing",
+                        "description": "DISTRIBUTE_HORIZONTAL_SPACING_BUTTON. Move elements horizontally so gaps between them are uniform.\n",
+                        "style": {
+                          "size": 20
+                        },
+                        "bind": {
+                          "disabled": "active_document.selection_count < 3 or (panel.align_to == \"key_object\" and panel.key_object_path == null)"
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "effects": [
+                              {
+                                "dispatch": "distribute_horizontal_spacing"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": "distribute_spacing_value",
+                        "type": "number_input",
+                        "summary": "Explicit spacing",
+                        "description": "DISTRIBUTE_SPACING_VALUE. Explicit gap in points for Distribute Spacing when Align To is Key Object and a key has been designated. Range 0\u20131296 pt.\n",
+                        "min": 0,
+                        "max": 1296,
+                        "style": {
+                          "flex": 1
+                        },
+                        "bind": {
+                          "value": "panel.distribute_spacing_value",
+                          "disabled": "not (panel.align_to == \"key_object\" and panel.key_object_path != null)"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "layout": "column",
+                "style": {
+                  "gap": 4,
+                  "flex": 1
+                },
+                "children": [
+                  {
+                    "type": "container",
+                    "layout": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Align To:",
+                        "style": {
+                          "font_size": 10
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "container",
+                    "layout": "row",
+                    "style": {
+                      "gap": 2,
+                      "alignment": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "align_to_artboard_button",
+                        "type": "icon_button",
+                        "icon": "align_to_artboard",
+                        "summary": "Align to artboard",
+                        "description": "ALIGN_TO_ARTBOARD_BUTTON. Use the active artboard rectangle as the reference for every Align and Distribute operation.\n",
+                        "style": {
+                          "size": 20
+                        },
+                        "bind": {
+                          "checked": "panel.align_to == \"artboard\""
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "effects": [
+                              {
+                                "dispatch": {
+                                  "action": "set_align_to",
+                                  "params": {
+                                    "target": "artboard"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": "align_to_selection_button",
+                        "type": "icon_button",
+                        "icon": "align_to_selection",
+                        "summary": "Align to selection",
+                        "description": "ALIGN_TO_SELECTION_BUTTON. Use the current selection bounding box as the reference. This is the default mode.\n",
+                        "style": {
+                          "size": 20
+                        },
+                        "bind": {
+                          "checked": "panel.align_to == \"selection\""
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "effects": [
+                              {
+                                "dispatch": {
+                                  "action": "set_align_to",
+                                  "params": {
+                                    "target": "selection"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": "align_to_key_object_button",
+                        "type": "icon_button",
+                        "icon": "align_to_key_object",
+                        "summary": "Align to key object",
+                        "description": "ALIGN_TO_KEY_OBJECT_BUTTON. Use a designated element from the selection as the fixed reference. The key is designated by clicking an already-selected element on the canvas.\n",
+                        "style": {
+                          "size": 20
+                        },
+                        "bind": {
+                          "checked": "panel.align_to == \"key_object\""
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "effects": [
+                              {
+                                "dispatch": {
+                                  "action": "set_align_to",
+                                  "params": {
+                                    "target": "key_object"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
     "artboards_panel_content": {
       "id": "artboards_panel_content",
       "type": "panel",
