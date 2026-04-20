@@ -424,6 +424,12 @@ private func elementJson(_ elem: Element) -> String {
         let children = e.children.map { elementJson($0) }
         o.raw("children", jsonArray(children))
         o.str("name", e.name)
+    case .live(let v):
+        o.str("type", "live")
+        o.str("kind", v.kind)
+        commonFields(o, v.opacity, v.transform, v.locked, v.visibility)
+        let children = v.operands.map { elementJson($0) }
+        o.raw("children", jsonArray(children))
     }
     return o.build()
 }
