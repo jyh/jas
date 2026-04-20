@@ -1104,6 +1104,33 @@ impl Element {
             Element::Layer(l) => children_bounds(&l.children),
         }
     }
+
+    /// Return the geometric bounding box — the bbox of the path /
+    /// shape geometry alone, ignoring stroke width. Used by Align
+    /// operations when Use Preview Bounds is off (the default) per
+    /// ALIGN.md §Bounding box selection.
+    pub fn geometric_bounds(&self) -> Bounds {
+        match self {
+            Element::Line(e) => {
+                let min_x = e.x1.min(e.x2);
+                let min_y = e.y1.min(e.y2);
+                (min_x, min_y, (e.x2 - e.x1).abs(), (e.y2 - e.y1).abs())
+            }
+            Element::Rect(e) => (e.x, e.y, e.width, e.height),
+            Element::Circle(e) => (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0),
+            Element::Ellipse(e) => (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0),
+            Element::Polyline(e) => points_bounds(&e.points, None),
+            Element::Polygon(e) => points_bounds(&e.points, None),
+            Element::Path(e) => path_bounds(&e.d),
+            Element::Text(_) | Element::TextPath(_) => {
+                // Text has no stroke inflation today; preview and
+                // geometric bounds are equivalent.
+                self.bounds()
+            }
+            Element::Group(g) => geometric_children_bounds(&g.children),
+            Element::Layer(l) => geometric_children_bounds(&l.children),
+        }
+    }
 }
 
 fn points_bounds(points: &[(f64, f64)], stroke: Option<&Stroke>) -> Bounds {
@@ -1250,6 +1277,24 @@ fn children_bounds(children: &[Rc<Element>]) -> Bounds {
         return (0.0, 0.0, 0.0, 0.0);
     }
     let all: Vec<Bounds> = children.iter().map(|c| c.bounds()).collect();
+    let min_x = all.iter().map(|b| b.0).fold(f64::INFINITY, f64::min);
+    let min_y = all.iter().map(|b| b.1).fold(f64::INFINITY, f64::min);
+    let max_x = all
+        .iter()
+        .map(|b| b.0 + b.2)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_y = all
+        .iter()
+        .map(|b| b.1 + b.3)
+        .fold(f64::NEG_INFINITY, f64::max);
+    (min_x, min_y, max_x - min_x, max_y - min_y)
+}
+
+fn geometric_children_bounds(children: &[Rc<Element>]) -> Bounds {
+    if children.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let all: Vec<Bounds> = children.iter().map(|c| c.geometric_bounds()).collect();
     let min_x = all.iter().map(|b| b.0).fold(f64::INFINITY, f64::min);
     let min_y = all.iter().map(|b| b.1).fold(f64::INFINITY, f64::min);
     let max_x = all
@@ -2158,6 +2203,59 @@ mod tests {
         assert!(by < 0.0);
         assert!(bw > 50.0);
         assert!(bh > 50.0);
+    }
+
+    // ── geometric_bounds vs bounds ───────────────────────────
+    // geometric_bounds ignores stroke inflation; Align operations
+    // read it when Use Preview Bounds is off (ALIGN.md §Bounding
+    // box selection).
+
+    #[test]
+    fn geometric_bounds_ignores_stroke_inflation_on_line() {
+        let e = line(0.0, 0.0, 50.0, 50.0);
+        assert_eq!(e.geometric_bounds(), (0.0, 0.0, 50.0, 50.0));
+    }
+
+    #[test]
+    fn geometric_bounds_rect_matches_raw_dimensions() {
+        let e = rect(10.0, 20.0, 30.0, 40.0);
+        assert_eq!(e.geometric_bounds(), (10.0, 20.0, 30.0, 40.0));
+    }
+
+    #[test]
+    fn geometric_bounds_circle() {
+        let e = circle(50.0, 50.0, 20.0);
+        assert_eq!(e.geometric_bounds(), (30.0, 30.0, 40.0, 40.0));
+    }
+
+    #[test]
+    fn geometric_bounds_ellipse() {
+        let e = ellipse(50.0, 50.0, 30.0, 15.0);
+        assert_eq!(e.geometric_bounds(), (20.0, 35.0, 60.0, 30.0));
+    }
+
+    #[test]
+    fn geometric_bounds_group_unions_children_without_inflation() {
+        let g = group(vec![
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(20.0, 20.0, 10.0, 10.0),
+        ]);
+        assert_eq!(g.geometric_bounds(), (0.0, 0.0, 30.0, 30.0));
+    }
+
+    #[test]
+    fn geometric_bounds_matches_bounds_for_unstroked_shapes() {
+        let e = circle(50.0, 50.0, 20.0);
+        assert_eq!(e.geometric_bounds(), e.bounds());
+    }
+
+    #[test]
+    fn geometric_bounds_narrower_than_preview_for_stroked_line() {
+        let e = line(0.0, 0.0, 50.0, 50.0);
+        let (_, _, gw, gh) = e.geometric_bounds();
+        let (_, _, pw, ph) = e.bounds();
+        assert!(pw > gw);
+        assert!(ph > gh);
     }
 
     #[test]
