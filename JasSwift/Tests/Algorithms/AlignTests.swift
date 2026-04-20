@@ -82,3 +82,88 @@ private func bboxEqual(_ a: BBox, _ b: BBox) -> Bool {
     #expect(b.x == 10 && b.y == 20 && b.width == 30 && b.height == 40)
 }
 
+// MARK: - Align operations
+
+private func selectionRef(_ b: BBox) -> AlignReference { .selection(b) }
+private func refOf(_ rects: [Element]) -> AlignReference {
+    selectionRef(alignUnionBounds(rects, alignGeometricBounds))
+}
+
+@Test func alignLeftMovesTwoRectsToLeftEdge() {
+    let rs = [rect(10, 0, 10, 10), rect(30, 0, 10, 10), rect(60, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = alignLeft(input, r, alignGeometricBounds)
+    #expect(out.count == 2)
+    #expect(out[0] == AlignTranslation(path: [1], dx: -20, dy: 0))
+    #expect(out[1] == AlignTranslation(path: [2], dx: -50, dy: 0))
+}
+
+@Test func alignRightMovesToRightEdge() {
+    let rs = [rect(10, 0, 10, 10), rect(30, 0, 10, 10), rect(60, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = alignRight(input, r, alignGeometricBounds)
+    #expect(out.count == 2)
+    #expect(out[0].dx == 50)
+    #expect(out[1].dx == 30)
+}
+
+@Test func alignHorizontalCenterMovesToMidpoint() {
+    let rs = [rect(10, 0, 10, 10), rect(30, 0, 10, 10), rect(60, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = alignHorizontalCenter(input, r, alignGeometricBounds)
+    #expect(out.count == 3)
+    #expect(out[0].dx == 25)
+    #expect(out[1].dx == 5)
+    #expect(out[2].dx == -25)
+}
+
+@Test func alignTopOnlyAffectsY() {
+    let rs = [rect(0, 10, 10, 10), rect(20, 30, 10, 10), rect(40, 50, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = alignTop(input, r, alignGeometricBounds)
+    for t in out { #expect(t.dx == 0) }
+    #expect(out.count == 2)
+}
+
+@Test func alignVerticalCenterMovesToMidline() {
+    let rs = [rect(0, 0, 10, 10), rect(20, 20, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1])]
+    let out = alignVerticalCenter(input, r, alignGeometricBounds)
+    #expect(out.count == 2)
+    #expect(out[0].dy == 10)
+    #expect(out[1].dy == -10)
+}
+
+@Test func alignBottomMovesToBottomEdge() {
+    let rs = [rect(0, 0, 10, 20), rect(20, 0, 10, 10)]
+    let r = refOf(rs)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1])]
+    let out = alignBottom(input, r, alignGeometricBounds)
+    #expect(out.count == 1)
+    #expect(out[0].path == [1])
+    #expect(out[0].dy == 10)
+}
+
+@Test func alignLeftWithKeyObjectDoesNotMoveKey() {
+    let rs = [rect(10, 0, 10, 10), rect(30, 0, 10, 10), rect(60, 0, 10, 10)]
+    let keyPath: ElementPath = [1]
+    let r = AlignReference.keyObject(bbox: rs[1].geometricBounds, path: keyPath)
+    let input: [(ElementPath, Element)] = [([0], rs[0]), ([1], rs[1]), ([2], rs[2])]
+    let out = alignLeft(input, r, alignGeometricBounds)
+    for t in out { #expect(t.path != keyPath) }
+    #expect(out.count == 2)
+    #expect(out[0] == AlignTranslation(path: [0], dx: 20, dy: 0))
+    #expect(out[1] == AlignTranslation(path: [2], dx: -30, dy: 0))
+}
+
+@Test func alignLeftEmptyInputYieldsEmptyOutput() {
+    let r: AlignReference = .selection((0, 0, 10, 10))
+    let out = alignLeft([], r, alignGeometricBounds)
+    #expect(out.isEmpty)
+}
+
