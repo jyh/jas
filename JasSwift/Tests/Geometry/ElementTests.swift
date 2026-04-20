@@ -42,6 +42,66 @@ import Testing
     #expect(b.x == 0 && b.y == 0 && b.width == 10 && b.height == 20)
 }
 
+// MARK: - Element.geometricBounds
+// Align reads geometricBounds (stroke-exclusive) when Use Preview
+// Bounds is off, the default per ALIGN.md §Bounding box selection.
+
+@Test func geometricBoundsIgnoresStrokeInflationOnLine() {
+    let ln = Line(x1: 0, y1: 0, x2: 50, y2: 50,
+                  stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 2.0))
+    let e = Element.line(ln)
+    let b = e.geometricBounds
+    #expect(b.x == 0 && b.y == 0 && b.width == 50 && b.height == 50)
+}
+
+@Test func geometricBoundsRect() {
+    let r = Rect(x: 10, y: 20, width: 30, height: 40)
+    let e = Element.rect(r)
+    let b = e.geometricBounds
+    #expect(b.x == 10 && b.y == 20 && b.width == 30 && b.height == 40)
+}
+
+@Test func geometricBoundsCircle() {
+    let c = Circle(cx: 50, cy: 50, r: 20)
+    let e = Element.circle(c)
+    let b = e.geometricBounds
+    #expect(b.x == 30 && b.y == 30 && b.width == 40 && b.height == 40)
+}
+
+@Test func geometricBoundsEllipse() {
+    let el = Ellipse(cx: 50, cy: 50, rx: 30, ry: 15)
+    let e = Element.ellipse(el)
+    let b = e.geometricBounds
+    #expect(b.x == 20 && b.y == 35 && b.width == 60 && b.height == 30)
+}
+
+@Test func geometricBoundsGroupUnionsChildrenWithoutInflation() {
+    let c1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let c2 = Element.rect(Rect(x: 20, y: 20, width: 10, height: 10))
+    let g = Group(children: [c1, c2])
+    let e = Element.group(g)
+    let b = e.geometricBounds
+    #expect(b.x == 0 && b.y == 0 && b.width == 30 && b.height == 30)
+}
+
+@Test func geometricBoundsMatchesBoundsForUnstrokedShapes() {
+    let c = Circle(cx: 50, cy: 50, r: 20)
+    let e = Element.circle(c)
+    let g = e.geometricBounds
+    let p = e.bounds
+    #expect(g.x == p.x && g.y == p.y && g.width == p.width && g.height == p.height)
+}
+
+@Test func geometricBoundsNarrowerThanPreviewForStrokedLine() {
+    let ln = Line(x1: 0, y1: 0, x2: 50, y2: 50,
+                  stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 4.0))
+    let e = Element.line(ln)
+    let g = e.geometricBounds
+    let p = e.bounds
+    #expect(p.width > g.width)
+    #expect(p.height > g.height)
+}
+
 @Test func lineReversed() {
     let ln = Line(x1: 10, y1: 20, x2: 0, y2: 0)
     let b = ln.bounds
