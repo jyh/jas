@@ -12,6 +12,7 @@ from document.document import Document, ElementSelection
 from document.model import Model
 from geometry.element import CompoundShape, Layer, Polygon, Rect
 from panels.boolean_apply import (
+    apply_destructive_boolean,
     apply_expand_compound_shape,
     apply_make_compound_shape,
     apply_release_compound_shape,
@@ -88,6 +89,54 @@ class ExpandCompoundShapeTest(absltest.TestCase):
         children = model.document.layers[0].children
         self.assertEqual(len(children), 1)
         self.assertIsInstance(children[0], Polygon)
+
+
+class DestructiveBooleanTest(absltest.TestCase):
+    """Tests for the six implemented destructive ops."""
+
+    def _two_overlapping(self):
+        rects = [_rect(0, 0), _rect(5, 0)]
+        return _model_with_rects(rects, [(0, 0), (0, 1)])
+
+    def _count(self, model):
+        return len(model.document.layers[0].children)
+
+    def test_union_produces_one_polygon(self):
+        m = self._two_overlapping()
+        apply_destructive_boolean(m, "union")
+        self.assertEqual(self._count(m), 1)
+        self.assertIsInstance(m.document.layers[0].children[0], Polygon)
+
+    def test_intersection_produces_one_polygon(self):
+        m = self._two_overlapping()
+        apply_destructive_boolean(m, "intersection")
+        self.assertEqual(self._count(m), 1)
+
+    def test_exclude_produces_two_polygons(self):
+        m = self._two_overlapping()
+        apply_destructive_boolean(m, "exclude")
+        self.assertEqual(self._count(m), 2)
+
+    def test_subtract_front_consumes_front(self):
+        m = self._two_overlapping()
+        apply_destructive_boolean(m, "subtract_front")
+        self.assertEqual(self._count(m), 1)
+
+    def test_subtract_back_consumes_back(self):
+        m = self._two_overlapping()
+        apply_destructive_boolean(m, "subtract_back")
+        self.assertEqual(self._count(m), 1)
+
+    def test_crop_uses_frontmost_as_mask(self):
+        m = self._two_overlapping()
+        apply_destructive_boolean(m, "crop")
+        self.assertEqual(self._count(m), 1)
+
+    def test_unknown_op_is_noop(self):
+        m = self._two_overlapping()
+        before = self._count(m)
+        apply_destructive_boolean(m, "nonexistent")
+        self.assertEqual(self._count(m), before)
 
 
 if __name__ == "__main__":

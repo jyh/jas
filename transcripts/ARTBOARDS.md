@@ -22,14 +22,15 @@ elements.
 
 - ARTBOARD_NUMBER (artboards are assigned unique numbers starting with 1)
 - ARTBOARD_NAME
-- ARTBOARD_DIALOG_BUTTON (brings up the Artboard Dialogue Box, an example is
+- ARTBOARD_DIALOG_BUTTON (brings up the Artboard Dialogue Box)
   shown in examples/artboard-dialog.png)
 
 ```yaml panel:
 - .row:
   - .col-1: ARTBOARD_NUMBER
   - .col-10: ARTBOARD_NAME
-  - .col-1: ARTBOARD_DIALOG_BUTTON ```
+  - .col-1: ARTBOARD_DIALOG_BUTTON
+```
 
 The panel menu has the following entries.
 
@@ -43,4 +44,4 @@ The panel menu has the following entries.
 - Reset Panel (resets panel element back to their defaults, updating the
   selection)
 
-THIS IS WORK IN PROGRESS
+
