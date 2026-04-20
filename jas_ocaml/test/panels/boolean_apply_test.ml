@@ -63,7 +63,7 @@ let test_expand_replaces_with_polygons () =
     [[0; 0]; [0; 1]] in
   Boolean_apply.apply_make_compound_shape model;
   Boolean_apply.apply_expand_compound_shape model;
-  Alcotest.(check int) "one child (union → 1 polygon)" 1
+  Alcotest.(check int) "one child (union to 1 polygon)" 1
     (top_children_count model);
   match model#document.Document.layers.(0) with
   | Layer { children; _ } ->
@@ -71,6 +71,53 @@ let test_expand_replaces_with_polygons () =
      | Polygon _ -> ()
      | _ -> Alcotest.fail "expected Polygon")
   | _ -> Alcotest.fail "expected Layer"
+
+(* ── Destructive boolean tests ──────────────────────────────── *)
+
+let two_overlapping () =
+  make_model [rect_at 0.0 0.0; rect_at 5.0 0.0] [[0; 0]; [0; 1]]
+
+let test_union_produces_one_polygon () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "union";
+  Alcotest.(check int) "one polygon" 1 (top_children_count m);
+  match m#document.Document.layers.(0) with
+  | Layer { children; _ } ->
+    (match children.(0) with
+     | Polygon _ -> ()
+     | _ -> Alcotest.fail "expected Polygon")
+  | _ -> Alcotest.fail "expected Layer"
+
+let test_intersection_produces_one_polygon () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "intersection";
+  Alcotest.(check int) "one polygon" 1 (top_children_count m)
+
+let test_exclude_produces_two_polygons () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "exclude";
+  Alcotest.(check int) "two polygons" 2 (top_children_count m)
+
+let test_subtract_front_consumes_front () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "subtract_front";
+  Alcotest.(check int) "one polygon" 1 (top_children_count m)
+
+let test_subtract_back_consumes_back () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "subtract_back";
+  Alcotest.(check int) "one polygon" 1 (top_children_count m)
+
+let test_crop_uses_frontmost_as_mask () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "crop";
+  Alcotest.(check int) "one polygon" 1 (top_children_count m)
+
+let test_unknown_op_is_noop () =
+  let m = two_overlapping () in
+  let before = top_children_count m in
+  Boolean_apply.apply_destructive_boolean m "nonexistent";
+  Alcotest.(check int) "unchanged" before (top_children_count m)
 
 let () =
   Alcotest.run "Boolean_apply"
@@ -83,5 +130,21 @@ let () =
           test_release_restores_operands;
         Alcotest.test_case "expand replaces with polygons" `Quick
           test_expand_replaces_with_polygons;
+      ];
+      "destructive boolean", [
+        Alcotest.test_case "union produces one polygon" `Quick
+          test_union_produces_one_polygon;
+        Alcotest.test_case "intersection produces one polygon" `Quick
+          test_intersection_produces_one_polygon;
+        Alcotest.test_case "exclude produces two polygons" `Quick
+          test_exclude_produces_two_polygons;
+        Alcotest.test_case "subtract_front consumes front" `Quick
+          test_subtract_front_consumes_front;
+        Alcotest.test_case "subtract_back consumes back" `Quick
+          test_subtract_back_consumes_back;
+        Alcotest.test_case "crop uses frontmost as mask" `Quick
+          test_crop_uses_frontmost_as_mask;
+        Alcotest.test_case "unknown op is noop" `Quick
+          test_unknown_op_is_noop;
       ]
     ]
