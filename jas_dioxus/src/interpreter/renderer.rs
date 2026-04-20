@@ -1205,6 +1205,14 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // Boolean panel — Reset Panel. Clears last_op (makes Repeat a
+    // no-op until the next op click). Boolean Options values are
+    // left alone; the dialog's own Defaults button resets those.
+    if eff.get("reset_boolean_panel").is_some() {
+        st.reset_boolean_panel();
+        return deferred;
+    }
+
     // toggle_paragraph_field: <field_name> — Phase 4. Flips the named
     // bool on the typed paragraph panel state, then re-applies. Used by
     // toggle_hanging_punctuation. Syncs from selection first so other

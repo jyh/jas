@@ -1990,6 +1990,19 @@ actions:
       - boolean_exclude_compound: true
       - set: { last_boolean_op: '"exclude_compound"' }
 
+  reset_boolean_panel:
+    description: >
+      Reset the Boolean panel's transient state. Clears
+      state.last_boolean_op so Repeat Boolean Operation becomes a
+      no-op until the next op click. Does not touch the Boolean
+      Options dialog values (precision / remove_redundant_points /
+      divide_remove_unpainted); those are reset from the dialog's
+      Defaults button instead. See BOOLEAN.md §Panel metadata.
+    category: boolean
+    effects:
+      - reset_boolean_panel: true
+      - set: { last_boolean_op: "null" }
+
   repeat_boolean_operation:
     description: >
       Re-apply the most-recent boolean operation on the current

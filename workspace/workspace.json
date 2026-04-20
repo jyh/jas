@@ -2699,6 +2699,20 @@
         }
       ]
     },
+    "reset_boolean_panel": {
+      "description": "Reset the Boolean panel's transient state. Clears state.last_boolean_op so Repeat Boolean Operation becomes a no-op until the next op click. Does not touch the Boolean Options dialog values (precision / remove_redundant_points / divide_remove_unpainted); those are reset from the dialog's Defaults button instead. See BOOLEAN.md \u00a7Panel metadata.\n",
+      "category": "boolean",
+      "effects": [
+        {
+          "reset_boolean_panel": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "null"
+          }
+        }
+      ]
+    },
     "repeat_boolean_operation": {
       "description": "Re-apply the most-recent boolean operation on the current selection. Reads state.last_boolean_op (one of 13 enum values or null) and fires the matching destructive op or compound- creating variant. No-op when last_boolean_op is null. Make / Release / Expand Compound Shape are deliberately not repeatable. See BOOLEAN.md \u00a7Repeat state.\n",
       "category": "boolean",
