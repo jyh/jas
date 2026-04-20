@@ -707,5 +707,46 @@ class ColorHexTest(absltest.TestCase):
         self.assertEqual(b, 0.0)
 
 
+class GeometricBoundsTest(absltest.TestCase):
+    """geometric_bounds skips stroke inflation — used by Align when
+    Use Preview Bounds is off, the default per ALIGN.md."""
+
+    def test_line_ignores_stroke_inflation(self):
+        ln = Line(x1=0, y1=0, x2=50, y2=50,
+                  stroke=Stroke(color=RgbColor(0, 0, 0), width=4.0))
+        self.assertEqual(ln.geometric_bounds(), (0, 0, 50, 50))
+
+    def test_rect_matches_raw_dimensions(self):
+        r = Rect(x=10, y=20, width=30, height=40)
+        self.assertEqual(r.geometric_bounds(), (10, 20, 30, 40))
+
+    def test_circle(self):
+        c = Circle(cx=50, cy=50, r=20)
+        self.assertEqual(c.geometric_bounds(), (30, 30, 40, 40))
+
+    def test_ellipse(self):
+        e = Ellipse(cx=50, cy=50, rx=30, ry=15)
+        self.assertEqual(e.geometric_bounds(), (20, 35, 60, 30))
+
+    def test_group_unions_children_without_inflation(self):
+        g = Group(children=(
+            Rect(x=0, y=0, width=10, height=10),
+            Rect(x=20, y=20, width=10, height=10),
+        ))
+        self.assertEqual(g.geometric_bounds(), (0, 0, 30, 30))
+
+    def test_matches_bounds_for_unstroked_shapes(self):
+        c = Circle(cx=50, cy=50, r=20)
+        self.assertEqual(c.geometric_bounds(), c.bounds())
+
+    def test_narrower_than_preview_for_stroked_line(self):
+        ln = Line(x1=0, y1=0, x2=50, y2=50,
+                  stroke=Stroke(color=RgbColor(0, 0, 0), width=4.0))
+        _, _, gw, gh = ln.geometric_bounds()
+        _, _, pw, ph = ln.bounds()
+        self.assertGreater(pw, gw)
+        self.assertGreater(ph, gh)
+
+
 if __name__ == "__main__":
     absltest.main()

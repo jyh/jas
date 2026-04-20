@@ -495,6 +495,18 @@ class Element(ABC):
         """Return the bounding box as (x, y, width, height)."""
         ...
 
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        """Geometric bounding box — bbox of the path / shape geometry
+        alone, ignoring stroke width and any fill bleed. Align
+        operations read it when Use Preview Bounds is off, the default
+        per ALIGN.md §Bounding box selection.
+
+        Default implementation falls back to bounds() — correct for
+        text-like variants that carry no stroke. Shape variants
+        override to skip stroke inflation.
+        """
+        return self.bounds()
+
 
 @dataclass(frozen=True)
 class Line(Element):
@@ -517,6 +529,11 @@ class Line(Element):
             (min_x, min_y, abs(self.x2 - self.x1), abs(self.y2 - self.y1)),
             self.stroke)
 
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        min_x = min(self.x1, self.x2)
+        min_y = min(self.y1, self.y2)
+        return (min_x, min_y, abs(self.x2 - self.x1), abs(self.y2 - self.y1))
+
 
 @dataclass(frozen=True)
 class Rect(Element):
@@ -537,6 +554,9 @@ class Rect(Element):
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
 
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        return (self.x, self.y, self.width, self.height)
+
 
 @dataclass(frozen=True)
 class Circle(Element):
@@ -555,6 +575,9 @@ class Circle(Element):
         return _inflate_bounds(
             (self.cx - self.r, self.cy - self.r, self.r * 2, self.r * 2),
             self.stroke)
+
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        return (self.cx - self.r, self.cy - self.r, self.r * 2, self.r * 2)
 
 
 @dataclass(frozen=True)
@@ -575,6 +598,9 @@ class Ellipse(Element):
         return _inflate_bounds(
             (self.cx - self.rx, self.cy - self.ry, self.rx * 2, self.ry * 2),
             self.stroke)
+
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        return (self.cx - self.rx, self.cy - self.ry, self.rx * 2, self.ry * 2)
 
 
 @dataclass(frozen=True)
@@ -597,6 +623,14 @@ class Polyline(Element):
         return _inflate_bounds(
             (min_x, min_y, max(xs) - min_x, max(ys) - min_y), self.stroke)
 
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        if not self.points:
+            return (0, 0, 0, 0)
+        xs = [p[0] for p in self.points]
+        ys = [p[1] for p in self.points]
+        min_x, min_y = min(xs), min(ys)
+        return (min_x, min_y, max(xs) - min_x, max(ys) - min_y)
+
 
 @dataclass(frozen=True)
 class Polygon(Element):
@@ -618,6 +652,14 @@ class Polygon(Element):
         return _inflate_bounds(
             (min_x, min_y, max(xs) - min_x, max(ys) - min_y), self.stroke)
 
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        if not self.points:
+            return (0, 0, 0, 0)
+        xs = [p[0] for p in self.points]
+        ys = [p[1] for p in self.points]
+        min_x, min_y = min(xs), min(ys)
+        return (min_x, min_y, max(xs) - min_x, max(ys) - min_y)
+
 
 @dataclass(frozen=True)
 class Path(Element):
@@ -633,6 +675,9 @@ class Path(Element):
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
+
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        return _path_bounds(self.d)
 
 
 def _cubic_extrema(p0: float, p1: float, p2: float, p3: float) -> list[float]:
@@ -879,6 +924,9 @@ class TextPath(Element):
         # Approximate from path bounds
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
 
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        return _path_bounds(self.d)
+
 
 @dataclass(frozen=True)
 class Group(Element):
@@ -893,6 +941,16 @@ class Group(Element):
         if not self.children:
             return (0, 0, 0, 0)
         all_bounds = [c.bounds() for c in self.children]
+        min_x = min(b[0] for b in all_bounds)
+        min_y = min(b[1] for b in all_bounds)
+        max_x = max(b[0] + b[2] for b in all_bounds)
+        max_y = max(b[1] + b[3] for b in all_bounds)
+        return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+    def geometric_bounds(self) -> tuple[float, float, float, float]:
+        if not self.children:
+            return (0, 0, 0, 0)
+        all_bounds = [c.geometric_bounds() for c in self.children]
         min_x = min(b[0] for b in all_bounds)
         min_y = min(b[1] for b in all_bounds)
         max_x = max(b[0] + b[2] for b in all_bounds)
