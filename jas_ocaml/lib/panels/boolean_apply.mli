@@ -6,6 +6,13 @@
 
 val apply_make_compound_shape : Model.model -> unit
 
+(** Alt/Option+click on the four Shape Mode buttons. Creates a live
+    compound shape with the chosen operation (union / subtract_front
+    / intersection / exclude) instead of applying the destructive
+    variant. Unknown op names are no-ops. See [transcripts/BOOLEAN.md]
+    §Compound shapes. *)
+val apply_compound_creation : Model.model -> string -> unit
+
 val apply_release_compound_shape : Model.model -> unit
 
 val apply_expand_compound_shape : Model.model -> unit

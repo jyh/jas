@@ -610,6 +610,11 @@ let dispatch_yaml_action
              Boolean_apply.apply_destructive_boolean m op_name;
              `Null
          in
+         let make_compound_creation_h op_name : Effects.platform_effect =
+           fun _ _ _ ->
+             Boolean_apply.apply_compound_creation m op_name;
+             `Null
+         in
          let make_cs_h : Effects.platform_effect = fun _ _ _ ->
            Boolean_apply.apply_make_compound_shape m;
            `Null
@@ -645,6 +650,10 @@ let dispatch_yaml_action
            ("boolean_divide", make_boolean_op_h "divide");
            ("boolean_trim", make_boolean_op_h "trim");
            ("boolean_merge", make_boolean_op_h "merge");
+           ("boolean_union_compound", make_compound_creation_h "union");
+           ("boolean_subtract_front_compound", make_compound_creation_h "subtract_front");
+           ("boolean_intersection_compound", make_compound_creation_h "intersection");
+           ("boolean_exclude_compound", make_compound_creation_h "exclude");
            ("make_compound_shape", make_cs_h);
            ("release_compound_shape", release_cs_h);
            ("expand_compound_shape", expand_cs_h);
