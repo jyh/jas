@@ -566,6 +566,22 @@ fn set_app_state_field(
         "align_use_preview_bounds" => {
             if let Some(b) = val.as_bool() { st.align_panel.use_preview_bounds = b; }
         }
+        // Boolean panel fields — mirrors of BooleanPanelState per
+        // BOOLEAN.md §Boolean Options dialog.
+        "boolean_precision" => {
+            if let Some(n) = val.as_f64() { st.boolean_panel.precision = n; }
+        }
+        "boolean_remove_redundant_points" => {
+            if let Some(b) = val.as_bool() { st.boolean_panel.remove_redundant_points = b; }
+        }
+        "boolean_divide_remove_unpainted" => {
+            if let Some(b) = val.as_bool() { st.boolean_panel.divide_remove_unpainted = b; }
+        }
+        "last_boolean_op" => {
+            // The yaml string-or-null is only consumed by
+            // Repeat Boolean Operation (which is a future phase);
+            // nothing in AppState needs to mirror it today.
+        }
         // Workspace layout visibility fields are managed by the generic StateStore,
         // not directly by AppState. A set: on these keys has no effect here.
         "toolbar_visible" | "canvas_visible" | "dock_visible"
@@ -637,6 +653,7 @@ fn apply_set_panel_state(
                 "distribute_spacing_value": ap.distribute_spacing,
                 "use_preview_bounds": ap.use_preview_bounds,
             });
+            let bp = &st.boolean_panel;
             let state_json = serde_json::json!({
                 "align_to": ap.align_to.as_str(),
                 "align_key_object_path": ap.key_object_path.as_ref()
@@ -644,6 +661,9 @@ fn apply_set_panel_state(
                     .unwrap_or(serde_json::Value::Null),
                 "align_distribute_spacing": ap.distribute_spacing,
                 "align_use_preview_bounds": ap.use_preview_bounds,
+                "boolean_precision": bp.precision,
+                "boolean_remove_redundant_points": bp.remove_redundant_points,
+                "boolean_divide_remove_unpainted": bp.divide_remove_unpainted,
             });
             let ctx = serde_json::json!({"panel": panel_json, "state": state_json});
             let result = super::expr::eval(expr_str, &ctx);
