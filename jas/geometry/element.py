@@ -1019,6 +1019,35 @@ class CompoundShape(LiveElement):
         from geometry.live import DEFAULT_PRECISION, bounds_of_polygon_set
         return bounds_of_polygon_set(self.evaluate(DEFAULT_PRECISION))
 
+    def expand(self, precision: float) -> list["Element"]:
+        """Replace the compound shape with static Polygon element(s)
+        derived from its evaluated geometry. Each emitted polygon
+        carries the compound shape's own fill / stroke / common
+        props; the operand tree is discarded. Rings with fewer than
+        3 points are dropped. See BOOLEAN.md § Expand and Release
+        semantics.
+        """
+        ps = self.evaluate(precision)
+        return [
+            Polygon(
+                points=tuple(ring),
+                fill=self.fill,
+                stroke=self.stroke,
+                opacity=self.opacity,
+                transform=self.transform,
+                locked=self.locked,
+                visibility=self.visibility,
+            )
+            for ring in ps if len(ring) >= 3
+        ]
+
+    def release(self) -> tuple["Element", ...]:
+        """Return the operand tree as independent elements (inverse
+        of Make). Each operand keeps its own paint; the compound
+        shape's paint is discarded.
+        """
+        return self.operands
+
 
 def sync_tspans_from_content(element: Element) -> Element:
     """Rebuild a Text / TextPath element's ``tspans`` field from its
