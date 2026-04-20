@@ -117,3 +117,65 @@ def anchor_position(bbox: Bounds, axis: Axis, anchor: AxisAnchor) -> float:
     if anchor == AxisAnchor.MIN: return lo
     if anchor == AxisAnchor.MAX: return hi
     return mid
+
+
+def align_along_axis(
+    elements: list[tuple[ElementPath, Element]],
+    reference: AlignReference,
+    axis: Axis,
+    anchor: AxisAnchor,
+    bounds_fn: BoundsFn,
+) -> list[AlignTranslation]:
+    """Generic alignment driver used by the six Align operations.
+
+    For each selected element whose bbox anchor differs from the
+    reference's along the axis, emit a translation to the target.
+    Elements matching reference.key_path are skipped (the key
+    never moves, per ALIGN.md). Zero-delta translations are
+    omitted per the identity-value rule.
+    """
+    target = anchor_position(reference.bbox, axis, anchor)
+    key_path = reference.key_path
+    out: list[AlignTranslation] = []
+    for path, elem in elements:
+        if key_path is not None and tuple(path) == key_path:
+            continue
+        pos = anchor_position(bounds_fn(elem), axis, anchor)
+        delta = target - pos
+        if delta == 0:
+            continue
+        if axis == Axis.HORIZONTAL:
+            out.append(AlignTranslation(path=tuple(path), dx=delta, dy=0))
+        else:
+            out.append(AlignTranslation(path=tuple(path), dx=0, dy=delta))
+    return out
+
+
+def align_left(elements, reference, bounds_fn):
+    """ALIGN_LEFT_BUTTON."""
+    return align_along_axis(elements, reference, Axis.HORIZONTAL, AxisAnchor.MIN, bounds_fn)
+
+
+def align_horizontal_center(elements, reference, bounds_fn):
+    """ALIGN_HORIZONTAL_CENTER_BUTTON."""
+    return align_along_axis(elements, reference, Axis.HORIZONTAL, AxisAnchor.CENTER, bounds_fn)
+
+
+def align_right(elements, reference, bounds_fn):
+    """ALIGN_RIGHT_BUTTON."""
+    return align_along_axis(elements, reference, Axis.HORIZONTAL, AxisAnchor.MAX, bounds_fn)
+
+
+def align_top(elements, reference, bounds_fn):
+    """ALIGN_TOP_BUTTON."""
+    return align_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.MIN, bounds_fn)
+
+
+def align_vertical_center(elements, reference, bounds_fn):
+    """ALIGN_VERTICAL_CENTER_BUTTON."""
+    return align_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.CENTER, bounds_fn)
+
+
+def align_bottom(elements, reference, bounds_fn):
+    """ALIGN_BOTTOM_BUTTON."""
+    return align_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.MAX, bounds_fn)

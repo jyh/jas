@@ -7,6 +7,8 @@ from absl.testing import absltest
 
 from algorithms.align import (
     AlignReference, AlignTranslation, Axis, AxisAnchor,
+    align_bottom, align_horizontal_center, align_left, align_right,
+    align_top, align_vertical_center,
     anchor_position, axis_extent, geometric_bounds, preview_bounds,
     union_bounds,
 )
@@ -73,6 +75,83 @@ class AlignPrimitivesTest(absltest.TestCase):
     def test_translation_record_is_hashable(self):
         t = AlignTranslation(path=(0, 1), dx=10, dy=20)
         self.assertEqual(t.path, (0, 1))
+
+
+class AlignOpsTest(absltest.TestCase):
+    """Stage 5e — six Align operations. Parallels the Rust /
+    Swift / OCaml port tests."""
+
+    def _three_rects(self):
+        return [_rect(10, 0, 10, 10), _rect(30, 0, 10, 10), _rect(60, 0, 10, 10)]
+
+    def _ref_selection_of(self, rs):
+        return AlignReference.selection(union_bounds(rs, geometric_bounds))
+
+    def _input(self, rs):
+        return [((i,), r) for i, r in enumerate(rs)]
+
+    def test_align_left_moves_two_rects_to_left_edge(self):
+        rs = self._three_rects()
+        out = align_left(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0], AlignTranslation(path=(1,), dx=-20, dy=0))
+        self.assertEqual(out[1], AlignTranslation(path=(2,), dx=-50, dy=0))
+
+    def test_align_right_moves_to_right_edge(self):
+        rs = self._three_rects()
+        out = align_right(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Target = 70. rs[0] 20 → Δ+50. rs[1] 40 → Δ+30. rs[2] at 70 omitted.
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0].dx, 50)
+        self.assertEqual(out[1].dx, 30)
+
+    def test_align_horizontal_center_moves_to_midpoint(self):
+        rs = self._three_rects()
+        out = align_horizontal_center(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Target = 40. Centers 15, 35, 65 → Δ+25, +5, -25.
+        self.assertEqual(len(out), 3)
+        self.assertEqual(out[0].dx, 25)
+        self.assertEqual(out[1].dx, 5)
+        self.assertEqual(out[2].dx, -25)
+
+    def test_align_top_only_affects_y(self):
+        rs = [_rect(0, 10, 10, 10), _rect(20, 30, 10, 10), _rect(40, 50, 10, 10)]
+        out = align_top(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        for t in out:
+            self.assertEqual(t.dx, 0)
+        self.assertEqual(len(out), 2)  # first already at top
+
+    def test_align_vertical_center_moves_to_midline(self):
+        rs = [_rect(0, 0, 10, 10), _rect(20, 20, 10, 10)]
+        out = align_vertical_center(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Target = 15. Centers 5, 25 → Δ+10, -10.
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0].dy, 10)
+        self.assertEqual(out[1].dy, -10)
+
+    def test_align_bottom_moves_to_bottom_edge(self):
+        rs = [_rect(0, 0, 10, 20), _rect(20, 0, 10, 10)]
+        out = align_bottom(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Target = 20. rs[0] omitted; rs[1] bottom 10 → Δ+10.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dy, 10)
+
+    def test_align_left_with_key_object_does_not_move_key(self):
+        rs = self._three_rects()
+        key_path = (1,)
+        r = AlignReference.key_object(rs[1].geometric_bounds(), key_path)
+        out = align_left(self._input(rs), r, geometric_bounds)
+        for t in out:
+            self.assertNotEqual(t.path, key_path)
+        # rs[0] 10 → 30 Δ+20; rs[2] 60 → 30 Δ-30.
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0], AlignTranslation(path=(0,), dx=20, dy=0))
+        self.assertEqual(out[1], AlignTranslation(path=(2,), dx=-30, dy=0))
+
+    def test_align_left_empty_input_yields_empty_output(self):
+        r = AlignReference.selection((0, 0, 10, 10))
+        self.assertEqual(align_left([], r, geometric_bounds), [])
 
 
 if __name__ == "__main__":
