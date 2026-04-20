@@ -863,6 +863,40 @@ let set_visibility v = function
   | Group r -> Group { r with visibility = v }
   | Layer r -> Layer { r with visibility = v }
 
+let get_transform = function
+  | Line { transform; _ } | Rect { transform; _ } | Circle { transform; _ }
+  | Ellipse { transform; _ } | Polyline { transform; _ }
+  | Polygon { transform; _ } | Path { transform; _ } | Text { transform; _ }
+  | Text_path { transform; _ } | Group { transform; _ }
+  | Layer { transform; _ } -> transform
+
+let set_transform t = function
+  | Line r -> Line { r with transform = t }
+  | Rect r -> Rect { r with transform = t }
+  | Circle r -> Circle { r with transform = t }
+  | Ellipse r -> Ellipse { r with transform = t }
+  | Polyline r -> Polyline { r with transform = t }
+  | Polygon r -> Polygon { r with transform = t }
+  | Path r -> Path { r with transform = t }
+  | Text r -> Text { r with transform = t }
+  | Text_path r -> Text_path { r with transform = t }
+  | Group r -> Group { r with transform = t }
+  | Layer r -> Layer { r with transform = t }
+
+(** Pre-pend a world-space [translate(dx, dy)] to an existing
+    transform matrix. If the element has no current transform,
+    the result is a simple translate. Rotation / scale components
+    are preserved; only the (e, f) translation slot changes. *)
+let translate_transform dx dy t_opt =
+  let cur = match t_opt with Some t -> t | None -> identity_transform in
+  Some { cur with e = cur.e +. dx; f = cur.f +. dy }
+
+(** Return a copy of [elem] with (dx, dy) pre-pended to its
+    transform. Used by Align operations per ALIGN.md SVG
+    attribute mapping. *)
+let with_transform_translated ~dx ~dy elem =
+  set_transform (translate_transform dx dy (get_transform elem)) elem
+
 let with_fill elem f =
   match elem with
   | Rect r -> Rect { r with fill = f }
