@@ -49,12 +49,13 @@ class PanelKind(Enum):
     PARAGRAPH = auto()
     ARTBOARDS = auto()
     ALIGN = auto()
+    BOOLEAN = auto()
 
 ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
-    PanelKind.ALIGN,
+    PanelKind.ALIGN, PanelKind.BOOLEAN,
 ]
 
 @dataclass
@@ -219,6 +220,7 @@ class WorkspaceLayout:
                 id=0,
                 groups=[
                     PanelGroup(panels=[PanelKind.COLOR, PanelKind.SWATCHES]),
+                    PanelGroup(panels=[PanelKind.ALIGN, PanelKind.BOOLEAN]),
                     PanelGroup(panels=[PanelKind.CHARACTER, PanelKind.PARAGRAPH]),
                     PanelGroup(panels=[PanelKind.STROKE, PanelKind.PROPERTIES]),
                     PanelGroup(panels=[PanelKind.ARTBOARDS, PanelKind.LAYERS]),
@@ -461,6 +463,7 @@ class WorkspaceLayout:
             PanelKind.PARAGRAPH: "Paragraph",
             PanelKind.ARTBOARDS: "Artboards",
             PanelKind.ALIGN: "Align",
+            PanelKind.BOOLEAN: "Boolean",
         }[kind]
 
     # -- Close / show panels --

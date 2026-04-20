@@ -98,6 +98,10 @@ private func normalizeElement(_ elem: Element) -> Element {
         return .layer(Layer(name: l.name, children: l.children.map(normalizeElement),
                             opacity: l.opacity, transform: l.transform,
                             locked: l.locked, visibility: l.visibility))
+    case .live(let v):
+        // Phase 1: pass through unchanged. Phase 2 will recursively
+        // normalize operands and fill / stroke like Group does.
+        return .live(v)
     }
 }
 

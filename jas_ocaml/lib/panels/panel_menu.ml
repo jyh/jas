@@ -10,7 +10,7 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean |]
 
 (** Paragraph panel state-store handle. The yaml_panel_view sets
     this ref to the panel's [State_store.t] when rendering the
@@ -54,6 +54,7 @@ let panel_label = function
   | Paragraph -> "Paragraph"
   | Artboards -> "Artboards"
   | Align -> "Align"
+  | Boolean -> "Boolean"
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
@@ -111,6 +112,17 @@ let panel_menu = function
       Action { label = "Reset Panel"; command = "reset_align_panel"; shortcut = "" };
       Separator;
       Action { label = "Close Align"; command = "close_panel"; shortcut = "" } ]
+  | Boolean -> [
+      Action { label = "Repeat Boolean Operation"; command = "repeat_boolean_operation"; shortcut = "" };
+      Action { label = "Boolean Options\xe2\x80\xa6"; command = "open_boolean_options"; shortcut = "" };
+      Separator;
+      Action { label = "Make Compound Shape"; command = "make_compound_shape"; shortcut = "" };
+      Action { label = "Release Compound Shape"; command = "release_compound_shape"; shortcut = "" };
+      Action { label = "Expand Compound Shape"; command = "expand_compound_shape"; shortcut = "" };
+      Separator;
+      Action { label = "Reset Panel"; command = "reset_boolean_panel"; shortcut = "" };
+      Separator;
+      Action { label = "Close Boolean"; command = "close_panel"; shortcut = "" } ]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =
@@ -591,6 +603,61 @@ let dispatch_yaml_action
             | None -> ());
            `Null
          in
+         (* Boolean panel destructive ops. See BOOLEAN.md Panel actions.
+            DIVIDE / TRIM / MERGE ship in phase 9e. *)
+         let boolean_options_from_store store =
+           let def = Boolean_apply.default_boolean_options in
+           let get k = State_store.get store k in
+           let precision = match get "boolean_precision" with
+             | `Float f -> f
+             | `Int i -> float_of_int i
+             | _ -> def.precision
+           in
+           let rrp = match get "boolean_remove_redundant_points" with
+             | `Bool b -> b | _ -> def.remove_redundant_points
+           in
+           let drup = match get "boolean_divide_remove_unpainted" with
+             | `Bool b -> b | _ -> def.divide_remove_unpainted
+           in
+           { Boolean_apply.precision; remove_redundant_points = rrp;
+             divide_remove_unpainted = drup }
+         in
+         let make_boolean_op_h op_name : Effects.platform_effect =
+           fun _ _ store ->
+             let options = boolean_options_from_store store in
+             Boolean_apply.apply_destructive_boolean ~options m op_name;
+             `Null
+         in
+         let make_compound_creation_h op_name : Effects.platform_effect =
+           fun _ _ _ ->
+             Boolean_apply.apply_compound_creation m op_name;
+             `Null
+         in
+         let repeat_boolean_op_h : Effects.platform_effect = fun _ _ store ->
+           let last = match State_store.get store "last_boolean_op" with
+             | `String s -> Some s | _ -> None
+           in
+           let options = boolean_options_from_store store in
+           Boolean_apply.apply_repeat_boolean_operation ~options m last;
+           `Null
+         in
+         let reset_boolean_panel_h : Effects.platform_effect = fun _ _ _ ->
+           (* No extra tear-down; the yaml `set: last_boolean_op: null`
+              in the same action clears the repeat state. *)
+           `Null
+         in
+         let make_cs_h : Effects.platform_effect = fun _ _ _ ->
+           Boolean_apply.apply_make_compound_shape m;
+           `Null
+         in
+         let release_cs_h : Effects.platform_effect = fun _ _ _ ->
+           Boolean_apply.apply_release_compound_shape m;
+           `Null
+         in
+         let expand_cs_h : Effects.platform_effect = fun _ _ _ ->
+           Boolean_apply.apply_expand_compound_shape m;
+           `Null
+         in
          let base_platform_effects = [
            ("snapshot", snapshot_h);
            ("doc.set", doc_set_h);
@@ -605,6 +672,24 @@ let dispatch_yaml_action
            ("set_panel_state", set_panel_state_h);
            ("list_push", list_push_h);
            ("pop", pop_h);
+           ("boolean_union", make_boolean_op_h "union");
+           ("boolean_intersection", make_boolean_op_h "intersection");
+           ("boolean_exclude", make_boolean_op_h "exclude");
+           ("boolean_subtract_front", make_boolean_op_h "subtract_front");
+           ("boolean_subtract_back", make_boolean_op_h "subtract_back");
+           ("boolean_crop", make_boolean_op_h "crop");
+           ("boolean_divide", make_boolean_op_h "divide");
+           ("boolean_trim", make_boolean_op_h "trim");
+           ("boolean_merge", make_boolean_op_h "merge");
+           ("boolean_union_compound", make_compound_creation_h "union");
+           ("boolean_subtract_front_compound", make_compound_creation_h "subtract_front");
+           ("boolean_intersection_compound", make_compound_creation_h "intersection");
+           ("boolean_exclude_compound", make_compound_creation_h "exclude");
+           ("repeat_boolean_operation", repeat_boolean_op_h);
+           ("reset_boolean_panel", reset_boolean_panel_h);
+           ("make_compound_shape", make_cs_h);
+           ("release_compound_shape", release_cs_h);
+           ("expand_compound_shape", expand_cs_h);
          ] in
          let platform_effects = match on_close_dialog with
            | Some _ -> ("close_dialog", close_dialog_h) :: base_platform_effects
@@ -675,6 +760,12 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     paragraph_menu_dispatch (`Toggle "hanging_punctuation") get_model
   | "reset_paragraph_panel" when kind = Paragraph ->
     paragraph_menu_dispatch `Reset get_model
+  | "make_compound_shape" when kind = Boolean ->
+    Boolean_apply.apply_make_compound_shape (get_model ())
+  | "release_compound_shape" when kind = Boolean ->
+    Boolean_apply.apply_release_compound_shape (get_model ())
+  | "expand_compound_shape" when kind = Boolean ->
+    Boolean_apply.apply_expand_compound_shape (get_model ())
   | _ -> ()
 
 (** Query whether a toggle/radio command is checked. *)

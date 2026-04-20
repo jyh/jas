@@ -890,3 +890,166 @@ class TestStrokePanelInDock:
         html = render_element(dock_el, theme, state, mode="normal")
         assert "Butt Cap" in html
         assert "Miter Join" in html
+
+
+class TestBooleanPanel:
+    """Tests against the real workspace Boolean panel spec.
+
+    Flask's scope for the Boolean panel is yaml wiring only — the
+    document model and canvas don't exist server-side — so these
+    tests verify that the panel spec loads from workspace.json and
+    renders its nine operation buttons plus the Expand button.
+    """
+
+    @pytest.fixture(autouse=True)
+    def load_ws(self):
+        from loader import load_workspace
+        from renderer import set_icons, set_panels, set_initial_state
+        ws = load_workspace(WORKSPACE_PATH)
+        set_icons(ws.get("icons", {}))
+        set_panels(ws.get("panels", {}))
+        set_initial_state(ws.get("state", {}))
+
+    @pytest.fixture
+    def panel(self):
+        from loader import load_workspace
+        ws = load_workspace(WORKSPACE_PATH)
+        return ws.get("panels", {}).get("boolean_panel_content", {})
+
+    @pytest.fixture
+    def panel_html(self, panel, theme, state):
+        from renderer import render_element
+        return render_element(panel, theme, state, mode="normal")
+
+    def test_panel_spec_present(self, panel):
+        assert panel, "boolean_panel_content spec missing from workspace"
+        assert panel.get("summary") == "Boolean"
+
+    def test_panel_renders(self, panel_html):
+        assert panel_html
+
+    # ── Shape Modes row ──
+    def test_union_button_present(self, panel_html):
+        assert "boolean_union_button" in panel_html
+
+    def test_subtract_front_button_present(self, panel_html):
+        assert "boolean_subtract_front_button" in panel_html
+
+    def test_intersection_button_present(self, panel_html):
+        assert "boolean_intersection_button" in panel_html
+
+    def test_exclude_button_present(self, panel_html):
+        assert "boolean_exclude_button" in panel_html
+
+    def test_expand_button_present(self, panel_html):
+        assert "boolean_expand_button" in panel_html
+
+    # ── Pathfinders row ──
+    def test_divide_button_present(self, panel_html):
+        assert "boolean_divide_button" in panel_html
+
+    def test_trim_button_present(self, panel_html):
+        assert "boolean_trim_button" in panel_html
+
+    def test_merge_button_present(self, panel_html):
+        assert "boolean_merge_button" in panel_html
+
+    def test_crop_button_present(self, panel_html):
+        assert "boolean_crop_button" in panel_html
+
+    def test_subtract_back_button_present(self, panel_html):
+        assert "boolean_subtract_back_button" in panel_html
+
+    # ── Section labels ──
+    def test_shape_modes_label_present(self, panel_html):
+        assert "Shape Modes:" in panel_html
+
+    def test_pathfinders_label_present(self, panel_html):
+        assert "Pathfinders:" in panel_html
+
+    # ── Panel in dock — full integration ──
+    def test_boolean_panel_in_dock(self, theme, state):
+        from renderer import render_element
+        dock_el = {
+            "id": "dock_main",
+            "type": "dock_view",
+            "collapsed_width": 36,
+            "groups": [{"panels": ["boolean"], "active": 0, "collapsed": False}],
+        }
+        html = render_element(dock_el, theme, state, mode="normal")
+        assert "boolean_union_button" in html
+        assert "Boolean" in html
+
+
+class TestBooleanOptionsDialog:
+    """Tests against the real workspace Boolean Options dialog spec."""
+
+    @pytest.fixture(autouse=True)
+    def load_ws(self):
+        from loader import load_workspace
+        from renderer import set_icons, set_panels, set_initial_state
+        ws = load_workspace(WORKSPACE_PATH)
+        set_icons(ws.get("icons", {}))
+        set_panels(ws.get("panels", {}))
+        set_initial_state(ws.get("state", {}))
+
+    @pytest.fixture
+    def dialog(self):
+        from loader import load_workspace
+        ws = load_workspace(WORKSPACE_PATH)
+        return ws.get("dialogs", {}).get("boolean_options", {})
+
+    def test_dialog_spec_present(self, dialog):
+        assert dialog, "boolean_options dialog spec missing from workspace"
+        assert dialog.get("summary") == "Boolean Options"
+
+    def test_dialog_has_three_state_fields(self, dialog):
+        state_fields = dialog.get("state", {})
+        assert "precision" in state_fields
+        assert "remove_redundant_points" in state_fields
+        assert "divide_remove_unpainted" in state_fields
+
+    def test_dialog_precision_default(self, dialog):
+        precision = dialog.get("state", {}).get("precision", {})
+        assert precision.get("default") == 0.0283
+
+    def test_dialog_has_init_bindings(self, dialog):
+        init = dialog.get("init", {})
+        assert init.get("precision") == "param.precision"
+        assert init.get("remove_redundant_points") == "param.remove_redundant_points"
+        assert init.get("divide_remove_unpainted") == "param.divide_remove_unpainted"
+
+
+class TestBooleanActions:
+    """Confirm the Boolean panel's actions are registered in workspace.json."""
+
+    @pytest.fixture
+    def actions(self):
+        from loader import load_workspace
+        ws = load_workspace(WORKSPACE_PATH)
+        return ws.get("actions", {})
+
+    @pytest.mark.parametrize("op", [
+        "boolean_union", "boolean_subtract_front", "boolean_intersection",
+        "boolean_exclude", "boolean_divide", "boolean_trim", "boolean_merge",
+        "boolean_crop", "boolean_subtract_back",
+    ])
+    def test_destructive_op_registered(self, actions, op):
+        assert op in actions, f"{op} action missing from workspace"
+        assert actions[op].get("category") == "boolean"
+
+    @pytest.mark.parametrize("op", [
+        "boolean_union_compound", "boolean_subtract_front_compound",
+        "boolean_intersection_compound", "boolean_exclude_compound",
+    ])
+    def test_compound_variant_registered(self, actions, op):
+        assert op in actions, f"{op} compound variant missing from workspace"
+
+    @pytest.mark.parametrize("op", [
+        "make_compound_shape", "release_compound_shape",
+        "expand_compound_shape", "repeat_boolean_operation",
+        "reset_boolean_panel", "open_boolean_options",
+        "boolean_options_confirm",
+    ])
+    def test_menu_action_registered(self, actions, op):
+        assert op in actions, f"{op} menu action missing from workspace"

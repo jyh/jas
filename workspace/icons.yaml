@@ -874,3 +874,74 @@ icons:
     svg: >
       <rect x="1.5" y="1.5" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.4 1"/>
       <rect x="5" y="5" width="6" height="6" fill="currentColor"/>
+
+  # ── Boolean panel icons ──────────────────────────────────────
+  # All boolean-op icons share a two-square motif: rect A at (2,4,8,8)
+  # and rect B at (6,2,8,8) overlapping in (6..10, 4..10). Different
+  # fills / strokes distinguish the nine operations visually.
+
+  boolean_union:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M2,4 H10 V12 H2 Z M6,2 H14 V10 H6 Z" fill="currentColor"/>
+
+  boolean_subtract_front:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z" fill="currentColor" fill-rule="evenodd"/>
+      <rect x="6" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.2 1"/>
+
+  boolean_intersection:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="4" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <rect x="6" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <rect x="6" y="4" width="4" height="6" fill="currentColor"/>
+
+  boolean_exclude:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z" fill="currentColor" fill-rule="evenodd"/>
+      <path d="M6,2 H14 V10 H6 Z M6,4 H10 V10 H6 Z" fill="currentColor" fill-rule="evenodd"/>
+
+  boolean_divide:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="4" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <rect x="6" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <line x1="6" y1="4" x2="6" y2="12" stroke="currentColor" stroke-width="1"/>
+      <line x1="10" y1="4" x2="10" y2="10" stroke="currentColor" stroke-width="1"/>
+      <line x1="2" y1="10" x2="10" y2="10" stroke="currentColor" stroke-width="1"/>
+
+  boolean_trim:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z" fill="currentColor" fill-rule="evenodd"/>
+      <rect x="6" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"/>
+
+  boolean_merge:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M2,4 H14 V10 H2 Z" fill="currentColor"/>
+      <rect x="2" y="4" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1"/>
+      <rect x="6" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1"/>
+
+  boolean_crop:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="4" width="8" height="8" fill="currentColor" opacity="0.35"/>
+      <rect x="6" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <rect x="6" y="4" width="4" height="6" fill="currentColor"/>
+
+  boolean_subtract_back:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="4" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.2 1"/>
+      <path d="M6,2 H14 V10 H6 Z M6,4 H10 V10 H6 Z" fill="currentColor" fill-rule="evenodd"/>
+
+  boolean_expand:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="1.4 1"/>
+      <polygon points="5,8 11,8 8,5" fill="currentColor"/>
+      <polygon points="5,8 11,8 8,11" fill="currentColor"/>

@@ -93,6 +93,7 @@ let panel_kind_str = function
   | Paragraph -> "paragraph"
   | Artboards -> "artboards"
   | Align -> "align"
+  | Boolean -> "boolean"
 
 let pane_kind_str = function
   | Toolbar -> "toolbar"
@@ -493,6 +494,8 @@ let parse_panel_kind_str s =
   | "character" -> Character
   | "paragraph" -> Paragraph
   | "artboards" -> Artboards
+  | "align" -> Align
+  | "boolean" -> Boolean
   | _ -> Layers
 
 let parse_panel_kind j = parse_panel_kind_str (to_string j)

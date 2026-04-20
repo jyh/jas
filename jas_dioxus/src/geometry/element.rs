@@ -586,6 +586,9 @@ pub enum Element {
     TextPath(TextPathElem),
     Group(GroupElem),
     Layer(LayerElem),
+    /// A non-destructive element whose geometry is evaluated on demand
+    /// from its source inputs. See `super::live::LiveVariant`.
+    Live(super::live::LiveVariant),
 }
 
 /// Per-element visibility mode.
@@ -961,6 +964,7 @@ impl Element {
             Element::TextPath(e) => &e.common,
             Element::Group(e) => &e.common,
             Element::Layer(e) => &e.common,
+            Element::Live(e) => super::live::LiveElement::common(e),
         }
     }
 
@@ -977,6 +981,7 @@ impl Element {
             Element::TextPath(e) => &mut e.common,
             Element::Group(e) => &mut e.common,
             Element::Layer(e) => &mut e.common,
+            Element::Live(e) => super::live::LiveElement::common_mut(e),
         }
     }
 
@@ -1034,6 +1039,7 @@ impl Element {
             Element::Path(e) => e.fill.as_ref(),
             Element::Text(e) => e.fill.as_ref(),
             Element::TextPath(e) => e.fill.as_ref(),
+            Element::Live(e) => super::live::LiveElement::fill(e),
             _ => None,
         }
     }
@@ -1049,6 +1055,7 @@ impl Element {
             Element::Path(e) => e.stroke.as_ref(),
             Element::Text(e) => e.stroke.as_ref(),
             Element::TextPath(e) => e.stroke.as_ref(),
+            Element::Live(e) => super::live::LiveElement::stroke(e),
             _ => None,
         }
     }
@@ -1115,6 +1122,7 @@ impl Element {
             Element::TextPath(e) => inflate_bounds(path_bounds(&e.d), e.stroke.as_ref()),
             Element::Group(g) => children_bounds(&g.children),
             Element::Layer(l) => children_bounds(&l.children),
+            Element::Live(e) => super::live::LiveElement::bounds(e),
         }
     }
 
@@ -1142,6 +1150,9 @@ impl Element {
             }
             Element::Group(g) => geometric_children_bounds(&g.children),
             Element::Layer(l) => geometric_children_bounds(&l.children),
+            // Phase 1 stub: geometric bounds match bounds (no stroke
+            // inflation distinction until compound shapes evaluate).
+            Element::Live(e) => super::live::LiveElement::bounds(e),
         }
     }
 }
@@ -1400,6 +1411,87 @@ pub fn path_anchor_points(d: &[PathCommand]) -> Vec<(f64, f64)> {
 // ---------------------------------------------------------------------------
 // Path flattening (for hit-testing and text-on-path)
 // ---------------------------------------------------------------------------
+
+/// Flatten path commands into one polyline per subpath, suitable for
+/// use as boolean-operation operand rings under the even-odd fill
+/// rule. Each MoveTo starts a new ring; each ClosePath finalizes the
+/// current ring. Open subpaths (no ClosePath) are implicitly closed
+/// by the boolean algorithm consuming the first and last points.
+/// Rings with fewer than 3 points are dropped.
+///
+/// Uses the same fixed per-curve step count as `flatten_path_commands`.
+/// Precision-adaptive subdivision is a future enhancement.
+pub fn flatten_path_to_rings(d: &[PathCommand]) -> Vec<Vec<(f64, f64)>> {
+    let steps = FLATTEN_STEPS;
+    let mut rings: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut cur: Vec<(f64, f64)> = Vec::new();
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+
+    let flush_cur = |cur: &mut Vec<(f64, f64)>, rings: &mut Vec<Vec<(f64, f64)>>| {
+        if cur.len() >= 3 {
+            rings.push(std::mem::take(cur));
+        } else {
+            cur.clear();
+        }
+    };
+
+    for cmd in d {
+        match cmd {
+            PathCommand::MoveTo { x, y } => {
+                flush_cur(&mut cur, &mut rings);
+                cur.push((*x, *y));
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::LineTo { x, y } => {
+                cur.push((*x, *y));
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                for i in 1..=steps {
+                    let t = i as f64 / steps as f64;
+                    let mt = 1.0 - t;
+                    let px = mt.powi(3) * cx
+                        + 3.0 * mt.powi(2) * t * x1
+                        + 3.0 * mt * t.powi(2) * x2
+                        + t.powi(3) * x;
+                    let py = mt.powi(3) * cy
+                        + 3.0 * mt.powi(2) * t * y1
+                        + 3.0 * mt * t.powi(2) * y2
+                        + t.powi(3) * y;
+                    cur.push((px, py));
+                }
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::QuadTo { x1, y1, x, y } => {
+                for i in 1..=steps {
+                    let t = i as f64 / steps as f64;
+                    let mt = 1.0 - t;
+                    let px = mt.powi(2) * cx + 2.0 * mt * t * x1 + t.powi(2) * x;
+                    let py = mt.powi(2) * cy + 2.0 * mt * t * y1 + t.powi(2) * y;
+                    cur.push((px, py));
+                }
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::ClosePath => {
+                flush_cur(&mut cur, &mut rings);
+            }
+            PathCommand::SmoothCurveTo { x, y, .. }
+            | PathCommand::SmoothQuadTo { x, y }
+            | PathCommand::ArcTo { x, y, .. } => {
+                cur.push((*x, *y));
+                cx = *x;
+                cy = *y;
+            }
+        }
+    }
+    flush_cur(&mut cur, &mut rings);
+    rings
+}
 
 /// Flatten path commands into a polyline by evaluating Bezier curves.
 pub fn flatten_path_commands(d: &[PathCommand]) -> Vec<(f64, f64)> {
@@ -2095,6 +2187,16 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
             children: e.children.iter().map(|c| Rc::new(translate_element(c, dx, dy))).collect(),
             ..e.clone()
         }),
+        Element::Live(v) => match v {
+            super::live::LiveVariant::CompoundShape(cs) => Element::Live(
+                super::live::LiveVariant::CompoundShape(super::live::CompoundShape {
+                    operands: cs.operands.iter()
+                        .map(|c| Rc::new(translate_element(c, dx, dy)))
+                        .collect(),
+                    ..cs.clone()
+                }),
+            ),
+        },
     }
 }
 
@@ -2111,6 +2213,14 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
         Element::Text(e) => Element::Text(TextElem { fill, ..e.clone() }),
         Element::TextPath(e) => Element::TextPath(TextPathElem { fill, ..e.clone() }),
         Element::Line(_) | Element::Group(_) | Element::Layer(_) => elem.clone(),
+        Element::Live(v) => match v {
+            super::live::LiveVariant::CompoundShape(cs) => Element::Live(
+                super::live::LiveVariant::CompoundShape(super::live::CompoundShape {
+                    fill,
+                    ..cs.clone()
+                }),
+            ),
+        },
     }
 }
 
@@ -2128,6 +2238,14 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
         Element::Text(e) => Element::Text(TextElem { stroke, ..e.clone() }),
         Element::TextPath(e) => Element::TextPath(TextPathElem { stroke, ..e.clone() }),
         Element::Group(_) | Element::Layer(_) => elem.clone(),
+        Element::Live(v) => match v {
+            super::live::LiveVariant::CompoundShape(cs) => Element::Live(
+                super::live::LiveVariant::CompoundShape(super::live::CompoundShape {
+                    stroke,
+                    ..cs.clone()
+                }),
+            ),
+        },
     }
 }
 

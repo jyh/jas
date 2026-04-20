@@ -92,6 +92,18 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
         "distribute_left", "distribute_horizontal_center", "distribute_right",
         "distribute_top", "distribute_vertical_center", "distribute_bottom",
         "distribute_vertical_spacing", "distribute_horizontal_spacing",
+        // Boolean panel effects per BOOLEAN.md -- all nine destructive
+        // ops registered in phases 9d + 9e.
+        "boolean_union", "boolean_intersection", "boolean_exclude",
+        "boolean_subtract_front", "boolean_subtract_back", "boolean_crop",
+        "boolean_divide", "boolean_trim", "boolean_merge",
+        "make_compound_shape", "release_compound_shape",
+        "expand_compound_shape",
+        // Alt+click compound-creating variants (phase 9f).
+        "boolean_union_compound", "boolean_subtract_front_compound",
+        "boolean_intersection_compound", "boolean_exclude_compound",
+        // Repeat / Reset (phases 9i + 9j).
+        "repeat_boolean_operation", "reset_boolean_panel",
     ]
     #expect(Set(effects.keys) == expected)
 }

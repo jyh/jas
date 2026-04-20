@@ -412,6 +412,7 @@ let element_fill = function
   | Element.Ellipse { fill; _ } | Element.Polyline { fill; _ }
   | Element.Polygon { fill; _ } | Element.Path { fill; _ }
   | Element.Text { fill; _ } | Element.Text_path { fill; _ } -> Some fill
+  | Element.Live (Element.Compound_shape cs) -> Some cs.fill
   | Element.Line _ | Element.Group _ | Element.Layer _ -> None
 
 let element_stroke = function
@@ -420,6 +421,7 @@ let element_stroke = function
   | Element.Polyline { stroke; _ } | Element.Polygon { stroke; _ }
   | Element.Path { stroke; _ } | Element.Text { stroke; _ }
   | Element.Text_path { stroke; _ } -> Some stroke
+  | Element.Live (Element.Compound_shape cs) -> Some cs.stroke
   | Element.Group _ | Element.Layer _ -> None
 
 let selection_fill_summary (doc : Document.document) =

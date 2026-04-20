@@ -39,12 +39,12 @@ public enum DockEdge: Hashable, Codable {
 }
 
 public enum PanelKind: Hashable, Codable {
-    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align
+    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean
 
     /// All panel kinds, for iteration.
     public static let all: [PanelKind] = [
         .layers, .color, .swatches, .stroke, .properties,
-        .character, .paragraph, .artboards, .align,
+        .character, .paragraph, .artboards, .align, .boolean,
     ]
 }
 
@@ -311,6 +311,7 @@ public struct WorkspaceLayout: Codable {
             name: name,
             anchored: [(.right, Dock(id: DockId(0), groups: [
                 PanelGroup(panels: [.color, .swatches]),
+                PanelGroup(panels: [.align, .boolean]),
                 PanelGroup(panels: [.character, .paragraph]),
                 PanelGroup(panels: [.stroke, .properties]),
                 PanelGroup(panels: [.artboards, .layers]),
@@ -612,6 +613,7 @@ public struct WorkspaceLayout: Codable {
         case .paragraph: return "Paragraph"
         case .artboards: return "Artboards"
         case .align: return "Align"
+        case .boolean: return "Boolean"
         }
     }
 

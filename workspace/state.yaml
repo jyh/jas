@@ -177,6 +177,51 @@ state:
       consult each element's preview bounds (stroke-inclusive);
       otherwise they consult geometric bounds.
 
+  # ── Boolean panel ─────────────────────────────────────────────
+  # Mirror state for the Boolean panel and its Options dialog. See
+  # transcripts/BOOLEAN.md §Repeat state and §Boolean Options dialog.
+
+  last_boolean_op:
+    type: enum
+    values: [
+      null,
+      union, subtract_front, intersection, exclude,
+      divide, trim, merge, crop, subtract_back,
+      union_compound, subtract_front_compound,
+      intersection_compound, exclude_compound,
+    ]
+    default: null
+    nullable: true
+    description: >
+      Most-recently-applied boolean operation. Populated by the
+      destructive and compound-creating actions; consumed by
+      "Repeat Boolean Operation". Make / Release / Expand Compound
+      Shape do not write this field.
+
+  boolean_precision:
+    type: number
+    default: 0.0283
+    description: >
+      Geometric tolerance in points for Bezier flattening, Bezier
+      refit, and redundant-point removal. Edited via the Boolean
+      Options dialog. Default 0.0283 pt = 0.01 mm.
+
+  boolean_remove_redundant_points:
+    type: bool
+    default: false
+    description: >
+      When true, collinear points in boolean-op output are collapsed
+      within Precision after each operation. Edited via the Boolean
+      Options dialog.
+
+  boolean_divide_remove_unpainted:
+    type: bool
+    default: false
+    description: >
+      When true, DIVIDE fragments with no fill and no stroke are
+      discarded rather than kept as invisible paths. Edited via the
+      Boolean Options dialog.
+
   fill_on_top:
     type: bool
     default: true

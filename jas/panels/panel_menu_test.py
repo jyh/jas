@@ -18,7 +18,7 @@ def test_panel_label_all_kinds():
 
 
 def test_all_panel_kinds_count():
-    assert len(ALL_PANEL_KINDS) == 9
+    assert len(ALL_PANEL_KINDS) == 10
 
 
 def test_all_panel_kinds_contains_all():

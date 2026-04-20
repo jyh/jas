@@ -109,6 +109,11 @@ pub(crate) struct AppState {
     /// selection / artboard / key-object Align To mode. See
     /// transcripts/ALIGN.md §Panel state.
     pub(crate) align_panel: AlignPanelState,
+    /// Boolean panel document-level options — mirrors
+    /// state.boolean_* and is edited by the Boolean Options dialog.
+    /// Read by `Controller::apply_destructive_boolean` and compound
+    /// shape evaluation. See BOOLEAN.md §Boolean Options dialog.
+    pub(crate) boolean_panel: BooleanPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -335,6 +340,40 @@ impl Default for AlignPanelState {
     }
 }
 
+/// Mirror of the Boolean panel's document-level state per BOOLEAN.md
+/// §Boolean Options dialog and §Repeat state. Edited by the Boolean
+/// Options dialog and by every destructive / compound-creating
+/// action; read by `Controller::apply_destructive_boolean`, compound
+/// shape evaluation, and `Repeat Boolean Operation`.
+#[derive(Debug, Clone)]
+pub(crate) struct BooleanPanelState {
+    /// Geometric tolerance in points. Default 0.0283 pt = 0.01 mm.
+    pub precision: f64,
+    /// When true, collinear points in boolean-op output within
+    /// Precision are collapsed.
+    pub remove_redundant_points: bool,
+    /// When true, DIVIDE fragments with no fill and no stroke are
+    /// discarded rather than kept as invisible paths.
+    pub divide_remove_unpainted: bool,
+    /// Most-recent op (one of 13 values plus None). See BOOLEAN.md
+    /// §Repeat state. Populated by every destructive op and every
+    /// compound-creating variant; consumed by Repeat Boolean
+    /// Operation. Make / Release / Expand Compound Shape do not
+    /// write this field.
+    pub last_op: Option<String>,
+}
+
+impl Default for BooleanPanelState {
+    fn default() -> Self {
+        Self {
+            precision: 0.0283,
+            remove_redundant_points: false,
+            divide_remove_unpainted: false,
+            last_op: None,
+        }
+    }
+}
+
 impl AlignTo {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -420,6 +459,7 @@ impl AppState {
             character_panel: CharacterPanelState::default(),
             paragraph_panel: ParagraphPanelState::default(),
             align_panel: AlignPanelState::default(),
+            boolean_panel: BooleanPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
@@ -929,7 +969,7 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
-        render::render(&ctx, w, h, tab.model.document());
+        render::render(&ctx, w, h, tab.model.document(), self.boolean_panel.precision);
 
         // Draw tool overlay
         if let Some(tool) = tab.tools.get(&self.active_tool) {
@@ -1333,6 +1373,92 @@ impl AppState {
     /// false.
     pub(crate) fn reset_align_panel(&mut self) {
         self.align_panel = AlignPanelState::default();
+    }
+
+    /// Make a compound shape from the current selection. Wraps
+    /// `Controller::make_compound_shape`; a snapshot effect runs
+    /// first per the yaml dispatch order, so each click is one
+    /// undoable transaction.
+    pub(crate) fn apply_make_compound_shape(&mut self) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::make_compound_shape(&mut tab.model);
+        }
+    }
+
+    /// Release every selected compound shape, restoring its
+    /// operands. See `Controller::release_compound_shape`.
+    pub(crate) fn apply_release_compound_shape(&mut self) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::release_compound_shape(&mut tab.model);
+        }
+    }
+
+    /// Expand every selected compound shape to static polygons.
+    /// See `Controller::expand_compound_shape`.
+    pub(crate) fn apply_expand_compound_shape(&mut self) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::expand_compound_shape(&mut tab.model);
+        }
+    }
+
+    /// Apply one of the nine destructive boolean operations.
+    /// See `Controller::apply_destructive_boolean`. Reads options
+    /// from `self.boolean_panel` (edited by the Boolean Options
+    /// dialog).
+    pub(crate) fn apply_boolean_operation(&mut self, op: &str) {
+        let options = crate::document::controller::BooleanOptions {
+            precision: self.boolean_panel.precision,
+            remove_redundant_points: self.boolean_panel.remove_redundant_points,
+            divide_remove_unpainted: self.boolean_panel.divide_remove_unpainted,
+        };
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::apply_destructive_boolean(
+                &mut tab.model, op, &options,
+            );
+        }
+    }
+
+    /// Create a compound shape from the current selection using the
+    /// named operation (one of union / subtract_front / intersection
+    /// / exclude). Fired by Alt+click on the four Shape Mode buttons.
+    pub(crate) fn apply_compound_creation(&mut self, op_name: &str) {
+        use crate::geometry::live::CompoundOperation;
+        let op = match op_name {
+            "union" => CompoundOperation::Union,
+            "subtract_front" => CompoundOperation::SubtractFront,
+            "intersection" => CompoundOperation::Intersection,
+            "exclude" => CompoundOperation::Exclude,
+            _ => return,
+        };
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::make_compound_shape_with_op(
+                &mut tab.model, op,
+            );
+        }
+    }
+
+    /// Reset the Boolean panel's transient state. Clears last_op
+    /// (so Repeat becomes a no-op) without touching the Boolean
+    /// Options fields.
+    pub(crate) fn reset_boolean_panel(&mut self) {
+        self.boolean_panel.last_op = None;
+    }
+
+    /// Re-apply the most-recent boolean operation (destructive or
+    /// compound-creating) on the current selection. No-op when
+    /// `boolean_panel.last_op` is None. Make / Release / Expand
+    /// Compound Shape are non-repeatable per BOOLEAN.md §Repeat
+    /// state so they never populate last_op.
+    pub(crate) fn apply_repeat_boolean_operation(&mut self) {
+        let last = match self.boolean_panel.last_op.clone() {
+            Some(s) => s,
+            None => return,
+        };
+        if let Some(op) = last.strip_suffix("_compound") {
+            self.apply_compound_creation(op);
+        } else {
+            self.apply_boolean_operation(&last);
+        }
     }
 
     /// Execute one of the 14 Align panel operations by name. The

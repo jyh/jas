@@ -737,6 +737,7 @@ and render_tree_view ~packing ~ctx:_ _el =
     | Element.Path _ -> "Path" | Element.Text _ -> "Text"
     | Element.Text_path _ -> "Text Path"
     | Element.Group _ -> "Group" | Element.Layer _ -> "Layer"
+    | Element.Live _ -> "Compound Shape"
   in
   let display_name e =
     match e with
@@ -818,6 +819,7 @@ and render_tree_view ~packing ~ctx:_ _el =
           | Element.Path _ -> "path" | Element.Text _ -> "text"
           | Element.Text_path _ -> "text_path"
           | Element.Group _ -> "group" | Element.Layer _ -> "layer"
+          | Element.Live _ -> "live"
         in
         let passes_type = not (StrSet.mem type_v !_layers_hidden_types) in
         if not (passes_search && passes_type) then begin

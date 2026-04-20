@@ -1814,5 +1814,70 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
             return nil
         }
     }
+    // Boolean panel destructive ops. See BOOLEAN.md §Panel actions.
+    let booleanOps = [
+        "union", "intersection", "exclude",
+        "subtract_front", "subtract_back", "crop",
+        "divide", "trim", "merge",
+    ]
+    func booleanOptionsFromStore(_ store: StateStore) -> BooleanOptions {
+        let def = BooleanOptions()
+        let precision: Double
+        switch store.get("boolean_precision") {
+        case let d as Double: precision = d
+        case let i as Int: precision = Double(i)
+        default: precision = def.precision
+        }
+        let rrp = (store.get("boolean_remove_redundant_points") as? Bool) ?? def.removeRedundantPoints
+        let drup = (store.get("boolean_divide_remove_unpainted") as? Bool) ?? def.divideRemoveUnpainted
+        return BooleanOptions(precision: precision,
+                              removeRedundantPoints: rrp,
+                              divideRemoveUnpainted: drup)
+    }
+    for op in booleanOps {
+        effects["boolean_\(op)"] = { _, _, store in
+            let opts = booleanOptionsFromStore(store)
+            Controller(model: model).applyDestructiveBoolean(op, options: opts)
+            return nil
+        }
+    }
+    // Boolean panel compound-shape menu actions (also dispatched by
+    // the hamburger menu path, but yaml-driven menu items route here).
+    effects["make_compound_shape"] = { _, _, _ in
+        Controller(model: model).makeCompoundShape()
+        return nil
+    }
+    effects["release_compound_shape"] = { _, _, _ in
+        Controller(model: model).releaseCompoundShape()
+        return nil
+    }
+    effects["expand_compound_shape"] = { _, _, _ in
+        Controller(model: model).expandCompoundShape()
+        return nil
+    }
+    // Alt/Option+click compound-creating variants. See BOOLEAN.md
+    // §Compound shapes. Each keyed effect creates a live compound
+    // shape with the chosen operation instead of applying the
+    // destructive equivalent.
+    let compoundOps = ["union", "subtract_front", "intersection", "exclude"]
+    for op in compoundOps {
+        effects["boolean_\(op)_compound"] = { _, _, _ in
+            Controller(model: model).applyCompoundCreation(op)
+            return nil
+        }
+    }
+    // Repeat Boolean Operation reads state.last_boolean_op (13-value
+    // enum; see BOOLEAN.md §Repeat state) and re-dispatches via
+    // applyRepeatBooleanOperation.
+    effects["repeat_boolean_operation"] = { _, _, store in
+        let last = store.get("last_boolean_op") as? String
+        let opts = booleanOptionsFromStore(store)
+        Controller(model: model).applyRepeatBooleanOperation(last, options: opts)
+        return nil
+    }
+    // Reset Panel clears last_op only (handled by the yaml `set`
+    // effect that pairs with this one); dialog defaults are not
+    // reset here.
+    effects["reset_boolean_panel"] = { _, _, _ in nil }
     return effects
 }

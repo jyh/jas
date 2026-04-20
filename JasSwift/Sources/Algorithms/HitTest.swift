@@ -295,7 +295,7 @@ private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Do
         return segs.contains { s in
             segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
         }
-    case .text, .textPath, .group, .layer:
+    case .text, .textPath, .group, .layer, .live:
         let b = elem.bounds
         let corners = [(b.x, b.y), (b.x + b.width, b.y),
                        (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]

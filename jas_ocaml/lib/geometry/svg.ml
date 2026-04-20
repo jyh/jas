@@ -314,6 +314,14 @@ let rec element_svg indent (elem : Element.element) =
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
+  | Live (Compound_shape cs) ->
+    (* Phase 1: emit as a group of operands so SVG export remains
+       round-trippable. Phase 2 replaces with the evaluated geometry. *)
+    let header = Printf.sprintf "%s<g data-jas-live=\"compound_shape\"%s%s>"
+      indent (opacity_attr cs.opacity) (transform_attr cs.transform) in
+    let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) cs.operands) in
+    let footer = Printf.sprintf "%s</g>" indent in
+    String.concat "\n" (header :: child_lines @ [footer])
 
 let document_to_svg doc =
   let (bx, by, bw, bh) = Document.bounds doc in

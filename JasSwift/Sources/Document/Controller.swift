@@ -499,6 +499,368 @@ public class Controller {
                                   selection: newSelection)
     }
 
+    /// Make a compound shape from the current selection using UNION.
+    /// Thin wrapper around makeCompoundShape(operation:).
+    public func makeCompoundShape() {
+        makeCompoundShape(operation: .union)
+    }
+
+    /// Make a compound shape from the current selection using the
+    /// given [operation]. All selected elements must be siblings;
+    /// at least 2 required. Paint inherits from the frontmost
+    /// (last-in-path-order) operand. The new compound replaces its
+    /// operands in place and becomes the selection. See BOOLEAN.md
+    /// §Compound shapes.
+    public func makeCompoundShape(operation: CompoundOperation) {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
+        guard paths.count >= 2 else { return }
+        let parent = Array(paths[0].dropLast())
+        guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
+        let elements = paths.map { doc.getElement($0) }
+        let frontmost = elements.last!
+        let cs = CompoundShape(
+            operation: operation,
+            operands: elements,
+            fill: frontmost.fill,
+            stroke: frontmost.stroke,
+            opacity: 1.0,
+            transform: frontmost.transform,
+            locked: false,
+            visibility: frontmost.visibility
+        )
+        let compound = Element.live(.compoundShape(cs))
+        var newDoc = doc
+        for path in paths.reversed() {
+            newDoc = newDoc.deleteElement(path)
+        }
+        let insertPath = paths[0]
+        let layerIdx = insertPath[0]
+        let childIdx = insertPath.count > 1 ? insertPath[1] : 0
+        let layer = newDoc.layers[layerIdx]
+        var newChildren = layer.children
+        newChildren.insert(compound, at: childIdx)
+        let newLayer = Layer(name: layer.name, children: newChildren,
+                            opacity: layer.opacity, transform: layer.transform)
+        var newLayers = newDoc.layers
+        newLayers[layerIdx] = newLayer
+        let newSelection: Selection = [ElementSelection.all(insertPath)]
+        model.document = Document(layers: newLayers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
+    /// Alt/Option+click on the four Shape Mode buttons. Creates a
+    /// live compound shape with the chosen [opName] (union,
+    /// subtract_front, intersection, exclude) instead of applying
+    /// the destructive variant. Unknown op names are no-ops.
+    public func applyCompoundCreation(_ opName: String) {
+        let op: CompoundOperation
+        switch opName {
+        case "union": op = .union
+        case "subtract_front": op = .subtractFront
+        case "intersection": op = .intersection
+        case "exclude": op = .exclude
+        default: return
+        }
+        makeCompoundShape(operation: op)
+    }
+
+    /// Release every selected compound shape. Each is replaced with
+    /// its operand children; operands keep their own paint. Released
+    /// operands become the new selection.
+    public func releaseCompoundShape() {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        var csPaths: [ElementPath] = []
+        for es in doc.selection {
+            if case .live = doc.getElement(es.path) {
+                csPaths.append(es.path)
+            }
+        }
+        guard !csPaths.isEmpty else { return }
+        csPaths.sort { $0.lexicographicallyPrecedes($1) }
+        var newDoc = doc
+        for csPath in csPaths.reversed() {
+            guard case .live(.compoundShape(let cs)) = newDoc.getElement(csPath) else { continue }
+            newDoc = newDoc.deleteElement(csPath)
+            let layerIdx = csPath[0]
+            let childIdx = csPath.count > 1 ? csPath[1] : 0
+            let layer = newDoc.layers[layerIdx]
+            var newChildren = layer.children
+            newChildren.insert(contentsOf: cs.operands, at: childIdx)
+            let newLayer = Layer(name: layer.name, children: newChildren,
+                                opacity: layer.opacity, transform: layer.transform)
+            var newLayers = newDoc.layers
+            newLayers[layerIdx] = newLayer
+            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
+                              selection: [])
+        }
+        var newSelection: Selection = []
+        var offset = 0
+        for csPath in csPaths {
+            guard case .live(.compoundShape(let cs)) = doc.getElement(csPath) else { continue }
+            let n = cs.operands.count
+            let layerIdx = csPath[0]
+            let childIdx = (csPath.count > 1 ? csPath[1] : 0) + offset
+            for j in 0..<n {
+                newSelection.insert(ElementSelection.all([layerIdx, childIdx + j]))
+            }
+            offset += n - 1
+        }
+        model.document = Document(layers: newDoc.layers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
+    /// Expand every selected compound shape into static Polygon
+    /// elements derived from its evaluated geometry. Expanded
+    /// polygons become the new selection.
+    public func expandCompoundShape() {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        var csPaths: [ElementPath] = []
+        for es in doc.selection {
+            if case .live = doc.getElement(es.path) {
+                csPaths.append(es.path)
+            }
+        }
+        guard !csPaths.isEmpty else { return }
+        csPaths.sort { $0.lexicographicallyPrecedes($1) }
+        var expandedCounts: [Int] = []
+        var newDoc = doc
+        for csPath in csPaths.reversed() {
+            guard case .live(.compoundShape(let cs)) = newDoc.getElement(csPath) else {
+                expandedCounts.append(0)
+                continue
+            }
+            let expanded = cs.expand(precision: DEFAULT_PRECISION)
+            expandedCounts.append(expanded.count)
+            newDoc = newDoc.deleteElement(csPath)
+            let layerIdx = csPath[0]
+            let childIdx = csPath.count > 1 ? csPath[1] : 0
+            let layer = newDoc.layers[layerIdx]
+            var newChildren = layer.children
+            newChildren.insert(contentsOf: expanded, at: childIdx)
+            let newLayer = Layer(name: layer.name, children: newChildren,
+                                opacity: layer.opacity, transform: layer.transform)
+            var newLayers = newDoc.layers
+            newLayers[layerIdx] = newLayer
+            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
+                              selection: [])
+        }
+        expandedCounts.reverse()
+        var newSelection: Selection = []
+        var offset = 0
+        for (csPath, n) in zip(csPaths, expandedCounts) {
+            let layerIdx = csPath[0]
+            let childIdx = (csPath.count > 1 ? csPath[1] : 0) + offset
+            for j in 0..<n {
+                newSelection.insert(ElementSelection.all([layerIdx, childIdx + j]))
+            }
+            offset += n - 1
+        }
+        model.document = Document(layers: newDoc.layers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
+    /// Destructively apply one of the nine boolean ops to the
+    /// current selection. Supported: "union", "intersection",
+    /// "exclude", "subtract_front", "subtract_back", "crop",
+    /// "divide", "trim", "merge".
+    ///
+    /// [options] carries the document-scoped Boolean Options
+    /// settings (precision / remove_redundant_points /
+    /// divide_remove_unpainted) per BOOLEAN.md §Boolean Options
+    /// dialog. Defaults are applied when not provided.
+    ///
+    /// Semantics per BOOLEAN.md §Operand and paint rules:
+    /// - UNION / INTERSECTION / EXCLUDE: all operands consumed;
+    ///   result carries the frontmost operand's paint.
+    /// - SUBTRACT_FRONT: frontmost is consumed as cutter; each
+    ///   survivor keeps its own paint.
+    /// - SUBTRACT_BACK: backmost is consumed as cutter.
+    /// - CROP: frontmost is consumed as mask; survivors clipped to
+    ///   its interior.
+    /// - DIVIDE: cut the union apart so no two fragments overlap;
+    ///   each fragment inherits the frontmost covering operand's
+    ///   paint.
+    /// - TRIM: each operand minus the union of all later operands;
+    ///   frontmost is untouched.
+    /// - MERGE: TRIM, then union touching survivors whose solid-
+    ///   color fills are exactly equal.
+    public func applyDestructiveBoolean(
+        _ opName: String, options: BooleanOptions = BooleanOptions()
+    ) {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
+        guard paths.count >= 2 else { return }
+        let parent = Array(paths[0].dropLast())
+        guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
+        let elements = paths.map { doc.getElement($0) }
+        let precision = options.precision
+
+        // outputs: one (polygonSet, element-for-paint) pair per fragment.
+        var outputs: [(BoolPolygonSet, Element)] = []
+        switch opName {
+        case "union", "intersection", "exclude":
+            let sets = elements.map { elementToPolygonSet($0, precision: precision) }
+            let op: CompoundOperation = opName == "union" ? .union
+                : opName == "intersection" ? .intersection : .exclude
+            outputs.append((applyOperation(op, sets), elements.last!))
+        case "subtract_front", "crop":
+            let cutter = elementToPolygonSet(elements.last!, precision: precision)
+            for survivor in elements.dropLast() {
+                let sSet = elementToPolygonSet(survivor, precision: precision)
+                let res = opName == "crop"
+                    ? booleanIntersect(sSet, cutter)
+                    : booleanSubtract(sSet, cutter)
+                outputs.append((res, survivor))
+            }
+        case "subtract_back":
+            let cutter = elementToPolygonSet(elements.first!, precision: precision)
+            for survivor in elements.dropFirst() {
+                let sSet = elementToPolygonSet(survivor, precision: precision)
+                outputs.append((booleanSubtract(sSet, cutter), survivor))
+            }
+        case "divide":
+            // Walk operands back-to-front, maintaining a partition
+            // of the union-so-far as (region, frontmost-covering
+            // operand index) pairs. Each incoming operand splits
+            // every existing region into overlap / non-overlap;
+            // overlap relabels to the incoming index (now frontmost).
+            let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }
+            var accumulator: [(BoolPolygonSet, Int)] = []
+            for (i, opSet) in operandSets.enumerated() {
+                var newAcc: [(BoolPolygonSet, Int)] = []
+                var remaining = opSet
+                for (existingRegion, existingIdx) in accumulator {
+                    let overlap = booleanIntersect(existingRegion, opSet)
+                    if !overlap.isEmpty { newAcc.append((overlap, i)) }
+                    let nonOverlap = booleanSubtract(existingRegion, opSet)
+                    if !nonOverlap.isEmpty { newAcc.append((nonOverlap, existingIdx)) }
+                    remaining = booleanSubtract(remaining, existingRegion)
+                }
+                if !remaining.isEmpty { newAcc.append((remaining, i)) }
+                accumulator = newAcc
+            }
+            for (region, paintIdx) in accumulator {
+                outputs.append((region, elements[paintIdx]))
+            }
+        case "trim", "merge":
+            let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }
+            var trimmed: [(BoolPolygonSet, Element)] = []
+            for i in 0..<elements.count {
+                var region = operandSets[i]
+                for later in operandSets[(i + 1)...] {
+                    region = booleanSubtract(region, later)
+                }
+                if !region.isEmpty {
+                    trimmed.append((region, elements[i]))
+                }
+            }
+            if opName == "trim" {
+                outputs.append(contentsOf: trimmed)
+            } else {
+                // MERGE: unify touching same-fill survivors. O(N^2)
+                // pass; acceptable for panel-sized selections. The
+                // frontmost contributor wins stroke / common props
+                // on the merged output.
+                var consumed = [Bool](repeating: false, count: trimmed.count)
+                for i in 0..<trimmed.count {
+                    if consumed[i] { continue }
+                    consumed[i] = true
+                    var merged = trimmed[i].0
+                    var paintSrc = trimmed[i].1
+                    if let fillI = paintSrc.fill {
+                        for j in (i + 1)..<trimmed.count {
+                            if consumed[j] { continue }
+                            if let fillJ = trimmed[j].1.fill,
+                               fillI.color == fillJ.color {
+                                merged = booleanUnion(merged, trimmed[j].0)
+                                paintSrc = trimmed[j].1
+                                consumed[j] = true
+                            }
+                        }
+                    }
+                    outputs.append((merged, paintSrc))
+                }
+            }
+        default:
+            return
+        }
+
+        // Flatten to Polygon elements; drop rings with < 3 points.
+        // Optional per BooleanOptions:
+        // - divide_remove_unpainted: drop unpainted DIVIDE fragments
+        // - remove_redundant_points: collapse near-collinear points
+        var newElements: [Element] = []
+        for (ps, paintSrc) in outputs {
+            if opName == "divide" && options.divideRemoveUnpainted
+               && paintSrc.fill == nil && paintSrc.stroke == nil {
+                continue
+            }
+            for ring in ps {
+                let r = options.removeRedundantPoints
+                    ? collapseCollinearPoints(ring, tolerance: options.precision)
+                    : ring
+                guard r.count >= 3 else { continue }
+                newElements.append(.polygon(Polygon(
+                    points: r,
+                    fill: paintSrc.fill,
+                    stroke: paintSrc.stroke,
+                    opacity: 1.0,
+                    transform: paintSrc.transform,
+                    locked: false,
+                    visibility: paintSrc.visibility
+                )))
+            }
+        }
+
+        var newDoc = doc
+        for path in paths.reversed() {
+            newDoc = newDoc.deleteElement(path)
+        }
+        let insertPath = paths[0]
+        let layerIdx = insertPath[0]
+        let childIdx = insertPath.count > 1 ? insertPath[1] : 0
+        let layer = newDoc.layers[layerIdx]
+        var newChildren = layer.children
+        newChildren.insert(contentsOf: newElements, at: childIdx)
+        let newLayer = Layer(name: layer.name, children: newChildren,
+                            opacity: layer.opacity, transform: layer.transform)
+        var newLayers = newDoc.layers
+        newLayers[layerIdx] = newLayer
+        var newSelection: Selection = []
+        for i in 0..<newElements.count {
+            newSelection.insert(ElementSelection.all([layerIdx, childIdx + i]))
+        }
+        model.document = Document(layers: newLayers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
+    /// Re-apply the last destructive or compound-creating boolean op
+    /// to the current selection. [lastOp] is the 13-value enum from
+    /// BOOLEAN.md §Repeat state: op names ending in _compound route
+    /// to applyCompoundCreation; all others route to
+    /// applyDestructiveBoolean. No-op when [lastOp] is nil or empty.
+    public func applyRepeatBooleanOperation(
+        _ lastOp: String?, options: BooleanOptions = BooleanOptions()
+    ) {
+        guard let op = lastOp, !op.isEmpty else { return }
+        let suffix = "_compound"
+        if op.hasSuffix(suffix) {
+            let base = String(op.dropLast(suffix.count))
+            applyCompoundCreation(base)
+        } else {
+            applyDestructiveBoolean(op, options: options)
+        }
+    }
+
     /// Set the fill of every element in the current selection.
     public func setSelectionFill(_ fill: Fill?) {
         var doc = model.document

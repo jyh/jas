@@ -218,7 +218,7 @@ public func recognizeElement(_ element: Element, _ cfg: RecognizeConfig) -> (Sha
     switch element {
     case .path(let p): pts = flattenPathCommands(p.d)
     case .polyline(let p): pts = p.points
-    case .line, .rect, .circle, .ellipse, .polygon, .text, .textPath, .group, .layer:
+    case .line, .rect, .circle, .ellipse, .polygon, .text, .textPath, .group, .layer, .live:
         return nil
     }
     guard let shape = recognize(pts, cfg) else { return nil }
