@@ -2083,3 +2083,241 @@ actions:
     effects:
       - snapshot
       - expand_compound_shape: true
+
+  # ── Artboards (ARTBOARDS.md) ─────────────────────────────────
+
+  new_artboard:
+    description: >
+      Create a new artboard silently (no dialogue). Size inherits
+      from the current artboard (topmost panel-selected, else first).
+      Position is (0,0) if panel-selection is empty, else offset
+      (20,20) pt from the current artboard's top-left. Name is
+      "Artboard N" with the smallest unused N.
+    category: artboards
+    effects:
+      - snapshot
+      - if:
+          condition: "active_document.artboards_panel_selection_ids.length > 0"
+          then:
+            - doc.create_artboard:
+                width: "active_document.current_artboard.width"
+                height: "active_document.current_artboard.height"
+                x: "active_document.current_artboard.x + 20"
+                y: "active_document.current_artboard.y + 20"
+          else:
+            - doc.create_artboard:
+                width: "active_document.current_artboard.width"
+                height: "active_document.current_artboard.height"
+                x: "0"
+                y: "0"
+      - set_panel_state:
+          panel: artboards
+          key: rearrange_dirty
+          value: "true"
+
+  duplicate_artboards:
+    description: >
+      Deep-copy each panel-selected artboard. Each duplicate gets a
+      fresh id, the next unused "Artboard N" name, and is offset
+      (20,20) pt from its source's top-left. Contained-element
+      copying is not implemented in Flask (no element model); native
+      ports override the doc.duplicate_artboard store method.
+    category: artboards
+    enabled_when: "active_document.artboards_panel_selection_ids.length > 0"
+    effects:
+      - snapshot
+      - foreach:
+          source: "active_document.artboards_panel_selection_ids"
+          as: ab_id
+        do:
+          - doc.duplicate_artboard: ab_id
+      - set_panel_state:
+          panel: artboards
+          key: rearrange_dirty
+          value: "true"
+
+  delete_artboards:
+    description: >
+      Delete panel-selected artboards. Elements inside them remain
+      in the document — artboards are boundaries, not containers.
+      The at-least-one-artboard invariant is enforced by the menu /
+      footer / keyboard enabled_when predicates; this action assumes
+      the precondition (selection non-empty AND size < total count).
+    category: artboards
+    enabled_when: "active_document.artboards_panel_selection_ids.length > 0 and active_document.artboards_panel_selection_ids.length < active_document.artboards_count"
+    effects:
+      - snapshot
+      - foreach:
+          source: "active_document.artboards_panel_selection_ids"
+          as: ab_id
+        do:
+          - doc.delete_artboard_by_id: ab_id
+      - set_panel_state:
+          panel: artboards
+          key: artboards_panel_selection
+          value: "[]"
+      - set_panel_state:
+          panel: artboards
+          key: panel_selection_anchor
+          value: "null"
+      - set_panel_state:
+          panel: artboards
+          key: rearrange_dirty
+          value: "true"
+
+  delete_empty_artboards:
+    description: >
+      Flask-side stub — element bounds aren't available server-side,
+      so nothing is ever detected as empty. Native ports compute
+      intersection against the element tree and delete artboards with
+      no intersecting geometry, preserving position 1 if all are
+      empty. Single undo op when native.
+    category: artboards
+    effects:
+      - log: "delete_empty_artboards (Flask stub; native ports implement)"
+
+  artboards_panel_select:
+    description: >
+      Panel-select an artboard by id. modifier=none replaces the
+      selection with just this id (anchor becomes this id).
+      modifier=shift extends the range from anchor to target in list
+      order. modifier=meta toggles the target id in or out. Shift /
+      meta semantics are wired in native apps; Flask phase-1 handles
+      the common replace path.
+    category: artboards
+    params:
+      artboard_id: { type: string }
+      modifier: { type: string, default: "none" }
+    effects:
+      - if:
+          condition: "param.modifier == 'none' or param.modifier == null"
+          then:
+            - set_panel_state:
+                panel: artboards
+                key: artboards_panel_selection
+                value: "[param.artboard_id]"
+            - set_panel_state:
+                panel: artboards
+                key: panel_selection_anchor
+                value: "param.artboard_id"
+          else:
+            - log: "artboards_panel_select non-none modifier (sub-phase 4 / native)"
+
+  artboards_select_all:
+    description: >
+      Select every artboard in the panel (Command-A). Reads the ids
+      from active_document.artboards via map.
+    category: artboards
+    effects:
+      - set_panel_state:
+          panel: artboards
+          key: artboards_panel_selection
+          value: "map(active_document.artboards, fun ab -> ab.id)"
+
+  rename_artboard:
+    description: >
+      Begin inline renaming of a single panel-selected artboard.
+      Sets panel.renaming_artboard to the target id; the row template
+      shows a text_input in place of the name label while the field
+      is set. Triggered by F2, Enter (with single selection),
+      click-and-wait on the name, or the Rename menu entry.
+    category: artboards
+    params:
+      artboard_id: { type: string }
+    enabled_when: "active_document.artboards_panel_selection_ids.length == 1"
+    effects:
+      - set_panel_state:
+          panel: artboards
+          key: renaming_artboard
+          value: "param.artboard_id"
+
+  confirm_artboard_rename:
+    description: >
+      Commit the inline rename. Trims leading / trailing whitespace;
+      reverts to the prior name silently if the trimmed result is
+      empty; truncates to 256 characters. Duplicate names are
+      allowed. Single undo op. Triggered by Enter or blur on the
+      rename input.
+    category: artboards
+    params:
+      artboard_id: { type: string }
+      new_name: { type: string }
+    effects:
+      - snapshot
+      - doc.set_artboard_field:
+          id: "param.artboard_id"
+          field: "name"
+          value: "param.new_name"
+      - set_panel_state:
+          panel: artboards
+          key: renaming_artboard
+          value: "null"
+
+  cancel_artboard_rename:
+    description: >
+      Abandon the inline rename; the name reverts to its value before
+      editing began. Triggered by Escape during rename.
+    category: artboards
+    effects:
+      - set_panel_state:
+          panel: artboards
+          key: renaming_artboard
+          value: "null"
+
+  reset_artboards_panel:
+    description: >
+      Reset panel UI state (panel-selection cleared, scroll to top,
+      reference-point preference restored to center). Does not
+      modify document data.
+    category: artboards
+    effects:
+      - set_panel_state:
+          panel: artboards
+          key: artboards_panel_selection
+          value: "[]"
+      - set_panel_state:
+          panel: artboards
+          key: panel_selection_anchor
+          value: "null"
+      - set_panel_state:
+          panel: artboards
+          key: reference_point
+          value: "'center'"
+
+  # Placeholders for sub-phase 4 (reorder) and sub-phase 5
+  # (dialogue). Action names resolve so panel behaviors don't hit
+  # missing-action errors.
+
+  move_artboard_up:
+    description: "Sub-phase 4: reorder panel-selected artboards one position earlier."
+    category: artboards
+    effects:
+      - log: "move_artboard_up (sub-phase 4)"
+
+  move_artboard_down:
+    description: "Sub-phase 4: reorder panel-selected artboards one position later."
+    category: artboards
+    effects:
+      - log: "move_artboard_down (sub-phase 4)"
+
+  open_artboard_options:
+    description: "Sub-phase 5: open the Artboard Options Dialogue."
+    category: artboards
+    params:
+      artboard_id: { type: string }
+    effects:
+      - log: "open_artboard_options (sub-phase 5)"
+
+  convert_to_artboards:
+    description: "Phase-1 deferred. Grayed with 'Coming soon' tooltip."
+    category: artboards
+    enabled_when: "false"
+    effects:
+      - log: "convert_to_artboards (deferred)"
+
+  rearrange_artboards:
+    description: "Phase-1 deferred. Grayed with 'Coming soon' tooltip."
+    category: artboards
+    enabled_when: "false"
+    effects:
+      - log: "rearrange_artboards (deferred)"

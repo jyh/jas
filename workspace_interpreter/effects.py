@@ -203,6 +203,72 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         artboard = store.create_artboard(overrides)
         return None, artboard
 
+    # doc.delete_artboard_by_id: id_expr — ARTBOARDS.md §Menu — Delete Artboards
+    # Removes the artboard with the given id from document.artboards.
+    # Returns the deleted artboard for `as:` binding, or None.
+    if "doc.delete_artboard_by_id" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        id_expr = effect["doc.delete_artboard_by_id"]
+        eval_ctx = store.eval_context(ctx)
+        val = evaluate(str(id_expr) if id_expr is not None else "", eval_ctx)
+        if val.type != ValueType.STRING:
+            return None, None
+        deleted = store.delete_artboard_by_id(val.value)
+        return None, deleted
+
+    # doc.duplicate_artboard: { id, offset_x?, offset_y? }
+    # — ARTBOARDS.md §Menu — Duplicate Artboards
+    # Deep-copies the artboard with the given id and appends it with
+    # a fresh id, next-unused name, offset position. Returns the new
+    # artboard.
+    if "doc.duplicate_artboard" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.duplicate_artboard"]
+        if isinstance(spec, str):
+            spec = {"id": spec}
+        if not isinstance(spec, dict):
+            return None, None
+        eval_ctx = store.eval_context(ctx)
+        id_val = evaluate(str(spec.get("id", "")), eval_ctx)
+        if id_val.type != ValueType.STRING:
+            return None, None
+        ox = 20
+        oy = 20
+        if "offset_x" in spec:
+            v = evaluate(str(spec["offset_x"]), eval_ctx)
+            if v.type == ValueType.NUMBER:
+                ox = v.value
+        if "offset_y" in spec:
+            v = evaluate(str(spec["offset_y"]), eval_ctx)
+            if v.type == ValueType.NUMBER:
+                oy = v.value
+        dup = store.duplicate_artboard(id_val.value, ox, oy)
+        return None, dup
+
+    # doc.set_artboard_field: { id, field, value }
+    # — ARTBOARDS.md §Rename, §Artboard Options Dialogue
+    # Writes value to the named field on the artboard with the given id.
+    if "doc.set_artboard_field" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.set_artboard_field"]
+        if not isinstance(spec, dict):
+            return None
+        eval_ctx = store.eval_context(ctx)
+        id_val = evaluate(str(spec.get("id", "")), eval_ctx)
+        if id_val.type != ValueType.STRING:
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            value_result = evaluate(value_expr, eval_ctx)
+            value = value_result.value if value_result.type != ValueType.CLOSURE else None
+        else:
+            value = value_expr
+        store.set_artboard_field(id_val.value, field, value)
+        return None
+
     # doc.delete_at: path_expr — PHASE3 §5.5
     # Deletes the element at the given path. Returns the deleted
     # element (native form) for binding via `as:`.

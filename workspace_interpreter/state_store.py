@@ -472,6 +472,78 @@ class StateStore:
         artboards.append(artboard)
         return artboard
 
+    def find_artboard_by_id(self, artboard_id: str) -> dict | None:
+        """Return the live artboard dict with this id, or None."""
+        if self._document is None:
+            return None
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return None
+        for a in artboards:
+            if isinstance(a, dict) and a.get("id") == artboard_id:
+                return a
+        return None
+
+    def delete_artboard_by_id(self, artboard_id: str) -> dict | None:
+        """Remove the artboard with this id from the list. Returns
+        the deleted dict, or None if not found. Callers enforce the
+        at-least-one-artboard invariant (via enabled_when predicates
+        in the panel yaml)."""
+        if self._document is None:
+            return None
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return None
+        for i, a in enumerate(artboards):
+            if isinstance(a, dict) and a.get("id") == artboard_id:
+                return artboards.pop(i)
+        return None
+
+    def set_artboard_field(self, artboard_id: str, field: str, value) -> bool:
+        """Write value to the named field of the artboard with this id.
+        Returns True on success, False if the artboard wasn't found."""
+        ab = self.find_artboard_by_id(artboard_id)
+        if ab is None:
+            return False
+        ab[field] = value
+        return True
+
+    def duplicate_artboard(
+        self, artboard_id: str, offset_x: float = 20, offset_y: float = 20
+    ) -> dict | None:
+        """Deep-copy the artboard with this id, mint a fresh id, pick
+        the next unused ``Artboard N`` name, offset position by
+        ``(offset_x, offset_y)`` pt, and append to
+        ``document.artboards``. Returns the new artboard, or None if
+        the source wasn't found or there is no document.
+
+        Contained-element copying is not implemented here — the
+        artboard-only copy is correct for the Flask phase-1 surface,
+        which has no element model. Native ports that carry elements
+        can override this method."""
+        source = self.find_artboard_by_id(artboard_id)
+        if source is None or self._document is None:
+            return None
+        artboards = self._document.setdefault("artboards", [])
+        if not isinstance(artboards, list):
+            return None
+        existing_ids = {a.get("id") for a in artboards if isinstance(a, dict)}
+        aid: str | None = None
+        for _ in range(100):
+            candidate = _generate_artboard_id(self._artboard_id_rng)
+            if candidate not in existing_ids:
+                aid = candidate
+                break
+        if aid is None:
+            return None
+        dup = copy.deepcopy(source)
+        dup["id"] = aid
+        dup["name"] = next_artboard_name(artboards)
+        dup["x"] = dup.get("x", 0) + offset_x
+        dup["y"] = dup.get("y", 0) + offset_y
+        artboards.append(dup)
+        return dup
+
     def set_element_field(self, path: tuple[int, ...], dotted_field: str, value) -> bool:
         """Write value to the element at path under dotted_field.
         Creates intermediate dicts as needed. Returns True on success."""
@@ -546,22 +618,31 @@ class StateStore:
             if isinstance(ab_sel, list) else []
         )
         current_artboard_id: str | None = None
+        current_artboard: dict | None = None
         selected_set = set(artboards_panel_selection_ids)
         if selected_set:
             for a in raw_artboards:
                 if isinstance(a, dict) and a.get("id") in selected_set:
                     current_artboard_id = a["id"]
+                    current_artboard = dict(a)
                     break
-        if current_artboard_id is None and raw_artboards:
+        if current_artboard is None and raw_artboards:
             first = raw_artboards[0]
             if isinstance(first, dict):
                 current_artboard_id = first.get("id")
+                current_artboard = dict(first)
+        # When there are no artboards at all (document is None),
+        # current_artboard is {} rather than None so expressions like
+        # current_artboard.width don't null-deref.
+        if current_artboard is None:
+            current_artboard = {}
         artboards_common = {
             "artboards": artboards_view,
             "artboard_options": dict(raw_options),
             "artboards_count": artboards_count,
             "next_artboard_name": next_ab_name,
             "current_artboard_id": current_artboard_id,
+            "current_artboard": current_artboard,
             "artboards_panel_selection_ids": artboards_panel_selection_ids,
         }
         if self._document is None:
