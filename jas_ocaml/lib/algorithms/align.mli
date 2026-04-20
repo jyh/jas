@@ -78,3 +78,18 @@ val distribute_vertical_center
 val distribute_bottom
   : (element_path * Element.element) list -> align_reference -> bounds_fn
   -> align_translation list
+
+val distribute_spacing_along_axis
+  : (element_path * Element.element) list -> align_reference
+  -> axis -> float option -> bounds_fn
+  -> align_translation list
+
+val distribute_vertical_spacing
+  : (element_path * Element.element) list -> align_reference
+  -> float option -> bounds_fn
+  -> align_translation list
+
+val distribute_horizontal_spacing
+  : (element_path * Element.element) list -> align_reference
+  -> float option -> bounds_fn
+  -> align_translation list
