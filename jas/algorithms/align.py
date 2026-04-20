@@ -262,3 +262,95 @@ def distribute_vertical_center(elements, reference, bounds_fn):
 def distribute_bottom(elements, reference, bounds_fn):
     """DISTRIBUTE_BOTTOM_BUTTON."""
     return distribute_along_axis(elements, reference, Axis.VERTICAL, AxisAnchor.MAX, bounds_fn)
+
+
+def distribute_spacing_along_axis(
+    elements: list[tuple[ElementPath, Element]],
+    reference: AlignReference,
+    axis: Axis,
+    explicit_gap: Optional[float],
+    bounds_fn: BoundsFn,
+) -> list[AlignTranslation]:
+    """Generic driver for the two Distribute Spacing operations.
+
+    Sorts the selection along the axis by min-edge and equalises the
+    gaps between consecutive bboxes.
+
+    - explicit_gap=None (average mode): extremals hold, interior gaps
+      average to (span − Σ sizes) / (n − 1). Used when no key object.
+    - explicit_gap=g (explicit mode): key object holds; others placed
+      so each consecutive pair has exactly `g` pts of space. Requires
+      reference.key_path; returns [] otherwise.
+
+    Fewer than 3 elements yields []. Keys are skipped. Zero-deltas
+    omitted. Output sorted by path.
+    """
+    n = len(elements)
+    if n < 3:
+        return []
+
+    sorted_list: list[tuple[int, float, float]] = []
+    for i, (_, e) in enumerate(elements):
+        lo, hi, _ = axis_extent(bounds_fn(e), axis)
+        sorted_list.append((i, lo, hi))
+    sorted_list.sort(key=lambda t: t[1])
+
+    if explicit_gap is not None:
+        key_path = reference.key_path
+        if key_path is None:
+            return []
+        key_original_idx = next(
+            (i for i, (p, _) in enumerate(elements) if tuple(p) == key_path), None)
+        if key_original_idx is None:
+            return []
+        key_sorted_idx = next(
+            (i for i, (oi, _, _) in enumerate(sorted_list) if oi == key_original_idx), None)
+        if key_sorted_idx is None:
+            return []
+        positions = [0.0] * n
+        positions[key_sorted_idx] = sorted_list[key_sorted_idx][1]
+        # Walk forward from key.
+        for i in range(key_sorted_idx + 1, n):
+            prev_size = sorted_list[i - 1][2] - sorted_list[i - 1][1]
+            positions[i] = positions[i - 1] + prev_size + explicit_gap
+        # Walk backward from key.
+        for i in range(key_sorted_idx - 1, -1, -1):
+            size = sorted_list[i][2] - sorted_list[i][1]
+            positions[i] = positions[i + 1] - explicit_gap - size
+    else:
+        total_span = sorted_list[-1][2] - sorted_list[0][1]
+        total_sizes = sum(hi - lo for _, lo, hi in sorted_list)
+        gap = (total_span - total_sizes) / (n - 1)
+        positions = []
+        cursor = sorted_list[0][1]
+        for _, lo, hi in sorted_list:
+            positions.append(cursor)
+            cursor += (hi - lo) + gap
+
+    key_path = reference.key_path
+    out: list[AlignTranslation] = []
+    for sorted_idx, (original_idx, old_min, _) in enumerate(sorted_list):
+        delta = positions[sorted_idx] - old_min
+        if delta == 0:
+            continue
+        path, _ = elements[original_idx]
+        if key_path is not None and tuple(path) == key_path:
+            continue
+        if axis == Axis.HORIZONTAL:
+            out.append(AlignTranslation(path=tuple(path), dx=delta, dy=0))
+        else:
+            out.append(AlignTranslation(path=tuple(path), dx=0, dy=delta))
+    out.sort(key=lambda t: t.path)
+    return out
+
+
+def distribute_vertical_spacing(elements, reference, explicit_gap, bounds_fn):
+    """DISTRIBUTE_VERTICAL_SPACING_BUTTON."""
+    return distribute_spacing_along_axis(
+        elements, reference, Axis.VERTICAL, explicit_gap, bounds_fn)
+
+
+def distribute_horizontal_spacing(elements, reference, explicit_gap, bounds_fn):
+    """DISTRIBUTE_HORIZONTAL_SPACING_BUTTON."""
+    return distribute_spacing_along_axis(
+        elements, reference, Axis.HORIZONTAL, explicit_gap, bounds_fn)

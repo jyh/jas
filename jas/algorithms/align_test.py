@@ -12,6 +12,7 @@ from algorithms.align import (
     anchor_position, axis_extent,
     distribute_bottom, distribute_horizontal_center, distribute_left,
     distribute_right, distribute_top, distribute_vertical_center,
+    distribute_horizontal_spacing, distribute_vertical_spacing,
     geometric_bounds, preview_bounds,
     union_bounds,
 )
@@ -243,6 +244,71 @@ class DistributeOpsTest(absltest.TestCase):
         self.assertEqual(out[0].dx, -20)
         self.assertEqual(out[1].dx, 60)
         self.assertEqual(out[2].dx, 140)
+
+
+class DistributeSpacingOpsTest(absltest.TestCase):
+    """Stage 5g — two Distribute Spacing operations. Parallels the
+    Rust / Swift / OCaml port tests."""
+
+    def _ref_selection_of(self, rs):
+        return AlignReference.selection(union_bounds(rs, geometric_bounds))
+
+    def _input(self, rs):
+        return [((i,), r) for i, r in enumerate(rs)]
+
+    def test_distribute_spacing_requires_at_least_three_elements(self):
+        rs = [_rect(0, 0, 10, 10), _rect(50, 0, 10, 10)]
+        out = distribute_horizontal_spacing(
+            self._input(rs), self._ref_selection_of(rs), None, geometric_bounds)
+        self.assertEqual(out, [])
+
+    def test_distribute_horizontal_spacing_average_equalises_gaps(self):
+        # Widths 10 each, span 0..100, sum sizes 30, gap = 70/2 = 35.
+        rs = [_rect(0, 0, 10, 10), _rect(20, 0, 10, 10), _rect(90, 0, 10, 10)]
+        out = distribute_horizontal_spacing(
+            self._input(rs), self._ref_selection_of(rs), None, geometric_bounds)
+        # Expected new positions: 0, 45, 90. Only middle moves Δ+25.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dx, 25)
+
+    def test_distribute_vertical_spacing_average_equalises_gaps(self):
+        rs = [_rect(0, 0, 10, 10), _rect(0, 20, 10, 10), _rect(0, 90, 10, 10)]
+        out = distribute_vertical_spacing(
+            self._input(rs), self._ref_selection_of(rs), None, geometric_bounds)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dy, 25)
+
+    def test_distribute_spacing_explicit_without_key_returns_empty(self):
+        rs = [_rect(0, 0, 10, 10), _rect(50, 0, 10, 10), _rect(100, 0, 10, 10)]
+        out = distribute_horizontal_spacing(
+            self._input(rs), self._ref_selection_of(rs), 12, geometric_bounds)
+        self.assertEqual(out, [])
+
+    def test_distribute_horizontal_spacing_explicit_applies_exact_gap(self):
+        # Three rects widths 10; middle key stays. Explicit gap 20.
+        rs = [_rect(0, 0, 10, 10), _rect(100, 0, 10, 10), _rect(200, 0, 10, 10)]
+        key_path = (1,)
+        r = AlignReference.key_object(rs[1].geometric_bounds(), key_path)
+        out = distribute_horizontal_spacing(self._input(rs), r, 20, geometric_bounds)
+        # rs[0] new left = 100 − 20 − 10 = 70; Δ +70.
+        # rs[2] new left = 110 + 20 = 130; Δ −70. Output sorted by path.
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0].path, (0,))
+        self.assertEqual(out[0].dx, 70)
+        self.assertEqual(out[1].path, (2,))
+        self.assertEqual(out[1].dx, -70)
+
+    def test_distribute_spacing_explicit_zero_gap_makes_elements_touch(self):
+        rs = [_rect(0, 0, 10, 10), _rect(100, 0, 10, 10), _rect(200, 0, 10, 10)]
+        key_path = (1,)
+        r = AlignReference.key_object(rs[1].geometric_bounds(), key_path)
+        out = distribute_horizontal_spacing(self._input(rs), r, 0, geometric_bounds)
+        # rs[0] new left = 90; Δ +90. rs[2] new left = 110; Δ −90.
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0].dx, 90)
+        self.assertEqual(out[1].dx, -90)
 
 
 if __name__ == "__main__":
