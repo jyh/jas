@@ -102,6 +102,8 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
         // Alt+click compound-creating variants (phase 9f).
         "boolean_union_compound", "boolean_subtract_front_compound",
         "boolean_intersection_compound", "boolean_exclude_compound",
+        // Repeat / Reset (phases 9i + 9j).
+        "repeat_boolean_operation", "reset_boolean_panel",
     ]
     #expect(Set(effects.keys) == expected)
 }

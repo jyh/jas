@@ -16,6 +16,59 @@ import Foundation
 /// default in the Boolean Options dialog (BOOLEAN.md). Equals 0.01 mm.
 public let DEFAULT_PRECISION: Double = 0.0283
 
+// MARK: - BooleanOptions
+
+/// Document-scoped boolean op settings. Mirrors Rust BooleanOptions
+/// per BOOLEAN.md §Boolean Options dialog.
+public struct BooleanOptions: Equatable {
+    /// Geometric tolerance (points) used for curve flattening and
+    /// collinear-point collapse.
+    public let precision: Double
+    /// If true, collapse collinear / near-duplicate points in output
+    /// rings within [precision] of the line through their neighbors.
+    public let removeRedundantPoints: Bool
+    /// If true, DIVIDE drops fragments with no fill and no stroke.
+    public let divideRemoveUnpainted: Bool
+
+    public init(precision: Double = DEFAULT_PRECISION,
+                removeRedundantPoints: Bool = true,
+                divideRemoveUnpainted: Bool = false) {
+        self.precision = precision
+        self.removeRedundantPoints = removeRedundantPoints
+        self.divideRemoveUnpainted = divideRemoveUnpainted
+    }
+}
+
+/// Single-pass removal of points whose perpendicular distance to the
+/// line between their two neighbors is below [tolerance]. Returns the
+/// original ring when collapse would leave fewer than 3 points.
+/// Matches the Rust collapse_collinear_points reference.
+public func collapseCollinearPoints(
+    _ ring: [(Double, Double)], tolerance: Double
+) -> [(Double, Double)] {
+    let n = ring.count
+    guard n >= 3 else { return ring }
+    var keep = [Bool](repeating: true, count: n)
+    for i in 0..<n {
+        let prev = ring[(i - 1 + n) % n]
+        let cur = ring[i]
+        let nxt = ring[(i + 1) % n]
+        let dx = nxt.0 - prev.0
+        let dy = nxt.1 - prev.1
+        let segLen = (dx * dx + dy * dy).squareRoot()
+        if segLen == 0.0 {
+            keep[i] = false
+            continue
+        }
+        let num = abs(dy * cur.0 - dx * cur.1 + nxt.0 * prev.1 - nxt.1 * prev.0)
+        if num / segLen < tolerance {
+            keep[i] = false
+        }
+    }
+    let result = zip(ring, keep).compactMap { $1 ? $0 : nil }
+    return result.count < 3 ? ring : result
+}
+
 // MARK: - CompoundShape
 
 /// Which boolean operation a compound shape evaluates to. Only the
