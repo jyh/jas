@@ -113,6 +113,41 @@ def test_path_flattens_into_polygon_set():
     assert abs(max_x - 10.0) < 1e-6
 
 
+def test_expand_produces_polygon_per_ring():
+    from geometry.element import (
+        Color,
+        CompoundOperation,
+        CompoundShape,
+        Fill,
+        Polygon,
+    )
+    from geometry.live import DEFAULT_PRECISION
+    red = Fill(color=Color.rgb(1.0, 0.0, 0.0))
+    cs = CompoundShape(
+        operation=CompoundOperation.EXCLUDE,
+        operands=(_rect_at(0, 0), _rect_at(5, 0)),
+        fill=red,
+    )
+    expanded = cs.expand(DEFAULT_PRECISION)
+    # XOR of two overlapping rects → 2 non-overlapping strips → 2 polygons
+    assert len(expanded) == 2
+    for poly in expanded:
+        assert isinstance(poly, Polygon)
+        assert poly.fill == red
+
+
+def test_release_returns_operands_verbatim():
+    from geometry.element import CompoundOperation, CompoundShape
+    r1 = _rect_at(0, 0)
+    r2 = _rect_at(5, 0)
+    cs = CompoundShape(
+        operation=CompoundOperation.UNION,
+        operands=(r1, r2),
+    )
+    released = cs.release()
+    assert released == (r1, r2)
+
+
 def test_multi_subpath_path_yields_multi_ring():
     from geometry.element import ClosePath, LineTo, MoveTo, Path
     from geometry.live import DEFAULT_PRECISION, element_to_polygon_set

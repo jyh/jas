@@ -51,7 +51,7 @@ ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
-    PanelKind.ALIGN,
+    PanelKind.ALIGN, PanelKind.BOOLEAN,
 ]
 
 # Color panel mode commands
@@ -80,6 +80,7 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.PARAGRAPH: "Paragraph",
     PanelKind.ARTBOARDS: "Artboards",
     PanelKind.ALIGN: "Align",
+    PanelKind.BOOLEAN: "Boolean",
 }
 
 
@@ -138,6 +139,19 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.action("Reset Panel", "reset_align_panel"),
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Align", "close_panel"),
+        ]
+    if kind == PanelKind.BOOLEAN:
+        return [
+            PanelMenuItem.action("Repeat Boolean Operation", "repeat_boolean_operation"),
+            PanelMenuItem.action("Boolean Options…", "open_boolean_options"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Make Compound Shape", "make_compound_shape"),
+            PanelMenuItem.action("Release Compound Shape", "release_compound_shape"),
+            PanelMenuItem.action("Expand Compound Shape", "expand_compound_shape"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Reset Panel", "reset_boolean_panel"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Boolean", "close_panel"),
         ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 

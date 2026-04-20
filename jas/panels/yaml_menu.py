@@ -30,6 +30,7 @@ PANEL_KIND_TO_CONTENT_ID = {
     PanelKind.PARAGRAPH: "paragraph_panel_content",
     PanelKind.ARTBOARDS: "artboards_panel_content",
     PanelKind.ALIGN: "align_panel_content",
+    PanelKind.BOOLEAN: "boolean_panel_content",
 }
 
 # Module-level cache for loaded panel specs
