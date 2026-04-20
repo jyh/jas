@@ -1840,5 +1840,16 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         Controller(model: model).expandCompoundShape()
         return nil
     }
+    // Alt/Option+click compound-creating variants. See BOOLEAN.md
+    // §Compound shapes. Each keyed effect creates a live compound
+    // shape with the chosen operation instead of applying the
+    // destructive equivalent.
+    let compoundOps = ["union", "subtract_front", "intersection", "exclude"]
+    for op in compoundOps {
+        effects["boolean_\(op)_compound"] = { _, _, _ in
+            Controller(model: model).applyCompoundCreation(op)
+            return nil
+        }
+    }
     return effects
 }

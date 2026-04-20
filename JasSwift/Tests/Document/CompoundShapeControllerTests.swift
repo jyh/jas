@@ -187,3 +187,41 @@ private func disjointRects() -> Model {
     Controller(model: m).applyDestructiveBoolean("merge")
     #expect(topChildrenCount(m) == 2)
 }
+
+// MARK: - Compound creation (Alt+click)
+
+private func firstChildCompoundOp(_ m: Model) -> CompoundOperation? {
+    guard case .live(.compoundShape(let cs)) = m.document.layers[0].children[0]
+    else { return nil }
+    return cs.operation
+}
+
+@Test func unionCompoundUsesUnion() {
+    let m = twoOverlapping()
+    Controller(model: m).applyCompoundCreation("union")
+    #expect(firstChildCompoundOp(m) == .union)
+}
+
+@Test func subtractFrontCompoundUsesSubtractFront() {
+    let m = twoOverlapping()
+    Controller(model: m).applyCompoundCreation("subtract_front")
+    #expect(firstChildCompoundOp(m) == .subtractFront)
+}
+
+@Test func intersectionCompoundUsesIntersection() {
+    let m = twoOverlapping()
+    Controller(model: m).applyCompoundCreation("intersection")
+    #expect(firstChildCompoundOp(m) == .intersection)
+}
+
+@Test func excludeCompoundUsesExclude() {
+    let m = twoOverlapping()
+    Controller(model: m).applyCompoundCreation("exclude")
+    #expect(firstChildCompoundOp(m) == .exclude)
+}
+
+@Test func compoundCreationUnknownOpIsNoop() {
+    let m = twoOverlapping()
+    Controller(model: m).applyCompoundCreation("nonexistent")
+    #expect(topChildrenCount(m) == 2)
+}
