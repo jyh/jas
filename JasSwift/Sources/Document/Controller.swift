@@ -499,6 +499,150 @@ public class Controller {
                                   selection: newSelection)
     }
 
+    /// Make a compound shape from the current selection using UNION.
+    /// All selected elements must be siblings; at least 2 required.
+    /// Paint inherits from the frontmost (last-in-path-order)
+    /// operand. The new compound replaces its operands in place and
+    /// becomes the selection. See BOOLEAN.md §Compound shapes.
+    public func makeCompoundShape() {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
+        guard paths.count >= 2 else { return }
+        let parent = Array(paths[0].dropLast())
+        guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
+        let elements = paths.map { doc.getElement($0) }
+        let frontmost = elements.last!
+        let cs = CompoundShape(
+            operation: .union,
+            operands: elements,
+            fill: frontmost.fill,
+            stroke: frontmost.stroke,
+            opacity: 1.0,
+            transform: frontmost.transform,
+            locked: false,
+            visibility: frontmost.visibility
+        )
+        let compound = Element.live(.compoundShape(cs))
+        var newDoc = doc
+        for path in paths.reversed() {
+            newDoc = newDoc.deleteElement(path)
+        }
+        let insertPath = paths[0]
+        let layerIdx = insertPath[0]
+        let childIdx = insertPath.count > 1 ? insertPath[1] : 0
+        let layer = newDoc.layers[layerIdx]
+        var newChildren = layer.children
+        newChildren.insert(compound, at: childIdx)
+        let newLayer = Layer(name: layer.name, children: newChildren,
+                            opacity: layer.opacity, transform: layer.transform)
+        var newLayers = newDoc.layers
+        newLayers[layerIdx] = newLayer
+        let newSelection: Selection = [ElementSelection.all(insertPath)]
+        model.document = Document(layers: newLayers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
+    /// Release every selected compound shape. Each is replaced with
+    /// its operand children; operands keep their own paint. Released
+    /// operands become the new selection.
+    public func releaseCompoundShape() {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        var csPaths: [ElementPath] = []
+        for es in doc.selection {
+            if case .live = doc.getElement(es.path) {
+                csPaths.append(es.path)
+            }
+        }
+        guard !csPaths.isEmpty else { return }
+        csPaths.sort { $0.lexicographicallyPrecedes($1) }
+        var newDoc = doc
+        for csPath in csPaths.reversed() {
+            guard case .live(.compoundShape(let cs)) = newDoc.getElement(csPath) else { continue }
+            newDoc = newDoc.deleteElement(csPath)
+            let layerIdx = csPath[0]
+            let childIdx = csPath.count > 1 ? csPath[1] : 0
+            let layer = newDoc.layers[layerIdx]
+            var newChildren = layer.children
+            newChildren.insert(contentsOf: cs.operands, at: childIdx)
+            let newLayer = Layer(name: layer.name, children: newChildren,
+                                opacity: layer.opacity, transform: layer.transform)
+            var newLayers = newDoc.layers
+            newLayers[layerIdx] = newLayer
+            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
+                              selection: [])
+        }
+        var newSelection: Selection = []
+        var offset = 0
+        for csPath in csPaths {
+            guard case .live(.compoundShape(let cs)) = doc.getElement(csPath) else { continue }
+            let n = cs.operands.count
+            let layerIdx = csPath[0]
+            let childIdx = (csPath.count > 1 ? csPath[1] : 0) + offset
+            for j in 0..<n {
+                newSelection.insert(ElementSelection.all([layerIdx, childIdx + j]))
+            }
+            offset += n - 1
+        }
+        model.document = Document(layers: newDoc.layers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
+    /// Expand every selected compound shape into static Polygon
+    /// elements derived from its evaluated geometry. Expanded
+    /// polygons become the new selection.
+    public func expandCompoundShape() {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        var csPaths: [ElementPath] = []
+        for es in doc.selection {
+            if case .live = doc.getElement(es.path) {
+                csPaths.append(es.path)
+            }
+        }
+        guard !csPaths.isEmpty else { return }
+        csPaths.sort { $0.lexicographicallyPrecedes($1) }
+        var expandedCounts: [Int] = []
+        var newDoc = doc
+        for csPath in csPaths.reversed() {
+            guard case .live(.compoundShape(let cs)) = newDoc.getElement(csPath) else {
+                expandedCounts.append(0)
+                continue
+            }
+            let expanded = cs.expand(precision: DEFAULT_PRECISION)
+            expandedCounts.append(expanded.count)
+            newDoc = newDoc.deleteElement(csPath)
+            let layerIdx = csPath[0]
+            let childIdx = csPath.count > 1 ? csPath[1] : 0
+            let layer = newDoc.layers[layerIdx]
+            var newChildren = layer.children
+            newChildren.insert(contentsOf: expanded, at: childIdx)
+            let newLayer = Layer(name: layer.name, children: newChildren,
+                                opacity: layer.opacity, transform: layer.transform)
+            var newLayers = newDoc.layers
+            newLayers[layerIdx] = newLayer
+            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
+                              selection: [])
+        }
+        expandedCounts.reverse()
+        var newSelection: Selection = []
+        var offset = 0
+        for (csPath, n) in zip(csPaths, expandedCounts) {
+            let layerIdx = csPath[0]
+            let childIdx = (csPath.count > 1 ? csPath[1] : 0) + offset
+            for j in 0..<n {
+                newSelection.insert(ElementSelection.all([layerIdx, childIdx + j]))
+            }
+            offset += n - 1
+        }
+        model.document = Document(layers: newDoc.layers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
     /// Set the fill of every element in the current selection.
     public func setSelectionFill(_ fill: Fill?) {
         var doc = model.document
