@@ -1004,12 +1004,20 @@ class CompoundShape(LiveElement):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> tuple[float, float, float, float]:
-        """Phase 1 stub: empty bounds. Phase 2 returns bounds of the
-        evaluated polygon set after running the boolean algorithm
-        over operands.
+    def evaluate(self, precision: float):
+        """Flatten operands to polygon sets, apply the boolean
+        operation, return the result. Pure — no cache today.
         """
-        return (0.0, 0.0, 0.0, 0.0)
+        from geometry.live import apply_operation, element_to_polygon_set
+        operand_sets = [
+            element_to_polygon_set(op, precision) for op in self.operands
+        ]
+        return apply_operation(self.operation, operand_sets)
+
+    def bounds(self) -> tuple[float, float, float, float]:
+        """Bounding box of the evaluated geometry."""
+        from geometry.live import DEFAULT_PRECISION, bounds_of_polygon_set
+        return bounds_of_polygon_set(self.evaluate(DEFAULT_PRECISION))
 
 
 def sync_tspans_from_content(element: Element) -> Element:
