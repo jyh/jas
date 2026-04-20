@@ -603,6 +603,25 @@ let dispatch_yaml_action
             | None -> ());
            `Null
          in
+         (* Boolean panel destructive ops. See BOOLEAN.md Panel actions.
+            DIVIDE / TRIM / MERGE ship in phase 9e. *)
+         let make_boolean_op_h op_name : Effects.platform_effect =
+           fun _ _ _ ->
+             Boolean_apply.apply_destructive_boolean m op_name;
+             `Null
+         in
+         let make_cs_h : Effects.platform_effect = fun _ _ _ ->
+           Boolean_apply.apply_make_compound_shape m;
+           `Null
+         in
+         let release_cs_h : Effects.platform_effect = fun _ _ _ ->
+           Boolean_apply.apply_release_compound_shape m;
+           `Null
+         in
+         let expand_cs_h : Effects.platform_effect = fun _ _ _ ->
+           Boolean_apply.apply_expand_compound_shape m;
+           `Null
+         in
          let base_platform_effects = [
            ("snapshot", snapshot_h);
            ("doc.set", doc_set_h);
@@ -617,6 +636,15 @@ let dispatch_yaml_action
            ("set_panel_state", set_panel_state_h);
            ("list_push", list_push_h);
            ("pop", pop_h);
+           ("boolean_union", make_boolean_op_h "union");
+           ("boolean_intersection", make_boolean_op_h "intersection");
+           ("boolean_exclude", make_boolean_op_h "exclude");
+           ("boolean_subtract_front", make_boolean_op_h "subtract_front");
+           ("boolean_subtract_back", make_boolean_op_h "subtract_back");
+           ("boolean_crop", make_boolean_op_h "crop");
+           ("make_compound_shape", make_cs_h);
+           ("release_compound_shape", release_cs_h);
+           ("expand_compound_shape", expand_cs_h);
          ] in
          let platform_effects = match on_close_dialog with
            | Some _ -> ("close_dialog", close_dialog_h) :: base_platform_effects
