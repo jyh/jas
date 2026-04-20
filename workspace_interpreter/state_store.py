@@ -508,6 +508,65 @@ class StateStore:
         ab[field] = value
         return True
 
+    def move_artboards_up(self, selected_ids: list) -> bool:
+        """Apply the swap-with-neighbor-skipping-selected rule for
+        Move Up (ARTBOARDS.md §Reordering). Iterate top-to-bottom;
+        each selected row swaps with the row above it, skipping rows
+        whose upper neighbor is itself selected or which are already
+        at position 1. Returns True if any swap occurred."""
+        if self._document is None:
+            return False
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return False
+        selected_set = {s for s in selected_ids if isinstance(s, str)}
+        changed = False
+        for i in range(len(artboards)):
+            elem = artboards[i]
+            if not isinstance(elem, dict):
+                continue
+            if elem.get("id") not in selected_set:
+                continue
+            if i == 0:
+                continue
+            above = artboards[i - 1]
+            if not isinstance(above, dict):
+                continue
+            if above.get("id") in selected_set:
+                continue
+            artboards[i - 1], artboards[i] = artboards[i], artboards[i - 1]
+            changed = True
+        return changed
+
+    def move_artboards_down(self, selected_ids: list) -> bool:
+        """Symmetric to Move Up. Iterate bottom-to-top; each selected
+        row swaps with the row below it, skipping rows whose lower
+        neighbor is itself selected or which are already at the
+        bottom. Returns True if any swap occurred."""
+        if self._document is None:
+            return False
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return False
+        selected_set = {s for s in selected_ids if isinstance(s, str)}
+        changed = False
+        for i in range(len(artboards) - 1, -1, -1):
+            elem = artboards[i]
+            if not isinstance(elem, dict):
+                continue
+            if elem.get("id") not in selected_set:
+                continue
+            if i == len(artboards) - 1:
+                continue
+            below = artboards[i + 1]
+            if not isinstance(below, dict):
+                continue
+            if below.get("id") in selected_set:
+                continue
+            artboards[i], artboards[i + 1] = artboards[i + 1], artboards[i]
+            changed = True
+        return changed
+
     def duplicate_artboard(
         self, artboard_id: str, offset_x: float = 20, offset_y: float = 20
     ) -> dict | None:

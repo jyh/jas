@@ -903,6 +903,164 @@ class TestPanelSelectActions:
         ]
 
 
+# ══════════════════════════════════════════════════════════════════
+# Reorder: swap-with-neighbor-skipping-selected rule
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestReorderSwapRule:
+    def _store(self, count: int) -> StateStore:
+        doc = {"artboards": [
+            _default_artboard(f"id{i:06d}", f"Artboard {i}")
+            for i in range(1, count + 1)
+        ]}
+        return StateStore(document=doc, artboard_id_generator=_seeded_rng(9000))
+
+    def _ids(self, store: StateStore) -> list[str]:
+        return [a["id"] for a in store.document()["artboards"]]
+
+    def test_move_up_single_middle_row(self):
+        s = self._store(3)
+        changed = s.move_artboards_up(["id000002"])
+        assert changed is True
+        assert self._ids(s) == ["id000002", "id000001", "id000003"]
+
+    def test_move_up_row_at_top_is_noop(self):
+        s = self._store(3)
+        changed = s.move_artboards_up(["id000001"])
+        assert changed is False
+        assert self._ids(s) == ["id000001", "id000002", "id000003"]
+
+    def test_move_up_contiguous_block_moves_together(self):
+        """Rows 3 and 4 both selected → each swaps with its upper
+        non-selected neighbor. The pair slides up as a unit."""
+        s = self._store(5)
+        changed = s.move_artboards_up(["id000003", "id000004"])
+        assert changed is True
+        assert self._ids(s) == [
+            "id000001", "id000003", "id000004", "id000002", "id000005",
+        ]
+
+    def test_move_up_discontiguous_1_3_5(self):
+        """The canonical spec example. Selection {1, 3, 5} + Move Up
+        → row 1 stays (top), row 3 swaps with 2, row 5 swaps with 4.
+        Result: [1, 3, 2, 5, 4]."""
+        s = self._store(5)
+        changed = s.move_artboards_up(["id000001", "id000003", "id000005"])
+        assert changed is True
+        assert self._ids(s) == [
+            "id000001", "id000003", "id000002", "id000005", "id000004",
+        ]
+
+    def test_move_up_all_selected_is_noop(self):
+        """If every row is selected, every upper neighbor is also
+        selected, so every swap is skipped."""
+        s = self._store(4)
+        all_ids = self._ids(s)
+        changed = s.move_artboards_up(all_ids)
+        assert changed is False
+        assert self._ids(s) == all_ids
+
+    def test_move_down_symmetric_middle_row(self):
+        s = self._store(3)
+        changed = s.move_artboards_down(["id000002"])
+        assert changed is True
+        assert self._ids(s) == ["id000001", "id000003", "id000002"]
+
+    def test_move_down_row_at_bottom_is_noop(self):
+        s = self._store(3)
+        changed = s.move_artboards_down(["id000003"])
+        assert changed is False
+        assert self._ids(s) == ["id000001", "id000002", "id000003"]
+
+    def test_move_down_discontiguous_1_3(self):
+        """Selection {1, 3} + Move Down → row 3 swaps with 4 first,
+        then row 1 swaps with 2. Result: [2, 1, 4, 3, 5]."""
+        s = self._store(5)
+        changed = s.move_artboards_down(["id000001", "id000003"])
+        assert changed is True
+        assert self._ids(s) == [
+            "id000002", "id000001", "id000004", "id000003", "id000005",
+        ]
+
+    def test_empty_selection_is_noop(self):
+        s = self._store(3)
+        ids_before = self._ids(s)
+        assert s.move_artboards_up([]) is False
+        assert s.move_artboards_down([]) is False
+        assert self._ids(s) == ids_before
+
+    def test_non_existent_id_is_ignored(self):
+        s = self._store(3)
+        ids_before = self._ids(s)
+        assert s.move_artboards_up(["does-not-exist"]) is False
+        assert self._ids(s) == ids_before
+
+
+class TestMoveActions:
+    def test_move_up_action_takes_one_snapshot(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+            _default_artboard("ccc", "Artboard 3"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb"],
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "move_artboard_up")
+        assert [a["id"] for a in store.document()["artboards"]] == ["bbb", "aaa", "ccc"]
+        assert len(store.snapshots()) == 1
+
+    def test_move_down_action_symmetric(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+            _default_artboard("ccc", "Artboard 3"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb"],
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "move_artboard_down")
+        assert [a["id"] for a in store.document()["artboards"]] == ["aaa", "ccc", "bbb"]
+
+    def test_move_action_sets_rearrange_dirty(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["bbb"],
+            "rearrange_dirty": False,
+        })
+        store.set_active_panel("artboards")
+        _run_action(store, "move_artboard_up")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+
+class TestPanelSelectionTracksIdAcrossReorder:
+    def test_selection_follows_artboard_across_move(self):
+        """ART-107: panel-selection is by id, so it follows the
+        artboard across a reorder, not a fixed position."""
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+            _default_artboard("ccc", "Artboard 3"),
+        ]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["ccc"],
+        })
+        store.set_active_panel("artboards")
+        # Move ccc up twice: ccc → position 2, then position 1.
+        _run_action(store, "move_artboard_up")
+        _run_action(store, "move_artboard_up")
+        assert [a["id"] for a in store.document()["artboards"]] == ["ccc", "aaa", "bbb"]
+        assert store.get_panel("artboards", "artboards_panel_selection") == ["ccc"]
+        # current_artboard still ccc (topmost panel-selected).
+        assert store._active_document_view()["current_artboard_id"] == "ccc"
+
+
 class TestResetPanelAction:
     def test_reset_clears_selection_and_restores_reference_point(self):
         store = StateStore(document={"artboards": [_default_artboard("aaa")]})
