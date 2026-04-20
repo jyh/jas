@@ -255,6 +255,14 @@ pub fn App() -> Element {
             let shift = mods.shift();
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                // Align panel key-object intercept (Phase 2j, ALIGN.md
+                // §Align To target). While the panel is in key-object
+                // mode, canvas clicks designate / redesignate / clear
+                // the key object instead of going through the active
+                // tool. Other modes fall through.
+                if st.try_designate_align_key_object(cx, cy) {
+                    return;
+                }
                 let kind = st.active_tool;
                 if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
