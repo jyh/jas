@@ -166,5 +166,6 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     case .paragraph: return "paragraph_panel_content"
     case .artboards: return "artboards_panel_content"
     case .align: return "align_panel_content"
+    case .boolean: return "boolean_panel_content"
     }
 }

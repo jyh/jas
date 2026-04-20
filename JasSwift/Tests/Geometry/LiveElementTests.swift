@@ -82,6 +82,32 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
     #expect(bx == 0 && by == 0 && bw == 0 && bh == 0)
 }
 
+@Test func expandProducesPolygonPerRing() {
+    let red = Fill(color: Color(r: 1, g: 0, b: 0))
+    let cs = CompoundShape(
+        operation: .exclude,
+        operands: [rectAt(0, 0), rectAt(5, 0)],
+        fill: red
+    )
+    let expanded = cs.expand(precision: DEFAULT_PRECISION)
+    #expect(expanded.count == 2)  // XOR → 2 rings → 2 polygons
+    for e in expanded {
+        if case .polygon(let p) = e {
+            #expect(p.fill == red)
+        } else {
+            Issue.record("expected polygon element")
+        }
+    }
+}
+
+@Test func releaseReturnsOperandsVerbatim() {
+    let r1 = rectAt(0, 0)
+    let r2 = rectAt(5, 0)
+    let cs = CompoundShape(operation: .union, operands: [r1, r2])
+    let released = cs.release()
+    #expect(released.count == 2)
+}
+
 @Test func pathFlattensIntoPolygonSet() {
     let path = Element.path(Path(d: [
         .moveTo(0, 0),

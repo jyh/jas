@@ -10,7 +10,7 @@ import Testing
 }
 
 @Test func panelKindAllCount() {
-    #expect(PanelKind.all.count == 9)
+    #expect(PanelKind.all.count == 10)
 }
 
 @Test func panelKindAllContainsAllVariants() {
