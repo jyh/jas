@@ -1121,6 +1121,23 @@ fn run_yaml_effect(
         }
     }
 
+    // Boolean panel — compound-shape menu actions. The destructive
+    // pathfinder operations (union, intersection, etc.) land in a
+    // later phase; only the three compound-shape menu entries fire
+    // here today. See BOOLEAN.md §Panel actions.
+    if eff.get("make_compound_shape").is_some() {
+        st.apply_make_compound_shape();
+        return deferred;
+    }
+    if eff.get("release_compound_shape").is_some() {
+        st.apply_release_compound_shape();
+        return deferred;
+    }
+    if eff.get("expand_compound_shape").is_some() {
+        st.apply_expand_compound_shape();
+        return deferred;
+    }
+
     // toggle_paragraph_field: <field_name> — Phase 4. Flips the named
     // bool on the typed paragraph panel state, then re-applies. Used by
     // toggle_hanging_punctuation. Syncs from selection first so other
