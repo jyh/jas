@@ -1327,6 +1327,134 @@ impl AppState {
         self.apply_paragraph_panel_to_selection();
     }
 
+    /// Reset every Align panel control to its default per ALIGN.md
+    /// §Panel menu Reset Panel: align_to = Selection, key object
+    /// path cleared, distribute_spacing = 0, use_preview_bounds =
+    /// false.
+    pub(crate) fn reset_align_panel(&mut self) {
+        self.align_panel = AlignPanelState::default();
+    }
+
+    /// Execute one of the 14 Align panel operations by name. The
+    /// operation reads the current selection, builds an
+    /// [`crate::algorithms::align::AlignReference`] from
+    /// `self.align_panel`, calls the algorithm, and applies the
+    /// resulting translations to each moved element's transform.
+    ///
+    /// Zero-delta outputs are discarded, so idempotent clicks
+    /// don't touch the document. A snapshot must have been taken
+    /// before this call (the yaml-emitted `snapshot` effect runs
+    /// first, producing a single undoable transaction per button
+    /// press per ALIGN.md §Undo semantics).
+    pub(crate) fn apply_align_operation(&mut self, op: &str) {
+        use crate::algorithms::align as aa;
+
+        // Gather (path, &Element) pairs from the current selection.
+        let Some(tab) = self.tabs.get(self.active_tab) else { return; };
+        let doc = tab.model.document();
+        let mut elements: Vec<(crate::document::document::ElementPath, &crate::geometry::element::Element)> = Vec::new();
+        for es in &doc.selection {
+            if let Some(e) = doc.get_element(&es.path) {
+                elements.push((es.path.clone(), e));
+            }
+        }
+        if elements.len() < 2 {
+            return;
+        }
+
+        // Pick bounds fn per Use Preview Bounds.
+        let bounds_fn: aa::BoundsFn = if self.align_panel.use_preview_bounds {
+            aa::preview_bounds
+        } else {
+            aa::geometric_bounds
+        };
+
+        // Build reference from panel state.
+        let reference = match self.align_panel.align_to {
+            AlignTo::Selection => {
+                let refs: Vec<&crate::geometry::element::Element> =
+                    elements.iter().map(|(_, e)| *e).collect();
+                aa::AlignReference::Selection(aa::union_bounds(&refs, bounds_fn))
+            }
+            AlignTo::Artboard => {
+                // Artboards are not yet in the document model; fall
+                // back to the selection union so Artboard mode still
+                // moves elements coherently. TODO(ALIGN §Artboards):
+                // replace with the active artboard rect.
+                let refs: Vec<&crate::geometry::element::Element> =
+                    elements.iter().map(|(_, e)| *e).collect();
+                aa::AlignReference::Artboard(aa::union_bounds(&refs, bounds_fn))
+            }
+            AlignTo::KeyObject => {
+                let Some(key_path) = self.align_panel.key_object_path.clone() else {
+                    return;
+                };
+                let Some(key_elem) = doc.get_element(&key_path) else {
+                    return;
+                };
+                aa::AlignReference::KeyObject {
+                    bbox: bounds_fn(key_elem),
+                    path: key_path,
+                }
+            }
+        };
+
+        // Dispatch to the algorithm.
+        let translations: Vec<aa::AlignTranslation> = match op {
+            "align_left" => aa::align_left(&elements, &reference, bounds_fn),
+            "align_horizontal_center" => aa::align_horizontal_center(&elements, &reference, bounds_fn),
+            "align_right" => aa::align_right(&elements, &reference, bounds_fn),
+            "align_top" => aa::align_top(&elements, &reference, bounds_fn),
+            "align_vertical_center" => aa::align_vertical_center(&elements, &reference, bounds_fn),
+            "align_bottom" => aa::align_bottom(&elements, &reference, bounds_fn),
+            "distribute_left" => aa::distribute_left(&elements, &reference, bounds_fn),
+            "distribute_horizontal_center" => aa::distribute_horizontal_center(&elements, &reference, bounds_fn),
+            "distribute_right" => aa::distribute_right(&elements, &reference, bounds_fn),
+            "distribute_top" => aa::distribute_top(&elements, &reference, bounds_fn),
+            "distribute_vertical_center" => aa::distribute_vertical_center(&elements, &reference, bounds_fn),
+            "distribute_bottom" => aa::distribute_bottom(&elements, &reference, bounds_fn),
+            "distribute_vertical_spacing" => {
+                let explicit = self.align_panel_explicit_gap();
+                aa::distribute_vertical_spacing(&elements, &reference, explicit, bounds_fn)
+            }
+            "distribute_horizontal_spacing" => {
+                let explicit = self.align_panel_explicit_gap();
+                aa::distribute_horizontal_spacing(&elements, &reference, explicit, bounds_fn)
+            }
+            _ => return,
+        };
+
+        if translations.is_empty() {
+            return;
+        }
+
+        // Apply translations: clone the document once, mutate each
+        // moved element's transform in place.
+        let tab = self.tabs.get_mut(self.active_tab).unwrap();
+        let mut new_doc = tab.model.document().clone();
+        for t in &translations {
+            if let Some(elem) = new_doc.get_element_mut(&t.path) {
+                let current = elem.common().transform.unwrap_or_default();
+                elem.common_mut().transform =
+                    Some(current.translated(t.dx, t.dy));
+            }
+        }
+        tab.model.set_document(new_doc);
+    }
+
+    /// Distribute Spacing explicit gap: `Some(gap)` when the panel
+    /// is in Key Object mode with a designated key, else `None`
+    /// (average mode). See ALIGN.md §Distribute Spacing.
+    fn align_panel_explicit_gap(&self) -> Option<f64> {
+        if self.align_panel.align_to == AlignTo::KeyObject
+            && self.align_panel.key_object_path.is_some()
+        {
+            Some(self.align_panel.distribute_spacing)
+        } else {
+            None
+        }
+    }
+
     /// Commit the 11 Justification-dialog field values onto every
     /// paragraph wrapper tspan in the selection. Per the
     /// identity-value rule each numeric value at its spec default
@@ -2449,5 +2577,152 @@ mod align_panel_state_tests {
         assert!(st.align_panel.key_object_path.is_none());
         assert_eq!(st.align_panel.distribute_spacing, 0.0);
         assert!(!st.align_panel.use_preview_bounds);
+    }
+
+    #[test]
+    fn reset_align_panel_restores_all_defaults() {
+        let mut st = AppState::new();
+        st.align_panel.align_to = AlignTo::KeyObject;
+        st.align_panel.key_object_path = Some(vec![0, 1]);
+        st.align_panel.distribute_spacing = 12.0;
+        st.align_panel.use_preview_bounds = true;
+        st.reset_align_panel();
+        assert_eq!(st.align_panel.align_to, AlignTo::Selection);
+        assert!(st.align_panel.key_object_path.is_none());
+        assert_eq!(st.align_panel.distribute_spacing, 0.0);
+        assert!(!st.align_panel.use_preview_bounds);
+    }
+
+    // ── apply_align_operation end-to-end ─────────────────────
+    // Build a minimal document with selected rects, call
+    // apply_align_operation, and verify each element's transform
+    // carries the expected translation.
+
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{Element, RectElem, CommonProps, Color, Fill, Transform};
+
+    fn make_rect(x: f64, y: f64, w: f64, h: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    fn state_with_three_rects(rects: Vec<Element>, selected: Vec<Vec<usize>>) -> AppState {
+        use crate::geometry::element::LayerElem;
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(super::TabState::new());
+            st.active_tab = 0;
+        }
+        let layer = Element::Layer(LayerElem {
+            name: "L".into(),
+            children: rects.into_iter().map(std::rc::Rc::new).collect(),
+            common: CommonProps::default(),
+        });
+        let selection: Vec<ElementSelection> = selected.into_iter()
+            .map(ElementSelection::all)
+            .collect();
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection };
+        st.tabs[st.active_tab].model.set_document(doc);
+        st
+    }
+
+    fn transform_at(st: &AppState, path: Vec<usize>) -> Transform {
+        st.tabs[st.active_tab].model.document()
+            .get_element(&path)
+            .and_then(|e| e.common().transform)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn apply_align_left_translates_non_extremal_rects() {
+        // Three rects at x = 10, 30, 60. Selection bbox min-x = 10.
+        // After align_left: rect@10 unchanged, rect@30 translated -20, rect@60 translated -50.
+        let rects = vec![
+            make_rect(10.0, 0.0, 10.0, 10.0),
+            make_rect(30.0, 0.0, 10.0, 10.0),
+            make_rect(60.0, 0.0, 10.0, 10.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1], vec![0, 2]],
+        );
+        st.apply_align_operation("align_left");
+        // First rect at min — no translation → identity transform.
+        assert_eq!(transform_at(&st, vec![0, 0]), Transform::IDENTITY);
+        // Second rect needs translation of -20 in x.
+        let t1 = transform_at(&st, vec![0, 1]);
+        assert_eq!(t1.e, -20.0);
+        assert_eq!(t1.f, 0.0);
+        // Third rect needs translation of -50 in x.
+        let t2 = transform_at(&st, vec![0, 2]);
+        assert_eq!(t2.e, -50.0);
+        assert_eq!(t2.f, 0.0);
+    }
+
+    #[test]
+    fn apply_align_operation_no_op_when_fewer_than_two_selected() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 10.0, 10.0),
+            make_rect(100.0, 0.0, 10.0, 10.0),
+        ];
+        let mut st = state_with_three_rects(rects, vec![vec![0, 0]]);
+        st.apply_align_operation("align_left");
+        // Both elements still have identity transforms.
+        assert_eq!(transform_at(&st, vec![0, 0]), Transform::IDENTITY);
+        assert_eq!(transform_at(&st, vec![0, 1]), Transform::IDENTITY);
+    }
+
+    #[test]
+    fn apply_align_operation_unknown_op_does_nothing() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 10.0, 10.0),
+            make_rect(50.0, 0.0, 10.0, 10.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.apply_align_operation("not_a_real_op");
+        assert_eq!(transform_at(&st, vec![0, 0]), Transform::IDENTITY);
+        assert_eq!(transform_at(&st, vec![0, 1]), Transform::IDENTITY);
+    }
+
+    #[test]
+    fn apply_align_operation_uses_preview_bounds_when_set() {
+        // Two stroked lines at x = 0 and 100 (width 1pt stroke
+        // inflates preview bounds by 0.5 on each side).
+        use crate::geometry::element::{LineElem, Stroke};
+        let rects = vec![
+            Element::Line(LineElem {
+                x1: 0.0, y1: 5.0, x2: 0.0, y2: 15.0,
+                stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+            }),
+            Element::Line(LineElem {
+                x1: 100.0, y1: 5.0, x2: 100.0, y2: 15.0,
+                stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+            }),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.align_panel.use_preview_bounds = true;
+        st.apply_align_operation("align_left");
+        // With preview bounds, the selection's left edge is −0.5
+        // (half the stroke width). Line at x=100 has preview left
+        // 99.5, so it translates by 99.5 − (−0.5) = 100 in the
+        // *preview frame*; but the translation delta is relative
+        // to the current preview anchor. Let me recompute: target
+        // is selection min = −0.5. Line[1]'s preview min = 99.5.
+        // Δ = −0.5 − 99.5 = −100.
+        let t = transform_at(&st, vec![0, 1]);
+        assert_eq!(t.e, -100.0);
     }
 }
