@@ -13,13 +13,24 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import replace as dreplace
 
+from algorithms.boolean import (
+    boolean_exclude,
+    boolean_intersect,
+    boolean_subtract,
+    boolean_union,
+)
 from document.document import ElementSelection
 from geometry.element import (
     CompoundOperation,
     CompoundShape,
     Element,
+    Polygon,
 )
-from geometry.live import DEFAULT_PRECISION
+from geometry.live import (
+    DEFAULT_PRECISION,
+    apply_operation,
+    element_to_polygon_set,
+)
 
 
 def _sorted_selection_paths(doc) -> list[tuple[int, ...]]:
@@ -166,6 +177,122 @@ def apply_release_compound_shape(model) -> None:
                 pass
         offset += n - 1
 
+    new_doc = dataclasses.replace(new_doc, selection=frozenset(new_selection))
+    model.document = new_doc
+
+
+# ── Destructive boolean operations ──────────────────────────────
+
+def _polygon_from_ring(ring, fill, stroke, opacity, transform, locked, visibility):
+    return Polygon(
+        points=tuple(ring),
+        fill=fill,
+        stroke=stroke,
+        opacity=opacity,
+        transform=transform,
+        locked=locked,
+        visibility=visibility if visibility is not None else Polygon.__dataclass_fields__["visibility"].default,
+    )
+
+
+def _paint_of(elem):
+    return (
+        getattr(elem, "fill", None),
+        getattr(elem, "stroke", None),
+        getattr(elem, "opacity", 1.0),
+        getattr(elem, "transform", None),
+        getattr(elem, "locked", False),
+        getattr(elem, "visibility", None),
+    )
+
+
+def apply_destructive_boolean(model, op_name: str) -> None:
+    """Destructively apply one of the six implemented boolean ops to
+    the current selection. Supported: "union", "intersection",
+    "exclude", "subtract_front", "subtract_back", "crop". DIVIDE /
+    TRIM / MERGE live in phase 9e.
+
+    Semantics per BOOLEAN.md §Operand and paint rules:
+    - UNION / INTERSECTION / EXCLUDE: all operands consumed; result
+      carries the frontmost operand's paint.
+    - SUBTRACT_FRONT: frontmost (last in path order) is consumed as
+      the cutter; each surviving element has the cutter subtracted
+      and keeps its own paint.
+    - SUBTRACT_BACK: backmost (first in path order) is consumed as
+      the cutter.
+    - CROP: frontmost is consumed as the mask; each survivor is
+      clipped to the mask's interior and keeps its own paint.
+    """
+    doc = model.document
+    if not doc.selection:
+        return
+    paths = _sorted_selection_paths(doc)
+    if len(paths) < 2 or not _all_siblings(paths):
+        return
+    try:
+        elements = tuple(doc.get_element(p) for p in paths)
+    except (IndexError, ValueError):
+        return
+
+    precision = DEFAULT_PRECISION
+    outputs = []  # list of (PolygonSet, fill, stroke, opacity, transform, locked, visibility)
+
+    if op_name in ("union", "intersection", "exclude"):
+        operand_sets = [element_to_polygon_set(e, precision) for e in elements]
+        op_map = {
+            "union": CompoundOperation.UNION,
+            "intersection": CompoundOperation.INTERSECTION,
+            "exclude": CompoundOperation.EXCLUDE,
+        }
+        result = apply_operation(op_map[op_name], operand_sets)
+        outputs.append((result, *_paint_of(elements[-1])))
+    elif op_name in ("subtract_front", "crop"):
+        cutter = element_to_polygon_set(elements[-1], precision)
+        for survivor in elements[:-1]:
+            s_set = element_to_polygon_set(survivor, precision)
+            res = (
+                boolean_intersect(s_set, cutter) if op_name == "crop"
+                else boolean_subtract(s_set, cutter)
+            )
+            outputs.append((res, *_paint_of(survivor)))
+    elif op_name == "subtract_back":
+        cutter = element_to_polygon_set(elements[0], precision)
+        for survivor in elements[1:]:
+            s_set = element_to_polygon_set(survivor, precision)
+            res = boolean_subtract(s_set, cutter)
+            outputs.append((res, *_paint_of(survivor)))
+    else:
+        return  # unknown op
+
+    # Flatten to Polygon elements; drop rings with < 3 points.
+    new_elements: list[Element] = []
+    for ps, fill, stroke, opacity, transform, locked, visibility in outputs:
+        for ring in ps:
+            if len(ring) >= 3:
+                new_elements.append(_polygon_from_ring(
+                    ring, fill, stroke, opacity, transform, locked, visibility
+                ))
+
+    model.snapshot()
+    new_doc = doc
+    for p in reversed(paths):
+        new_doc = new_doc.delete_element(p)
+    insert_path = paths[0]
+    layer_idx, child_idx = insert_path[0], insert_path[1]
+    layer = new_doc.layers[layer_idx]
+    new_children = (
+        layer.children[:child_idx] + tuple(new_elements) + layer.children[child_idx:]
+    )
+    new_doc = _replace_layer_children(new_doc, layer_idx, new_children)
+
+    new_selection: set[ElementSelection] = set()
+    for i in range(len(new_elements)):
+        path = (layer_idx, child_idx + i)
+        try:
+            new_doc.get_element(path)
+            new_selection.add(ElementSelection.all(path))
+        except (IndexError, ValueError):
+            pass
     new_doc = dataclasses.replace(new_doc, selection=frozenset(new_selection))
     model.document = new_doc
 
