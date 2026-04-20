@@ -498,5 +498,49 @@ let () =
                   abs_float (g1 -. g2) < 0.01 &&
                   abs_float (b1 -. b2) < 0.01)
         | None -> assert false);
+
+      (* geometric_bounds — Align reads this when Use Preview
+         Bounds is off per ALIGN.md Bounding box selection. *)
+
+      Alcotest.test_case "geometric_bounds ignores stroke inflation on line" `Quick (fun () ->
+        let ln = make_line ~stroke:(Some (make_stroke ~width:4.0 (make_color 0.0 0.0 0.0)))
+          0.0 0.0 50.0 50.0 in
+        let (x, y, w, h) = geometric_bounds ln in
+        assert (x = 0.0 && y = 0.0 && w = 50.0 && h = 50.0));
+
+      Alcotest.test_case "geometric_bounds rect" `Quick (fun () ->
+        let r = make_rect 10.0 20.0 30.0 40.0 in
+        let (x, y, w, h) = geometric_bounds r in
+        assert (x = 10.0 && y = 20.0 && w = 30.0 && h = 40.0));
+
+      Alcotest.test_case "geometric_bounds circle" `Quick (fun () ->
+        let c = make_circle 50.0 50.0 20.0 in
+        let (x, y, w, h) = geometric_bounds c in
+        assert (x = 30.0 && y = 30.0 && w = 40.0 && h = 40.0));
+
+      Alcotest.test_case "geometric_bounds ellipse" `Quick (fun () ->
+        let e = make_ellipse 50.0 50.0 30.0 15.0 in
+        let (x, y, w, h) = geometric_bounds e in
+        assert (x = 20.0 && y = 35.0 && w = 60.0 && h = 30.0));
+
+      Alcotest.test_case "geometric_bounds group unions children without inflation" `Quick (fun () ->
+        let g = make_group [| make_rect 0.0 0.0 10.0 10.0;
+                              make_rect 20.0 20.0 10.0 10.0 |] in
+        let (x, y, w, h) = geometric_bounds g in
+        assert (x = 0.0 && y = 0.0 && w = 30.0 && h = 30.0));
+
+      Alcotest.test_case "geometric_bounds matches bounds on unstroked shape" `Quick (fun () ->
+        let c = make_circle 50.0 50.0 20.0 in
+        let g = geometric_bounds c in
+        let b = bounds c in
+        assert (g = b));
+
+      Alcotest.test_case "geometric_bounds narrower than preview for stroked line" `Quick (fun () ->
+        let ln = make_line ~stroke:(Some (make_stroke ~width:4.0 (make_color 0.0 0.0 0.0)))
+          0.0 0.0 50.0 50.0 in
+        let (_, _, gw, gh) = geometric_bounds ln in
+        let (_, _, pw, ph) = bounds ln in
+        assert (pw > gw);
+        assert (ph > gh));
     ];
   ]
