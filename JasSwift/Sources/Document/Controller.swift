@@ -500,11 +500,18 @@ public class Controller {
     }
 
     /// Make a compound shape from the current selection using UNION.
-    /// All selected elements must be siblings; at least 2 required.
-    /// Paint inherits from the frontmost (last-in-path-order)
-    /// operand. The new compound replaces its operands in place and
-    /// becomes the selection. See BOOLEAN.md §Compound shapes.
+    /// Thin wrapper around makeCompoundShape(operation:).
     public func makeCompoundShape() {
+        makeCompoundShape(operation: .union)
+    }
+
+    /// Make a compound shape from the current selection using the
+    /// given [operation]. All selected elements must be siblings;
+    /// at least 2 required. Paint inherits from the frontmost
+    /// (last-in-path-order) operand. The new compound replaces its
+    /// operands in place and becomes the selection. See BOOLEAN.md
+    /// §Compound shapes.
+    public func makeCompoundShape(operation: CompoundOperation) {
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
         let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
@@ -514,7 +521,7 @@ public class Controller {
         let elements = paths.map { doc.getElement($0) }
         let frontmost = elements.last!
         let cs = CompoundShape(
-            operation: .union,
+            operation: operation,
             operands: elements,
             fill: frontmost.fill,
             stroke: frontmost.stroke,
@@ -542,6 +549,22 @@ public class Controller {
         model.document = Document(layers: newLayers,
                                   selectedLayer: newDoc.selectedLayer,
                                   selection: newSelection)
+    }
+
+    /// Alt/Option+click on the four Shape Mode buttons. Creates a
+    /// live compound shape with the chosen [opName] (union,
+    /// subtract_front, intersection, exclude) instead of applying
+    /// the destructive variant. Unknown op names are no-ops.
+    public func applyCompoundCreation(_ opName: String) {
+        let op: CompoundOperation
+        switch opName {
+        case "union": op = .union
+        case "subtract_front": op = .subtractFront
+        case "intersection": op = .intersection
+        case "exclude": op = .exclude
+        default: return
+        }
+        makeCompoundShape(operation: op)
     }
 
     /// Release every selected compound shape. Each is replaced with
