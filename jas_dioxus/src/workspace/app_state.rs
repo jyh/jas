@@ -1361,6 +1361,16 @@ impl AppState {
         }
     }
 
+    /// Apply one of the six implemented destructive boolean
+    /// operations. See `Controller::apply_destructive_boolean`.
+    pub(crate) fn apply_boolean_operation(&mut self, op: &str) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::apply_destructive_boolean(
+                &mut tab.model, op,
+            );
+        }
+    }
+
     /// Execute one of the 14 Align panel operations by name. The
     /// operation reads the current selection, builds an
     /// [`crate::algorithms::align::AlignReference`] from

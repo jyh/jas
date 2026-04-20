@@ -583,6 +583,169 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Destructively apply one of the six implemented boolean ops to
+    /// the current selection. Supported: `"union"`, `"intersection"`,
+    /// `"exclude"`, `"subtract_front"`, `"subtract_back"`, `"crop"`.
+    /// DIVIDE / TRIM / MERGE land in a later pass.
+    ///
+    /// UNION / INTERSECTION / EXCLUDE: every operand is consumed; the
+    /// resulting polygon(s) carry the frontmost operand's paint.
+    /// SUBTRACT_FRONT / SUBTRACT_BACK: the front/back operand is the
+    /// cutter and is consumed; each remaining survivor emits a
+    /// subtracted polygon carrying its own paint. CROP: the frontmost
+    /// operand is the mask and is consumed; each remaining survivor
+    /// emits the intersection carrying its own paint.
+    pub fn apply_destructive_boolean(model: &mut Model, op_name: &str) {
+        use crate::algorithms::boolean::{
+            boolean_intersect, boolean_subtract, PolygonSet,
+        };
+        use crate::geometry::element::{CommonProps, Fill, PolygonElem, Stroke};
+        use crate::geometry::live::{
+            apply_operation, element_to_polygon_set, CompoundOperation,
+            DEFAULT_PRECISION,
+        };
+
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut paths: Vec<ElementPath> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        paths.sort();
+        if paths.len() < 2 {
+            return;
+        }
+        // Siblings only.
+        let parent: ElementPath = paths[0][..paths[0].len() - 1].to_vec();
+        if !paths.iter().all(|p| {
+            p.len() == paths[0].len() && p[..p.len() - 1] == parent[..]
+        }) {
+            return;
+        }
+        let elements: Vec<Rc<Element>> = paths
+            .iter()
+            .filter_map(|p| doc.get_element(p).cloned().map(Rc::new))
+            .collect();
+        if elements.len() != paths.len() {
+            return;
+        }
+
+        // (PolygonSet, fill, stroke, common) tuples; flattened to
+        // Polygon elements below. Empty polygon sets are skipped.
+        let mut outputs: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, CommonProps)> = Vec::new();
+        let precision = DEFAULT_PRECISION;
+
+        match op_name {
+            "union" | "intersection" | "exclude" => {
+                let operand_sets: Vec<PolygonSet> = elements
+                    .iter()
+                    .map(|e| element_to_polygon_set(e, precision))
+                    .collect();
+                let op = match op_name {
+                    "union" => CompoundOperation::Union,
+                    "intersection" => CompoundOperation::Intersection,
+                    "exclude" => CompoundOperation::Exclude,
+                    _ => unreachable!(),
+                };
+                let result = apply_operation(op, &operand_sets);
+                let front = elements.last().unwrap();
+                outputs.push((
+                    result,
+                    front.fill().copied(),
+                    front.stroke().copied(),
+                    front.common().clone(),
+                ));
+            }
+            "subtract_front" | "crop" => {
+                // Frontmost (= last in path order) consumed.
+                let cutter = element_to_polygon_set(
+                    elements.last().unwrap(), precision,
+                );
+                for survivor in &elements[..elements.len() - 1] {
+                    let survivor_set = element_to_polygon_set(survivor, precision);
+                    let result = if op_name == "crop" {
+                        boolean_intersect(&survivor_set, &cutter)
+                    } else {
+                        boolean_subtract(&survivor_set, &cutter)
+                    };
+                    outputs.push((
+                        result,
+                        survivor.fill().copied(),
+                        survivor.stroke().copied(),
+                        survivor.common().clone(),
+                    ));
+                }
+            }
+            "subtract_back" => {
+                let cutter = element_to_polygon_set(&elements[0], precision);
+                for survivor in &elements[1..] {
+                    let survivor_set = element_to_polygon_set(survivor, precision);
+                    let result = boolean_subtract(&survivor_set, &cutter);
+                    outputs.push((
+                        result,
+                        survivor.fill().copied(),
+                        survivor.stroke().copied(),
+                        survivor.common().clone(),
+                    ));
+                }
+            }
+            _ => return,
+        }
+
+        // Flatten (PolygonSet, paint) outputs into Polygon elements.
+        let mut new_elements: Vec<Rc<Element>> = Vec::new();
+        for (ps, fill, stroke, common) in outputs {
+            for ring in ps {
+                if ring.len() >= 3 {
+                    new_elements.push(Rc::new(Element::Polygon(PolygonElem {
+                        points: ring,
+                        fill,
+                        stroke,
+                        common: common.clone(),
+                    })));
+                }
+            }
+        }
+
+        // Remove all original operands in reverse path order.
+        let mut new_doc = doc.clone();
+        for p in paths.iter().rev() {
+            new_doc = new_doc.delete_element(p);
+        }
+
+        // Insert new elements starting at paths[0]'s child_idx.
+        let insert_base = paths[0].clone();
+        if insert_base.len() >= 2 {
+            let layer_idx = insert_base[0];
+            let child_idx = insert_base[1];
+            if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
+                for (i, elem) in new_elements.iter().enumerate() {
+                    let insert_idx = child_idx + i;
+                    if insert_idx <= layer_children.len() {
+                        layer_children.insert(insert_idx, elem.clone());
+                    } else {
+                        layer_children.push(elem.clone());
+                    }
+                }
+            }
+        }
+
+        // Select the new elements.
+        let mut new_selection = Vec::new();
+        if insert_base.len() >= 2 {
+            let layer_idx = insert_base[0];
+            let base_child_idx = insert_base[1];
+            for i in 0..new_elements.len() {
+                let path = vec![layer_idx, base_child_idx + i];
+                if new_doc.get_element(&path).is_some() {
+                    new_selection.push(ElementSelection::all(path));
+                }
+            }
+        }
+        new_doc.selection = new_selection;
+        model.set_document(new_doc);
+    }
+
     /// Ungroup all unlocked Group elements in the entire document.
     pub fn ungroup_all(model: &mut Model) {
         let doc = model.document().clone();
@@ -1362,6 +1525,88 @@ mod tests {
         assert_eq!(children.len(), 3);
         // Released operands are the new selection.
         assert_eq!(model.document().selection.len(), 2);
+    }
+
+    /// Two overlapping axis-aligned rects on a single layer:
+    /// r1 = [0..10]×[0..10], r2 = [5..15]×[0..10].
+    fn two_overlapping_rects() -> Model {
+        let r1 = make_rect(0.0, 0.0, 10.0, 10.0);
+        let r2 = make_rect(5.0, 0.0, 10.0, 10.0);
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![Rc::new(r1), Rc::new(r2)],
+            common: CommonProps::default(),
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        doc.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        Model::new(doc, None)
+    }
+
+    fn top_children_count(model: &Model) -> usize {
+        model.document().layers[0].children().map_or(0, |c| c.len())
+    }
+
+    #[test]
+    fn destructive_union_produces_one_polygon() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "union");
+        assert_eq!(top_children_count(&model), 1);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        assert!(matches!(&**child, Element::Polygon(_)));
+        assert_eq!(model.document().selection.len(), 1);
+    }
+
+    #[test]
+    fn destructive_intersection_produces_one_polygon() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "intersection");
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_exclude_produces_two_polygons() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "exclude");
+        // Symmetric difference of two overlapping rects → 2 disjoint
+        // polygons.
+        assert_eq!(top_children_count(&model), 2);
+        assert_eq!(model.document().selection.len(), 2);
+    }
+
+    #[test]
+    fn destructive_subtract_front_consumes_front() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "subtract_front");
+        // r2 (front, last) consumed; r1 minus r2 remains = 1 polygon.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_subtract_back_consumes_back() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "subtract_back");
+        // r1 (back, first) consumed; r2 minus r1 remains = 1 polygon.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_crop_uses_frontmost_as_mask() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "crop");
+        // r2 (front) is the mask, consumed; r1 clipped to its
+        // interior = 1 polygon covering the overlap.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_unknown_op_is_noop() {
+        let mut model = two_overlapping_rects();
+        let before = top_children_count(&model);
+        Controller::apply_destructive_boolean(&mut model, "divide");
+        assert_eq!(top_children_count(&model), before);
     }
 
     #[test]

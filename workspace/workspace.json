@@ -2504,6 +2504,96 @@
         }
       ]
     },
+    "boolean_union": {
+      "description": "UNION_BUTTON. Destructively merge every selected element into a single path taking the union of their geometries. All operands are consumed; the result carries the frontmost operand's paint. See BOOLEAN.md \u00a7Operand and paint rules.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_union": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"union\""
+          }
+        }
+      ]
+    },
+    "boolean_subtract_front": {
+      "description": "SUBTRACT_FRONT_BUTTON. Subtract the frontmost selected element (the cutter) from each remaining element. Cutter is consumed; each remaining element keeps its own paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_subtract_front": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"subtract_front\""
+          }
+        }
+      ]
+    },
+    "boolean_intersection": {
+      "description": "INTERSECTION_BUTTON. Destructively reduce the selection to the region covered by every element. All operands are consumed; result carries the frontmost operand's paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_intersection": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"intersection\""
+          }
+        }
+      ]
+    },
+    "boolean_exclude": {
+      "description": "EXCLUDE_BUTTON. Destructively reduce the selection to the symmetric difference (region covered by exactly one operand). All operands are consumed; result carries the frontmost operand's paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_exclude": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"exclude\""
+          }
+        }
+      ]
+    },
+    "boolean_crop": {
+      "description": "CROP_BUTTON. Use the frontmost selected element as a mask and crop every other element to its interior. The mask is consumed; each cropped survivor keeps its own paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_crop": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"crop\""
+          }
+        }
+      ]
+    },
+    "boolean_subtract_back": {
+      "description": "SUBTRACT_BACK_BUTTON. Subtract the backmost selected element from each remaining element. Backmost is consumed; each remaining element keeps its own paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_subtract_back": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"subtract_back\""
+          }
+        }
+      ]
+    },
     "make_compound_shape": {
       "description": "Equivalent to Alt+click on UNION. Replaces the current selection with a single compound shape (live, non-destructive) whose operand list is the selected elements in their original z-order and whose operation is Union. The new compound shape is selected and inserted at the frontmost operand's position. Enabled when selection_count >= 2. See BOOLEAN.md \u00a7Compound shapes.\n",
       "category": "boolean",
@@ -3180,6 +3270,46 @@
     "align_to_key_object": {
       "viewbox": "0 0 16 16",
       "svg": "<rect x=\"1.5\" y=\"1.5\" width=\"13\" height=\"13\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-dasharray=\"1.4 1\"/> <rect x=\"5\" y=\"5\" width=\"6\" height=\"6\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_union": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,2 H14 V10 H6 Z\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_subtract_front": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-dasharray=\"1.2 1\"/>\n"
+    },
+    "boolean_intersection": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"6\" y=\"4\" width=\"4\" height=\"6\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_exclude": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/> <path d=\"M6,2 H14 V10 H6 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/>\n"
+    },
+    "boolean_divide": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"6\" y1=\"4\" x2=\"6\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1\"/> <line x1=\"10\" y1=\"4\" x2=\"10\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1\"/> <line x1=\"2\" y1=\"10\" x2=\"10\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1\"/>\n"
+    },
+    "boolean_trim": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/>\n"
+    },
+    "boolean_merge": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H14 V10 H2 Z\" fill=\"currentColor\"/> <rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/>\n"
+    },
+    "boolean_crop": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"currentColor\" opacity=\"0.35\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/> <rect x=\"6\" y=\"4\" width=\"4\" height=\"6\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_subtract_back": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-dasharray=\"1.2 1\"/> <path d=\"M6,2 H14 V10 H6 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/>\n"
+    },
+    "boolean_expand": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-dasharray=\"1.4 1\"/> <polygon points=\"5,8 11,8 8,5\" fill=\"currentColor\"/> <polygon points=\"5,8 11,8 8,11\" fill=\"currentColor\"/>\n"
     }
   },
   "layout": {
@@ -10381,17 +10511,125 @@
             "type": "container",
             "layout": "row",
             "style": {
-              "gap": 4,
+              "gap": 2,
               "alignment": "center"
             },
             "children": [
               {
-                "type": "text",
-                "content": "(buttons pending)",
+                "id": "boolean_union_button",
+                "type": "icon_button",
+                "icon": "boolean_union",
+                "summary": "Union",
+                "description": "UNION_BUTTON. Merge all selected elements into a single element taking the union of their geometries. Result carries the frontmost operand's paint. Alt/Option+click creates a live compound shape instead.\n",
                 "style": {
-                  "font_size": 10,
-                  "color": "dim"
-                }
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_union"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_subtract_front_button",
+                "type": "icon_button",
+                "icon": "boolean_subtract_front",
+                "summary": "Subtract Front",
+                "description": "SUBTRACT_FRONT_BUTTON. Subtract the frontmost element from all others in the selection. The frontmost is consumed; remaining elements keep their own paint.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_subtract_front"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_intersection_button",
+                "type": "icon_button",
+                "icon": "boolean_intersection",
+                "summary": "Intersection",
+                "description": "INTERSECTION_BUTTON. Keep only the region covered by every selected element. Result carries the frontmost operand's paint. Alt/Option+click creates a live compound shape instead.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_intersection"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_exclude_button",
+                "type": "icon_button",
+                "icon": "boolean_exclude",
+                "summary": "Exclude",
+                "description": "EXCLUDE_BUTTON. Keep the region covered by exactly one selected element (symmetric difference). Result carries the frontmost operand's paint. Alt/Option+click creates a live compound shape instead.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_exclude"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_expand_button",
+                "type": "icon_button",
+                "icon": "boolean_expand",
+                "summary": "Expand",
+                "description": "EXPAND_BUTTON. Flatten every selected compound shape into static Polygon elements derived from its evaluated geometry. The compound shape's paint is carried to each expanded polygon; the operand tree is discarded. Enabled only when the selection contains at least one compound shape.\n",
+                "style": {
+                  "size": 20,
+                  "flex": 2
+                },
+                "bind": {
+                  "disabled": "not active_document.selection_has_compound_shape"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "expand_compound_shape"
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           },
@@ -10412,16 +10650,129 @@
             "type": "container",
             "layout": "row",
             "style": {
-              "gap": 4,
+              "gap": 2,
               "alignment": "center"
             },
             "children": [
               {
-                "type": "text",
-                "content": "(buttons pending)",
+                "id": "boolean_divide_button",
+                "type": "icon_button",
+                "icon": "boolean_divide",
+                "summary": "Divide",
+                "description": "DIVIDE_BUTTON. Cut the elements apart so none overlap. Each fragment inherits the paint of the frontmost original element that covered it. Deferred \u2014 implemented in a follow-up phase.\n",
                 "style": {
-                  "font_size": 10,
-                  "color": "dim"
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "true"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_divide"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_trim_button",
+                "type": "icon_button",
+                "icon": "boolean_trim",
+                "summary": "Trim",
+                "description": "TRIM_BUTTON. Remove parts of elements that are hidden behind other elements. Each survivor keeps its own paint. Deferred \u2014 implemented in a follow-up phase.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "true"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_trim"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_merge_button",
+                "type": "icon_button",
+                "icon": "boolean_merge",
+                "summary": "Merge",
+                "description": "MERGE_BUTTON. TRIM first, then merge any touching survivors whose fills are exactly equal. Deferred \u2014 implemented in a follow-up phase.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "true"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_merge"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_crop_button",
+                "type": "icon_button",
+                "icon": "boolean_crop",
+                "summary": "Crop",
+                "description": "CROP_BUTTON. Use the frontmost element as a mask and crop all others to its interior. The mask is consumed; each cropped survivor keeps its own paint.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_crop"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_subtract_back_button",
+                "type": "icon_button",
+                "icon": "boolean_subtract_back",
+                "summary": "Subtract Back",
+                "description": "SUBTRACT_BACK_BUTTON. Subtract the backmost element from all others. The backmost is consumed; remaining elements keep their own paint.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_subtract_back"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "spacer",
+                "style": {
+                  "size": 20
                 }
               }
             ]
