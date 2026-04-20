@@ -373,6 +373,16 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         }
         lines.append("\(indent)</g>")
         return lines.joined(separator: "\n")
+
+    case .live(let v):
+        // Phase 1: emit as a group of operands so SVG export remains
+        // round-tripped. Phase 2 replaces with the evaluated geometry.
+        var lines = ["\(indent)<g data-jas-live=\"\(v.kind)\"\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        for child in v.operands {
+            lines.append(elementSvg(child, indent: indent + "  "))
+        }
+        lines.append("\(indent)</g>")
+        return lines.joined(separator: "\n")
     }
 }
 

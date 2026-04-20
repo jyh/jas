@@ -663,6 +663,7 @@ private func elementTypeLabel(_ elem: Element) -> String {
     case .textPath: return "Text Path"
     case .group: return "Group"
     case .layer: return "Layer"
+    case .live: return "Compound Shape"
     }
 }
 
@@ -855,6 +856,7 @@ struct TreeViewContent: View {
         case .textPath: return "text_path"
         case .group: return "group"
         case .layer: return "layer"
+        case .live: return "live"
         }
     }
 

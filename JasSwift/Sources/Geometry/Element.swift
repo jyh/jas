@@ -516,6 +516,9 @@ public enum Element: Equatable {
     case group(Group)
     /// Named layer
     case layer(Layer)
+    /// A non-destructive element whose geometry is evaluated on
+    /// demand from its source inputs. See `LiveVariant`.
+    case live(LiveVariant)
 
     public var bounds: BBox {
         switch self {
@@ -530,6 +533,7 @@ public enum Element: Equatable {
         case .textPath(let v): return v.bounds
         case .group(let v): return v.bounds
         case .layer(let v): return v.bounds
+        case .live(let v): return v.bounds
         }
     }
 
@@ -554,6 +558,7 @@ public enum Element: Equatable {
             return self.bounds
         case .group(let v): return childrenGeometricBounds(v.children)
         case .layer(let v): return childrenGeometricBounds(v.children)
+        case .live(let v): return v.bounds
         }
     }
 
@@ -768,6 +773,7 @@ public enum Element: Equatable {
         case .textPath(let v): return v.fill
         case .group: return nil
         case .layer: return nil
+        case .live(let v): return v.fill
         }
     }
 
@@ -785,6 +791,7 @@ public enum Element: Equatable {
         case .textPath(let v): return v.stroke
         case .group: return nil
         case .layer: return nil
+        case .live(let v): return v.stroke
         }
     }
 
@@ -801,6 +808,7 @@ public enum Element: Equatable {
         case .textPath(let v): return v.locked
         case .group(let v): return v.locked
         case .layer(let v): return v.locked
+        case .live(let v): return v.locked
         }
     }
 
@@ -865,6 +873,8 @@ public enum Element: Equatable {
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: v.transform, locked: locked,
                                 visibility: v.visibility))
+        case .live(let v):
+            return .live(v.withLocked(locked))
         }
     }
 
@@ -884,6 +894,7 @@ public enum Element: Equatable {
         case .textPath(let v): return v.visibility
         case .group(let v): return v.visibility
         case .layer(let v): return v.visibility
+        case .live(let v): return v.visibility
         }
     }
 
@@ -901,6 +912,7 @@ public enum Element: Equatable {
         case .textPath(let v): return v.transform
         case .group(let v): return v.transform
         case .layer(let v): return v.transform
+        case .live(let v): return v.transform
         }
     }
 
@@ -966,6 +978,8 @@ public enum Element: Equatable {
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: v.transform, locked: v.locked,
                                 visibility: visibility))
+        case .live(let v):
+            return .live(v.withVisibility(visibility))
         }
     }
 
@@ -1035,6 +1049,8 @@ public enum Element: Equatable {
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: t, locked: v.locked,
                                 visibility: v.visibility))
+        case .live(let v):
+            return .live(v.withTransform(t))
         }
     }
 }
@@ -1095,6 +1111,8 @@ public func withFill(_ element: Element, fill: Fill?) -> Element {
                                   visibility: v.visibility))
     case .group, .layer:
         return element
+    case .live(let v):
+        return .live(v.withFill(fill))
     }
 }
 
@@ -1155,6 +1173,8 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
                                   visibility: v.visibility))
     case .group, .layer:
         return element
+    case .live(let v):
+        return .live(v.withStroke(stroke))
     }
 }
 
