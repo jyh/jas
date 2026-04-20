@@ -247,6 +247,89 @@ let compute_destructive_outputs op_name elements precision =
       (res, paint_of s)
     ) survivors in
     Some outputs
+  | "divide" ->
+    (* Walk operands back-to-front, maintaining a partition of the
+       union-so-far as (region, frontmost-covering-operand-index)
+       pairs. Each incoming operand splits every existing region
+       into overlap / non-overlap; overlap relabels to the incoming
+       index (now frontmost). *)
+    let operand_sets = Array.of_list (List.map to_set elements) in
+    let elements_arr = Array.of_list elements in
+    let accumulator = ref [] in
+    for i = 0 to n - 1 do
+      let op_set = operand_sets.(i) in
+      let new_acc = ref [] in
+      let remaining = ref op_set in
+      List.iter (fun (existing_region, existing_idx) ->
+        let overlap = B.boolean_intersect existing_region op_set in
+        if overlap <> [] then
+          new_acc := (overlap, i) :: !new_acc;
+        let non_overlap = B.boolean_subtract existing_region op_set in
+        if non_overlap <> [] then
+          new_acc := (non_overlap, existing_idx) :: !new_acc;
+        remaining := B.boolean_subtract !remaining existing_region
+      ) !accumulator;
+      if !remaining <> [] then
+        new_acc := (!remaining, i) :: !new_acc;
+      accumulator := List.rev !new_acc
+    done;
+    Some (List.map (fun (region, paint_idx) ->
+      (region, paint_of elements_arr.(paint_idx))
+    ) !accumulator)
+  | "trim" | "merge" ->
+    let operand_sets = Array.of_list (List.map to_set elements) in
+    let elements_arr = Array.of_list elements in
+    (* For each operand i, subtract the union of all later operands. *)
+    let trimmed = ref [] in
+    for i = 0 to n - 1 do
+      let region = ref operand_sets.(i) in
+      for j = i + 1 to n - 1 do
+        region := B.boolean_subtract !region operand_sets.(j)
+      done;
+      if !region <> [] then
+        trimmed := (!region, elements_arr.(i)) :: !trimmed
+    done;
+    let trimmed = List.rev !trimmed in
+    if op_name = "trim" then
+      Some (List.map (fun (r, e) -> (r, paint_of e)) trimmed)
+    else begin
+      (* MERGE: unify touching same-fill survivors. *)
+      let arr = Array.of_list trimmed in
+      let len = Array.length arr in
+      let consumed = Array.make len false in
+      let outputs = ref [] in
+      for i = 0 to len - 1 do
+        if not consumed.(i) then begin
+          consumed.(i) <- true;
+          let (region_i, elem_i) = arr.(i) in
+          let (fill_i, _, _, _, _, _) = paint_of elem_i in
+          let merged = ref region_i in
+          let paint_src = ref elem_i in
+          (match fill_i with
+           | None -> ()
+           | Some fa ->
+             for j = i + 1 to len - 1 do
+               if not consumed.(j) then begin
+                 let (region_j, elem_j) = arr.(j) in
+                 let (fill_j, _, _, _, _, _) = paint_of elem_j in
+                 match fill_j with
+                 | Some fb when fa.fill_color = fb.fill_color ->
+                   merged := B.boolean_union !merged region_j;
+                   (* j > i in z-order; j wins stroke/common on merged
+                      output. Its fill equals i's by predicate. *)
+                   paint_src := elem_j;
+                   consumed.(j) <- true
+                 | _ -> ()
+               end
+             done);
+          let (_, stroke_w, opacity_w, transform_w, locked_w, vis_w) =
+            paint_of !paint_src in
+          outputs := (!merged, (fill_i, stroke_w, opacity_w,
+                                transform_w, locked_w, vis_w)) :: !outputs
+        end
+      done;
+      Some (List.rev !outputs)
+    end
   | _ -> None
 
 let apply_destructive_boolean (model : Model.model) (op_name : string) : unit =
