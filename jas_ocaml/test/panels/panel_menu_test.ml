@@ -30,7 +30,7 @@ let label_tests = [
     assert (panel_label Properties = "Properties"));
 
   Alcotest.test_case "all_panel_kinds_count" `Quick (fun () ->
-    assert (Array.length all_panel_kinds = 8));
+    assert (Array.length all_panel_kinds = 9));
 
   Alcotest.test_case "all_panel_kinds_contains_all" `Quick (fun () ->
     let has k = Array.exists (( = ) k) all_panel_kinds in
@@ -41,7 +41,26 @@ let label_tests = [
     assert (has Properties);
     assert (has Character);
     assert (has Paragraph);
-    assert (has Artboards));
+    assert (has Artboards);
+    assert (has Align));
+
+  Alcotest.test_case "panel_label_align" `Quick (fun () ->
+    assert (panel_label Align = "Align"));
+
+  Alcotest.test_case "align_menu_has_expected_entries" `Quick (fun () ->
+    let items = panel_menu Align in
+    assert (List.length items = 5);
+    (match List.nth items 0 with
+     | Toggle { command = "toggle_use_preview_bounds"; _ } -> ()
+     | _ -> assert false);
+    (match List.nth items 1 with Separator -> () | _ -> assert false);
+    (match List.nth items 2 with
+     | Action { command = "reset_align_panel"; _ } -> ()
+     | _ -> assert false);
+    (match List.nth items 3 with Separator -> () | _ -> assert false);
+    (match List.nth items 4 with
+     | Action { label = "Close Align"; command = "close_panel"; _ } -> ()
+     | _ -> assert false));
 ]
 
 (* ================================================================== *)

@@ -10,7 +10,7 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align |]
 
 (** Paragraph panel state-store handle. The yaml_panel_view sets
     this ref to the panel's [State_store.t] when rendering the
@@ -53,6 +53,7 @@ let panel_label = function
   | Character -> "Character"
   | Paragraph -> "Paragraph"
   | Artboards -> "Artboards"
+  | Align -> "Align"
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
@@ -104,6 +105,12 @@ let panel_menu = function
       Separator;
       Action { label = "Close Paragraph"; command = "close_panel"; shortcut = "" } ]
   | Artboards -> [Action { label = "Close Artboards"; command = "close_panel"; shortcut = "" }]
+  | Align -> [
+      Toggle { label = "Use Preview Bounds"; command = "toggle_use_preview_bounds" };
+      Separator;
+      Action { label = "Reset Panel"; command = "reset_align_panel"; shortcut = "" };
+      Separator;
+      Action { label = "Close Align"; command = "close_panel"; shortcut = "" } ]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =
