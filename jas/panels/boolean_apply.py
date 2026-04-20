@@ -11,7 +11,8 @@ See transcripts/BOOLEAN.md § Compound shape data model.
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import replace as dreplace
+import math
+from dataclasses import dataclass, replace as dreplace
 
 from algorithms.boolean import (
     boolean_exclude,
@@ -31,6 +32,51 @@ from geometry.live import (
     apply_operation,
     element_to_polygon_set,
 )
+
+
+@dataclass(frozen=True)
+class BooleanOptions:
+    """Document-scoped boolean op settings. Mirrors Rust
+    BooleanOptions per BOOLEAN.md §Boolean Options dialog.
+    - precision: geometric tolerance (points) used for curve
+      flattening and collinear-point collapse.
+    - remove_redundant_points: if True, collapse collinear / near-
+      duplicate points in output rings within [precision] of the
+      line through their neighbors.
+    - divide_remove_unpainted: if True, DIVIDE drops fragments with
+      no fill and no stroke (keeps only painted artwork)."""
+    precision: float = DEFAULT_PRECISION
+    remove_redundant_points: bool = True
+    divide_remove_unpainted: bool = False
+
+
+def collapse_collinear_points(ring: list, tol: float) -> list:
+    """Single-pass removal of points whose perpendicular distance to
+    the line between their two neighbors is below [tol]. Returns the
+    original ring if collapse would leave fewer than 3 points.
+    Matches the Rust collapse_collinear_points reference."""
+    n = len(ring)
+    if n < 3:
+        return ring
+    keep = [True] * n
+    for i in range(n):
+        prev = ring[(i - 1) % n]
+        cur = ring[i]
+        nxt = ring[(i + 1) % n]
+        dx = nxt[0] - prev[0]
+        dy = nxt[1] - prev[1]
+        seg_len = math.hypot(dx, dy)
+        if seg_len == 0.0:
+            keep[i] = False
+            continue
+        # Perpendicular distance from cur to segment prev→next.
+        num = abs(dy * cur[0] - dx * cur[1] + nxt[0] * prev[1] - nxt[1] * prev[0])
+        if num / seg_len < tol:
+            keep[i] = False
+    result = [p for p, k in zip(ring, keep) if k]
+    if len(result) < 3:
+        return ring
+    return result
 
 
 def _sorted_selection_paths(doc) -> list[tuple[int, ...]]:
@@ -237,11 +283,18 @@ def _fills_merge_equal(a, b) -> bool:
     return a.color == b.color
 
 
-def apply_destructive_boolean(model, op_name: str) -> None:
+def apply_destructive_boolean(
+    model, op_name: str, options: BooleanOptions | None = None
+) -> None:
     """Destructively apply one of the nine boolean ops to the current
     selection. Supported: "union", "intersection", "exclude",
     "subtract_front", "subtract_back", "crop", "divide", "trim",
     "merge".
+
+    [options] defaults to BooleanOptions() when not provided;
+    callers who care about document-scoped precision / redundant-
+    point removal / divide-remove-unpainted should pass their own.
+    See BOOLEAN.md §Boolean Options dialog.
 
     Semantics per BOOLEAN.md §Operand and paint rules:
     - UNION / INTERSECTION / EXCLUDE: all operands consumed; result
@@ -259,6 +312,8 @@ def apply_destructive_boolean(model, op_name: str) -> None:
     - MERGE: TRIM, then union touching survivors whose solid-color
       fills match exactly.
     """
+    if options is None:
+        options = BooleanOptions()
     doc = model.document
     if not doc.selection:
         return
@@ -270,7 +325,7 @@ def apply_destructive_boolean(model, op_name: str) -> None:
     except (IndexError, ValueError):
         return
 
-    precision = DEFAULT_PRECISION
+    precision = options.precision
     outputs = []  # list of (PolygonSet, fill, stroke, opacity, transform, locked, visibility)
 
     if op_name in ("union", "intersection", "exclude"):
@@ -366,12 +421,21 @@ def apply_destructive_boolean(model, op_name: str) -> None:
         return  # unknown op
 
     # Flatten to Polygon elements; drop rings with < 3 points.
+    # Optional per BooleanOptions:
+    # - divide_remove_unpainted: drop unpainted DIVIDE fragments
+    # - remove_redundant_points: collapse near-collinear points
     new_elements: list[Element] = []
     for ps, fill, stroke, opacity, transform, locked, visibility in outputs:
+        if (op_name == "divide" and options.divide_remove_unpainted
+                and fill is None and stroke is None):
+            continue
         for ring in ps:
-            if len(ring) >= 3:
+            r = ring
+            if options.remove_redundant_points:
+                r = collapse_collinear_points(r, options.precision)
+            if len(r) >= 3:
                 new_elements.append(_polygon_from_ring(
-                    ring, fill, stroke, opacity, transform, locked, visibility
+                    r, fill, stroke, opacity, transform, locked, visibility
                 ))
 
     model.snapshot()
@@ -457,3 +521,28 @@ def apply_expand_compound_shape(model) -> None:
 
     new_doc = dataclasses.replace(new_doc, selection=frozenset(new_selection))
     model.document = new_doc
+
+
+# ── Repeat + Reset ──────────────────────────────────────────────
+
+# Op names whose "_compound" suffix indicates a compound-creating
+# variant vs a destructive one. Matches the 13-value enum in
+# BOOLEAN.md §Repeat state.
+_COMPOUND_SUFFIX = "_compound"
+
+
+def apply_repeat_boolean_operation(
+    model, last_op: str | None, options: BooleanOptions | None = None
+) -> None:
+    """Re-apply the last destructive or compound-creating boolean op
+    to the current selection. Reads [last_op] (the 13-value state
+    enum from BOOLEAN.md §Repeat state) and dispatches to either
+    apply_destructive_boolean or apply_compound_creation. No-op when
+    last_op is None or empty."""
+    if not last_op:
+        return
+    if last_op.endswith(_COMPOUND_SUFFIX):
+        base = last_op[: -len(_COMPOUND_SUFFIX)]
+        apply_compound_creation(model, base)
+    else:
+        apply_destructive_boolean(model, last_op, options)

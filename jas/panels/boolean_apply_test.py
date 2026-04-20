@@ -14,11 +14,14 @@ from geometry.element import (
     Color, CompoundOperation, CompoundShape, Fill, Layer, Polygon, Rect,
 )
 from panels.boolean_apply import (
+    BooleanOptions,
     apply_compound_creation,
     apply_destructive_boolean,
     apply_expand_compound_shape,
     apply_make_compound_shape,
     apply_release_compound_shape,
+    apply_repeat_boolean_operation,
+    collapse_collinear_points,
 )
 
 
@@ -255,6 +258,71 @@ class DivideTrimMergeTest(absltest.TestCase):
         rects = [self._rect(0, 0), self._rect(5, 0)]
         m = self._model(rects, [(0, 0), (0, 1)])
         apply_destructive_boolean(m, "merge")
+        self.assertEqual(len(m.document.layers[0].children), 2)
+
+
+class BooleanOptionsTest(absltest.TestCase):
+    """Tests for BooleanOptions threading and collinear collapse."""
+
+    def test_collapse_collinear_points_drops_midpoint(self):
+        # Triangle with a collinear midpoint on one edge.
+        ring = [(0, 0), (5, 0), (10, 0), (10, 10), (0, 10)]
+        collapsed = collapse_collinear_points(ring, tol=0.01)
+        # (5, 0) sits exactly on the line (0,0)→(10,0); should drop.
+        self.assertNotIn((5, 0), collapsed)
+
+    def test_collapse_preserves_triangle_corners(self):
+        ring = [(0, 0), (10, 0), (5, 10)]
+        collapsed = collapse_collinear_points(ring, tol=0.01)
+        self.assertEqual(len(collapsed), 3)
+
+    def test_remove_redundant_points_disabled_keeps_all(self):
+        rects = [_rect(0, 0), _rect(5, 0)]
+        m = _model_with_rects(rects, [(0, 0), (0, 1)])
+        options = BooleanOptions(remove_redundant_points=False)
+        apply_destructive_boolean(m, "union", options)
+        polygon = m.document.layers[0].children[0]
+        # Union of two overlapping rects: with collapse off, rough
+        # rect output keeps its 4+ vertices.
+        self.assertGreaterEqual(len(polygon.points), 4)
+
+    def test_divide_remove_unpainted_drops_unfilled(self):
+        # Both rects have no fill/stroke → DIVIDE normally produces
+        # 3 fragments; with divide_remove_unpainted all drop.
+        rects = [_rect(0, 0), _rect(5, 0)]
+        m = _model_with_rects(rects, [(0, 0), (0, 1)])
+        options = BooleanOptions(divide_remove_unpainted=True)
+        apply_destructive_boolean(m, "divide", options)
+        self.assertEqual(len(m.document.layers[0].children), 0)
+
+
+class RepeatBooleanOpTest(absltest.TestCase):
+    """Tests for apply_repeat_boolean_operation."""
+
+    def _rects(self):
+        return [_rect(0, 0), _rect(5, 0)]
+
+    def test_repeat_destructive_replays_op(self):
+        m = _model_with_rects(self._rects(), [(0, 0), (0, 1)])
+        apply_repeat_boolean_operation(m, "union")
+        self.assertEqual(len(m.document.layers[0].children), 1)
+        self.assertIsInstance(m.document.layers[0].children[0], Polygon)
+
+    def test_repeat_compound_replays_compound_creation(self):
+        m = _model_with_rects(self._rects(), [(0, 0), (0, 1)])
+        apply_repeat_boolean_operation(m, "intersection_compound")
+        cs = m.document.layers[0].children[0]
+        self.assertIsInstance(cs, CompoundShape)
+        self.assertEqual(cs.operation, CompoundOperation.INTERSECTION)
+
+    def test_repeat_none_is_noop(self):
+        m = _model_with_rects(self._rects(), [(0, 0), (0, 1)])
+        apply_repeat_boolean_operation(m, None)
+        self.assertEqual(len(m.document.layers[0].children), 2)
+
+    def test_repeat_empty_string_is_noop(self):
+        m = _model_with_rects(self._rects(), [(0, 0), (0, 1)])
+        apply_repeat_boolean_operation(m, "")
         self.assertEqual(len(m.document.layers[0].children), 2)
 
 

@@ -332,7 +332,8 @@ class DockPanelWidget(QWidget):
                     from panels.boolean_apply import apply_destructive_boolean
                     model = self._get_model() if self._get_model else None
                     if model is not None:
-                        apply_destructive_boolean(model, op_name)
+                        opts = _boolean_options_from_store(store)
+                        apply_destructive_boolean(model, op_name, opts)
                 return handle
 
             def _make_compound_creation_handler(op_name):
@@ -342,6 +343,42 @@ class DockPanelWidget(QWidget):
                     if model is not None:
                         apply_compound_creation(model, op_name)
                 return handle
+
+            def _boolean_options_from_store(store):
+                """Build BooleanOptions from document state. Defaults
+                come from BooleanOptions() when keys are absent."""
+                from panels.boolean_apply import BooleanOptions
+                defaults = BooleanOptions()
+                if store is None:
+                    return defaults
+                precision = store.get("boolean_precision")
+                rrp = store.get("boolean_remove_redundant_points")
+                drup = store.get("boolean_divide_remove_unpainted")
+                return BooleanOptions(
+                    precision=float(precision) if isinstance(precision, (int, float))
+                        else defaults.precision,
+                    remove_redundant_points=bool(rrp) if isinstance(rrp, bool)
+                        else defaults.remove_redundant_points,
+                    divide_remove_unpainted=bool(drup) if isinstance(drup, bool)
+                        else defaults.divide_remove_unpainted,
+                )
+
+            def handle_repeat_boolean_operation(data, ctx, store):
+                from panels.boolean_apply import apply_repeat_boolean_operation
+                model = self._get_model() if self._get_model else None
+                if model is None or store is None:
+                    return
+                last = store.get("last_boolean_op")
+                if not isinstance(last, str) or not last:
+                    return
+                opts = _boolean_options_from_store(store)
+                apply_repeat_boolean_operation(model, last, opts)
+
+            def handle_reset_boolean_panel(data, ctx, store):
+                # Per BOOLEAN.md: only clears last_boolean_op (handled
+                # by the yaml `set` effect in the same action). No
+                # extra state to tear down in Python.
+                return
 
             def handle_make_compound_shape(data, ctx, store):
                 from panels.boolean_apply import apply_make_compound_shape
@@ -380,6 +417,8 @@ class DockPanelWidget(QWidget):
                 "make_compound_shape": handle_make_compound_shape,
                 "release_compound_shape": handle_release_compound_shape,
                 "expand_compound_shape": handle_expand_compound_shape,
+                "repeat_boolean_operation": handle_repeat_boolean_operation,
+                "reset_boolean_panel": handle_reset_boolean_panel,
             }
 
             run_effects(action_def.get("effects", []), ctx, self._state_store,
