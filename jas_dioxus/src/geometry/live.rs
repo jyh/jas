@@ -57,6 +57,17 @@ pub trait LiveElement {
     /// Mark the kind's internal cache dirty. Default: no-op. Kinds
     /// that introduce a cache override this.
     fn invalidate(&mut self) {}
+
+    /// Flatten to one-or-more static elements. The evaluated geometry
+    /// becomes concrete Path / Polygon elements that no longer depend
+    /// on the source tree. See BOOLEAN.md § Expand and Release
+    /// semantics. `precision` governs any Bézier refit.
+    fn expand(&self, precision: f64) -> Vec<Rc<Element>>;
+
+    /// Restore the source elements as independent children. Each
+    /// returned element retains its original paint; the LiveElement
+    /// wrapper's own paint is discarded.
+    fn release(&self) -> Vec<Rc<Element>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +126,31 @@ impl LiveElement for CompoundShape {
     fn bounds(&self) -> Bounds {
         bounds_of_polygon_set(&self.evaluate(DEFAULT_PRECISION))
     }
+
+    /// Expand a compound shape to one `Polygon` element per ring of
+    /// the evaluated geometry. Each produced element inherits the
+    /// compound shape's own fill / stroke / common; the operand tree
+    /// is dropped. Phase 2's polygon output is already a set of
+    /// closed rings, so no Bézier refit is performed; refitting via
+    /// `algorithms::fit_curve` lands in a later pass.
+    fn expand(&self, precision: f64) -> Vec<Rc<Element>> {
+        let ps = self.evaluate(precision);
+        ps.into_iter()
+            .filter(|ring| ring.len() >= 3)
+            .map(|ring| {
+                Rc::new(Element::Polygon(super::element::PolygonElem {
+                    points: ring,
+                    fill: self.fill.clone(),
+                    stroke: self.stroke.clone(),
+                    common: self.common.clone(),
+                }))
+            })
+            .collect()
+    }
+
+    fn release(&self) -> Vec<Rc<Element>> {
+        self.operands.clone()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +196,12 @@ impl LiveElement for LiveVariant {
     }
     fn invalidate(&mut self) {
         match self { LiveVariant::CompoundShape(cs) => cs.invalidate() }
+    }
+    fn expand(&self, precision: f64) -> Vec<Rc<Element>> {
+        match self { LiveVariant::CompoundShape(cs) => cs.expand(precision) }
+    }
+    fn release(&self) -> Vec<Rc<Element>> {
+        match self { LiveVariant::CompoundShape(cs) => cs.release() }
     }
 }
 
@@ -474,6 +516,65 @@ mod tests {
         let ps = element_to_polygon_set(&rect, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 1);
         assert_eq!(ps[0], vec![(1.0, 2.0), (4.0, 2.0), (4.0, 6.0), (1.0, 6.0)]);
+    }
+
+    #[test]
+    fn expand_produces_one_polygon_per_ring() {
+        use crate::geometry::element::{Color, Fill};
+        let red = Fill::new(Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 });
+        let cs = CompoundShape {
+            operation: CompoundOperation::Exclude,
+            operands: vec![rc_rect(0.0, 0.0, 10.0, 10.0), rc_rect(5.0, 0.0, 10.0, 10.0)],
+            fill: Some(red),
+            stroke: None,
+            common: CommonProps::default(),
+        };
+        let expanded = cs.expand(DEFAULT_PRECISION);
+        // XOR of two overlapping rects → two non-overlapping rings.
+        assert_eq!(expanded.len(), 2);
+        // Each produced element is a Polygon carrying the compound
+        // shape's own fill.
+        for rc in &expanded {
+            match rc.as_ref() {
+                Element::Polygon(p) => {
+                    assert_eq!(p.fill, Some(red));
+                }
+                other => panic!("expected Polygon, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn release_returns_operands_verbatim() {
+        let r1 = rc_rect(0.0, 0.0, 10.0, 10.0);
+        let r2 = rc_rect(5.0, 0.0, 10.0, 10.0);
+        let cs = CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![r1.clone(), r2.clone()],
+            fill: None, stroke: None, common: CommonProps::default(),
+        };
+        let released = cs.release();
+        assert_eq!(released.len(), 2);
+        // Same Rc instances — no deep clone.
+        assert!(Rc::ptr_eq(&released[0], &r1));
+        assert!(Rc::ptr_eq(&released[1], &r2));
+    }
+
+    #[test]
+    fn element_live_bounds_come_from_evaluation() {
+        // Wrap a CompoundShape in an Element and verify the top-level
+        // Element::bounds() accessor delegates into LiveElement::bounds.
+        let cs = CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![rc_rect(0.0, 0.0, 10.0, 10.0), rc_rect(5.0, 0.0, 10.0, 10.0)],
+            fill: None, stroke: None, common: CommonProps::default(),
+        };
+        let elem = Element::Live(LiveVariant::CompoundShape(cs));
+        let (bx, by, bw, bh) = elem.bounds();
+        assert!((bx - 0.0).abs() < 1e-6);
+        assert!((by - 0.0).abs() < 1e-6);
+        assert!((bw - 15.0).abs() < 1e-6);
+        assert!((bh - 10.0).abs() < 1e-6);
     }
 
     #[test]
