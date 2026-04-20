@@ -13,6 +13,8 @@ default_layouts:
         groups:
           - panels: [color, swatches]
             active: 0
+          - panels: [align, boolean]
+            active: 0
           - panels: [character, paragraph]
             active: 0
           - panels: [stroke, properties]

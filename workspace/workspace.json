@@ -2590,6 +2590,13 @@
             },
             {
               "panels": [
+                "align",
+                "boolean"
+              ],
+              "active": 0
+            },
+            {
+              "panels": [
                 "character",
                 "paragraph"
               ],
