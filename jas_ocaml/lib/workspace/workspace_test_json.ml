@@ -93,6 +93,7 @@ let panel_kind_str = function
   | Paragraph -> "paragraph"
   | Artboards -> "artboards"
   | Align -> "align"
+  | Boolean -> "boolean"
 
 let pane_kind_str = function
   | Toolbar -> "toolbar"

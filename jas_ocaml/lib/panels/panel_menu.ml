@@ -10,7 +10,7 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean |]
 
 (** Paragraph panel state-store handle. The yaml_panel_view sets
     this ref to the panel's [State_store.t] when rendering the
@@ -54,6 +54,7 @@ let panel_label = function
   | Paragraph -> "Paragraph"
   | Artboards -> "Artboards"
   | Align -> "Align"
+  | Boolean -> "Boolean"
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
@@ -111,6 +112,17 @@ let panel_menu = function
       Action { label = "Reset Panel"; command = "reset_align_panel"; shortcut = "" };
       Separator;
       Action { label = "Close Align"; command = "close_panel"; shortcut = "" } ]
+  | Boolean -> [
+      Action { label = "Repeat Boolean Operation"; command = "repeat_boolean_operation"; shortcut = "" };
+      Action { label = "Boolean Options\xe2\x80\xa6"; command = "open_boolean_options"; shortcut = "" };
+      Separator;
+      Action { label = "Make Compound Shape"; command = "make_compound_shape"; shortcut = "" };
+      Action { label = "Release Compound Shape"; command = "release_compound_shape"; shortcut = "" };
+      Action { label = "Expand Compound Shape"; command = "expand_compound_shape"; shortcut = "" };
+      Separator;
+      Action { label = "Reset Panel"; command = "reset_boolean_panel"; shortcut = "" };
+      Separator;
+      Action { label = "Close Boolean"; command = "close_panel"; shortcut = "" } ]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =
