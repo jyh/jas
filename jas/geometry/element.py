@@ -964,6 +964,54 @@ class Layer(Group):
     name: str = "Layer"
 
 
+# ─── LiveElement framework ─────────────────────────────────────
+# See transcripts/BOOLEAN.md § Live element framework. CompoundShape
+# is the first conformer (non-destructive boolean over an operand
+# tree). Future Live Effects (drop shadow, blend, ...) add a new
+# subclass of LiveElement.
+
+class CompoundOperation(Enum):
+    """Which boolean operation a CompoundShape evaluates to. Only
+    the four Shape Mode operations can be compound."""
+    UNION = "union"
+    SUBTRACT_FRONT = "subtract_front"
+    INTERSECTION = "intersection"
+    EXCLUDE = "exclude"
+
+
+class LiveElement(Element):
+    """Abstract base for non-destructive element kinds that store
+    source inputs and evaluate them on demand. Subclasses implement
+    ``bounds`` and any kind-specific rendering.
+
+    See BOOLEAN.md § Live element framework.
+    """
+    pass
+
+
+@dataclass(frozen=True)
+class CompoundShape(LiveElement):
+    """A live, non-destructive boolean element: stores the operation
+    and its operand tree; evaluates to a polygon set on demand.
+    See BOOLEAN.md § Compound shape data model.
+    """
+    operation: CompoundOperation = CompoundOperation.UNION
+    operands: tuple[Element, ...] = ()
+    fill: Fill | None = None
+    stroke: Stroke | None = None
+    opacity: float = 1.0
+    transform: Transform | None = None
+    locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
+
+    def bounds(self) -> tuple[float, float, float, float]:
+        """Phase 1 stub: empty bounds. Phase 2 returns bounds of the
+        evaluated polygon set after running the boolean algorithm
+        over operands.
+        """
+        return (0.0, 0.0, 0.0, 0.0)
+
+
 def sync_tspans_from_content(element: Element) -> Element:
     """Rebuild a Text / TextPath element's ``tspans`` field from its
     ``content`` field. The resulting tuple has a single entry with
