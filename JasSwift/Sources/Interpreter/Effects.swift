@@ -1814,5 +1814,31 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
             return nil
         }
     }
+    // Boolean panel destructive ops. See BOOLEAN.md §Panel actions.
+    // DIVIDE / TRIM / MERGE ship in phase 9e.
+    let booleanOps = [
+        "union", "intersection", "exclude",
+        "subtract_front", "subtract_back", "crop",
+    ]
+    for op in booleanOps {
+        effects["boolean_\(op)"] = { _, _, _ in
+            Controller(model: model).applyDestructiveBoolean(op)
+            return nil
+        }
+    }
+    // Boolean panel compound-shape menu actions (also dispatched by
+    // the hamburger menu path, but yaml-driven menu items route here).
+    effects["make_compound_shape"] = { _, _, _ in
+        Controller(model: model).makeCompoundShape()
+        return nil
+    }
+    effects["release_compound_shape"] = { _, _, _ in
+        Controller(model: model).releaseCompoundShape()
+        return nil
+    }
+    effects["expand_compound_shape"] = { _, _, _ in
+        Controller(model: model).expandCompoundShape()
+        return nil
+    }
     return effects
 }
