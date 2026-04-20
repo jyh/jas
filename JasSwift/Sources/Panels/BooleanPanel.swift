@@ -23,11 +23,16 @@ public enum BooleanPanel {
         ]
     }
 
-    public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout) {
+    public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
         switch cmd {
         case "close_panel": layout.closePanel(addr)
-        // All other menu actions route through the yaml-driven
-        // renderer dispatch path; that wiring lands in phase 9b.
+        case "make_compound_shape":
+            if let m = model { Controller(model: m).makeCompoundShape() }
+        case "release_compound_shape":
+            if let m = model { Controller(model: m).releaseCompoundShape() }
+        case "expand_compound_shape":
+            if let m = model { Controller(model: m).expandCompoundShape() }
+        // Repeat / Boolean Options / Reset dispatch is phase 9c+.
         default: break
         }
     }
