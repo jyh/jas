@@ -14,6 +14,7 @@ public func panelLabel(_ kind: PanelKind) -> String {
     case .character: return CharacterPanel.label
     case .paragraph: return ParagraphPanel.label
     case .artboards: return ArtboardsPanel.label
+    case .align: return AlignPanel.label
     }
 }
 
@@ -28,6 +29,7 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     case .character: return CharacterPanel.menuItems()
     case .paragraph: return ParagraphPanel.menuItems()
     case .artboards: return ArtboardsPanel.menuItems()
+    case .align: return AlignPanel.menuItems()
     }
 }
 
@@ -42,6 +44,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .character: CharacterPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .paragraph: ParagraphPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .artboards: ArtboardsPanel.dispatch(cmd, addr: addr, layout: &layout)
+    case .align: AlignPanel.dispatch(cmd, addr: addr, layout: &layout)
     }
 }
 
@@ -56,5 +59,6 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String, layout: WorkspaceLayo
     case .character: return CharacterPanel.isChecked(cmd, layout: layout)
     case .paragraph: return ParagraphPanel.isChecked(cmd, layout: layout)
     case .artboards: return ArtboardsPanel.isChecked(cmd, layout: layout)
+    case .align: return AlignPanel.isChecked(cmd, layout: layout)
     }
 }
