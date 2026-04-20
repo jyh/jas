@@ -119,6 +119,64 @@ let test_unknown_op_is_noop () =
   Boolean_apply.apply_destructive_boolean m "nonexistent";
   Alcotest.(check int) "unchanged" before (top_children_count m)
 
+(* ── DIVIDE / TRIM / MERGE tests ────────────────────────────── *)
+
+let rect_with_fill x y color =
+  Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
+         fill = Some { fill_color = color; fill_opacity = 1.0 };
+         stroke = None; opacity = 1.0; transform = None;
+         locked = false; visibility = Preview }
+
+let disjoint_rects () =
+  make_model [rect_at 0.0 0.0; rect_at 20.0 0.0] [[0; 0]; [0; 1]]
+
+let test_divide_two_overlapping_produces_three_fragments () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "divide";
+  Alcotest.(check int) "three fragments" 3 (top_children_count m)
+
+let test_divide_disjoint_keeps_two () =
+  let m = disjoint_rects () in
+  Boolean_apply.apply_destructive_boolean m "divide";
+  Alcotest.(check int) "two fragments" 2 (top_children_count m)
+
+let test_trim_two_overlapping_keeps_two () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "trim";
+  Alcotest.(check int) "two outputs" 2 (top_children_count m)
+
+let test_trim_fully_covered_operand_vanishes () =
+  let back = rect_at 0.0 0.0 in
+  let front = Rect { x = 0.0; y = 0.0; width = 20.0; height = 20.0;
+                     rx = 0.0; ry = 0.0; fill = None; stroke = None;
+                     opacity = 1.0; transform = None; locked = false;
+                     visibility = Preview } in
+  let m = make_model [back; front] [[0; 0]; [0; 1]] in
+  Boolean_apply.apply_destructive_boolean m "trim";
+  Alcotest.(check int) "front only" 1 (top_children_count m)
+
+let test_merge_matching_fills_combine () =
+  let red = color_rgb 1.0 0.0 0.0 in
+  let m = make_model
+    [rect_with_fill 0.0 0.0 red; rect_with_fill 5.0 0.0 red]
+    [[0; 0]; [0; 1]] in
+  Boolean_apply.apply_destructive_boolean m "merge";
+  Alcotest.(check int) "one merged" 1 (top_children_count m)
+
+let test_merge_mismatched_fills_stay_separate () =
+  let red = color_rgb 1.0 0.0 0.0 in
+  let blue = color_rgb 0.0 0.0 1.0 in
+  let m = make_model
+    [rect_with_fill 0.0 0.0 red; rect_with_fill 5.0 0.0 blue]
+    [[0; 0]; [0; 1]] in
+  Boolean_apply.apply_destructive_boolean m "merge";
+  Alcotest.(check int) "two separate" 2 (top_children_count m)
+
+let test_merge_none_fill_never_matches () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_destructive_boolean m "merge";
+  Alcotest.(check int) "two separate" 2 (top_children_count m)
+
 let () =
   Alcotest.run "Boolean_apply"
     [ "compound shape", [
@@ -146,5 +204,21 @@ let () =
           test_crop_uses_frontmost_as_mask;
         Alcotest.test_case "unknown op is noop" `Quick
           test_unknown_op_is_noop;
+      ];
+      "divide trim merge", [
+        Alcotest.test_case "divide overlapping produces three" `Quick
+          test_divide_two_overlapping_produces_three_fragments;
+        Alcotest.test_case "divide disjoint keeps two" `Quick
+          test_divide_disjoint_keeps_two;
+        Alcotest.test_case "trim overlapping keeps two" `Quick
+          test_trim_two_overlapping_keeps_two;
+        Alcotest.test_case "trim fully covered operand vanishes" `Quick
+          test_trim_fully_covered_operand_vanishes;
+        Alcotest.test_case "merge matching fills combine" `Quick
+          test_merge_matching_fills_combine;
+        Alcotest.test_case "merge mismatched fills stay separate" `Quick
+          test_merge_mismatched_fills_stay_separate;
+        Alcotest.test_case "merge none fill never matches" `Quick
+          test_merge_none_fill_never_matches;
       ]
     ]

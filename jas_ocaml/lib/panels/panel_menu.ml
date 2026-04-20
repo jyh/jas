@@ -642,6 +642,9 @@ let dispatch_yaml_action
            ("boolean_subtract_front", make_boolean_op_h "subtract_front");
            ("boolean_subtract_back", make_boolean_op_h "subtract_back");
            ("boolean_crop", make_boolean_op_h "crop");
+           ("boolean_divide", make_boolean_op_h "divide");
+           ("boolean_trim", make_boolean_op_h "trim");
+           ("boolean_merge", make_boolean_op_h "merge");
            ("make_compound_shape", make_cs_h);
            ("release_compound_shape", release_cs_h);
            ("expand_compound_shape", expand_cs_h);
