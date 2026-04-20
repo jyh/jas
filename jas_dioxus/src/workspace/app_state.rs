@@ -1437,6 +1437,13 @@ impl AppState {
         }
     }
 
+    /// Reset the Boolean panel's transient state. Clears last_op
+    /// (so Repeat becomes a no-op) without touching the Boolean
+    /// Options fields.
+    pub(crate) fn reset_boolean_panel(&mut self) {
+        self.boolean_panel.last_op = None;
+    }
+
     /// Re-apply the most-recent boolean operation (destructive or
     /// compound-creating) on the current selection. No-op when
     /// `boolean_panel.last_op` is None. Make / Release / Expand
