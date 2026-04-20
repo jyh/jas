@@ -486,12 +486,12 @@ def run_align(vectors):
         else:
             raise ValueError(f"unknown align op: {op}")
 
-        results.append({"name": v["name"], "result": {
+        results.append({
             "translations": [
                 {"path": list(t.path), "dx": t.dx, "dy": t.dy}
                 for t in translations
             ],
-        }})
+        })
     return results
 
 
