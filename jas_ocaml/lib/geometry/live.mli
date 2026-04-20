@@ -31,3 +31,11 @@ val bounds_of_polygon_set :
     algorithm at the given precision. *)
 val evaluate :
   Element.compound_shape -> float -> Boolean.polygon_set
+
+(** Replace a compound shape with Polygon elements derived from its
+    evaluated geometry. Each polygon carries the compound shape's
+    own paint; rings with fewer than 3 points are dropped. *)
+val expand : Element.compound_shape -> float -> Element.element list
+
+(** Inverse of Make. Returns the operand array verbatim. *)
+val release : Element.compound_shape -> Element.element array

@@ -141,6 +141,32 @@ and evaluate cs precision =
   in
   apply_operation cs.operation operand_sets
 
+(** Replace a compound shape with one Polygon per ring of the
+    evaluated geometry. Each output polygon carries the compound
+    shape's own fill / stroke / common props; the operand tree is
+    discarded. Rings with fewer than 3 points are dropped. See
+    BOOLEAN.md § Expand and Release semantics. *)
+let expand (cs : compound_shape) precision : element list =
+  let ps = evaluate cs precision in
+  List.filter_map (fun ring ->
+    if Array.length ring < 3 then None
+    else
+      let points = Array.to_list ring in
+      Some (Polygon {
+        points;
+        fill = cs.fill;
+        stroke = cs.stroke;
+        opacity = cs.opacity;
+        transform = cs.transform;
+        locked = cs.locked;
+        visibility = cs.visibility;
+      })
+  ) ps
+
+(** Inverse of Make. Returns the operands unchanged. Each operand
+    keeps its own paint; the compound shape's paint is discarded. *)
+let release (cs : compound_shape) : element array = cs.operands
+
 let bounds_of_polygon_set ps =
   let min_x = ref infinity in
   let min_y = ref infinity in
