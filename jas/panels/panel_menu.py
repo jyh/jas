@@ -510,6 +510,21 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
                 new_h = (h + 180.0) % 360.0
                 complemented = Color.hsb(new_h, s, br)
                 set_active_color(complemented, model)
+    elif kind == PanelKind.BOOLEAN and model is not None:
+        # Compound-shape menu dispatches. Destructive ops,
+        # Boolean Options dialog, Repeat, and Reset are phase 9b+
+        # of the Python port.
+        from panels.boolean_apply import (
+            apply_expand_compound_shape,
+            apply_make_compound_shape,
+            apply_release_compound_shape,
+        )
+        if cmd == "make_compound_shape":
+            apply_make_compound_shape(model)
+        elif cmd == "release_compound_shape":
+            apply_release_compound_shape(model)
+        elif cmd == "expand_compound_shape":
+            apply_expand_compound_shape(model)
 
 
 def panel_is_checked(kind: PanelKind, cmd: str, layout: WorkspaceLayout) -> bool:
