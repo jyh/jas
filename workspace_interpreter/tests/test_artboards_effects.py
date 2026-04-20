@@ -1074,3 +1074,248 @@ class TestResetPanelAction:
         assert store.get_panel("artboards", "artboards_panel_selection") == []
         assert store.get_panel("artboards", "panel_selection_anchor") is None
         assert store.get_panel("artboards", "reference_point") == "center"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Anchor-offset builtins (reference-point display transform)
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestAnchorOffsetBuiltins:
+    def _eval(self, expr: str) -> float:
+        from workspace_interpreter.expr import evaluate
+        r = evaluate(expr, {})
+        return r.value
+
+    def test_center_half_width(self):
+        assert self._eval("anchor_offset_x('center', 612)") == 306
+        assert self._eval("anchor_offset_y('center', 792)") == 396
+
+    def test_top_left_zero(self):
+        assert self._eval("anchor_offset_x('top_left', 612)") == 0
+        assert self._eval("anchor_offset_y('top_left', 792)") == 0
+
+    def test_bottom_right_full_size(self):
+        assert self._eval("anchor_offset_x('bottom_right', 612)") == 612
+        assert self._eval("anchor_offset_y('bottom_right', 792)") == 792
+
+    def test_middle_left_half_y_zero_x(self):
+        assert self._eval("anchor_offset_x('middle_left', 612)") == 0
+        assert self._eval("anchor_offset_y('middle_left', 792)") == 396
+
+    def test_top_center_half_x_zero_y(self):
+        assert self._eval("anchor_offset_x('top_center', 612)") == 306
+        assert self._eval("anchor_offset_y('top_center', 792)") == 0
+
+
+# ══════════════════════════════════════════════════════════════════
+# doc.set_artboard_options_field effect
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestDocSetArtboardOptionsField:
+    def test_writes_document_global_toggle(self):
+        store = StateStore(
+            document={"artboards": [_default_artboard("aaa")]},
+        )
+        run_effects(
+            [{"doc.set_artboard_options_field": {
+                "field": "fade_region_outside_artboard",
+                "value": "false",
+            }}],
+            {}, store,
+        )
+        assert store.document()["artboard_options"]["fade_region_outside_artboard"] is False
+
+    def test_writes_update_while_dragging(self):
+        store = StateStore(
+            document={"artboards": [_default_artboard("aaa")]},
+        )
+        run_effects(
+            [{"doc.set_artboard_options_field": {
+                "field": "update_while_dragging",
+                "value": "false",
+            }}],
+            {}, store,
+        )
+        assert store.document()["artboard_options"]["update_while_dragging"] is False
+
+
+# ══════════════════════════════════════════════════════════════════
+# Artboard Options dialog open / confirm round-trip
+# ══════════════════════════════════════════════════════════════════
+
+
+_WORKSPACE_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "workspace",
+)
+
+
+def _load_dialogs() -> dict:
+    """Load dialogs from the workspace dir to support open_dialog."""
+    path = os.path.join(_WORKSPACE_PATH, "dialogs")
+    dialogs: dict = {}
+    for fname in sorted(os.listdir(path)):
+        if not fname.endswith(".yaml"):
+            continue
+        with open(os.path.join(path, fname)) as f:
+            data = yaml.safe_load(f)
+        if isinstance(data, dict):
+            dialogs.update(data)
+    return dialogs
+
+
+DIALOGS = _load_dialogs()
+
+
+def _run_dialog_action(store: StateStore, name: str, params: dict | None = None):
+    action = ACTIONS[name]
+    effects = action.get("effects", [])
+    ctx = {"param": params} if params else {}
+    run_effects(effects, ctx, store, actions=ACTIONS, dialogs=DIALOGS)
+
+
+class TestArtboardOptionsDialog:
+    def _prepared_store(self, **ab_overrides) -> StateStore:
+        ab = _default_artboard("aaa", "Artboard 1")
+        ab.update(ab_overrides)
+        store = StateStore(document={"artboards": [ab]})
+        store.init_panel("artboards", {
+            "artboards_panel_selection": ["aaa"],
+            "reference_point": "center",
+        })
+        store.set_active_panel("artboards")
+        return store
+
+    def test_open_populates_dialog_state_from_artboard(self):
+        store = self._prepared_store(width=400, height=300, name="Cover")
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        assert store.get_dialog_id() == "artboard_options"
+        assert store.get_dialog("name") == "Cover"
+        assert store.get_dialog("width") == 400
+        assert store.get_dialog("height") == 300
+
+    def test_open_pulls_global_options(self):
+        store = self._prepared_store()
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        assert store.get_dialog("fade_region_outside_artboard") is True
+        assert store.get_dialog("update_while_dragging") is True
+
+    def test_confirm_writes_all_fields(self):
+        store = self._prepared_store()
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        _run_dialog_action(store, "artboard_options_confirm", {
+            "artboard_id": "aaa",
+            "name": "Cover",
+            "x": 100,
+            "y": 200,
+            "width": 400,
+            "height": 300,
+            "fill": "#ffcc00",
+            "show_center_mark": True,
+            "show_cross_hairs": False,
+            "show_video_safe_areas": True,
+            "video_ruler_pixel_aspect_ratio": 1.5,
+            "fade_region_outside_artboard": False,
+            "update_while_dragging": False,
+        })
+        ab = store.find_artboard_by_id("aaa")
+        assert ab["name"] == "Cover"
+        assert ab["x"] == 100
+        assert ab["y"] == 200
+        assert ab["width"] == 400
+        assert ab["height"] == 300
+        assert ab["fill"] == "#ffcc00"
+        assert ab["show_center_mark"] is True
+        assert ab["show_video_safe_areas"] is True
+        assert ab["video_ruler_pixel_aspect_ratio"] == 1.5
+        assert store.document()["artboard_options"]["fade_region_outside_artboard"] is False
+        assert store.document()["artboard_options"]["update_while_dragging"] is False
+
+    def test_confirm_takes_one_snapshot(self):
+        store = self._prepared_store()
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        _run_dialog_action(store, "artboard_options_confirm", {
+            "artboard_id": "aaa",
+            "name": "X",
+            "x": 0, "y": 0,
+            "width": 612, "height": 792,
+            "fill": "transparent",
+            "show_center_mark": False,
+            "show_cross_hairs": False,
+            "show_video_safe_areas": False,
+            "video_ruler_pixel_aspect_ratio": 1.0,
+            "fade_region_outside_artboard": True,
+            "update_while_dragging": True,
+        })
+        assert len(store.snapshots()) == 1
+
+    def test_confirm_closes_dialog(self):
+        store = self._prepared_store()
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        assert store.get_dialog_id() == "artboard_options"
+        _run_dialog_action(store, "artboard_options_confirm", {
+            "artboard_id": "aaa",
+            "name": "X",
+            "x": 0, "y": 0,
+            "width": 612, "height": 792,
+            "fill": "transparent",
+            "show_center_mark": False,
+            "show_cross_hairs": False,
+            "show_video_safe_areas": False,
+            "video_ruler_pixel_aspect_ratio": 1.0,
+            "fade_region_outside_artboard": True,
+            "update_while_dragging": True,
+        })
+        assert store.get_dialog_id() is None
+
+    def test_reference_point_widget_transforms_display(self):
+        """ART-199: with anchor = center, X=306 Y=396 displays for
+        an artboard at top-left (0, 0) size 612x792."""
+        store = self._prepared_store()
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        # dialog.x_rp is a computed prop. Reading evaluates the get
+        # expression against dialog state + panel.reference_point.
+        x_rp = store.get_dialog("x_rp")
+        y_rp = store.get_dialog("y_rp")
+        assert x_rp == 306   # 0 + 612/2
+        assert y_rp == 396   # 0 + 792/2
+
+    def test_reference_point_top_left_displays_raw(self):
+        store = self._prepared_store()
+        store.set_panel("artboards", "reference_point", "top_left")
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        assert store.get_dialog("x_rp") == 0
+        assert store.get_dialog("y_rp") == 0
+
+
+class TestDeleteArtboardFromDialog:
+    def test_deletes_and_closes(self):
+        store = StateStore(document={"artboards": [
+            _default_artboard("aaa", "Artboard 1"),
+            _default_artboard("bbb", "Artboard 2"),
+        ]})
+        store.init_panel("artboards", {"artboards_panel_selection": ["aaa"]})
+        store.set_active_panel("artboards")
+        _run_dialog_action(store, "open_artboard_options", {
+            "artboard_id": "aaa",
+        })
+        _run_dialog_action(store, "delete_artboard_from_dialog", {
+            "artboard_id": "aaa",
+        })
+        assert [a["id"] for a in store.document()["artboards"]] == ["bbb"]
+        assert store.get_dialog_id() is None
