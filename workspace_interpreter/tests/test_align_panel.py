@@ -455,3 +455,57 @@ def _menubar_item_by_id(menubar, target_id):
             if isinstance(item, dict) and item.get("id") == target_id:
                 return item
     return None
+
+
+class TestAlignIcons:
+    """Stage 1g: 17 icon SVG stubs in workspace/icons.yaml matching
+    the names declared in ALIGN.md §Icon names and referenced by
+    the icon_button widgets in align.yaml."""
+
+    EXPECTED_ICONS = [
+        "align_left", "align_horizontal_center", "align_right",
+        "align_top", "align_vertical_center", "align_bottom",
+        "distribute_left", "distribute_horizontal_center", "distribute_right",
+        "distribute_top", "distribute_vertical_center", "distribute_bottom",
+        "distribute_spacing_vertical", "distribute_spacing_horizontal",
+        "align_to_artboard", "align_to_selection", "align_to_key_object",
+    ]
+
+    @pytest.mark.parametrize("icon_name", EXPECTED_ICONS)
+    def test_icon_is_declared(self, workspace_path, icon_name):
+        ws = load_workspace(workspace_path)
+        icons = ws.get("icons", {})
+        assert icon_name in icons, f"icon {icon_name!r} not in icons.yaml"
+
+    @pytest.mark.parametrize("icon_name", EXPECTED_ICONS)
+    def test_icon_has_viewbox_and_svg(self, workspace_path, icon_name):
+        ws = load_workspace(workspace_path)
+        icon = ws["icons"][icon_name]
+        assert "viewbox" in icon and isinstance(icon["viewbox"], str)
+        assert "svg" in icon and isinstance(icon["svg"], str)
+        assert icon["svg"].strip(), f"icon {icon_name!r} svg is empty"
+
+    def test_every_panel_icon_reference_resolves(self, workspace_path):
+        """Every icon: <name> in align.yaml widgets is defined in
+        icons.yaml — otherwise buttons render a blank glyph."""
+        ws = load_workspace(workspace_path)
+        spec = ws["panels"]["align_panel_content"]
+        referenced = _collect_icon_refs(spec.get("content", {}))
+        icons = ws.get("icons", {})
+        missing = [n for n in referenced if n not in icons]
+        assert missing == [], f"icon names referenced but not defined: {missing}"
+
+
+def _collect_icon_refs(node, out=None):
+    """Yield every icon name referenced under ``icon:`` keys."""
+    if out is None:
+        out = []
+    if isinstance(node, dict):
+        if "icon" in node and isinstance(node["icon"], str):
+            out.append(node["icon"])
+        for v in node.values():
+            _collect_icon_refs(v, out)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_icon_refs(item, out)
+    return out
