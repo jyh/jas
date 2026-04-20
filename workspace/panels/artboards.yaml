@@ -302,6 +302,33 @@ content:
                 action: open_artboard_options
                 params: { artboard_id: "ab.id" }
 
+        # Right-click context menu. Pre-menu selection rule (replace
+        # panel-selection with this row if it isn't already selected,
+        # else preserve the existing selection) is native behavior;
+        # the menu contents mirror the panel-menu counterparts.
+        # Right-click on empty panel area (below the last row) shows
+        # nothing — achieved by the absence of a container-level
+        # context_menu block.
+        context_menu:
+          - label: "Artboard Options..."
+            action: open_artboard_options
+            params: { artboard_id: "ab.id" }
+          - label: "Rename"
+            action: rename_artboard
+            params: { artboard_id: "ab.id" }
+            enabled_when: "active_document.artboards_panel_selection_ids.length == 1"
+          - label: "Duplicate Artboards"
+            action: duplicate_artboards
+            enabled_when: "active_document.artboards_panel_selection_ids.length > 0"
+          - label: "Delete Artboards"
+            action: delete_artboards
+            enabled_when: "active_document.artboards_panel_selection_ids.length > 0 and active_document.artboards_panel_selection_ids.length < active_document.artboards_count"
+          - separator
+          - label: "Convert to Artboards"
+            action: convert_to_artboards
+            enabled_when: "false"
+            tooltip: "Coming soon"
+
     # ── Separator ─────────────────────────────────────────────
 
     - type: separator

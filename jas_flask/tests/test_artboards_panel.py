@@ -231,6 +231,31 @@ class TestArtboardsPanel:
         assert keys.get("Alt+ArrowUp") == "move_artboard_up"
         assert keys.get("Alt+ArrowDown") == "move_artboard_down"
 
+    # ── Row-level context menu ─────────────────────────────────
+
+    def test_row_has_context_menu(self, panel):
+        content = panel.get("content", {})
+        list_container = next(c for c in content.get("children", []) if isinstance(c, dict) and c.get("id") == "ap_list")
+        row = list_container.get("do", {})
+        ctx_menu = row.get("context_menu")
+        assert ctx_menu is not None
+        labels = [m.get("label") for m in ctx_menu if isinstance(m, dict)]
+        assert labels[:4] == [
+            "Artboard Options...", "Rename",
+            "Duplicate Artboards", "Delete Artboards",
+        ]
+        # Separator + Convert-to-Artboards (grayed).
+        assert "Convert to Artboards" in labels
+
+    def test_empty_panel_area_has_no_context_menu(self, panel):
+        """Right-click in empty panel area below the last row shows
+        nothing — enforced by the absence of a container-level
+        context_menu block on ap_root / ap_list."""
+        content = panel.get("content", {})
+        assert "context_menu" not in content
+        list_container = next(c for c in content.get("children", []) if isinstance(c, dict) and c.get("id") == "ap_list")
+        assert "context_menu" not in list_container
+
     # ── Full dock integration: panel renders inside a dock ─────
 
     def test_artboards_panel_in_dock(self, theme, state):
