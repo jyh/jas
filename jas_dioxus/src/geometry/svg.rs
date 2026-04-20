@@ -1592,13 +1592,23 @@ pub fn svg_to_document(svg: &str) -> Document {
             }
         }
     }
+    // SVG has no artboards concept. Parsed SVG documents produce
+    // an empty artboards list; native loaders enforce the
+    // at-least-one invariant at app load time. See
+    // ARTBOARDS.md §At-least-one-artboard invariant for the
+    // load-time repair contract.
     if layers.is_empty() {
-        return Document::default();
+        let mut d = Document::default();
+        d.artboards = Vec::new();
+        d.artboard_options = crate::document::artboard::ArtboardOptions::default();
+        return d;
     }
     let doc = Document {
         layers,
         selected_layer: 0,
         selection: Vec::new(),
+        artboards: Vec::new(),
+        artboard_options: crate::document::artboard::ArtboardOptions::default(),
     };
     normalize_document(&doc)
 }
@@ -1707,6 +1717,7 @@ mod tests {
             })],
             selected_layer: 0,
             selection: vec![],
+            ..Document::default()
         }
     }
 

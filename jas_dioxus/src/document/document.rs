@@ -32,6 +32,9 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use crate::document::artboard::{
+    ensure_artboards_invariant, generate_artboard_id, Artboard, ArtboardOptions,
+};
 use crate::geometry::element::{Element, LayerElem, CommonProps};
 
 /// A path identifies an element by its position in the document tree.
@@ -208,10 +211,21 @@ pub struct Document {
     pub layers: Vec<Element>,
     pub selected_layer: usize,
     pub selection: Selection,
+    /// Artboards — print-page regions. The at-least-one invariant
+    /// (ARTBOARDS.md) guarantees this is never empty at observable
+    /// state. See `document/artboard.rs`.
+    pub artboards: Vec<Artboard>,
+    /// Document-wide artboard display toggles (fade outside,
+    /// update while dragging).
+    pub artboard_options: ArtboardOptions,
 }
 
 impl Default for Document {
     fn default() -> Self {
+        let mut artboards = Vec::new();
+        // `None` uses platform entropy. Tests that need deterministic
+        // ids construct Document directly via struct literal.
+        ensure_artboards_invariant(&mut artboards, None);
         Self {
             layers: vec![Element::Layer(LayerElem {
                 name: "Layer".to_string(),
@@ -220,6 +234,8 @@ impl Default for Document {
             })],
             selected_layer: 0,
             selection: Vec::new(),
+            artboards,
+            artboard_options: ArtboardOptions::default(),
         }
     }
 }
@@ -467,14 +483,14 @@ mod tests {
 
     #[test]
     fn empty_document_bounds() {
-        let doc = Document { layers: vec![], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() };
         assert_eq!(doc.bounds(), (0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]
     fn single_layer_bounds() {
         let layer = make_layer("L1", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         assert_eq!(doc.bounds(), (0.0, 0.0, 10.0, 10.0));
     }
 
@@ -487,7 +503,7 @@ mod tests {
     #[test]
     fn get_element_child() {
         let layer = make_layer("L", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let elem = doc.get_element(&vec![0, 0]).unwrap();
         assert!(matches!(elem, Element::Rect(_)));
     }
@@ -496,7 +512,7 @@ mod tests {
     fn get_element_nested() {
         let group = make_group(vec![make_line(0.0, 0.0, 1.0, 1.0)]);
         let layer = make_layer("L", vec![group]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let elem = doc.get_element(&vec![0, 0, 0]).unwrap();
         assert!(matches!(elem, Element::Line(_)));
     }
@@ -510,7 +526,7 @@ mod tests {
     #[test]
     fn replace_element_child() {
         let layer = make_layer("L", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let new_rect = make_rect(5.0, 5.0, 20.0, 20.0);
         let doc2 = doc.replace_element(&vec![0, 0], new_rect.clone());
         assert_eq!(doc2.get_element(&vec![0, 0]).unwrap(), &new_rect);
@@ -526,7 +542,7 @@ mod tests {
             make_rect(0.0, 0.0, 10.0, 10.0),
             make_line(0.0, 0.0, 5.0, 5.0),
         ]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let doc2 = doc.replace_element(&vec![0, 0], make_rect(99.0, 99.0, 1.0, 1.0));
         assert!(matches!(doc2.get_element(&vec![0, 1]).unwrap(), Element::Line(_)));
     }
@@ -537,7 +553,7 @@ mod tests {
             make_rect(0.0, 0.0, 10.0, 10.0),
             make_line(0.0, 0.0, 5.0, 5.0),
         ]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let doc2 = doc.delete_element(&vec![0, 0]);
         if let Element::Layer(l) = &doc2.layers[0] {
             assert_eq!(l.children.len(), 1);
@@ -554,7 +570,7 @@ mod tests {
             make_line(0.0, 0.0, 5.0, 5.0),
         ]);
         let sel = vec![ElementSelection::all(vec![0, 0])];
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: sel };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: sel, ..Document::default() };
         let doc2 = doc.delete_selection();
         assert!(doc2.selection.is_empty());
         if let Element::Layer(l) = &doc2.layers[0] {
@@ -565,7 +581,7 @@ mod tests {
     #[test]
     fn insert_element_after() {
         let layer = make_layer("L", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let doc2 = doc.insert_element_after(&vec![0, 0], make_line(0.0, 0.0, 5.0, 5.0));
         if let Element::Layer(l) = &doc2.layers[0] {
             assert_eq!(l.children.len(), 2);
@@ -576,7 +592,7 @@ mod tests {
     #[test]
     fn insert_element_at() {
         let layer = make_layer("L", vec![make_line(0.0, 0.0, 5.0, 5.0)]);
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let doc2 = doc.insert_element_at(&vec![0, 0], make_rect(0.0, 0.0, 10.0, 10.0));
         if let Element::Layer(l) = &doc2.layers[0] {
             assert_eq!(l.children.len(), 2);

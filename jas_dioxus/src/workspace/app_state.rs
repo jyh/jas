@@ -2812,7 +2812,7 @@ mod align_panel_state_tests {
         let selection: Vec<ElementSelection> = selected.into_iter()
             .map(ElementSelection::all)
             .collect();
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() };
         st.tabs[st.active_tab].model.set_document(doc);
         st
     }
