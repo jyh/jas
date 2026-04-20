@@ -1303,6 +1303,125 @@ class TestArtboardOptionsDialog:
         assert store.get_dialog("y_rp") == 0
 
 
+# ══════════════════════════════════════════════════════════════════
+# Phase-1 deferrals and blue-dot (rearrange_dirty) flag
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestRearrangeDirtyBlueDot:
+    """ART-334: the REARRANGE_BUTTON's accent dot fires on first list
+    change and — in phase 1 — remains lit (the Rearrange Dialogue
+    that would clear it is deferred)."""
+
+    def _store(self, ids: list[str]) -> StateStore:
+        doc = {"artboards": [_default_artboard(i, f"Artboard {n}") for n, i in enumerate(ids, 1)]}
+        store = StateStore(document=doc, artboard_id_generator=_seeded_rng(333))
+        store.init_panel("artboards", {
+            "artboards_panel_selection": [],
+            "rearrange_dirty": False,
+        })
+        store.set_active_panel("artboards")
+        return store
+
+    def test_fresh_panel_flag_starts_false(self):
+        store = self._store(["aaa"])
+        assert store.get_panel("artboards", "rearrange_dirty") is False
+
+    def test_new_artboard_flips_flag(self):
+        store = self._store(["aaa"])
+        _run_action(store, "new_artboard")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+    def test_duplicate_flips_flag(self):
+        store = self._store(["aaa"])
+        store.set_panel("artboards", "artboards_panel_selection", ["aaa"])
+        _run_action(store, "duplicate_artboards")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+    def test_delete_flips_flag(self):
+        store = self._store(["aaa", "bbb"])
+        store.set_panel("artboards", "artboards_panel_selection", ["bbb"])
+        _run_action(store, "delete_artboards")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+    def test_move_up_flips_flag(self):
+        store = self._store(["aaa", "bbb"])
+        store.set_panel("artboards", "artboards_panel_selection", ["bbb"])
+        _run_action(store, "move_artboard_up")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+    def test_move_down_flips_flag(self):
+        store = self._store(["aaa", "bbb"])
+        store.set_panel("artboards", "artboards_panel_selection", ["aaa"])
+        _run_action(store, "move_artboard_down")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+    def test_flag_sticks_across_multiple_changes(self):
+        """Phase-1: no Dialogue exists to clear the flag, so it stays
+        lit after the first change."""
+        store = self._store(["aaa"])
+        _run_action(store, "new_artboard")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+        _run_action(store, "new_artboard")
+        assert store.get_panel("artboards", "rearrange_dirty") is True
+
+
+class TestPhase1DeferralsPanelYaml:
+    """Structural tests against workspace/panels/artboards.yaml that
+    the deferred menu / footer / context-menu entries are present
+    and grayed."""
+
+    @pytest.fixture
+    def panel(self) -> dict:
+        path = os.path.join(
+            _WORKSPACE_PATH, "panels", "artboards.yaml",
+        )
+        with open(path) as f:
+            return yaml.safe_load(f)
+
+    def test_menu_convert_grayed(self, panel):
+        menu = panel.get("menu", [])
+        entry = next(m for m in menu if isinstance(m, dict) and m.get("label") == "Convert to Artboards")
+        assert entry.get("enabled_when") == "false"
+        assert "Coming soon" in entry.get("description", "")
+
+    def test_menu_rearrange_grayed(self, panel):
+        menu = panel.get("menu", [])
+        entry = next(m for m in menu if isinstance(m, dict) and m.get("label") == "Rearrange...")
+        assert entry.get("enabled_when") == "false"
+        assert "Coming soon" in entry.get("description", "")
+
+    def test_footer_rearrange_grayed_with_badge(self, panel):
+        content = panel.get("content", {})
+        footer = next(c for c in content.get("children", []) if isinstance(c, dict) and c.get("id") == "ap_footer")
+        rearrange = next(ch for ch in footer.get("children", []) if isinstance(ch, dict) and ch.get("id") == "ap_rearrange")
+        assert rearrange.get("bind", {}).get("disabled") == "true"
+        assert rearrange.get("bind", {}).get("badge") == "panel.rearrange_dirty"
+        assert rearrange.get("description") == "Coming soon"
+
+    def test_context_menu_exists_on_rows(self, panel):
+        content = panel.get("content", {})
+        list_container = next(c for c in content.get("children", []) if isinstance(c, dict) and c.get("id") == "ap_list")
+        row = list_container.get("do", {})
+        ctx_menu = row.get("context_menu")
+        assert ctx_menu is not None
+        labels = [m.get("label") for m in ctx_menu if isinstance(m, dict)]
+        assert "Artboard Options..." in labels
+        assert "Rename" in labels
+        assert "Duplicate Artboards" in labels
+        assert "Delete Artboards" in labels
+        assert "Convert to Artboards" in labels
+
+    def test_context_menu_convert_is_grayed(self, panel):
+        content = panel.get("content", {})
+        list_container = next(c for c in content.get("children", []) if isinstance(c, dict) and c.get("id") == "ap_list")
+        row = list_container.get("do", {})
+        ctx_menu = row.get("context_menu", [])
+        convert = next(m for m in ctx_menu if isinstance(m, dict) and m.get("label") == "Convert to Artboards")
+        assert convert.get("enabled_when") == "false"
+        assert convert.get("tooltip") == "Coming soon"
+
+
 class TestDeleteArtboardFromDialog:
     def test_deletes_and_closes(self):
         store = StateStore(document={"artboards": [
