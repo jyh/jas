@@ -49,7 +49,8 @@ let insert_many_at_layer (doc : Document.document) (layer_idx : int)
 
 (* ── Make Compound Shape ─────────────────────────────────────── *)
 
-let apply_make_compound_shape (model : Model.model) : unit =
+let apply_make_compound_shape_with_op (model : Model.model)
+    (operation : compound_operation) : unit =
   let doc = model#document in
   let sel = doc.Document.selection in
   if Document.PathMap.is_empty sel then ()
@@ -83,7 +84,7 @@ let apply_make_compound_shape (model : Model.model) : unit =
           | _ -> None
         in
         let cs = {
-          operation = Op_union;
+          operation;
           operands;
           fill;
           stroke;
@@ -107,6 +108,21 @@ let apply_make_compound_shape (model : Model.model) : unit =
       end
     end
   end
+
+let apply_make_compound_shape (model : Model.model) : unit =
+  apply_make_compound_shape_with_op model Op_union
+
+let apply_compound_creation (model : Model.model) (op_name : string) : unit =
+  let operation = match op_name with
+    | "union" -> Some Op_union
+    | "subtract_front" -> Some Op_subtract_front
+    | "intersection" -> Some Op_intersection
+    | "exclude" -> Some Op_exclude
+    | _ -> None
+  in
+  match operation with
+  | None -> ()
+  | Some op -> apply_make_compound_shape_with_op model op
 
 (* ── Release Compound Shape ──────────────────────────────────── *)
 

@@ -177,6 +177,49 @@ let test_merge_none_fill_never_matches () =
   Boolean_apply.apply_destructive_boolean m "merge";
   Alcotest.(check int) "two separate" 2 (top_children_count m)
 
+(* ── Compound creation (Alt+click) tests ────────────────────── *)
+
+let cs_operation (m : Model.model) =
+  match m#document.Document.layers.(0) with
+  | Layer { children; _ } ->
+    (match children.(0) with
+     | Live (Compound_shape cs) -> Some cs.operation
+     | _ -> None)
+  | _ -> None
+
+let test_union_compound_uses_union () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_compound_creation m "union";
+  (match cs_operation m with
+   | Some Op_union -> ()
+   | _ -> Alcotest.fail "expected Op_union compound")
+
+let test_subtract_front_compound_uses_subtract_front () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_compound_creation m "subtract_front";
+  (match cs_operation m with
+   | Some Op_subtract_front -> ()
+   | _ -> Alcotest.fail "expected Op_subtract_front compound")
+
+let test_intersection_compound_uses_intersection () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_compound_creation m "intersection";
+  (match cs_operation m with
+   | Some Op_intersection -> ()
+   | _ -> Alcotest.fail "expected Op_intersection compound")
+
+let test_exclude_compound_uses_exclude () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_compound_creation m "exclude";
+  (match cs_operation m with
+   | Some Op_exclude -> ()
+   | _ -> Alcotest.fail "expected Op_exclude compound")
+
+let test_compound_creation_unknown_op_is_noop () =
+  let m = two_overlapping () in
+  Boolean_apply.apply_compound_creation m "nonexistent";
+  Alcotest.(check int) "rects unchanged" 2 (top_children_count m)
+
 let () =
   Alcotest.run "Boolean_apply"
     [ "compound shape", [
@@ -220,5 +263,17 @@ let () =
           test_merge_mismatched_fills_stay_separate;
         Alcotest.test_case "merge none fill never matches" `Quick
           test_merge_none_fill_never_matches;
+      ];
+      "compound creation", [
+        Alcotest.test_case "union compound uses union" `Quick
+          test_union_compound_uses_union;
+        Alcotest.test_case "subtract_front compound uses subtract_front" `Quick
+          test_subtract_front_compound_uses_subtract_front;
+        Alcotest.test_case "intersection compound uses intersection" `Quick
+          test_intersection_compound_uses_intersection;
+        Alcotest.test_case "exclude compound uses exclude" `Quick
+          test_exclude_compound_uses_exclude;
+        Alcotest.test_case "unknown op is noop" `Quick
+          test_compound_creation_unknown_op_is_noop;
       ]
     ]
