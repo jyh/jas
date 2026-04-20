@@ -1,8 +1,8 @@
 # Artboards Panel — Manual Test Suite
 
 Follows the procedure in `MANUAL_TESTING.md`. Spec source:
-`workspace/panels/artboards.yaml` (not yet created),
-`workspace/dialogs/artboard_options.yaml` (not yet created),
+`workspace/panels/artboards.yaml`,
+`workspace/dialogs/artboard_options.yaml`,
 `workspace/dialogs/rearrange_artboards.yaml` (phase 2, not yet created).
 Design doc: `transcripts/ARTBOARDS.md`.
 
@@ -11,9 +11,10 @@ phase-1 implementation. Native apps (Rust / Swift / OCaml / Python) pick up
 the feature in the order Rust → Swift → OCaml → Python per the project
 rule, and are covered in Session P parity.
 
-This suite is defined **before implementation** per the test-first rule in
-`CLAUDE.md`. Every P0/P1 item starts `[unwired]`; items flip to `[wired]`
-as the Flask pass lands, then to `[parity]` as native apps catch up.
+This suite was defined **before implementation** per the test-first rule
+in `CLAUDE.md`. Phase-1 sub-phases 1-7 have landed, wiring the
+panel / dialogue / data model / actions through the YAML interpreter;
+canvas rendering and cross-app parity remain.
 
 ---
 
@@ -50,17 +51,77 @@ _Last reviewed: 2026-04-20_
 
 _Last synced: 2026-04-20_
 
-**None.** No implementation yet; this suite defines the acceptance
-criteria for the first Flask pass. Automation will be added alongside
-each session's wiring:
+**Python — `workspace_interpreter/tests/test_artboards_effects.py`
+(115 tests).** Full phase-1 data-layer coverage:
+- `color_or_transparent` schema type coercion (5).
+- At-least-one-artboard invariant + load-time repair (6).
+- StateStore load-repair contract (3).
+- Artboard id generation (4): 8-char base36, deterministic seed.
+- `next_artboard_name` rule (6): empty list, skip used, fill gaps,
+  ignore custom names, case-sensitive pattern, non-dict entries.
+- StateStore `create_artboard` method (6): append, overrides, name
+  fallback, collision retry.
+- `doc.create_artboard` effect (3): append, `as:` binding, overrides.
+- Snapshot preserves ids (2).
+- Active-document view surface (6): artboards with derived `number`,
+  options, next-name, current_artboard_id, panel-selection ids.
+- Default-seeded fixture contract (2).
+- StateStore artboard helpers: find_by_id, delete_by_id,
+  set_artboard_field, duplicate_artboard (7).
+- `doc.delete_artboard_by_id` + `doc.duplicate_artboard` +
+  `doc.set_artboard_field` + `doc.set_artboard_options_field` +
+  `doc.move_artboards_up/down` effects (6).
+- `current_artboard` field in view (3).
+- Action dispatch against real workspace/actions.yaml:
+  - New Artboard (4): silent create, size inheritance, placement
+    rule, snapshot count, rearrange_dirty flip.
+  - Delete Artboards (4): selected, multi-delete, clears selection,
+    snapshot.
+  - Duplicate Artboards (1).
+  - Rename flow (4): begin, confirm, cancel, single snapshot.
+  - Panel-select modifier=none (2), select_all (1).
+  - Reset panel (1).
+- Reorder swap-skip-selected rule (10): middle row, top/bottom
+  no-ops, contiguous block, discontiguous {1,3,5} producing
+  [1,3,2,5,4], all-selected no-op, empty selection, non-existent id,
+  Move Down symmetric with {1,3} → [2,1,4,3,5].
+- Move actions (3): snapshot, symmetry, rearrange_dirty.
+- Panel-selection tracks id across reorder (1, ART-107).
+- Anchor-offset builtins (5): center = size/2, top_left = 0,
+  bottom_right = full size, cross-axis cases.
+- Artboard Options Dialogue (7): open populates dialog, pulls global
+  options, confirm writes all fields, single undo, closes dialog,
+  reference-point transforms display (ART-199), top_left anchor
+  shows raw.
+- Delete-from-dialog + blue-dot + phase-1 deferrals (14).
 
-- Flask (`jas_flask/tests/…`): panel rendering + action dispatch +
-  Dialogue commit via the generic YAML interpreter, per the existing
-  Layers / Boolean pattern.
-- Python (`jas/…`): data-model invariants (at-least-one, positional
-  numbering, stable id, naming rules).
-- Rust / Swift / OCaml: parity suites when those apps pick up the
-  feature.
+**Python — `jas_flask/tests/test_artboards_panel.py` (23 tests).**
+Structural + integration coverage of the panel yaml:
+- Panel spec loads with correct summary and renders.
+- State block carries the five phase-1 fields.
+- Menu contains all 10 entries with correct enabled_when
+  predicates (Convert/Rearrange deferred as `"false"`).
+- Row template has three cells + selection-background bind via
+  `mem(ab.id, active_document.artboards_panel_selection_ids)`.
+- Footer has five buttons in the specified order, with
+  invariant-respecting Delete disablement and always-enabled New.
+- Keyboard shortcuts: Delete/Backspace/F2/Enter/Meta+A/Alt+Arrows.
+- Panel renders inside a dock.
+- Row context_menu has the 5 expected entries; root and list
+  containers have no context_menu (empty-area no-menu rule).
+- Theming contract: no hardcoded hex colors outside of preset
+  comparators.
+- Reset Panel menu entry wired to `reset_artboards_panel`.
+
+**Rust / Swift / OCaml / Python-native: not yet.** Native-app
+coverage lands alongside each port in Session P — see transcripts
+for sub-phases that propagate artboards beyond Flask.
+
+Manual-suite items still requiring live verification: canvas
+rendering (Session G all, Session H visuals 170-172, F-107 visual),
+cross-app parity (Session P), and the live Artboard-Tool and
+Rearrange Dialogue behaviors (ART-900, ART-902, ART-904, ART-905 —
+tracked in Known broken).
 
 ---
 
