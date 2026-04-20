@@ -542,6 +542,8 @@ private func parsePanelKind(_ v: Any?) -> PanelKind {
     case "character": return .character
     case "paragraph": return .paragraph
     case "artboards": return .artboards
+    case "align": return .align
+    case "boolean": return .boolean
     default: return .layers
     }
 }

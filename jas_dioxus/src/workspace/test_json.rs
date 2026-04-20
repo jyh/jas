@@ -526,6 +526,8 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
         "character" => PanelKind::Character,
         "paragraph" => PanelKind::Paragraph,
         "artboards" => PanelKind::Artboards,
+        "align" => PanelKind::Align,
+        "boolean" => PanelKind::Boolean,
         _ => PanelKind::Layers,
     }
 }
