@@ -518,6 +518,91 @@ let run_path_text_layout vectors =
   ) vectors
 
 (* ---------------------------------------------------------------
+ * align
+ * --------------------------------------------------------------- *)
+
+let rect_of_json j =
+  match j with
+  | `List [`Float x; `Float y; `Float w; `Float h] ->
+    Jas.Element.make_rect x y w h
+  | `List [a; b; c; d] ->
+    let to_f = function
+      | `Int i -> float_of_int i
+      | `Float f -> f
+      | _ -> 0.0 in
+    Jas.Element.make_rect (to_f a) (to_f b) (to_f c) (to_f d)
+  | _ -> failwith "rect_of_json: unexpected shape"
+
+let bounds_of_json j =
+  let to_f = function
+    | `Int i -> float_of_int i
+    | `Float f -> f
+    | _ -> 0.0 in
+  match j with
+  | `List [a; b; c; d] -> (to_f a, to_f b, to_f c, to_f d)
+  | _ -> failwith "bounds_of_json: unexpected shape"
+
+let run_align vectors =
+  List.map (fun v ->
+    let op = to_string (member "op" v) in
+    let rects = to_list (member "rects" v) |> List.map rect_of_json in
+    let pairs = List.mapi (fun i e -> ([i], e)) rects in
+    let use_preview =
+      try to_bool (member "use_preview_bounds" v) with _ -> false in
+    let bounds_fn =
+      if use_preview then Jas.Align.preview_bounds
+      else Jas.Align.geometric_bounds in
+    let ref_kind =
+      try to_string (member "kind" (member "reference" v))
+      with _ -> "selection" in
+    let reference = match ref_kind with
+      | "selection" ->
+        Jas.Align.Selection (Jas.Align.union_bounds rects bounds_fn)
+      | "artboard" ->
+        Jas.Align.Artboard (bounds_of_json (member "bbox" (member "reference" v)))
+      | "key_object" ->
+        let idx = to_int (member "index" (member "reference" v)) in
+        Jas.Align.Key_object { bbox = bounds_fn (List.nth rects idx);
+                                path = [idx] }
+      | _ -> Jas.Align.Selection (0.0, 0.0, 0.0, 0.0)
+    in
+    let explicit_gap =
+      match member "explicit_gap" v with
+      | `Null -> None
+      | `Float f -> Some f
+      | `Int i -> Some (float_of_int i)
+      | _ -> None
+    in
+    let translations = match op with
+      | "align_left" -> Jas.Align.align_left pairs reference bounds_fn
+      | "align_horizontal_center" -> Jas.Align.align_horizontal_center pairs reference bounds_fn
+      | "align_right" -> Jas.Align.align_right pairs reference bounds_fn
+      | "align_top" -> Jas.Align.align_top pairs reference bounds_fn
+      | "align_vertical_center" -> Jas.Align.align_vertical_center pairs reference bounds_fn
+      | "align_bottom" -> Jas.Align.align_bottom pairs reference bounds_fn
+      | "distribute_left" -> Jas.Align.distribute_left pairs reference bounds_fn
+      | "distribute_horizontal_center" -> Jas.Align.distribute_horizontal_center pairs reference bounds_fn
+      | "distribute_right" -> Jas.Align.distribute_right pairs reference bounds_fn
+      | "distribute_top" -> Jas.Align.distribute_top pairs reference bounds_fn
+      | "distribute_vertical_center" -> Jas.Align.distribute_vertical_center pairs reference bounds_fn
+      | "distribute_bottom" -> Jas.Align.distribute_bottom pairs reference bounds_fn
+      | "distribute_vertical_spacing" ->
+        Jas.Align.distribute_vertical_spacing pairs reference explicit_gap bounds_fn
+      | "distribute_horizontal_spacing" ->
+        Jas.Align.distribute_horizontal_spacing pairs reference explicit_gap bounds_fn
+      | _ -> []
+    in
+    let ts = List.map (fun (t : Jas.Align.align_translation) ->
+      `Assoc [
+        ("path", `List (List.map (fun i -> `Int i) t.path));
+        ("dx", `Float t.dx);
+        ("dy", `Float t.dy);
+      ]
+    ) translations in
+    `Assoc [ ("translations", `List ts) ]
+  ) vectors
+
+(* ---------------------------------------------------------------
  * Main
  * --------------------------------------------------------------- *)
 
@@ -548,6 +633,7 @@ let () =
     | "text_layout" -> run_text_layout vectors
     | "text_layout_paragraph" -> run_text_layout_paragraph vectors
     | "path_text_layout" -> run_path_text_layout vectors
+    | "align" -> run_align vectors
     | _ -> Printf.eprintf "Unknown algorithm: %s\n" algo; exit 1
   in
   print_string (Yojson.Safe.to_string (`List results))
