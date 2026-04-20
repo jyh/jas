@@ -27,3 +27,8 @@
  (name align_panel_state_test)
  (modules align_panel_state_test)
  (libraries jas alcotest))
+
+(test
+ (name align_apply_test)
+ (modules align_apply_test)
+ (libraries jas alcotest))

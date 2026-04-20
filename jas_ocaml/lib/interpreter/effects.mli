@@ -221,3 +221,30 @@ type hyphenation_dialog_values = {
     reflects the dialog commit. Phase 9. *)
 val apply_hyphenation_dialog_to_selection :
   State_store.t -> Controller.controller -> hyphenation_dialog_values -> unit
+
+(** {2 Align panel} *)
+
+(** Reset every Align panel state field to its default per
+    ALIGN.md Panel menu Reset Panel. Writes through both the
+    global [state.align_*] surface and the panel-local mirrors. *)
+val reset_align_panel : State_store.t -> unit
+
+(** Execute one of the 14 Align panel operations by name. Reads
+    align state, gathers the current selection, builds an
+    align_reference, calls the algorithm, and applies
+    translations by rebuilding the document. Artboard falls back
+    to selection bounds until the document model grows artboards. *)
+val apply_align_operation :
+  State_store.t -> Controller.controller -> string -> unit
+
+(** Canvas-click intercept for key-object designation. Returns
+    [true] when the click was consumed (the canvas tool should
+    not see it) and [false] when Align To is not in key-object
+    mode. *)
+val try_designate_align_key_object :
+  State_store.t -> Controller.controller -> float -> float -> bool
+
+(** Clear the key-object path if the previously-designated key
+    is no longer part of the current selection. Idempotent. *)
+val sync_align_key_object_from_selection :
+  State_store.t -> Controller.controller -> unit

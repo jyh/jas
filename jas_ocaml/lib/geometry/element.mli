@@ -418,6 +418,11 @@ val set_locked : bool -> element -> element
 val get_visibility : element -> visibility
 val set_visibility : visibility -> element -> element
 
+val get_transform : element -> transform option
+val set_transform : transform option -> element -> element
+val translate_transform : float -> float -> transform option -> transform option
+val with_transform_translated : dx:float -> dy:float -> element -> element
+
 (** {2 Fill and stroke} *)
 
 val with_fill : element -> fill option -> element

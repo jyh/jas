@@ -1760,3 +1760,169 @@ let apply_hyphenation_dialog_to_selection
   | Some h ->
     State_store.set_panel store "paragraph_panel_content" "hyphenate" (`Bool h)
   | None -> ()
+
+(* ══════════════════════════════════════════════════════════════════ *)
+(* Align panel                                                        *)
+(* ══════════════════════════════════════════════════════════════════ *)
+
+(** Reset the four Align panel state fields to their defaults per
+    ALIGN.md Panel menu Reset Panel. Writes both the global
+    [state.align_*] surface and the panel-local mirrors. *)
+let reset_align_panel (store : State_store.t) =
+  let pid = "align_panel_content" in
+  State_store.set store "align_to" (`String "selection");
+  State_store.set store "align_key_object_path" `Null;
+  State_store.set store "align_distribute_spacing" (`Float 0.0);
+  State_store.set store "align_use_preview_bounds" (`Bool false);
+  State_store.set_panel store pid "align_to" (`String "selection");
+  State_store.set_panel store pid "key_object_path" `Null;
+  State_store.set_panel store pid "distribute_spacing_value" (`Float 0.0);
+  State_store.set_panel store pid "use_preview_bounds" (`Bool false)
+
+(** Decode a [__path__] json marker into an OCaml path list. *)
+let decode_align_path_marker json =
+  match json with
+  | `Assoc pairs ->
+    (match List.assoc_opt "__path__" pairs with
+     | Some (`List arr) ->
+       Some (List.filter_map (function
+         | `Int i -> Some i
+         | _ -> None) arr)
+     | _ -> None)
+  | _ -> None
+
+(** Distribute Spacing explicit gap — [Some gap] when the panel
+    is in Key Object mode with a designated key, else [None]. *)
+let align_panel_explicit_gap (store : State_store.t) : float option =
+  let align_to = match State_store.get store "align_to" with
+    | `String s -> s | _ -> "selection" in
+  let has_key = match State_store.get store "align_key_object_path" with
+    | `Null -> false | _ -> true in
+  if align_to = "key_object" && has_key then
+    match State_store.get store "align_distribute_spacing" with
+    | `Float f -> Some f
+    | `Int i -> Some (float_of_int i)
+    | _ -> Some 0.0
+  else None
+
+(** Execute one of the 14 Align panel operations by name. Reads
+    align state, gathers the current selection, builds an
+    [align_reference], calls the algorithm, and applies the
+    resulting translations by rebuilding the document through
+    [Document.replace_element] + [Element.with_transform_translated].
+    Artboard falls back to selection bounds until the document
+    model grows artboards (see transcripts/ALIGN.md). *)
+let apply_align_operation (store : State_store.t) (ctrl : Controller.controller)
+    (op : string) : unit =
+  let model = ctrl#model in
+  let doc = model#document in
+  let elements = Document.PathMap.bindings doc.Document.selection
+    |> List.map (fun (path, _es) -> (path, Document.get_element doc path)) in
+  if List.length elements < 2 then ()
+  else begin
+    let use_preview = match State_store.get store "align_use_preview_bounds" with
+      | `Bool b -> b | _ -> false in
+    let bounds_fn =
+      if use_preview then Align.preview_bounds
+      else Align.geometric_bounds in
+    let align_to = match State_store.get store "align_to" with
+      | `String s -> s | _ -> "selection" in
+    let just_elems = List.map snd elements in
+    let reference = match align_to with
+      | "artboard" ->
+        Align.Artboard (Align.union_bounds just_elems bounds_fn)
+      | "key_object" ->
+        (match decode_align_path_marker
+                 (State_store.get store "align_key_object_path") with
+         | None ->
+           Align.Selection (Align.union_bounds just_elems bounds_fn)
+         | Some kp ->
+           let e = Document.get_element doc kp in
+           Align.Key_object { bbox = bounds_fn e; path = kp })
+      | _ ->
+        Align.Selection (Align.union_bounds just_elems bounds_fn)
+    in
+    let explicit = align_panel_explicit_gap store in
+    let translations = match op with
+      | "align_left" -> Align.align_left elements reference bounds_fn
+      | "align_horizontal_center" -> Align.align_horizontal_center elements reference bounds_fn
+      | "align_right" -> Align.align_right elements reference bounds_fn
+      | "align_top" -> Align.align_top elements reference bounds_fn
+      | "align_vertical_center" -> Align.align_vertical_center elements reference bounds_fn
+      | "align_bottom" -> Align.align_bottom elements reference bounds_fn
+      | "distribute_left" -> Align.distribute_left elements reference bounds_fn
+      | "distribute_horizontal_center" -> Align.distribute_horizontal_center elements reference bounds_fn
+      | "distribute_right" -> Align.distribute_right elements reference bounds_fn
+      | "distribute_top" -> Align.distribute_top elements reference bounds_fn
+      | "distribute_vertical_center" -> Align.distribute_vertical_center elements reference bounds_fn
+      | "distribute_bottom" -> Align.distribute_bottom elements reference bounds_fn
+      | "distribute_vertical_spacing" ->
+        Align.distribute_vertical_spacing elements reference explicit bounds_fn
+      | "distribute_horizontal_spacing" ->
+        Align.distribute_horizontal_spacing elements reference explicit bounds_fn
+      | _ -> []
+    in
+    if translations <> [] then begin
+      let new_doc = List.fold_left (fun doc (t : Align.align_translation) ->
+        let elem = Document.get_element doc t.path in
+        let moved = Element.with_transform_translated
+          ~dx:t.dx ~dy:t.dy elem in
+        Document.replace_element doc t.path moved
+      ) doc translations in
+      model#set_document new_doc
+    end
+  end
+
+(** Try key-object designation at canvas coordinates. Returns
+    [true] when the click was consumed (the canvas tool should
+    not see it) and [false] when Align To is not in key-object
+    mode. *)
+let try_designate_align_key_object (store : State_store.t)
+    (ctrl : Controller.controller) (x : float) (y : float) : bool =
+  let align_to = match State_store.get store "align_to" with
+    | `String s -> s | _ -> "selection" in
+  if align_to <> "key_object" then false
+  else begin
+    let doc = ctrl#model#document in
+    let hit = Document.PathMap.fold (fun path _es acc ->
+      match acc with
+      | Some _ -> acc
+      | None ->
+        let e = Document.get_element doc path in
+        let (bx, by, bw, bh) = Element.bounds e in
+        if x >= bx && x <= bx +. bw && y >= by && y <= by +. bh
+        then Some path else None
+    ) doc.Document.selection None in
+    let pid = "align_panel_content" in
+    let current_key = decode_align_path_marker
+      (State_store.get store "align_key_object_path") in
+    (match hit with
+     | Some p when current_key = Some p ->
+       (* Toggle: clicking the current key clears it. *)
+       State_store.set store "align_key_object_path" `Null;
+       State_store.set_panel store pid "key_object_path" `Null
+     | Some p ->
+       let marker = `Assoc ["__path__", `List (List.map (fun i -> `Int i) p)] in
+       State_store.set store "align_key_object_path" marker;
+       State_store.set_panel store pid "key_object_path" marker
+     | None ->
+       State_store.set store "align_key_object_path" `Null;
+       State_store.set_panel store pid "key_object_path" `Null);
+    true
+  end
+
+(** Clear the key-object path if the previously-designated key
+    is no longer part of the current selection. Idempotent. *)
+let sync_align_key_object_from_selection
+    (store : State_store.t) (ctrl : Controller.controller) : unit =
+  match decode_align_path_marker
+    (State_store.get store "align_key_object_path") with
+  | None -> ()
+  | Some key_path ->
+    let doc = ctrl#model#document in
+    let still_selected = Document.PathMap.mem key_path doc.Document.selection in
+    if not still_selected then begin
+      State_store.set store "align_key_object_path" `Null;
+      State_store.set_panel store "align_panel_content"
+        "key_object_path" `Null
+    end
