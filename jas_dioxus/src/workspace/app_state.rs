@@ -109,6 +109,11 @@ pub(crate) struct AppState {
     /// selection / artboard / key-object Align To mode. See
     /// transcripts/ALIGN.md §Panel state.
     pub(crate) align_panel: AlignPanelState,
+    /// Boolean panel document-level options — mirrors
+    /// state.boolean_* and is edited by the Boolean Options dialog.
+    /// Read by `Controller::apply_destructive_boolean` and compound
+    /// shape evaluation. See BOOLEAN.md §Boolean Options dialog.
+    pub(crate) boolean_panel: BooleanPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -335,6 +340,32 @@ impl Default for AlignPanelState {
     }
 }
 
+/// Mirror of the Boolean panel's document-level state per BOOLEAN.md
+/// §Boolean Options dialog. Edited by the Boolean Options dialog;
+/// read by `Controller::apply_destructive_boolean` and compound
+/// shape evaluation.
+#[derive(Debug, Clone)]
+pub(crate) struct BooleanPanelState {
+    /// Geometric tolerance in points. Default 0.0283 pt = 0.01 mm.
+    pub precision: f64,
+    /// When true, collinear points in boolean-op output within
+    /// Precision are collapsed.
+    pub remove_redundant_points: bool,
+    /// When true, DIVIDE fragments with no fill and no stroke are
+    /// discarded rather than kept as invisible paths.
+    pub divide_remove_unpainted: bool,
+}
+
+impl Default for BooleanPanelState {
+    fn default() -> Self {
+        Self {
+            precision: 0.0283,
+            remove_redundant_points: false,
+            divide_remove_unpainted: false,
+        }
+    }
+}
+
 impl AlignTo {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -420,6 +451,7 @@ impl AppState {
             character_panel: CharacterPanelState::default(),
             paragraph_panel: ParagraphPanelState::default(),
             align_panel: AlignPanelState::default(),
+            boolean_panel: BooleanPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
@@ -1362,11 +1394,18 @@ impl AppState {
     }
 
     /// Apply one of the nine destructive boolean operations.
-    /// See `Controller::apply_destructive_boolean`.
+    /// See `Controller::apply_destructive_boolean`. Reads options
+    /// from `self.boolean_panel` (edited by the Boolean Options
+    /// dialog).
     pub(crate) fn apply_boolean_operation(&mut self, op: &str) {
+        let options = crate::document::controller::BooleanOptions {
+            precision: self.boolean_panel.precision,
+            remove_redundant_points: self.boolean_panel.remove_redundant_points,
+            divide_remove_unpainted: self.boolean_panel.divide_remove_unpainted,
+        };
         if let Some(tab) = self.tab_mut() {
             crate::document::controller::Controller::apply_destructive_boolean(
-                &mut tab.model, op,
+                &mut tab.model, op, &options,
             );
         }
     }

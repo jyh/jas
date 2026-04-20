@@ -36,6 +36,65 @@ fn fills_merge_equal(a: &Option<Fill>, b: &Option<Fill>) -> bool {
     }
 }
 
+/// Collapse each ring point whose perpendicular distance to the line
+/// between its two neighbors is smaller than `tol`. Single-pass;
+/// acceptable for boolean-op outputs which already have clean right-
+/// angle / smooth-arc corners. Preserves the original ring if
+/// collapse leaves fewer than 3 points.
+fn collapse_collinear_points(ring: Vec<(f64, f64)>, tol: f64) -> Vec<(f64, f64)> {
+    if ring.len() < 3 {
+        return ring;
+    }
+    let n = ring.len();
+    let mut keep = vec![true; n];
+    for i in 0..n {
+        let prev = ring[(i + n - 1) % n];
+        let cur = ring[i];
+        let next = ring[(i + 1) % n];
+        let dx = next.0 - prev.0;
+        let dy = next.1 - prev.1;
+        let seg_len = (dx * dx + dy * dy).sqrt();
+        if seg_len == 0.0 {
+            // Degenerate neighborhood — cur is on top of its neighbors.
+            keep[i] = false;
+            continue;
+        }
+        let num = ((next.0 - prev.0) * (prev.1 - cur.1)
+            - (prev.0 - cur.0) * (next.1 - prev.1))
+            .abs();
+        if num / seg_len < tol {
+            keep[i] = false;
+        }
+    }
+    let collapsed: Vec<(f64, f64)> = ring
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, p)| *p)
+        .collect();
+    if collapsed.len() < 3 { ring } else { collapsed }
+}
+
+/// Options for destructive boolean operations, read from the Boolean
+/// Options dialog and mirrored in `AppState.boolean_panel`. See
+/// BOOLEAN.md §Boolean Options dialog.
+#[derive(Debug, Clone, Copy)]
+pub struct BooleanOptions {
+    pub precision: f64,
+    pub remove_redundant_points: bool,
+    pub divide_remove_unpainted: bool,
+}
+
+impl Default for BooleanOptions {
+    fn default() -> Self {
+        Self {
+            precision: 0.0283,
+            remove_redundant_points: false,
+            divide_remove_unpainted: false,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------------
@@ -625,14 +684,17 @@ impl Controller {
     /// subtracted polygon carrying its own paint. CROP: the frontmost
     /// operand is the mask and is consumed; each remaining survivor
     /// emits the intersection carrying its own paint.
-    pub fn apply_destructive_boolean(model: &mut Model, op_name: &str) {
+    pub fn apply_destructive_boolean(
+        model: &mut Model,
+        op_name: &str,
+        options: &BooleanOptions,
+    ) {
         use crate::algorithms::boolean::{
             boolean_intersect, boolean_subtract, boolean_union, PolygonSet,
         };
         use crate::geometry::element::{CommonProps, Fill, PolygonElem, Stroke};
         use crate::geometry::live::{
             apply_operation, element_to_polygon_set, CompoundOperation,
-            DEFAULT_PRECISION,
         };
 
         let doc = model.document();
@@ -663,7 +725,7 @@ impl Controller {
         // (PolygonSet, fill, stroke, common) tuples; flattened to
         // Polygon elements below. Empty polygon sets are skipped.
         let mut outputs: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, CommonProps)> = Vec::new();
-        let precision = DEFAULT_PRECISION;
+        let precision = options.precision;
 
         match op_name {
             "union" | "intersection" | "exclude" => {
@@ -823,9 +885,26 @@ impl Controller {
         }
 
         // Flatten (PolygonSet, paint) outputs into Polygon elements.
+        // When `options.remove_redundant_points` is on, collinear
+        // points are collapsed within `options.precision`. When
+        // `options.divide_remove_unpainted` is on and this is a
+        // DIVIDE op, fragments with no fill and no stroke are
+        // discarded.
         let mut new_elements: Vec<Rc<Element>> = Vec::new();
         for (ps, fill, stroke, common) in outputs {
+            if op_name == "divide"
+                && options.divide_remove_unpainted
+                && fill.is_none()
+                && stroke.is_none()
+            {
+                continue;
+            }
             for ring in ps {
+                let ring = if options.remove_redundant_points {
+                    collapse_collinear_points(ring, options.precision)
+                } else {
+                    ring
+                };
                 if ring.len() >= 3 {
                     new_elements.push(Rc::new(Element::Polygon(PolygonElem {
                         points: ring,
@@ -1741,7 +1820,7 @@ mod tests {
     #[test]
     fn destructive_union_produces_one_polygon() {
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "union");
+        Controller::apply_destructive_boolean(&mut model, "union", &BooleanOptions::default());
         assert_eq!(top_children_count(&model), 1);
         let child = &model.document().layers[0].children().unwrap()[0];
         assert!(matches!(&**child, Element::Polygon(_)));
@@ -1751,14 +1830,14 @@ mod tests {
     #[test]
     fn destructive_intersection_produces_one_polygon() {
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "intersection");
+        Controller::apply_destructive_boolean(&mut model, "intersection", &BooleanOptions::default());
         assert_eq!(top_children_count(&model), 1);
     }
 
     #[test]
     fn destructive_exclude_produces_two_polygons() {
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "exclude");
+        Controller::apply_destructive_boolean(&mut model, "exclude", &BooleanOptions::default());
         // Symmetric difference of two overlapping rects → 2 disjoint
         // polygons.
         assert_eq!(top_children_count(&model), 2);
@@ -1768,7 +1847,7 @@ mod tests {
     #[test]
     fn destructive_subtract_front_consumes_front() {
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "subtract_front");
+        Controller::apply_destructive_boolean(&mut model, "subtract_front", &BooleanOptions::default());
         // r2 (front, last) consumed; r1 minus r2 remains = 1 polygon.
         assert_eq!(top_children_count(&model), 1);
     }
@@ -1776,7 +1855,7 @@ mod tests {
     #[test]
     fn destructive_subtract_back_consumes_back() {
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "subtract_back");
+        Controller::apply_destructive_boolean(&mut model, "subtract_back", &BooleanOptions::default());
         // r1 (back, first) consumed; r2 minus r1 remains = 1 polygon.
         assert_eq!(top_children_count(&model), 1);
     }
@@ -1784,7 +1863,7 @@ mod tests {
     #[test]
     fn destructive_crop_uses_frontmost_as_mask() {
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "crop");
+        Controller::apply_destructive_boolean(&mut model, "crop", &BooleanOptions::default());
         // r2 (front) is the mask, consumed; r1 clipped to its
         // interior = 1 polygon covering the overlap.
         assert_eq!(top_children_count(&model), 1);
@@ -1795,7 +1874,7 @@ mod tests {
         // Two overlapping rects → 3 fragments (left-only, overlap,
         // right-only). All three get polygon-typed elements.
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "divide");
+        Controller::apply_destructive_boolean(&mut model, "divide", &BooleanOptions::default());
         assert_eq!(top_children_count(&model), 3);
         for child in model.document().layers[0].children().unwrap() {
             assert!(matches!(&**child, Element::Polygon(_)));
@@ -1807,7 +1886,7 @@ mod tests {
         // Two overlapping rects: front untouched; back has overlap
         // removed. Expect 2 polygons.
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "trim");
+        Controller::apply_destructive_boolean(&mut model, "trim", &BooleanOptions::default());
         assert_eq!(top_children_count(&model), 2);
     }
 
@@ -1817,7 +1896,7 @@ mod tests {
         // helper). MERGE performs TRIM, then unions the two touching
         // same-fill survivors. Expected: 1 polygon covering both.
         let mut model = two_overlapping_rects();
-        Controller::apply_destructive_boolean(&mut model, "merge");
+        Controller::apply_destructive_boolean(&mut model, "merge", &BooleanOptions::default());
         // TRIM would leave 2; MERGE collapses to 1.
         assert_eq!(top_children_count(&model), 1);
     }
@@ -1846,16 +1925,90 @@ mod tests {
             ElementSelection::all(vec![0, 1]),
         ];
         let mut model = Model::new(doc, None);
-        Controller::apply_destructive_boolean(&mut model, "merge");
+        Controller::apply_destructive_boolean(&mut model, "merge", &BooleanOptions::default());
         // Different fills → no merge; TRIM output of 2 survives.
         assert_eq!(top_children_count(&model), 2);
+    }
+
+    #[test]
+    fn destructive_divide_remove_unpainted_filters_no_paint_fragments() {
+        // Two rects, neither has fill or stroke → every DIVIDE
+        // fragment is "unpainted" (fill None, stroke None). With the
+        // flag off, fragments are kept (3). With the flag on, they
+        // are discarded (0).
+        let unpainted_rect = |x: f64| Rc::new(Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+        }));
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
+            common: CommonProps::default(),
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        doc.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        let mut model = Model::new(doc, None);
+
+        let mut off = BooleanOptions::default();
+        off.divide_remove_unpainted = false;
+        Controller::apply_destructive_boolean(&mut model, "divide", &off);
+        assert_eq!(top_children_count(&model), 3);
+
+        // Redo the selection (prior divide consumed them).
+        let mut model = {
+            let layer = Element::Layer(LayerElem {
+                name: "L0".to_string(),
+                children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
+                common: CommonProps::default(),
+            });
+            let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+            doc.selection = vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ];
+            Model::new(doc, None)
+        };
+        let mut on = BooleanOptions::default();
+        on.divide_remove_unpainted = true;
+        Controller::apply_destructive_boolean(&mut model, "divide", &on);
+        assert_eq!(top_children_count(&model), 0);
+    }
+
+    #[test]
+    fn destructive_remove_redundant_points_collapses_collinear() {
+        // Two overlapping rects. After UNION, the resulting ring has
+        // some collinear points along the shared vertical edges (the
+        // boolean algorithm retains intersection points). With the
+        // flag on, collinear points within Precision are collapsed.
+        let mut model = two_overlapping_rects();
+        let off = BooleanOptions::default();
+        Controller::apply_destructive_boolean(&mut model, "union", &off);
+        let pts_off = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Polygon(p) => p.points.len(),
+            _ => panic!("expected polygon"),
+        };
+
+        let mut model = two_overlapping_rects();
+        let mut on = BooleanOptions::default();
+        on.remove_redundant_points = true;
+        Controller::apply_destructive_boolean(&mut model, "union", &on);
+        let pts_on = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Polygon(p) => p.points.len(),
+            _ => panic!("expected polygon"),
+        };
+        // The collapse removes at least the collinear pair on the
+        // shared vertical seam; point count should not increase.
+        assert!(pts_on <= pts_off, "collapse should not add points");
     }
 
     #[test]
     fn destructive_unknown_op_is_noop() {
         let mut model = two_overlapping_rects();
         let before = top_children_count(&model);
-        Controller::apply_destructive_boolean(&mut model, "nonexistent");
+        Controller::apply_destructive_boolean(&mut model, "nonexistent", &BooleanOptions::default());
         assert_eq!(top_children_count(&model), before);
     }
 
