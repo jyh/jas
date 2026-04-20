@@ -335,6 +335,14 @@ class DockPanelWidget(QWidget):
                         apply_destructive_boolean(model, op_name)
                 return handle
 
+            def _make_compound_creation_handler(op_name):
+                def handle(data, ctx, store):
+                    from panels.boolean_apply import apply_compound_creation
+                    model = self._get_model() if self._get_model else None
+                    if model is not None:
+                        apply_compound_creation(model, op_name)
+                return handle
+
             def handle_make_compound_shape(data, ctx, store):
                 from panels.boolean_apply import apply_make_compound_shape
                 model = self._get_model() if self._get_model else None
@@ -365,6 +373,10 @@ class DockPanelWidget(QWidget):
                 "boolean_divide": _make_boolean_handler("divide"),
                 "boolean_trim": _make_boolean_handler("trim"),
                 "boolean_merge": _make_boolean_handler("merge"),
+                "boolean_union_compound": _make_compound_creation_handler("union"),
+                "boolean_subtract_front_compound": _make_compound_creation_handler("subtract_front"),
+                "boolean_intersection_compound": _make_compound_creation_handler("intersection"),
+                "boolean_exclude_compound": _make_compound_creation_handler("exclude"),
                 "make_compound_shape": handle_make_compound_shape,
                 "release_compound_shape": handle_release_compound_shape,
                 "expand_compound_shape": handle_expand_compound_shape,

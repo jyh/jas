@@ -11,9 +11,10 @@ from absl.testing import absltest
 from document.document import Document, ElementSelection
 from document.model import Model
 from geometry.element import (
-    Color, CompoundShape, Fill, Layer, Polygon, Rect,
+    Color, CompoundOperation, CompoundShape, Fill, Layer, Polygon, Rect,
 )
 from panels.boolean_apply import (
+    apply_compound_creation,
     apply_destructive_boolean,
     apply_expand_compound_shape,
     apply_make_compound_shape,
@@ -139,6 +140,45 @@ class DestructiveBooleanTest(absltest.TestCase):
         before = self._count(m)
         apply_destructive_boolean(m, "nonexistent")
         self.assertEqual(self._count(m), before)
+
+
+class CompoundCreationTest(absltest.TestCase):
+    """Tests for Alt+click compound-creating variants."""
+
+    def _model(self):
+        rects = [_rect(0, 0), _rect(5, 0)]
+        return _model_with_rects(rects, [(0, 0), (0, 1)])
+
+    def test_union_compound_uses_union_operation(self):
+        m = self._model()
+        apply_compound_creation(m, "union")
+        cs = m.document.layers[0].children[0]
+        self.assertIsInstance(cs, CompoundShape)
+        self.assertEqual(cs.operation, CompoundOperation.UNION)
+
+    def test_subtract_front_compound_uses_subtract_front(self):
+        m = self._model()
+        apply_compound_creation(m, "subtract_front")
+        cs = m.document.layers[0].children[0]
+        self.assertEqual(cs.operation, CompoundOperation.SUBTRACT_FRONT)
+
+    def test_intersection_compound_uses_intersection(self):
+        m = self._model()
+        apply_compound_creation(m, "intersection")
+        cs = m.document.layers[0].children[0]
+        self.assertEqual(cs.operation, CompoundOperation.INTERSECTION)
+
+    def test_exclude_compound_uses_exclude(self):
+        m = self._model()
+        apply_compound_creation(m, "exclude")
+        cs = m.document.layers[0].children[0]
+        self.assertEqual(cs.operation, CompoundOperation.EXCLUDE)
+
+    def test_unknown_op_is_noop(self):
+        m = self._model()
+        apply_compound_creation(m, "nonexistent")
+        # No compound shape created; rects still there.
+        self.assertEqual(len(m.document.layers[0].children), 2)
 
 
 class DivideTrimMergeTest(absltest.TestCase):
