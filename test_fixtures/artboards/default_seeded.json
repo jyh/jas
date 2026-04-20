@@ -1,0 +1,22 @@
+{
+  "_comment": "Canonical default artboard + document-global artboard_options, inserted by the at-least-one-artboard invariant on empty or missing artboards. ARTBOARDS.md §At-least-one-artboard invariant. The `id` field is a fresh 8-char base36 value at load time; tests normalize ids before comparison. Used as the cross-app contract fixture (ART-441).",
+  "artboards": [
+    {
+      "id": "<placeholder>",
+      "name": "Artboard 1",
+      "x": 0,
+      "y": 0,
+      "width": 612,
+      "height": 792,
+      "fill": "transparent",
+      "show_center_mark": false,
+      "show_cross_hairs": false,
+      "show_video_safe_areas": false,
+      "video_ruler_pixel_aspect_ratio": 1.0
+    }
+  ],
+  "artboard_options": {
+    "fade_region_outside_artboard": true,
+    "update_while_dragging": true
+  }
+}
