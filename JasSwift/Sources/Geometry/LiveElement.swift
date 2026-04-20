@@ -71,6 +71,31 @@ public struct CompoundShape: Equatable {
     public var bounds: BBox {
         boundsOfPolygonSet(evaluate(precision: DEFAULT_PRECISION))
     }
+
+    /// Replace the compound shape with Polygon elements derived
+    /// from its evaluated geometry. Each polygon carries the
+    /// compound shape's own fill / stroke / common props; rings
+    /// with fewer than 3 points are dropped. See BOOLEAN.md §
+    /// Expand and Release semantics.
+    public func expand(precision: Double) -> [Element] {
+        let ps = evaluate(precision: precision)
+        return ps.compactMap { ring -> Element? in
+            guard ring.count >= 3 else { return nil }
+            return .polygon(Polygon(
+                points: ring,
+                fill: fill,
+                stroke: stroke,
+                opacity: opacity,
+                transform: transform,
+                locked: locked,
+                visibility: visibility
+            ))
+        }
+    }
+
+    /// Inverse of Make. Returns the operand list verbatim; each
+    /// keeps its own paint, compound-shape paint is discarded.
+    public func release() -> [Element] { operands }
 }
 
 // MARK: - Geometry helpers
