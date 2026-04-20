@@ -104,3 +104,4 @@ menubar:
       - { id: menu_properties,    label: "&Properties",   action: toggle_panel, params: { panel: properties } }
       - { id: menu_character,     label: "Ch&aracter",    action: toggle_panel, params: { panel: character } }
       - { id: menu_paragraph,     label: "Para&graph",    action: toggle_panel, params: { panel: paragraph } }
+      - { id: menu_align,         label: "Ali&gn",        action: toggle_panel, params: { panel: align } }
