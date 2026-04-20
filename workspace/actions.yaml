@@ -1990,6 +1990,19 @@ actions:
       - boolean_exclude_compound: true
       - set: { last_boolean_op: '"exclude_compound"' }
 
+  repeat_boolean_operation:
+    description: >
+      Re-apply the most-recent boolean operation on the current
+      selection. Reads state.last_boolean_op (one of 13 enum values
+      or null) and fires the matching destructive op or compound-
+      creating variant. No-op when last_boolean_op is null. Make /
+      Release / Expand Compound Shape are deliberately not
+      repeatable. See BOOLEAN.md §Repeat state.
+    category: boolean
+    effects:
+      - snapshot
+      - repeat_boolean_operation: true
+
   open_boolean_options:
     description: >
       Open the Boolean Options dialog seeded with the current
