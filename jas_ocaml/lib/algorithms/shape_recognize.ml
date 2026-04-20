@@ -745,7 +745,7 @@ let recognize_element element cfg =
     | Element.Polyline { points; _ } -> Some points
     | Element.Line _ | Element.Rect _ | Element.Circle _ | Element.Ellipse _
     | Element.Polygon _ | Element.Text _ | Element.Text_path _
-    | Element.Group _ | Element.Layer _ -> None
+    | Element.Group _ | Element.Layer _ | Element.Live _ -> None
   in
   match pts with
   | None -> None

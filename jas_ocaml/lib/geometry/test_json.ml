@@ -422,6 +422,15 @@ let rec element_json = function
     json_raw o "children" (json_array children);
     json_str o "name" e.name;
     json_build o
+  | Live (Compound_shape cs) ->
+    let o = json_obj () in
+    json_str o "type" "live";
+    json_str o "kind" "compound_shape";
+    common_fields o ~opacity:cs.opacity ~transform:cs.transform
+      ~locked:cs.locked ~visibility:cs.visibility;
+    let children = Array.to_list cs.operands |> List.map element_json in
+    json_raw o "children" (json_array children);
+    json_build o
 
 (* ------------------------------------------------------------------ *)
 (* Selection serializer                                               *)

@@ -455,6 +455,27 @@ type element =
       locked : bool;
       visibility : visibility;
     }
+  | Live of live_variant
+
+and live_variant =
+  | Compound_shape of compound_shape
+
+and compound_operation =
+  | Op_union
+  | Op_subtract_front
+  | Op_intersection
+  | Op_exclude
+
+and compound_shape = {
+  operation : compound_operation;
+  operands : element array;
+  fill : fill option;
+  stroke : stroke option;
+  opacity : float;
+  transform : transform option;
+  locked : bool;
+  visibility : visibility;
+}
 
 (** Expand a bounding box by half the stroke width on all sides. *)
 let inflate_bounds (bx, by, bw, bh) stroke =
@@ -639,6 +660,10 @@ let rec bounds = function
       let max_x = Array.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all_bounds in
       let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all_bounds in
       (min_x, min_y, max_x -. min_x, max_y -. min_y)
+  | Live _ ->
+    (* Phase 1 stub. Phase 2 returns bounds of the evaluated
+       polygon_set after running the boolean algorithm over operands. *)
+    (0.0, 0.0, 0.0, 0.0)
 
 (** Geometric bounding box — bbox of the path / shape geometry
     alone, ignoring stroke width and any fill bleed. Align
@@ -674,6 +699,7 @@ let rec geometric_bounds = function
       let max_x = Array.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all in
       let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all in
       (min_x, min_y, max_x -. min_x, max_y -. min_y)
+  | Live _ -> (0.0, 0.0, 0.0, 0.0)
 
 (** Helper constructors. *)
 
@@ -730,6 +756,7 @@ let transform_of elem =
   | Ellipse r -> r.transform | Polyline r -> r.transform | Polygon r -> r.transform
   | Path r -> r.transform | Text r -> r.transform | Text_path r -> r.transform
   | Group r -> r.transform | Layer r -> r.transform
+  | Live (Compound_shape cs) -> cs.transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
   Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview }
@@ -829,6 +856,7 @@ let is_locked = function
   | Ellipse { locked; _ } | Polyline { locked; _ } | Polygon { locked; _ }
   | Path { locked; _ } | Text { locked; _ } | Text_path { locked; _ }
   | Group { locked; _ } | Layer { locked; _ } -> locked
+  | Live (Compound_shape cs) -> cs.locked
 
 let set_locked v = function
   | Line r -> Line { r with locked = v }
@@ -842,6 +870,7 @@ let set_locked v = function
   | Text_path r -> Text_path { r with locked = v }
   | Group r -> Group { r with locked = v }
   | Layer r -> Layer { r with locked = v }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with locked = v })
 
 let get_visibility = function
   | Line { visibility; _ } | Rect { visibility; _ } | Circle { visibility; _ }
@@ -849,6 +878,7 @@ let get_visibility = function
   | Polygon { visibility; _ } | Path { visibility; _ } | Text { visibility; _ }
   | Text_path { visibility; _ } | Group { visibility; _ }
   | Layer { visibility; _ } -> visibility
+  | Live (Compound_shape cs) -> cs.visibility
 
 let set_visibility v = function
   | Line r -> Line { r with visibility = v }
@@ -862,6 +892,7 @@ let set_visibility v = function
   | Text_path r -> Text_path { r with visibility = v }
   | Group r -> Group { r with visibility = v }
   | Layer r -> Layer { r with visibility = v }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with visibility = v })
 
 let get_transform = function
   | Line { transform; _ } | Rect { transform; _ } | Circle { transform; _ }
@@ -869,6 +900,7 @@ let get_transform = function
   | Polygon { transform; _ } | Path { transform; _ } | Text { transform; _ }
   | Text_path { transform; _ } | Group { transform; _ }
   | Layer { transform; _ } -> transform
+  | Live (Compound_shape cs) -> cs.transform
 
 let set_transform t = function
   | Line r -> Line { r with transform = t }
@@ -882,6 +914,7 @@ let set_transform t = function
   | Text_path r -> Text_path { r with transform = t }
   | Group r -> Group { r with transform = t }
   | Layer r -> Layer { r with transform = t }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with transform = t })
 
 (** Pre-pend a world-space [translate(dx, dy)] to an existing
     transform matrix. If the element has no current transform,
@@ -907,6 +940,7 @@ let with_fill elem f =
   | Path r -> Path { r with fill = f }
   | Text r -> Text { r with fill = f }
   | Text_path r -> Text_path { r with fill = f }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with fill = f })
   | Line _ | Group _ | Layer _ -> elem
 
 let with_stroke elem s =
@@ -920,6 +954,7 @@ let with_stroke elem s =
   | Path r -> Path { r with stroke = s }
   | Text r -> Text { r with stroke = s }
   | Text_path r -> Text_path { r with stroke = s }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
   | Group _ | Layer _ -> elem
 
 let with_width_points elem wp =

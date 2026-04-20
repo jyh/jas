@@ -352,6 +352,10 @@ let rec pack_element = function
            vstr font_weight; vstr font_style; vstr text_decoration;
            pack_fill fill; pack_stroke stroke;
            vlist tspans_list]
+  | Live _ ->
+    (* Phase 1: binary serialization of Live elements is deferred to
+       the phase that implements compound-shape document I/O. *)
+    failwith "binary serialization of Live elements not yet implemented"
 
 let pack_selection sel =
   let entries = PathMap.fold (fun _path es acc ->
