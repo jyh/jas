@@ -10,7 +10,7 @@ import Testing
 }
 
 @Test func panelKindAllCount() {
-    #expect(PanelKind.all.count == 8)
+    #expect(PanelKind.all.count == 9)
 }
 
 @Test func panelKindAllContainsAllVariants() {
@@ -22,6 +22,35 @@ import Testing
     #expect(PanelKind.all.contains(.character))
     #expect(PanelKind.all.contains(.paragraph))
     #expect(PanelKind.all.contains(.artboards))
+    #expect(PanelKind.all.contains(.align))
+}
+
+@Test func alignPanelMenuHasExpectedEntries() {
+    let items = panelMenu(.align)
+    // Three entries plus two separators per ALIGN.md Panel menu.
+    #expect(items.count == 5)
+    guard case .toggle(_, let togCmd) = items[0] else {
+        Issue.record("first item should be a toggle")
+        return
+    }
+    #expect(togCmd == "toggle_use_preview_bounds")
+    if case .separator = items[1] {} else {
+        Issue.record("second item should be a separator")
+    }
+    guard case .action(_, let resetCmd, _) = items[2] else {
+        Issue.record("third item should be an action")
+        return
+    }
+    #expect(resetCmd == "reset_align_panel")
+    if case .separator = items[3] {} else {
+        Issue.record("fourth item should be a separator")
+    }
+    guard case .action(let closeLabel, let closeCmd, _) = items[4] else {
+        Issue.record("fifth item should be an action")
+        return
+    }
+    #expect(closeCmd == "close_panel")
+    #expect(closeLabel == "Close Align")
 }
 
 @Test func panelMenuNonEmptyForAllKinds() {
