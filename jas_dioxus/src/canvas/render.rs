@@ -720,6 +720,19 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 draw_element(ctx, child, effective);
             }
         }
+        Element::Live(v) => {
+            // Phase 1: render each operand individually so the user
+            // can still see the source artwork. Phase 2 replaces this
+            // with the evaluated geometry (boolean op cached in the
+            // LiveElement's internal cache).
+            match v {
+                crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                    for child in &cs.operands {
+                        draw_element(ctx, child, effective);
+                    }
+                }
+            }
+        }
     }
     ctx.restore();
 }
@@ -943,8 +956,11 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
         Element::Text(_)
         | Element::TextPath(_)
         | Element::Group(_)
-        | Element::Layer(_) => {
-            // Handled separately.
+        | Element::Layer(_)
+        | Element::Live(_) => {
+            // Handled separately. Live elements: phase 2 will trace
+            // the evaluated geometry; phase 1 renders operands via
+            // draw_element and skips path tracing here.
         }
     }
 }
