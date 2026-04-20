@@ -106,6 +106,11 @@ radio group; exactly one is active at a time.
   artboard's rectangle. Align moves each element to the
   corresponding artboard edge or center; Distribute spreads
   elements across the artboard extent along the axis.
+  **Deferred.** The document model does not yet have artboards;
+  until it does, ALIGN_TO_ARTBOARD_BUTTON falls back to
+  selection-union bounds (behaving like ALIGN_TO_SELECTION_BUTTON).
+  The button remains in the UI so the Align To radio group is
+  complete. Revisit when the artboards feature lands.
 
 - ALIGN_TO_KEY_OBJECT_BUTTON — one designated element within
   the selection is the reference. The key object never moves;
