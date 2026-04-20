@@ -2325,12 +2325,115 @@ actions:
           value: "true"
 
   open_artboard_options:
-    description: "Sub-phase 5: open the Artboard Options Dialogue."
+    description: >
+      Open the Artboard Options Dialogue for the artboard with the
+      given id. The dialog's init expressions pull the artboard's
+      fields and the document-global artboard_options into dialog
+      state, so edits are local until OK.
     category: artboards
     params:
       artboard_id: { type: string }
     effects:
-      - log: "open_artboard_options (sub-phase 5)"
+      - open_dialog:
+          id: artboard_options
+          params:
+            artboard_id: "param.artboard_id"
+
+  artboard_options_confirm:
+    description: >
+      Commit the Artboard Options Dialogue. Writes all per-artboard
+      fields via doc.set_artboard_field, plus the two document-global
+      fields via doc.set_artboard_options_field. Single undo op
+      covers the batch; close_dialog dismisses.
+    category: artboards
+    params:
+      artboard_id: { type: string }
+      name: { type: string }
+      x: { type: number }
+      y: { type: number }
+      width: { type: number }
+      height: { type: number }
+      fill: { type: string }
+      show_center_mark: { type: bool }
+      show_cross_hairs: { type: bool }
+      show_video_safe_areas: { type: bool }
+      video_ruler_pixel_aspect_ratio: { type: number }
+      fade_region_outside_artboard: { type: bool }
+      update_while_dragging: { type: bool }
+    effects:
+      - snapshot
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "name",   value: "param.name" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "x",      value: "param.x" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "y",      value: "param.y" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "width",  value: "param.width" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "height", value: "param.height" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "fill",   value: "param.fill" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "show_center_mark",      value: "param.show_center_mark" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "show_cross_hairs",      value: "param.show_cross_hairs" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "show_video_safe_areas", value: "param.show_video_safe_areas" }
+      - doc.set_artboard_field: { id: "param.artboard_id", field: "video_ruler_pixel_aspect_ratio", value: "param.video_ruler_pixel_aspect_ratio" }
+      - doc.set_artboard_options_field: { field: "fade_region_outside_artboard", value: "param.fade_region_outside_artboard" }
+      - doc.set_artboard_options_field: { field: "update_while_dragging",        value: "param.update_while_dragging" }
+      - clear_dialog_snapshot
+      - close_dialog
+
+  delete_artboard_from_dialog:
+    description: >
+      Delete the artboard the dialog is editing and close. Disabled
+      in the dialog footer when the document has exactly one
+      artboard (the at-least-one invariant).
+    category: artboards
+    params:
+      artboard_id: { type: string }
+    enabled_when: "active_document.artboards_count > 1"
+    effects:
+      - snapshot
+      - doc.delete_artboard_by_id: "param.artboard_id"
+      - clear_dialog_snapshot
+      - close_dialog
+
+  # Preset / chain-link / orientation / fill-preset / reference-point
+  # helper actions. Log-only stubs in Flask; native apps override
+  # with concrete dialog-state mutations.
+
+  apply_artboard_preset:
+    description: "Translate dialog.preset into dialog.width/height (native-app concrete; Flask log)."
+    category: artboards
+    params:
+      preset: { type: string }
+    effects:
+      - log: "apply_artboard_preset (sub-phase follow-up / native)"
+
+  toggle_artboard_chain_link:
+    description: "Toggle dialog.chain_link_engaged; capture dialog.chain_link_ratio on engage."
+    category: artboards
+    effects:
+      - log: "toggle_artboard_chain_link (native)"
+
+  toggle_artboard_orientation:
+    description: "Swap dialog.width <-> dialog.height around the current reference-point anchor."
+    category: artboards
+    effects:
+      - log: "toggle_artboard_orientation (native)"
+
+  set_artboard_fill_preset:
+    description: "Translate dialog.fill dropdown selection into dialog.fill hex / transparent."
+    category: artboards
+    params:
+      preset: { type: string }
+    effects:
+      - log: "set_artboard_fill_preset (native)"
+
+  set_artboard_reference_point:
+    description: "Update the panel.reference_point preference from the 3x3 widget."
+    category: artboards
+    params:
+      anchor: { type: string }
+    effects:
+      - set_panel_state:
+          panel: artboards
+          key: reference_point
+          value: "param.anchor"
 
   convert_to_artboards:
     description: "Phase-1 deferred. Grayed with 'Coming soon' tooltip."

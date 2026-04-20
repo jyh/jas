@@ -269,6 +269,28 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.move_artboards_down(val.value)
         return None
 
+    # doc.set_artboard_options_field: { field, value }
+    # — ARTBOARDS.md §Artboard Options Dialogue — Global section
+    # Writes a document-wide artboard option
+    # (fade_region_outside_artboard / update_while_dragging).
+    if "doc.set_artboard_options_field" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.set_artboard_options_field"]
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        eval_ctx = store.eval_context(ctx)
+        if isinstance(value_expr, str):
+            value_result = evaluate(value_expr, eval_ctx)
+            value = value_result.value if value_result.type != ValueType.CLOSURE else None
+        else:
+            value = value_expr
+        store.set_artboard_options_field(field, value)
+        return None
+
     # doc.set_artboard_field: { id, field, value }
     # — ARTBOARDS.md §Rename, §Artboard Options Dialogue
     # Writes value to the named field on the artboard with the given id.

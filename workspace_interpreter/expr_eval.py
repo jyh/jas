@@ -465,6 +465,45 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             return Value.null()
         return Value.list_(list(reversed(arg.value)))
 
+    # anchor_offset_x / anchor_offset_y: (anchor, size) → number
+    # — ARTBOARDS.md §Coordinates and units
+    # Reference-point anchor (9 positions) to x/y offset from top-left
+    # corner. Used by the Artboard Options Dialogue to convert between
+    # top-left storage and reference-point-relative display.
+    if name == "anchor_offset_x":
+        if len(node.args) != 2:
+            return Value.null()
+        anchor_val = eval_node(node.args[0], ctx)
+        size_val = eval_node(node.args[1], ctx)
+        if anchor_val.type != ValueType.STRING or size_val.type != ValueType.NUMBER:
+            return Value.null()
+        anchor = anchor_val.value
+        size = size_val.value
+        if anchor in ("top_left", "middle_left", "bottom_left"):
+            return Value.number(0.0)
+        if anchor in ("top_center", "center", "bottom_center"):
+            return Value.number(size / 2.0)
+        if anchor in ("top_right", "middle_right", "bottom_right"):
+            return Value.number(float(size))
+        return Value.number(0.0)
+
+    if name == "anchor_offset_y":
+        if len(node.args) != 2:
+            return Value.null()
+        anchor_val = eval_node(node.args[0], ctx)
+        size_val = eval_node(node.args[1], ctx)
+        if anchor_val.type != ValueType.STRING or size_val.type != ValueType.NUMBER:
+            return Value.null()
+        anchor = anchor_val.value
+        size = size_val.value
+        if anchor in ("top_left", "top_center", "top_right"):
+            return Value.number(0.0)
+        if anchor in ("middle_left", "center", "middle_right"):
+            return Value.number(size / 2.0)
+        if anchor in ("bottom_left", "bottom_center", "bottom_right"):
+            return Value.number(float(size))
+        return Value.number(0.0)
+
     # mem: (element, list) → bool — list membership
     if name == "mem":
         if len(node.args) != 2:

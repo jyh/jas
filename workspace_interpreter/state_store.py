@@ -206,8 +206,20 @@ class StateStore:
         prop = self._dialog_props.get(key)
         if prop and "get" in prop:
             from workspace_interpreter.expr import evaluate
-            # Build local scope: all sibling state vars by bare name
+            # Build local scope: all sibling state vars by bare name,
+            # plus panel + state + active_document + param for
+            # cross-scope reads (used by ARTBOARDS reference-point
+            # transforms that depend on panel.reference_point).
             local = dict(self._dialog)
+            local["panel"] = (
+                dict(self._panels[self._active_panel])
+                if self._active_panel and self._active_panel in self._panels
+                else {}
+            )
+            local["state"] = dict(self._state)
+            local["active_document"] = self._active_document_view()
+            if self._dialog_params is not None:
+                local["param"] = dict(self._dialog_params)
             result = evaluate(prop["get"], local)
             return result.value
         return self._dialog.get(key)
@@ -219,8 +231,19 @@ class StateStore:
         if prop and "set" in prop:
             from workspace_interpreter.expr import evaluate
             from workspace_interpreter.expr_types import Value, ValueType
-            # Parse the setter as a lambda and apply with the value
+            # Parse the setter as a lambda and apply with the value.
+            # Expose the same cross-scope bindings as the getter so
+            # the setter's body can reference panel.* / state.* etc.
             local = dict(self._dialog)
+            local["panel"] = (
+                dict(self._panels[self._active_panel])
+                if self._active_panel and self._active_panel in self._panels
+                else {}
+            )
+            local["state"] = dict(self._state)
+            local["active_document"] = self._active_document_view()
+            if self._dialog_params is not None:
+                local["param"] = dict(self._dialog_params)
             # Store callback: assignments in the setter write to dialog state
             def store_cb(target, val):
                 self._dialog[target] = val.value
@@ -506,6 +529,18 @@ class StateStore:
         if ab is None:
             return False
         ab[field] = value
+        return True
+
+    def set_artboard_options_field(self, field: str, value) -> bool:
+        """Write value to ``document.artboard_options[field]``. Used
+        by the dialog's Global section (fade_region_outside_artboard,
+        update_while_dragging). Returns True on success."""
+        if self._document is None:
+            return False
+        options = self._document.setdefault("artboard_options", {})
+        if not isinstance(options, dict):
+            return False
+        options[field] = value
         return True
 
     def move_artboards_up(self, selected_ids: list) -> bool:
