@@ -1505,3 +1505,12 @@ Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements. Rank your responses in priority
 from high to low, and giving each a number. What are the benefits? What are the
 downsides? Be ready for a deep dive into any of the suggestions.
+
+# Boolean
+
+Read BOOLEAN.md
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
