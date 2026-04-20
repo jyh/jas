@@ -671,6 +671,11 @@ public class Controller {
     /// "exclude", "subtract_front", "subtract_back", "crop",
     /// "divide", "trim", "merge".
     ///
+    /// [options] carries the document-scoped Boolean Options
+    /// settings (precision / remove_redundant_points /
+    /// divide_remove_unpainted) per BOOLEAN.md §Boolean Options
+    /// dialog. Defaults are applied when not provided.
+    ///
     /// Semantics per BOOLEAN.md §Operand and paint rules:
     /// - UNION / INTERSECTION / EXCLUDE: all operands consumed;
     ///   result carries the frontmost operand's paint.
@@ -686,7 +691,9 @@ public class Controller {
     ///   frontmost is untouched.
     /// - MERGE: TRIM, then union touching survivors whose solid-
     ///   color fills are exactly equal.
-    public func applyDestructiveBoolean(_ opName: String) {
+    public func applyDestructiveBoolean(
+        _ opName: String, options: BooleanOptions = BooleanOptions()
+    ) {
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
         let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
@@ -694,7 +701,7 @@ public class Controller {
         let parent = Array(paths[0].dropLast())
         guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
         let elements = paths.map { doc.getElement($0) }
-        let precision = DEFAULT_PRECISION
+        let precision = options.precision
 
         // outputs: one (polygonSet, element-for-paint) pair per fragment.
         var outputs: [(BoolPolygonSet, Element)] = []
@@ -787,11 +794,22 @@ public class Controller {
         }
 
         // Flatten to Polygon elements; drop rings with < 3 points.
+        // Optional per BooleanOptions:
+        // - divide_remove_unpainted: drop unpainted DIVIDE fragments
+        // - remove_redundant_points: collapse near-collinear points
         var newElements: [Element] = []
         for (ps, paintSrc) in outputs {
-            for ring in ps where ring.count >= 3 {
+            if opName == "divide" && options.divideRemoveUnpainted
+               && paintSrc.fill == nil && paintSrc.stroke == nil {
+                continue
+            }
+            for ring in ps {
+                let r = options.removeRedundantPoints
+                    ? collapseCollinearPoints(ring, tolerance: options.precision)
+                    : ring
+                guard r.count >= 3 else { continue }
                 newElements.append(.polygon(Polygon(
-                    points: ring,
+                    points: r,
                     fill: paintSrc.fill,
                     stroke: paintSrc.stroke,
                     opacity: 1.0,
@@ -823,6 +841,24 @@ public class Controller {
         model.document = Document(layers: newLayers,
                                   selectedLayer: newDoc.selectedLayer,
                                   selection: newSelection)
+    }
+
+    /// Re-apply the last destructive or compound-creating boolean op
+    /// to the current selection. [lastOp] is the 13-value enum from
+    /// BOOLEAN.md §Repeat state: op names ending in _compound route
+    /// to applyCompoundCreation; all others route to
+    /// applyDestructiveBoolean. No-op when [lastOp] is nil or empty.
+    public func applyRepeatBooleanOperation(
+        _ lastOp: String?, options: BooleanOptions = BooleanOptions()
+    ) {
+        guard let op = lastOp, !op.isEmpty else { return }
+        let suffix = "_compound"
+        if op.hasSuffix(suffix) {
+            let base = String(op.dropLast(suffix.count))
+            applyCompoundCreation(base)
+        } else {
+            applyDestructiveBoolean(op, options: options)
+        }
     }
 
     /// Set the fill of every element in the current selection.

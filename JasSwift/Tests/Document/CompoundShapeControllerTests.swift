@@ -225,3 +225,48 @@ private func firstChildCompoundOp(_ m: Model) -> CompoundOperation? {
     Controller(model: m).applyCompoundCreation("nonexistent")
     #expect(topChildrenCount(m) == 2)
 }
+
+// MARK: - BooleanOptions / Repeat
+
+@Test func collapseCollinearDropsMidpoint() {
+    let ring: [(Double, Double)] = [(0, 0), (5, 0), (10, 0), (10, 10), (0, 10)]
+    let collapsed = collapseCollinearPoints(ring, tolerance: 0.01)
+    #expect(collapsed.count == 4)
+}
+
+@Test func collapsePreservesTriangleCorners() {
+    let ring: [(Double, Double)] = [(0, 0), (10, 0), (5, 10)]
+    let collapsed = collapseCollinearPoints(ring, tolerance: 0.01)
+    #expect(collapsed.count == 3)
+}
+
+@Test func divideRemoveUnpaintedDropsUnfilled() {
+    let m = twoOverlapping()
+    let opts = BooleanOptions(divideRemoveUnpainted: true)
+    Controller(model: m).applyDestructiveBoolean("divide", options: opts)
+    #expect(topChildrenCount(m) == 0)
+}
+
+@Test func repeatDestructiveReplaysOp() {
+    let m = twoOverlapping()
+    Controller(model: m).applyRepeatBooleanOperation("union")
+    #expect(topChildrenCount(m) == 1)
+}
+
+@Test func repeatCompoundReplaysCompoundCreation() {
+    let m = twoOverlapping()
+    Controller(model: m).applyRepeatBooleanOperation("intersection_compound")
+    #expect(firstChildCompoundOp(m) == .intersection)
+}
+
+@Test func repeatNilIsNoop() {
+    let m = twoOverlapping()
+    Controller(model: m).applyRepeatBooleanOperation(nil)
+    #expect(topChildrenCount(m) == 2)
+}
+
+@Test func repeatEmptyStringIsNoop() {
+    let m = twoOverlapping()
+    Controller(model: m).applyRepeatBooleanOperation("")
+    #expect(topChildrenCount(m) == 2)
+}
