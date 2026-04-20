@@ -54,6 +54,7 @@ case "planar":            results = runPlanar(activeVectors)
 case "text_layout":       results = runTextLayout(activeVectors)
 case "text_layout_paragraph": results = runTextLayoutParagraph(activeVectors)
 case "path_text_layout":  results = runPathTextLayout(activeVectors)
+case "align":             results = runAlign(activeVectors)
 default:
     fputs("Unknown algorithm: \(algo)\n", stderr)
     exit(1)
@@ -512,4 +513,67 @@ func properCrossing(_ ax1: Double, _ ay1: Double, _ ax2: Double, _ ay2: Double,
 
 func crossProduct(_ ux: Double, _ uy: Double, _ vx: Double, _ vy: Double) -> Double {
     ux * vy - uy * vx
+}
+
+// MARK: - align
+
+func runAlign(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    var out: [[String: Any]] = []
+    for v in vectors {
+        let op = v["op"] as? String ?? ""
+        let rectsRaw = v["rects"] as? [[Double]] ?? []
+        let rects: [Element] = rectsRaw.map {
+            .rect(Rect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]))
+        }
+        let pairs: [(ElementPath, Element)] = rects.enumerated().map { (i, e) in
+            ([i], e)
+        }
+        let usePreview = v["use_preview_bounds"] as? Bool ?? false
+        let boundsFn: AlignBoundsFn = usePreview ? alignPreviewBounds : alignGeometricBounds
+
+        let refRaw = v["reference"] as? [String: Any] ?? [:]
+        let refKind = refRaw["kind"] as? String ?? "selection"
+        let reference: AlignReference
+        switch refKind {
+        case "selection":
+            reference = .selection(alignUnionBounds(rects, boundsFn))
+        case "artboard":
+            let bb = refRaw["bbox"] as? [Double] ?? [0, 0, 0, 0]
+            reference = .artboard((bb[0], bb[1], bb[2], bb[3]))
+        case "key_object":
+            let idx = (refRaw["index"] as? NSNumber)?.intValue ?? 0
+            reference = .keyObject(bbox: boundsFn(rects[idx]), path: [idx])
+        default:
+            reference = .selection((0, 0, 0, 0))
+        }
+
+        let explicitGap: Double? = (v["explicit_gap"] as? NSNumber)?.doubleValue
+
+        let translations: [AlignTranslation]
+        switch op {
+        case "align_left": translations = alignLeft(pairs, reference, boundsFn)
+        case "align_horizontal_center": translations = alignHorizontalCenter(pairs, reference, boundsFn)
+        case "align_right": translations = alignRight(pairs, reference, boundsFn)
+        case "align_top": translations = alignTop(pairs, reference, boundsFn)
+        case "align_vertical_center": translations = alignVerticalCenter(pairs, reference, boundsFn)
+        case "align_bottom": translations = alignBottom(pairs, reference, boundsFn)
+        case "distribute_left": translations = distributeLeft(pairs, reference, boundsFn)
+        case "distribute_horizontal_center": translations = distributeHorizontalCenter(pairs, reference, boundsFn)
+        case "distribute_right": translations = distributeRight(pairs, reference, boundsFn)
+        case "distribute_top": translations = distributeTop(pairs, reference, boundsFn)
+        case "distribute_vertical_center": translations = distributeVerticalCenter(pairs, reference, boundsFn)
+        case "distribute_bottom": translations = distributeBottom(pairs, reference, boundsFn)
+        case "distribute_vertical_spacing":
+            translations = distributeVerticalSpacing(pairs, reference, explicitGap, boundsFn)
+        case "distribute_horizontal_spacing":
+            translations = distributeHorizontalSpacing(pairs, reference, explicitGap, boundsFn)
+        default: translations = []
+        }
+
+        let ts: [[String: Any]] = translations.map {
+            ["path": $0.path, "dx": $0.dx, "dy": $0.dy]
+        }
+        out.append(["translations": ts])
+    }
+    return out
 }
