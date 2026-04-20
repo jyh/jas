@@ -1149,11 +1149,10 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // Boolean panel — destructive operations. The six below are
-    // implemented; DIVIDE / TRIM / MERGE land in a follow-up phase.
+    // Boolean panel — destructive operations. All nine are wired.
     for &op in &[
         "union", "subtract_front", "intersection", "exclude",
-        "crop", "subtract_back",
+        "divide", "trim", "merge", "crop", "subtract_back",
     ] {
         let key = format!("boolean_{op}");
         if eff.get(&key).is_some() {

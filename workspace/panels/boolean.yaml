@@ -191,11 +191,10 @@ content:
           description: >
             DIVIDE_BUTTON. Cut the elements apart so none overlap.
             Each fragment inherits the paint of the frontmost
-            original element that covered it. Deferred — implemented
-            in a follow-up phase.
+            original element that covered it.
           style: { size: 20 }
           bind:
-            disabled: "true"
+            disabled: "active_document.selection_count < 2"
           behavior:
             - event: click
               effects:
@@ -206,11 +205,10 @@ content:
           summary: "Trim"
           description: >
             TRIM_BUTTON. Remove parts of elements that are hidden
-            behind other elements. Each survivor keeps its own
-            paint. Deferred — implemented in a follow-up phase.
+            behind other elements. Each survivor keeps its own paint.
           style: { size: 20 }
           bind:
-            disabled: "true"
+            disabled: "active_document.selection_count < 2"
           behavior:
             - event: click
               effects:
@@ -220,12 +218,11 @@ content:
           icon: boolean_merge
           summary: "Merge"
           description: >
-            MERGE_BUTTON. TRIM first, then merge any touching
-            survivors whose fills are exactly equal. Deferred —
-            implemented in a follow-up phase.
+            MERGE_BUTTON. TRIM first, then union any touching
+            survivors whose fills are exactly equal.
           style: { size: 20 }
           bind:
-            disabled: "true"
+            disabled: "active_document.selection_count < 2"
           behavior:
             - event: click
               effects:
