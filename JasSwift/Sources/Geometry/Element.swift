@@ -461,6 +461,26 @@ private func inflateBounds(_ bbox: BBox, _ stroke: Stroke?) -> BBox {
     return (bbox.x - half, bbox.y - half, bbox.width + 2 * half, bbox.height + 2 * half)
 }
 
+/// Bounding box of a point list, no stroke inflation.
+private func pointsBounds(_ points: [(Double, Double)]) -> BBox {
+    guard !points.isEmpty else { return (0, 0, 0, 0) }
+    let xs = points.map(\.0), ys = points.map(\.1)
+    let minX = xs.min()!, minY = ys.min()!
+    return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+}
+
+/// Union the geometric bounds of a children list. Returns
+/// `(0, 0, 0, 0)` for empty groups. Used by the recursive
+/// `Element.geometricBounds` implementation.
+private func childrenGeometricBounds(_ children: [Element]) -> BBox {
+    guard !children.isEmpty else { return (0, 0, 0, 0) }
+    let all = children.map(\.geometricBounds)
+    let minX = all.map(\.x).min()!, minY = all.map(\.y).min()!
+    let maxX = all.map { $0.x + $0.width }.max()!
+    let maxY = all.map { $0.y + $0.height }.max()!
+    return (minX, minY, maxX - minX, maxY - minY)
+}
+
 /// An SVG document element. All elements are immutable value types.
 public enum Element: Equatable {
     /// SVG \<line\>
@@ -499,6 +519,30 @@ public enum Element: Equatable {
         case .textPath(let v): return v.bounds
         case .group(let v): return v.bounds
         case .layer(let v): return v.bounds
+        }
+    }
+
+    /// Geometric bounding box — bbox of the path / shape geometry
+    /// alone, ignoring stroke width and any fill bleed. Used by
+    /// Align operations when "Use Preview Bounds" is off (the
+    /// default) per ALIGN.md §Bounding box selection.
+    public var geometricBounds: BBox {
+        switch self {
+        case .line(let v):
+            let minX = min(v.x1, v.x2), minY = min(v.y1, v.y2)
+            return (minX, minY, abs(v.x2 - v.x1), abs(v.y2 - v.y1))
+        case .rect(let v): return (v.x, v.y, v.width, v.height)
+        case .circle(let v): return (v.cx - v.r, v.cy - v.r, v.r * 2, v.r * 2)
+        case .ellipse(let v): return (v.cx - v.rx, v.cy - v.ry, v.rx * 2, v.ry * 2)
+        case .polyline(let v): return pointsBounds(v.points)
+        case .polygon(let v): return pointsBounds(v.points)
+        case .path(let v): return pathBounds(v.d)
+        case .text, .textPath:
+            // Text has no stroke inflation today; preview and
+            // geometric bounds are equivalent.
+            return self.bounds
+        case .group(let v): return childrenGeometricBounds(v.children)
+        case .layer(let v): return childrenGeometricBounds(v.children)
         }
     }
 
