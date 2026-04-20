@@ -477,6 +477,14 @@ and compound_shape = {
   visibility : visibility;
 }
 
+(** Hook for the LiveElement bounds computation. Set by [Live] at
+    module init time to avoid a module cycle (live.ml needs element
+    types; element.ml needs Live.evaluate for bounds). Default:
+    empty bounds, matching the phase-1 stub. *)
+let live_bounds_hook :
+    (live_variant -> float * float * float * float) ref =
+  ref (fun _ -> (0.0, 0.0, 0.0, 0.0))
+
 (** Expand a bounding box by half the stroke width on all sides. *)
 let inflate_bounds (bx, by, bw, bh) stroke =
   match stroke with
@@ -660,10 +668,7 @@ let rec bounds = function
       let max_x = Array.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all_bounds in
       let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all_bounds in
       (min_x, min_y, max_x -. min_x, max_y -. min_y)
-  | Live _ ->
-    (* Phase 1 stub. Phase 2 returns bounds of the evaluated
-       polygon_set after running the boolean algorithm over operands. *)
-    (0.0, 0.0, 0.0, 0.0)
+  | Live v -> !live_bounds_hook v
 
 (** Geometric bounding box — bbox of the path / shape geometry
     alone, ignoring stroke width and any fill bleed. Align
@@ -699,7 +704,7 @@ let rec geometric_bounds = function
       let max_x = Array.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all in
       let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all in
       (min_x, min_y, max_x -. min_x, max_y -. min_y)
-  | Live _ -> (0.0, 0.0, 0.0, 0.0)
+  | Live v -> !live_bounds_hook v
 
 (** Helper constructors. *)
 
