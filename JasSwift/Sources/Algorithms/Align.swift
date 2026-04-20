@@ -119,3 +119,96 @@ public func alignAnchorPosition(
     case .max: return hi
     }
 }
+
+/// Generic alignment driver used by the six public Align
+/// operations. For each selected element whose bbox anchor differs
+/// from the reference bbox anchor along the given axis, emit a
+/// translation that moves it onto the target.
+///
+/// Elements whose path matches `reference.keyPath` are skipped —
+/// the key object never moves, per ALIGN.md §Align To target.
+/// Zero-delta translations are omitted per the identity-value
+/// rule in ALIGN.md §SVG attribute mapping.
+public func alignAlongAxis(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ axis: AlignAxis,
+    _ anchor: AlignAxisAnchor,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    let target = alignAnchorPosition(reference.bbox, axis, anchor)
+    let keyPath = reference.keyPath
+    var out: [AlignTranslation] = []
+    for (path, elem) in elements {
+        if path == keyPath { continue }
+        let pos = alignAnchorPosition(boundsFn(elem), axis, anchor)
+        let delta = target - pos
+        if delta == 0 { continue }
+        let (dx, dy): (Double, Double) = switch axis {
+        case .horizontal: (delta, 0)
+        case .vertical: (0, delta)
+        }
+        out.append(AlignTranslation(path: path, dx: dx, dy: dy))
+    }
+    return out
+}
+
+/// ALIGN_LEFT_BUTTON. Move every non-key element so its left edge
+/// coincides with the reference's left edge.
+public func alignLeft(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    alignAlongAxis(elements, reference, .horizontal, .min, boundsFn)
+}
+
+/// ALIGN_HORIZONTAL_CENTER_BUTTON. Move every non-key element so
+/// its horizontal center coincides with the reference's.
+public func alignHorizontalCenter(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    alignAlongAxis(elements, reference, .horizontal, .center, boundsFn)
+}
+
+/// ALIGN_RIGHT_BUTTON. Move every non-key element so its right
+/// edge coincides with the reference's right edge.
+public func alignRight(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    alignAlongAxis(elements, reference, .horizontal, .max, boundsFn)
+}
+
+/// ALIGN_TOP_BUTTON. Move every non-key element so its top edge
+/// coincides with the reference's top edge.
+public func alignTop(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    alignAlongAxis(elements, reference, .vertical, .min, boundsFn)
+}
+
+/// ALIGN_VERTICAL_CENTER_BUTTON. Move every non-key element so
+/// its vertical center coincides with the reference's.
+public func alignVerticalCenter(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    alignAlongAxis(elements, reference, .vertical, .center, boundsFn)
+}
+
+/// ALIGN_BOTTOM_BUTTON. Move every non-key element so its bottom
+/// edge coincides with the reference's bottom edge.
+public func alignBottom(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    alignAlongAxis(elements, reference, .vertical, .max, boundsFn)
+}
