@@ -10,7 +10,9 @@ from absl.testing import absltest
 
 from document.document import Document, ElementSelection
 from document.model import Model
-from geometry.element import CompoundShape, Layer, Polygon, Rect
+from geometry.element import (
+    Color, CompoundShape, Fill, Layer, Polygon, Rect,
+)
 from panels.boolean_apply import (
     apply_destructive_boolean,
     apply_expand_compound_shape,
@@ -137,6 +139,83 @@ class DestructiveBooleanTest(absltest.TestCase):
         before = self._count(m)
         apply_destructive_boolean(m, "nonexistent")
         self.assertEqual(self._count(m), before)
+
+
+class DivideTrimMergeTest(absltest.TestCase):
+    """Tests for DIVIDE / TRIM / MERGE — phase 9e.
+
+    DIVIDE splits the union into region pieces labeled by the
+    frontmost covering operand. TRIM subtracts each operand's later
+    operands from itself. MERGE runs TRIM then unions same-fill
+    survivors (per BOOLEAN.md §Operand and paint rules)."""
+
+    def _rect(self, x, y, w=10, h=10, fill=None):
+        return Rect(x=x, y=y, width=w, height=h, fill=fill)
+
+    def _fill(self, r, g, b):
+        return Fill(color=Color.rgb(r, g, b))
+
+    def _model(self, rects, selected):
+        layer = Layer(children=tuple(rects))
+        sel = frozenset(
+            ElementSelection.all(tuple(p)) for p in selected
+        )
+        doc = Document(layers=(layer,), selection=sel)
+        return Model(document=doc)
+
+    def test_divide_two_overlapping_produces_three_fragments(self):
+        # Back (0,0,10,10) and front (5,0,10,10): regions back-only,
+        # overlap, front-only = 3 fragments.
+        rects = [self._rect(0, 0), self._rect(5, 0)]
+        m = self._model(rects, [(0, 0), (0, 1)])
+        apply_destructive_boolean(m, "divide")
+        self.assertEqual(len(m.document.layers[0].children), 3)
+        for c in m.document.layers[0].children:
+            self.assertIsInstance(c, Polygon)
+
+    def test_divide_disjoint_keeps_two(self):
+        rects = [self._rect(0, 0), self._rect(20, 0)]
+        m = self._model(rects, [(0, 0), (0, 1)])
+        apply_destructive_boolean(m, "divide")
+        self.assertEqual(len(m.document.layers[0].children), 2)
+
+    def test_trim_two_overlapping_keeps_two(self):
+        # TRIM: back gets back-only region; front is untouched.
+        rects = [self._rect(0, 0), self._rect(5, 0)]
+        m = self._model(rects, [(0, 0), (0, 1)])
+        apply_destructive_boolean(m, "trim")
+        self.assertEqual(len(m.document.layers[0].children), 2)
+
+    def test_trim_fully_covered_operand_vanishes(self):
+        # Front fully covers back — back's trimmed region is empty.
+        rects = [self._rect(0, 0), self._rect(0, 0, 20, 20)]
+        m = self._model(rects, [(0, 0), (0, 1)])
+        apply_destructive_boolean(m, "trim")
+        # Only the front survives.
+        self.assertEqual(len(m.document.layers[0].children), 1)
+
+    def test_merge_matching_fills_combine(self):
+        red = self._fill(1.0, 0.0, 0.0)
+        # TRIM would produce back-only + front, both red → MERGE unions.
+        rects = [self._rect(0, 0, fill=red), self._rect(5, 0, fill=red)]
+        m = self._model(rects, [(0, 0), (0, 1)])
+        apply_destructive_boolean(m, "merge")
+        self.assertEqual(len(m.document.layers[0].children), 1)
+
+    def test_merge_mismatched_fills_stay_separate(self):
+        red = self._fill(1.0, 0.0, 0.0)
+        blue = self._fill(0.0, 0.0, 1.0)
+        rects = [self._rect(0, 0, fill=red), self._rect(5, 0, fill=blue)]
+        m = self._model(rects, [(0, 0), (0, 1)])
+        apply_destructive_boolean(m, "merge")
+        self.assertEqual(len(m.document.layers[0].children), 2)
+
+    def test_merge_none_fill_never_matches(self):
+        # Both None → MERGE does not combine them.
+        rects = [self._rect(0, 0), self._rect(5, 0)]
+        m = self._model(rects, [(0, 0), (0, 1)])
+        apply_destructive_boolean(m, "merge")
+        self.assertEqual(len(m.document.layers[0].children), 2)
 
 
 if __name__ == "__main__":

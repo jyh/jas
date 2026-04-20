@@ -206,11 +206,21 @@ def _paint_of(elem):
     )
 
 
+def _fills_merge_equal(a, b) -> bool:
+    """MERGE predicate: two operands merge iff both have a fill and
+    their fill colors are exactly equal. None / mismatched fills
+    never merge (strict predicate per BOOLEAN.md §MERGE). Gradients
+    and patterns never match — only solid-color fills compare here."""
+    if a is None or b is None:
+        return False
+    return a.color == b.color
+
+
 def apply_destructive_boolean(model, op_name: str) -> None:
-    """Destructively apply one of the six implemented boolean ops to
-    the current selection. Supported: "union", "intersection",
-    "exclude", "subtract_front", "subtract_back", "crop". DIVIDE /
-    TRIM / MERGE live in phase 9e.
+    """Destructively apply one of the nine boolean ops to the current
+    selection. Supported: "union", "intersection", "exclude",
+    "subtract_front", "subtract_back", "crop", "divide", "trim",
+    "merge".
 
     Semantics per BOOLEAN.md §Operand and paint rules:
     - UNION / INTERSECTION / EXCLUDE: all operands consumed; result
@@ -218,10 +228,15 @@ def apply_destructive_boolean(model, op_name: str) -> None:
     - SUBTRACT_FRONT: frontmost (last in path order) is consumed as
       the cutter; each surviving element has the cutter subtracted
       and keeps its own paint.
-    - SUBTRACT_BACK: backmost (first in path order) is consumed as
-      the cutter.
+    - SUBTRACT_BACK: backmost is consumed as the cutter.
     - CROP: frontmost is consumed as the mask; each survivor is
-      clipped to the mask's interior and keeps its own paint.
+      clipped to the mask's interior.
+    - DIVIDE: cut the union apart so no two fragments overlap; each
+      fragment inherits the frontmost covering operand's paint.
+    - TRIM: each operand minus the union of all later operands;
+      frontmost is untouched.
+    - MERGE: TRIM, then union touching survivors whose solid-color
+      fills match exactly.
     """
     doc = model.document
     if not doc.selection:
@@ -261,6 +276,71 @@ def apply_destructive_boolean(model, op_name: str) -> None:
             s_set = element_to_polygon_set(survivor, precision)
             res = boolean_subtract(s_set, cutter)
             outputs.append((res, *_paint_of(survivor)))
+    elif op_name == "divide":
+        # Walk operands back-to-front. Maintain a partition of the
+        # union-so-far as a list of (region, frontmost-covering
+        # operand index). Each incoming operand splits every existing
+        # region into overlap / non-overlap; overlap relabels to the
+        # incoming index (now frontmost).
+        accumulator: list[tuple[list, int]] = []
+        operand_sets = [element_to_polygon_set(e, precision) for e in elements]
+        for i, op_set in enumerate(operand_sets):
+            new_acc: list[tuple[list, int]] = []
+            remaining = list(op_set)
+            for existing_region, existing_idx in accumulator:
+                overlap = boolean_intersect(existing_region, op_set)
+                if overlap:
+                    new_acc.append((overlap, i))
+                non_overlap = boolean_subtract(existing_region, op_set)
+                if non_overlap:
+                    new_acc.append((non_overlap, existing_idx))
+                remaining = boolean_subtract(remaining, existing_region)
+            if remaining:
+                new_acc.append((remaining, i))
+            accumulator = new_acc
+        for region, paint_idx in accumulator:
+            outputs.append((region, *_paint_of(elements[paint_idx])))
+    elif op_name in ("trim", "merge"):
+        operand_sets = [element_to_polygon_set(e, precision) for e in elements]
+        trimmed: list[tuple[list, object, object, float, object, bool, object]] = []
+        for i in range(len(elements)):
+            region = list(operand_sets[i])
+            for later in operand_sets[i + 1:]:
+                region = boolean_subtract(region, later)
+            if region:
+                trimmed.append((region, *_paint_of(elements[i])))
+        if op_name == "trim":
+            outputs.extend(trimmed)
+        else:
+            # MERGE: unify touching same-fill survivors. O(N^2) pass;
+            # acceptable for panel-sized selections. Frontmost
+            # contributor in the merged cluster keeps its stroke /
+            # opacity / transform; its fill is already the cluster's
+            # fill by predicate.
+            consumed = [False] * len(trimmed)
+            for i, (region_i, fill_i, stroke_i, opacity_i, transform_i, locked_i, vis_i) \
+                    in enumerate(trimmed):
+                if consumed[i]:
+                    continue
+                consumed[i] = True
+                merged = list(region_i)
+                stroke_w, opacity_w, transform_w, locked_w, vis_w = (
+                    stroke_i, opacity_i, transform_i, locked_i, vis_i
+                )
+                if fill_i is not None:
+                    for j in range(i + 1, len(trimmed)):
+                        if consumed[j]:
+                            continue
+                        if _fills_merge_equal(fill_i, trimmed[j][1]):
+                            merged = boolean_union(merged, trimmed[j][0])
+                            # j > i in operand z-order → j is frontmost.
+                            stroke_w = trimmed[j][2]
+                            opacity_w = trimmed[j][3]
+                            transform_w = trimmed[j][4]
+                            locked_w = trimmed[j][5]
+                            vis_w = trimmed[j][6]
+                            consumed[j] = True
+                outputs.append((merged, fill_i, stroke_w, opacity_w, transform_w, locked_w, vis_w))
     else:
         return  # unknown op
 
