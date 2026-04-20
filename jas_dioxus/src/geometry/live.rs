@@ -252,9 +252,15 @@ pub(crate) fn element_to_polygon_set(elem: &Element, precision: f64) -> PolygonS
         Element::Live(v) => match v {
             LiveVariant::CompoundShape(cs) => cs.evaluate(precision),
         },
-        Element::Line(_) | Element::Path(_) | Element::Text(_) | Element::TextPath(_) => {
-            PolygonSet::new()
+        Element::Path(p) => super::element::flatten_path_to_rings(&p.d),
+        Element::TextPath(tp) => {
+            // Treat text-on-path's underlying path as a ring; the
+            // glyph layout itself is not a polygon-set concept.
+            super::element::flatten_path_to_rings(&tp.d)
         }
+        // Line has zero area; Text glyph flattening is deferred until
+        // we have a font-outline pipeline.
+        Element::Line(_) | Element::Text(_) => PolygonSet::new(),
     }
 }
 
@@ -575,6 +581,84 @@ mod tests {
         assert!((by - 0.0).abs() < 1e-6);
         assert!((bw - 15.0).abs() < 1e-6);
         assert!((bh - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn path_flattens_into_polygon_set_for_boolean() {
+        use crate::geometry::element::{PathCommand, PathElem};
+        // Path equivalent of a 10x10 square at origin, closed.
+        let sq = Rc::new(Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 10.0, y: 0.0 },
+                PathCommand::LineTo { x: 10.0, y: 10.0 },
+                PathCommand::LineTo { x: 0.0, y: 10.0 },
+                PathCommand::ClosePath,
+            ],
+            fill: None, stroke: None, width_points: vec![],
+            common: CommonProps::default(),
+        }));
+        let ps = element_to_polygon_set(&sq, DEFAULT_PRECISION);
+        assert_eq!(ps.len(), 1, "closed square path → 1 ring");
+        let (min_x, min_y, max_x, max_y) = bbox_of_ring(&ps[0]);
+        assert!((min_x - 0.0).abs() < 1e-6);
+        assert!((min_y - 0.0).abs() < 1e-6);
+        assert!((max_x - 10.0).abs() < 1e-6);
+        assert!((max_y - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn compound_shape_with_path_operand_evaluates() {
+        use crate::geometry::element::{PathCommand, PathElem};
+        let sq = |ox: f64| Rc::new(Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: ox, y: 0.0 },
+                PathCommand::LineTo { x: ox + 10.0, y: 0.0 },
+                PathCommand::LineTo { x: ox + 10.0, y: 10.0 },
+                PathCommand::LineTo { x: ox, y: 10.0 },
+                PathCommand::ClosePath,
+            ],
+            fill: None, stroke: None, width_points: vec![],
+            common: CommonProps::default(),
+        }));
+        let cs = CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![sq(0.0), sq(5.0)],
+            fill: None, stroke: None, common: CommonProps::default(),
+        };
+        let ps = cs.evaluate(DEFAULT_PRECISION);
+        // Union of two overlapping path-rects → 1 ring spanning
+        // x ∈ [0, 15], y ∈ [0, 10].
+        assert_eq!(ps.len(), 1);
+        let (min_x, min_y, max_x, max_y) = bbox_of_ring(&ps[0]);
+        assert!((min_x - 0.0).abs() < 1e-6);
+        assert!((min_y - 0.0).abs() < 1e-6);
+        assert!((max_x - 15.0).abs() < 1e-6);
+        assert!((max_y - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn multi_subpath_path_yields_multi_ring_polygon_set() {
+        use crate::geometry::element::{PathCommand, PathElem};
+        // Two disjoint squares in one path.
+        let p = Rc::new(Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 10.0, y: 0.0 },
+                PathCommand::LineTo { x: 10.0, y: 10.0 },
+                PathCommand::LineTo { x: 0.0, y: 10.0 },
+                PathCommand::ClosePath,
+                PathCommand::MoveTo { x: 20.0, y: 0.0 },
+                PathCommand::LineTo { x: 30.0, y: 0.0 },
+                PathCommand::LineTo { x: 30.0, y: 10.0 },
+                PathCommand::LineTo { x: 20.0, y: 10.0 },
+                PathCommand::ClosePath,
+            ],
+            fill: None, stroke: None, width_points: vec![],
+            common: CommonProps::default(),
+        }));
+        let ps = element_to_polygon_set(&p, DEFAULT_PRECISION);
+        assert_eq!(ps.len(), 2, "two disjoint subpaths → 2 rings");
     }
 
     #[test]
