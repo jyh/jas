@@ -548,6 +548,24 @@ fn set_app_state_field(
         "stroke_arrow_align" => { if let Some(s) = val.as_str() { st.stroke_panel.arrow_align = s.into(); } }
         "stroke_profile" => { if let Some(s) = val.as_str() { st.stroke_panel.profile = s.into(); } }
         "stroke_profile_flipped" => { if let Some(b) = val.as_bool() { st.stroke_panel.profile_flipped = b; } }
+        // Align panel fields — mirrors of AlignPanelState per
+        // ALIGN.md Panel state.
+        "align_to" => {
+            if let Some(s) = val.as_str() {
+                if let Some(mode) = crate::workspace::app_state::AlignTo::from_str(s) {
+                    st.align_panel.align_to = mode;
+                }
+            }
+        }
+        "align_key_object_path" => {
+            st.align_panel.key_object_path = parse_path_value(val);
+        }
+        "align_distribute_spacing" => {
+            if let Some(n) = val.as_f64() { st.align_panel.distribute_spacing = n; }
+        }
+        "align_use_preview_bounds" => {
+            if let Some(b) = val.as_bool() { st.align_panel.use_preview_bounds = b; }
+        }
         // Workspace layout visibility fields are managed by the generic StateStore,
         // not directly by AppState. A set: on these keys has no effect here.
         "toolbar_visible" | "canvas_visible" | "dock_visible"
@@ -555,6 +573,28 @@ fn set_app_state_field(
         | "active_tab" | "tab_count" => {}
         _ => {}
     }
+}
+
+/// Parse a JSON value into an `Option<ElementPath>`. Accepts the
+/// `{"__path__": [...]}` marker used by the expression evaluator,
+/// `null` for an absent path, and passes through arrays for
+/// plain-list paths.
+fn parse_path_value(val: &serde_json::Value) -> Option<crate::document::document::ElementPath> {
+    if val.is_null() {
+        return None;
+    }
+    let arr = if let Some(obj) = val.as_object() {
+        obj.get("__path__")?.as_array()?
+    } else if let Some(a) = val.as_array() {
+        a
+    } else {
+        return None;
+    };
+    let path: Vec<usize> = arr
+        .iter()
+        .filter_map(|v| v.as_u64().map(|n| n as usize))
+        .collect();
+    Some(path)
 }
 
 /// Apply `set_panel_state: { key, value }` effects to the stroke panel state.
@@ -577,6 +617,62 @@ fn apply_set_panel_state(
         // Only accept an empty list (clear); richer updates not supported yet.
         if matches!(resolved, serde_json::Value::Array(ref a) if a.is_empty()) {
             st.layers_panel_selection.clear();
+        }
+        return;
+    }
+    // Align panel keys — AlignPanelState lives on AppState, not the
+    // stroke panel. Each of the four fields writes to its typed
+    // slot; expression values are evaluated against the current
+    // align panel state.
+    if matches!(key, "align_to" | "key_object_path"
+                   | "distribute_spacing_value" | "use_preview_bounds") {
+        let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
+        let resolved = if let Some(expr_str) = val.as_str() {
+            let ap = &st.align_panel;
+            let panel_json = serde_json::json!({
+                "align_to": ap.align_to.as_str(),
+                "key_object_path": ap.key_object_path.as_ref()
+                    .map(|p| serde_json::json!({"__path__": p}))
+                    .unwrap_or(serde_json::Value::Null),
+                "distribute_spacing_value": ap.distribute_spacing,
+                "use_preview_bounds": ap.use_preview_bounds,
+            });
+            let state_json = serde_json::json!({
+                "align_to": ap.align_to.as_str(),
+                "align_key_object_path": ap.key_object_path.as_ref()
+                    .map(|p| serde_json::json!({"__path__": p}))
+                    .unwrap_or(serde_json::Value::Null),
+                "align_distribute_spacing": ap.distribute_spacing,
+                "align_use_preview_bounds": ap.use_preview_bounds,
+            });
+            let ctx = serde_json::json!({"panel": panel_json, "state": state_json});
+            let result = super::expr::eval(expr_str, &ctx);
+            super::effects::value_to_json(&result)
+        } else {
+            val.clone()
+        };
+        match key {
+            "align_to" => {
+                if let Some(s) = resolved.as_str() {
+                    if let Some(mode) = crate::workspace::app_state::AlignTo::from_str(s) {
+                        st.align_panel.align_to = mode;
+                    }
+                }
+            }
+            "key_object_path" => {
+                st.align_panel.key_object_path = parse_path_value(&resolved);
+            }
+            "distribute_spacing_value" => {
+                if let Some(n) = resolved.as_f64() {
+                    st.align_panel.distribute_spacing = n;
+                }
+            }
+            "use_preview_bounds" => {
+                if let Some(b) = resolved.as_bool() {
+                    st.align_panel.use_preview_bounds = b;
+                }
+            }
+            _ => {}
         }
         return;
     }
@@ -996,6 +1092,33 @@ fn run_yaml_effect(
     if eff.get("reset_paragraph_panel").is_some() {
         st.reset_paragraph_panel();
         return deferred;
+    }
+
+    // reset_align_panel — Phase 2 Align implementation. Restores
+    // defaults across the four AlignPanelState fields (the panel is
+    // otherwise stateless — no selection-apply step needed).
+    if eff.get("reset_align_panel").is_some() {
+        st.reset_align_panel();
+        return deferred;
+    }
+
+    // Align panel operations — Phase 2 Align implementation. Each of
+    // the 14 Align / Distribute / Distribute Spacing buttons fires a
+    // same-named platform effect; the handler builds an
+    // AlignReference from panel state and applies the algorithm's
+    // translations to the selection. See ALIGN.md and
+    // algorithms/align.rs.
+    for &op in &[
+        "align_left", "align_horizontal_center", "align_right",
+        "align_top", "align_vertical_center", "align_bottom",
+        "distribute_left", "distribute_horizontal_center", "distribute_right",
+        "distribute_top", "distribute_vertical_center", "distribute_bottom",
+        "distribute_vertical_spacing", "distribute_horizontal_spacing",
+    ] {
+        if eff.get(op).is_some() {
+            st.apply_align_operation(op);
+            return deferred;
+        }
     }
 
     // toggle_paragraph_field: <field_name> — Phase 4. Flips the named

@@ -449,6 +449,19 @@ impl Transform {
         }
     }
 
+    /// Return a new transform equal to `translate(dx, dy) * self`
+    /// — i.e., this transform with a world-space translation of
+    /// (dx, dy) pre-pended. The rotation / scale components of
+    /// `self` are preserved; only `e` and `f` change.
+    ///
+    /// Used by the Align panel operations per ALIGN.md §SVG
+    /// attribute mapping: moving an element adds (dx, dy) to its
+    /// existing transforms translation in world coordinates,
+    /// regardless of any rotation or scale it already carries.
+    pub fn translated(self, dx: f64, dy: f64) -> Self {
+        Self { e: self.e + dx, f: self.f + dy, ..self }
+    }
+
     pub fn scale(sx: f64, sy: f64) -> Self {
         Self {
             a: sx,
@@ -2256,6 +2269,42 @@ mod tests {
         let (_, _, pw, ph) = e.bounds();
         assert!(pw > gw);
         assert!(ph > gh);
+    }
+
+    // ── Transform::translated ────────────────────────────────
+    // Pre-pending a translation adds to (e, f) regardless of the
+    // existing rotation / scale components. Used by Align ops.
+
+    #[test]
+    fn translated_on_identity_writes_into_e_f() {
+        let t = Transform::IDENTITY.translated(10.0, 20.0);
+        assert_eq!(t, Transform::translate(10.0, 20.0));
+    }
+
+    #[test]
+    fn translated_on_existing_translate_accumulates() {
+        let t = Transform::translate(5.0, 7.0).translated(10.0, -3.0);
+        assert_eq!(t.e, 15.0);
+        assert_eq!(t.f, 4.0);
+    }
+
+    #[test]
+    fn translated_preserves_rotation_and_scale() {
+        let t = Transform::rotate(90.0).translated(10.0, 20.0);
+        let rot = Transform::rotate(90.0);
+        assert_eq!(t.a, rot.a);
+        assert_eq!(t.b, rot.b);
+        assert_eq!(t.c, rot.c);
+        assert_eq!(t.d, rot.d);
+        assert_eq!(t.e, 10.0);
+        assert_eq!(t.f, 20.0);
+    }
+
+    #[test]
+    fn translated_zero_is_identity_change() {
+        let t0 = Transform::rotate(45.0);
+        let t1 = t0.translated(0.0, 0.0);
+        assert_eq!(t0, t1);
     }
 
     #[test]
