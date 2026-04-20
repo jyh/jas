@@ -578,9 +578,11 @@ fn set_app_state_field(
             if let Some(b) = val.as_bool() { st.boolean_panel.divide_remove_unpainted = b; }
         }
         "last_boolean_op" => {
-            // The yaml string-or-null is only consumed by
-            // Repeat Boolean Operation (which is a future phase);
-            // nothing in AppState needs to mirror it today.
+            if val.is_null() {
+                st.boolean_panel.last_op = None;
+            } else if let Some(s) = val.as_str() {
+                st.boolean_panel.last_op = Some(s.to_string());
+            }
         }
         // Workspace layout visibility fields are managed by the generic StateStore,
         // not directly by AppState. A set: on these keys has no effect here.
@@ -664,6 +666,9 @@ fn apply_set_panel_state(
                 "boolean_precision": bp.precision,
                 "boolean_remove_redundant_points": bp.remove_redundant_points,
                 "boolean_divide_remove_unpainted": bp.divide_remove_unpainted,
+                "last_boolean_op": bp.last_op.as_ref()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .unwrap_or(serde_json::Value::Null),
             });
             let ctx = serde_json::json!({"panel": panel_json, "state": state_json});
             let result = super::expr::eval(expr_str, &ctx);
@@ -1189,6 +1194,15 @@ fn run_yaml_effect(
             st.apply_compound_creation(op);
             return deferred;
         }
+    }
+
+    // Boolean panel — Repeat Boolean Operation. Reads
+    // boolean_panel.last_op (populated by every destructive and
+    // compound-creating action) and re-dispatches. No-op when
+    // last_op is None.
+    if eff.get("repeat_boolean_operation").is_some() {
+        st.apply_repeat_boolean_operation();
+        return deferred;
     }
 
     // toggle_paragraph_field: <field_name> — Phase 4. Flips the named

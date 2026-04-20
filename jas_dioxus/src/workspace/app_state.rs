@@ -341,9 +341,10 @@ impl Default for AlignPanelState {
 }
 
 /// Mirror of the Boolean panel's document-level state per BOOLEAN.md
-/// §Boolean Options dialog. Edited by the Boolean Options dialog;
-/// read by `Controller::apply_destructive_boolean` and compound
-/// shape evaluation.
+/// §Boolean Options dialog and §Repeat state. Edited by the Boolean
+/// Options dialog and by every destructive / compound-creating
+/// action; read by `Controller::apply_destructive_boolean`, compound
+/// shape evaluation, and `Repeat Boolean Operation`.
 #[derive(Debug, Clone)]
 pub(crate) struct BooleanPanelState {
     /// Geometric tolerance in points. Default 0.0283 pt = 0.01 mm.
@@ -354,6 +355,12 @@ pub(crate) struct BooleanPanelState {
     /// When true, DIVIDE fragments with no fill and no stroke are
     /// discarded rather than kept as invisible paths.
     pub divide_remove_unpainted: bool,
+    /// Most-recent op (one of 13 values plus None). See BOOLEAN.md
+    /// §Repeat state. Populated by every destructive op and every
+    /// compound-creating variant; consumed by Repeat Boolean
+    /// Operation. Make / Release / Expand Compound Shape do not
+    /// write this field.
+    pub last_op: Option<String>,
 }
 
 impl Default for BooleanPanelState {
@@ -362,6 +369,7 @@ impl Default for BooleanPanelState {
             precision: 0.0283,
             remove_redundant_points: false,
             divide_remove_unpainted: false,
+            last_op: None,
         }
     }
 }
@@ -1426,6 +1434,23 @@ impl AppState {
             crate::document::controller::Controller::make_compound_shape_with_op(
                 &mut tab.model, op,
             );
+        }
+    }
+
+    /// Re-apply the most-recent boolean operation (destructive or
+    /// compound-creating) on the current selection. No-op when
+    /// `boolean_panel.last_op` is None. Make / Release / Expand
+    /// Compound Shape are non-repeatable per BOOLEAN.md §Repeat
+    /// state so they never populate last_op.
+    pub(crate) fn apply_repeat_boolean_operation(&mut self) {
+        let last = match self.boolean_panel.last_op.clone() {
+            Some(s) => s,
+            None => return,
+        };
+        if let Some(op) = last.strip_suffix("_compound") {
+            self.apply_compound_creation(op);
+        } else {
+            self.apply_boolean_operation(&last);
         }
     }
 
