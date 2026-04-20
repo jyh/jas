@@ -176,7 +176,12 @@ fn apply_outline_style(ctx: &CanvasRenderingContext2d) {
     ctx.set_miter_limit(10.0);
 }
 
-fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Visibility) {
+fn draw_element(
+    ctx: &CanvasRenderingContext2d,
+    elem: &Element,
+    ancestor_vis: Visibility,
+    precision: f64,
+) {
     // Effective visibility is the minimum of the inherited (capping)
     // visibility and this element's own. Groups/Layers propagate the
     // cap down to their children; Invisible stops the recursion.
@@ -712,18 +717,18 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             // effective visibility (which already incorporates our
             // ancestor's cap).
             for child in &g.children {
-                draw_element(ctx, child, effective);
+                draw_element(ctx, child, effective, precision);
             }
         }
         Element::Layer(l) => {
             for child in &l.children {
-                draw_element(ctx, child, effective);
+                draw_element(ctx, child, effective, precision);
             }
         }
         Element::Live(v) => {
             match v {
                 crate::geometry::live::LiveVariant::CompoundShape(cs) => {
-                    let ps = cs.evaluate(crate::geometry::live::DEFAULT_PRECISION);
+                    let ps = cs.evaluate(precision);
                     let (mut fill_op, mut stroke_op, mut stroke_align) =
                         (1.0, 1.0, StrokeAlign::Center);
                     if outline {
@@ -1057,8 +1062,17 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
 // Public render function
 // ---------------------------------------------------------------------------
 
-/// Render the entire document to the canvas.
-pub fn render(ctx: &CanvasRenderingContext2d, width: f64, height: f64, doc: &Document) {
+/// Render the entire document to the canvas. `precision` is the
+/// Boolean-panel Precision value used when evaluating compound
+/// shapes (and any other LiveElement that flattens to polygons for
+/// rendering).
+pub fn render(
+    ctx: &CanvasRenderingContext2d,
+    width: f64,
+    height: f64,
+    doc: &Document,
+    precision: f64,
+) {
     // Clear
     ctx.set_fill_style_str("white");
     ctx.fill_rect(0.0, 0.0, width, height);
@@ -1067,7 +1081,7 @@ pub fn render(ctx: &CanvasRenderingContext2d, width: f64, height: f64, doc: &Doc
     // visibility. Each layer's own visibility caps it further, and
     // the cap propagates down to descendants.
     for layer in &doc.layers {
-        draw_element(ctx, layer, Visibility::Preview);
+        draw_element(ctx, layer, Visibility::Preview, precision);
     }
 
     // Draw selection overlays

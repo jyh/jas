@@ -969,7 +969,7 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
-        render::render(&ctx, w, h, tab.model.document());
+        render::render(&ctx, w, h, tab.model.document(), self.boolean_panel.precision);
 
         // Draw tool overlay
         if let Some(tool) = tab.tools.get(&self.active_tool) {
