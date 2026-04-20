@@ -1990,6 +1990,38 @@ actions:
       - boolean_exclude_compound: true
       - set: { last_boolean_op: '"exclude_compound"' }
 
+  open_boolean_options:
+    description: >
+      Open the Boolean Options dialog seeded with the current
+      state.boolean_* values. OK writes the dialog's values back to
+      document state; Cancel discards. See BOOLEAN.md §Boolean
+      Options dialog.
+    category: boolean
+    effects:
+      - open_dialog:
+          id: boolean_options
+          params:
+            precision: "state.boolean_precision"
+            remove_redundant_points: "state.boolean_remove_redundant_points"
+            divide_remove_unpainted: "state.boolean_divide_remove_unpainted"
+
+  boolean_options_confirm:
+    description: >
+      Commit the Boolean Options dialog. Writes precision, remove-
+      redundant-points, and divide-remove-unpainted to document
+      state and closes the dialog.
+    category: boolean
+    params:
+      precision: { type: number }
+      remove_redundant_points: { type: bool }
+      divide_remove_unpainted: { type: bool }
+    effects:
+      - set:
+          boolean_precision: "param.precision"
+          boolean_remove_redundant_points: "param.remove_redundant_points"
+          boolean_divide_remove_unpainted: "param.divide_remove_unpainted"
+      - close_dialog: None
+
   make_compound_shape:
     description: >
       Equivalent to Alt+click on UNION. Replaces the current selection
