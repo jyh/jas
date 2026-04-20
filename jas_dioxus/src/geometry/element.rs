@@ -1412,6 +1412,87 @@ pub fn path_anchor_points(d: &[PathCommand]) -> Vec<(f64, f64)> {
 // Path flattening (for hit-testing and text-on-path)
 // ---------------------------------------------------------------------------
 
+/// Flatten path commands into one polyline per subpath, suitable for
+/// use as boolean-operation operand rings under the even-odd fill
+/// rule. Each MoveTo starts a new ring; each ClosePath finalizes the
+/// current ring. Open subpaths (no ClosePath) are implicitly closed
+/// by the boolean algorithm consuming the first and last points.
+/// Rings with fewer than 3 points are dropped.
+///
+/// Uses the same fixed per-curve step count as `flatten_path_commands`.
+/// Precision-adaptive subdivision is a future enhancement.
+pub fn flatten_path_to_rings(d: &[PathCommand]) -> Vec<Vec<(f64, f64)>> {
+    let steps = FLATTEN_STEPS;
+    let mut rings: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut cur: Vec<(f64, f64)> = Vec::new();
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+
+    let flush_cur = |cur: &mut Vec<(f64, f64)>, rings: &mut Vec<Vec<(f64, f64)>>| {
+        if cur.len() >= 3 {
+            rings.push(std::mem::take(cur));
+        } else {
+            cur.clear();
+        }
+    };
+
+    for cmd in d {
+        match cmd {
+            PathCommand::MoveTo { x, y } => {
+                flush_cur(&mut cur, &mut rings);
+                cur.push((*x, *y));
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::LineTo { x, y } => {
+                cur.push((*x, *y));
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                for i in 1..=steps {
+                    let t = i as f64 / steps as f64;
+                    let mt = 1.0 - t;
+                    let px = mt.powi(3) * cx
+                        + 3.0 * mt.powi(2) * t * x1
+                        + 3.0 * mt * t.powi(2) * x2
+                        + t.powi(3) * x;
+                    let py = mt.powi(3) * cy
+                        + 3.0 * mt.powi(2) * t * y1
+                        + 3.0 * mt * t.powi(2) * y2
+                        + t.powi(3) * y;
+                    cur.push((px, py));
+                }
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::QuadTo { x1, y1, x, y } => {
+                for i in 1..=steps {
+                    let t = i as f64 / steps as f64;
+                    let mt = 1.0 - t;
+                    let px = mt.powi(2) * cx + 2.0 * mt * t * x1 + t.powi(2) * x;
+                    let py = mt.powi(2) * cy + 2.0 * mt * t * y1 + t.powi(2) * y;
+                    cur.push((px, py));
+                }
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::ClosePath => {
+                flush_cur(&mut cur, &mut rings);
+            }
+            PathCommand::SmoothCurveTo { x, y, .. }
+            | PathCommand::SmoothQuadTo { x, y }
+            | PathCommand::ArcTo { x, y, .. } => {
+                cur.push((*x, *y));
+                cx = *x;
+                cy = *y;
+            }
+        }
+    }
+    flush_cur(&mut cur, &mut rings);
+    rings
+}
+
 /// Flatten path commands into a polyline by evaluating Bezier curves.
 pub fn flatten_path_commands(d: &[PathCommand]) -> Vec<(f64, f64)> {
     let mut pts = Vec::new();
