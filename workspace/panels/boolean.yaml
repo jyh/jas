@@ -104,8 +104,13 @@ content:
             disabled: "active_document.selection_count < 2"
           behavior:
             - event: click
+              condition: "not event.alt"
               effects:
                 - dispatch: boolean_union
+            - event: click
+              condition: "event.alt"
+              effects:
+                - dispatch: boolean_union_compound
         - id: boolean_subtract_front_button
           type: icon_button
           icon: boolean_subtract_front
@@ -114,13 +119,19 @@ content:
             SUBTRACT_FRONT_BUTTON. Subtract the frontmost element
             from all others in the selection. The frontmost is
             consumed; remaining elements keep their own paint.
+            Alt/Option+click creates a live compound shape instead.
           style: { size: 20 }
           bind:
             disabled: "active_document.selection_count < 2"
           behavior:
             - event: click
+              condition: "not event.alt"
               effects:
                 - dispatch: boolean_subtract_front
+            - event: click
+              condition: "event.alt"
+              effects:
+                - dispatch: boolean_subtract_front_compound
         - id: boolean_intersection_button
           type: icon_button
           icon: boolean_intersection
@@ -135,8 +146,13 @@ content:
             disabled: "active_document.selection_count < 2"
           behavior:
             - event: click
+              condition: "not event.alt"
               effects:
                 - dispatch: boolean_intersection
+            - event: click
+              condition: "event.alt"
+              effects:
+                - dispatch: boolean_intersection_compound
         - id: boolean_exclude_button
           type: icon_button
           icon: boolean_exclude
@@ -151,8 +167,13 @@ content:
             disabled: "active_document.selection_count < 2"
           behavior:
             - event: click
+              condition: "not event.alt"
               effects:
                 - dispatch: boolean_exclude
+            - event: click
+              condition: "event.alt"
+              effects:
+                - dispatch: boolean_exclude_compound
         - id: boolean_expand_button
           type: icon_button
           icon: boolean_expand

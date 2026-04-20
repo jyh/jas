@@ -383,12 +383,23 @@ impl Controller {
     }
 
     /// Make a compound shape from the current selection using UNION.
-    /// All selected elements must be siblings. The frontmost (last in
-    /// path order) operand's fill, stroke, and common attributes are
-    /// copied onto the new compound shape. Selection becomes the new
-    /// compound shape. See BOOLEAN.md §Compound shapes.
+    /// Thin wrapper around `make_compound_shape_with_op`.
     pub fn make_compound_shape(model: &mut Model) {
-        use crate::geometry::live::{CompoundOperation, CompoundShape, LiveVariant};
+        use crate::geometry::live::CompoundOperation;
+        Self::make_compound_shape_with_op(model, CompoundOperation::Union);
+    }
+
+    /// Make a compound shape from the current selection using the
+    /// given operation. Selected elements must be siblings. The
+    /// frontmost (last in path order) operand's fill, stroke, and
+    /// common attributes are copied onto the new compound shape.
+    /// Selection becomes the new compound shape. See BOOLEAN.md
+    /// §Compound shapes.
+    pub fn make_compound_shape_with_op(
+        model: &mut Model,
+        operation: crate::geometry::live::CompoundOperation,
+    ) {
+        use crate::geometry::live::{CompoundShape, LiveVariant};
         let doc = model.document();
         if doc.selection.is_empty() {
             return;
@@ -420,7 +431,7 @@ impl Controller {
         let common = frontmost.common().clone();
 
         let compound = Element::Live(LiveVariant::CompoundShape(CompoundShape {
-            operation: CompoundOperation::Union,
+            operation,
             operands: elements,
             fill,
             stroke,
@@ -1625,6 +1636,65 @@ mod tests {
         assert_eq!(live_count, 1);
         // The compound is selected.
         assert_eq!(model.document().selection.len(), 1);
+    }
+
+    #[test]
+    fn make_compound_shape_with_op_subtract_front() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        Controller::make_compound_shape_with_op(
+            &mut model, CompoundOperation::SubtractFront,
+        );
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::SubtractFront);
+    }
+
+    #[test]
+    fn make_compound_shape_with_op_intersection() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        Controller::make_compound_shape_with_op(
+            &mut model, CompoundOperation::Intersection,
+        );
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::Intersection);
+    }
+
+    #[test]
+    fn make_compound_shape_with_op_exclude() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        Controller::make_compound_shape_with_op(
+            &mut model, CompoundOperation::Exclude,
+        );
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::Exclude);
+    }
+
+    #[test]
+    fn make_compound_shape_menu_still_uses_union() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        // The menu-action wrapper delegates to Union.
+        Controller::make_compound_shape(&mut model);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::Union);
     }
 
     #[test]

@@ -2639,6 +2639,66 @@
         }
       ]
     },
+    "boolean_union_compound": {
+      "description": "Alt/Option+click UNION. Creates a live compound shape with the Union operation from the selection instead of applying UNION destructively.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_union_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"union_compound\""
+          }
+        }
+      ]
+    },
+    "boolean_subtract_front_compound": {
+      "description": "Alt/Option+click SUBTRACT_FRONT. Creates a live compound shape with the SubtractFront operation from the selection.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_subtract_front_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"subtract_front_compound\""
+          }
+        }
+      ]
+    },
+    "boolean_intersection_compound": {
+      "description": "Alt/Option+click INTERSECTION. Creates a live compound shape with the Intersection operation from the selection.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_intersection_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"intersection_compound\""
+          }
+        }
+      ]
+    },
+    "boolean_exclude_compound": {
+      "description": "Alt/Option+click EXCLUDE. Creates a live compound shape with the Exclude operation from the selection.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_exclude_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"exclude_compound\""
+          }
+        }
+      ]
+    },
     "make_compound_shape": {
       "description": "Equivalent to Alt+click on UNION. Replaces the current selection with a single compound shape (live, non-destructive) whose operand list is the selected elements in their original z-order and whose operation is Union. The new compound shape is selected and inserted at the frontmost operand's position. Enabled when selection_count >= 2. See BOOLEAN.md \u00a7Compound shapes.\n",
       "category": "boolean",
@@ -10575,9 +10635,19 @@
                 "behavior": [
                   {
                     "event": "click",
+                    "condition": "not event.alt",
                     "effects": [
                       {
                         "dispatch": "boolean_union"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_union_compound"
                       }
                     ]
                   }
@@ -10588,7 +10658,7 @@
                 "type": "icon_button",
                 "icon": "boolean_subtract_front",
                 "summary": "Subtract Front",
-                "description": "SUBTRACT_FRONT_BUTTON. Subtract the frontmost element from all others in the selection. The frontmost is consumed; remaining elements keep their own paint.\n",
+                "description": "SUBTRACT_FRONT_BUTTON. Subtract the frontmost element from all others in the selection. The frontmost is consumed; remaining elements keep their own paint. Alt/Option+click creates a live compound shape instead.\n",
                 "style": {
                   "size": 20
                 },
@@ -10598,9 +10668,19 @@
                 "behavior": [
                   {
                     "event": "click",
+                    "condition": "not event.alt",
                     "effects": [
                       {
                         "dispatch": "boolean_subtract_front"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_subtract_front_compound"
                       }
                     ]
                   }
@@ -10621,9 +10701,19 @@
                 "behavior": [
                   {
                     "event": "click",
+                    "condition": "not event.alt",
                     "effects": [
                       {
                         "dispatch": "boolean_intersection"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_intersection_compound"
                       }
                     ]
                   }
@@ -10644,9 +10734,19 @@
                 "behavior": [
                   {
                     "event": "click",
+                    "condition": "not event.alt",
                     "effects": [
                       {
                         "dispatch": "boolean_exclude"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_exclude_compound"
                       }
                     ]
                   }
