@@ -33,3 +33,7 @@
 (test
  (name knuth_plass_test)
  (libraries jas alcotest))
+
+(test
+ (name align_test)
+ (libraries jas alcotest))
