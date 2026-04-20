@@ -211,3 +211,106 @@ let distribute_vertical_center elements reference bounds_fn =
 (** DISTRIBUTE_BOTTOM_BUTTON. *)
 let distribute_bottom elements reference bounds_fn =
   distribute_along_axis elements reference Vertical Anchor_max bounds_fn
+
+(** Generic driver for the two Distribute Spacing operations.
+    Sorts the selection along the axis by min-edge and
+    equalises the gaps between consecutive bboxes.
+
+    Behaviour depends on [explicit_gap]:
+    - [None] (average mode): first and last elements hold;
+      interior gaps average to (span - sum of sizes) / (n - 1).
+    - [Some gap] (explicit mode): the key object holds; others
+      walk outward from the key with exactly [gap] points of
+      space between consecutive bboxes. Requires a key-object
+      reference — returns empty otherwise.
+
+    Fewer than 3 elements yield an empty output. Key objects are
+    skipped; zero-delta translations are omitted. *)
+let distribute_spacing_along_axis elements reference axis explicit_gap bounds_fn =
+  let n = List.length elements in
+  if n < 3 then []
+  else begin
+    let elements_arr = Array.of_list elements in
+    let sorted = Array.init n (fun i ->
+      let (_, e) = elements_arr.(i) in
+      let (lo, hi, _) = axis_extent (bounds_fn e) axis in
+      (i, lo, hi)
+    ) in
+    Array.sort (fun (_, a, _) (_, b, _) -> compare a b) sorted;
+
+    let new_mins = match explicit_gap with
+      | Some gap ->
+        (match reference_key_path reference with
+         | None -> [||]
+         | Some kp ->
+           let key_original_idx = ref None in
+           Array.iteri (fun i (path, _) ->
+             if path = kp then key_original_idx := Some i
+           ) elements_arr;
+           (match !key_original_idx with
+            | None -> [||]
+            | Some koi ->
+              let key_sorted_idx = ref None in
+              Array.iteri (fun i (oi, _, _) ->
+                if oi = koi then key_sorted_idx := Some i
+              ) sorted;
+              (match !key_sorted_idx with
+               | None -> [||]
+               | Some ksi ->
+                 let positions = Array.make n 0.0 in
+                 let (_, k_lo, _) = sorted.(ksi) in
+                 positions.(ksi) <- k_lo;
+                 for i = ksi + 1 to n - 1 do
+                   let (_, prev_lo, prev_hi) = sorted.(i - 1) in
+                   let prev_size = prev_hi -. prev_lo in
+                   positions.(i) <- positions.(i - 1) +. prev_size +. gap
+                 done;
+                 for i = ksi - 1 downto 0 do
+                   let (_, lo, hi) = sorted.(i) in
+                   let size = hi -. lo in
+                   positions.(i) <- positions.(i + 1) -. gap -. size
+                 done;
+                 positions)))
+      | None ->
+        let (_, first_lo, _) = sorted.(0) in
+        let (_, _, last_hi) = sorted.(n - 1) in
+        let total_span = last_hi -. first_lo in
+        let total_sizes = Array.fold_left
+          (fun acc (_, lo, hi) -> acc +. (hi -. lo)) 0.0 sorted in
+        let gap = (total_span -. total_sizes) /. float_of_int (n - 1) in
+        let positions = Array.make n 0.0 in
+        let cursor = ref first_lo in
+        Array.iteri (fun i (_, lo, hi) ->
+          positions.(i) <- !cursor;
+          cursor := !cursor +. (hi -. lo) +. gap
+        ) sorted;
+        positions
+    in
+    if Array.length new_mins = 0 then []
+    else begin
+      let key_path = reference_key_path reference in
+      let out = ref [] in
+      Array.iteri (fun sorted_idx (original_idx, old_min, _) ->
+        let delta = new_mins.(sorted_idx) -. old_min in
+        if delta <> 0.0 then begin
+          let (path, _) = elements_arr.(original_idx) in
+          if Some path <> key_path then begin
+            let (dx, dy) = match axis with
+              | Horizontal -> (delta, 0.0)
+              | Vertical -> (0.0, delta)
+            in
+            out := { path; dx; dy } :: !out
+          end
+        end
+      ) sorted;
+      List.sort (fun a b -> compare a.path b.path) !out
+    end
+  end
+
+(** DISTRIBUTE_VERTICAL_SPACING_BUTTON. *)
+let distribute_vertical_spacing elements reference explicit_gap bounds_fn =
+  distribute_spacing_along_axis elements reference Vertical explicit_gap bounds_fn
+
+(** DISTRIBUTE_HORIZONTAL_SPACING_BUTTON. *)
+let distribute_horizontal_spacing elements reference explicit_gap bounds_fn =
+  distribute_spacing_along_axis elements reference Horizontal explicit_gap bounds_fn

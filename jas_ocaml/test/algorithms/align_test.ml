@@ -232,9 +232,68 @@ let dist_tests = [
     List.iter (fun t -> assert (t.Align.path <> [1])) out);
 ]
 
+let spacing_tests = [
+  Alcotest.test_case "distribute_spacing_requires_at_least_three" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 50.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    assert (Align.distribute_horizontal_spacing input r None Align.geometric_bounds = []));
+
+  Alcotest.test_case "distribute_horizontal_spacing_average" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 20.0 0.0 10.0 10.0;
+              rect 90.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_horizontal_spacing input r None Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.path = [1]);
+    assert ((List.nth out 0).Align.dx = 25.0));
+
+  Alcotest.test_case "distribute_vertical_spacing_average" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 0.0 20.0 10.0 10.0;
+              rect 0.0 90.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_vertical_spacing input r None Align.geometric_bounds in
+    assert (List.length out = 1);
+    assert ((List.nth out 0).Align.path = [1]);
+    assert ((List.nth out 0).Align.dy = 25.0));
+
+  Alcotest.test_case "distribute_spacing_explicit_without_key_empty" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 50.0 0.0 10.0 10.0;
+              rect 100.0 0.0 10.0 10.0] in
+    let r = ref_of rs in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_horizontal_spacing input r (Some 12.0) Align.geometric_bounds in
+    assert (out = []));
+
+  Alcotest.test_case "distribute_horizontal_spacing_explicit_applies" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 100.0 0.0 10.0 10.0;
+              rect 200.0 0.0 10.0 10.0] in
+    let key = Align.Key_object {
+      bbox = Element.geometric_bounds (List.nth rs 1); path = [1] } in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_horizontal_spacing input key (Some 20.0) Align.geometric_bounds in
+    assert (List.length out = 2);
+    assert ((List.nth out 0).Align.path = [0] && (List.nth out 0).Align.dx = 70.0);
+    assert ((List.nth out 1).Align.path = [2] && (List.nth out 1).Align.dx = -70.0));
+
+  Alcotest.test_case "distribute_spacing_explicit_zero_gap" `Quick (fun () ->
+    let rs = [rect 0.0 0.0 10.0 10.0; rect 100.0 0.0 10.0 10.0;
+              rect 200.0 0.0 10.0 10.0] in
+    let key = Align.Key_object {
+      bbox = Element.geometric_bounds (List.nth rs 1); path = [1] } in
+    let input = List.mapi (fun i e -> pair [i] e) rs in
+    let out = Align.distribute_horizontal_spacing input key (Some 0.0) Align.geometric_bounds in
+    assert (List.length out = 2);
+    assert ((List.nth out 0).Align.dx = 90.0);
+    assert ((List.nth out 1).Align.dx = -90.0));
+]
+
 let () =
   Alcotest.run "align" [
     "primitives", tests;
     "align_ops", op_tests;
     "distribute_ops", dist_tests;
+    "distribute_spacing_ops", spacing_tests;
   ]
