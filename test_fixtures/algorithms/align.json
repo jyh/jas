@@ -1,0 +1,199 @@
+{
+  "algorithm": "align",
+  "comparison": "exact",
+  "tolerance": 0.0001,
+  "_doc": [
+    "Cross-language parity fixtures for the 14 Align panel operations.",
+    "",
+    "Each vector specifies:",
+    "  op: one of align_left / align_horizontal_center / align_right /",
+    "      align_top / align_vertical_center / align_bottom /",
+    "      distribute_left / distribute_horizontal_center / distribute_right /",
+    "      distribute_top / distribute_vertical_center / distribute_bottom /",
+    "      distribute_vertical_spacing / distribute_horizontal_spacing.",
+    "  rects: list of [x, y, w, h] — axis-aligned rectangle elements.",
+    "    Paths are implicit: the i-th rect has path [i].",
+    "  reference: { kind: selection } or { kind: artboard, bbox: [x, y, w, h] }",
+    "             or { kind: key_object, index: <i> } where i indexes into rects.",
+    "  use_preview_bounds: bool; for rect-only fixtures geometric and preview",
+    "    bounds are identical so this should be false in all current vectors.",
+    "  explicit_gap: null or number; only consulted by the two",
+    "    distribute_*_spacing ops.",
+    "",
+    "Expected output:",
+    "  translations: sorted-by-path list of { path, dx, dy } with zero-delta",
+    "    entries omitted per the identity-value rule."
+  ],
+  "vectors": [
+    {
+      "name": "align_left_selection",
+      "op": "align_left",
+      "rects": [[10, 0, 10, 10], [30, 0, 10, 10], [60, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": -20.0, "dy": 0.0},
+        {"path": [2], "dx": -50.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "align_right_selection",
+      "op": "align_right",
+      "rects": [[10, 0, 10, 10], [30, 0, 10, 10], [60, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [0], "dx": 50.0, "dy": 0.0},
+        {"path": [1], "dx": 30.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "align_horizontal_center_selection",
+      "op": "align_horizontal_center",
+      "rects": [[10, 0, 10, 10], [30, 0, 10, 10], [60, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [0], "dx": 25.0, "dy": 0.0},
+        {"path": [1], "dx": 5.0, "dy": 0.0},
+        {"path": [2], "dx": -25.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "align_top_selection",
+      "op": "align_top",
+      "rects": [[0, 10, 10, 10], [20, 30, 10, 10], [40, 50, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": 0.0, "dy": -20.0},
+        {"path": [2], "dx": 0.0, "dy": -40.0}
+      ]
+    },
+    {
+      "name": "align_bottom_selection",
+      "op": "align_bottom",
+      "rects": [[0, 0, 10, 20], [20, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": 0.0, "dy": 10.0}
+      ]
+    },
+    {
+      "name": "align_left_key_object",
+      "op": "align_left",
+      "rects": [[10, 0, 10, 10], [30, 0, 10, 10], [60, 0, 10, 10]],
+      "reference": {"kind": "key_object", "index": 1},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [0], "dx": 20.0, "dy": 0.0},
+        {"path": [2], "dx": -30.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "distribute_left_uneven",
+      "op": "distribute_left",
+      "rects": [[0, 0, 10, 10], [30, 0, 10, 10], [100, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": 20.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "distribute_right_uneven",
+      "op": "distribute_right",
+      "rects": [[0, 0, 10, 10], [20, 0, 10, 10], [100, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": 30.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "distribute_top_uneven",
+      "op": "distribute_top",
+      "rects": [[0, 0, 10, 10], [5, 30, 10, 10], [10, 100, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": 0.0, "dy": 20.0}
+      ]
+    },
+    {
+      "name": "distribute_left_artboard",
+      "op": "distribute_left",
+      "rects": [[20, 0, 10, 10], [40, 0, 10, 10], [60, 0, 10, 10]],
+      "reference": {"kind": "artboard", "bbox": [0, 0, 200, 100]},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [0], "dx": -20.0, "dy": 0.0},
+        {"path": [1], "dx": 60.0, "dy": 0.0},
+        {"path": [2], "dx": 140.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "distribute_horizontal_spacing_average",
+      "op": "distribute_horizontal_spacing",
+      "rects": [[0, 0, 10, 10], [20, 0, 10, 10], [90, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": 25.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "distribute_vertical_spacing_average",
+      "op": "distribute_vertical_spacing",
+      "rects": [[0, 0, 10, 10], [0, 20, 10, 10], [0, 90, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [1], "dx": 0.0, "dy": 25.0}
+      ]
+    },
+    {
+      "name": "distribute_horizontal_spacing_explicit",
+      "op": "distribute_horizontal_spacing",
+      "rects": [[0, 0, 10, 10], [100, 0, 10, 10], [200, 0, 10, 10]],
+      "reference": {"kind": "key_object", "index": 1},
+      "use_preview_bounds": false,
+      "explicit_gap": 20.0,
+      "translations": [
+        {"path": [0], "dx": 70.0, "dy": 0.0},
+        {"path": [2], "dx": -70.0, "dy": 0.0}
+      ]
+    },
+    {
+      "name": "already_aligned_no_op",
+      "op": "align_left",
+      "rects": [[0, 0, 10, 10], [0, 20, 10, 10], [0, 40, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": []
+    },
+    {
+      "name": "fewer_than_three_distribute_no_op",
+      "op": "distribute_left",
+      "rects": [[0, 0, 10, 10], [50, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": []
+    }
+  ]
+}

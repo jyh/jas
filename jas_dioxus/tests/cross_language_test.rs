@@ -92,3 +92,114 @@ fn json_roundtrip_all_fixtures() {
         }
     }
 }
+
+// --- Align panel parity fixture ---
+//
+// Runs each vector in test_fixtures/algorithms/align.json through
+// the Rust algorithms module and compares the translation output
+// to the expected field. Swift / OCaml / Python ports will consume
+// the same fixture via their own algorithm_roundtrip binaries.
+
+#[test]
+fn align_fixture_matches_expected() {
+    use jas_dioxus::algorithms::align as aa;
+    use jas_dioxus::geometry::element::{
+        Bounds, Color, CommonProps, Element, Fill, RectElem,
+    };
+
+    let raw = read_fixture("algorithms/align.json");
+    let fixture: serde_json::Value = serde_json::from_str(&raw)
+        .expect("align.json parses as JSON");
+    let vectors = fixture["vectors"].as_array().expect("vectors array");
+
+    fn make_rect(b: Bounds) -> Element {
+        Element::Rect(RectElem {
+            x: b.0, y: b.1, width: b.2, height: b.3, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+    fn to_bounds(arr: &serde_json::Value) -> Bounds {
+        let a = arr.as_array().unwrap();
+        (
+            a[0].as_f64().unwrap(), a[1].as_f64().unwrap(),
+            a[2].as_f64().unwrap(), a[3].as_f64().unwrap(),
+        )
+    }
+
+    for v in vectors {
+        let name = v["name"].as_str().unwrap_or("<unnamed>");
+        let op = v["op"].as_str().unwrap_or("");
+        let rects: Vec<Element> = v["rects"].as_array().unwrap()
+            .iter().map(|r| make_rect(to_bounds(r))).collect();
+        let pairs: Vec<(Vec<usize>, &Element)> = rects.iter().enumerate()
+            .map(|(i, e)| (vec![i], e)).collect();
+
+        let bounds_fn: aa::BoundsFn = if v["use_preview_bounds"].as_bool().unwrap_or(false) {
+            aa::preview_bounds
+        } else {
+            aa::geometric_bounds
+        };
+        let reference = {
+            let r = &v["reference"];
+            match r["kind"].as_str().unwrap_or("selection") {
+                "selection" => {
+                    let refs: Vec<&Element> = rects.iter().collect();
+                    aa::AlignReference::Selection(aa::union_bounds(&refs, bounds_fn))
+                }
+                "artboard" => aa::AlignReference::Artboard(to_bounds(&r["bbox"])),
+                "key_object" => {
+                    let idx = r["index"].as_u64().unwrap() as usize;
+                    aa::AlignReference::KeyObject {
+                        bbox: bounds_fn(&rects[idx]),
+                        path: vec![idx],
+                    }
+                }
+                other => panic!("unknown reference kind: {other}"),
+            }
+        };
+        let explicit_gap = v["explicit_gap"].as_f64();
+
+        let actual = match op {
+            "align_left" => aa::align_left(&pairs, &reference, bounds_fn),
+            "align_horizontal_center" => aa::align_horizontal_center(&pairs, &reference, bounds_fn),
+            "align_right" => aa::align_right(&pairs, &reference, bounds_fn),
+            "align_top" => aa::align_top(&pairs, &reference, bounds_fn),
+            "align_vertical_center" => aa::align_vertical_center(&pairs, &reference, bounds_fn),
+            "align_bottom" => aa::align_bottom(&pairs, &reference, bounds_fn),
+            "distribute_left" => aa::distribute_left(&pairs, &reference, bounds_fn),
+            "distribute_horizontal_center" => aa::distribute_horizontal_center(&pairs, &reference, bounds_fn),
+            "distribute_right" => aa::distribute_right(&pairs, &reference, bounds_fn),
+            "distribute_top" => aa::distribute_top(&pairs, &reference, bounds_fn),
+            "distribute_vertical_center" => aa::distribute_vertical_center(&pairs, &reference, bounds_fn),
+            "distribute_bottom" => aa::distribute_bottom(&pairs, &reference, bounds_fn),
+            "distribute_vertical_spacing" => aa::distribute_vertical_spacing(&pairs, &reference, explicit_gap, bounds_fn),
+            "distribute_horizontal_spacing" => aa::distribute_horizontal_spacing(&pairs, &reference, explicit_gap, bounds_fn),
+            other => panic!("unknown op: {other}"),
+        };
+
+        let expected_arr = v["translations"].as_array().unwrap();
+        assert_eq!(
+            actual.len(),
+            expected_arr.len(),
+            "vector {name}: translation count mismatch — got {:?}",
+            actual,
+        );
+        for (act, exp) in actual.iter().zip(expected_arr.iter()) {
+            let exp_path: Vec<usize> = exp["path"].as_array().unwrap()
+                .iter().map(|v| v.as_u64().unwrap() as usize).collect();
+            assert_eq!(act.path, exp_path, "vector {name}: path mismatch");
+            assert!(
+                (act.dx - exp["dx"].as_f64().unwrap()).abs() < 1e-4,
+                "vector {name}: dx mismatch on path {:?}: got {} want {}",
+                act.path, act.dx, exp["dx"].as_f64().unwrap(),
+            );
+            assert!(
+                (act.dy - exp["dy"].as_f64().unwrap()).abs() < 1e-4,
+                "vector {name}: dy mismatch on path {:?}: got {} want {}",
+                act.path, act.dy, exp["dy"].as_f64().unwrap(),
+            );
+        }
+    }
+}
