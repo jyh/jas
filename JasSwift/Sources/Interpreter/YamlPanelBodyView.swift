@@ -287,7 +287,9 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderButton() -> some View {
         let label = element["label"] as? String ?? ""
-        Button(label) { }
+        let isDisabled = evalBindDisabled()
+        return Button(label) { handleClickBehavior() }
+            .disabled(isDisabled)
     }
 
     // MARK: - Icon Button
@@ -295,8 +297,35 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderIconButton() -> some View {
         let summary = element["summary"] as? String ?? ""
-        Button(summary) { }
+        let isDisabled = evalBindDisabled()
+        Button(summary) { handleClickBehavior() }
             .buttonStyle(.plain)
+            .disabled(isDisabled)
+    }
+
+    /// Evaluate `bind.disabled` if present; returns `false` when
+    /// absent so click remains wired.
+    private func evalBindDisabled() -> Bool {
+        guard let bind = element["bind"] as? [String: Any],
+              let expr = bind["disabled"] as? String else { return false }
+        return evaluate(expr, context: context).toBool()
+    }
+
+    /// Run the widget's `behavior: [{event: click, effects: [...]}]`
+    /// effects through the shared `runEffects` pipeline. The
+    /// platform-effects registry is scoped to Align for now; other
+    /// panels can extend this when they wire up their own handlers.
+    private func handleClickBehavior() {
+        guard let model = model else { return }
+        guard let behavior = element["behavior"] as? [[String: Any]] else { return }
+        let ws = WorkspaceData.load()
+        let actions = ws?.data["actions"] as? [String: Any]
+        let platformEffects = alignPlatformEffects(model: model)
+        for entry in behavior where (entry["event"] as? String) == "click" {
+            let effects = (entry["effects"] as? [Any]) ?? []
+            runEffects(effects, ctx: context, store: model.stateStore,
+                       actions: actions, platformEffects: platformEffects)
+        }
     }
 
     // MARK: - Slider

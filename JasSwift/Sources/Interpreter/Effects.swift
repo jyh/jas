@@ -1601,3 +1601,153 @@ private func _fmtNum(_ n: Double) -> String {
     if s.hasSuffix(".") { s.removeLast() }
     return s
 }
+
+// MARK: - Align panel
+
+/// Reset the four Align panel state fields to their defaults per
+/// ALIGN.md §Panel menu Reset Panel. Writes through both the
+/// global `state.align_*` surface (StateStore.set) and the
+/// panel-local mirrors (StateStore.setPanel).
+public func resetAlignPanel(store: StateStore) {
+    let pid = "align_panel_content"
+    store.set("align_to", "selection")
+    store.set("align_key_object_path", NSNull())
+    store.set("align_distribute_spacing", 0.0)
+    store.set("align_use_preview_bounds", false)
+    store.setPanel(pid, "align_to", "selection")
+    store.setPanel(pid, "key_object_path", NSNull())
+    store.setPanel(pid, "distribute_spacing_value", 0.0)
+    store.setPanel(pid, "use_preview_bounds", false)
+}
+
+/// Execute one of the 14 Align panel operations by name. The
+/// operation reads the current selection, builds an
+/// `AlignReference` from the store's `align_*` keys, calls the
+/// algorithm, and applies the resulting translations to each
+/// moved element's transform.
+///
+/// Zero-delta outputs are discarded. The caller is responsible
+/// for taking a snapshot first — the yaml-emitted `snapshot`
+/// effect runs before this handler per ALIGN.md Undo semantics.
+public func applyAlignOperation(model: Model, store: StateStore, op: String) {
+    // Gather (path, element) pairs from the current selection.
+    let doc = model.document
+    var elements: [(ElementPath, Element)] = []
+    for es in doc.selection {
+        elements.append((es.path, doc.getElement(es.path)))
+    }
+    if elements.count < 2 { return }
+
+    // Read align panel state.
+    let usePreview = (store.get("align_use_preview_bounds") as? Bool) ?? false
+    let boundsFn: AlignBoundsFn = usePreview ? alignPreviewBounds : alignGeometricBounds
+    let alignTo = (store.get("align_to") as? String) ?? "selection"
+    let keyPathRaw = store.get("align_key_object_path")
+
+    // Build the reference.
+    let reference: AlignReference
+    switch alignTo {
+    case "artboard":
+        // No artboards in the document model yet; fall back to
+        // selection-union bounds per ALIGN.md §Align To target
+        // Deferred note.
+        let refs = elements.map(\.1)
+        reference = .artboard(alignUnionBounds(refs, boundsFn))
+    case "key_object":
+        // Decode the key object path marker.
+        let keyPath: ElementPath? = {
+            if let dict = keyPathRaw as? [String: Any],
+               let arr = dict["__path__"] as? [Int] {
+                return arr
+            }
+            if let arr = keyPathRaw as? [Int] { return arr }
+            return nil
+        }()
+        guard let kp = keyPath else { return }
+        // Guard the path is valid in the document.
+        guard let _ = doc.selection.first(where: { $0.path == kp }) else { return }
+        let keyElem = doc.getElement(kp)
+        reference = .keyObject(bbox: boundsFn(keyElem), path: kp)
+    default:
+        let refs = elements.map(\.1)
+        reference = .selection(alignUnionBounds(refs, boundsFn))
+    }
+
+    // Distribute Spacing explicit-gap: only in key-object mode
+    // with a designated key.
+    let explicitGap: Double? = {
+        if alignTo != "key_object" { return nil }
+        if reference.keyPath == nil { return nil }
+        if let n = store.get("align_distribute_spacing") as? NSNumber {
+            return n.doubleValue
+        }
+        if let d = store.get("align_distribute_spacing") as? Double { return d }
+        if let i = store.get("align_distribute_spacing") as? Int { return Double(i) }
+        return 0.0
+    }()
+
+    // Dispatch to the algorithm.
+    let translations: [AlignTranslation]
+    switch op {
+    case "align_left": translations = alignLeft(elements, reference, boundsFn)
+    case "align_horizontal_center": translations = alignHorizontalCenter(elements, reference, boundsFn)
+    case "align_right": translations = alignRight(elements, reference, boundsFn)
+    case "align_top": translations = alignTop(elements, reference, boundsFn)
+    case "align_vertical_center": translations = alignVerticalCenter(elements, reference, boundsFn)
+    case "align_bottom": translations = alignBottom(elements, reference, boundsFn)
+    case "distribute_left": translations = distributeLeft(elements, reference, boundsFn)
+    case "distribute_horizontal_center": translations = distributeHorizontalCenter(elements, reference, boundsFn)
+    case "distribute_right": translations = distributeRight(elements, reference, boundsFn)
+    case "distribute_top": translations = distributeTop(elements, reference, boundsFn)
+    case "distribute_vertical_center": translations = distributeVerticalCenter(elements, reference, boundsFn)
+    case "distribute_bottom": translations = distributeBottom(elements, reference, boundsFn)
+    case "distribute_vertical_spacing":
+        translations = distributeVerticalSpacing(elements, reference, explicitGap, boundsFn)
+    case "distribute_horizontal_spacing":
+        translations = distributeHorizontalSpacing(elements, reference, explicitGap, boundsFn)
+    default: return
+    }
+    if translations.isEmpty { return }
+
+    // Apply translations to the document. Swift elements are value
+    // types so each translation produces a new Document via
+    // replaceElement; the outer loop updates model.document at the
+    // end.
+    var newDoc = model.document
+    for t in translations {
+        let elem = newDoc.getElement(t.path)
+        let moved = elem.withTransformTranslated(dx: t.dx, dy: t.dy)
+        newDoc = newDoc.replaceElement(t.path, with: moved)
+    }
+    model.document = newDoc
+}
+
+/// Build the platform-effects dictionary consumed by
+/// `runEffects` when the Align panel fires operation or reset
+/// actions. Registered per-call with a captured model reference.
+func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
+    let ops = [
+        "align_left", "align_horizontal_center", "align_right",
+        "align_top", "align_vertical_center", "align_bottom",
+        "distribute_left", "distribute_horizontal_center", "distribute_right",
+        "distribute_top", "distribute_vertical_center", "distribute_bottom",
+        "distribute_vertical_spacing", "distribute_horizontal_spacing",
+    ]
+    var effects: [String: PlatformEffect] = [
+        "snapshot": { _, _, _ in
+            model.snapshot()
+            return nil
+        },
+        "reset_align_panel": { _, _, store in
+            resetAlignPanel(store: store)
+            return nil
+        },
+    ]
+    for op in ops {
+        effects[op] = { _, _, store in
+            applyAlignOperation(model: model, store: store, op: op)
+            return nil
+        }
+    }
+    return effects
+}
