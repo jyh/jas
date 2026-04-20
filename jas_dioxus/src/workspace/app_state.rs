@@ -1455,6 +1455,68 @@ impl AppState {
         }
     }
 
+    /// Canvas-click intercept for key-object designation. Per
+    /// ALIGN.md §Align To target, when `align_to == KeyObject` a
+    /// canvas click at (x, y) designates the hit selected element
+    /// as the key, toggles off if it hits the current key, or
+    /// clears the key when the click falls outside any selected
+    /// element.
+    ///
+    /// Returns `true` when the click was consumed (selection tool
+    /// should not see it) and `false` when Align To is not in
+    /// key-object mode (click falls through to the tool).
+    pub(crate) fn try_designate_align_key_object(&mut self, x: f64, y: f64) -> bool {
+        if self.align_panel.align_to != AlignTo::KeyObject {
+            return false;
+        }
+        let Some(tab) = self.tabs.get(self.active_tab) else { return true; };
+        let doc = tab.model.document();
+        // Hit-test against the current selection using preview
+        // bounds (matches what the user sees).
+        let mut hit: Option<crate::document::document::ElementPath> = None;
+        for es in &doc.selection {
+            if let Some(e) = doc.get_element(&es.path) {
+                let (bx, by, bw, bh) = e.bounds();
+                if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
+                    hit = Some(es.path.clone());
+                    break;
+                }
+            }
+        }
+        match hit {
+            Some(p) => {
+                // Toggle: clicking the current key clears it.
+                if self.align_panel.key_object_path.as_ref() == Some(&p) {
+                    self.align_panel.key_object_path = None;
+                } else {
+                    self.align_panel.key_object_path = Some(p);
+                }
+            }
+            None => {
+                self.align_panel.key_object_path = None;
+            }
+        }
+        true
+    }
+
+    /// Clear the key-object path if the previously-designated key
+    /// is no longer part of the current selection. Called after
+    /// any selection change to uphold the spec guarantee:
+    /// "Changing the selection so the key is no longer part of it
+    /// also clears the designation automatically." Idempotent
+    /// — safe to call when no key is designated.
+    pub(crate) fn sync_align_key_object_from_selection(&mut self) {
+        let Some(key_path) = self.align_panel.key_object_path.clone() else {
+            return;
+        };
+        let Some(tab) = self.tabs.get(self.active_tab) else { return; };
+        let doc = tab.model.document();
+        let still_selected = doc.selection.iter().any(|es| es.path == key_path);
+        if !still_selected {
+            self.align_panel.key_object_path = None;
+        }
+    }
+
     /// Commit the 11 Justification-dialog field values onto every
     /// paragraph wrapper tspan in the selection. Per the
     /// identity-value rule each numeric value at its spec default
@@ -2688,6 +2750,135 @@ mod align_panel_state_tests {
         st.apply_align_operation("not_a_real_op");
         assert_eq!(transform_at(&st, vec![0, 0]), Transform::IDENTITY);
         assert_eq!(transform_at(&st, vec![0, 1]), Transform::IDENTITY);
+    }
+
+    // ── Canvas click intercept for key-object designation ────
+
+    #[test]
+    fn try_designate_returns_false_when_not_in_key_object_mode() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        // Align To defaults to Selection, so intercept must not fire.
+        assert!(!st.try_designate_align_key_object(25.0, 25.0));
+        assert!(st.align_panel.key_object_path.is_none());
+    }
+
+    #[test]
+    fn try_designate_sets_key_on_hit_in_key_mode() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.align_panel.align_to = AlignTo::KeyObject;
+        let consumed = st.try_designate_align_key_object(25.0, 25.0);
+        assert!(consumed);
+        assert_eq!(st.align_panel.key_object_path, Some(vec![0, 0]));
+    }
+
+    #[test]
+    fn try_designate_second_click_on_same_element_clears_key() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.align_panel.align_to = AlignTo::KeyObject;
+        st.try_designate_align_key_object(25.0, 25.0);
+        st.try_designate_align_key_object(25.0, 25.0);
+        assert!(st.align_panel.key_object_path.is_none());
+    }
+
+    #[test]
+    fn try_designate_click_outside_selection_clears_key() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.align_panel.align_to = AlignTo::KeyObject;
+        st.align_panel.key_object_path = Some(vec![0, 0]);
+        // Click far off any selected rect.
+        assert!(st.try_designate_align_key_object(500.0, 500.0));
+        assert!(st.align_panel.key_object_path.is_none());
+    }
+
+    #[test]
+    fn try_designate_click_on_different_selected_element_swaps_key() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.align_panel.align_to = AlignTo::KeyObject;
+        st.align_panel.key_object_path = Some(vec![0, 0]);
+        // Click on the second rect.
+        st.try_designate_align_key_object(125.0, 25.0);
+        assert_eq!(st.align_panel.key_object_path, Some(vec![0, 1]));
+    }
+
+    #[test]
+    fn sync_align_key_object_noop_when_no_key() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.sync_align_key_object_from_selection();
+        assert!(st.align_panel.key_object_path.is_none());
+    }
+
+    #[test]
+    fn sync_align_key_object_preserves_still_selected_key() {
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.align_panel.key_object_path = Some(vec![0, 1]);
+        st.sync_align_key_object_from_selection();
+        assert_eq!(st.align_panel.key_object_path, Some(vec![0, 1]));
+    }
+
+    #[test]
+    fn sync_align_key_object_clears_when_key_no_longer_selected() {
+        // Selection is [0, 0] only; key references [0, 1] which is
+        // not selected.
+        let rects = vec![
+            make_rect(0.0, 0.0, 50.0, 50.0),
+            make_rect(100.0, 0.0, 50.0, 50.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects,
+            vec![vec![0, 0]],
+        );
+        st.align_panel.key_object_path = Some(vec![0, 1]);
+        st.sync_align_key_object_from_selection();
+        assert!(st.align_panel.key_object_path.is_none());
     }
 
     #[test]
