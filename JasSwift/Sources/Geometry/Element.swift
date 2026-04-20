@@ -374,6 +374,17 @@ public struct Transform: Equatable, Hashable {
         return Transform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
     }
 
+    /// Identity transform — the no-op 2D affine.
+    public static let identity = Transform()
+
+    /// Return a new transform equal to `translate(dx, dy) * self`:
+    /// a world-space translation of (dx, dy) pre-pended to this
+    /// transform, preserving any existing rotation / scale. Used
+    /// by the Align panel per ALIGN.md SVG attribute mapping.
+    public func translated(_ dx: Double, _ dy: Double) -> Transform {
+        Transform(a: a, b: b, c: c, d: d, e: e + dx, f: f + dy)
+    }
+
     /// Apply this transform to a point.
     public func applyPoint(_ x: Double, _ y: Double) -> (Double, Double) {
         (a * x + c * y + e, b * x + d * y + f)
@@ -955,6 +966,75 @@ public enum Element: Equatable {
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: v.transform, locked: v.locked,
                                 visibility: visibility))
+        }
+    }
+
+    /// Return a copy of this element with `(dx, dy)` pre-pended to
+    /// its transforms world-space translation. See
+    /// `Transform.translated` for the math. Used by the Align panel
+    /// to move elements without disturbing existing rotation / scale.
+    public func withTransformTranslated(dx: Double, dy: Double) -> Element {
+        let t = (transform ?? .identity).translated(dx, dy)
+        switch self {
+        case .line(let v):
+            return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                              stroke: v.stroke, widthPoints: v.widthPoints,
+                              opacity: v.opacity, transform: t,
+                              locked: v.locked, visibility: v.visibility))
+        case .rect(let v):
+            return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                              rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: t, locked: v.locked,
+                              visibility: v.visibility))
+        case .circle(let v):
+            return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                                  fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: t, locked: v.locked,
+                                  visibility: v.visibility))
+        case .ellipse(let v):
+            return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                    fill: v.fill, stroke: v.stroke,
+                                    opacity: v.opacity, transform: t, locked: v.locked,
+                                    visibility: v.visibility))
+        case .polyline(let v):
+            return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
+                                     opacity: v.opacity, transform: t, locked: v.locked,
+                                     visibility: v.visibility))
+        case .polygon(let v):
+            return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
+                                    opacity: v.opacity, transform: t, locked: v.locked,
+                                    visibility: v.visibility))
+        case .path(let v):
+            return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                              widthPoints: v.widthPoints,
+                              opacity: v.opacity, transform: t, locked: v.locked,
+                              visibility: v.visibility))
+        case .text(let v):
+            return .text(Text(x: v.x, y: v.y, content: v.content,
+                              fontFamily: v.fontFamily, fontSize: v.fontSize,
+                              fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                              textDecoration: v.textDecoration,
+                              width: v.width, height: v.height,
+                              fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: t, locked: v.locked,
+                              visibility: v.visibility))
+        case .textPath(let v):
+            return .textPath(TextPath(d: v.d, content: v.content,
+                                      startOffset: v.startOffset,
+                                      fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                      fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                                      textDecoration: v.textDecoration,
+                                      fill: v.fill, stroke: v.stroke,
+                                      opacity: v.opacity, transform: t, locked: v.locked,
+                                      visibility: v.visibility))
+        case .group(let v):
+            return .group(Group(children: v.children, opacity: v.opacity,
+                                transform: t, locked: v.locked,
+                                visibility: v.visibility))
+        case .layer(let v):
+            return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
+                                transform: t, locked: v.locked,
+                                visibility: v.visibility))
         }
     }
 }
