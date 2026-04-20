@@ -120,6 +120,7 @@ mod tests {
             stroke_panel: StrokePanelState::default(),
             character_panel: crate::workspace::app_state::CharacterPanelState::default(),
             paragraph_panel: crate::workspace::app_state::ParagraphPanelState::default(),
+            align_panel: crate::workspace::app_state::AlignPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),

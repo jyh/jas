@@ -46,8 +46,9 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     }
 }
 
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    // Stage 2b will wire this to state.align_panel.use_preview_bounds
-    // once AlignPanelState lands on AppState.
-    false
+pub fn is_checked(cmd: &str, state: &AppState) -> bool {
+    match cmd {
+        "toggle_use_preview_bounds" => state.align_panel.use_preview_bounds,
+        _ => false,
+    }
 }
