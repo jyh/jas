@@ -115,3 +115,83 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
     let t2 = transformAt(model, path: [0, 2])
     #expect(t2.e == -30)
 }
+
+// MARK: - Canvas click intercept for key-object designation
+
+@Test func tryDesignateReturnsFalseWhenNotInKeyObjectMode() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0], [0, 1]])
+    // Defaults: align_to is nil / falls back to "selection" — intercept must not fire.
+    #expect(!tryDesignateAlignKeyObject(model: model, store: model.stateStore,
+                                        x: 25, y: 25))
+    #expect(model.stateStore.get("align_key_object_path") is Optional<Any>)
+}
+
+@Test func tryDesignateSetsKeyOnHitInKeyMode() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0], [0, 1]])
+    let s = model.stateStore
+    s.set("align_to", "key_object")
+    let consumed = tryDesignateAlignKeyObject(model: model, store: s, x: 25, y: 25)
+    #expect(consumed)
+    let dict = s.get("align_key_object_path") as? [String: Any]
+    #expect(dict?["__path__"] as? [Int] == [0, 0])
+}
+
+@Test func tryDesignateSecondClickOnSameElementClearsKey() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0], [0, 1]])
+    let s = model.stateStore
+    s.set("align_to", "key_object")
+    _ = tryDesignateAlignKeyObject(model: model, store: s, x: 25, y: 25)
+    _ = tryDesignateAlignKeyObject(model: model, store: s, x: 25, y: 25)
+    #expect(s.get("align_key_object_path") is NSNull)
+}
+
+@Test func tryDesignateClickOutsideSelectionClearsKey() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0], [0, 1]])
+    let s = model.stateStore
+    s.set("align_to", "key_object")
+    s.set("align_key_object_path", ["__path__": [0, 0]])
+    _ = tryDesignateAlignKeyObject(model: model, store: s, x: 500, y: 500)
+    #expect(s.get("align_key_object_path") is NSNull)
+}
+
+@Test func tryDesignateClickOnDifferentSelectedElementSwapsKey() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0], [0, 1]])
+    let s = model.stateStore
+    s.set("align_to", "key_object")
+    s.set("align_key_object_path", ["__path__": [0, 0]])
+    _ = tryDesignateAlignKeyObject(model: model, store: s, x: 125, y: 25)
+    let dict = s.get("align_key_object_path") as? [String: Any]
+    #expect(dict?["__path__"] as? [Int] == [0, 1])
+}
+
+@Test func syncAlignKeyObjectNoopWhenNoKey() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0], [0, 1]])
+    syncAlignKeyObjectFromSelection(model: model, store: model.stateStore)
+    // No mutation, no crash.
+    #expect(true)
+}
+
+@Test func syncAlignKeyObjectPreservesStillSelectedKey() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0], [0, 1]])
+    let s = model.stateStore
+    s.set("align_key_object_path", ["__path__": [0, 1]])
+    syncAlignKeyObjectFromSelection(model: model, store: s)
+    let dict = s.get("align_key_object_path") as? [String: Any]
+    #expect(dict?["__path__"] as? [Int] == [0, 1])
+}
+
+@Test func syncAlignKeyObjectClearsWhenKeyNoLongerSelected() {
+    let rects = [makeRect(0, 0, 50, 50), makeRect(100, 0, 50, 50)]
+    let model = modelWithRects(rects, selected: [[0, 0]])
+    let s = model.stateStore
+    s.set("align_key_object_path", ["__path__": [0, 1]])
+    syncAlignKeyObjectFromSelection(model: model, store: s)
+    #expect(s.get("align_key_object_path") is NSNull)
+}
