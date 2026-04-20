@@ -9,7 +9,10 @@ from algorithms.align import (
     AlignReference, AlignTranslation, Axis, AxisAnchor,
     align_bottom, align_horizontal_center, align_left, align_right,
     align_top, align_vertical_center,
-    anchor_position, axis_extent, geometric_bounds, preview_bounds,
+    anchor_position, axis_extent,
+    distribute_bottom, distribute_horizontal_center, distribute_left,
+    distribute_right, distribute_top, distribute_vertical_center,
+    geometric_bounds, preview_bounds,
     union_bounds,
 )
 from geometry.element import Rect
@@ -152,6 +155,94 @@ class AlignOpsTest(absltest.TestCase):
     def test_align_left_empty_input_yields_empty_output(self):
         r = AlignReference.selection((0, 0, 10, 10))
         self.assertEqual(align_left([], r, geometric_bounds), [])
+
+
+class DistributeOpsTest(absltest.TestCase):
+    """Stage 5f — six Distribute operations. Parallels the Rust /
+    Swift / OCaml port tests."""
+
+    def _ref_selection_of(self, rs):
+        return AlignReference.selection(union_bounds(rs, geometric_bounds))
+
+    def _input(self, rs):
+        return [((i,), r) for i, r in enumerate(rs)]
+
+    def test_distribute_requires_at_least_three_elements(self):
+        rs = [_rect(0, 0, 10, 10), _rect(50, 0, 10, 10)]
+        out = distribute_left(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        self.assertEqual(out, [])
+
+    def test_distribute_left_already_even_emits_no_translations(self):
+        rs = [_rect(0, 0, 10, 10), _rect(50, 0, 10, 10), _rect(100, 0, 10, 10)]
+        out = distribute_left(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        self.assertEqual(out, [])
+
+    def test_distribute_left_uneven_moves_middle_to_center(self):
+        rs = [_rect(0, 0, 10, 10), _rect(30, 0, 10, 10), _rect(100, 0, 10, 10)]
+        out = distribute_left(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Span [0, 100]; middle target left = 50; Δ = +20.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0], AlignTranslation(path=(1,), dx=20, dy=0))
+
+    def test_distribute_horizontal_center_evenly_spaces_centers(self):
+        rs = [_rect(0, 0, 10, 10), _rect(20, 0, 10, 10), _rect(100, 0, 10, 10)]
+        out = distribute_horizontal_center(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Center span [5, 105]; middle target = 55; Δ = +30.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dx, 30)
+
+    def test_distribute_right_distributes_right_edges(self):
+        rs = [_rect(0, 0, 10, 10), _rect(20, 0, 10, 10), _rect(100, 0, 10, 10)]
+        out = distribute_right(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Right-edge span [10, 110]; middle target = 60; Δ = +30.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dx, 30)
+
+    def test_distribute_top_moves_only_y(self):
+        rs = [_rect(0, 0, 10, 10), _rect(5, 30, 10, 10), _rect(10, 100, 10, 10)]
+        out = distribute_top(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Top-edge span [0, 100]; middle target = 50; Δ = +20.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dx, 0)
+        self.assertEqual(out[0].dy, 20)
+
+    def test_distribute_bottom_moves_only_y(self):
+        rs = [_rect(0, 0, 10, 10), _rect(5, 30, 10, 10), _rect(10, 100, 10, 10)]
+        out = distribute_bottom(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Bottom-edge span [10, 110]; middle target = 60; Δ = +20.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dy, 20)
+
+    def test_distribute_vertical_center_with_key_skips_key(self):
+        rs = [_rect(0, 0, 10, 10), _rect(0, 30, 10, 10), _rect(0, 100, 10, 10)]
+        key_path = (1,)
+        r = AlignReference.key_object(rs[1].geometric_bounds(), key_path)
+        out = distribute_vertical_center(self._input(rs), r, geometric_bounds)
+        for t in out:
+            self.assertNotEqual(t.path, key_path)
+
+    def test_distribute_handles_unsorted_input(self):
+        # Input in reverse order — algorithm sorts internally.
+        rs = [_rect(100, 0, 10, 10), _rect(30, 0, 10, 10), _rect(0, 0, 10, 10)]
+        out = distribute_left(self._input(rs), self._ref_selection_of(rs), geometric_bounds)
+        # Span [0, 100]; middle element (rs[1], x=30) → target 50; Δ = +20.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].path, (1,))
+        self.assertEqual(out[0].dx, 20)
+
+    def test_distribute_artboard_reference_uses_artboard_extent(self):
+        rs = [_rect(20, 0, 10, 10), _rect(40, 0, 10, 10), _rect(60, 0, 10, 10)]
+        r = AlignReference.artboard((0, 0, 200, 100))
+        out = distribute_left(self._input(rs), r, geometric_bounds)
+        # Span = artboard [0, 200]. Targets 0, 100, 200; deltas -20, +60, +140.
+        self.assertEqual(len(out), 3)
+        self.assertEqual(out[0].dx, -20)
+        self.assertEqual(out[1].dx, 60)
+        self.assertEqual(out[2].dx, 140)
 
 
 if __name__ == "__main__":
