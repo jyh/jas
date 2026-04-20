@@ -48,3 +48,7 @@ and normalize_element = function
     Element.Group { e with children = Array.map normalize_element e.children }
   | Element.Layer e ->
     Element.Layer { e with children = Array.map normalize_element e.children }
+  | Element.Live v ->
+    (* Phase 1: pass through unchanged. Phase 2 will recursively
+       normalize operands + fill / stroke. *)
+    Element.Live v

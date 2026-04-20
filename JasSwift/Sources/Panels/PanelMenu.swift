@@ -15,6 +15,7 @@ public func panelLabel(_ kind: PanelKind) -> String {
     case .paragraph: return ParagraphPanel.label
     case .artboards: return ArtboardsPanel.label
     case .align: return AlignPanel.label
+    case .boolean: return BooleanPanel.label
     }
 }
 
@@ -30,6 +31,7 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     case .paragraph: return ParagraphPanel.menuItems()
     case .artboards: return ArtboardsPanel.menuItems()
     case .align: return AlignPanel.menuItems()
+    case .boolean: return BooleanPanel.menuItems()
     }
 }
 
@@ -45,6 +47,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .paragraph: ParagraphPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .artboards: ArtboardsPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .align: AlignPanel.dispatch(cmd, addr: addr, layout: &layout)
+    case .boolean: BooleanPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     }
 }
 
@@ -60,5 +63,6 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String, layout: WorkspaceLayo
     case .paragraph: return ParagraphPanel.isChecked(cmd, layout: layout)
     case .artboards: return ArtboardsPanel.isChecked(cmd, layout: layout)
     case .align: return AlignPanel.isChecked(cmd, layout: layout)
+    case .boolean: return BooleanPanel.isChecked(cmd, layout: layout)
     }
 }

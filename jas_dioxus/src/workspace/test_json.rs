@@ -103,6 +103,7 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Paragraph => "paragraph",
         PanelKind::Artboards => "artboards",
         PanelKind::Align => "align",
+        PanelKind::Boolean => "boolean",
     }
 }
 
@@ -525,6 +526,8 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
         "character" => PanelKind::Character,
         "paragraph" => PanelKind::Paragraph,
         "artboards" => PanelKind::Artboards,
+        "align" => PanelKind::Align,
+        "boolean" => PanelKind::Boolean,
         _ => PanelKind::Layers,
     }
 }

@@ -91,5 +91,17 @@ fn normalize_element(elem: &Element) -> Element {
             children: l.children.iter().map(|c| Rc::new(normalize_element(c))).collect(),
             ..l.clone()
         }),
+        Element::Live(v) => match v {
+            crate::geometry::live::LiveVariant::CompoundShape(cs) => Element::Live(
+                crate::geometry::live::LiveVariant::CompoundShape(crate::geometry::live::CompoundShape {
+                    operands: cs.operands.iter()
+                        .map(|c| Rc::new(normalize_element(c)))
+                        .collect(),
+                    fill: cs.fill.as_ref().map(normalize_fill),
+                    stroke: cs.stroke.as_ref().map(normalize_stroke),
+                    ..cs.clone()
+                }),
+            ),
+        },
     }
 }

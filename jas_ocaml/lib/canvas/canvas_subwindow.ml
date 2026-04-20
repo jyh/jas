@@ -717,6 +717,16 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) children;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
+
+  | Live (Compound_shape cs) ->
+    (* Phase 1 stub: render operands individually so the user can
+       still see the source artwork. Phase 2 evaluates the boolean
+       op and renders the result. *)
+    Cairo.Group.push cr;
+    apply_transform cr cs.transform;
+    Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) cs.operands;
+    Cairo.Group.pop_to_source cr;
+    Cairo.paint cr ~alpha:cs.opacity
   end;
   Cairo.restore cr
 
@@ -1103,7 +1113,8 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Element.Polyline { transform; _ } | Element.Polygon { transform; _ }
         | Element.Path { transform; _ } | Element.Text { transform; _ }
         | Element.Text_path { transform; _ }
-        | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform);
+        | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform
+        | Element.Live (Element.Compound_shape cs) -> cs.transform);
       let n = Element.control_point_count !node in
       let cps = Document.selection_kind_to_sorted es.es_kind ~total:n in
       let is_partial = match es.es_kind with

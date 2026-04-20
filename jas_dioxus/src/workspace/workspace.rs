@@ -52,6 +52,7 @@ pub enum PanelKind {
     Paragraph,
     Artboards,
     Align,
+    Boolean,
 }
 
 impl PanelKind {
@@ -66,6 +67,7 @@ impl PanelKind {
         Self::Paragraph,
         Self::Artboards,
         Self::Align,
+        Self::Boolean,
     ];
 }
 
@@ -282,6 +284,7 @@ impl WorkspaceLayout {
                     DockId(0),
                     vec![
                         PanelGroup::new(vec![PanelKind::Color, PanelKind::Swatches]),
+                        PanelGroup::new(vec![PanelKind::Align, PanelKind::Boolean]),
                         PanelGroup::new(vec![PanelKind::Character, PanelKind::Paragraph]),
                         PanelGroup::new(vec![PanelKind::Stroke, PanelKind::Properties]),
                         PanelGroup::new(vec![PanelKind::Artboards, PanelKind::Layers]),
@@ -1800,7 +1803,7 @@ mod tests {
 
     #[test]
     fn panel_kind_all_count() {
-        assert_eq!(PanelKind::ALL.len(), 9);
+        assert_eq!(PanelKind::ALL.len(), 10);
     }
 
     #[test]
@@ -1902,17 +1905,18 @@ mod tests {
 
     #[test]
     fn show_panel_restores_to_prior_group() {
-        // Character is in group 1 of the default layout (Color+Swatches
-        // = 0, Character+Paragraph = 1). Close then reopen it, verify it
-        // lands back in group 1 rather than the default group 0.
+        // Character is in group 2 of the default layout (Color+Swatches
+        // = 0, Align+Boolean = 1, Character+Paragraph = 2). Close then
+        // reopen it, verify it lands back in group 2 rather than the
+        // default group 0.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let (cg, cpi) = panel_of(&l, id, PanelKind::Character);
-        assert_eq!(cg, 1);
+        assert_eq!(cg, 2);
         l.close_panel(pa(id.0, cg, cpi));
         l.show_panel(PanelKind::Character);
         let (cg2, _) = panel_of(&l, id, PanelKind::Character);
-        assert_eq!(cg2, 1, "reopened panel should be in the same group");
+        assert_eq!(cg2, 2, "reopened panel should be in the same group");
     }
 
     #[test]

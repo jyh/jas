@@ -2,3 +2,8 @@
  (name panel_menu_test)
  (modules panel_menu_test)
  (libraries jas alcotest))
+
+(test
+ (name boolean_apply_test)
+ (modules boolean_apply_test)
+ (libraries jas alcotest))

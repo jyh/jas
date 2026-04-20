@@ -566,6 +566,24 @@ fn set_app_state_field(
         "align_use_preview_bounds" => {
             if let Some(b) = val.as_bool() { st.align_panel.use_preview_bounds = b; }
         }
+        // Boolean panel fields — mirrors of BooleanPanelState per
+        // BOOLEAN.md §Boolean Options dialog.
+        "boolean_precision" => {
+            if let Some(n) = val.as_f64() { st.boolean_panel.precision = n; }
+        }
+        "boolean_remove_redundant_points" => {
+            if let Some(b) = val.as_bool() { st.boolean_panel.remove_redundant_points = b; }
+        }
+        "boolean_divide_remove_unpainted" => {
+            if let Some(b) = val.as_bool() { st.boolean_panel.divide_remove_unpainted = b; }
+        }
+        "last_boolean_op" => {
+            if val.is_null() {
+                st.boolean_panel.last_op = None;
+            } else if let Some(s) = val.as_str() {
+                st.boolean_panel.last_op = Some(s.to_string());
+            }
+        }
         // Workspace layout visibility fields are managed by the generic StateStore,
         // not directly by AppState. A set: on these keys has no effect here.
         "toolbar_visible" | "canvas_visible" | "dock_visible"
@@ -637,6 +655,7 @@ fn apply_set_panel_state(
                 "distribute_spacing_value": ap.distribute_spacing,
                 "use_preview_bounds": ap.use_preview_bounds,
             });
+            let bp = &st.boolean_panel;
             let state_json = serde_json::json!({
                 "align_to": ap.align_to.as_str(),
                 "align_key_object_path": ap.key_object_path.as_ref()
@@ -644,6 +663,12 @@ fn apply_set_panel_state(
                     .unwrap_or(serde_json::Value::Null),
                 "align_distribute_spacing": ap.distribute_spacing,
                 "align_use_preview_bounds": ap.use_preview_bounds,
+                "boolean_precision": bp.precision,
+                "boolean_remove_redundant_points": bp.remove_redundant_points,
+                "boolean_divide_remove_unpainted": bp.divide_remove_unpainted,
+                "last_boolean_op": bp.last_op.as_ref()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .unwrap_or(serde_json::Value::Null),
             });
             let ctx = serde_json::json!({"panel": panel_json, "state": state_json});
             let result = super::expr::eval(expr_str, &ctx);
@@ -952,6 +977,7 @@ fn build_active_document_view(
             "layers_panel_selection_count": 0,
             "has_selection": false,
             "selection_count": 0,
+            "selection_has_compound_shape": false,
             "element_selection": [],
         });
     };
@@ -1006,6 +1032,17 @@ fn build_active_document_view(
             serde_json::json!({"__path__": path_ints})
         })
         .collect();
+    // True if any selected element is an Element::Live (currently
+    // only compound shapes). Consumed by the Boolean panel's Expand
+    // button and Release/Expand Compound Shape menu items.
+    let selection_has_compound_shape = canvas_selection
+        .iter()
+        .any(|es| {
+            matches!(
+                tab.model.document().get_element(&es.path),
+                Some(Element::Live(_))
+            )
+        });
     serde_json::json!({
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
@@ -1014,6 +1051,7 @@ fn build_active_document_view(
         "layers_panel_selection_count": st.layers_panel_selection.len(),
         "has_selection": !canvas_selection.is_empty(),
         "selection_count": canvas_selection.len(),
+        "selection_has_compound_shape": selection_has_compound_shape,
         "element_selection": element_selection,
     })
 }
@@ -1119,6 +1157,60 @@ fn run_yaml_effect(
             st.apply_align_operation(op);
             return deferred;
         }
+    }
+
+    // Boolean panel — compound-shape menu actions. See BOOLEAN.md
+    // §Panel actions.
+    if eff.get("make_compound_shape").is_some() {
+        st.apply_make_compound_shape();
+        return deferred;
+    }
+    if eff.get("release_compound_shape").is_some() {
+        st.apply_release_compound_shape();
+        return deferred;
+    }
+    if eff.get("expand_compound_shape").is_some() {
+        st.apply_expand_compound_shape();
+        return deferred;
+    }
+
+    // Boolean panel — destructive operations. All nine are wired.
+    for &op in &[
+        "union", "subtract_front", "intersection", "exclude",
+        "divide", "trim", "merge", "crop", "subtract_back",
+    ] {
+        let key = format!("boolean_{op}");
+        if eff.get(&key).is_some() {
+            st.apply_boolean_operation(op);
+            return deferred;
+        }
+    }
+
+    // Boolean panel — compound-creating variants (Alt+click on the
+    // four Shape Mode buttons).
+    for &op in &["union", "subtract_front", "intersection", "exclude"] {
+        let key = format!("boolean_{op}_compound");
+        if eff.get(&key).is_some() {
+            st.apply_compound_creation(op);
+            return deferred;
+        }
+    }
+
+    // Boolean panel — Repeat Boolean Operation. Reads
+    // boolean_panel.last_op (populated by every destructive and
+    // compound-creating action) and re-dispatches. No-op when
+    // last_op is None.
+    if eff.get("repeat_boolean_operation").is_some() {
+        st.apply_repeat_boolean_operation();
+        return deferred;
+    }
+
+    // Boolean panel — Reset Panel. Clears last_op (makes Repeat a
+    // no-op until the next op click). Boolean Options values are
+    // left alone; the dialog's own Defaults button resets those.
+    if eff.get("reset_boolean_panel").is_some() {
+        st.reset_boolean_panel();
+        return deferred;
     }
 
     // toggle_paragraph_field: <field_name> — Phase 4. Flips the named
@@ -1865,10 +1957,24 @@ fn build_mouse_event_handler(
     let ctx_snapshot = ctx.clone();
     let mut dialog_signal = rctx.dialog_ctx.0;
 
-    Some(EventHandler::new(move |_evt: Event<MouseData>| {
+    Some(EventHandler::new(move |evt: Event<MouseData>| {
         let app = app.clone();
         let actions = resolved_actions.clone();
-        let ctx_snap = ctx_snapshot.clone();
+        let mut ctx_snap = ctx_snapshot.clone();
+        // Expose click-time modifier state to yaml condition
+        // expressions as `event.alt` / `event.shift` / `event.meta` /
+        // `event.ctrl`. The Boolean panel uses `event.alt` to route
+        // Shape Mode buttons between destructive and compound-creating
+        // dispatches; future panels can consume the same namespace.
+        let mods = evt.data().modifiers();
+        if let serde_json::Value::Object(obj) = &mut ctx_snap {
+            obj.insert("event".to_string(), serde_json::json!({
+                "alt": mods.alt(),
+                "shift": mods.shift(),
+                "meta": mods.meta(),
+                "ctrl": mods.ctrl(),
+            }));
+        }
         spawn(async move {
             let mut deferred_dialog_effects = Vec::new();
             {
@@ -3719,6 +3825,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             GeoElement::TextPath(_) => "Text Path",
             GeoElement::Group(_) => "Group",
             GeoElement::Layer(_) => "Layer",
+            GeoElement::Live(v) => match v {
+                crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
+            },
         }
     }
 

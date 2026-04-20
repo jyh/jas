@@ -51,7 +51,7 @@ ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
-    PanelKind.ALIGN,
+    PanelKind.ALIGN, PanelKind.BOOLEAN,
 ]
 
 # Color panel mode commands
@@ -80,6 +80,7 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.PARAGRAPH: "Paragraph",
     PanelKind.ARTBOARDS: "Artboards",
     PanelKind.ALIGN: "Align",
+    PanelKind.BOOLEAN: "Boolean",
 }
 
 
@@ -138,6 +139,19 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.action("Reset Panel", "reset_align_panel"),
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Align", "close_panel"),
+        ]
+    if kind == PanelKind.BOOLEAN:
+        return [
+            PanelMenuItem.action("Repeat Boolean Operation", "repeat_boolean_operation"),
+            PanelMenuItem.action("Boolean Options…", "open_boolean_options"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Make Compound Shape", "make_compound_shape"),
+            PanelMenuItem.action("Release Compound Shape", "release_compound_shape"),
+            PanelMenuItem.action("Expand Compound Shape", "expand_compound_shape"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Reset Panel", "reset_boolean_panel"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Boolean", "close_panel"),
         ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 
@@ -496,6 +510,21 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
                 new_h = (h + 180.0) % 360.0
                 complemented = Color.hsb(new_h, s, br)
                 set_active_color(complemented, model)
+    elif kind == PanelKind.BOOLEAN and model is not None:
+        # Compound-shape menu dispatches. Destructive ops,
+        # Boolean Options dialog, Repeat, and Reset are phase 9b+
+        # of the Python port.
+        from panels.boolean_apply import (
+            apply_expand_compound_shape,
+            apply_make_compound_shape,
+            apply_release_compound_shape,
+        )
+        if cmd == "make_compound_shape":
+            apply_make_compound_shape(model)
+        elif cmd == "release_compound_shape":
+            apply_release_compound_shape(model)
+        elif cmd == "expand_compound_shape":
+            apply_expand_compound_shape(model)
 
 
 def panel_is_checked(kind: PanelKind, cmd: str, layout: WorkspaceLayout) -> bool:

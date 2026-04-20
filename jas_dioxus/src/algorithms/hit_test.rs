@@ -264,6 +264,22 @@ pub fn segments_of_element(elem: &Element) -> Vec<(f64, f64, f64, f64)> {
                 vec![]
             }
         }
+        Element::Live(v) => match v {
+            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                let ps = cs.evaluate(crate::geometry::live::DEFAULT_PRECISION);
+                let mut segs = Vec::new();
+                for ring in &ps {
+                    if ring.len() < 2 { continue; }
+                    for w in ring.windows(2) {
+                        segs.push((w[0].0, w[0].1, w[1].0, w[1].1));
+                    }
+                    let last = *ring.last().unwrap();
+                    let first = *ring.first().unwrap();
+                    segs.push((last.0, last.1, first.0, first.1));
+                }
+                segs
+            }
+        },
         _ => vec![],
     }
 }

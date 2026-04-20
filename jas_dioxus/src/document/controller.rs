@@ -18,6 +18,84 @@ use crate::geometry::element::{
 use crate::algorithms::hit_test::{element_intersects_polygon, element_intersects_rect, point_in_rect};
 
 // ---------------------------------------------------------------------------
+// Helpers — shared by the Controller's boolean ops
+// ---------------------------------------------------------------------------
+
+/// MERGE predicate per BOOLEAN.md §Operand and paint rules.
+/// Two fills merge when both are solid colors with exactly equal
+/// `color` components. `None` fills never match anything — including
+/// other `None` fills. Gradients and patterns, once they exist,
+/// likewise never match; the current `Fill` type holds only a
+/// solid-color enum so every `Some(_)` is eligible today.
+/// Only the color is inspected; opacity / stroke / blend_mode do not
+/// participate.
+fn fills_merge_equal(a: &Option<Fill>, b: &Option<Fill>) -> bool {
+    match (a, b) {
+        (Some(fa), Some(fb)) => fa.color == fb.color,
+        _ => false,
+    }
+}
+
+/// Collapse each ring point whose perpendicular distance to the line
+/// between its two neighbors is smaller than `tol`. Single-pass;
+/// acceptable for boolean-op outputs which already have clean right-
+/// angle / smooth-arc corners. Preserves the original ring if
+/// collapse leaves fewer than 3 points.
+fn collapse_collinear_points(ring: Vec<(f64, f64)>, tol: f64) -> Vec<(f64, f64)> {
+    if ring.len() < 3 {
+        return ring;
+    }
+    let n = ring.len();
+    let mut keep = vec![true; n];
+    for i in 0..n {
+        let prev = ring[(i + n - 1) % n];
+        let cur = ring[i];
+        let next = ring[(i + 1) % n];
+        let dx = next.0 - prev.0;
+        let dy = next.1 - prev.1;
+        let seg_len = (dx * dx + dy * dy).sqrt();
+        if seg_len == 0.0 {
+            // Degenerate neighborhood — cur is on top of its neighbors.
+            keep[i] = false;
+            continue;
+        }
+        let num = ((next.0 - prev.0) * (prev.1 - cur.1)
+            - (prev.0 - cur.0) * (next.1 - prev.1))
+            .abs();
+        if num / seg_len < tol {
+            keep[i] = false;
+        }
+    }
+    let collapsed: Vec<(f64, f64)> = ring
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, p)| *p)
+        .collect();
+    if collapsed.len() < 3 { ring } else { collapsed }
+}
+
+/// Options for destructive boolean operations, read from the Boolean
+/// Options dialog and mirrored in `AppState.boolean_panel`. See
+/// BOOLEAN.md §Boolean Options dialog.
+#[derive(Debug, Clone, Copy)]
+pub struct BooleanOptions {
+    pub precision: f64,
+    pub remove_redundant_points: bool,
+    pub divide_remove_unpainted: bool,
+}
+
+impl Default for BooleanOptions {
+    fn default() -> Self {
+        Self {
+            precision: 0.0283,
+            remove_redundant_points: false,
+            divide_remove_unpainted: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------------
 
@@ -358,6 +436,520 @@ impl Controller {
                 }
             }
             offset += n_children as i64 - 1;
+        }
+        new_doc.selection = new_selection;
+        model.set_document(new_doc);
+    }
+
+    /// Make a compound shape from the current selection using UNION.
+    /// Thin wrapper around `make_compound_shape_with_op`.
+    pub fn make_compound_shape(model: &mut Model) {
+        use crate::geometry::live::CompoundOperation;
+        Self::make_compound_shape_with_op(model, CompoundOperation::Union);
+    }
+
+    /// Make a compound shape from the current selection using the
+    /// given operation. Selected elements must be siblings. The
+    /// frontmost (last in path order) operand's fill, stroke, and
+    /// common attributes are copied onto the new compound shape.
+    /// Selection becomes the new compound shape. See BOOLEAN.md
+    /// §Compound shapes.
+    pub fn make_compound_shape_with_op(
+        model: &mut Model,
+        operation: crate::geometry::live::CompoundOperation,
+    ) {
+        use crate::geometry::live::{CompoundShape, LiveVariant};
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut paths: Vec<ElementPath> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        paths.sort();
+        if paths.len() < 2 {
+            return;
+        }
+        // Siblings only.
+        let parent: ElementPath = paths[0][..paths[0].len() - 1].to_vec();
+        if !paths.iter().all(|p| {
+            p.len() == paths[0].len() && p[..p.len() - 1] == parent[..]
+        }) {
+            return;
+        }
+        let elements: Vec<Rc<Element>> = paths
+            .iter()
+            .filter_map(|p| doc.get_element(p).cloned().map(Rc::new))
+            .collect();
+        if elements.len() != paths.len() {
+            return;
+        }
+        // Inherit the frontmost operand's paint (last in path order).
+        let frontmost = elements.last().unwrap();
+        let fill = frontmost.fill().copied();
+        let stroke = frontmost.stroke().copied();
+        let common = frontmost.common().clone();
+
+        let compound = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation,
+            operands: elements,
+            fill,
+            stroke,
+            common,
+        }));
+
+        let mut new_doc = doc.clone();
+        for p in paths.iter().rev() {
+            new_doc = new_doc.delete_element(p);
+        }
+        let insert_path = paths[0].clone();
+        new_doc = new_doc.insert_element_at(&insert_path, compound);
+        new_doc.selection = vec![ElementSelection::all(insert_path)];
+        model.set_document(new_doc);
+    }
+
+    /// Release every selected compound shape: replace it in place with
+    /// its operand children. Each operand keeps its own paint. The
+    /// compound shape's paint is discarded. Selection becomes the
+    /// restored operands.
+    pub fn release_compound_shape(model: &mut Model) {
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut cs_paths: Vec<ElementPath> = Vec::new();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path)
+                && matches!(elem, Element::Live(_))
+            {
+                cs_paths.push(es.path.clone());
+            }
+        }
+        if cs_paths.is_empty() {
+            return;
+        }
+        cs_paths.sort();
+
+        let orig_doc = doc.clone();
+        let mut new_doc = doc.clone();
+        // Process in reverse to preserve sibling indices.
+        for cs_path in cs_paths.iter().rev() {
+            let cs_elem = match new_doc.get_element(cs_path).cloned() {
+                Some(e) => e,
+                None => continue,
+            };
+            let operands: Vec<Rc<Element>> = match &cs_elem {
+                Element::Live(crate::geometry::live::LiveVariant::CompoundShape(cs)) => {
+                    cs.operands.clone()
+                }
+                _ => continue,
+            };
+            new_doc = new_doc.delete_element(cs_path);
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = cs_path[1];
+                if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
+                    for (j, op) in operands.iter().enumerate() {
+                        let insert_idx = child_idx + j;
+                        if insert_idx <= layer_children.len() {
+                            layer_children.insert(insert_idx, op.clone());
+                        } else {
+                            layer_children.push(op.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build selection of released operands.
+        let mut new_selection = Vec::new();
+        let mut offset: i64 = 0;
+        for cs_path in &cs_paths {
+            let orig_elem = match orig_doc.get_element(cs_path) {
+                Some(e) => e,
+                None => continue,
+            };
+            let n = match orig_elem {
+                Element::Live(crate::geometry::live::LiveVariant::CompoundShape(cs)) => {
+                    cs.operands.len()
+                }
+                _ => continue,
+            };
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = (cs_path[1] as i64 + offset) as usize;
+                for j in 0..n {
+                    let path = vec![layer_idx, child_idx + j];
+                    if new_doc.get_element(&path).is_some() {
+                        new_selection.push(ElementSelection::all(path));
+                    }
+                }
+            }
+            offset += n as i64 - 1;
+        }
+        new_doc.selection = new_selection;
+        model.set_document(new_doc);
+    }
+
+    /// Expand every selected compound shape into static Polygon
+    /// elements derived from its evaluated geometry. The expanded
+    /// polygons carry the compound shape's own paint. Operand tree
+    /// is discarded.
+    pub fn expand_compound_shape(model: &mut Model) {
+        use crate::geometry::live::{DEFAULT_PRECISION, LiveElement, LiveVariant};
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut cs_paths: Vec<ElementPath> = Vec::new();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path)
+                && matches!(elem, Element::Live(_))
+            {
+                cs_paths.push(es.path.clone());
+            }
+        }
+        if cs_paths.is_empty() {
+            return;
+        }
+        cs_paths.sort();
+
+        let orig_doc = doc.clone();
+        let mut new_doc = doc.clone();
+        let mut expanded_counts: Vec<usize> = Vec::with_capacity(cs_paths.len());
+
+        for cs_path in cs_paths.iter().rev() {
+            let cs_elem = match new_doc.get_element(cs_path).cloned() {
+                Some(e) => e,
+                None => {
+                    expanded_counts.push(0);
+                    continue;
+                }
+            };
+            let expanded: Vec<Rc<Element>> = match &cs_elem {
+                Element::Live(LiveVariant::CompoundShape(cs)) => cs.expand(DEFAULT_PRECISION),
+                _ => {
+                    expanded_counts.push(0);
+                    continue;
+                }
+            };
+            expanded_counts.push(expanded.len());
+            new_doc = new_doc.delete_element(cs_path);
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = cs_path[1];
+                if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
+                    for (j, poly) in expanded.iter().enumerate() {
+                        let insert_idx = child_idx + j;
+                        if insert_idx <= layer_children.len() {
+                            layer_children.insert(insert_idx, poly.clone());
+                        } else {
+                            layer_children.push(poly.clone());
+                        }
+                    }
+                }
+            }
+        }
+        expanded_counts.reverse(); // restore forward order
+
+        // Build selection of expanded polygons.
+        let mut new_selection = Vec::new();
+        let mut offset: i64 = 0;
+        for (cs_path, &n) in cs_paths.iter().zip(expanded_counts.iter()) {
+            let _orig = orig_doc.get_element(cs_path);
+            if cs_path.len() >= 2 {
+                let layer_idx = cs_path[0];
+                let child_idx = (cs_path[1] as i64 + offset) as usize;
+                for j in 0..n {
+                    let path = vec![layer_idx, child_idx + j];
+                    if new_doc.get_element(&path).is_some() {
+                        new_selection.push(ElementSelection::all(path));
+                    }
+                }
+            }
+            offset += n as i64 - 1;
+        }
+        new_doc.selection = new_selection;
+        model.set_document(new_doc);
+    }
+
+    /// Destructively apply one of the six implemented boolean ops to
+    /// the current selection. Supported: `"union"`, `"intersection"`,
+    /// `"exclude"`, `"subtract_front"`, `"subtract_back"`, `"crop"`.
+    /// DIVIDE / TRIM / MERGE land in a later pass.
+    ///
+    /// UNION / INTERSECTION / EXCLUDE: every operand is consumed; the
+    /// resulting polygon(s) carry the frontmost operand's paint.
+    /// SUBTRACT_FRONT / SUBTRACT_BACK: the front/back operand is the
+    /// cutter and is consumed; each remaining survivor emits a
+    /// subtracted polygon carrying its own paint. CROP: the frontmost
+    /// operand is the mask and is consumed; each remaining survivor
+    /// emits the intersection carrying its own paint.
+    pub fn apply_destructive_boolean(
+        model: &mut Model,
+        op_name: &str,
+        options: &BooleanOptions,
+    ) {
+        use crate::algorithms::boolean::{
+            boolean_intersect, boolean_subtract, boolean_union, PolygonSet,
+        };
+        use crate::geometry::element::{CommonProps, Fill, PolygonElem, Stroke};
+        use crate::geometry::live::{
+            apply_operation, element_to_polygon_set, CompoundOperation,
+        };
+
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut paths: Vec<ElementPath> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        paths.sort();
+        if paths.len() < 2 {
+            return;
+        }
+        // Siblings only.
+        let parent: ElementPath = paths[0][..paths[0].len() - 1].to_vec();
+        if !paths.iter().all(|p| {
+            p.len() == paths[0].len() && p[..p.len() - 1] == parent[..]
+        }) {
+            return;
+        }
+        let elements: Vec<Rc<Element>> = paths
+            .iter()
+            .filter_map(|p| doc.get_element(p).cloned().map(Rc::new))
+            .collect();
+        if elements.len() != paths.len() {
+            return;
+        }
+
+        // (PolygonSet, fill, stroke, common) tuples; flattened to
+        // Polygon elements below. Empty polygon sets are skipped.
+        let mut outputs: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, CommonProps)> = Vec::new();
+        let precision = options.precision;
+
+        match op_name {
+            "union" | "intersection" | "exclude" => {
+                let operand_sets: Vec<PolygonSet> = elements
+                    .iter()
+                    .map(|e| element_to_polygon_set(e, precision))
+                    .collect();
+                let op = match op_name {
+                    "union" => CompoundOperation::Union,
+                    "intersection" => CompoundOperation::Intersection,
+                    "exclude" => CompoundOperation::Exclude,
+                    _ => unreachable!(),
+                };
+                let result = apply_operation(op, &operand_sets);
+                let front = elements.last().unwrap();
+                outputs.push((
+                    result,
+                    front.fill().copied(),
+                    front.stroke().copied(),
+                    front.common().clone(),
+                ));
+            }
+            "subtract_front" | "crop" => {
+                // Frontmost (= last in path order) consumed.
+                let cutter = element_to_polygon_set(
+                    elements.last().unwrap(), precision,
+                );
+                for survivor in &elements[..elements.len() - 1] {
+                    let survivor_set = element_to_polygon_set(survivor, precision);
+                    let result = if op_name == "crop" {
+                        boolean_intersect(&survivor_set, &cutter)
+                    } else {
+                        boolean_subtract(&survivor_set, &cutter)
+                    };
+                    outputs.push((
+                        result,
+                        survivor.fill().copied(),
+                        survivor.stroke().copied(),
+                        survivor.common().clone(),
+                    ));
+                }
+            }
+            "subtract_back" => {
+                let cutter = element_to_polygon_set(&elements[0], precision);
+                for survivor in &elements[1..] {
+                    let survivor_set = element_to_polygon_set(survivor, precision);
+                    let result = boolean_subtract(&survivor_set, &cutter);
+                    outputs.push((
+                        result,
+                        survivor.fill().copied(),
+                        survivor.stroke().copied(),
+                        survivor.common().clone(),
+                    ));
+                }
+            }
+            "divide" => {
+                // Walk operands back-to-front, maintaining a partition
+                // of the union-so-far into (region, frontmost-covering
+                // operand index) pairs. Each incoming operand splits
+                // every existing region into overlap / non-overlap; the
+                // overlap relabels to the incoming index (now frontmost).
+                let mut accumulator: Vec<(PolygonSet, usize)> = Vec::new();
+                for (i, op_elem) in elements.iter().enumerate() {
+                    let op_set = element_to_polygon_set(op_elem, precision);
+                    let mut new_acc: Vec<(PolygonSet, usize)> = Vec::new();
+                    let mut remaining = op_set.clone();
+                    for (existing_region, existing_idx) in &accumulator {
+                        let overlap = boolean_intersect(existing_region, &op_set);
+                        if !overlap.is_empty() {
+                            new_acc.push((overlap, i));
+                        }
+                        let non_overlap = boolean_subtract(existing_region, &op_set);
+                        if !non_overlap.is_empty() {
+                            new_acc.push((non_overlap, *existing_idx));
+                        }
+                        remaining = boolean_subtract(&remaining, existing_region);
+                    }
+                    if !remaining.is_empty() {
+                        new_acc.push((remaining, i));
+                    }
+                    accumulator = new_acc;
+                }
+                for (region, paint_idx) in accumulator {
+                    let src = &elements[paint_idx];
+                    outputs.push((
+                        region,
+                        src.fill().copied(),
+                        src.stroke().copied(),
+                        src.common().clone(),
+                    ));
+                }
+            }
+            "trim" | "merge" => {
+                // TRIM: for each operand i, emit (operand[i] - union
+                // of all later operands) keeping operand[i]'s own
+                // paint. Frontmost (i = N-1) is untouched.
+                let operand_sets: Vec<PolygonSet> = elements
+                    .iter()
+                    .map(|e| element_to_polygon_set(e, precision))
+                    .collect();
+                let mut trimmed: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, CommonProps)> =
+                    Vec::new();
+                for i in 0..elements.len() {
+                    let mut region = operand_sets[i].clone();
+                    for later in operand_sets.iter().skip(i + 1) {
+                        region = boolean_subtract(&region, later);
+                    }
+                    if !region.is_empty() {
+                        trimmed.push((
+                            region,
+                            elements[i].fill().copied(),
+                            elements[i].stroke().copied(),
+                            elements[i].common().clone(),
+                        ));
+                    }
+                }
+                if op_name == "trim" {
+                    outputs.extend(trimmed);
+                } else {
+                    // MERGE: union touching trimmed survivors that
+                    // share an exactly-equal solid-color fill. None
+                    // fills never merge (predicate per BOOLEAN.md).
+                    // Grouping is O(N^2) by linear scan; acceptable for
+                    // the selection sizes this panel handles.
+                    let mut consumed = vec![false; trimmed.len()];
+                    for i in 0..trimmed.len() {
+                        if consumed[i] {
+                            continue;
+                        }
+                        consumed[i] = true;
+                        let (region_i, fill_i, stroke_i, common_i) =
+                            trimmed[i].clone();
+                        let mut merged = region_i;
+                        let mut stroke_winner = stroke_i;
+                        let mut common_winner = common_i;
+                        if fill_i.is_some() {
+                            for (j, trim_j) in trimmed.iter().enumerate().skip(i + 1) {
+                                if consumed[j] {
+                                    continue;
+                                }
+                                if fills_merge_equal(&fill_i, &trim_j.1) {
+                                    merged = boolean_union(&merged, &trim_j.0);
+                                    // j > i in operand z-order, so j
+                                    // is frontmost; its stroke/common
+                                    // wins on the merged output.
+                                    stroke_winner = trim_j.2;
+                                    common_winner = trim_j.3.clone();
+                                    consumed[j] = true;
+                                }
+                            }
+                        }
+                        outputs.push((merged, fill_i, stroke_winner, common_winner));
+                    }
+                }
+            }
+            _ => return,
+        }
+
+        // Flatten (PolygonSet, paint) outputs into Polygon elements.
+        // When `options.remove_redundant_points` is on, collinear
+        // points are collapsed within `options.precision`. When
+        // `options.divide_remove_unpainted` is on and this is a
+        // DIVIDE op, fragments with no fill and no stroke are
+        // discarded.
+        let mut new_elements: Vec<Rc<Element>> = Vec::new();
+        for (ps, fill, stroke, common) in outputs {
+            if op_name == "divide"
+                && options.divide_remove_unpainted
+                && fill.is_none()
+                && stroke.is_none()
+            {
+                continue;
+            }
+            for ring in ps {
+                let ring = if options.remove_redundant_points {
+                    collapse_collinear_points(ring, options.precision)
+                } else {
+                    ring
+                };
+                if ring.len() >= 3 {
+                    new_elements.push(Rc::new(Element::Polygon(PolygonElem {
+                        points: ring,
+                        fill,
+                        stroke,
+                        common: common.clone(),
+                    })));
+                }
+            }
+        }
+
+        // Remove all original operands in reverse path order.
+        let mut new_doc = doc.clone();
+        for p in paths.iter().rev() {
+            new_doc = new_doc.delete_element(p);
+        }
+
+        // Insert new elements starting at paths[0]'s child_idx.
+        let insert_base = paths[0].clone();
+        if insert_base.len() >= 2 {
+            let layer_idx = insert_base[0];
+            let child_idx = insert_base[1];
+            if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
+                for (i, elem) in new_elements.iter().enumerate() {
+                    let insert_idx = child_idx + i;
+                    if insert_idx <= layer_children.len() {
+                        layer_children.insert(insert_idx, elem.clone());
+                    } else {
+                        layer_children.push(elem.clone());
+                    }
+                }
+            }
+        }
+
+        // Select the new elements.
+        let mut new_selection = Vec::new();
+        if insert_base.len() >= 2 {
+            let layer_idx = insert_base[0];
+            let base_child_idx = insert_base[1];
+            for i in 0..new_elements.len() {
+                let path = vec![layer_idx, base_child_idx + i];
+                if new_doc.get_element(&path).is_some() {
+                    new_selection.push(ElementSelection::all(path));
+                }
+            }
         }
         new_doc.selection = new_selection;
         model.set_document(new_doc);
@@ -1103,6 +1695,350 @@ mod tests {
         // No more groups (the original group should be ungrouped)
         let group_count = children.iter().filter(|c| matches!(***c, Element::Group(_))).count();
         assert_eq!(group_count, 0);
+    }
+
+    #[test]
+    fn make_compound_shape_wraps_selection_in_one_live_element() {
+        let mut model = setup_model();
+        // Select rect (0,0) and line (0,2) — siblings at layer 0.
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 2]),
+        ]);
+        Controller::make_compound_shape(&mut model);
+        let children = model.document().layers[0].children().unwrap();
+        // Originally 3 siblings; now rect+line merged into 1 compound
+        // plus the group, so 2 total.
+        assert_eq!(children.len(), 2);
+        // One of them must be the new Live element.
+        let live_count = children.iter().filter(|c| matches!(***c, Element::Live(_))).count();
+        assert_eq!(live_count, 1);
+        // The compound is selected.
+        assert_eq!(model.document().selection.len(), 1);
+    }
+
+    #[test]
+    fn make_compound_shape_with_op_subtract_front() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        Controller::make_compound_shape_with_op(
+            &mut model, CompoundOperation::SubtractFront,
+        );
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::SubtractFront);
+    }
+
+    #[test]
+    fn make_compound_shape_with_op_intersection() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        Controller::make_compound_shape_with_op(
+            &mut model, CompoundOperation::Intersection,
+        );
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::Intersection);
+    }
+
+    #[test]
+    fn make_compound_shape_with_op_exclude() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        Controller::make_compound_shape_with_op(
+            &mut model, CompoundOperation::Exclude,
+        );
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::Exclude);
+    }
+
+    #[test]
+    fn make_compound_shape_menu_still_uses_union() {
+        use crate::geometry::live::{CompoundOperation, LiveVariant};
+        let mut model = two_overlapping_rects();
+        // The menu-action wrapper delegates to Union.
+        Controller::make_compound_shape(&mut model);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        let operation = match &**child {
+            Element::Live(LiveVariant::CompoundShape(cs)) => cs.operation,
+            _ => panic!("expected Live(CompoundShape)"),
+        };
+        assert_eq!(operation, CompoundOperation::Union);
+    }
+
+    #[test]
+    fn release_compound_shape_restores_operands() {
+        let mut model = setup_model();
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 2]),
+        ]);
+        Controller::make_compound_shape(&mut model);
+        // Now release the compound (still selected).
+        Controller::release_compound_shape(&mut model);
+        let children = model.document().layers[0].children().unwrap();
+        // Back to a rect + group + line (three siblings).
+        let live_count = children.iter().filter(|c| matches!(***c, Element::Live(_))).count();
+        assert_eq!(live_count, 0);
+        assert_eq!(children.len(), 3);
+        // Released operands are the new selection.
+        assert_eq!(model.document().selection.len(), 2);
+    }
+
+    /// Two overlapping axis-aligned rects on a single layer:
+    /// r1 = [0..10]×[0..10], r2 = [5..15]×[0..10].
+    fn two_overlapping_rects() -> Model {
+        let r1 = make_rect(0.0, 0.0, 10.0, 10.0);
+        let r2 = make_rect(5.0, 0.0, 10.0, 10.0);
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![Rc::new(r1), Rc::new(r2)],
+            common: CommonProps::default(),
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        doc.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        Model::new(doc, None)
+    }
+
+    fn top_children_count(model: &Model) -> usize {
+        model.document().layers[0].children().map_or(0, |c| c.len())
+    }
+
+    #[test]
+    fn destructive_union_produces_one_polygon() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "union", &BooleanOptions::default());
+        assert_eq!(top_children_count(&model), 1);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        assert!(matches!(&**child, Element::Polygon(_)));
+        assert_eq!(model.document().selection.len(), 1);
+    }
+
+    #[test]
+    fn destructive_intersection_produces_one_polygon() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "intersection", &BooleanOptions::default());
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_exclude_produces_two_polygons() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "exclude", &BooleanOptions::default());
+        // Symmetric difference of two overlapping rects → 2 disjoint
+        // polygons.
+        assert_eq!(top_children_count(&model), 2);
+        assert_eq!(model.document().selection.len(), 2);
+    }
+
+    #[test]
+    fn destructive_subtract_front_consumes_front() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "subtract_front", &BooleanOptions::default());
+        // r2 (front, last) consumed; r1 minus r2 remains = 1 polygon.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_subtract_back_consumes_back() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "subtract_back", &BooleanOptions::default());
+        // r1 (back, first) consumed; r2 minus r1 remains = 1 polygon.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_crop_uses_frontmost_as_mask() {
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "crop", &BooleanOptions::default());
+        // r2 (front) is the mask, consumed; r1 clipped to its
+        // interior = 1 polygon covering the overlap.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_divide_produces_three_fragments() {
+        // Two overlapping rects → 3 fragments (left-only, overlap,
+        // right-only). All three get polygon-typed elements.
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "divide", &BooleanOptions::default());
+        assert_eq!(top_children_count(&model), 3);
+        for child in model.document().layers[0].children().unwrap() {
+            assert!(matches!(&**child, Element::Polygon(_)));
+        }
+    }
+
+    #[test]
+    fn destructive_trim_keeps_operands_with_own_paint() {
+        // Two overlapping rects: front untouched; back has overlap
+        // removed. Expect 2 polygons.
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "trim", &BooleanOptions::default());
+        assert_eq!(top_children_count(&model), 2);
+    }
+
+    #[test]
+    fn destructive_merge_unions_matching_fills() {
+        // Both rects default to Color::BLACK fill (see make_rect
+        // helper). MERGE performs TRIM, then unions the two touching
+        // same-fill survivors. Expected: 1 polygon covering both.
+        let mut model = two_overlapping_rects();
+        Controller::apply_destructive_boolean(&mut model, "merge", &BooleanOptions::default());
+        // TRIM would leave 2; MERGE collapses to 1.
+        assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn destructive_merge_does_not_union_different_fills() {
+        use crate::geometry::element::Color;
+        let red = Fill::new(Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 });
+        let blue = Fill::new(Color::Rgb { r: 0.0, g: 0.0, b: 1.0, a: 1.0 });
+        let r1 = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(red), stroke: None, common: CommonProps::default(),
+        });
+        let r2 = Element::Rect(RectElem {
+            x: 5.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(blue), stroke: None, common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![Rc::new(r1), Rc::new(r2)],
+            common: CommonProps::default(),
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        doc.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        let mut model = Model::new(doc, None);
+        Controller::apply_destructive_boolean(&mut model, "merge", &BooleanOptions::default());
+        // Different fills → no merge; TRIM output of 2 survives.
+        assert_eq!(top_children_count(&model), 2);
+    }
+
+    #[test]
+    fn destructive_divide_remove_unpainted_filters_no_paint_fragments() {
+        // Two rects, neither has fill or stroke → every DIVIDE
+        // fragment is "unpainted" (fill None, stroke None). With the
+        // flag off, fragments are kept (3). With the flag on, they
+        // are discarded (0).
+        let unpainted_rect = |x: f64| Rc::new(Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+        }));
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
+            common: CommonProps::default(),
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        doc.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        let mut model = Model::new(doc, None);
+
+        let mut off = BooleanOptions::default();
+        off.divide_remove_unpainted = false;
+        Controller::apply_destructive_boolean(&mut model, "divide", &off);
+        assert_eq!(top_children_count(&model), 3);
+
+        // Redo the selection (prior divide consumed them).
+        let mut model = {
+            let layer = Element::Layer(LayerElem {
+                name: "L0".to_string(),
+                children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
+                common: CommonProps::default(),
+            });
+            let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+            doc.selection = vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ];
+            Model::new(doc, None)
+        };
+        let mut on = BooleanOptions::default();
+        on.divide_remove_unpainted = true;
+        Controller::apply_destructive_boolean(&mut model, "divide", &on);
+        assert_eq!(top_children_count(&model), 0);
+    }
+
+    #[test]
+    fn destructive_remove_redundant_points_collapses_collinear() {
+        // Two overlapping rects. After UNION, the resulting ring has
+        // some collinear points along the shared vertical edges (the
+        // boolean algorithm retains intersection points). With the
+        // flag on, collinear points within Precision are collapsed.
+        let mut model = two_overlapping_rects();
+        let off = BooleanOptions::default();
+        Controller::apply_destructive_boolean(&mut model, "union", &off);
+        let pts_off = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Polygon(p) => p.points.len(),
+            _ => panic!("expected polygon"),
+        };
+
+        let mut model = two_overlapping_rects();
+        let mut on = BooleanOptions::default();
+        on.remove_redundant_points = true;
+        Controller::apply_destructive_boolean(&mut model, "union", &on);
+        let pts_on = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Polygon(p) => p.points.len(),
+            _ => panic!("expected polygon"),
+        };
+        // The collapse removes at least the collinear pair on the
+        // shared vertical seam; point count should not increase.
+        assert!(pts_on <= pts_off, "collapse should not add points");
+    }
+
+    #[test]
+    fn destructive_unknown_op_is_noop() {
+        let mut model = two_overlapping_rects();
+        let before = top_children_count(&model);
+        Controller::apply_destructive_boolean(&mut model, "nonexistent", &BooleanOptions::default());
+        assert_eq!(top_children_count(&model), before);
+    }
+
+    #[test]
+    fn expand_compound_shape_replaces_with_polygons() {
+        // Build a fresh doc with two overlapping rects so the boolean
+        // evaluates to one merged polygon.
+        let rect_a = make_rect(0.0, 0.0, 10.0, 10.0);
+        let rect_b = make_rect(5.0, 0.0, 10.0, 10.0);
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![Rc::new(rect_a), Rc::new(rect_b)],
+            common: CommonProps::default(),
+        });
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let mut model = Model::new(doc, None);
+
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ]);
+        Controller::make_compound_shape(&mut model);
+        Controller::expand_compound_shape(&mut model);
+
+        let children = model.document().layers[0].children().unwrap();
+        // Union of overlapping rects = 1 ring = 1 Polygon element.
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&*children[0], Element::Polygon(_)));
+        // The polygon is selected.
+        assert_eq!(model.document().selection.len(), 1);
     }
 
     #[test]

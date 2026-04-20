@@ -964,6 +964,91 @@ class Layer(Group):
     name: str = "Layer"
 
 
+# ─── LiveElement framework ─────────────────────────────────────
+# See transcripts/BOOLEAN.md § Live element framework. CompoundShape
+# is the first conformer (non-destructive boolean over an operand
+# tree). Future Live Effects (drop shadow, blend, ...) add a new
+# subclass of LiveElement.
+
+class CompoundOperation(Enum):
+    """Which boolean operation a CompoundShape evaluates to. Only
+    the four Shape Mode operations can be compound."""
+    UNION = "union"
+    SUBTRACT_FRONT = "subtract_front"
+    INTERSECTION = "intersection"
+    EXCLUDE = "exclude"
+
+
+class LiveElement(Element):
+    """Abstract base for non-destructive element kinds that store
+    source inputs and evaluate them on demand. Subclasses implement
+    ``bounds`` and any kind-specific rendering.
+
+    See BOOLEAN.md § Live element framework.
+    """
+    pass
+
+
+@dataclass(frozen=True)
+class CompoundShape(LiveElement):
+    """A live, non-destructive boolean element: stores the operation
+    and its operand tree; evaluates to a polygon set on demand.
+    See BOOLEAN.md § Compound shape data model.
+    """
+    operation: CompoundOperation = CompoundOperation.UNION
+    operands: tuple[Element, ...] = ()
+    fill: Fill | None = None
+    stroke: Stroke | None = None
+    opacity: float = 1.0
+    transform: Transform | None = None
+    locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
+
+    def evaluate(self, precision: float):
+        """Flatten operands to polygon sets, apply the boolean
+        operation, return the result. Pure — no cache today.
+        """
+        from geometry.live import apply_operation, element_to_polygon_set
+        operand_sets = [
+            element_to_polygon_set(op, precision) for op in self.operands
+        ]
+        return apply_operation(self.operation, operand_sets)
+
+    def bounds(self) -> tuple[float, float, float, float]:
+        """Bounding box of the evaluated geometry."""
+        from geometry.live import DEFAULT_PRECISION, bounds_of_polygon_set
+        return bounds_of_polygon_set(self.evaluate(DEFAULT_PRECISION))
+
+    def expand(self, precision: float) -> list["Element"]:
+        """Replace the compound shape with static Polygon element(s)
+        derived from its evaluated geometry. Each emitted polygon
+        carries the compound shape's own fill / stroke / common
+        props; the operand tree is discarded. Rings with fewer than
+        3 points are dropped. See BOOLEAN.md § Expand and Release
+        semantics.
+        """
+        ps = self.evaluate(precision)
+        return [
+            Polygon(
+                points=tuple(ring),
+                fill=self.fill,
+                stroke=self.stroke,
+                opacity=self.opacity,
+                transform=self.transform,
+                locked=self.locked,
+                visibility=self.visibility,
+            )
+            for ring in ps if len(ring) >= 3
+        ]
+
+    def release(self) -> tuple["Element", ...]:
+        """Return the operand tree as independent elements (inverse
+        of Make). Each operand keeps its own paint; the compound
+        shape's paint is discarded.
+        """
+        return self.operands
+
+
 def sync_tspans_from_content(element: Element) -> Element:
     """Rebuild a Text / TextPath element's ``tspans`` field from its
     ``content`` field. The resulting tuple has a single entry with

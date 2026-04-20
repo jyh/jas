@@ -2503,6 +2503,298 @@
           }
         }
       ]
+    },
+    "boolean_union": {
+      "description": "UNION_BUTTON. Destructively merge every selected element into a single path taking the union of their geometries. All operands are consumed; the result carries the frontmost operand's paint. See BOOLEAN.md \u00a7Operand and paint rules.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_union": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"union\""
+          }
+        }
+      ]
+    },
+    "boolean_subtract_front": {
+      "description": "SUBTRACT_FRONT_BUTTON. Subtract the frontmost selected element (the cutter) from each remaining element. Cutter is consumed; each remaining element keeps its own paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_subtract_front": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"subtract_front\""
+          }
+        }
+      ]
+    },
+    "boolean_intersection": {
+      "description": "INTERSECTION_BUTTON. Destructively reduce the selection to the region covered by every element. All operands are consumed; result carries the frontmost operand's paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_intersection": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"intersection\""
+          }
+        }
+      ]
+    },
+    "boolean_exclude": {
+      "description": "EXCLUDE_BUTTON. Destructively reduce the selection to the symmetric difference (region covered by exactly one operand). All operands are consumed; result carries the frontmost operand's paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_exclude": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"exclude\""
+          }
+        }
+      ]
+    },
+    "boolean_crop": {
+      "description": "CROP_BUTTON. Use the frontmost selected element as a mask and crop every other element to its interior. The mask is consumed; each cropped survivor keeps its own paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_crop": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"crop\""
+          }
+        }
+      ]
+    },
+    "boolean_subtract_back": {
+      "description": "SUBTRACT_BACK_BUTTON. Subtract the backmost selected element from each remaining element. Backmost is consumed; each remaining element keeps its own paint.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_subtract_back": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"subtract_back\""
+          }
+        }
+      ]
+    },
+    "boolean_divide": {
+      "description": "DIVIDE_BUTTON. Cut every selected element apart so no two overlap. Each resulting fragment inherits the paint of the frontmost original element that covered its area. All operands are consumed.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_divide": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"divide\""
+          }
+        }
+      ]
+    },
+    "boolean_trim": {
+      "description": "TRIM_BUTTON. Remove the parts of each element hidden behind elements in front of it. Each remaining element keeps its own paint. Frontmost operand is untouched.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_trim": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"trim\""
+          }
+        }
+      ]
+    },
+    "boolean_merge": {
+      "description": "MERGE_BUTTON. Perform TRIM, then union any two touching survivors whose fills are exactly equal (solid colors only; gradients, patterns, and None never match). The merged path carries the frontmost contributor's full paint. See BOOLEAN.md \u00a7Operand and paint rules for the merge predicate.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_merge": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"merge\""
+          }
+        }
+      ]
+    },
+    "boolean_union_compound": {
+      "description": "Alt/Option+click UNION. Creates a live compound shape with the Union operation from the selection instead of applying UNION destructively.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_union_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"union_compound\""
+          }
+        }
+      ]
+    },
+    "boolean_subtract_front_compound": {
+      "description": "Alt/Option+click SUBTRACT_FRONT. Creates a live compound shape with the SubtractFront operation from the selection.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_subtract_front_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"subtract_front_compound\""
+          }
+        }
+      ]
+    },
+    "boolean_intersection_compound": {
+      "description": "Alt/Option+click INTERSECTION. Creates a live compound shape with the Intersection operation from the selection.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_intersection_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"intersection_compound\""
+          }
+        }
+      ]
+    },
+    "boolean_exclude_compound": {
+      "description": "Alt/Option+click EXCLUDE. Creates a live compound shape with the Exclude operation from the selection.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "boolean_exclude_compound": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "\"exclude_compound\""
+          }
+        }
+      ]
+    },
+    "reset_boolean_panel": {
+      "description": "Reset the Boolean panel's transient state. Clears state.last_boolean_op so Repeat Boolean Operation becomes a no-op until the next op click. Does not touch the Boolean Options dialog values (precision / remove_redundant_points / divide_remove_unpainted); those are reset from the dialog's Defaults button instead. See BOOLEAN.md \u00a7Panel metadata.\n",
+      "category": "boolean",
+      "effects": [
+        {
+          "reset_boolean_panel": true
+        },
+        {
+          "set": {
+            "last_boolean_op": "null"
+          }
+        }
+      ]
+    },
+    "repeat_boolean_operation": {
+      "description": "Re-apply the most-recent boolean operation on the current selection. Reads state.last_boolean_op (one of 13 enum values or null) and fires the matching destructive op or compound- creating variant. No-op when last_boolean_op is null. Make / Release / Expand Compound Shape are deliberately not repeatable. See BOOLEAN.md \u00a7Repeat state.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "repeat_boolean_operation": true
+        }
+      ]
+    },
+    "open_boolean_options": {
+      "description": "Open the Boolean Options dialog seeded with the current state.boolean_* values. OK writes the dialog's values back to document state; Cancel discards. See BOOLEAN.md \u00a7Boolean Options dialog.\n",
+      "category": "boolean",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "boolean_options",
+            "params": {
+              "precision": "state.boolean_precision",
+              "remove_redundant_points": "state.boolean_remove_redundant_points",
+              "divide_remove_unpainted": "state.boolean_divide_remove_unpainted"
+            }
+          }
+        }
+      ]
+    },
+    "boolean_options_confirm": {
+      "description": "Commit the Boolean Options dialog. Writes precision, remove- redundant-points, and divide-remove-unpainted to document state and closes the dialog.\n",
+      "category": "boolean",
+      "params": {
+        "precision": {
+          "type": "number"
+        },
+        "remove_redundant_points": {
+          "type": "bool"
+        },
+        "divide_remove_unpainted": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        {
+          "set": {
+            "boolean_precision": "param.precision",
+            "boolean_remove_redundant_points": "param.remove_redundant_points",
+            "boolean_divide_remove_unpainted": "param.divide_remove_unpainted"
+          }
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "make_compound_shape": {
+      "description": "Equivalent to Alt+click on UNION. Replaces the current selection with a single compound shape (live, non-destructive) whose operand list is the selected elements in their original z-order and whose operation is Union. The new compound shape is selected and inserted at the frontmost operand's position. Enabled when selection_count >= 2. See BOOLEAN.md \u00a7Compound shapes.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "make_compound_shape": true
+        }
+      ]
+    },
+    "release_compound_shape": {
+      "description": "Inverse of Make. For every compound shape in the selection, replaces it with its operand children (each keeping its own paint). The compound shape's own paint is discarded. Enabled when the selection contains at least one compound shape.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "release_compound_shape": true
+        }
+      ]
+    },
+    "expand_compound_shape": {
+      "description": "Flattens every compound shape in the selection into static Polygon element(s) derived from its evaluated geometry, using the compound shape's own paint. The operand tree is discarded. Enabled when the selection contains at least one compound shape. See BOOLEAN.md \u00a7Expand and Release semantics.\n",
+      "category": "boolean",
+      "effects": [
+        "snapshot",
+        {
+          "expand_compound_shape": true
+        }
+      ]
     }
   },
   "version": 1,
@@ -2555,6 +2847,13 @@
               "panels": [
                 "color",
                 "swatches"
+              ],
+              "active": 0
+            },
+            {
+              "panels": [
+                "align",
+                "boolean"
               ],
               "active": 0
             },
@@ -3143,6 +3442,46 @@
     "align_to_key_object": {
       "viewbox": "0 0 16 16",
       "svg": "<rect x=\"1.5\" y=\"1.5\" width=\"13\" height=\"13\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-dasharray=\"1.4 1\"/> <rect x=\"5\" y=\"5\" width=\"6\" height=\"6\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_union": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,2 H14 V10 H6 Z\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_subtract_front": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-dasharray=\"1.2 1\"/>\n"
+    },
+    "boolean_intersection": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"6\" y=\"4\" width=\"4\" height=\"6\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_exclude": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/> <path d=\"M6,2 H14 V10 H6 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/>\n"
+    },
+    "boolean_divide": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"6\" y1=\"4\" x2=\"6\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1\"/> <line x1=\"10\" y1=\"4\" x2=\"10\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1\"/> <line x1=\"2\" y1=\"10\" x2=\"10\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1\"/>\n"
+    },
+    "boolean_trim": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H10 V12 H2 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/>\n"
+    },
+    "boolean_merge": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,4 H14 V10 H2 Z\" fill=\"currentColor\"/> <rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/>\n"
+    },
+    "boolean_crop": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"currentColor\" opacity=\"0.35\"/> <rect x=\"6\" y=\"2\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/> <rect x=\"6\" y=\"4\" width=\"4\" height=\"6\" fill=\"currentColor\"/>\n"
+    },
+    "boolean_subtract_back": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"4\" width=\"8\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-dasharray=\"1.2 1\"/> <path d=\"M6,2 H14 V10 H6 Z M6,4 H10 V10 H6 Z\" fill=\"currentColor\" fill-rule=\"evenodd\"/>\n"
+    },
+    "boolean_expand": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-dasharray=\"1.4 1\"/> <polygon points=\"5,8 11,8 8,5\" fill=\"currentColor\"/> <polygon points=\"5,8 11,8 8,11\" fill=\"currentColor\"/>\n"
     }
   },
   "layout": {
@@ -5240,6 +5579,43 @@
       "default": false,
       "description": "When true, Align / Distribute / Distribute Spacing operations consult each element's preview bounds (stroke-inclusive); otherwise they consult geometric bounds.\n"
     },
+    "last_boolean_op": {
+      "type": "enum",
+      "values": [
+        null,
+        "union",
+        "subtract_front",
+        "intersection",
+        "exclude",
+        "divide",
+        "trim",
+        "merge",
+        "crop",
+        "subtract_back",
+        "union_compound",
+        "subtract_front_compound",
+        "intersection_compound",
+        "exclude_compound"
+      ],
+      "default": null,
+      "nullable": true,
+      "description": "Most-recently-applied boolean operation. Populated by the destructive and compound-creating actions; consumed by \"Repeat Boolean Operation\". Make / Release / Expand Compound Shape do not write this field.\n"
+    },
+    "boolean_precision": {
+      "type": "number",
+      "default": 0.0283,
+      "description": "Geometric tolerance in points for Bezier flattening, Bezier refit, and redundant-point removal. Edited via the Boolean Options dialog. Default 0.0283 pt = 0.01 mm.\n"
+    },
+    "boolean_remove_redundant_points": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, collinear points in boolean-op output are collapsed within Precision after each operation. Edited via the Boolean Options dialog.\n"
+    },
+    "boolean_divide_remove_unpainted": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, DIVIDE fragments with no fill and no stroke are discarded rather than kept as invisible paths. Edited via the Boolean Options dialog.\n"
+    },
     "fill_on_top": {
       "type": "bool",
       "default": true,
@@ -5485,6 +5861,173 @@
                 "variant": "primary",
                 "bind": {
                   "disabled": "dialog.name == \"\""
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "boolean_options": {
+      "summary": "Boolean Options",
+      "description": "Modal dialog reached from the Boolean panel's hamburger menu via \"Boolean Options\u2026\". Edits three document-level preferences that every boolean operation consults:\n- Precision: single tolerance (in points) for Bezier flattening,\n  Bezier refit, and redundant-point collapse. Default 0.0283 pt\n  (= 0.01 mm).\n- Remove Redundant Points: when on, collinear points in boolean-\n  op output whose deviation is within Precision are collapsed.\n- Divide and Outline Will Remove Unpainted Artwork: when on,\n  DIVIDE fragments with no fill and no stroke are discarded\n  rather than kept as invisible paths.\n\nCancel dismisses the dialog without applying; OK writes the three fields to document state and dismisses. See BOOLEAN.md \u00a7Boolean Options dialog.\n",
+      "modal": true,
+      "width": 360,
+      "params": {
+        "precision": {
+          "type": "number"
+        },
+        "remove_redundant_points": {
+          "type": "bool"
+        },
+        "divide_remove_unpainted": {
+          "type": "bool"
+        }
+      },
+      "state": {
+        "precision": {
+          "type": "number",
+          "default": 0.0283,
+          "description": "Geometric tolerance in points"
+        },
+        "remove_redundant_points": {
+          "type": "bool",
+          "default": false,
+          "description": "Collapse near-collinear points in boolean-op output"
+        },
+        "divide_remove_unpainted": {
+          "type": "bool",
+          "default": false,
+          "description": "DIVIDE drops fragments with no paint when on"
+        }
+      },
+      "init": {
+        "precision": "param.precision",
+        "remove_redundant_points": "param.remove_redundant_points",
+        "divide_remove_unpainted": "param.divide_remove_unpainted"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 10,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 4,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Precision:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "bo_precision_input",
+                    "type": "number_input",
+                    "min": 0.001,
+                    "max": 100,
+                    "step": 0.0001,
+                    "bind": {
+                      "value": "dialog.precision"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "pt",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 12,
+                "children": [
+                  {
+                    "id": "bo_remove_redundant_points",
+                    "type": "toggle",
+                    "label": "Remove Redundant Points",
+                    "bind": {
+                      "checked": "dialog.remove_redundant_points"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 12,
+                "children": [
+                  {
+                    "id": "bo_divide_remove_unpainted",
+                    "type": "toggle",
+                    "label": "Divide and Outline Will Remove Unpainted Artwork",
+                    "bind": {
+                      "checked": "dialog.divide_remove_unpainted"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "end"
+            },
+            "children": [
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "OK",
+                "action": "boolean_options_confirm",
+                "variant": "primary",
+                "params": {
+                  "precision": "dialog.precision",
+                  "remove_redundant_points": "dialog.remove_redundant_points",
+                  "divide_remove_unpainted": "dialog.divide_remove_unpainted"
                 }
               }
             ]
@@ -10209,6 +10752,406 @@
                 },
                 "bind": {
                   "value": "panel.artboard_name"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "boolean_panel_content": {
+      "id": "boolean_panel_content",
+      "type": "panel",
+      "summary": "Boolean",
+      "description": "The Boolean panel performs boolean operations on the geometry of the current selection. Nine destructive operations and four compound- shape variants let the user combine overlapping paths into unified shapes or live (non-destructive) compound shapes.\nLayout (top to bottom):\nRow 1 \u2014 \"Shape Modes:\" label. Row 2 \u2014 four icon buttons (UNION, SUBTRACT_FRONT, INTERSECTION,\n  EXCLUDE) on the left half; an \"Expand\" button on the right half\n  that flattens the selected compound shape(s) to static paths.\nRow 3 \u2014 five icon buttons (DIVIDE, TRIM, MERGE, CROP,\n  SUBTRACT_BACK). A sixth slot is reserved for OUTLINE, which is\n  deferred until the planar-graph / DCEL primitive ships.\n\nAlt/Option-clicking UNION, SUBTRACT_FRONT, INTERSECTION, or EXCLUDE creates a live compound shape that re-evaluates when its operands are edited. A plain click applies the boolean destructively.\nEnable / disable rules: - Every operation button requires at least 2 selected elements. - The Expand button and Release / Expand Compound Shape menu items\n  require the selection to contain at least one compound shape.\n- Repeat Boolean Operation enables only when last_operation is not\n  null and the current selection satisfies that op's gate.\n\nSee `transcripts/BOOLEAN.md` for the complete spec, operand and paint rules, Boolean Options dialog, and cross-language parity expectations.\n",
+      "state": {
+        "last_operation": {
+          "type": "enum",
+          "values": [
+            null,
+            "union",
+            "subtract_front",
+            "intersection",
+            "exclude",
+            "divide",
+            "trim",
+            "merge",
+            "crop",
+            "subtract_back",
+            "union_compound",
+            "subtract_front_compound",
+            "intersection_compound",
+            "exclude_compound"
+          ],
+          "default": null,
+          "nullable": true,
+          "description": "Most-recently-applied operation. Populated by each op action; consumed by \"Repeat Boolean Operation\". Mirrors state.last_boolean_op.\n"
+        }
+      },
+      "init": {
+        "last_operation": "state.last_boolean_op"
+      },
+      "menu": [
+        {
+          "label": "Repeat Boolean Operation",
+          "action": "repeat_boolean_operation"
+        },
+        {
+          "label": "Boolean Options\u2026",
+          "action": "open_boolean_options"
+        },
+        "separator",
+        {
+          "label": "Make Compound Shape",
+          "action": "make_compound_shape"
+        },
+        {
+          "label": "Release Compound Shape",
+          "action": "release_compound_shape"
+        },
+        {
+          "label": "Expand Compound Shape",
+          "action": "expand_compound_shape"
+        },
+        "separator",
+        {
+          "label": "Reset Panel",
+          "action": "reset_boolean_panel"
+        },
+        "separator",
+        {
+          "label": "Close Boolean",
+          "action": "close_panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "boolean_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "row",
+            "children": [
+              {
+                "type": "text",
+                "content": "Shape Modes:",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 2,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "boolean_union_button",
+                "type": "icon_button",
+                "icon": "boolean_union",
+                "summary": "Union",
+                "description": "UNION_BUTTON. Merge all selected elements into a single element taking the union of their geometries. Result carries the frontmost operand's paint. Alt/Option+click creates a live compound shape instead.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "condition": "not event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_union"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_union_compound"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_subtract_front_button",
+                "type": "icon_button",
+                "icon": "boolean_subtract_front",
+                "summary": "Subtract Front",
+                "description": "SUBTRACT_FRONT_BUTTON. Subtract the frontmost element from all others in the selection. The frontmost is consumed; remaining elements keep their own paint. Alt/Option+click creates a live compound shape instead.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "condition": "not event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_subtract_front"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_subtract_front_compound"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_intersection_button",
+                "type": "icon_button",
+                "icon": "boolean_intersection",
+                "summary": "Intersection",
+                "description": "INTERSECTION_BUTTON. Keep only the region covered by every selected element. Result carries the frontmost operand's paint. Alt/Option+click creates a live compound shape instead.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "condition": "not event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_intersection"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_intersection_compound"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_exclude_button",
+                "type": "icon_button",
+                "icon": "boolean_exclude",
+                "summary": "Exclude",
+                "description": "EXCLUDE_BUTTON. Keep the region covered by exactly one selected element (symmetric difference). Result carries the frontmost operand's paint. Alt/Option+click creates a live compound shape instead.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "condition": "not event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_exclude"
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_exclude_compound"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_expand_button",
+                "type": "icon_button",
+                "icon": "boolean_expand",
+                "summary": "Expand",
+                "description": "EXPAND_BUTTON. Flatten every selected compound shape into static Polygon elements derived from its evaluated geometry. The compound shape's paint is carried to each expanded polygon; the operand tree is discarded. Enabled only when the selection contains at least one compound shape.\n",
+                "style": {
+                  "size": 20,
+                  "flex": 2
+                },
+                "bind": {
+                  "disabled": "not active_document.selection_has_compound_shape"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "expand_compound_shape"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "children": [
+              {
+                "type": "text",
+                "content": "Pathfinders:",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 2,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "boolean_divide_button",
+                "type": "icon_button",
+                "icon": "boolean_divide",
+                "summary": "Divide",
+                "description": "DIVIDE_BUTTON. Cut the elements apart so none overlap. Each fragment inherits the paint of the frontmost original element that covered it.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_divide"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_trim_button",
+                "type": "icon_button",
+                "icon": "boolean_trim",
+                "summary": "Trim",
+                "description": "TRIM_BUTTON. Remove parts of elements that are hidden behind other elements. Each survivor keeps its own paint.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_trim"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_merge_button",
+                "type": "icon_button",
+                "icon": "boolean_merge",
+                "summary": "Merge",
+                "description": "MERGE_BUTTON. TRIM first, then union any touching survivors whose fills are exactly equal.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_merge"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_crop_button",
+                "type": "icon_button",
+                "icon": "boolean_crop",
+                "summary": "Crop",
+                "description": "CROP_BUTTON. Use the frontmost element as a mask and crop all others to its interior. The mask is consumed; each cropped survivor keeps its own paint.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_crop"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "boolean_subtract_back_button",
+                "type": "icon_button",
+                "icon": "boolean_subtract_back",
+                "summary": "Subtract Back",
+                "description": "SUBTRACT_BACK_BUTTON. Subtract the backmost element from all others. The backmost is consumed; remaining elements keep their own paint.\n",
+                "style": {
+                  "size": 20
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count < 2"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "dispatch": "boolean_subtract_back"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "spacer",
+                "style": {
+                  "size": 20
                 }
               }
             ]

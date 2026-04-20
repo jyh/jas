@@ -605,6 +605,10 @@ private func packElement(_ elem: Element) -> MsgValue {
                        vstr(e.fontWeight), vstr(e.fontStyle), vstr(e.textDecoration),
                        packFill(e.fill), packStroke(e.stroke),
                        .array(tspans)])
+    case .live:
+        // Phase 1: binary serialization of Live elements is deferred
+        // to the phase that implements compound-shape document I/O.
+        fatalError("binary serialization of Live elements not yet implemented")
     }
 }
 

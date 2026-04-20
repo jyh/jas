@@ -918,6 +918,14 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         for child in v.children { drawElement(ctx, child, ancestorVis: effective) }
+
+    case .live(let v):
+        // Phase 1 stub: render each operand so the user can still see
+        // the source artwork. Phase 2 replaces with the evaluated
+        // polygon_set (boolean op result).
+        ctx.setAlpha(CGFloat(v.opacity))
+        applyTransform(ctx, v.transform)
+        for child in v.operands { drawElement(ctx, child, ancestorVis: effective) }
     }
     ctx.restoreGState()
 }
@@ -1122,6 +1130,7 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
         case .textPath(let v): applyTransform(ctx, v.transform)
         case .group(let v): applyTransform(ctx, v.transform)
         case .layer(let v): applyTransform(ctx, v.transform)
+        case .live(let v): applyTransform(ctx, v.transform)
         }
         drawElementOverlay(ctx, node, kind: es.kind)
         ctx.restoreGState()

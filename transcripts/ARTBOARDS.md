@@ -14,26 +14,27 @@ When a new document is created, by default it starts with a single artboard of
 size 612pt * 792pt.
 
 An artboard displays on the canvas as a white area. The canvas background is
-gray, determined by the theme. An example is shown in
-examples/artboard-canvas.md.
+gray, determined by the theme.
 
 The Artboard Panel contains a list of rows, each row with the following
 elements.
 
 - ARTBOARD_NUMBER (artboards are assigned unique numbers starting with 1)
 - ARTBOARD_NAME
-- ARTBOARD_DIALOG_BUTTON (brings up the Artboard Dialogue Box, an example is
+- ARTBOARD_DIALOG_BUTTON (brings up the Artboard Dialogue Box)
   shown in examples/artboard-dialog.png)
 
-```yaml panel:
+```yaml
+panel:
 - .row:
   - .col-1: ARTBOARD_NUMBER
   - .col-10: ARTBOARD_NAME
-  - .col-1: ARTBOARD_DIALOG_BUTTON ```
+  - .col-1: ARTBOARD_DIALOG_BUTTON
+```
 
 The panel menu has the following entries.
 
-- Roman Hanging Punctuation (w/checkbox)
+- Hanging Punctuation (w/checkbox)
 - ----
 - Justification... (brings up the Justification Dialog box shown in
   examples/justification.png)
@@ -42,5 +43,3 @@ The panel menu has the following entries.
 - ----
 - Reset Panel (resets panel element back to their defaults, updating the
   selection)
-
-THIS IS WORK IN PROGRESS
