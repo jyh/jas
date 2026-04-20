@@ -17,6 +17,10 @@ from algorithms.hit_test import (
     rects_intersect, circle_intersects_rect, ellipse_intersects_rect,
     point_in_polygon,
 )
+from algorithms import align as align_algo
+from algorithms.align import (
+    AlignReference, geometric_bounds, preview_bounds, union_bounds,
+)
 from algorithms.boolean import (
     boolean_union, boolean_intersect, boolean_subtract, boolean_exclude,
 )
@@ -34,7 +38,7 @@ from algorithms.text_layout import (
     ParagraphSegment, TextAlign,
 )
 from algorithms.path_text_layout import layout_path_text
-from geometry.element import MoveTo, LineTo, CurveTo, QuadTo, ClosePath
+from geometry.element import MoveTo, LineTo, CurveTo, QuadTo, ClosePath, Rect
 from geometry.measure import Measure, Unit
 from geometry.test_json import parse_element_json
 
@@ -70,6 +74,7 @@ def main():
         "text_layout": run_text_layout,
         "text_layout_paragraph": run_text_layout_paragraph,
         "path_text_layout": run_path_text_layout,
+        "align": run_align,
     }
 
     if algo not in runners:
@@ -426,6 +431,66 @@ def run_path_text_layout(vectors):
             "char_count": lay.char_count,
             "glyphs": glyphs,
             "total_length": lay.total_length,
+        }})
+    return results
+
+
+# ---------------------------------------------------------------
+# Align (Stage 5i parity runner)
+# ---------------------------------------------------------------
+
+_ALIGN_OPS = {
+    "align_left": align_algo.align_left,
+    "align_horizontal_center": align_algo.align_horizontal_center,
+    "align_right": align_algo.align_right,
+    "align_top": align_algo.align_top,
+    "align_vertical_center": align_algo.align_vertical_center,
+    "align_bottom": align_algo.align_bottom,
+    "distribute_left": align_algo.distribute_left,
+    "distribute_horizontal_center": align_algo.distribute_horizontal_center,
+    "distribute_right": align_algo.distribute_right,
+    "distribute_top": align_algo.distribute_top,
+    "distribute_vertical_center": align_algo.distribute_vertical_center,
+    "distribute_bottom": align_algo.distribute_bottom,
+}
+_ALIGN_SPACING_OPS = {
+    "distribute_vertical_spacing": align_algo.distribute_vertical_spacing,
+    "distribute_horizontal_spacing": align_algo.distribute_horizontal_spacing,
+}
+
+
+def run_align(vectors):
+    results = []
+    for v in vectors:
+        rects = [Rect(x=r[0], y=r[1], width=r[2], height=r[3]) for r in v["rects"]]
+        pairs = [((i,), r) for i, r in enumerate(rects)]
+        use_preview = v.get("use_preview_bounds", False)
+        bounds_fn = preview_bounds if use_preview else geometric_bounds
+
+        ref = v.get("reference") or {}
+        kind = ref.get("kind", "selection")
+        if kind == "artboard":
+            reference = AlignReference.artboard(tuple(ref.get("bbox", [0, 0, 0, 0])))
+        elif kind == "key_object":
+            idx = ref["index"]
+            reference = AlignReference.key_object(bounds_fn(rects[idx]), (idx,))
+        else:
+            reference = AlignReference.selection(union_bounds(rects, bounds_fn))
+
+        op = v["op"]
+        if op in _ALIGN_OPS:
+            translations = _ALIGN_OPS[op](pairs, reference, bounds_fn)
+        elif op in _ALIGN_SPACING_OPS:
+            translations = _ALIGN_SPACING_OPS[op](
+                pairs, reference, v.get("explicit_gap"), bounds_fn)
+        else:
+            raise ValueError(f"unknown align op: {op}")
+
+        results.append({"name": v["name"], "result": {
+            "translations": [
+                {"path": list(t.path), "dx": t.dx, "dy": t.dy}
+                for t in translations
+            ],
         }})
     return results
 
