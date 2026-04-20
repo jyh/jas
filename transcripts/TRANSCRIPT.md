@@ -1528,3 +1528,15 @@ and completeness. Make suggestions for improvements. Rank your responses in prio
 from high to low, and giving each a number. What are the benefits? What are the
 downsides? Be ready for a deep dive into any of the suggestions.
 
+# Opacity
+
+Read OPACITY.md
+
+An example is shown in examples/opacity.png.
+An example of the Opacity Menu is in examples/opacity-menu.png.
+An example of the Opacity Modes is in examples/opacity-modes.png.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
