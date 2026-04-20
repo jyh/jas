@@ -72,9 +72,16 @@ def test_phase3_fixture(fixture_path: str) -> None:
         store.set_active_panel(panel_id)
     run_effects(effects, {}, store)
 
-    # Assert the document tree matches expected_doc
+    # Assert the document tree matches expected_doc.
+    # The at-least-one-artboard invariant (ARTBOARDS.md) adds `artboards`
+    # and `artboard_options` to every document on load; phase3 fixtures
+    # pre-date the invariant and cover layer semantics only, so strip
+    # those keys before comparison.
     expected = fixture["expected_doc"]
-    actual = store.document()
+    actual = {
+        k: v for k, v in store.document().items()
+        if k not in ("artboards", "artboard_options")
+    }
     assert actual == expected, (
         f"\n--- Fixture: {os.path.basename(fixture_path)} ---\n"
         f"Expected: {expected}\n"

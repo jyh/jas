@@ -13,7 +13,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-CANONICAL_TYPES = frozenset({"bool", "number", "string", "color", "enum", "list", "object"})
+CANONICAL_TYPES = frozenset({
+    "bool", "number", "string", "color", "color_or_transparent",
+    "enum", "list", "object",
+})
 
 _COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
 _NUMBER_STR_RE = re.compile(r'^-?\d+(\.\d+)?$')
@@ -203,6 +206,11 @@ def coerce_value(value: Any, entry: SchemaEntry) -> tuple[Any, str | None]:
 
     if t == "color":
         if isinstance(value, str) and _COLOR_RE.match(value):
+            return value, None
+        return None, "type_mismatch"
+
+    if t == "color_or_transparent":
+        if isinstance(value, str) and (value == "transparent" or _COLOR_RE.match(value)):
             return value, None
         return None, "type_mismatch"
 

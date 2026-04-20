@@ -184,6 +184,25 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         }
         return None, layer
 
+    # doc.create_artboard: { [field]: expr, ... } — ARTBOARDS.md §Menu — New Artboard
+    # Factory-and-insert: mints a fresh 8-char base36 id, picks the
+    # next unused "Artboard N" name unless overridden, appends to
+    # document.artboards, and returns the new artboard for `as:`.
+    if "doc.create_artboard" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.create_artboard"]
+        overrides: dict = {}
+        if isinstance(spec, dict):
+            eval_ctx = store.eval_context(ctx)
+            for k, v in spec.items():
+                if isinstance(v, str):
+                    val = evaluate(v, eval_ctx)
+                    overrides[k] = val.value if val.type != ValueType.CLOSURE else None
+                else:
+                    overrides[k] = v
+        artboard = store.create_artboard(overrides)
+        return None, artboard
+
     # doc.delete_at: path_expr — PHASE3 §5.5
     # Deletes the element at the given path. Returns the deleted
     # element (native form) for binding via `as:`.

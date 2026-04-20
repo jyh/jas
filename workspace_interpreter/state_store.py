@@ -7,13 +7,90 @@ to the subscribe mechanism.
 
 from __future__ import annotations
 import copy
+import logging
 from typing import Callable
+
+# ── Artboard invariants (ARTBOARDS.md §At-least-one-artboard invariant) ──
+
+_ARTBOARD_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+_ARTBOARD_ID_LENGTH = 8
+
+
+def _generate_artboard_id(rng=None) -> str:
+    """Mint an 8-char base36 id. Pass a seeded ``random.Random`` for
+    deterministic tests; default is cryptographically random."""
+    import random
+    import secrets
+    if rng is None:
+        rng = random.Random(secrets.randbits(128))
+    return "".join(rng.choices(_ARTBOARD_ID_ALPHABET, k=_ARTBOARD_ID_LENGTH))
+
+
+def _default_artboard(artboard_id: str, name: str = "Artboard 1") -> dict:
+    """Return the canonical default artboard: Letter 612x792 at origin,
+    transparent fill, all display toggles off."""
+    return {
+        "id": artboard_id,
+        "name": name,
+        "x": 0,
+        "y": 0,
+        "width": 612,
+        "height": 792,
+        "fill": "transparent",
+        "show_center_mark": False,
+        "show_cross_hairs": False,
+        "show_video_safe_areas": False,
+        "video_ruler_pixel_aspect_ratio": 1.0,
+    }
+
+
+def next_artboard_name(artboards: list) -> str:
+    """Pick ``Artboard N`` with the smallest N not currently used as a
+    default-pattern name. Case-sensitive match on ``^Artboard \\d+$``
+    with exactly one space (ARTBOARDS.md §Numbering and naming)."""
+    import re
+    used: set[int] = set()
+    for a in artboards:
+        if not isinstance(a, dict):
+            continue
+        name = a.get("name", "")
+        if isinstance(name, str):
+            m = re.match(r'^Artboard (\d+)$', name)
+            if m:
+                used.add(int(m.group(1)))
+    n = 1
+    while n in used:
+        n += 1
+    return f"Artboard {n}"
+
+
+def ensure_artboards_invariant(document: dict, id_generator=None) -> bool:
+    """Mutate ``document`` in-place to enforce ``artboards.length >= 1``
+    and populate ``artboard_options`` defaults. Returns True when a
+    default artboard was inserted — callers emit the log line.
+
+    ``id_generator`` is a zero-arg callable returning a fresh id string;
+    tests pass a seeded generator for determinism."""
+    gen = id_generator if id_generator is not None else _generate_artboard_id
+    repaired = False
+    artboards = document.get("artboards")
+    if not isinstance(artboards, list) or len(artboards) == 0:
+        document["artboards"] = [_default_artboard(gen())]
+        repaired = True
+    options = document.get("artboard_options")
+    if not isinstance(options, dict):
+        options = {}
+        document["artboard_options"] = options
+    options.setdefault("fade_region_outside_artboard", True)
+    options.setdefault("update_while_dragging", True)
+    return repaired
 
 
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
-    def __init__(self, defaults: dict | None = None, document: dict | None = None):
+    def __init__(self, defaults: dict | None = None, document: dict | None = None,
+                 artboard_id_generator=None):
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
@@ -29,10 +106,22 @@ class StateStore:
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
         # Phase 3: optional document tree for doc.set / snapshot effects.
-        # Shape: {"layers": [<element>, ...]} where <element> is a dict
-        # with at least {"kind": str, "name": str}. Real apps use a
-        # native Model; tests use plain dicts.
+        # Shape: {"layers": [<element>, ...], "artboards": [<artboard>, ...],
+        # "artboard_options": {...}}. Real apps use a native Model; tests
+        # use plain dicts.
         self._document: dict | None = document
+        # Random-like rng (has .choices()) used for artboard id generation.
+        # ensure_artboards_invariant expects a zero-arg callable, so wrap.
+        self._artboard_id_rng = artboard_id_generator
+        if self._document is not None:
+            id_fn = lambda: _generate_artboard_id(self._artboard_id_rng)
+            repaired = ensure_artboards_invariant(
+                self._document, id_generator=id_fn,
+            )
+            if repaired:
+                logging.getLogger("workspace_interpreter").info(
+                    "Document had no artboards; inserted default."
+                )
         self._snapshots: list[dict] = []
 
     # ── Global state ─────────────────────────────────────────
@@ -343,6 +432,46 @@ class StateStore:
             return None
         return children.pop(last)
 
+    # ── Artboards ────────────────────────────────────────────
+
+    def create_artboard(self, overrides: dict | None = None) -> dict | None:
+        """Append a new artboard to ``document.artboards``.
+
+        A fresh 8-char base36 id is minted; on (astronomically unlikely)
+        collision the id generator is retried up to 100 times. Name
+        defaults to the next unused ``Artboard N`` if not supplied in
+        overrides. Field overrides map 1:1 onto artboard fields (``x``,
+        ``y``, ``width``, ``height``, ``fill``, display toggles).
+
+        Returns the new artboard dict (live reference inside the
+        document), or None when there is no document."""
+        if self._document is None:
+            return None
+        artboards = self._document.setdefault("artboards", [])
+        if not isinstance(artboards, list):
+            return None
+        existing_ids = {a.get("id") for a in artboards if isinstance(a, dict)}
+        aid = None
+        for _ in range(100):
+            candidate = _generate_artboard_id(self._artboard_id_rng)
+            if candidate not in existing_ids:
+                aid = candidate
+                break
+        if aid is None:
+            return None
+        overrides = overrides or {}
+        name = overrides.get("name")
+        if not isinstance(name, str) or not name.strip():
+            name = next_artboard_name(artboards)
+        artboard = _default_artboard(aid, name)
+        for k, v in overrides.items():
+            if k == "name":
+                continue
+            if k in artboard:
+                artboard[k] = v
+        artboards.append(artboard)
+        return artboard
+
     def set_element_field(self, path: tuple[int, ...], dotted_field: str, value) -> bool:
         """Write value to the element at path under dotted_field.
         Creates intermediate dicts as needed. Returns True on success."""
@@ -384,12 +513,57 @@ class StateStore:
         Includes top_level_layers and top_level_layer_paths (Phase 3 §7.2).
         Also exposes computed properties for new_layer: next_layer_name and
         new_layer_insert_index — derived from current layers + panel state.
+        Artboard fields (ARTBOARDS.md): artboards, artboard_options,
+        artboards_count, next_artboard_name, current_artboard_id,
+        artboards_panel_selection_ids.
         """
         from workspace_interpreter.expr_types import Value
         canvas_sel = self._canvas_selection_paths()
         has_selection = len(canvas_sel) > 0
         selection_count = len(canvas_sel)
         element_selection = [Value.path(p) for p in canvas_sel]
+        # Artboard-view computation (works whether document is None or not)
+        if self._document is None:
+            raw_artboards: list = []
+            raw_options: dict = {}
+        else:
+            raw_ab = self._document.get("artboards")
+            raw_artboards = raw_ab if isinstance(raw_ab, list) else []
+            raw_opt = self._document.get("artboard_options")
+            raw_options = raw_opt if isinstance(raw_opt, dict) else {}
+        artboards_view: list = []
+        for i, a in enumerate(raw_artboards):
+            if isinstance(a, dict):
+                v = dict(a)
+                v["number"] = i + 1
+                artboards_view.append(v)
+        artboards_count = len(artboards_view)
+        next_ab_name = next_artboard_name(raw_artboards)
+        ab_panel = self._panels.get("artboards", {})
+        ab_sel = ab_panel.get("artboards_panel_selection", [])
+        artboards_panel_selection_ids = (
+            [s for s in ab_sel if isinstance(s, str)]
+            if isinstance(ab_sel, list) else []
+        )
+        current_artboard_id: str | None = None
+        selected_set = set(artboards_panel_selection_ids)
+        if selected_set:
+            for a in raw_artboards:
+                if isinstance(a, dict) and a.get("id") in selected_set:
+                    current_artboard_id = a["id"]
+                    break
+        if current_artboard_id is None and raw_artboards:
+            first = raw_artboards[0]
+            if isinstance(first, dict):
+                current_artboard_id = first.get("id")
+        artboards_common = {
+            "artboards": artboards_view,
+            "artboard_options": dict(raw_options),
+            "artboards_count": artboards_count,
+            "next_artboard_name": next_ab_name,
+            "current_artboard_id": current_artboard_id,
+            "artboards_panel_selection_ids": artboards_panel_selection_ids,
+        }
         if self._document is None:
             sel_count = 0
             if self._active_panel == "layers":
@@ -406,6 +580,7 @@ class StateStore:
                 "has_selection": has_selection,
                 "selection_count": selection_count,
                 "element_selection": element_selection,
+                **artboards_common,
             }
         layers = self._document.get("layers", [])
         top_level_layers = []
@@ -466,6 +641,7 @@ class StateStore:
             "has_selection": has_selection,
             "selection_count": selection_count,
             "element_selection": element_selection,
+            **artboards_common,
         }
 
     def _canvas_selection_paths(self) -> list[tuple[int, ...]]:
