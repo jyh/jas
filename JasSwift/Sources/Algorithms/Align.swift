@@ -318,3 +318,108 @@ public func distributeBottom(
 ) -> [AlignTranslation] {
     distributeAlongAxis(elements, reference, .vertical, .max, boundsFn)
 }
+
+/// Generic driver for the two Distribute Spacing operations.
+/// Sorts the selection along the axis by min-edge and equalises
+/// the gaps between consecutive bboxes. Behaviour depends on
+/// `explicitGap`:
+///
+/// - `nil` (average mode): first and last elements hold; interior
+///   gaps average to (span − Σ sizes) / (n − 1).
+/// - `.some(gap)` (explicit mode): the key object holds; others
+///   walk outward with exactly `gap` points of space between
+///   consecutive bboxes. Requires a key-object reference —
+///   returns empty otherwise.
+///
+/// Fewer than 3 elements yield an empty output. Key objects are
+/// skipped; zero-delta translations are omitted.
+public func distributeSpacingAlongAxis(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ axis: AlignAxis,
+    _ explicitGap: Double?,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    let n = elements.count
+    if n < 3 { return [] }
+    // (original_idx, lo, hi) along the axis.
+    var sorted: [(Int, Double, Double)] = elements.enumerated().map { (i, pair) in
+        let (lo, hi, _) = alignAxisExtent(boundsFn(pair.1), axis)
+        return (i, lo, hi)
+    }
+    sorted.sort { $0.1 < $1.1 }
+
+    let newMins: [Double]
+    if let gap = explicitGap {
+        guard let keyPath = reference.keyPath,
+              let keyOriginalIdx = elements.firstIndex(where: { $0.0 == keyPath }),
+              let keySortedIdx = sorted.firstIndex(where: { $0.0 == keyOriginalIdx })
+        else { return [] }
+        var positions: [Double] = Array(repeating: 0, count: n)
+        positions[keySortedIdx] = sorted[keySortedIdx].1
+        // Walk forward.
+        if keySortedIdx + 1 < n {
+            for i in (keySortedIdx + 1)..<n {
+                let prevSize = sorted[i - 1].2 - sorted[i - 1].1
+                positions[i] = positions[i - 1] + prevSize + gap
+            }
+        }
+        // Walk backward.
+        if keySortedIdx > 0 {
+            for i in stride(from: keySortedIdx - 1, through: 0, by: -1) {
+                let size = sorted[i].2 - sorted[i].1
+                positions[i] = positions[i + 1] - gap - size
+            }
+        }
+        newMins = positions
+    } else {
+        let totalSpan = sorted[n - 1].2 - sorted[0].1
+        let totalSizes = sorted.reduce(0.0) { $0 + ($1.2 - $1.1) }
+        let gap = (totalSpan - totalSizes) / Double(n - 1)
+        var positions: [Double] = []
+        positions.reserveCapacity(n)
+        var cursor = sorted[0].1
+        for entry in sorted {
+            positions.append(cursor)
+            cursor += (entry.2 - entry.1) + gap
+        }
+        newMins = positions
+    }
+
+    let keyPath = reference.keyPath
+    var out: [AlignTranslation] = []
+    for (sortedIdx, entry) in sorted.enumerated() {
+        let (originalIdx, oldMin, _) = entry
+        let delta = newMins[sortedIdx] - oldMin
+        if delta == 0 { continue }
+        let (path, _) = elements[originalIdx]
+        if path == keyPath { continue }
+        let (dx, dy): (Double, Double) = switch axis {
+        case .horizontal: (delta, 0)
+        case .vertical: (0, delta)
+        }
+        out.append(AlignTranslation(path: path, dx: dx, dy: dy))
+    }
+    out.sort { $0.path.lexicographicallyPrecedes($1.path) }
+    return out
+}
+
+/// DISTRIBUTE_VERTICAL_SPACING_BUTTON. Equalise vertical gaps.
+public func distributeVerticalSpacing(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ explicitGap: Double?,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeSpacingAlongAxis(elements, reference, .vertical, explicitGap, boundsFn)
+}
+
+/// DISTRIBUTE_HORIZONTAL_SPACING_BUTTON. Equalise horizontal gaps.
+public func distributeHorizontalSpacing(
+    _ elements: [(ElementPath, Element)],
+    _ reference: AlignReference,
+    _ explicitGap: Double?,
+    _ boundsFn: AlignBoundsFn
+) -> [AlignTranslation] {
+    distributeSpacingAlongAxis(elements, reference, .horizontal, explicitGap, boundsFn)
+}
