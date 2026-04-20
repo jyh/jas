@@ -2289,16 +2289,40 @@ actions:
   # missing-action errors.
 
   move_artboard_up:
-    description: "Sub-phase 4: reorder panel-selected artboards one position earlier."
+    description: >
+      Move panel-selected artboards one position earlier in the list.
+      Applies the swap-with-neighbor-skipping-selected-neighbors rule:
+      iterate top-to-bottom; each selected row swaps with the row
+      above it, skipping rows already at position 1 or whose upper
+      neighbor is itself selected. Preserves relative order within
+      the selection. Example: selection {1, 3, 5} → result
+      [1, 3, 2, 5, 4]. Single undo op.
     category: artboards
+    enabled_when: "active_document.artboards_panel_selection_ids.length > 0"
     effects:
-      - log: "move_artboard_up (sub-phase 4)"
+      - snapshot
+      - doc.move_artboards_up: "active_document.artboards_panel_selection_ids"
+      - set_panel_state:
+          panel: artboards
+          key: rearrange_dirty
+          value: "true"
 
   move_artboard_down:
-    description: "Sub-phase 4: reorder panel-selected artboards one position later."
+    description: >
+      Move panel-selected artboards one position later in the list.
+      Symmetric to move_artboard_up — iterate bottom-to-top; each
+      selected row swaps with the row below it, skipping rows already
+      at the end or whose lower neighbor is itself selected. Single
+      undo op.
     category: artboards
+    enabled_when: "active_document.artboards_panel_selection_ids.length > 0"
     effects:
-      - log: "move_artboard_down (sub-phase 4)"
+      - snapshot
+      - doc.move_artboards_down: "active_document.artboards_panel_selection_ids"
+      - set_panel_state:
+          panel: artboards
+          key: rearrange_dirty
+          value: "true"
 
   open_artboard_options:
     description: "Sub-phase 5: open the Artboard Options Dialogue."

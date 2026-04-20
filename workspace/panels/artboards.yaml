@@ -223,6 +223,18 @@ content:
         style: { height: 24, padding: "0 4", gap: 4, alignment: center }
         bind:
           background: "if mem(ab.id, active_document.artboards_panel_selection_ids) then '{{theme.colors.selection}}' else 'transparent'"
+        # Row-level drag-to-reorder. Flask declares the events; native
+        # apps implement the actual drag behavior and insertion-line
+        # rendering. See ARTBOARDS.md §Reordering.
+        behavior:
+          - event: drag_start
+            description: "Panel-select this artboard (if not already) and begin drag"
+            action: artboards_panel_select
+            params: { artboard_id: "ab.id", modifier: "none" }
+          - event: drag_move
+            description: "Show horizontal insertion line between rows at the drop point"
+          - event: drag_end
+            description: "Reorder the panel-selected artboards to land at the drop point (single undo op)"
         children:
 
           # ARTBOARD_NUMBER (col-1): click makes current

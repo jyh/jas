@@ -245,6 +245,30 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         dup = store.duplicate_artboard(id_val.value, ox, oy)
         return None, dup
 
+    # doc.move_artboards_up: ids_expr — ARTBOARDS.md §Reordering
+    # Applies the swap-with-neighbor-skipping-selected rule to the
+    # given list of artboard ids.
+    if "doc.move_artboards_up" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        ids_expr = effect["doc.move_artboards_up"]
+        eval_ctx = store.eval_context(ctx)
+        val = evaluate(str(ids_expr) if ids_expr is not None else "", eval_ctx)
+        if val.type != ValueType.LIST:
+            return None
+        store.move_artboards_up(val.value)
+        return None
+
+    # doc.move_artboards_down: ids_expr — ARTBOARDS.md §Reordering
+    if "doc.move_artboards_down" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        ids_expr = effect["doc.move_artboards_down"]
+        eval_ctx = store.eval_context(ctx)
+        val = evaluate(str(ids_expr) if ids_expr is not None else "", eval_ctx)
+        if val.type != ValueType.LIST:
+            return None
+        store.move_artboards_down(val.value)
+        return None
+
     # doc.set_artboard_field: { id, field, value }
     # — ARTBOARDS.md §Rename, §Artboard Options Dialogue
     # Writes value to the named field on the artboard with the given id.
