@@ -92,6 +92,7 @@ let panel_kind_str = function
   | Character -> "character"
   | Paragraph -> "paragraph"
   | Artboards -> "artboards"
+  | Align -> "align"
 
 let pane_kind_str = function
   | Toolbar -> "toolbar"
