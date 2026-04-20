@@ -17,3 +17,8 @@
  (name tspan_test)
  (modules tspan_test)
  (libraries jas yojson alcotest))
+
+(test
+ (name live_test)
+ (modules live_test)
+ (libraries jas alcotest))

@@ -390,6 +390,10 @@ and compound_shape = {
   visibility : visibility;
 }
 
+(** Hook for the LiveElement bounds computation. Set by [Live] at
+    module init time. Consumers need not touch this directly. *)
+val live_bounds_hook : (live_variant -> float * float * float * float) ref
+
 (** Return the bounding box as (x, y, width, height). *)
 val bounds : element -> float * float * float * float
 
