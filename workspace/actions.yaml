@@ -534,7 +534,7 @@ actions:
       If the group becomes empty it is removed automatically.
     category: window
     params:
-      panel: { type: enum, values: [layers, color, stroke, properties] }
+      panel: { type: enum, values: [layers, color, stroke, properties, align] }
     effects:
       - log: "toggle_panel: {{param.panel}}"
   toggle_canvas_maximize:
@@ -734,7 +734,7 @@ actions:
       back to the last group of the anchored dock.
     category: panel
     params:
-      panel: { type: enum, values: [layers, color, stroke, properties] }
+      panel: { type: enum, values: [layers, color, stroke, properties, align] }
     effects:
       - close_panel: { panel: "param.panel" }
 
@@ -745,7 +745,7 @@ actions:
       shown panel.
     category: panel
     params:
-      panel: { type: enum, values: [layers, color, stroke, properties] }
+      panel: { type: enum, values: [layers, color, stroke, properties, align] }
     effects:
       - show_panel: { panel: "param.panel", target: dock_main }
       - set: { dock_visible: true, dock_collapsed: false }

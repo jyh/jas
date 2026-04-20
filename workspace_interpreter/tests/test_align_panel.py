@@ -421,3 +421,37 @@ class TestAlignPanelMenu:
         menu = ws["panels"]["align_panel_content"]["menu"]
         sep_count = sum(1 for m in menu if m == "separator")
         assert sep_count == 2
+
+
+class TestAlignPanelRegistration:
+    """Stage 1f: Align panel is registered as a toggleable Window-
+    menu panel and accepted by toggle_panel / close_panel."""
+
+    def test_toggle_panel_accepts_align(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        toggle_panel = ws["actions"]["toggle_panel"]
+        assert "align" in toggle_panel["params"]["panel"]["values"]
+
+    def test_close_panel_accepts_align(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        close_panel = ws["actions"]["close_panel"]
+        assert "align" in close_panel["params"]["panel"]["values"]
+
+    def test_window_menu_includes_align_entry(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        entry = _menubar_item_by_id(ws["menubar"], "menu_align")
+        assert entry is not None, "menu_align entry missing from menubar"
+        assert entry["action"] == "toggle_panel"
+        assert entry["params"]["panel"] == "align"
+
+
+def _menubar_item_by_id(menubar, target_id):
+    """Recursively search the menubar tree for an item with the
+    given id."""
+    for menu in menubar or []:
+        if not isinstance(menu, dict):
+            continue
+        for item in menu.get("items", []):
+            if isinstance(item, dict) and item.get("id") == target_id:
+                return item
+    return None
