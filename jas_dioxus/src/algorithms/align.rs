@@ -250,6 +250,133 @@ pub fn align_bottom(
     align_along_axis(elements, reference, Axis::Vertical, AxisAnchor::Max, bounds_fn)
 }
 
+/// Generic driver for the six Distribute operations. Sorts the
+/// selection by current anchor position along the axis, determines
+/// the span from the [`AlignReference`] (extremal anchor for
+/// Selection / KeyObject, artboard extent for Artboard), and emits
+/// translations that place each element's anchor at an evenly-
+/// spaced position within the span.
+///
+/// Distribute operations require at least 3 selected elements per
+/// ALIGN.md §Enable and disable rules; fewer yields an empty
+/// output. Elements matching the key path (if any) are skipped.
+/// Zero-delta translations are omitted.
+pub fn distribute_along_axis(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    axis: Axis,
+    anchor: AxisAnchor,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    let n = elements.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    // Annotate each element with its current anchor position then
+    // sort by that position so distribution is monotonic along the
+    // axis. We keep the original index so we can emit translations
+    // in the input order.
+    let mut indexed: Vec<(usize, f64)> = elements
+        .iter()
+        .enumerate()
+        .map(|(i, (_, e))| (i, anchor_position(bounds_fn(e), axis, anchor)))
+        .collect();
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (min_anchor, max_anchor) = match reference {
+        AlignReference::Selection(_) | AlignReference::KeyObject { .. } => {
+            (indexed.first().unwrap().1, indexed.last().unwrap().1)
+        }
+        AlignReference::Artboard(bbox) => {
+            let (lo, hi, _) = axis_extent(*bbox, axis);
+            (lo, hi)
+        }
+    };
+
+    let key_path = reference.key_path();
+    let mut out: Vec<AlignTranslation> = Vec::new();
+    for (sorted_idx, (original_idx, current_anchor)) in indexed.iter().enumerate() {
+        let t = sorted_idx as f64 / (n as f64 - 1.0);
+        let new_anchor = min_anchor + (max_anchor - min_anchor) * t;
+        let delta = new_anchor - current_anchor;
+        if delta == 0.0 {
+            continue;
+        }
+        let (path, _) = &elements[*original_idx];
+        if Some(path) == key_path {
+            continue;
+        }
+        let (dx, dy) = match axis {
+            Axis::Horizontal => (delta, 0.0),
+            Axis::Vertical => (0.0, delta),
+        };
+        out.push(AlignTranslation { path: path.clone(), dx, dy });
+    }
+    // Emit translations in the input order for predictability.
+    out.sort_by_key(|t| t.path.clone());
+    out
+}
+
+/// DISTRIBUTE_LEFT_BUTTON. Redistribute left-edge anchors evenly
+/// across the reference extent along the horizontal axis.
+pub fn distribute_left(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_along_axis(elements, reference, Axis::Horizontal, AxisAnchor::Min, bounds_fn)
+}
+
+/// DISTRIBUTE_HORIZONTAL_CENTER_BUTTON. Redistribute horizontal
+/// centers evenly along the horizontal axis.
+pub fn distribute_horizontal_center(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_along_axis(elements, reference, Axis::Horizontal, AxisAnchor::Center, bounds_fn)
+}
+
+/// DISTRIBUTE_RIGHT_BUTTON. Redistribute right-edge anchors
+/// evenly along the horizontal axis.
+pub fn distribute_right(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_along_axis(elements, reference, Axis::Horizontal, AxisAnchor::Max, bounds_fn)
+}
+
+/// DISTRIBUTE_TOP_BUTTON. Redistribute top-edge anchors evenly
+/// along the vertical axis.
+pub fn distribute_top(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_along_axis(elements, reference, Axis::Vertical, AxisAnchor::Min, bounds_fn)
+}
+
+/// DISTRIBUTE_VERTICAL_CENTER_BUTTON. Redistribute vertical
+/// centers evenly along the vertical axis.
+pub fn distribute_vertical_center(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_along_axis(elements, reference, Axis::Vertical, AxisAnchor::Center, bounds_fn)
+}
+
+/// DISTRIBUTE_BOTTOM_BUTTON. Redistribute bottom-edge anchors
+/// evenly along the vertical axis.
+pub fn distribute_bottom(
+    elements: &[(ElementPath, &Element)],
+    reference: &AlignReference,
+    bounds_fn: BoundsFn,
+) -> Vec<AlignTranslation> {
+    distribute_along_axis(elements, reference, Axis::Vertical, AxisAnchor::Max, bounds_fn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,5 +654,186 @@ mod tests {
         let r = selection_ref((0.0, 0.0, 10.0, 10.0));
         let out = align_left(&[], &r, geometric_bounds);
         assert!(out.is_empty());
+    }
+
+    // ── distribute operations ────────────────────────────────
+
+    #[test]
+    fn distribute_requires_at_least_three_elements() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(50.0, 0.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+        ];
+        assert!(distribute_left(&input, &r, geometric_bounds).is_empty());
+    }
+
+    #[test]
+    fn distribute_left_already_even_emits_no_translations() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(50.0, 0.0, 10.0, 10.0),
+            rect(100.0, 0.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        assert!(distribute_left(&input, &r, geometric_bounds).is_empty());
+    }
+
+    #[test]
+    fn distribute_left_uneven_moves_middle_to_center() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(30.0, 0.0, 10.0, 10.0),
+            rect(100.0, 0.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_left(&input, &r, geometric_bounds);
+        // Span [0, 100]; middle element's target left = 50; Δ = +20.
+        // Extremals hold (first at 0, last at 100).
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0], AlignTranslation { path: vec![1], dx: 20.0, dy: 0.0 });
+    }
+
+    #[test]
+    fn distribute_horizontal_center_evenly_spaces_centers() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),   // center x = 5
+            rect(20.0, 0.0, 10.0, 10.0),  // center x = 25
+            rect(100.0, 0.0, 10.0, 10.0), // center x = 105
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_horizontal_center(&input, &r, geometric_bounds);
+        // Span of centers [5, 105]; middle target = 55; Δ = +30.
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, vec![1]);
+        assert_eq!(out[0].dx, 30.0);
+    }
+
+    #[test]
+    fn distribute_right_distributes_right_edges() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),   // right = 10
+            rect(20.0, 0.0, 10.0, 10.0),  // right = 30
+            rect(100.0, 0.0, 10.0, 10.0), // right = 110
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_right(&input, &r, geometric_bounds);
+        // Span of right edges [10, 110]; middle target = 60; Δ = +30.
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, vec![1]);
+        assert_eq!(out[0].dx, 30.0);
+    }
+
+    #[test]
+    fn distribute_top_moves_only_y() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(5.0, 30.0, 10.0, 10.0),
+            rect(10.0, 100.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_top(&input, &r, geometric_bounds);
+        // Span of top edges [0, 100]; middle target = 50; Δ = +20.
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, vec![1]);
+        assert_eq!(out[0].dx, 0.0);
+        assert_eq!(out[0].dy, 20.0);
+    }
+
+    #[test]
+    fn distribute_handles_unsorted_input() {
+        // Input in reverse order — algorithm sorts internally.
+        let rs = [
+            rect(100.0, 0.0, 10.0, 10.0),
+            rect(30.0, 0.0, 10.0, 10.0),
+            rect(0.0, 0.0, 10.0, 10.0),
+        ];
+        let r = ref_selection_of(&rs);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_left(&input, &r, geometric_bounds);
+        // Span [0, 100]; middle element (rs[1], x=30) → target=50, Δ=+20.
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, vec![1]);
+        assert_eq!(out[0].dx, 20.0);
+    }
+
+    #[test]
+    fn distribute_artboard_reference_uses_artboard_extent() {
+        let rs = [
+            rect(20.0, 0.0, 10.0, 10.0),   // left = 20
+            rect(40.0, 0.0, 10.0, 10.0),   // left = 40
+            rect(60.0, 0.0, 10.0, 10.0),   // left = 60
+        ];
+        let artboard = (0.0, 0.0, 200.0, 100.0);
+        let r = AlignReference::Artboard(artboard);
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_left(&input, &r, geometric_bounds);
+        // Span is the artboard [0, 200]. Targets are 0, 100, 200.
+        // Deltas: −20, +60, +140.
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].dx, -20.0);
+        assert_eq!(out[1].dx, 60.0);
+        assert_eq!(out[2].dx, 140.0);
+    }
+
+    #[test]
+    fn distribute_vertical_center_with_key_skips_key() {
+        let rs = [
+            rect(0.0, 0.0, 10.0, 10.0),   // vcenter = 5
+            rect(0.0, 30.0, 10.0, 10.0),  // vcenter = 35
+            rect(0.0, 100.0, 10.0, 10.0), // vcenter = 105
+        ];
+        let key_path = vec![1];
+        let r = AlignReference::KeyObject {
+            bbox: rs[1].geometric_bounds(),
+            path: key_path.clone(),
+        };
+        let input = vec![
+            pair(vec![0], &rs[0]),
+            pair(vec![1], &rs[1]),
+            pair(vec![2], &rs[2]),
+        ];
+        let out = distribute_vertical_center(&input, &r, geometric_bounds);
+        // Key (rs[1]) must never move.
+        for t in &out {
+            assert_ne!(t.path, key_path);
+        }
     }
 }
