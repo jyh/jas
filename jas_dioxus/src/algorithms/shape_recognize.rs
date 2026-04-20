@@ -304,7 +304,8 @@ pub fn recognize_element(element: &Element, cfg: &RecognizeConfig) -> Option<(Sh
         | Element::Text(_)
         | Element::TextPath(_)
         | Element::Group(_)
-        | Element::Layer(_) => return None,
+        | Element::Layer(_)
+        | Element::Live(_) => return None,
     };
     let shape = recognize(&pts, cfg)?;
     let kind = shape.kind();

@@ -586,6 +586,9 @@ pub enum Element {
     TextPath(TextPathElem),
     Group(GroupElem),
     Layer(LayerElem),
+    /// A non-destructive element whose geometry is evaluated on demand
+    /// from its source inputs. See `super::live::LiveVariant`.
+    Live(super::live::LiveVariant),
 }
 
 /// Per-element visibility mode.
@@ -961,6 +964,7 @@ impl Element {
             Element::TextPath(e) => &e.common,
             Element::Group(e) => &e.common,
             Element::Layer(e) => &e.common,
+            Element::Live(e) => super::live::LiveElement::common(e),
         }
     }
 
@@ -977,6 +981,7 @@ impl Element {
             Element::TextPath(e) => &mut e.common,
             Element::Group(e) => &mut e.common,
             Element::Layer(e) => &mut e.common,
+            Element::Live(e) => super::live::LiveElement::common_mut(e),
         }
     }
 
@@ -1034,6 +1039,7 @@ impl Element {
             Element::Path(e) => e.fill.as_ref(),
             Element::Text(e) => e.fill.as_ref(),
             Element::TextPath(e) => e.fill.as_ref(),
+            Element::Live(e) => super::live::LiveElement::fill(e),
             _ => None,
         }
     }
@@ -1049,6 +1055,7 @@ impl Element {
             Element::Path(e) => e.stroke.as_ref(),
             Element::Text(e) => e.stroke.as_ref(),
             Element::TextPath(e) => e.stroke.as_ref(),
+            Element::Live(e) => super::live::LiveElement::stroke(e),
             _ => None,
         }
     }
@@ -1115,6 +1122,7 @@ impl Element {
             Element::TextPath(e) => inflate_bounds(path_bounds(&e.d), e.stroke.as_ref()),
             Element::Group(g) => children_bounds(&g.children),
             Element::Layer(l) => children_bounds(&l.children),
+            Element::Live(e) => super::live::LiveElement::bounds(e),
         }
     }
 
@@ -1142,6 +1150,9 @@ impl Element {
             }
             Element::Group(g) => geometric_children_bounds(&g.children),
             Element::Layer(l) => geometric_children_bounds(&l.children),
+            // Phase 1 stub: geometric bounds match bounds (no stroke
+            // inflation distinction until compound shapes evaluate).
+            Element::Live(e) => super::live::LiveElement::bounds(e),
         }
     }
 }
@@ -2095,6 +2106,16 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
             children: e.children.iter().map(|c| Rc::new(translate_element(c, dx, dy))).collect(),
             ..e.clone()
         }),
+        Element::Live(v) => match v {
+            super::live::LiveVariant::CompoundShape(cs) => Element::Live(
+                super::live::LiveVariant::CompoundShape(super::live::CompoundShape {
+                    operands: cs.operands.iter()
+                        .map(|c| Rc::new(translate_element(c, dx, dy)))
+                        .collect(),
+                    ..cs.clone()
+                }),
+            ),
+        },
     }
 }
 
@@ -2111,6 +2132,14 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
         Element::Text(e) => Element::Text(TextElem { fill, ..e.clone() }),
         Element::TextPath(e) => Element::TextPath(TextPathElem { fill, ..e.clone() }),
         Element::Line(_) | Element::Group(_) | Element::Layer(_) => elem.clone(),
+        Element::Live(v) => match v {
+            super::live::LiveVariant::CompoundShape(cs) => Element::Live(
+                super::live::LiveVariant::CompoundShape(super::live::CompoundShape {
+                    fill,
+                    ..cs.clone()
+                }),
+            ),
+        },
     }
 }
 
@@ -2128,6 +2157,14 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
         Element::Text(e) => Element::Text(TextElem { stroke, ..e.clone() }),
         Element::TextPath(e) => Element::TextPath(TextPathElem { stroke, ..e.clone() }),
         Element::Group(_) | Element::Layer(_) => elem.clone(),
+        Element::Live(v) => match v {
+            super::live::LiveVariant::CompoundShape(cs) => Element::Live(
+                super::live::LiveVariant::CompoundShape(super::live::CompoundShape {
+                    stroke,
+                    ..cs.clone()
+                }),
+            ),
+        },
     }
 }
 

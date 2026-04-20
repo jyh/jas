@@ -419,6 +419,25 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             lines.push(format!("{}</g>", indent));
             lines.join("\n")
         }
+        // Live elements (phase 1): emit as a group of operands so SVG
+        // export remains lossless-ish. Phase 2 will replace this with
+        // the evaluated geometry once the boolean pipeline is wired.
+        Element::Live(v) => match v {
+            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                let mut lines = vec![format!(
+                    "{}<g data-jas-live=\"compound_shape\"{}{}>",
+                    indent,
+                    opacity_attr(cs.common.opacity),
+                    transform_attr(&cs.common.transform),
+                )];
+                let child_indent = format!("{}  ", indent);
+                for child in &cs.operands {
+                    lines.push(element_svg(child, &child_indent));
+                }
+                lines.push(format!("{}</g>", indent));
+                lines.join("\n")
+            }
+        },
     }
 }
 

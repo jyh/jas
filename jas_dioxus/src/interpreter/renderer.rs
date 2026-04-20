@@ -3719,6 +3719,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             GeoElement::TextPath(_) => "Text Path",
             GeoElement::Group(_) => "Group",
             GeoElement::Layer(_) => "Layer",
+            GeoElement::Live(v) => match v {
+                crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
+            },
         }
     }
 

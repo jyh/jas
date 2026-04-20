@@ -432,6 +432,11 @@ fn pack_element(elem: &Element) -> Value {
                               pack_fill(&e.fill), pack_stroke(&e.stroke),
                               Value::Array(tspans)])
         }
+        Element::Live(_) => {
+            // Live (compound shape etc.) binary serialization is
+            // phase 2-3 scope. No code path creates Live elements yet.
+            panic!("binary serialization of Live elements not yet implemented")
+        }
     }
 }
 

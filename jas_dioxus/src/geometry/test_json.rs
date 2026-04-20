@@ -498,6 +498,15 @@ fn element_json(elem: &Element) -> String {
             o.raw("children", json_array(&children));
             o.str_val("name", &e.name);
         }
+        Element::Live(v) => match v {
+            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                o.str_val("type", "live");
+                o.str_val("kind", "compound_shape");
+                common_fields(&mut o, &cs.common);
+                let children: Vec<String> = cs.operands.iter().map(|c| element_json(c)).collect();
+                o.raw("children", json_array(&children));
+            }
+        },
     }
     o.build()
 }
