@@ -643,10 +643,10 @@ public class Controller {
                                   selection: newSelection)
     }
 
-    /// Destructively apply one of the six implemented boolean ops to
-    /// the current selection. Supported: "union", "intersection",
-    /// "exclude", "subtract_front", "subtract_back", "crop". DIVIDE /
-    /// TRIM / MERGE live in phase 9e.
+    /// Destructively apply one of the nine boolean ops to the
+    /// current selection. Supported: "union", "intersection",
+    /// "exclude", "subtract_front", "subtract_back", "crop",
+    /// "divide", "trim", "merge".
     ///
     /// Semantics per BOOLEAN.md §Operand and paint rules:
     /// - UNION / INTERSECTION / EXCLUDE: all operands consumed;
@@ -655,7 +655,14 @@ public class Controller {
     ///   survivor keeps its own paint.
     /// - SUBTRACT_BACK: backmost is consumed as cutter.
     /// - CROP: frontmost is consumed as mask; survivors clipped to
-    ///   its interior and keep their own paint.
+    ///   its interior.
+    /// - DIVIDE: cut the union apart so no two fragments overlap;
+    ///   each fragment inherits the frontmost covering operand's
+    ///   paint.
+    /// - TRIM: each operand minus the union of all later operands;
+    ///   frontmost is untouched.
+    /// - MERGE: TRIM, then union touching survivors whose solid-
+    ///   color fills are exactly equal.
     public func applyDestructiveBoolean(_ opName: String) {
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
@@ -688,6 +695,69 @@ public class Controller {
             for survivor in elements.dropFirst() {
                 let sSet = elementToPolygonSet(survivor, precision: precision)
                 outputs.append((booleanSubtract(sSet, cutter), survivor))
+            }
+        case "divide":
+            // Walk operands back-to-front, maintaining a partition
+            // of the union-so-far as (region, frontmost-covering
+            // operand index) pairs. Each incoming operand splits
+            // every existing region into overlap / non-overlap;
+            // overlap relabels to the incoming index (now frontmost).
+            let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }
+            var accumulator: [(BoolPolygonSet, Int)] = []
+            for (i, opSet) in operandSets.enumerated() {
+                var newAcc: [(BoolPolygonSet, Int)] = []
+                var remaining = opSet
+                for (existingRegion, existingIdx) in accumulator {
+                    let overlap = booleanIntersect(existingRegion, opSet)
+                    if !overlap.isEmpty { newAcc.append((overlap, i)) }
+                    let nonOverlap = booleanSubtract(existingRegion, opSet)
+                    if !nonOverlap.isEmpty { newAcc.append((nonOverlap, existingIdx)) }
+                    remaining = booleanSubtract(remaining, existingRegion)
+                }
+                if !remaining.isEmpty { newAcc.append((remaining, i)) }
+                accumulator = newAcc
+            }
+            for (region, paintIdx) in accumulator {
+                outputs.append((region, elements[paintIdx]))
+            }
+        case "trim", "merge":
+            let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }
+            var trimmed: [(BoolPolygonSet, Element)] = []
+            for i in 0..<elements.count {
+                var region = operandSets[i]
+                for later in operandSets[(i + 1)...] {
+                    region = booleanSubtract(region, later)
+                }
+                if !region.isEmpty {
+                    trimmed.append((region, elements[i]))
+                }
+            }
+            if opName == "trim" {
+                outputs.append(contentsOf: trimmed)
+            } else {
+                // MERGE: unify touching same-fill survivors. O(N^2)
+                // pass; acceptable for panel-sized selections. The
+                // frontmost contributor wins stroke / common props
+                // on the merged output.
+                var consumed = [Bool](repeating: false, count: trimmed.count)
+                for i in 0..<trimmed.count {
+                    if consumed[i] { continue }
+                    consumed[i] = true
+                    var merged = trimmed[i].0
+                    var paintSrc = trimmed[i].1
+                    if let fillI = paintSrc.fill {
+                        for j in (i + 1)..<trimmed.count {
+                            if consumed[j] { continue }
+                            if let fillJ = trimmed[j].1.fill,
+                               fillI.color == fillJ.color {
+                                merged = booleanUnion(merged, trimmed[j].0)
+                                paintSrc = trimmed[j].1
+                                consumed[j] = true
+                            }
+                        }
+                    }
+                    outputs.append((merged, paintSrc))
+                }
             }
         default:
             return

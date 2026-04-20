@@ -122,3 +122,68 @@ private func twoOverlapping() -> Model {
     Controller(model: m).applyDestructiveBoolean("nonexistent")
     #expect(topChildrenCount(m) == before)
 }
+
+// MARK: - DIVIDE / TRIM / MERGE
+
+private func rectWithFill(_ x: Double, _ y: Double, _ color: Color) -> Element {
+    .rect(Rect(x: x, y: y, width: 10, height: 10,
+               fill: Fill(color: color)))
+}
+
+private func disjointRects() -> Model {
+    modelWithRects([rectAt(0, 0), rectAt(20, 0)],
+                   selected: [[0, 0], [0, 1]])
+}
+
+@Test func divideOverlappingProducesThreeFragments() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("divide")
+    #expect(topChildrenCount(m) == 3)
+}
+
+@Test func divideDisjointKeepsTwo() {
+    let m = disjointRects()
+    Controller(model: m).applyDestructiveBoolean("divide")
+    #expect(topChildrenCount(m) == 2)
+}
+
+@Test func trimOverlappingKeepsTwo() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("trim")
+    #expect(topChildrenCount(m) == 2)
+}
+
+@Test func trimFullyCoveredOperandVanishes() {
+    let back = rectAt(0, 0)
+    let front = Element.rect(Rect(x: 0, y: 0, width: 20, height: 20))
+    let m = modelWithRects([back, front], selected: [[0, 0], [0, 1]])
+    Controller(model: m).applyDestructiveBoolean("trim")
+    #expect(topChildrenCount(m) == 1)
+}
+
+@Test func mergeMatchingFillsCombine() {
+    let red = Color(r: 1, g: 0, b: 0)
+    let m = modelWithRects(
+        [rectWithFill(0, 0, red), rectWithFill(5, 0, red)],
+        selected: [[0, 0], [0, 1]]
+    )
+    Controller(model: m).applyDestructiveBoolean("merge")
+    #expect(topChildrenCount(m) == 1)
+}
+
+@Test func mergeMismatchedFillsStaySeparate() {
+    let red = Color(r: 1, g: 0, b: 0)
+    let blue = Color(r: 0, g: 0, b: 1)
+    let m = modelWithRects(
+        [rectWithFill(0, 0, red), rectWithFill(5, 0, blue)],
+        selected: [[0, 0], [0, 1]]
+    )
+    Controller(model: m).applyDestructiveBoolean("merge")
+    #expect(topChildrenCount(m) == 2)
+}
+
+@Test func mergeNoneFillNeverMatches() {
+    let m = twoOverlapping()
+    Controller(model: m).applyDestructiveBoolean("merge")
+    #expect(topChildrenCount(m) == 2)
+}

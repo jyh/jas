@@ -1815,10 +1815,10 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         }
     }
     // Boolean panel destructive ops. See BOOLEAN.md §Panel actions.
-    // DIVIDE / TRIM / MERGE ship in phase 9e.
     let booleanOps = [
         "union", "intersection", "exclude",
         "subtract_front", "subtract_back", "crop",
+        "divide", "trim", "merge",
     ]
     for op in booleanOps {
         effects["boolean_\(op)"] = { _, _, _ in
