@@ -687,6 +687,12 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     paragraph_menu_dispatch (`Toggle "hanging_punctuation") get_model
   | "reset_paragraph_panel" when kind = Paragraph ->
     paragraph_menu_dispatch `Reset get_model
+  | "make_compound_shape" when kind = Boolean ->
+    Boolean_apply.apply_make_compound_shape (get_model ())
+  | "release_compound_shape" when kind = Boolean ->
+    Boolean_apply.apply_release_compound_shape (get_model ())
+  | "expand_compound_shape" when kind = Boolean ->
+    Boolean_apply.apply_expand_compound_shape (get_model ())
   | _ -> ()
 
 (** Query whether a toggle/radio command is checked. *)
