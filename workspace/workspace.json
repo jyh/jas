@@ -5240,6 +5240,43 @@
       "default": false,
       "description": "When true, Align / Distribute / Distribute Spacing operations consult each element's preview bounds (stroke-inclusive); otherwise they consult geometric bounds.\n"
     },
+    "last_boolean_op": {
+      "type": "enum",
+      "values": [
+        null,
+        "union",
+        "subtract_front",
+        "intersection",
+        "exclude",
+        "divide",
+        "trim",
+        "merge",
+        "crop",
+        "subtract_back",
+        "union_compound",
+        "subtract_front_compound",
+        "intersection_compound",
+        "exclude_compound"
+      ],
+      "default": null,
+      "nullable": true,
+      "description": "Most-recently-applied boolean operation. Populated by the destructive and compound-creating actions; consumed by \"Repeat Boolean Operation\". Make / Release / Expand Compound Shape do not write this field.\n"
+    },
+    "boolean_precision": {
+      "type": "number",
+      "default": 0.0283,
+      "description": "Geometric tolerance in points for Bezier flattening, Bezier refit, and redundant-point removal. Edited via the Boolean Options dialog. Default 0.0283 pt = 0.01 mm.\n"
+    },
+    "boolean_remove_redundant_points": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, collinear points in boolean-op output are collapsed within Precision after each operation. Edited via the Boolean Options dialog.\n"
+    },
+    "boolean_divide_remove_unpainted": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, DIVIDE fragments with no fill and no stroke are discarded rather than kept as invisible paths. Edited via the Boolean Options dialog.\n"
+    },
     "fill_on_top": {
       "type": "bool",
       "default": true,
@@ -10209,6 +10246,145 @@
                 },
                 "bind": {
                   "value": "panel.artboard_name"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "boolean_panel_content": {
+      "id": "boolean_panel_content",
+      "type": "panel",
+      "summary": "Boolean",
+      "description": "The Boolean panel performs boolean operations on the geometry of the current selection. Nine destructive operations and four compound- shape variants let the user combine overlapping paths into unified shapes or live (non-destructive) compound shapes.\nLayout (top to bottom):\nRow 1 \u2014 \"Shape Modes:\" label. Row 2 \u2014 four icon buttons (UNION, SUBTRACT_FRONT, INTERSECTION,\n  EXCLUDE) on the left half; an \"Expand\" button on the right half\n  that flattens the selected compound shape(s) to static paths.\nRow 3 \u2014 five icon buttons (DIVIDE, TRIM, MERGE, CROP,\n  SUBTRACT_BACK). A sixth slot is reserved for OUTLINE, which is\n  deferred until the planar-graph / DCEL primitive ships.\n\nAlt/Option-clicking UNION, SUBTRACT_FRONT, INTERSECTION, or EXCLUDE creates a live compound shape that re-evaluates when its operands are edited. A plain click applies the boolean destructively.\nEnable / disable rules: - Every operation button requires at least 2 selected elements. - The Expand button and Release / Expand Compound Shape menu items\n  require the selection to contain at least one compound shape.\n- Repeat Boolean Operation enables only when last_operation is not\n  null and the current selection satisfies that op's gate.\n\nSee `transcripts/BOOLEAN.md` for the complete spec, operand and paint rules, Boolean Options dialog, and cross-language parity expectations.\n",
+      "state": {
+        "last_operation": {
+          "type": "enum",
+          "values": [
+            null,
+            "union",
+            "subtract_front",
+            "intersection",
+            "exclude",
+            "divide",
+            "trim",
+            "merge",
+            "crop",
+            "subtract_back",
+            "union_compound",
+            "subtract_front_compound",
+            "intersection_compound",
+            "exclude_compound"
+          ],
+          "default": null,
+          "nullable": true,
+          "description": "Most-recently-applied operation. Populated by each op action; consumed by \"Repeat Boolean Operation\". Mirrors state.last_boolean_op.\n"
+        }
+      },
+      "init": {
+        "last_operation": "state.last_boolean_op"
+      },
+      "menu": [
+        {
+          "label": "Repeat Boolean Operation",
+          "action": "repeat_boolean_operation"
+        },
+        {
+          "label": "Boolean Options\u2026",
+          "action": "open_boolean_options"
+        },
+        "separator",
+        {
+          "label": "Make Compound Shape",
+          "action": "make_compound_shape"
+        },
+        {
+          "label": "Release Compound Shape",
+          "action": "release_compound_shape"
+        },
+        {
+          "label": "Expand Compound Shape",
+          "action": "expand_compound_shape"
+        },
+        "separator",
+        {
+          "label": "Reset Panel",
+          "action": "reset_boolean_panel"
+        },
+        "separator",
+        {
+          "label": "Close Boolean",
+          "action": "close_panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "boolean_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "row",
+            "children": [
+              {
+                "type": "text",
+                "content": "Shape Modes:",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "(buttons pending)",
+                "style": {
+                  "font_size": 10,
+                  "color": "dim"
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "children": [
+              {
+                "type": "text",
+                "content": "Pathfinders:",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "(buttons pending)",
+                "style": {
+                  "font_size": 10,
+                  "color": "dim"
                 }
               }
             ]

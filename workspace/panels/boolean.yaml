@@ -1,0 +1,113 @@
+id: boolean_panel_content
+type: panel
+summary: "Boolean"
+description: >
+  The Boolean panel performs boolean operations on the geometry of the
+  current selection. Nine destructive operations and four compound-
+  shape variants let the user combine overlapping paths into unified
+  shapes or live (non-destructive) compound shapes.
+
+  Layout (top to bottom):
+
+  Row 1 — "Shape Modes:" label.
+  Row 2 — four icon buttons (UNION, SUBTRACT_FRONT, INTERSECTION,
+    EXCLUDE) on the left half; an "Expand" button on the right half
+    that flattens the selected compound shape(s) to static paths.
+  Row 3 — five icon buttons (DIVIDE, TRIM, MERGE, CROP,
+    SUBTRACT_BACK). A sixth slot is reserved for OUTLINE, which is
+    deferred until the planar-graph / DCEL primitive ships.
+
+  Alt/Option-clicking UNION, SUBTRACT_FRONT, INTERSECTION, or EXCLUDE
+  creates a live compound shape that re-evaluates when its operands
+  are edited. A plain click applies the boolean destructively.
+
+  Enable / disable rules:
+  - Every operation button requires at least 2 selected elements.
+  - The Expand button and Release / Expand Compound Shape menu items
+    require the selection to contain at least one compound shape.
+  - Repeat Boolean Operation enables only when last_operation is not
+    null and the current selection satisfies that op's gate.
+
+  See `transcripts/BOOLEAN.md` for the complete spec, operand and
+  paint rules, Boolean Options dialog, and cross-language parity
+  expectations.
+
+state:
+  last_operation:
+    type: enum
+    values: [
+      null,
+      union, subtract_front, intersection, exclude,
+      divide, trim, merge, crop, subtract_back,
+      union_compound, subtract_front_compound,
+      intersection_compound, exclude_compound,
+    ]
+    default: null
+    nullable: true
+    description: >
+      Most-recently-applied operation. Populated by each op action;
+      consumed by "Repeat Boolean Operation". Mirrors
+      state.last_boolean_op.
+
+init:
+  last_operation: "state.last_boolean_op"
+
+menu:
+  - label: "Repeat Boolean Operation"
+    action: repeat_boolean_operation
+  - label: "Boolean Options…"
+    action: open_boolean_options
+  - separator
+  - label: "Make Compound Shape"
+    action: make_compound_shape
+  - label: "Release Compound Shape"
+    action: release_compound_shape
+  - label: "Expand Compound Shape"
+    action: expand_compound_shape
+  - separator
+  - label: "Reset Panel"
+    action: reset_boolean_panel
+  - separator
+  - label: "Close Boolean"
+    action: close_panel
+
+content:
+  type: container
+  id: boolean_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # ── Shape Modes ──────────────────────────────────────────
+    - type: container
+      layout: row
+      children:
+        - type: text
+          content: "Shape Modes:"
+          style: { font_size: 10 }
+
+    # Placeholder row — button grid is wired in a follow-up
+    # commit alongside the destructive-op action handlers.
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "(buttons pending)"
+          style: { font_size: 10, color: dim }
+
+    # ── Pathfinders ──────────────────────────────────────────
+    - type: container
+      layout: row
+      children:
+        - type: text
+          content: "Pathfinders:"
+          style: { font_size: 10 }
+
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "(buttons pending)"
+          style: { font_size: 10, color: dim }

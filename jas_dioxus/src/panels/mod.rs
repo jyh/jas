@@ -10,6 +10,7 @@ pub mod panel_menu_view;
 
 pub mod align_panel;
 pub mod artboards_panel;
+pub mod boolean_panel;
 pub mod character_panel;
 pub mod color_panel;
 pub mod layers_panel;
@@ -34,6 +35,7 @@ pub fn panel_label(kind: PanelKind) -> &'static str {
         PanelKind::Paragraph => paragraph_panel::LABEL,
         PanelKind::Artboards => artboards_panel::LABEL,
         PanelKind::Align => align_panel::LABEL,
+        PanelKind::Boolean => boolean_panel::LABEL,
     }
 }
 
@@ -49,6 +51,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Paragraph => paragraph_panel::menu_items(),
         PanelKind::Artboards => artboards_panel::menu_items(),
         PanelKind::Align => align_panel::menu_items(),
+        PanelKind::Boolean => boolean_panel::menu_items(),
     }
 }
 
@@ -69,6 +72,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Paragraph => paragraph_panel::dispatch(cmd, addr, state),
         PanelKind::Artboards => artboards_panel::dispatch(cmd, addr, state),
         PanelKind::Align => align_panel::dispatch(cmd, addr, state),
+        PanelKind::Boolean => boolean_panel::dispatch(cmd, addr, state),
     }
 }
 
@@ -84,6 +88,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Paragraph => paragraph_panel::is_checked(cmd, state),
         PanelKind::Artboards => artboards_panel::is_checked(cmd, state),
         PanelKind::Align => align_panel::is_checked(cmd, state),
+        PanelKind::Boolean => boolean_panel::is_checked(cmd, state),
     }
 }
 
