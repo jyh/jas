@@ -5854,6 +5854,7 @@ mod tests {
                     transform: None,
                     locked,
                     visibility: vis,
+                    mask: None,
                 },
             })
         }).collect();

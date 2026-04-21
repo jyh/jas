@@ -651,6 +651,7 @@ fn unpack_common(arr: &[Value]) -> CommonProps {
         mode: crate::geometry::element::BlendMode::default(),
         visibility: vis,
         transform: unpack_transform(&arr[4]),
+        mask: None,
     }
 }
 
