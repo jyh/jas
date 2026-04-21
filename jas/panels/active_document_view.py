@@ -151,3 +151,47 @@ def build_active_document_view(
         "current_artboard": current_artboard_view,
         "artboards_panel_selection_ids": ab_sel,
     }
+
+
+def sync_document_to_store(model, store) -> None:
+    """Mirror the jas dataclass document onto the store's ``_document``
+    dict so the interpreter's ``active_document`` view (used by dialog
+    get/set cross-scope bindings) reflects current model state.
+
+    The store's internal ``_document`` is the source of truth for
+    ``store._active_document_view()`` which is built during
+    ``store.get_dialog`` / ``store.set_dialog`` scope resolution —
+    callers that only pass ``active_document`` through ``run_effects``
+    ``extra`` ctx don't reach that code path. Sync before opening
+    dialogs (and ideally before any run_effects) keeps those two
+    views consistent.
+    """
+    if model is None or store is None:
+        return
+    doc = model.document
+    artboards = [
+        {
+            "id": a.id,
+            "name": a.name,
+            "x": a.x,
+            "y": a.y,
+            "width": a.width,
+            "height": a.height,
+            "fill": a.fill,
+            "show_center_mark": a.show_center_mark,
+            "show_cross_hairs": a.show_cross_hairs,
+            "show_video_safe_areas": a.show_video_safe_areas,
+            "video_ruler_pixel_aspect_ratio": a.video_ruler_pixel_aspect_ratio,
+        }
+        for a in doc.artboards
+    ]
+    artboard_options = {
+        "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
+        "update_while_dragging": doc.artboard_options.update_while_dragging,
+    }
+    # Preserve any other keys the store may track (layers); overwrite
+    # artboards + artboard_options from the jas model.
+    if store._document is None:
+        store._document = {}
+    store._document["artboards"] = artboards
+    store._document["artboard_options"] = artboard_options

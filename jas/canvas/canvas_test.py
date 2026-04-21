@@ -420,5 +420,140 @@ class VisibilityDrawTest(absltest.TestCase):
         p.end()
 
 
+class ArtboardDrawTest(absltest.TestCase):
+    """Smoke tests for Phase D+E artboard Z-layer passes — ARTBOARDS.md
+    §Canvas appearance. Verifies each draw helper executes without
+    error against a synthetic document."""
+
+    @classmethod
+    def setUpClass(cls):
+        # drawText needs a QApplication for font layout machinery.
+        if not QApplication.instance():
+            cls.app = QApplication([])
+
+    def _make_painter(self):
+        img = QImage(200, 200, QImage.Format_ARGB32)
+        painter = QPainter(img)
+        return painter, img
+
+    def _doc_with_artboards(self, *artboards, fade=True):
+        import dataclasses
+        from document.artboard import ArtboardOptions
+        return Document(
+            artboards=tuple(artboards),
+            artboard_options=ArtboardOptions(
+                fade_region_outside_artboard=fade,
+                update_while_dragging=True,
+            ),
+        )
+
+    def test_draw_artboard_fills_transparent_skips(self):
+        import dataclasses
+        from canvas.canvas import _draw_artboard_fills
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 fill="transparent")
+        doc = self._doc_with_artboards(a)
+        p, _ = self._make_painter()
+        _draw_artboard_fills(p, doc)
+        p.end()
+
+    def test_draw_artboard_fills_colored(self):
+        import dataclasses
+        from canvas.canvas import _draw_artboard_fills
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 fill="#ff0000", x=10, y=10,
+                                 width=50, height=50)
+        doc = self._doc_with_artboards(a)
+        p, _ = self._make_painter()
+        _draw_artboard_fills(p, doc)
+        p.end()
+
+    def test_draw_fade_overlay_on(self):
+        import dataclasses
+        from canvas.canvas import _draw_fade_overlay
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 x=20, y=20, width=100, height=100)
+        doc = self._doc_with_artboards(a, fade=True)
+        p, _ = self._make_painter()
+        _draw_fade_overlay(p, doc, 200, 200)
+        p.end()
+
+    def test_draw_fade_overlay_off_noop(self):
+        import dataclasses
+        from canvas.canvas import _draw_fade_overlay
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 x=20, y=20, width=100, height=100)
+        doc = self._doc_with_artboards(a, fade=False)
+        p, _ = self._make_painter()
+        _draw_fade_overlay(p, doc, 200, 200)
+        p.end()
+
+    def test_draw_artboard_borders(self):
+        import dataclasses
+        from canvas.canvas import _draw_artboard_borders
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 x=0, y=0, width=50, height=50)
+        doc = self._doc_with_artboards(a)
+        p, _ = self._make_painter()
+        _draw_artboard_borders(p, doc)
+        p.end()
+
+    def test_draw_artboard_accent_selected(self):
+        import dataclasses
+        from canvas.canvas import _draw_artboard_accent
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 x=0, y=0, width=50, height=50)
+        b = dataclasses.replace(Artboard.default_with_id("bbbb0002"),
+                                 x=60, y=0, width=50, height=50)
+        doc = self._doc_with_artboards(a, b)
+        p, _ = self._make_painter()
+        _draw_artboard_accent(p, doc, ["bbbb0002"])
+        p.end()
+
+    def test_draw_artboard_accent_empty_selection_noop(self):
+        import dataclasses
+        from canvas.canvas import _draw_artboard_accent
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 x=0, y=0, width=50, height=50)
+        doc = self._doc_with_artboards(a)
+        p, _ = self._make_painter()
+        _draw_artboard_accent(p, doc, [])
+        p.end()
+
+    def test_draw_artboard_labels(self):
+        import dataclasses
+        from canvas.canvas import _draw_artboard_labels
+        from document.artboard import Artboard
+        a = dataclasses.replace(Artboard.default_with_id("aaaa0001"),
+                                 name="Cover",
+                                 x=20, y=20, width=80, height=80)
+        doc = self._doc_with_artboards(a)
+        p, _ = self._make_painter()
+        _draw_artboard_labels(p, doc)
+        p.end()
+
+    def test_draw_artboard_display_marks_all_on(self):
+        import dataclasses
+        from canvas.canvas import _draw_artboard_display_marks
+        from document.artboard import Artboard
+        a = dataclasses.replace(
+            Artboard.default_with_id("aaaa0001"),
+            x=10, y=10, width=100, height=80,
+            show_center_mark=True, show_cross_hairs=True,
+            show_video_safe_areas=True,
+        )
+        doc = self._doc_with_artboards(a)
+        p, _ = self._make_painter()
+        _draw_artboard_display_marks(p, doc)
+        p.end()
+
+
 if __name__ == "__main__":
     absltest.main()
