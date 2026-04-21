@@ -87,8 +87,24 @@ public enum OpacityPanel {
             layout.opacityPanel.newMasksClipping.toggle()
         case "toggle_new_masks_inverted":
             layout.opacityPanel.newMasksInverted.toggle()
+        // Mask-lifecycle commands route to the document controller.
+        case "make_opacity_mask":
+            guard let model = model else { break }
+            let ctrl = Controller(model: model)
+            ctrl.makeMaskOnSelection(
+                clip: layout.opacityPanel.newMasksClipping,
+                invert: layout.opacityPanel.newMasksInverted)
+        case "release_opacity_mask":
+            guard let model = model else { break }
+            Controller(model: model).releaseMaskOnSelection()
+        case "disable_opacity_mask":
+            guard let model = model else { break }
+            Controller(model: model).toggleMaskDisabledOnSelection()
+        case "unlink_opacity_mask":
+            guard let model = model else { break }
+            Controller(model: model).toggleMaskLinkedOnSelection()
         default:
-            // Mask-lifecycle and page-level commands are Phase-1 inert.
+            // Page-level blending commands remain deferred.
             break
         }
     }

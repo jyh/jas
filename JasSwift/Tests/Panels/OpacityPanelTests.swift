@@ -115,7 +115,10 @@ private func makeLayoutAndAddr() -> (WorkspaceLayout, PanelAddr) {
     #expect(layout.opacityPanel.newMasksInverted == true)
 }
 
-@Test func opacityPanelDispatchMaskLifecycleCommandsAreInert() {
+@Test func opacityPanelDispatchMaskLifecycleDoesNotTouchPanelState() {
+    // Mask-lifecycle commands route to the Controller and operate on
+    // the document; they must not mutate panel-local state (which
+    // governs UI chrome).
     var (layout, addr) = makeLayoutAndAddr()
     let before = layout.opacityPanel
     OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &layout)
@@ -123,6 +126,53 @@ private func makeLayoutAndAddr() -> (WorkspaceLayout, PanelAddr) {
     OpacityPanel.dispatch("disable_opacity_mask", addr: addr, layout: &layout)
     OpacityPanel.dispatch("unlink_opacity_mask", addr: addr, layout: &layout)
     #expect(before == layout.opacityPanel)
+}
+
+// ── Integration: dispatch routes to Controller when model is passed ──
+
+private func setupOneRectSelectionModel() -> Model {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [rect])
+    let doc = Document(layers: [layer], selection: [
+        ElementSelection.all([0, 0]),
+    ])
+    return Model(document: doc)
+}
+
+@Test func dispatchMakeOpacityMaskCreatesMaskOnSelection() {
+    var (layout, addr) = makeLayoutAndAddr()
+    let model = setupOneRectSelectionModel()
+    OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &layout, model: model)
+    #expect(selectionHasMask(model.document) == true)
+}
+
+@Test func dispatchMakeUsesDocumentDefaultsForClipInvert() {
+    var (layout, addr) = makeLayoutAndAddr()
+    layout.opacityPanel.newMasksClipping = false
+    layout.opacityPanel.newMasksInverted = true
+    let model = setupOneRectSelectionModel()
+    OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &layout, model: model)
+    let m = model.document.getElement([0, 0]).mask
+    #expect(m?.clip == false)
+    #expect(m?.invert == true)
+}
+
+@Test func dispatchReleaseClearsMaskOnSelection() {
+    var (layout, addr) = makeLayoutAndAddr()
+    let model = setupOneRectSelectionModel()
+    OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &layout, model: model)
+    OpacityPanel.dispatch("release_opacity_mask", addr: addr, layout: &layout, model: model)
+    #expect(selectionHasMask(model.document) == false)
+}
+
+@Test func dispatchDisableAndUnlinkToggleMaskFields() {
+    var (layout, addr) = makeLayoutAndAddr()
+    let model = setupOneRectSelectionModel()
+    OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &layout, model: model)
+    OpacityPanel.dispatch("disable_opacity_mask", addr: addr, layout: &layout, model: model)
+    #expect(model.document.getElement([0, 0]).mask?.disabled == true)
+    OpacityPanel.dispatch("unlink_opacity_mask", addr: addr, layout: &layout, model: model)
+    #expect(model.document.getElement([0, 0]).mask?.linked == false)
 }
 
 // ── isChecked ────────────────────────────────────────────────
