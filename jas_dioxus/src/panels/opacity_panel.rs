@@ -97,9 +97,34 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         "toggle_new_masks_inverted" => {
             state.opacity_panel.new_masks_inverted = !state.opacity_panel.new_masks_inverted;
         }
-        // Mask-lifecycle and page-level commands are Phase-1 inert. The YAML
-        // spec gates them with `enabled_when: "false"`; here we silently
-        // ignore them so a stray click is harmless.
+        // Mask-lifecycle commands route to the document controller. Make
+        // uses the document's new_masks_* preferences; the others are
+        // first-wins toggles on the selection.
+        "make_opacity_mask" => {
+            let clip = state.opacity_panel.new_masks_clipping;
+            let invert = state.opacity_panel.new_masks_inverted;
+            if let Some(tab) = state.tab_mut() {
+                crate::document::controller::Controller::make_mask_on_selection(
+                    &mut tab.model, clip, invert);
+            }
+        }
+        "release_opacity_mask" => {
+            if let Some(tab) = state.tab_mut() {
+                crate::document::controller::Controller::release_mask_on_selection(&mut tab.model);
+            }
+        }
+        "disable_opacity_mask" => {
+            if let Some(tab) = state.tab_mut() {
+                crate::document::controller::Controller::toggle_mask_disabled_on_selection(&mut tab.model);
+            }
+        }
+        "unlink_opacity_mask" => {
+            if let Some(tab) = state.tab_mut() {
+                crate::document::controller::Controller::toggle_mask_linked_on_selection(&mut tab.model);
+            }
+        }
+        // Page-level blending commands remain deferred in YAML with
+        // status: pending_renderer; ignored here.
         _ => {}
     }
 }
@@ -255,15 +280,109 @@ mod tests {
         assert!(st.opacity_panel.new_masks_inverted);
     }
 
+    // ── Integration tests: dispatch routes to the Controller ───
+
+    /// Build a real AppState with one tab containing a layer + one
+    /// rect, selected, so dispatch → Controller calls have something
+    /// to operate on.
+    fn app_state_with_one_selected_rect() -> AppState {
+        use crate::document::controller::Controller;
+        use crate::geometry::element::{
+            CommonProps, Element, LayerElem, RectElem,
+        };
+        use crate::document::document::{Document, ElementSelection};
+        use std::rc::Rc;
+        let mut st = AppState::new();
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L0".into(),
+            children: vec![Rc::new(rect)],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        let model = crate::document::model::Model::new(doc, None);
+        st.add_tab(crate::workspace::app_state::TabState::with_model(model));
+        // Sanity: touch Controller to make sure the path compiles.
+        let _ = Controller::make_mask_on_selection;
+        st
+    }
+
+    fn selection_mask_some(st: &AppState) -> bool {
+        st.tab().and_then(|t| {
+            let doc = t.model.document();
+            let first = doc.selection.first()?;
+            doc.get_element(&first.path).map(|e| e.common().mask.is_some())
+        }).unwrap_or(false)
+    }
+
     #[test]
-    fn dispatch_mask_lifecycle_commands_are_inert() {
+    fn dispatch_make_opacity_mask_creates_mask_on_selection() {
+        let mut st = app_state_with_one_selected_rect();
+        assert!(!selection_mask_some(&st));
+        dispatch("make_opacity_mask", panel_addr(), &mut st);
+        assert!(selection_mask_some(&st));
+    }
+
+    #[test]
+    fn dispatch_make_uses_document_defaults_for_clip_invert() {
+        let mut st = app_state_with_one_selected_rect();
+        st.opacity_panel.new_masks_clipping = false;
+        st.opacity_panel.new_masks_inverted = true;
+        dispatch("make_opacity_mask", panel_addr(), &mut st);
+        let mask = st.tab().unwrap().model.document()
+            .get_element(&vec![0, 0]).unwrap()
+            .common().mask.as_ref().unwrap().clone();
+        assert!(!mask.clip);
+        assert!(mask.invert);
+    }
+
+    #[test]
+    fn dispatch_release_clears_mask_on_selection() {
+        let mut st = app_state_with_one_selected_rect();
+        dispatch("make_opacity_mask", panel_addr(), &mut st);
+        assert!(selection_mask_some(&st));
+        dispatch("release_opacity_mask", panel_addr(), &mut st);
+        assert!(!selection_mask_some(&st));
+    }
+
+    #[test]
+    fn dispatch_disable_and_unlink_toggle_mask_fields() {
+        let mut st = app_state_with_one_selected_rect();
+        dispatch("make_opacity_mask", panel_addr(), &mut st);
+        dispatch("disable_opacity_mask", panel_addr(), &mut st);
+        let disabled = st.tab().unwrap().model.document()
+            .get_element(&vec![0, 0]).unwrap()
+            .common().mask.as_ref().unwrap().disabled;
+        assert!(disabled);
+        dispatch("unlink_opacity_mask", panel_addr(), &mut st);
+        let linked = st.tab().unwrap().model.document()
+            .get_element(&vec![0, 0]).unwrap()
+            .common().mask.as_ref().unwrap().linked;
+        assert!(!linked);
+    }
+
+    #[test]
+    fn dispatch_mask_lifecycle_does_not_touch_panel_state() {
+        // The mask menu items route to the Controller and operate on the
+        // active tab's document; panel-local state fields must be left
+        // alone (they govern UI chrome, not the selection's masks).
         let mut st = test_app_state();
         let before = st.opacity_panel.clone();
         dispatch("make_opacity_mask", panel_addr(), &mut st);
         dispatch("release_opacity_mask", panel_addr(), &mut st);
         dispatch("disable_opacity_mask", panel_addr(), &mut st);
         dispatch("unlink_opacity_mask", panel_addr(), &mut st);
-        // Mask-lifecycle commands should not touch panel state in Phase 1.
         assert_eq!(before.thumbnails_hidden, st.opacity_panel.thumbnails_hidden);
         assert_eq!(before.options_shown, st.opacity_panel.options_shown);
         assert_eq!(before.new_masks_clipping, st.opacity_panel.new_masks_clipping);
