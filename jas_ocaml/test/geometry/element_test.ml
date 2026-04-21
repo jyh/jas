@@ -542,5 +542,34 @@ let () =
         let (_, _, pw, ph) = bounds ln in
         assert (pw > gw);
         assert (ph > gh));
+
+      (* BlendMode value and string helpers. *)
+
+      Alcotest.test_case "blend_mode_to_string snake_case for compound names" `Quick (fun () ->
+        assert (blend_mode_to_string Normal = "normal");
+        assert (blend_mode_to_string Color_burn = "color_burn");
+        assert (blend_mode_to_string Color_dodge = "color_dodge");
+        assert (blend_mode_to_string Soft_light = "soft_light");
+        assert (blend_mode_to_string Hard_light = "hard_light");
+        assert (blend_mode_to_string Luminosity = "luminosity"));
+
+      Alcotest.test_case "blend_mode_of_string round-trip for all sixteen" `Quick (fun () ->
+        let all = [ Normal; Darken; Multiply; Color_burn;
+                    Lighten; Screen; Color_dodge;
+                    Overlay; Soft_light; Hard_light;
+                    Difference; Exclusion;
+                    Hue; Saturation; Color; Luminosity ] in
+        assert (List.length all = 16);
+        List.iter (fun m ->
+          let s = blend_mode_to_string m in
+          match blend_mode_of_string s with
+          | Some back -> assert (back = m)
+          | None -> assert false
+        ) all);
+
+      Alcotest.test_case "blend_mode_of_string unknown returns None" `Quick (fun () ->
+        assert (blend_mode_of_string "not_a_mode" = None);
+        assert (blend_mode_of_string "" = None);
+        assert (blend_mode_of_string "ColorBurn" = None));
     ];
   ]

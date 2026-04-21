@@ -208,7 +208,8 @@ let () =
         let filled_rect = Rect { x = 0.0; y = 0.0; width = 100.0; height = 100.0;
                                   rx = 0.0; ry = 0.0; fill;
                                   stroke = None; opacity = 1.0; transform = None; locked = false;
-                                  visibility = Jas.Element.Preview } in
+                                  visibility = Jas.Element.Preview;
+                                  blend_mode = Jas.Element.Normal } in
         let fr_layer = make_layer ~name:"L0" [|filled_rect|] in
         let fr_doc = Jas.Document.make_document [|fr_layer|] in
         let fr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fr_doc ()) () in

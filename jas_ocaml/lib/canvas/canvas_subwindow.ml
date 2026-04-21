@@ -204,6 +204,13 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
   else
   let outline = effective = Element.Outline in
   Cairo.save cr;
+  (* Phase-1: element.blend_mode is stored on every element and round-trips
+     through test_json, but the OCaml cairo2 binding only exposes the basic
+     Porter-Duff operators (OVER, IN, OUT, etc.) — not the CSS/SVG blend
+     operators MULTIPLY / DARKEN / HSL_HUE etc. that the underlying Cairo C
+     library supports. Until the binding is upgraded (or a raw-cairo wrapper
+     is added), all blend_mode values render as source-over. *)
+  let _ = Element.get_blend_mode elem in
   begin match elem with
   | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; _ } ->
     Cairo.Group.push cr;

@@ -45,6 +45,35 @@ val color_to_cmyka : color -> float * float * float * float * float
     cap inherited from its parent Group or Layer. *)
 type visibility = Invisible | Outline | Preview
 
+(** Blend mode for compositing an element against its parent layer.
+    Values mirror the Opacity panel mode dropdown. Default is [Normal].
+    Serialize via [blend_mode_to_string] using snake_case to match the
+    [opacity.yaml] mode ids and the cross-language JSON equivalence
+    contract shared with Rust and Swift. *)
+type blend_mode =
+  | Normal
+  | Darken
+  | Multiply
+  | Color_burn
+  | Lighten
+  | Screen
+  | Color_dodge
+  | Overlay
+  | Soft_light
+  | Hard_light
+  | Difference
+  | Exclusion
+  | Hue
+  | Saturation
+  | Color
+  | Luminosity
+
+(** snake_case string id for a blend mode (e.g. [Color_burn] -> ["color_burn"]). *)
+val blend_mode_to_string : blend_mode -> string
+
+(** Parse a snake_case id into a [blend_mode]. Returns [None] on unknown. *)
+val blend_mode_of_string : string -> blend_mode option
+
 (** SVG stroke-linecap. *)
 type linecap = Butt | Round_cap | Square
 
@@ -219,6 +248,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Rect of {
       x : float; y : float;
@@ -230,6 +260,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -239,6 +270,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -249,6 +281,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Polyline of {
       points : (float * float) list;
@@ -258,6 +291,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Polygon of {
       points : (float * float) list;
@@ -267,6 +301,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Path of {
       d : path_command list;
@@ -277,6 +312,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Text of {
       x : float; y : float;
@@ -305,6 +341,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
       (** Ordered, non-empty list of per-range formatting fragments.
           Invariant: [concat_content tspans = content]. Constructors
           initialise to a single-tspan list with empty overrides;
@@ -340,6 +377,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
       (** See Text.tspans above. *)
       tspans : tspan array;
     }
@@ -349,6 +387,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Layer of {
       name : string;
@@ -357,6 +396,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   (** A non-destructive element whose geometry is evaluated on demand
       from its source inputs. See [live_variant] below and
@@ -388,6 +428,7 @@ and compound_shape = {
   transform : transform option;
   locked : bool;
   visibility : visibility;
+  blend_mode : blend_mode;
 }
 
 (** Hook for the LiveElement bounds computation. Set by [Live] at
@@ -451,6 +492,7 @@ val set_locked : bool -> element -> element
 (** {2 Visibility} *)
 
 val get_visibility : element -> visibility
+val get_blend_mode : element -> blend_mode
 val set_visibility : visibility -> element -> element
 
 val get_transform : element -> transform option

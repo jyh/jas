@@ -107,6 +107,61 @@ type visibility =
   | Outline
   | Preview
 
+type blend_mode =
+  | Normal
+  | Darken
+  | Multiply
+  | Color_burn
+  | Lighten
+  | Screen
+  | Color_dodge
+  | Overlay
+  | Soft_light
+  | Hard_light
+  | Difference
+  | Exclusion
+  | Hue
+  | Saturation
+  | Color
+  | Luminosity
+
+let blend_mode_to_string = function
+  | Normal      -> "normal"
+  | Darken      -> "darken"
+  | Multiply    -> "multiply"
+  | Color_burn  -> "color_burn"
+  | Lighten     -> "lighten"
+  | Screen      -> "screen"
+  | Color_dodge -> "color_dodge"
+  | Overlay     -> "overlay"
+  | Soft_light  -> "soft_light"
+  | Hard_light  -> "hard_light"
+  | Difference  -> "difference"
+  | Exclusion   -> "exclusion"
+  | Hue         -> "hue"
+  | Saturation  -> "saturation"
+  | Color       -> "color"
+  | Luminosity  -> "luminosity"
+
+let blend_mode_of_string = function
+  | "normal"      -> Some Normal
+  | "darken"      -> Some Darken
+  | "multiply"    -> Some Multiply
+  | "color_burn"  -> Some Color_burn
+  | "lighten"     -> Some Lighten
+  | "screen"      -> Some Screen
+  | "color_dodge" -> Some Color_dodge
+  | "overlay"     -> Some Overlay
+  | "soft_light"  -> Some Soft_light
+  | "hard_light"  -> Some Hard_light
+  | "difference"  -> Some Difference
+  | "exclusion"   -> Some Exclusion
+  | "hue"         -> Some Hue
+  | "saturation"  -> Some Saturation
+  | "color"       -> Some Color
+  | "luminosity"  -> Some Luminosity
+  | _             -> None
+
 (** SVG stroke-linecap. *)
 type linecap =
   | Butt
@@ -320,6 +375,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Rect of {
       x : float; y : float;
@@ -331,6 +387,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -340,6 +397,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -350,6 +408,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Polyline of {
       points : (float * float) list;
@@ -359,6 +418,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Polygon of {
       points : (float * float) list;
@@ -368,6 +428,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Path of {
       d : path_command list;
@@ -378,6 +439,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Text of {
       x : float; y : float;
@@ -409,6 +471,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
       (* See element.mli for the tspans invariant. *)
       tspans : tspan array;
     }
@@ -438,6 +501,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
       tspans : tspan array;
     }
   | Group of {
@@ -446,6 +510,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Layer of {
       name : string;
@@ -454,6 +519,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
     }
   | Live of live_variant
 
@@ -475,6 +541,7 @@ and compound_shape = {
   transform : transform option;
   locked : bool;
   visibility : visibility;
+  blend_mode : blend_mode;
 }
 
 (** Hook for the LiveElement bounds computation. Set by [Live] at
@@ -764,25 +831,25 @@ let transform_of elem =
   | Live (Compound_shape cs) -> cs.transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
-  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview }
+  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
-  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview }
+  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy r =
-  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview }
+  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy rx ry =
-  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview }
+  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview }
+  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview }
+  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
-  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview }
+  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /
@@ -835,7 +902,7 @@ let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = 
   Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
          text_transform; font_variant; baseline_shift; line_height; letter_spacing;
          xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
-         text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview;
+         text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
          tspans = tspans_from_content content }
 
 let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none")
@@ -847,14 +914,14 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
   Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
               text_transform; font_variant; baseline_shift; line_height; letter_spacing;
               xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
-              fill; stroke; opacity; transform; locked; visibility = Preview;
+              fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
               tspans = tspans_from_content content }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Group { children; opacity; transform; locked; visibility = Preview }
+  Group { children; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Layer { name; children; opacity; transform; locked; visibility = Preview }
+  Layer { name; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
 
 let is_locked = function
   | Line { locked; _ } | Rect { locked; _ } | Circle { locked; _ }
@@ -884,6 +951,14 @@ let get_visibility = function
   | Text_path { visibility; _ } | Group { visibility; _ }
   | Layer { visibility; _ } -> visibility
   | Live (Compound_shape cs) -> cs.visibility
+
+let get_blend_mode = function
+  | Line { blend_mode; _ } | Rect { blend_mode; _ } | Circle { blend_mode; _ }
+  | Ellipse { blend_mode; _ } | Polyline { blend_mode; _ }
+  | Polygon { blend_mode; _ } | Path { blend_mode; _ } | Text { blend_mode; _ }
+  | Text_path { blend_mode; _ } | Group { blend_mode; _ }
+  | Layer { blend_mode; _ } -> blend_mode
+  | Live (Compound_shape cs) -> cs.blend_mode
 
 let set_visibility v = function
   | Line r -> Line { r with visibility = v }
@@ -1294,7 +1369,8 @@ let move_control_points ?(is_all = false) elem indices dx dy =
       Polygon { points = Array.to_list pts;
                 fill = r.fill; stroke = r.stroke;
                 opacity = r.opacity; transform = r.transform;
-                locked = r.locked; visibility = r.visibility }
+                locked = r.locked; visibility = r.visibility;
+                blend_mode = r.blend_mode }
   | Circle r ->
     if is_all then
       Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }
