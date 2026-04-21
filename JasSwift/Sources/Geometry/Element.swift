@@ -2114,16 +2114,26 @@ public struct Group: Equatable {
     public let locked: Bool
     public let visibility: Visibility
     public let blendMode: BlendMode
+    /// Opacity panel "Page Isolated Blending" flag. Storage-only in
+    /// Phase 2; renderer support is deferred. Default false.
+    public let isolatedBlending: Bool
+    /// Opacity panel "Page Knockout Group" flag. Storage-only in
+    /// Phase 2; renderer support is deferred. Default false.
+    public let knockoutGroup: Bool
 
     public init(children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
                 visibility: Visibility = .preview,
-                blendMode: BlendMode = .normal) {
+                blendMode: BlendMode = .normal,
+                isolatedBlending: Bool = false,
+                knockoutGroup: Bool = false) {
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
+        self.isolatedBlending = isolatedBlending
+        self.knockoutGroup = knockoutGroup
     }
 
     public var bounds: BBox {
@@ -2145,17 +2155,26 @@ public struct Layer: Equatable {
     public let locked: Bool
     public let visibility: Visibility
     public let blendMode: BlendMode
+    /// See ``Group/isolatedBlending``. Present on layers so the
+    /// document root (a Layer) can carry the flag today.
+    public let isolatedBlending: Bool
+    /// See ``Group/knockoutGroup``.
+    public let knockoutGroup: Bool
 
     public init(name: String = "Layer", children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
                 visibility: Visibility = .preview,
-                blendMode: BlendMode = .normal) {
+                blendMode: BlendMode = .normal,
+                isolatedBlending: Bool = false,
+                knockoutGroup: Bool = false) {
         self.name = name
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
+        self.isolatedBlending = isolatedBlending
+        self.knockoutGroup = knockoutGroup
     }
 
     public var bounds: BBox {
