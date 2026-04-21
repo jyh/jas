@@ -1048,6 +1048,24 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     Boolean_apply.apply_release_compound_shape (get_model ())
   | "expand_compound_shape" when kind = Boolean ->
     Boolean_apply.apply_expand_compound_shape (get_model ())
+  (* Opacity panel mask-lifecycle commands route to the controller.
+     new_masks_clipping / new_masks_inverted defaults live in the
+     state store (not plumbed through panel_dispatch today); using
+     spec defaults (clip=true, invert=false) until the plumbing is
+     extended - matches OPACITY.md "New Opacity Masks Are Clipping"
+     checked-by-default. *)
+  | "make_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    ctrl#make_mask_on_selection ~clip:true ~invert:false
+  | "release_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    ctrl#release_mask_on_selection
+  | "disable_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    ctrl#toggle_mask_disabled_on_selection
+  | "unlink_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    ctrl#toggle_mask_linked_on_selection
   | _ -> ()
 
 (** Query whether a toggle/radio command is checked. *)
