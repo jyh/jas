@@ -1102,6 +1102,43 @@ fn draw_artboard_fills(ctx: &CanvasRenderingContext2d, doc: &Document) {
     }
 }
 
+/// Z-layer 4: fade overlay — ARTBOARDS.md §Canvas appearance.
+///
+/// When `doc.artboard_options.fade_region_outside_artboard` is on,
+/// paints a 50%-opacity canvas-gray mask over every screen region
+/// not inside any artboard. The effect dims elements that live
+/// outside the printable areas.
+///
+/// Implementation: fill the entire canvas in the fade color, then
+/// punch out each artboard via the `destination-out` composite
+/// operation (which subtracts the filled rect from the mask).
+/// Canvas state is saved and restored so the composite change
+/// doesn't leak into later passes.
+fn draw_fade_overlay(
+    ctx: &CanvasRenderingContext2d,
+    doc: &Document,
+    width: f64,
+    height: f64,
+) {
+    if !doc.artboard_options.fade_region_outside_artboard {
+        return;
+    }
+    if doc.artboards.is_empty() {
+        return;
+    }
+    ctx.save();
+    // Fill the full canvas with 50% theme-gray.
+    ctx.set_fill_style_str("rgba(160,160,160,0.5)");
+    ctx.fill_rect(0.0, 0.0, width, height);
+    // Punch out each artboard.
+    ctx.set_global_composite_operation("destination-out").ok();
+    ctx.set_fill_style_str("rgba(0,0,0,1)");
+    for ab in &doc.artboards {
+        ctx.fill_rect(ab.x, ab.y, ab.width, ab.height);
+    }
+    ctx.restore();
+}
+
 fn draw_artboard_borders(ctx: &CanvasRenderingContext2d, doc: &Document) {
     ctx.set_stroke_style_str(ARTBOARD_BORDER_COLOR);
     ctx.set_line_width(1.0);
@@ -1237,7 +1274,8 @@ pub fn render(
         draw_element(ctx, layer, Visibility::Preview, precision);
     }
 
-    // Layer 4: fade overlay — deferred to phase E.
+    // Layer 4: fade overlay (dims regions outside any artboard).
+    draw_fade_overlay(ctx, doc, width, height);
 
     // Layer 5: artboard borders (thin, above elements so they're
     // never occluded).
