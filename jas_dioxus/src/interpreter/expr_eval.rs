@@ -774,6 +774,52 @@ fn eval_func(
             }
         }
 
+        // anchor_offset_x / anchor_offset_y: (anchor, size) -> number
+        // — ARTBOARDS.md §Coordinates and units.
+        //
+        // Reference-point anchor to x/y offset from the top-left
+        // corner of an artboard of the given width/height. Used by
+        // the Artboard Options Dialogue's x_rp / y_rp computed
+        // properties to convert between top-left storage and
+        // reference-point-relative display.
+        "anchor_offset_x" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let anchor = eval_inner(&args[0], ctx, scope, store_cb);
+            let size = eval_inner(&args[1], ctx, scope, store_cb);
+            let (Value::Str(a), Value::Number(s)) = (anchor, size) else {
+                return Value::Null;
+            };
+            let s = s as f64;
+            let result = match a.as_str() {
+                "top_left" | "middle_left" | "bottom_left" => 0.0,
+                "top_center" | "center" | "bottom_center" => s / 2.0,
+                "top_right" | "middle_right" | "bottom_right" => s,
+                _ => 0.0,
+            };
+            Value::Number(result)
+        }
+
+        "anchor_offset_y" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let anchor = eval_inner(&args[0], ctx, scope, store_cb);
+            let size = eval_inner(&args[1], ctx, scope, store_cb);
+            let (Value::Str(a), Value::Number(s)) = (anchor, size) else {
+                return Value::Null;
+            };
+            let s = s as f64;
+            let result = match a.as_str() {
+                "top_left" | "top_center" | "top_right" => 0.0,
+                "middle_left" | "center" | "middle_right" => s / 2.0,
+                "bottom_left" | "bottom_center" | "bottom_right" => s,
+                _ => 0.0,
+            };
+            Value::Number(result)
+        }
+
         // mem: (element, list) -> bool — list membership
         "mem" => {
             if args.len() != 2 {

@@ -363,3 +363,186 @@ def test_exit_isolation_mode_via_yaml_pops():
     panel_dispatch(PanelKind.LAYERS, "exit_isolation_mode", addr, layout,
                    model=model)
     assert lps.get_isolation_stack() == []
+
+
+# ---------------------------------------------------------------------------
+# Phase B: Artboard effect handlers — ARTBOARDS.md §Menu
+# ---------------------------------------------------------------------------
+
+
+def _make_model_with_artboards(artboards):
+    """Build a Model whose document has the given artboards tuple."""
+    from document.document import Document
+    from document.model import Model
+    doc = Document(artboards=tuple(artboards))
+    return Model(document=doc)
+
+
+def test_new_artboard_creates_and_appends():
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    model = _make_model_with_artboards([Artboard.default_with_id("aaaaaaaa")])
+    _dispatch_yaml_layers_action("new_artboard", model,
+                                  artboards_panel_selection=[])
+    assert len(model.document.artboards) == 2
+    new_ab = model.document.artboards[1]
+    assert new_ab.id != "aaaaaaaa"
+    assert new_ab.name == "Artboard 2"
+    # Empty selection → offset (0,0) — spec says position (0,0)
+    assert new_ab.x == 0.0 and new_ab.y == 0.0
+
+
+def test_new_artboard_offsets_from_current():
+    import dataclasses
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    src = dataclasses.replace(
+        Artboard.default_with_id("src00000"),
+        name="Artboard 1", x=100.0, y=50.0, width=200.0, height=300.0,
+    )
+    model = _make_model_with_artboards([src])
+    _dispatch_yaml_layers_action("new_artboard", model,
+                                  artboards_panel_selection=["src00000"])
+    assert len(model.document.artboards) == 2
+    new_ab = model.document.artboards[1]
+    # Inherits size from current, offsets (20,20) from its top-left
+    assert new_ab.x == 120.0
+    assert new_ab.y == 70.0
+    assert new_ab.width == 200.0
+    assert new_ab.height == 300.0
+
+
+def test_delete_artboards_removes_by_id():
+    import dataclasses
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    a = dataclasses.replace(Artboard.default_with_id("aaaaaaaa"), name="Artboard 1")
+    b = dataclasses.replace(Artboard.default_with_id("bbbbbbbb"), name="Artboard 2")
+    c = dataclasses.replace(Artboard.default_with_id("cccccccc"), name="Artboard 3")
+    model = _make_model_with_artboards([a, b, c])
+    _dispatch_yaml_layers_action("delete_artboards", model,
+                                  artboards_panel_selection=["bbbbbbbb"])
+    assert len(model.document.artboards) == 2
+    assert [a.id for a in model.document.artboards] == ["aaaaaaaa", "cccccccc"]
+
+
+def test_duplicate_artboards_offsets_and_renames():
+    import dataclasses
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    a = dataclasses.replace(
+        Artboard.default_with_id("aaaaaaaa"),
+        name="Artboard 1", x=50.0, y=30.0, width=100.0, height=200.0,
+    )
+    model = _make_model_with_artboards([a])
+    _dispatch_yaml_layers_action("duplicate_artboards", model,
+                                  artboards_panel_selection=["aaaaaaaa"])
+    assert len(model.document.artboards) == 2
+    dup = model.document.artboards[1]
+    assert dup.id != "aaaaaaaa"
+    assert dup.name == "Artboard 2"
+    assert dup.x == 70.0  # 50 + 20
+    assert dup.y == 50.0  # 30 + 20
+    assert dup.width == 100.0
+    assert dup.height == 200.0
+
+
+def test_confirm_artboard_rename_sets_name():
+    import dataclasses
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    a = dataclasses.replace(Artboard.default_with_id("aaaaaaaa"), name="Old")
+    model = _make_model_with_artboards([a])
+    _dispatch_yaml_layers_action(
+        "confirm_artboard_rename", model,
+        params={"artboard_id": "aaaaaaaa", "new_name": "Cover"},
+    )
+    assert model.document.artboards[0].name == "Cover"
+
+
+def test_move_artboards_up_canonical_skip_selected():
+    """{1,3,5} → [1,3,2,5,4] — ARTBOARDS.md §Reordering."""
+    import dataclasses
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    ids = ["a", "b", "c", "d", "e"]
+    abs_ = [
+        dataclasses.replace(Artboard.default_with_id(id_), name=f"A{i}")
+        for i, id_ in enumerate(ids)
+    ]
+    model = _make_model_with_artboards(abs_)
+    # Selection {1,3,5} means indices 0, 2, 4 (ids a, c, e)
+    _dispatch_yaml_layers_action("move_artboard_up", model,
+                                  artboards_panel_selection=["a", "c", "e"])
+    # a was at 0 (no swap), c was at 2 → swap with b → order a,c,b,d,e;
+    # e was at 4 → swap with d → a,c,b,e,d
+    assert [a.id for a in model.document.artboards] == ["a", "c", "b", "e", "d"]
+
+
+def test_move_artboards_down_canonical():
+    """Symmetric: {0,2,4} → [1,0,3,2,4] (canonical from Rust tests)."""
+    import dataclasses
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    ids = ["a", "b", "c", "d", "e"]
+    abs_ = [
+        dataclasses.replace(Artboard.default_with_id(id_), name=f"A{i}")
+        for i, id_ in enumerate(ids)
+    ]
+    model = _make_model_with_artboards(abs_)
+    # Selection on a (0), c (2), e (4). Move Down: iterate bottom-up:
+    #   i=4 (e): already at end → skip
+    #   i=2 (c): swap with d → a,b,d,c,e
+    #   i=0 (a): swap with b → b,a,d,c,e
+    _dispatch_yaml_layers_action("move_artboard_down", model,
+                                  artboards_panel_selection=["a", "c", "e"])
+    assert [a.id for a in model.document.artboards] == ["b", "a", "d", "c", "e"]
+
+
+def test_artboards_menu_has_expected_entries():
+    """Hardcoded Artboards menu mirrors workspace/panels/artboards.yaml."""
+    items = panel_menu(PanelKind.ARTBOARDS)
+    labels = [i.label for i in items if i.kind == PanelMenuItemKind.ACTION]
+    assert "New Artboard" in labels
+    assert "Duplicate Artboards" in labels
+    assert "Delete Artboards" in labels
+    assert "Rename" in labels
+    assert "Delete Empty Artboards" in labels
+    assert "Convert to Artboards" in labels
+    assert "Artboard Options..." in labels
+    assert "Rearrange..." in labels
+    assert "Reset Panel" in labels
+    assert "Close Artboards" in labels
+
+
+def test_artboard_options_toggle_fade():
+    import dataclasses
+    from document.artboard import Artboard
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    a = dataclasses.replace(Artboard.default_with_id("aaaaaaaa"), name="A")
+    model = _make_model_with_artboards([a])
+    assert model.document.artboard_options.fade_region_outside_artboard is True
+    # artboard_options_confirm sets both fields from params — simulate by
+    # directly invoking the set_artboard_options_field effect via the
+    # handler registration. Use a thin YAML-action we know exists:
+    # artboard_options_confirm reads params.fade_region_outside_artboard.
+    _dispatch_yaml_layers_action(
+        "artboard_options_confirm", model,
+        params={
+            "artboard_id": "aaaaaaaa",
+            "name": "A",
+            "x_stored": 0.0,
+            "y_stored": 0.0,
+            "width": 612.0,
+            "height": 792.0,
+            "fill": "transparent",
+            "show_center_mark": False,
+            "show_cross_hairs": False,
+            "show_video_safe_areas": False,
+            "video_ruler_pixel_aspect_ratio": 1.0,
+            "fade_region_outside_artboard": False,
+            "update_while_dragging": True,
+        },
+    )
+    assert model.document.artboard_options.fade_region_outside_artboard is False
+    assert model.document.artboard_options.update_while_dragging is True

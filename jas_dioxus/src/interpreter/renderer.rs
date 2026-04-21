@@ -620,6 +620,18 @@ fn apply_set_panel_state(
     sps: &serde_json::Map<String, serde_json::Value>,
     st: &mut crate::workspace::app_state::AppState,
 ) {
+    apply_set_panel_state_with_ctx(sps, st, None);
+}
+
+/// As `apply_set_panel_state` but threads the action's eval ctx so
+/// expressions like `param.artboard_id` resolve (ARTBOARDS.md
+/// actions). When `ctx` is None, only ctx-independent expressions
+/// (panel / state rollups) can resolve.
+fn apply_set_panel_state_with_ctx(
+    sps: &serde_json::Map<String, serde_json::Value>,
+    st: &mut crate::workspace::app_state::AppState,
+    action_ctx: Option<&serde_json::Value>,
+) {
     let key = sps.get("key").and_then(|v| v.as_str()).unwrap_or("");
     // Layers panel: layers_panel_selection lives on AppState, not the
     // stroke panel. Handle here so YAML actions can clear it.
@@ -699,6 +711,70 @@ fn apply_set_panel_state(
             }
             _ => {}
         }
+        return;
+    }
+    // Artboards panel keys (ARTBOARDS.md §Selection semantics, §Rename).
+    // Stored as AppState fields, not in a dedicated panel struct.
+    if matches!(
+        key,
+        "artboards_panel_selection"
+            | "panel_selection_anchor"
+            | "renaming_artboard"
+            | "reference_point"
+            | "rearrange_dirty"
+    ) {
+        let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
+        // Expressions are evaluated against the active_document /
+        // panel / param context already bound by the caller's YAML
+        // action. Here we rebuild a compact artboard-view so
+        // expressions like "[param.artboard_id]" can resolve.
+        let resolved = if let Some(expr_str) = val.as_str() {
+            let artboards_json: Vec<serde_json::Value> = st
+                .tabs
+                .get(st.active_tab)
+                .map(|t| {
+                    t.model
+                        .document()
+                        .artboards
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| {
+                            serde_json::json!({
+                                "id": a.id,
+                                "name": a.name,
+                                "number": i + 1,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let active_doc = serde_json::json!({
+                "artboards": artboards_json,
+                "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+            });
+            let panel_json = serde_json::json!({
+                "artboards_panel_selection": st.artboards_panel_selection.clone(),
+                "reference_point": st.artboards_reference_point.clone(),
+                "rearrange_dirty": st.artboards_rearrange_dirty,
+            });
+            // Seed with the action's ctx if provided (so `param.*` and
+            // any `let:` bindings resolve), then overlay artboard-
+            // specific panel/active_document namespaces so the
+            // caller's minimal bindings win.
+            let mut ctx_map = match action_ctx {
+                Some(serde_json::Value::Object(m)) => m.clone(),
+                _ => serde_json::Map::new(),
+            };
+            ctx_map.insert("panel".to_string(), panel_json);
+            ctx_map.insert("state".to_string(), serde_json::Value::Object(Default::default()));
+            ctx_map.insert("active_document".to_string(), active_doc);
+            let ctx = serde_json::Value::Object(ctx_map);
+            let result = super::expr::eval(expr_str, &ctx);
+            super::effects::value_to_json(&result)
+        } else {
+            val.clone()
+        };
+        apply_artboards_panel_field(st, key, &resolved);
         return;
     }
     let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
@@ -899,6 +975,27 @@ fn set_paragraph_field(
 }
 
 /// Build an expression evaluation context from AppState + action params.
+/// Build the outer scope to pass into `dialog_view::open_dialog_with_outer`
+/// and `DialogState::eval_context_with_outer`. Exposes the panel +
+/// active_document namespaces that dialog init / get / set
+/// expressions may reference (most notably the Artboard Options
+/// Dialogue's x_rp / y_rp reference-point transforms).
+pub(crate) fn build_dialog_outer_scope(
+    st: &crate::workspace::app_state::AppState,
+) -> serde_json::Value {
+    // Panel scope: only the artboards panel fields are exposed today
+    // since that's the only dialog with panel-referencing init /
+    // prop expressions. Extend as new dialogs need it.
+    let panel = serde_json::json!({
+        "reference_point": st.artboards_reference_point.clone(),
+        "artboards_panel_selection": st.artboards_panel_selection.clone(),
+    });
+    serde_json::json!({
+        "panel": panel,
+        "active_document": build_active_document_view(st),
+    })
+}
+
 fn build_appstate_ctx(
     params: &serde_json::Map<String, serde_json::Value>,
     st: &crate::workspace::app_state::AppState,
@@ -979,6 +1076,16 @@ fn build_active_document_view(
             "selection_count": 0,
             "selection_has_compound_shape": false,
             "element_selection": [],
+            "artboards": [],
+            "artboard_options": {
+                "fade_region_outside_artboard": true,
+                "update_while_dragging": true,
+            },
+            "artboards_count": 0,
+            "next_artboard_name": "Artboard 1",
+            "current_artboard_id": serde_json::Value::Null,
+            "current_artboard": {},
+            "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
         });
     };
     let mut top_level_layers = Vec::new();
@@ -1043,6 +1150,54 @@ fn build_active_document_view(
                 Some(Element::Live(_))
             )
         });
+    // Artboard view (ARTBOARDS.md §Artboard data model).
+    let doc = tab.model.document();
+    let artboards_json: Vec<serde_json::Value> = doc
+        .artboards
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            serde_json::json!({
+                "id": a.id,
+                "name": a.name,
+                "number": i + 1,
+                "x": a.x,
+                "y": a.y,
+                "width": a.width,
+                "height": a.height,
+                "fill": a.fill.as_canonical(),
+                "show_center_mark": a.show_center_mark,
+                "show_cross_hairs": a.show_cross_hairs,
+                "show_video_safe_areas": a.show_video_safe_areas,
+                "video_ruler_pixel_aspect_ratio": a.video_ruler_pixel_aspect_ratio,
+            })
+        })
+        .collect();
+    // current_artboard: topmost panel-selected, else first.
+    let sel_set: std::collections::HashSet<&str> = st
+        .artboards_panel_selection
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let current: Option<&crate::document::artboard::Artboard> = doc
+        .artboards
+        .iter()
+        .find(|a| sel_set.contains(a.id.as_str()))
+        .or_else(|| doc.artboards.first());
+    let current_artboard_json = match current {
+        Some(a) => serde_json::json!({
+            "id": a.id,
+            "name": a.name,
+            "x": a.x,
+            "y": a.y,
+            "width": a.width,
+            "height": a.height,
+        }),
+        None => serde_json::json!({}),
+    };
+    let current_id = current.map(|a| serde_json::Value::String(a.id.clone())).unwrap_or(serde_json::Value::Null);
+    // next_artboard_name: smallest N not used by any "Artboard N" pattern name.
+    let next_artboard_name = crate::document::artboard::next_artboard_name(&doc.artboards);
     serde_json::json!({
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
@@ -1053,6 +1208,16 @@ fn build_active_document_view(
         "selection_count": canvas_selection.len(),
         "selection_has_compound_shape": selection_has_compound_shape,
         "element_selection": element_selection,
+        "artboards": artboards_json,
+        "artboard_options": {
+            "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
+            "update_while_dragging": doc.artboard_options.update_while_dragging,
+        },
+        "artboards_count": doc.artboards.len(),
+        "next_artboard_name": next_artboard_name,
+        "current_artboard_id": current_id,
+        "current_artboard": current_artboard_json,
+        "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
     })
 }
 
@@ -1253,6 +1418,207 @@ fn run_yaml_effect(
                 m.insert("_index".to_string(), serde_json::json!(i));
             }
             deferred.extend(run_yaml_effects(&body, &iter_ctx, st));
+        }
+        return deferred;
+    }
+
+    // ── Artboard effects (ARTBOARDS.md) ─────────────────────────
+    //
+    // All seven mirror the Python doc.* handlers in
+    // workspace_interpreter/effects.py. They clone the document,
+    // mutate the artboards list via the Artboard module helpers,
+    // then commit via tab.model.set_document() so undo/redo
+    // snapshots record the change. Effects assume snapshot has
+    // already been called upstream in the action's effects list.
+
+    // doc.create_artboard: { [field]: expr, ... }
+    // Appends a new artboard. Optional field overrides (x, y, width,
+    // height, fill, show_*, video_ruler_pixel_aspect_ratio, name)
+    // are evaluated and applied on top of the default.
+    if let Some(spec) = eff.get("doc.create_artboard").and_then(|v| v.as_object()) {
+        use crate::document::artboard::{
+            generate_artboard_id, next_artboard_name, Artboard,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        // Collision-retry id mint.
+        let existing_ids: std::collections::HashSet<String> =
+            new_doc.artboards.iter().map(|a| a.id.clone()).collect();
+        let mut id = String::new();
+        for _ in 0..100 {
+            let c = generate_artboard_id(None);
+            if !existing_ids.contains(&c) { id = c; break; }
+        }
+        if id.is_empty() { return deferred; }
+        let default_name = next_artboard_name(&new_doc.artboards);
+        let mut ab = Artboard::default_with_id(id.clone());
+        ab.name = default_name;
+        for (k, v) in spec {
+            let val = if let Some(s) = v.as_str() {
+                super::expr::eval(s, &*eval_ctx)
+            } else {
+                super::expr_types::Value::from_json(v)
+            };
+            apply_artboard_override(&mut ab, k, &val);
+        }
+        let new_id = ab.id.clone();
+        new_doc.artboards.push(ab);
+        tab.model.set_document(new_doc);
+        if let Some(as_n) = as_name {
+            if let Some(map) = eval_ctx.as_object_mut() {
+                map.insert(as_n, serde_json::json!(new_id));
+            }
+        }
+        return deferred;
+    }
+
+    // doc.delete_artboard_by_id: id_expr
+    if let Some(id_expr_v) = eff.get("doc.delete_artboard_by_id") {
+        let id_expr = id_expr_v.as_str().unwrap_or("");
+        let val = super::expr::eval(id_expr, &*eval_ctx);
+        let target = match val {
+            super::expr_types::Value::Str(s) => s,
+            _ => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        let before = new_doc.artboards.len();
+        new_doc.artboards.retain(|a| a.id != target);
+        if new_doc.artboards.len() < before {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.duplicate_artboard: id_expr | { id, offset_x?, offset_y? }
+    if let Some(eff_val) = eff.get("doc.duplicate_artboard") {
+        use crate::document::artboard::{
+            generate_artboard_id, next_artboard_name, Artboard,
+        };
+        let (id_expr, ox_expr, oy_expr) = match eff_val {
+            serde_json::Value::String(s) => (s.clone(), None, None),
+            serde_json::Value::Object(m) => (
+                m.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                m.get("offset_x").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                m.get("offset_y").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            ),
+            _ => return deferred,
+        };
+        let id_val = super::expr::eval(&id_expr, &*eval_ctx);
+        let target = match id_val {
+            super::expr_types::Value::Str(s) => s,
+            _ => return deferred,
+        };
+        let ox = ox_expr
+            .as_ref()
+            .map(|s| super::expr::eval(s, &*eval_ctx))
+            .and_then(|v| if let super::expr_types::Value::Number(n) = v { Some(n) } else { None })
+            .unwrap_or(20.0);
+        let oy = oy_expr
+            .as_ref()
+            .map(|s| super::expr::eval(s, &*eval_ctx))
+            .and_then(|v| if let super::expr_types::Value::Number(n) = v { Some(n) } else { None })
+            .unwrap_or(20.0);
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        let Some(source) = new_doc.artboards.iter().find(|a| a.id == target).cloned() else {
+            return deferred;
+        };
+        let existing_ids: std::collections::HashSet<String> =
+            new_doc.artboards.iter().map(|a| a.id.clone()).collect();
+        let mut id = String::new();
+        for _ in 0..100 {
+            let c = generate_artboard_id(None);
+            if !existing_ids.contains(&c) { id = c; break; }
+        }
+        if id.is_empty() { return deferred; }
+        let mut dup = Artboard { id, ..source };
+        dup.name = next_artboard_name(&new_doc.artboards);
+        dup.x += ox;
+        dup.y += oy;
+        new_doc.artboards.push(dup);
+        tab.model.set_document(new_doc);
+        return deferred;
+    }
+
+    // doc.set_artboard_field: { id, field, value }
+    if let Some(spec) = eff.get("doc.set_artboard_field").and_then(|v| v.as_object()) {
+        let id_expr = spec.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let id_val = super::expr::eval(id_expr, &*eval_ctx);
+        let target = match id_val {
+            super::expr_types::Value::Str(s) => s,
+            _ => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        if let Some(ab) = new_doc.artboards.iter_mut().find(|a| a.id == target) {
+            apply_artboard_override(ab, &field, &value_val);
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.set_artboard_options_field: { field, value }
+    if let Some(spec) = eff.get("doc.set_artboard_options_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        let flag = match value_val {
+            super::expr_types::Value::Bool(b) => b,
+            _ => return deferred,
+        };
+        match field.as_str() {
+            "fade_region_outside_artboard" => {
+                new_doc.artboard_options.fade_region_outside_artboard = flag;
+            }
+            "update_while_dragging" => {
+                new_doc.artboard_options.update_while_dragging = flag;
+            }
+            _ => return deferred,
+        }
+        tab.model.set_document(new_doc);
+        return deferred;
+    }
+
+    // doc.move_artboards_up: ids_expr
+    if let Some(ids_expr_v) = eff.get("doc.move_artboards_up") {
+        let ids_expr = ids_expr_v.as_str().unwrap_or("");
+        let val = super::expr::eval(ids_expr, &*eval_ctx);
+        let ids = extract_id_list(&val);
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        if move_artboards_up(&mut new_doc.artboards, &ids) {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.move_artboards_down: ids_expr
+    if let Some(ids_expr_v) = eff.get("doc.move_artboards_down") {
+        let ids_expr = ids_expr_v.as_str().unwrap_or("");
+        let val = super::expr::eval(ids_expr, &*eval_ctx);
+        let ids = extract_id_list(&val);
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        if move_artboards_down(&mut new_doc.artboards, &ids) {
+            tab.model.set_document(new_doc);
         }
         return deferred;
     }
@@ -1635,7 +2001,7 @@ fn run_yaml_effect(
 
     // set_panel_state: { key, value, panel? }
     if let Some(sps) = eff.get("set_panel_state").and_then(|v| v.as_object()) {
-        apply_set_panel_state(sps, st);
+        apply_set_panel_state_with_ctx(sps, st, Some(&*eval_ctx));
         return deferred;
     }
 
@@ -1705,6 +2071,144 @@ fn resolve_element_arg(
 
 /// Delete the element at path from the active tab's document.
 /// Returns the removed element.
+// ── Artboards panel-state setter (ARTBOARDS.md) ─────────────────────────
+//
+// Routes `set_panel_state { panel: artboards, key, value }` to the matching
+// AppState field. Five keys mirror workspace/panels/artboards.yaml's state
+// block: artboards_panel_selection, panel_selection_anchor,
+// renaming_artboard, reference_point, rearrange_dirty.
+
+fn apply_artboards_panel_field(
+    st: &mut crate::workspace::app_state::AppState,
+    key: &str,
+    value: &serde_json::Value,
+) {
+    match key {
+        "artboards_panel_selection" => {
+            if let serde_json::Value::Array(arr) = value {
+                st.artboards_panel_selection = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+            }
+        }
+        "panel_selection_anchor" => {
+            st.artboards_panel_anchor = match value {
+                serde_json::Value::Null => None,
+                serde_json::Value::String(s) => Some(s.clone()),
+                _ => st.artboards_panel_anchor.clone(),
+            };
+        }
+        "renaming_artboard" => {
+            st.artboards_renaming = match value {
+                serde_json::Value::Null => None,
+                serde_json::Value::String(s) => Some(s.clone()),
+                _ => st.artboards_renaming.clone(),
+            };
+        }
+        "reference_point" => {
+            if let Some(s) = value.as_str() {
+                st.artboards_reference_point = s.to_string();
+            }
+        }
+        "rearrange_dirty" => {
+            if let Some(b) = value.as_bool() {
+                st.artboards_rearrange_dirty = b;
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Artboard doc helpers (ARTBOARDS.md §Reordering) ────────────────────
+
+fn apply_artboard_override(
+    ab: &mut crate::document::artboard::Artboard,
+    field: &str,
+    val: &super::expr_types::Value,
+) {
+    use super::expr_types::Value;
+    use crate::document::artboard::ArtboardFill;
+    match field {
+        "name" => if let Value::Str(s) = val { ab.name = s.clone(); }
+        "x" => if let Value::Number(n) = val { ab.x = *n; }
+        "y" => if let Value::Number(n) = val { ab.y = *n; }
+        "width" => if let Value::Number(n) = val { ab.width = *n; }
+        "height" => if let Value::Number(n) = val { ab.height = *n; }
+        "fill" => match val {
+            Value::Str(s) => ab.fill = ArtboardFill::from_canonical(s),
+            Value::Color(s) => ab.fill = ArtboardFill::from_canonical(s),
+            _ => {}
+        },
+        "show_center_mark" => if let Value::Bool(b) = val { ab.show_center_mark = *b; }
+        "show_cross_hairs" => if let Value::Bool(b) = val { ab.show_cross_hairs = *b; }
+        "show_video_safe_areas" => if let Value::Bool(b) = val { ab.show_video_safe_areas = *b; }
+        "video_ruler_pixel_aspect_ratio" => {
+            if let Value::Number(n) = val { ab.video_ruler_pixel_aspect_ratio = *n; }
+        }
+        _ => {}
+    }
+}
+
+fn extract_id_list(val: &super::expr_types::Value) -> Vec<String> {
+    match val {
+        super::expr_types::Value::List(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Swap-with-neighbor-skipping-selected for Move Up
+/// (ARTBOARDS.md §Reordering). Returns true if any swap occurred.
+fn move_artboards_up(
+    artboards: &mut Vec<crate::document::artboard::Artboard>,
+    selected_ids: &[String],
+) -> bool {
+    let selected: std::collections::HashSet<&str> =
+        selected_ids.iter().map(|s| s.as_str()).collect();
+    let mut changed = false;
+    for i in 0..artboards.len() {
+        if !selected.contains(artboards[i].id.as_str()) {
+            continue;
+        }
+        if i == 0 {
+            continue;
+        }
+        if selected.contains(artboards[i - 1].id.as_str()) {
+            continue;
+        }
+        artboards.swap(i - 1, i);
+        changed = true;
+    }
+    changed
+}
+
+fn move_artboards_down(
+    artboards: &mut Vec<crate::document::artboard::Artboard>,
+    selected_ids: &[String],
+) -> bool {
+    let selected: std::collections::HashSet<&str> =
+        selected_ids.iter().map(|s| s.as_str()).collect();
+    let mut changed = false;
+    let n = artboards.len();
+    for i in (0..n).rev() {
+        if !selected.contains(artboards[i].id.as_str()) {
+            continue;
+        }
+        if i + 1 >= n {
+            continue;
+        }
+        if selected.contains(artboards[i + 1].id.as_str()) {
+            continue;
+        }
+        artboards.swap(i, i + 1);
+        changed = true;
+    }
+    changed
+}
+
 fn delete_element_at(
     path: &[usize],
     st: &mut crate::workspace::app_state::AppState,
@@ -2012,11 +2516,16 @@ fn build_mouse_event_handler(
                 if let Some(od) = eff.get("open_dialog") {
                     let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
-                    let live_state = {
+                    let (live_state, outer_scope) = {
                         let st = app.borrow();
-                        crate::workspace::dock_panel::build_live_state_map(&st)
+                        (
+                            crate::workspace::dock_panel::build_live_state_map(&st),
+                            build_dialog_outer_scope(&st),
+                        )
                     };
-                    super::dialog_view::open_dialog(&mut dialog_signal, dlg_id, &raw_params, &live_state);
+                    super::dialog_view::open_dialog_with_outer(
+                        &mut dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope,
+                    );
                 }
             }
             revision += 1;
@@ -4978,11 +5487,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     if let Some(od) = eff.get("open_dialog") {
                                         let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                         let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
-                                        let live_state = {
+                                        let (live_state, outer_scope) = {
                                             let st = a2.borrow();
-                                            crate::workspace::dock_panel::build_live_state_map(&st)
+                                            (
+                                                crate::workspace::dock_panel::build_live_state_map(&st),
+                                                build_dialog_outer_scope(&st),
+                                            )
                                         };
-                                        super::dialog_view::open_dialog(&mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state);
+                                        super::dialog_view::open_dialog_with_outer(
+                                            &mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state, &outer_scope,
+                                        );
                                     }
                                 }
                                 r += 1;
@@ -6100,5 +6614,380 @@ mod tests {
             {"__path__": [0, 2]},
         ]);
         assert_eq!(view["element_selection"], expected);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Artboard YAML-action integration (ARTBOARDS.md)
+    // ─────────────────────────────────────────────────────────────
+    //
+    // These exercise the full pipeline: load workspace/actions.yaml
+    // (compiled into workspace.json and include_str!'d at build),
+    // dispatch each action, and assert the document-model side
+    // effects landed.
+
+    use crate::document::artboard::{Artboard, ArtboardFill};
+
+    fn make_state_with_artboards(ids: &[&str]) -> AppState {
+        use crate::workspace::app_state::TabState;
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        doc.artboards = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let mut a = Artboard::default_with_id((*id).to_string());
+                a.name = format!("Artboard {}", i + 1);
+                a
+            })
+            .collect();
+        st.tabs[st.active_tab].model.set_document(doc);
+        st
+    }
+
+    fn dispatch(st: &mut AppState, action: &str, params: serde_json::Map<String, serde_json::Value>) {
+        dispatch_action(action, &params, st);
+    }
+
+    #[test]
+    fn new_artboard_action_appends_one() {
+        let mut st = make_state_with_artboards(&["aaa00001"]);
+        dispatch(&mut st, "new_artboard", serde_json::Map::new());
+        let doc = st.tabs[st.active_tab].model.document();
+        assert_eq!(doc.artboards.len(), 2);
+        // Default name pattern: the second artboard is "Artboard 2".
+        assert_eq!(doc.artboards[1].name, "Artboard 2");
+        assert_ne!(doc.artboards[1].id, doc.artboards[0].id);
+    }
+
+    #[test]
+    fn new_artboard_sets_rearrange_dirty() {
+        let mut st = make_state_with_artboards(&["aaa00001"]);
+        assert!(!st.artboards_rearrange_dirty);
+        dispatch(&mut st, "new_artboard", serde_json::Map::new());
+        assert!(st.artboards_rearrange_dirty);
+    }
+
+    #[test]
+    fn delete_artboards_action_removes_selection() {
+        let mut st = make_state_with_artboards(&["aaa", "bbb", "ccc"]);
+        st.artboards_panel_selection = vec!["bbb".to_string()];
+        dispatch(&mut st, "delete_artboards", serde_json::Map::new());
+        let doc = st.tabs[st.active_tab].model.document();
+        let ids: Vec<&str> = doc.artboards.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["aaa", "ccc"]);
+        // Action clears panel-selection after delete.
+        assert!(st.artboards_panel_selection.is_empty());
+    }
+
+    #[test]
+    fn duplicate_artboards_action_preserves_count_plus_one() {
+        let mut st = make_state_with_artboards(&["aaa"]);
+        st.artboards_panel_selection = vec!["aaa".to_string()];
+        dispatch(&mut st, "duplicate_artboards", serde_json::Map::new());
+        let doc = st.tabs[st.active_tab].model.document();
+        assert_eq!(doc.artboards.len(), 2);
+        assert_eq!(doc.artboards[0].id, "aaa");
+        assert_ne!(doc.artboards[1].id, "aaa");
+        assert_eq!(doc.artboards[1].name, "Artboard 2");
+        assert_eq!(doc.artboards[1].x, 20.0);
+        assert_eq!(doc.artboards[1].y, 20.0);
+    }
+
+    #[test]
+    fn move_artboard_up_action_applies_swap_rule() {
+        let mut st = make_state_with_artboards(&["aaa", "bbb", "ccc"]);
+        st.artboards_panel_selection = vec!["bbb".to_string()];
+        dispatch(&mut st, "move_artboard_up", serde_json::Map::new());
+        let ids: Vec<&str> = st
+            .tabs[st.active_tab]
+            .model
+            .document()
+            .artboards
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["bbb", "aaa", "ccc"]);
+    }
+
+    #[test]
+    fn move_artboard_up_discontiguous_1_3_5() {
+        // ART-103 canonical example: selection {1, 3, 5} → [1, 3, 2, 5, 4].
+        let mut st = make_state_with_artboards(&["a1", "a2", "a3", "a4", "a5"]);
+        st.artboards_panel_selection = vec![
+            "a1".to_string(),
+            "a3".to_string(),
+            "a5".to_string(),
+        ];
+        dispatch(&mut st, "move_artboard_up", serde_json::Map::new());
+        let ids: Vec<&str> = st
+            .tabs[st.active_tab]
+            .model
+            .document()
+            .artboards
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["a1", "a3", "a2", "a5", "a4"]);
+    }
+
+    #[test]
+    fn rename_artboard_action_sets_renaming_field() {
+        let mut st = make_state_with_artboards(&["aaa"]);
+        st.artboards_panel_selection = vec!["aaa".to_string()];
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "artboard_id".to_string(),
+            serde_json::json!("aaa"),
+        );
+        dispatch(&mut st, "rename_artboard", params);
+        assert_eq!(st.artboards_renaming, Some("aaa".to_string()));
+    }
+
+    #[test]
+    fn confirm_artboard_rename_writes_name() {
+        let mut st = make_state_with_artboards(&["aaa"]);
+        st.artboards_renaming = Some("aaa".to_string());
+        let mut params = serde_json::Map::new();
+        params.insert("artboard_id".to_string(), serde_json::json!("aaa"));
+        params.insert("new_name".to_string(), serde_json::json!("Cover"));
+        dispatch(&mut st, "confirm_artboard_rename", params);
+        let doc = st.tabs[st.active_tab].model.document();
+        assert_eq!(doc.artboards[0].name, "Cover");
+        assert_eq!(st.artboards_renaming, None);
+    }
+
+    #[test]
+    fn reset_artboards_panel_restores_reference_point() {
+        let mut st = make_state_with_artboards(&["aaa"]);
+        st.artboards_panel_selection = vec!["aaa".to_string()];
+        st.artboards_reference_point = "top_left".to_string();
+        dispatch(&mut st, "reset_artboards_panel", serde_json::Map::new());
+        assert_eq!(st.artboards_reference_point, "center");
+        assert!(st.artboards_panel_selection.is_empty());
+    }
+
+    #[test]
+    fn move_artboards_up_helper_canonical_example() {
+        // Unit-test the pure helper too.
+        let mut abs = vec![
+            Artboard::default_with_id("a1".into()),
+            Artboard::default_with_id("a2".into()),
+            Artboard::default_with_id("a3".into()),
+            Artboard::default_with_id("a4".into()),
+            Artboard::default_with_id("a5".into()),
+        ];
+        let selected = vec!["a1".into(), "a3".into(), "a5".into()];
+        let changed = super::move_artboards_up(&mut abs, &selected);
+        assert!(changed);
+        let ids: Vec<&str> = abs.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["a1", "a3", "a2", "a5", "a4"]);
+    }
+
+    #[test]
+    fn apply_artboard_override_all_fields() {
+        let mut ab = Artboard::default_with_id("aaa".into());
+        super::apply_artboard_override(&mut ab, "name", &super::super::expr_types::Value::Str("Cover".into()));
+        super::apply_artboard_override(&mut ab, "x", &super::super::expr_types::Value::Number(100.0));
+        super::apply_artboard_override(&mut ab, "y", &super::super::expr_types::Value::Number(200.0));
+        super::apply_artboard_override(&mut ab, "width", &super::super::expr_types::Value::Number(400.0));
+        super::apply_artboard_override(&mut ab, "fill", &super::super::expr_types::Value::Str("#ff0000".into()));
+        super::apply_artboard_override(&mut ab, "show_center_mark", &super::super::expr_types::Value::Bool(true));
+        assert_eq!(ab.name, "Cover");
+        assert_eq!(ab.x, 100.0);
+        assert_eq!(ab.y, 200.0);
+        assert_eq!(ab.width, 400.0);
+        assert_eq!(ab.fill, ArtboardFill::Color("#ff0000".into()));
+        assert!(ab.show_center_mark);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Artboard Options Dialogue — expression-evaluator integration
+    // (ARTBOARDS.md §Artboard Options Dialogue)
+    // ─────────────────────────────────────────────────────────────
+    //
+    // The Dioxus open_dialog path needs a Signal and can't be unit-
+    // tested here. These tests exercise the two pieces that matter
+    // independently:
+    //   1. anchor_offset_x / anchor_offset_y builtins produce the
+    //      right numbers for all 9 anchor positions.
+    //   2. DialogState computed-property get/set with an outer
+    //      scope round-trips through the reference-point transform
+    //      without mutating the stored top-left.
+
+    #[test]
+    fn anchor_offset_x_center_half_width() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_x('center', 612)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(306.0));
+    }
+
+    #[test]
+    fn anchor_offset_x_top_left_zero() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_x('top_left', 612)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(0.0));
+    }
+
+    #[test]
+    fn anchor_offset_x_bottom_right_full_size() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_x('bottom_right', 612)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(612.0));
+    }
+
+    #[test]
+    fn anchor_offset_y_center_half_height() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_y('center', 792)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(396.0));
+    }
+
+    #[test]
+    fn dialog_computed_prop_x_rp_center() {
+        // ART-199 in ARTBOARDS_TESTS.md: with reference_point=center
+        // on a default 612×792 artboard at origin, the Dialogue's
+        // X field reads 306 (= 0 + width/2).
+        use super::super::dialog_view::DialogState;
+        use std::collections::HashMap;
+
+        let mut state = HashMap::new();
+        state.insert("x_stored".to_string(), serde_json::json!(0));
+        state.insert("y_stored".to_string(), serde_json::json!(0));
+        state.insert("width".to_string(), serde_json::json!(612));
+        state.insert("height".to_string(), serde_json::json!(792));
+
+        let mut props = HashMap::new();
+        props.insert(
+            "x_rp".to_string(),
+            serde_json::json!({
+                "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
+            }),
+        );
+        props.insert(
+            "y_rp".to_string(),
+            serde_json::json!({
+                "get": "y_stored + anchor_offset_y(panel.reference_point, height)",
+            }),
+        );
+
+        let ds = DialogState {
+            id: "test".to_string(),
+            state,
+            params: HashMap::new(),
+            anchor: None,
+            props,
+        };
+
+        let outer = serde_json::json!({
+            "panel": { "reference_point": "center" },
+        });
+
+        let x_rp = ds.get_value_with_outer("x_rp", Some(&outer));
+        let y_rp = ds.get_value_with_outer("y_rp", Some(&outer));
+        // value_to_json normalizes whole f64 to i64 — compare ints.
+        assert_eq!(x_rp, serde_json::json!(306));
+        assert_eq!(y_rp, serde_json::json!(396));
+    }
+
+    #[test]
+    fn dialog_computed_prop_x_rp_top_left_shows_raw() {
+        use super::super::dialog_view::DialogState;
+        use std::collections::HashMap;
+
+        let mut state = HashMap::new();
+        state.insert("x_stored".to_string(), serde_json::json!(100));
+        state.insert("y_stored".to_string(), serde_json::json!(200));
+        state.insert("width".to_string(), serde_json::json!(612));
+        state.insert("height".to_string(), serde_json::json!(792));
+
+        let mut props = HashMap::new();
+        props.insert(
+            "x_rp".to_string(),
+            serde_json::json!({
+                "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
+            }),
+        );
+
+        let ds = DialogState {
+            id: "test".to_string(),
+            state,
+            params: HashMap::new(),
+            anchor: None,
+            props,
+        };
+
+        let outer = serde_json::json!({
+            "panel": { "reference_point": "top_left" },
+        });
+        let x_rp = ds.get_value_with_outer("x_rp", Some(&outer));
+        // top_left anchor: displayed X equals stored x (100).
+        assert_eq!(x_rp, serde_json::json!(100));
+    }
+
+    #[test]
+    fn dialog_computed_prop_set_x_rp_writes_top_left() {
+        use super::super::dialog_view::DialogState;
+        use std::collections::HashMap;
+
+        let mut state = HashMap::new();
+        state.insert("x_stored".to_string(), serde_json::json!(0));
+        state.insert("width".to_string(), serde_json::json!(612));
+
+        let mut props = HashMap::new();
+        props.insert(
+            "x_rp".to_string(),
+            serde_json::json!({
+                "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
+                "set": "fun new -> x_stored <- new - anchor_offset_x(panel.reference_point, width)",
+            }),
+        );
+
+        let mut ds = DialogState {
+            id: "test".to_string(),
+            state,
+            params: HashMap::new(),
+            anchor: None,
+            props,
+        };
+
+        let outer = serde_json::json!({
+            "panel": { "reference_point": "center" },
+        });
+        // User types X=406 with center anchor on a 612-wide artboard.
+        // Stored top-left should become 406 - 306 = 100.
+        ds.set_value_with_outer(
+            "x_rp",
+            serde_json::json!(406.0),
+            Some(&outer),
+        );
+        assert_eq!(
+            ds.state.get("x_stored"),
+            Some(&serde_json::json!(100))
+        );
+    }
+
+    #[test]
+    fn build_dialog_outer_scope_has_panel_and_active_document() {
+        let mut st = make_state_with_artboards(&["aaa00001"]);
+        st.artboards_reference_point = "top_left".to_string();
+        st.artboards_panel_selection = vec!["aaa00001".to_string()];
+        let outer = super::build_dialog_outer_scope(&st);
+        assert_eq!(
+            outer["panel"]["reference_point"],
+            serde_json::json!("top_left")
+        );
+        let ids = outer["active_document"]["artboards_panel_selection_ids"]
+            .as_array()
+            .unwrap();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], serde_json::json!("aaa00001"));
+        assert_eq!(
+            outer["active_document"]["artboards_count"],
+            serde_json::json!(1)
+        );
     }
 }

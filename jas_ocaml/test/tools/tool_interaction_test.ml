@@ -853,7 +853,9 @@ let () =
         let layer = Jas.Element.make_layer ~name:"L" [| existing |] in
         model#set_document
           { Jas.Document.layers = [| layer |]; selected_layer = 0;
-            selection = Jas.Document.PathMap.empty };
+            selection = Jas.Document.PathMap.empty;
+            artboards = [];
+            artboard_options = Jas.Artboard.default_options };
         let ctrl = Jas.Controller.create ~model () in
         let ctx : Jas.Canvas_tool.tool_context = {
           model;
@@ -949,7 +951,9 @@ let () =
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
         model#set_document
           { Jas.Document.layers = [| layer |]; selected_layer = 0;
-            selection = Jas.Document.PathMap.empty };
+            selection = Jas.Document.PathMap.empty;
+            artboards = [];
+            artboard_options = Jas.Artboard.default_options };
         let ctrl = Jas.Controller.create ~model () in
         let ctx : Jas.Canvas_tool.tool_context = {
           model;
@@ -998,7 +1002,9 @@ let () =
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
         model#set_document
           { Jas.Document.layers = [| layer |]; selected_layer = 0;
-            selection = Jas.Document.PathMap.empty };
+            selection = Jas.Document.PathMap.empty;
+            artboards = [];
+            artboard_options = Jas.Artboard.default_options };
         let ctrl = Jas.Controller.create ~model () in
         let ctx : Jas.Canvas_tool.tool_context = {
           model;

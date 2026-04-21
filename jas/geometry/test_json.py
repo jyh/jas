@@ -468,14 +468,51 @@ def _selection_json(sel: frozenset[ElementSelection]) -> str:
 # Document serializer (public API)                                    #
 # ------------------------------------------------------------------ #
 
+def _artboard_json(ab):
+    o = _JsonObj()
+    o.str("id", ab.id)
+    o.str("name", ab.name)
+    o.num("x", ab.x)
+    o.num("y", ab.y)
+    o.num("width", ab.width)
+    o.num("height", ab.height)
+    o.str("fill", ab.fill)
+    o.bool("show_center_mark", ab.show_center_mark)
+    o.bool("show_cross_hairs", ab.show_cross_hairs)
+    o.bool("show_video_safe_areas", ab.show_video_safe_areas)
+    o.num("video_ruler_pixel_aspect_ratio", ab.video_ruler_pixel_aspect_ratio)
+    return o.build()
+
+
+def _artboards_json(artboards):
+    return "[" + ",".join(_artboard_json(a) for a in artboards) + "]"
+
+
+def _artboard_options_json(opts):
+    o = _JsonObj()
+    o.bool("fade_region_outside_artboard", opts.fade_region_outside_artboard)
+    o.bool("update_while_dragging", opts.update_while_dragging)
+    return o.build()
+
+
 def document_to_test_json(doc: Document) -> str:
     """Serialize a Document to canonical test JSON.
 
     The output is a compact JSON string with sorted keys and normalized
     floats, suitable for byte-for-byte cross-language comparison.
+
+    Artboards and artboard_options are omitted from the output when
+    they carry defaults (empty list, default options) so the byte-for-
+    byte contract with legacy fixtures (which predate artboards) still
+    holds.
     """
+    from document.artboard import ArtboardOptions
     layers = [_element_json(l) for l in doc.layers]
     o = _JsonObj()
+    if doc.artboard_options != ArtboardOptions():
+        o.raw("artboard_options", _artboard_options_json(doc.artboard_options))
+    if len(doc.artboards) > 0:
+        o.raw("artboards", _artboards_json(doc.artboards))
     o.raw("layers", _json_array(layers))
     o.int_("selected_layer", doc.selected_layer)
     o.raw("selection", _selection_json(doc.selection))
@@ -763,6 +800,40 @@ def parse_element_json(d: dict) -> Element:
     return _parse_element(d)
 
 
+def _parse_artboard(d: dict):
+    from document.artboard import Artboard
+    raw_aspect = d.get("video_ruler_pixel_aspect_ratio", 1.0) or 1.0
+    return Artboard(
+        id=d.get("id", ""),
+        name=d.get("name", ""),
+        x=float(d.get("x", 0.0)),
+        y=float(d.get("y", 0.0)),
+        width=float(d.get("width", 0.0)),
+        height=float(d.get("height", 0.0)),
+        fill=d.get("fill", "transparent"),
+        show_center_mark=d.get("show_center_mark", False),
+        show_cross_hairs=d.get("show_cross_hairs", False),
+        show_video_safe_areas=d.get("show_video_safe_areas", False),
+        video_ruler_pixel_aspect_ratio=float(raw_aspect),
+    )
+
+
+def _parse_artboards(v):
+    if not isinstance(v, list):
+        return ()
+    return tuple(_parse_artboard(a) for a in v)
+
+
+def _parse_artboard_options(v):
+    from document.artboard import ArtboardOptions
+    if not isinstance(v, dict):
+        return ArtboardOptions()
+    return ArtboardOptions(
+        fade_region_outside_artboard=v.get("fade_region_outside_artboard", True),
+        update_while_dragging=v.get("update_while_dragging", True),
+    )
+
+
 def test_json_to_document(json_str: str) -> Document:
     """Parse canonical test JSON into a Document.
 
@@ -774,8 +845,12 @@ def test_json_to_document(json_str: str) -> Document:
     layers = tuple(_parse_element(l) for l in d["layers"])
     selected_layer = d["selected_layer"]
     selection = _parse_selection(d["selection"])
+    artboards = _parse_artboards(d.get("artboards", []))
+    artboard_options = _parse_artboard_options(d.get("artboard_options", None))
     return Document(layers=layers, selected_layer=selected_layer,
-                    selection=selection)
+                    selection=selection,
+                    artboards=artboards,
+                    artboard_options=artboard_options)
 
 # Prevent pytest from collecting this function as a test (the file name
 # test_json.py matches pytest's test_*.py pattern).

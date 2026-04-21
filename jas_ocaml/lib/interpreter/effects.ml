@@ -1830,7 +1830,30 @@ let apply_align_operation (store : State_store.t) (ctrl : Controller.controller)
     let just_elems = List.map snd elements in
     let reference = match align_to with
       | "artboard" ->
-        Align.Artboard (Align.union_bounds just_elems bounds_fn)
+        (* ARTBOARDS.md §Selection semantics — current =
+           topmost panel-selected, else first artboard. The at-
+           least-one invariant guarantees artboards[0] exists; if
+           empty (pathological), fall back to the selection union
+           so the op still moves elements. *)
+        let sel_ids = match State_store.get_panel store "artboards"
+                              "artboards_panel_selection" with
+          | `List xs ->
+            List.filter_map (function `String s -> Some s | _ -> None) xs
+          | _ -> []
+        in
+        let current = List.find_opt
+          (fun (a : Artboard.artboard) -> List.mem a.id sel_ids)
+          doc.Document.artboards
+        in
+        let current = match current with
+          | Some a -> Some a
+          | None -> (match doc.Document.artboards with
+              | [] -> None
+              | a :: _ -> Some a)
+        in
+        (match current with
+         | Some ab -> Align.Artboard (ab.x, ab.y, ab.width, ab.height)
+         | None -> Align.Artboard (Align.union_bounds just_elems bounds_fn))
       | "key_object" ->
         (match decode_align_path_marker
                  (State_store.get store "align_key_object_path") with

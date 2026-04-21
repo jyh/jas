@@ -1584,7 +1584,7 @@ mod tests {
             children: vec![Rc::new(rect), Rc::new(group), Rc::new(line)],
             common: CommonProps::default(),
         });
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         Model::new(doc, None)
     }
 
@@ -1805,7 +1805,7 @@ mod tests {
             children: vec![Rc::new(r1), Rc::new(r2)],
             common: CommonProps::default(),
         });
-        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
             ElementSelection::all(vec![0, 0]),
             ElementSelection::all(vec![0, 1]),
@@ -1919,7 +1919,7 @@ mod tests {
             children: vec![Rc::new(r1), Rc::new(r2)],
             common: CommonProps::default(),
         });
-        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
             ElementSelection::all(vec![0, 0]),
             ElementSelection::all(vec![0, 1]),
@@ -1945,7 +1945,7 @@ mod tests {
             children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
             common: CommonProps::default(),
         });
-        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
             ElementSelection::all(vec![0, 0]),
             ElementSelection::all(vec![0, 1]),
@@ -1964,7 +1964,7 @@ mod tests {
                 children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
                 common: CommonProps::default(),
             });
-            let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+            let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
             doc.selection = vec![
                 ElementSelection::all(vec![0, 0]),
                 ElementSelection::all(vec![0, 1]),
@@ -2023,7 +2023,7 @@ mod tests {
             children: vec![Rc::new(rect_a), Rc::new(rect_b)],
             common: CommonProps::default(),
         });
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let mut model = Model::new(doc, None);
 
         Controller::set_selection(&mut model, vec![

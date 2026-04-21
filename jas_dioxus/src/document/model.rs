@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn set_document() {
         let mut model = Model::default();
-        let doc = Document { layers: vec![], selected_layer: 0, selection: vec![] };
+        let doc = Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() };
         model.set_document(doc);
         assert_eq!(model.document().layers.len(), 0);
     }
@@ -207,7 +207,7 @@ mod tests {
         assert!(!model.can_undo());
 
         model.snapshot();
-        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![] });
+        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
         assert!(model.can_undo());
         assert!(!model.can_redo());
 
@@ -225,16 +225,16 @@ mod tests {
         let layer = make_layer("L1");
 
         model.snapshot();
-        model.set_document(Document { layers: vec![layer.clone()], selected_layer: 0, selection: vec![] });
+        model.set_document(Document { layers: vec![layer.clone()], selected_layer: 0, selection: vec![], ..Document::default() });
         model.snapshot();
-        model.set_document(Document { layers: vec![layer.clone(), layer.clone()], selected_layer: 0, selection: vec![] });
+        model.set_document(Document { layers: vec![layer.clone(), layer.clone()], selected_layer: 0, selection: vec![], ..Document::default() });
 
         model.undo();
         assert_eq!(model.document().layers.len(), 1);
         assert!(model.can_redo());
 
         model.snapshot();
-        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![] });
+        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
         assert!(!model.can_redo());
     }
 
@@ -289,7 +289,7 @@ mod tests {
         let mut model = Model::default();
         model.mark_saved();
         model.snapshot();
-        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![] });
+        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
         assert!(model.is_modified());
         model.undo();
         // After undo, generation differs from saved — still modified

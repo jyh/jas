@@ -38,14 +38,23 @@ func runEffects(
     // their own ctx so bindings don't leak back.
     var threadedCtx = ctx
     for effectAny in effects {
-        // Bare-string effects (e.g. `- snapshot`) normalize to {name: nil}
+        // Bare-string effects (e.g. `- snapshot`, `- close_dialog`) normalize
+        // to {name: nil}. Platform handlers take priority; otherwise the
+        // effect is re-entered as a dict-form so the built-in cases below
+        // (close_dialog, clear_dialog_snapshot, reset, ...) fire. Matches
+        // the Python reference interpreter's bare-string normalization.
+        var effect: [String: Any]
         if let effectStr = effectAny as? String {
             if let handler = platformEffects[effectStr] {
-                handler(NSNull(), threadedCtx, store)
+                _ = handler(NSNull(), threadedCtx, store)
+                continue
             }
+            effect = [effectStr: NSNull()]
+        } else if let dict = effectAny as? [String: Any] {
+            effect = dict
+        } else {
             continue
         }
-        guard let effect = effectAny as? [String: Any] else { continue }
         // let: { name: expr, ... } — PHASE3 §5.1
         if let bindings = effect["let"] as? [String: Any] {
             for (name, exprV) in bindings {
@@ -1648,11 +1657,21 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
     let reference: AlignReference
     switch alignTo {
     case "artboard":
-        // No artboards in the document model yet; fall back to
-        // selection-union bounds per ALIGN.md §Align To target
-        // Deferred note.
-        let refs = elements.map(\.1)
-        reference = .artboard(alignUnionBounds(refs, boundsFn))
+        // ARTBOARDS.md §Selection semantics — current artboard =
+        // topmost panel-selected, else first. The at-least-one
+        // invariant guarantees doc.artboards[0] exists for any
+        // loaded document; if the array is empty (pathological),
+        // fall back to the selection union so the op still moves
+        // elements.
+        let selectedIds = Set((store.getPanel("artboards", "artboards_panel_selection") as? [String]) ?? [])
+        let currentAb = doc.artboards.first(where: { selectedIds.contains($0.id) })
+            ?? doc.artboards.first
+        if let ab = currentAb {
+            reference = .artboard((ab.x, ab.y, ab.width, ab.height))
+        } else {
+            let refs = elements.map(\.1)
+            reference = .artboard(alignUnionBounds(refs, boundsFn))
+        }
     case "key_object":
         // Decode the key object path marker.
         let keyPath: ElementPath? = {

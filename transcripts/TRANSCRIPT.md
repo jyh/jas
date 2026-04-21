@@ -1519,10 +1519,6 @@ downsides? Be ready for a deep dive into any of the suggestions.
 
 Read ARTBOARDS.md
 
-An example is shown in examples/artboards.png.
-An example of the Artboard Dialog is shown in examples/artboard-dialog.png.
-An example of how an artboard appears on the canvase is shown in examples/artboard-canvas.png.
-
 Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements. Rank your responses in priority
 from high to low, and giving each a number. What are the benefits? What are the

@@ -45,7 +45,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .properties: PropertiesPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .character: CharacterPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .paragraph: ParagraphPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
-    case .artboards: ArtboardsPanel.dispatch(cmd, addr: addr, layout: &layout)
+    case .artboards: ArtboardsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .align: AlignPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .boolean: BooleanPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     }

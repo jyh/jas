@@ -106,7 +106,9 @@ final class AnchorPointTool: CanvasTool {
         newSelection.insert(ElementSelection.all(path))
         let newDoc = Document(layers: doc.layers,
                               selectedLayer: doc.selectedLayer,
-                              selection: newSelection)
+                              selection: newSelection,
+                              artboards: doc.artboards,
+                              artboardOptions: doc.artboardOptions)
         ctx.controller.setDocument(newDoc)
     }
 

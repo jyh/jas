@@ -254,7 +254,7 @@ pub(crate) fn selection_to_svg(st: &AppState) -> Option<String> {
         })],
         selected_layer: 0,
         selection: Vec::new(),
-    };
+     ..Document::default()};
     Some(document_to_svg(&temp_doc))
 }
 

@@ -23,12 +23,15 @@ from typing import Sequence
 def build_active_document_view(
     model,
     panel_selection: Sequence[tuple[int, ...]] | None = None,
+    artboards_panel_selection: Sequence[str] | None = None,
 ) -> dict:
     from geometry.element import Layer
     from workspace_interpreter.expr_types import Value
+    from document.artboard import next_artboard_name
 
     panel_selection = list(panel_selection or [])
     panel_count = len(panel_selection)
+    ab_sel = list(artboards_panel_selection or [])
 
     if model is None:
         return {
@@ -40,6 +43,16 @@ def build_active_document_view(
             "has_selection": False,
             "selection_count": 0,
             "element_selection": [],
+            "artboards": [],
+            "artboard_options": {
+                "fade_region_outside_artboard": True,
+                "update_while_dragging": True,
+            },
+            "artboards_count": 0,
+            "next_artboard_name": "Artboard 1",
+            "current_artboard_id": None,
+            "current_artboard": {},
+            "artboards_panel_selection_ids": ab_sel,
         }
 
     doc = model.document
@@ -79,6 +92,45 @@ def build_active_document_view(
     selection_paths = sorted(es.path for es in doc.selection)
     element_selection = [Value.path(tuple(p)) for p in selection_paths]
 
+    # Artboard view (ARTBOARDS.md §Artboard data model).
+    artboards_view = []
+    for i, ab in enumerate(doc.artboards):
+        artboards_view.append({
+            "id": ab.id,
+            "name": ab.name,
+            "number": i + 1,
+            "x": ab.x,
+            "y": ab.y,
+            "width": ab.width,
+            "height": ab.height,
+            "fill": ab.fill,
+            "show_center_mark": ab.show_center_mark,
+            "show_cross_hairs": ab.show_cross_hairs,
+            "show_video_safe_areas": ab.show_video_safe_areas,
+            "video_ruler_pixel_aspect_ratio": ab.video_ruler_pixel_aspect_ratio,
+        })
+    ab_sel_set = set(ab_sel)
+    current = None
+    for ab in doc.artboards:
+        if ab.id in ab_sel_set:
+            current = ab
+            break
+    if current is None and doc.artboards:
+        current = doc.artboards[0]
+    if current is not None:
+        current_artboard_id = current.id
+        current_artboard_view = {
+            "id": current.id,
+            "name": current.name,
+            "x": current.x,
+            "y": current.y,
+            "width": current.width,
+            "height": current.height,
+        }
+    else:
+        current_artboard_id = None
+        current_artboard_view = {}
+
     return {
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
@@ -88,4 +140,58 @@ def build_active_document_view(
         "has_selection": len(selection_paths) > 0,
         "selection_count": len(selection_paths),
         "element_selection": element_selection,
+        "artboards": artboards_view,
+        "artboard_options": {
+            "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
+            "update_while_dragging": doc.artboard_options.update_while_dragging,
+        },
+        "artboards_count": len(doc.artboards),
+        "next_artboard_name": next_artboard_name(doc.artboards),
+        "current_artboard_id": current_artboard_id,
+        "current_artboard": current_artboard_view,
+        "artboards_panel_selection_ids": ab_sel,
     }
+
+
+def sync_document_to_store(model, store) -> None:
+    """Mirror the jas dataclass document onto the store's ``_document``
+    dict so the interpreter's ``active_document`` view (used by dialog
+    get/set cross-scope bindings) reflects current model state.
+
+    The store's internal ``_document`` is the source of truth for
+    ``store._active_document_view()`` which is built during
+    ``store.get_dialog`` / ``store.set_dialog`` scope resolution —
+    callers that only pass ``active_document`` through ``run_effects``
+    ``extra`` ctx don't reach that code path. Sync before opening
+    dialogs (and ideally before any run_effects) keeps those two
+    views consistent.
+    """
+    if model is None or store is None:
+        return
+    doc = model.document
+    artboards = [
+        {
+            "id": a.id,
+            "name": a.name,
+            "x": a.x,
+            "y": a.y,
+            "width": a.width,
+            "height": a.height,
+            "fill": a.fill,
+            "show_center_mark": a.show_center_mark,
+            "show_cross_hairs": a.show_cross_hairs,
+            "show_video_safe_areas": a.show_video_safe_areas,
+            "video_ruler_pixel_aspect_ratio": a.video_ruler_pixel_aspect_ratio,
+        }
+        for a in doc.artboards
+    ]
+    artboard_options = {
+        "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
+        "update_while_dragging": doc.artboard_options.update_while_dragging,
+    }
+    # Preserve any other keys the store may track (layers); overwrite
+    # artboards + artboard_options from the jas model.
+    if store._document is None:
+        store._document = {}
+    store._document["artboards"] = artboards
+    store._document["artboard_options"] = artboard_options

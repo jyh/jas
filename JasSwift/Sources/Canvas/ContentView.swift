@@ -201,7 +201,16 @@ public struct ContentView: View {
             .overlay {
                 YamlDialogOverlay(
                     dialogState: $yamlDialogState,
-                    theme: workspace.theme
+                    theme: workspace.theme,
+                    outerScope: { buildDialogOuterScope() },
+                    model: workspace.activeModel,
+                    onDismiss: {
+                        // Keep the store's dialog tracker in sync with
+                        // the overlay binding — otherwise re-opening
+                        // the same dialog would be a no-op transition
+                        // and the bridge in DockPanelView wouldn't fire.
+                        workspace.activeModel?.stateStore.closeDialog()
+                    }
                 )
             }
         }
@@ -298,11 +307,42 @@ public struct ContentView: View {
                 dockId: rightDock.id,
                 edge: .right,
                 theme: workspace.theme,
-                model: workspace.activeModel
+                model: workspace.activeModel,
+                yamlDialogState: $yamlDialogState
             )
         } else {
             SwiftUI.Color.clear
         }
+    }
+
+    /// Build the ``panel`` + ``active_document`` dictionary surfaced to
+    /// the active dialog's render-time bind expressions. Recomputed on
+    /// each overlay render so live model / panel-state changes are
+    /// visible without tearing down the dialog.
+    ///
+    /// The Artboard Options Dialogue consumes this in two shapes:
+    /// - ``panel.reference_point`` — the reference_point_widget's
+    ///   selected anchor, cross-referenced by the x_rp / y_rp computed
+    ///   props' getter / setter lambdas (handled by store.getDialog /
+    ///   setDialog which read their own outer scope).
+    /// - ``active_document.artboards_count`` — the "Artboards: N"
+    ///   label at the dialog's bottom and the Delete button's
+    ///   ``bind.disabled: active_document.artboards_count <= 1``.
+    private func buildDialogOuterScope() -> [String: Any] {
+        guard let model = workspace.activeModel else { return [:] }
+        let store = model.stateStore
+        let abPanel = store.getPanelState("artboards")
+        let abSel = (abPanel["artboards_panel_selection"] as? [Any])?
+            .compactMap { $0 as? String } ?? []
+        let activeDoc = buildActiveDocumentView(
+            model: model,
+            layersPanelSelection: [],
+            artboardsPanelSelection: abSel
+        )
+        return [
+            "active_document": activeDoc,
+            "panel": abPanel,
+        ]
     }
 
     private func borderDragGesture(border: SharedBorder) -> some Gesture {
