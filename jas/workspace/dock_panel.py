@@ -300,7 +300,33 @@ class DockPanelWidget(QWidget):
         ws = get_workspace_data()
         if ws and action_name in ws.get("actions", {}):
             action_def = ws["actions"][action_name]
-            ctx = {"param": params} if params else {}
+            # Build active_document from model so artboard / layer
+            # expressions resolve against the jas dataclass document.
+            # The state store's view operates on its internal dict
+            # representation (empty for native jas) so we must supply
+            # our own.
+            model = self._get_model() if self._get_model else None
+            ctx: dict = {}
+            if model is not None:
+                from panels.active_document_view import (
+                    build_active_document_view, sync_document_to_store,
+                )
+                ab_panel = self._state_store.get_panel_state("artboards") if self._state_store else {}
+                ab_sel_raw = ab_panel.get("artboards_panel_selection", []) if isinstance(ab_panel, dict) else []
+                ab_sel = [s for s in ab_sel_raw if isinstance(s, str)] if isinstance(ab_sel_raw, list) else []
+                ctx["active_document"] = build_active_document_view(
+                    model, artboards_panel_selection=ab_sel,
+                )
+                # Mirror model → store so dialog get/set cross-scope
+                # bindings (evaluated in store.get_dialog /
+                # store.set_dialog) see the jas document, not the
+                # empty store default. Required for ARTBOARDS
+                # reference-point transforms (panel.reference_point
+                # picks anchor_offset_x / y relative to the current
+                # artboard's width / height).
+                sync_document_to_store(model, self._state_store)
+            if params:
+                ctx["param"] = params
 
             # Check if a dialog was open before running effects
             dialog_before = self._state_store.get_dialog_id() if self._state_store else None
@@ -398,6 +424,14 @@ class DockPanelWidget(QWidget):
                 if model is not None:
                     apply_expand_compound_shape(model)
 
+            # snapshot: push undo checkpoint on jas Model (replaces
+            # the effects.py default which only touches store state —
+            # native jas owns undo on the Model).
+            def handle_snapshot(_data, _ctx, _store):
+                m = self._get_model() if self._get_model else None
+                if m is not None:
+                    m.snapshot()
+
             platform_effects = {
                 "start_timer": handle_start_timer,
                 "cancel_timer": handle_cancel_timer,
@@ -419,7 +453,14 @@ class DockPanelWidget(QWidget):
                 "expand_compound_shape": handle_expand_compound_shape,
                 "repeat_boolean_operation": handle_repeat_boolean_operation,
                 "reset_boolean_panel": handle_reset_boolean_panel,
+                "snapshot": handle_snapshot,
             }
+            # Artboard doc effects — ARTBOARDS.md §Menu, §Reordering,
+            # §Artboard Options Dialogue. Seven handlers that mutate
+            # model.document.artboards via dataclasses.replace.
+            if model is not None:
+                from panels.artboard_effects import build_artboard_handlers
+                platform_effects.update(build_artboard_handlers(model))
 
             run_effects(action_def.get("effects", []), ctx, self._state_store,
                        actions=ws.get("actions"),
@@ -452,8 +493,26 @@ class DockPanelWidget(QWidget):
     def _show_yaml_dialog(self, dialog_id: str):
         """Show a YAML-interpreted dialog."""
         from panels.yaml_dialog_view import YamlDialogView
+        # Build active_document ctx from jas model + current artboards
+        # panel selection so dialog bind.* expressions referencing
+        # active_document resolve against live document state (Phase F
+        # cross-scope wiring).
+        dialog_ctx: dict = {}
+        model = self._get_model() if self._get_model else None
+        if model is not None:
+            from panels.active_document_view import (
+                build_active_document_view, sync_document_to_store,
+            )
+            ab_panel = self._state_store.get_panel_state("artboards") if self._state_store else {}
+            ab_sel_raw = ab_panel.get("artboards_panel_selection", []) if isinstance(ab_panel, dict) else []
+            ab_sel = [s for s in ab_sel_raw if isinstance(s, str)] if isinstance(ab_sel_raw, list) else []
+            dialog_ctx["active_document"] = build_active_document_view(
+                model, artboards_panel_selection=ab_sel,
+            )
+            sync_document_to_store(model, self._state_store)
         dlg = YamlDialogView(dialog_id, self._state_store,
                              dispatch_fn=self._dispatch_yaml_action,
+                             ctx=dialog_ctx,
                              parent=self)
         dlg.exec()
         # Clean up dialog state if still open
@@ -547,6 +606,13 @@ class DockPanelWidget(QWidget):
         elif action_name == "close_panel":
             panel_dispatch(kind, "close_panel", addr, self._layout_data)
         else:
+            # YAML-defined actions (artboards, etc.) run through the
+            # full effects dispatcher — panel_dispatch only handles
+            # hardcoded commands.
+            ws = get_workspace_data()
+            if ws and action_name in ws.get("actions", {}):
+                self._dispatch_yaml_action(action_name, params)
+                return
             # Generic fallback — try as direct command
             panel_dispatch(kind, action_name, addr, self._layout_data,
                           model=self._get_model() if self._get_model else None)

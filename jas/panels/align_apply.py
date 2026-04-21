@@ -14,8 +14,11 @@ points the host app wires in:
 - sync_align_key_object_from_selection: clears a dangling key path
   when the key is no longer part of the selection.
 
-Artboard mode falls back to selection bounds until the document model
-grows artboards — see transcripts/ALIGN.md §Align To target.
+Artboard mode (Align To = artboard) references the current artboard's
+bounds. Current = topmost panel-selected artboard, else artboard[0].
+Falls back to selection bounds only when the document has no
+artboards — see transcripts/ARTBOARDS.md §Align To and
+transcripts/ALIGN.md §Align To target.
 """
 
 from __future__ import annotations
@@ -136,8 +139,30 @@ def apply_align_operation(store: StateStore, controller: Controller, op: str) ->
 
     align_to = store.get("align_to") or "selection"
     if align_to == "artboard":
-        # Artboard unavailable — fall back to selection bounds.
-        reference = AlignReference.selection(union_bounds(just_elems, bounds_fn))
+        # Phase G (ARTBOARDS.md §Align To): reference the current
+        # artboard's bounds. Current = topmost panel-selected artboard,
+        # else artboard at position 1. Fall back to selection bounds
+        # when the document has no artboards (can only happen outside
+        # the at-least-one-artboard invariant — e.g., a legacy doc not
+        # yet repaired).
+        artboards = doc.artboards
+        current = None
+        if artboards:
+            ab_panel = store.get_panel_state("artboards")
+            ab_sel = ab_panel.get("artboards_panel_selection", []) if isinstance(ab_panel, dict) else []
+            selected_ids = set(ab_sel) if isinstance(ab_sel, list) else set()
+            for a in artboards:
+                if a.id in selected_ids:
+                    current = a
+                    break
+            if current is None:
+                current = artboards[0]
+        if current is not None:
+            reference = AlignReference.selection(
+                (current.x, current.y, current.width, current.height)
+            )
+        else:
+            reference = AlignReference.selection(union_bounds(just_elems, bounds_fn))
     elif align_to == "key_object":
         kp = _decode_path_marker(store.get("align_key_object_path"))
         if kp is None:

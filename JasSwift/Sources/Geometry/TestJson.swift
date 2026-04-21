@@ -463,13 +463,54 @@ private func selectionJson(_ sel: [ElementSelection]) -> String {
 
 // MARK: - Document serializer (public API)
 
+// MARK: - Artboard serialization (ARTBOARDS.md cross-app contract, ART-441)
+
+private func artboardJson(_ ab: Artboard) -> String {
+    let o = JsonObj()
+    o.str("id", ab.id)
+    o.str("name", ab.name)
+    o.num("x", ab.x)
+    o.num("y", ab.y)
+    o.num("width", ab.width)
+    o.num("height", ab.height)
+    o.str("fill", ab.fill.asCanonical)
+    o.bool("show_center_mark", ab.showCenterMark)
+    o.bool("show_cross_hairs", ab.showCrossHairs)
+    o.bool("show_video_safe_areas", ab.showVideoSafeAreas)
+    o.num("video_ruler_pixel_aspect_ratio", ab.videoRulerPixelAspectRatio)
+    return o.build()
+}
+
+private func artboardsJson(_ artboards: [Artboard]) -> String {
+    jsonArray(artboards.map(artboardJson))
+}
+
+private func artboardOptionsJson(_ opts: ArtboardOptions) -> String {
+    let o = JsonObj()
+    o.bool("fade_region_outside_artboard", opts.fadeRegionOutsideArtboard)
+    o.bool("update_while_dragging", opts.updateWhileDragging)
+    return o.build()
+}
+
 /// Serialize a Document to canonical test JSON.
 ///
 /// The output is a compact JSON string with sorted keys and normalized
 /// floats, suitable for byte-for-byte cross-language comparison.
+///
+/// Artboards and artboard_options are **omitted** from the output when
+/// they carry their defaults (empty list, default options) so the
+/// byte-for-byte contract with legacy Python fixtures (which predate
+/// the artboards feature) still holds. Native docs authored with
+/// artboards or non-default options serialize them explicitly.
 public func documentToTestJson(_ doc: Document) -> String {
     let layers = doc.layers.map { elementJson(.layer($0)) }
     let o = JsonObj()
+    if doc.artboardOptions != .default {
+        o.raw("artboard_options", artboardOptionsJson(doc.artboardOptions))
+    }
+    if !doc.artboards.isEmpty {
+        o.raw("artboards", artboardsJson(doc.artboards))
+    }
     o.raw("layers", jsonArray(layers))
     o.int("selected_layer", doc.selectedLayer)
     o.raw("selection", selectionJson(Array(doc.selection)))
@@ -784,6 +825,38 @@ private func parseSelection(_ v: Any?) -> Selection {
     return sel
 }
 
+private func parseArtboard(_ v: [String: Any]) -> Artboard {
+    let rawAspect = parseF(v["video_ruler_pixel_aspect_ratio"])
+    return Artboard(
+        id: (v["id"] as? String) ?? "",
+        name: (v["name"] as? String) ?? "",
+        x: parseF(v["x"]),
+        y: parseF(v["y"]),
+        width: parseF(v["width"]),
+        height: parseF(v["height"]),
+        fill: ArtboardFill.fromCanonical((v["fill"] as? String) ?? "transparent"),
+        showCenterMark: (v["show_center_mark"] as? Bool) ?? false,
+        showCrossHairs: (v["show_cross_hairs"] as? Bool) ?? false,
+        showVideoSafeAreas: (v["show_video_safe_areas"] as? Bool) ?? false,
+        videoRulerPixelAspectRatio: rawAspect == 0.0 ? 1.0 : rawAspect
+    )
+}
+
+private func parseArtboards(_ v: Any?) -> [Artboard] {
+    // Missing key → empty; load-time invariant repair happens at
+    // the app layer, not here (matches Python / Rust contract).
+    guard let arr = v as? [[String: Any]] else { return [] }
+    return arr.map(parseArtboard)
+}
+
+private func parseArtboardOptions(_ v: Any?) -> ArtboardOptions {
+    guard let d = v as? [String: Any] else { return .default }
+    return ArtboardOptions(
+        fadeRegionOutsideArtboard: (d["fade_region_outside_artboard"] as? Bool) ?? true,
+        updateWhileDragging: (d["update_while_dragging"] as? Bool) ?? true
+    )
+}
+
 /// Parse canonical test JSON into a Document.
 ///
 /// This is the inverse of ``documentToTestJson(_:)``.
@@ -798,5 +871,13 @@ public func testJsonToDocument(_ json: String) -> Document {
     }
     let selectedLayer = (v["selected_layer"] as? NSNumber)?.intValue ?? 0
     let selection = parseSelection(v["selection"])
-    return Document(layers: layers, selectedLayer: selectedLayer, selection: selection)
+    let artboards = parseArtboards(v["artboards"])
+    let artboardOptions = parseArtboardOptions(v["artboard_options"])
+    return Document(
+        rawLayers: layers,
+        rawSelectedLayer: selectedLayer,
+        rawSelection: selection,
+        rawArtboards: artboards,
+        rawArtboardOptions: artboardOptions
+    )
 }

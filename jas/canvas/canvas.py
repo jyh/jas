@@ -1148,6 +1148,163 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
         painter.restore()
 
 
+# ---------------------------------------------------------------------------
+# Artboard rendering (ARTBOARDS.md §Canvas appearance)
+# ---------------------------------------------------------------------------
+#
+# Z-order around the existing element / selection passes:
+#
+#   1. Canvas background (white fill in paintEvent)
+#   2. _draw_artboard_fills       — per artboard, list order
+#   3. (element tree — unchanged)
+#   4. _draw_fade_overlay         — dims off-artboard regions (Phase E)
+#   5. _draw_artboard_borders     — 1px dark-gray border per artboard
+#   6. _draw_artboard_accent      — 2px accent outline for panel-selected
+#   7. _draw_artboard_labels      — "N  Name" above top-left corner
+#   8. _draw_artboard_display_marks — center mark / cross hairs / safe areas
+#   9. _draw_selection_overlays   — unchanged
+#
+# Matches jas_dioxus/src/canvas/render.rs, JasSwift CanvasSubwindow, and
+# jas_ocaml canvas_subwindow — same colors and geometry across apps.
+
+_ARTBOARD_BORDER_COLOR = QColor(48, 48, 48)
+_ARTBOARD_ACCENT_COLOR = QColor(0, 120, 215, 242)  # ~0.95 alpha
+_ARTBOARD_MARK_COLOR = QColor(150, 150, 150)
+_ARTBOARD_LABEL_COLOR = QColor(200, 200, 200)
+_ARTBOARD_FADE_COLOR = QColor(160, 160, 160, 128)  # 50% alpha
+
+
+def _draw_artboard_fills(painter: QPainter, doc: Document) -> None:
+    """Layer 2: per-artboard fill. Transparent artboards skip (canvas
+    shows through); color fills paint the stored hex."""
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    for ab in doc.artboards:
+        if ab.fill == "transparent" or not ab.fill:
+            continue
+        c = QColor(ab.fill)
+        if c.isValid():
+            painter.setBrush(QBrush(c))
+            painter.drawRect(QRectF(ab.x, ab.y, ab.width, ab.height))
+    painter.restore()
+
+
+def _draw_fade_overlay(painter: QPainter, doc: Document,
+                       widget_width: int, widget_height: int) -> None:
+    """Layer 4: dim off-artboard regions when fade_region_outside_artboard
+    is on. Fills the whole canvas with 50%-opacity neutral gray, then
+    punches out each artboard via DestinationOut composition."""
+    if not doc.artboard_options.fade_region_outside_artboard:
+        return
+    if not doc.artboards:
+        return
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(_ARTBOARD_FADE_COLOR))
+    painter.drawRect(QRectF(0, 0, widget_width, widget_height))
+    painter.setCompositionMode(
+        QPainter.CompositionMode.CompositionMode_DestinationOut
+    )
+    painter.setBrush(QBrush(QColor(0, 0, 0, 255)))
+    for ab in doc.artboards:
+        painter.drawRect(QRectF(ab.x, ab.y, ab.width, ab.height))
+    painter.restore()
+
+
+def _draw_artboard_borders(painter: QPainter, doc: Document) -> None:
+    """Layer 5: 1px dark-gray border around each artboard."""
+    painter.save()
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    pen = QPen(_ARTBOARD_BORDER_COLOR)
+    pen.setWidthF(1.0)
+    painter.setPen(pen)
+    for ab in doc.artboards:
+        painter.drawRect(QRectF(ab.x, ab.y, ab.width, ab.height))
+    painter.restore()
+
+
+def _draw_artboard_accent(painter: QPainter, doc: Document,
+                           panel_selected_ids) -> None:
+    """Layer 6: 2px accent outline on panel-selected artboards. The
+    accent sits 1.5px outside the default border so its outer edge is
+    one pixel past the border's outer edge."""
+    if not panel_selected_ids:
+        return
+    selected = set(panel_selected_ids)
+    painter.save()
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    pen = QPen(_ARTBOARD_ACCENT_COLOR)
+    pen.setWidthF(2.0)
+    painter.setPen(pen)
+    pad = 1.5
+    for ab in doc.artboards:
+        if ab.id in selected:
+            painter.drawRect(QRectF(
+                ab.x - pad, ab.y - pad,
+                ab.width + 2 * pad, ab.height + 2 * pad,
+            ))
+    painter.restore()
+
+
+def _draw_artboard_labels(painter: QPainter, doc: Document) -> None:
+    """Layer 7: "N  Name" label above the top-left corner of each
+    artboard. Baseline sits 3 document units above the artboard's
+    top edge."""
+    painter.save()
+    painter.setPen(_ARTBOARD_LABEL_COLOR)
+    from PySide6.QtGui import QFont
+    f = QFont()  # default font family — Qt picks platform sans
+    f.setPointSize(11)
+    painter.setFont(f)
+    for i, ab in enumerate(doc.artboards):
+        label = f"{i + 1}  {ab.name}"
+        painter.drawText(QPointF(ab.x, ab.y - 3.0), label)
+    painter.restore()
+
+
+def _draw_artboard_center_mark(painter: QPainter, ab) -> None:
+    cx = ab.x + ab.width / 2.0
+    cy = ab.y + ab.height / 2.0
+    arm = 5.0
+    painter.drawLine(QPointF(cx - arm, cy), QPointF(cx + arm, cy))
+    painter.drawLine(QPointF(cx, cy - arm), QPointF(cx, cy + arm))
+
+
+def _draw_artboard_cross_hairs(painter: QPainter, ab) -> None:
+    cx = ab.x + ab.width / 2.0
+    cy = ab.y + ab.height / 2.0
+    painter.drawLine(QPointF(ab.x, cy), QPointF(ab.x + ab.width, cy))
+    painter.drawLine(QPointF(cx, ab.y), QPointF(cx, ab.y + ab.height))
+
+
+def _draw_artboard_safe_areas(painter: QPainter, ab) -> None:
+    """Action-safe at 90%, title-safe at 80%, centered."""
+    for frac in (0.9, 0.8):
+        w = ab.width * frac
+        h = ab.height * frac
+        x = ab.x + (ab.width - w) / 2.0
+        y = ab.y + (ab.height - h) / 2.0
+        painter.drawRect(QRectF(x, y, w, h))
+
+
+def _draw_artboard_display_marks(painter: QPainter, doc: Document) -> None:
+    """Layer 8: per-artboard optional overlays (center mark / cross
+    hairs / video safe areas)."""
+    painter.save()
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    pen = QPen(_ARTBOARD_MARK_COLOR)
+    pen.setWidthF(1.0)
+    painter.setPen(pen)
+    for ab in doc.artboards:
+        if ab.show_center_mark:
+            _draw_artboard_center_mark(painter, ab)
+        if ab.show_cross_hairs:
+            _draw_artboard_cross_hairs(painter, ab)
+        if ab.show_video_safe_areas:
+            _draw_artboard_safe_areas(painter, ab)
+    painter.restore()
+
+
 class CanvasWidget(QWidget):
     """The canvas view. Receives document updates from the Model."""
 
@@ -1177,6 +1334,11 @@ class CanvasWidget(QWidget):
         )
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
+        # Artboards panel selection — mirrored from the workspace state
+        # store (``panel["artboards"]["artboards_panel_selection"]``) so
+        # the canvas accent pass can highlight panel-selected artboards
+        # without reaching into the store during paint.
+        self._artboards_panel_selection: list[str] = []
         self._update_cursor()
         model.on_document_changed(self._on_document_changed)
         # Caret blink timer: ticks while the active tool is in an editing
@@ -1433,13 +1595,33 @@ class CanvasWidget(QWidget):
             alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
             self._active_tool.on_release(self._tool_ctx, pos.x(), pos.y(), shift, alt)
 
+    def set_artboards_panel_selection(self, ids) -> None:
+        """Push the current Artboards-panel selection (list of ids) so
+        the canvas accent pass can render the 2px outline. Triggers a
+        repaint if the list differs from the cached value."""
+        new_ids = [s for s in (ids or []) if isinstance(s, str)]
+        if new_ids != self._artboards_panel_selection:
+            self._artboards_panel_selection = new_ids
+            self.update()
+
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("white"))
         doc = self._model.document
+        # Z-layer 2: per-artboard fills.
+        _draw_artboard_fills(painter, doc)
+        # Z-layer 3: document elements.
         for layer in doc.layers:
             _draw_element(painter, layer)
+        # Z-layer 4: fade overlay (off-artboard dimming).
+        _draw_fade_overlay(painter, doc, self.width(), self.height())
+        # Z-layer 5-8: artboard chrome.
+        _draw_artboard_borders(painter, doc)
+        _draw_artboard_accent(painter, doc, self._artboards_panel_selection)
+        _draw_artboard_labels(painter, doc)
+        _draw_artboard_display_marks(painter, doc)
+        # Z-layer 9: selection overlays, then tool overlay.
         _draw_selection_overlays(painter, doc)
         self._active_tool.draw_overlay(self._tool_ctx, painter)
         painter.end()

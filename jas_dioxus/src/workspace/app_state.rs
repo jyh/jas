@@ -150,6 +150,22 @@ pub(crate) struct AppState {
     pub(crate) layers_hidden_types: std::collections::HashSet<String>,
     /// Whether the type filter dropdown is open.
     pub(crate) layers_filter_dropdown_open: bool,
+
+    /// Artboards panel — panel-selected artboard ids. Tracked by stable
+    /// id so selection survives reorder (ARTBOARDS.md §Selection
+    /// semantics).
+    pub(crate) artboards_panel_selection: Vec<String>,
+    /// Anchor id for shift-click range selection in the Artboards panel.
+    pub(crate) artboards_panel_anchor: Option<String>,
+    /// Id of the artboard currently being renamed inline, or None.
+    pub(crate) artboards_renaming: Option<String>,
+    /// Reference-point widget preference. One of the 9 anchor names.
+    /// Persists as a panel preference, not per document.
+    pub(crate) artboards_reference_point: String,
+    /// Blue-dot accent flag on REARRANGE_BUTTON. True after the first
+    /// list change in a session; phase-1 has no clear path (Rearrange
+    /// Dialogue deferred).
+    pub(crate) artboards_rearrange_dirty: bool,
 }
 
 /// Solo/unsolo state for the layers panel.
@@ -471,6 +487,11 @@ impl AppState {
             layers_saved_lock_states: std::collections::HashMap::new(),
             layers_hidden_types: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
+            artboards_panel_selection: Vec::new(),
+            artboards_panel_anchor: None,
+            artboards_renaming: None,
+            artboards_reference_point: "center".to_string(),
+            artboards_rearrange_dirty: false,
         }
     }
 
@@ -969,7 +990,14 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
-        render::render(&ctx, w, h, tab.model.document(), self.boolean_panel.precision);
+        render::render(
+            &ctx,
+            w,
+            h,
+            tab.model.document(),
+            self.boolean_panel.precision,
+            &self.artboards_panel_selection,
+        );
 
         // Draw tool overlay
         if let Some(tool) = tab.tools.get(&self.active_tool) {
@@ -1503,13 +1531,28 @@ impl AppState {
                 aa::AlignReference::Selection(aa::union_bounds(&refs, bounds_fn))
             }
             AlignTo::Artboard => {
-                // Artboards are not yet in the document model; fall
-                // back to the selection union so Artboard mode still
-                // moves elements coherently. TODO(ALIGN §Artboards):
-                // replace with the active artboard rect.
-                let refs: Vec<&crate::geometry::element::Element> =
-                    elements.iter().map(|(_, e)| *e).collect();
-                aa::AlignReference::Artboard(aa::union_bounds(&refs, bounds_fn))
+                // ARTBOARDS.md §Selection semantics — current =
+                // topmost panel-selected artboard, else first. The
+                // at-least-one invariant guarantees artboards[0]
+                // exists; if it somehow doesn't, fall back to the
+                // selection union so the op still moves elements.
+                let selected_set: std::collections::HashSet<&str> = self
+                    .artboards_panel_selection
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect();
+                let current_ab = doc
+                    .artboards
+                    .iter()
+                    .find(|a| selected_set.contains(a.id.as_str()))
+                    .or_else(|| doc.artboards.first());
+                if let Some(ab) = current_ab {
+                    aa::AlignReference::Artboard((ab.x, ab.y, ab.width, ab.height))
+                } else {
+                    let refs: Vec<&crate::geometry::element::Element> =
+                        elements.iter().map(|(_, e)| *e).collect();
+                    aa::AlignReference::Artboard(aa::union_bounds(&refs, bounds_fn))
+                }
             }
             AlignTo::KeyObject => {
                 let Some(key_path) = self.align_panel.key_object_path.clone() else {
@@ -2812,7 +2855,7 @@ mod align_panel_state_tests {
         let selection: Vec<ElementSelection> = selected.into_iter()
             .map(ElementSelection::all)
             .collect();
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection };
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() };
         st.tabs[st.active_tab].model.set_document(doc);
         st
     }

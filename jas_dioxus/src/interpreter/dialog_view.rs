@@ -32,12 +32,21 @@ pub struct DialogState {
 
 impl DialogState {
     /// Get a dialog value, evaluating the getter if present.
-    pub fn get_value(&self, key: &str) -> serde_json::Value {
+    ///
+    /// Dialog getters may reference cross-scope bindings (panel,
+    /// state, active_document, param) — pass them via `outer`.
+    /// When `None`, only dialog-local state is available, which is
+    /// fine for simple getters but insufficient for the Artboard
+    /// Options reference-point transforms (ARTBOARDS.md §Coordinates
+    /// and units).
+    pub fn get_value_with_outer(
+        &self,
+        key: &str,
+        outer: Option<&serde_json::Value>,
+    ) -> serde_json::Value {
         if let Some(prop) = self.props.get(key) {
             if let Some(get_expr) = prop.get("get").and_then(|v| v.as_str()) {
-                let local: serde_json::Map<String, serde_json::Value> =
-                    self.state.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                let ctx = serde_json::Value::Object(local);
+                let ctx = self.build_local_ctx(outer, None);
                 let result = super::expr::eval(get_expr, &ctx);
                 return super::effects::value_to_json(&result);
             }
@@ -45,11 +54,25 @@ impl DialogState {
         self.state.get(key).cloned().unwrap_or(serde_json::Value::Null)
     }
 
+    /// Get a dialog value with no outer scope (backwards-compatible).
+    pub fn get_value(&self, key: &str) -> serde_json::Value {
+        self.get_value_with_outer(key, None)
+    }
+
     /// Set a dialog value, running the setter lambda if present.
-    pub fn set_value(&mut self, key: &str, value: serde_json::Value) {
+    ///
+    /// `outer` gives the setter access to panel / state /
+    /// active_document / param — needed for Artboard Options
+    /// reference-point transforms.
+    pub fn set_value_with_outer(
+        &mut self,
+        key: &str,
+        value: serde_json::Value,
+        outer: Option<&serde_json::Value>,
+    ) {
         if let Some(prop) = self.props.get(key).cloned() {
             if let Some(set_expr) = prop.get("set").and_then(|v| v.as_str()) {
-                self._run_setter_pragmatic(set_expr, &value);
+                self._run_setter_pragmatic(set_expr, &value, outer);
                 return;
             }
             if prop.get("get").is_some() {
@@ -59,9 +82,20 @@ impl DialogState {
         self.state.insert(key.to_string(), value);
     }
 
+    /// Set a dialog value without a cross-scope context (backwards-
+    /// compatible).
+    pub fn set_value(&mut self, key: &str, value: serde_json::Value) {
+        self.set_value_with_outer(key, value, None);
+    }
+
     /// Pragmatic setter: parse "fun param -> body", eval body with param bound,
     /// and intercept Assign nodes to write back to state.
-    fn _run_setter_pragmatic(&mut self, set_expr: &str, value: &serde_json::Value) {
+    fn _run_setter_pragmatic(
+        &mut self,
+        set_expr: &str,
+        value: &serde_json::Value,
+        outer: Option<&serde_json::Value>,
+    ) {
         // Parse the set expression to extract param name and body
         let expr_str = set_expr.trim();
         if !expr_str.starts_with("fun ") {
@@ -75,19 +109,13 @@ impl DialogState {
         let param = param_part.trim_matches(|c: char| c == '(' || c == ')').trim();
         let body_str = expr_str[arrow_pos + 2..].trim();
 
-        // Build context: all stored state + param bound to incoming value
-        let mut local = serde_json::Map::new();
-        for (k, v) in &self.state {
-            local.insert(k.clone(), v.clone());
-        }
-        local.insert(param.to_string(), value.clone());
+        // Build context: cross-scope bindings (outer) + dialog state
+        // + the lambda's param.
+        let ctx = self.build_local_ctx(outer, Some((param, value)));
 
         // Evaluate the body expression. For <- assignments, we use the
         // eval_with_store function that collects assignments.
-        let assignments = super::expr::eval_with_store(
-            body_str,
-            &serde_json::Value::Object(local),
-        );
+        let assignments = super::expr::eval_with_store(body_str, &ctx);
 
         // Apply assignments to state
         for (target, val) in assignments {
@@ -95,8 +123,43 @@ impl DialogState {
         }
     }
 
+    /// Build the local evaluation context for get/set expressions:
+    /// cross-scope bindings (panel / state / active_document / param)
+    /// merged into a scope where dialog state fields are in scope
+    /// by bare name. An optional lambda-param binding can be added
+    /// last to shadow dialog-state fields with the same name.
+    fn build_local_ctx(
+        &self,
+        outer: Option<&serde_json::Value>,
+        lambda_param: Option<(&str, &serde_json::Value)>,
+    ) -> serde_json::Value {
+        let mut local = serde_json::Map::new();
+        // Start with any outer namespaces (panel, state,
+        // active_document, param). This lets get/set bodies
+        // reference things like `panel.reference_point`.
+        if let Some(serde_json::Value::Object(m)) = outer {
+            for (k, v) in m {
+                local.insert(k.clone(), v.clone());
+            }
+        }
+        // Dialog state fields in scope by bare name.
+        for (k, v) in &self.state {
+            local.insert(k.clone(), v.clone());
+        }
+        // Lambda param (for set expressions) shadows any collision.
+        if let Some((param, value)) = lambda_param {
+            local.insert(param.to_string(), value.clone());
+        }
+        serde_json::Value::Object(local)
+    }
+
     /// Build an eval context with computed getters for all properties.
-    pub fn eval_context(&self) -> serde_json::Map<String, serde_json::Value> {
+    /// Cross-scope bindings (panel / state / active_document / param)
+    /// are only visible to the getters if `outer` is provided.
+    pub fn eval_context_with_outer(
+        &self,
+        outer: Option<&serde_json::Value>,
+    ) -> serde_json::Map<String, serde_json::Value> {
         let mut result = serde_json::Map::new();
         // Start with stored values
         for (k, v) in &self.state {
@@ -105,10 +168,15 @@ impl DialogState {
         // Override with computed getters
         for (k, prop) in &self.props {
             if prop.get("get").and_then(|v| v.as_str()).is_some() {
-                result.insert(k.clone(), self.get_value(k));
+                result.insert(k.clone(), self.get_value_with_outer(k, outer));
             }
         }
         result
+    }
+
+    /// Back-compat: eval context without cross-scope bindings.
+    pub fn eval_context(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.eval_context_with_outer(None)
     }
 }
 
@@ -119,12 +187,37 @@ pub struct DialogCtx(pub Signal<Option<DialogState>>);
 /// Open a dialog by ID, initializing its state from the workspace definition.
 ///
 /// Resolves parameters, extracts state defaults, evaluates init expressions,
-/// and sets the dialog signal.
+/// and sets the dialog signal. Back-compatible shim that calls
+/// `open_dialog_with_outer` without extra scope — dialog init expressions
+/// that reference `panel.*` / `active_document.*` should call the
+/// `_with_outer` variant.
 pub fn open_dialog(
     dialog_signal: &mut Signal<Option<DialogState>>,
     dialog_id: &str,
     raw_params: &serde_json::Map<String, serde_json::Value>,
     live_state: &serde_json::Map<String, serde_json::Value>,
+) {
+    open_dialog_with_outer(
+        dialog_signal,
+        dialog_id,
+        raw_params,
+        live_state,
+        &serde_json::Value::Null,
+    )
+}
+
+/// As `open_dialog` but threads an `outer_scope` JSON object whose
+/// top-level keys (e.g. `panel`, `active_document`) are visible to
+/// init expressions alongside `state`, `dialog`, `param`. Required
+/// by the Artboard Options Dialogue whose init expressions call
+/// `filter(active_document.artboards, …)` and
+/// `panel.reference_point`.
+pub fn open_dialog_with_outer(
+    dialog_signal: &mut Signal<Option<DialogState>>,
+    dialog_id: &str,
+    raw_params: &serde_json::Map<String, serde_json::Value>,
+    live_state: &serde_json::Map<String, serde_json::Value>,
+    outer_scope: &serde_json::Value,
 ) {
     let ws = match Workspace::load() {
         Some(ws) => ws,
@@ -186,7 +279,8 @@ pub fn open_dialog(
     // Build init context: state + param + dialog (defaults so far)
     let mut dialog_state = defaults.clone();
 
-    // Evaluate init expressions
+    // Evaluate init expressions with access to any outer-scope
+    // namespaces (panel / active_document) the caller knows about.
     if let Some(serde_json::Value::Object(init_map)) = dlg_def.get("init") {
         for (key, init_expr) in init_map {
             let expr_str = init_expr.as_str().unwrap_or("");
@@ -194,11 +288,27 @@ pub fn open_dialog(
                 dialog_state.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
             let param_map: serde_json::Map<String, serde_json::Value> =
                 resolved_params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-            let init_ctx = serde_json::json!({
-                "state": serde_json::Value::Object(live_state.clone()),
-                "dialog": serde_json::Value::Object(dialog_map),
-                "param": serde_json::Value::Object(param_map),
-            });
+            let mut init_ctx_map = serde_json::Map::new();
+            if let serde_json::Value::Object(m) = outer_scope {
+                for (k, v) in m {
+                    init_ctx_map.insert(k.clone(), v.clone());
+                }
+            }
+            // state / dialog / param always win over outer's same-named
+            // namespaces (if any).
+            init_ctx_map.insert(
+                "state".to_string(),
+                serde_json::Value::Object(live_state.clone()),
+            );
+            init_ctx_map.insert(
+                "dialog".to_string(),
+                serde_json::Value::Object(dialog_map),
+            );
+            init_ctx_map.insert(
+                "param".to_string(),
+                serde_json::Value::Object(param_map),
+            );
+            let init_ctx = serde_json::Value::Object(init_ctx_map);
             let result = expr::eval(expr_str, &init_ctx);
             dialog_state.insert(key.clone(), value_to_json(&result));
         }
@@ -300,16 +410,21 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
         .and_then(|s| s.as_str())
         .unwrap_or(&ds.id);
 
-    // Build eval context — dialog map includes computed getters
-    let dialog_map: serde_json::Map<String, serde_json::Value> = ds.eval_context();
-    let param_map: serde_json::Map<String, serde_json::Value> =
-        ds.params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-
-    // Get live state from app
+    // Get live state + panel/active_document namespaces so dialog
+    // computed props (e.g. Artboard Options x_rp / y_rp) can reach
+    // panel.reference_point and active_document.current_artboard.
     let app = use_context::<crate::workspace::app_state::AppHandle>();
     let st = app.borrow();
     let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+    let outer_scope = super::renderer::build_dialog_outer_scope(&st);
     drop(st);
+
+    // Build eval context — dialog map includes computed getters
+    // evaluated with the outer scope in view.
+    let dialog_map: serde_json::Map<String, serde_json::Value> =
+        ds.eval_context_with_outer(Some(&outer_scope));
+    let param_map: serde_json::Map<String, serde_json::Value> =
+        ds.params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 
     let icons = ws.icons().clone();
     let eval_ctx = serde_json::json!({

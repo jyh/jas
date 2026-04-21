@@ -162,7 +162,9 @@ final class DeleteAnchorPointTool: CanvasTool {
             var newSelection = newDoc.selection.filter { $0.path != path }
             newSelection.insert(newSelEntry)
             newDoc = Document(layers: newDoc.layers, selectedLayer: newDoc.selectedLayer,
-                              selection: newSelection)
+                              selection: newSelection,
+                              artboards: newDoc.artboards,
+                              artboardOptions: newDoc.artboardOptions)
             ctx.controller.setDocument(newDoc)
         } else {
             // Path too small - remove entirely

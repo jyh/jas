@@ -1,0 +1,428 @@
+artboard_options:
+  summary: "Artboard Options"
+  description: >
+    Modal dialog for editing the properties of a single artboard.
+    ARTBOARDS.md §Artboard Options Dialogue.
+
+    Batched commit: edits don't apply until OK; Cancel discards; a
+    single undo entry records the OK (via snapshot inside the
+    confirm action, plus the dialog-snapshot preview-restore for
+    reversible preview_targets).
+
+    Layout follows the reference image: Name / Preset rows, then a
+    pair of rows with Width / Height on the left and X / Y on the
+    right (with the reference-point widget and chain-link toggle in
+    the middle column). Orientation button and Fill selector share
+    the next row. Display section groups the three show_* toggles
+    plus the Video Ruler Pixel Aspect Ratio input. Global section
+    carries the document-wide fade_region_outside_artboard toggle
+    with the indented update_while_dragging toggle. Info section
+    displays the live Artboards count. Footer: Delete / Cancel / OK.
+
+    Phase-1 deferrals: CHAIN_LINK_BUTTON state persists in dialog
+    state but does not alter Width / Height edits (drag-resize is
+    not wired). update_while_dragging persists but has no observable
+    effect in Flask. video_ruler_pixel_aspect_ratio round-trips but
+    does not distort the canvas.
+
+  modal: true
+  width: 380
+
+  params:
+    artboard_id: { type: string }
+
+  state:
+    # Per-artboard fields (stored as top-left; reference-point
+    # transform applied on display and on commit).
+    name:
+      type: string
+      default: ""
+    width:
+      type: number
+      default: 612
+    height:
+      type: number
+      default: 792
+    # Top-left storage (internal; not directly edited by the user).
+    x_stored:
+      type: number
+      default: 0
+    y_stored:
+      type: number
+      default: 0
+    fill:
+      type: color_or_transparent
+      default: "transparent"
+    show_center_mark:
+      type: bool
+      default: false
+    show_cross_hairs:
+      type: bool
+      default: false
+    show_video_safe_areas:
+      type: bool
+      default: false
+    video_ruler_pixel_aspect_ratio:
+      type: number
+      default: 1.0
+
+    # Document-global fields (echoed into the dialog's Global section).
+    fade_region_outside_artboard:
+      type: bool
+      default: true
+    update_while_dragging:
+      type: bool
+      default: true
+
+    # Preset dropdown selector: "Letter", "Legal", ..., "Custom" when
+    # W/H match no preset.
+    preset:
+      type: enum
+      values: [letter, legal, tabloid, a4, a3, hd1080, hd720, iphone, ipad_pro_11, square, custom]
+      default: custom
+
+    # Dialog-session-only chain-link state. Default off per spec.
+    chain_link_engaged:
+      type: bool
+      default: false
+    chain_link_ratio:
+      type: number
+      default: 1.0
+
+    # Reference-point-relative X / Y for display and entry. Computed
+    # on dialog open from (x_stored, y_stored, width, height) and the
+    # panel's reference_point preference; written back on OK.
+    x_rp:
+      get: "x_stored + anchor_offset_x(panel.reference_point, width)"
+      set: "fun new -> x_stored := new - anchor_offset_x(panel.reference_point, width)"
+    y_rp:
+      get: "y_stored + anchor_offset_y(panel.reference_point, height)"
+      set: "fun new -> y_stored := new - anchor_offset_y(panel.reference_point, height)"
+
+  init:
+    name: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].name"
+    width: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].width"
+    height: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].height"
+    x_stored: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].x"
+    y_stored: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].y"
+    fill: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].fill"
+    show_center_mark: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].show_center_mark"
+    show_cross_hairs: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].show_cross_hairs"
+    show_video_safe_areas: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].show_video_safe_areas"
+    video_ruler_pixel_aspect_ratio: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].video_ruler_pixel_aspect_ratio"
+    fade_region_outside_artboard: "active_document.artboard_options.fade_region_outside_artboard"
+    update_while_dragging: "active_document.artboard_options.update_while_dragging"
+
+  content:
+    type: container
+    layout: column
+    style: { gap: 10, padding: 16 }
+    children:
+
+      # Name row
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Name:", style: { font_size: 11 } }
+          - type: col
+            col: 9
+            children:
+              - id: ao_name_input
+                type: text_input
+                placeholder: "Artboard Name"
+                bind:
+                  value: "dialog.name"
+
+      # Preset row
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Preset:", style: { font_size: 11 } }
+          - type: col
+            col: 9
+            children:
+              - id: ao_preset
+                type: select
+                options:
+                  - { label: "Letter (612 × 792)",        value: letter }
+                  - { label: "Legal (612 × 1008)",        value: legal }
+                  - { label: "Tabloid (792 × 1224)",      value: tabloid }
+                  - { label: "A4 (595.28 × 841.89)",      value: a4 }
+                  - { label: "A3 (841.89 × 1190.55)",     value: a3 }
+                  - { label: "1080p Full HD (1920 × 1080)", value: hd1080 }
+                  - { label: "720p HD (1280 × 720)",      value: hd720 }
+                  - { label: "iPhone (1179 × 2556)",      value: iphone }
+                  - { label: "iPad Pro 11 (1668 × 2388)", value: ipad_pro_11 }
+                  - { label: "Square (1000 × 1000)",      value: square }
+                  - { label: "Custom",                    value: custom }
+                bind:
+                  value: "dialog.preset"
+                behavior:
+                  - event: change
+                    description: >
+                      Selecting a preset sets dialog.width and dialog.height
+                      to the preset's dimensions. "Custom" is display-only
+                      (cannot be selected) and appears automatically when
+                      W/H match no preset. Native apps translate the
+                      selected value into W/H assignments.
+                    action: apply_artboard_preset
+                    params:
+                      preset: "dialog.preset"
+
+      # Width / Chain / RefPoint / X
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Width:", style: { font_size: 11 } }
+          - type: col
+            col: 3
+            children:
+              - id: ao_width
+                type: number_input
+                min: 1
+                style: { width: 80 }
+                bind:
+                  value: "dialog.width"
+          - type: col
+            col: 1
+            children:
+              - id: ao_chain_link
+                type: icon_button
+                icon: "{{if dialog.chain_link_engaged then 'chain_linked' else 'chain_broken'}}"
+                summary: "Lock width / height aspect ratio"
+                description: >
+                  Toggle — when engaged, W and H scale proportionally.
+                  Dialog-session-only; default off on each open.
+                style: { size: 16 }
+                behavior:
+                  - event: click
+                    action: toggle_artboard_chain_link
+          - type: col
+            col: 1
+            children:
+              - id: ao_reference_point
+                type: reference_point_widget
+                summary: "Reference point"
+                description: "3×3 grid; exactly one anchor active. Changes X / Y display, not storage."
+                bind:
+                  value: "panel.reference_point"
+                behavior:
+                  - event: change
+                    action: set_artboard_reference_point
+                    params: { anchor: "event.value" }
+          - type: col
+            col: 1
+            children:
+              - { type: text, content: "X:", style: { font_size: 11 } }
+          - type: col
+            col: 3
+            children:
+              - id: ao_x
+                type: number_input
+                style: { width: 80 }
+                bind:
+                  value: "dialog.x_rp"
+
+      # Height / (blank) / Y
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Height:", style: { font_size: 11 } }
+          - type: col
+            col: 3
+            children:
+              - id: ao_height
+                type: number_input
+                min: 1
+                style: { width: 80 }
+                bind:
+                  value: "dialog.height"
+          - type: col
+            col: 2
+            children: []
+          - type: col
+            col: 1
+            children:
+              - { type: text, content: "Y:", style: { font_size: 11 } }
+          - type: col
+            col: 3
+            children:
+              - id: ao_y
+                type: number_input
+                style: { width: 80 }
+                bind:
+                  value: "dialog.y_rp"
+
+      # Orientation / Fill row
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Orientation:", style: { font_size: 11 } }
+          - type: col
+            col: 3
+            children:
+              - id: ao_orientation
+                type: icon_button_group
+                options:
+                  - { icon: orientation_portrait,  value: portrait }
+                  - { icon: orientation_landscape, value: landscape }
+                bind:
+                  value: "if dialog.height >= dialog.width then 'portrait' else 'landscape'"
+                behavior:
+                  - event: change
+                    action: toggle_artboard_orientation
+          - type: col
+            col: 2
+            children: []
+          - type: col
+            col: 1
+            children:
+              - { type: text, content: "Fill:", style: { font_size: 11 } }
+          - type: col
+            col: 2
+            children:
+              - id: ao_fill_dropdown
+                type: select
+                options:
+                  - { label: "Transparent", value: transparent }
+                  - { label: "White",       value: white }
+                  - { label: "Black",       value: black }
+                  - { label: "Custom…",     value: custom }
+                bind:
+                  value: "if dialog.fill == 'transparent' then 'transparent' else if dialog.fill == '#ffffff' then 'white' else if dialog.fill == '#000000' then 'black' else 'custom'"
+                behavior:
+                  - event: change
+                    action: set_artboard_fill_preset
+                    params: { preset: "event.value" }
+          - type: col
+            col: 1
+            children:
+              - id: ao_fill_swatch
+                type: color_swatch
+                summary: "Artboard fill"
+                description: "Click to open the Color Picker for a custom fill."
+                style: { size: 22 }
+                bind:
+                  color: "dialog.fill"
+                behavior:
+                  - event: click
+                    action: open_color_picker
+                    params: { target: "dialog.fill" }
+
+      # Display section header + separator
+      - type: separator
+        orientation: horizontal
+      - type: text
+        content: "Display"
+        style: { font_size: 11, font_weight: bold }
+
+      # Show Center Mark
+      - id: ao_show_center_mark
+        type: toggle
+        label: "Show Center Mark"
+        bind:
+          checked: "dialog.show_center_mark"
+
+      # Show Cross Hairs
+      - id: ao_show_cross_hairs
+        type: toggle
+        label: "Show Cross Hairs"
+        bind:
+          checked: "dialog.show_cross_hairs"
+
+      # Show Video Safe Areas
+      - id: ao_show_video_safe_areas
+        type: toggle
+        label: "Show Video Safe Areas"
+        bind:
+          checked: "dialog.show_video_safe_areas"
+
+      # Video Ruler Pixel Aspect Ratio
+      - type: row
+        children:
+          - type: col
+            col: 6
+            children:
+              - { type: text, content: "Video Ruler Pixel Aspect Ratio:", style: { font_size: 11 } }
+          - type: col
+            col: 6
+            children:
+              - id: ao_video_par
+                type: number_input
+                style: { width: 80 }
+                bind:
+                  value: "dialog.video_ruler_pixel_aspect_ratio"
+
+      # Global section
+      - type: separator
+        orientation: horizontal
+      - type: text
+        content: "Global"
+        style: { font_size: 11, font_weight: bold }
+
+      - id: ao_fade_region
+        type: toggle
+        label: "Fade region outside Artboard"
+        bind:
+          checked: "dialog.fade_region_outside_artboard"
+
+      - type: container
+        style: { padding: "0 0 0 20" }
+        children:
+          - id: ao_update_while_dragging
+            type: toggle
+            label: "Update while dragging"
+            bind:
+              checked: "dialog.update_while_dragging"
+              disabled: "not dialog.fade_region_outside_artboard"
+
+      # Info section — live artboard count
+      - type: separator
+        orientation: horizontal
+      - type: text
+        content: "Artboards: {{active_document.artboards_count}}"
+        style: { font_size: 11, color: "{{theme.colors.text_dim}}" }
+
+      # Footer: Delete / Cancel / OK
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: end }
+        children:
+          - id: ao_delete
+            type: button
+            label: "Delete"
+            bind:
+              disabled: "active_document.artboards_count <= 1"
+            action: delete_artboard_from_dialog
+            params: { artboard_id: "param.artboard_id" }
+          - type: spacer
+            style: { flex: 1 }
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - type: button
+            label: "OK"
+            action: artboard_options_confirm
+            variant: primary
+            params:
+              artboard_id: "param.artboard_id"
+              name: "dialog.name"
+              x: "dialog.x_stored"
+              y: "dialog.y_stored"
+              width: "dialog.width"
+              height: "dialog.height"
+              fill: "dialog.fill"
+              show_center_mark: "dialog.show_center_mark"
+              show_cross_hairs: "dialog.show_cross_hairs"
+              show_video_safe_areas: "dialog.show_video_safe_areas"
+              video_ruler_pixel_aspect_ratio: "dialog.video_ruler_pixel_aspect_ratio"
+              fade_region_outside_artboard: "dialog.fade_region_outside_artboard"
+              update_while_dragging: "dialog.update_while_dragging"

@@ -153,20 +153,44 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Boolean", "close_panel"),
         ]
+    if kind == PanelKind.ARTBOARDS:
+        # Hardcoded fallback — mirrors workspace/panels/artboards.yaml
+        # so tests and panel-label lookups work even when YAML loading
+        # is unavailable. Live runs use the YAML menu via build_qmenu.
+        return [
+            PanelMenuItem.action("New Artboard", "new_artboard"),
+            PanelMenuItem.action("Duplicate Artboards", "duplicate_artboards"),
+            PanelMenuItem.action("Delete Artboards", "delete_artboards"),
+            PanelMenuItem.action("Rename", "rename_artboard"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Delete Empty Artboards", "delete_empty_artboards"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Convert to Artboards", "convert_to_artboards"),
+            PanelMenuItem.action("Artboard Options...", "open_artboard_options"),
+            PanelMenuItem.action("Rearrange...", "rearrange_artboards"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Reset Panel", "reset_artboards_panel"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Artboards", "close_panel"),
+        ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 
 
 def _dispatch_yaml_layers_action(action_name: str, model,
                                   panel_selection=None,
+                                  artboards_panel_selection=None,
                                   params=None,
                                   on_close_dialog=None) -> None:
-    """Phase 3: dispatch a layers action through the compiled YAML effects.
+    """Phase 3: dispatch a YAML action through the compiled effects.
 
-    Builds active_document.top_level_layers / top_level_layer_paths from
-    model.document.layers and registers snapshot + doc.set as platform
-    effect handlers that operate on the Model.
+    Builds active_document from model.document and registers snapshot +
+    doc.set + all artboard doc.* effects as platform handlers that
+    operate on the Model. Name kept for back-compat; also dispatches
+    artboard actions now that the active_document view and the seven
+    artboard handlers are wired here.
     """
     panel_selection = panel_selection or []
+    artboards_panel_selection = artboards_panel_selection or []
     params = params or {}
     import dataclasses
     from geometry.element import Layer, Visibility
@@ -191,14 +215,21 @@ def _dispatch_yaml_layers_action(action_name: str, model,
     effects = action_def.get("effects", [])
 
     from panels.active_document_view import build_active_document_view
-    active_doc = build_active_document_view(model, panel_selection=panel_selection)
+    active_doc = build_active_document_view(
+        model,
+        panel_selection=panel_selection,
+        artboards_panel_selection=artboards_panel_selection,
+    )
     # Inject panel.layers_panel_selection as list of __path__ marker
     # dicts — matches the shape used by other apps so YAML expressions
     # like panel.layers_panel_selection[0] decode back to a Path value.
     selection_markers = [{"__path__": list(p)} for p in panel_selection]
     ctx = {
         "active_document": active_doc,
-        "panel": {"layers_panel_selection": selection_markers},
+        "panel": {
+            "layers_panel_selection": selection_markers,
+            "artboards_panel_selection": list(artboards_panel_selection),
+        },
         "param": params,
     }
 
@@ -445,6 +476,9 @@ def _dispatch_yaml_layers_action(action_name: str, model,
             on_close_dialog()
         return None
 
+    # ── Artboard doc effects (ARTBOARDS.md) ────────────────────────
+    from jas.panels.artboard_effects import build_artboard_handlers
+
     platform_effects = {
         "snapshot": snapshot_handler,
         "doc.set": doc_set_handler,
@@ -457,6 +491,7 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         "doc.wrap_in_layer": doc_wrap_in_layer_handler,
         "list_push": list_push_handler,
         "pop": pop_handler,
+        **build_artboard_handlers(model),
     }
     if on_close_dialog is not None:
         platform_effects["close_dialog"] = close_dialog_handler

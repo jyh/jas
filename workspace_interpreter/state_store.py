@@ -7,13 +7,90 @@ to the subscribe mechanism.
 
 from __future__ import annotations
 import copy
+import logging
 from typing import Callable
+
+# ── Artboard invariants (ARTBOARDS.md §At-least-one-artboard invariant) ──
+
+_ARTBOARD_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+_ARTBOARD_ID_LENGTH = 8
+
+
+def _generate_artboard_id(rng=None) -> str:
+    """Mint an 8-char base36 id. Pass a seeded ``random.Random`` for
+    deterministic tests; default is cryptographically random."""
+    import random
+    import secrets
+    if rng is None:
+        rng = random.Random(secrets.randbits(128))
+    return "".join(rng.choices(_ARTBOARD_ID_ALPHABET, k=_ARTBOARD_ID_LENGTH))
+
+
+def _default_artboard(artboard_id: str, name: str = "Artboard 1") -> dict:
+    """Return the canonical default artboard: Letter 612x792 at origin,
+    transparent fill, all display toggles off."""
+    return {
+        "id": artboard_id,
+        "name": name,
+        "x": 0,
+        "y": 0,
+        "width": 612,
+        "height": 792,
+        "fill": "transparent",
+        "show_center_mark": False,
+        "show_cross_hairs": False,
+        "show_video_safe_areas": False,
+        "video_ruler_pixel_aspect_ratio": 1.0,
+    }
+
+
+def next_artboard_name(artboards: list) -> str:
+    """Pick ``Artboard N`` with the smallest N not currently used as a
+    default-pattern name. Case-sensitive match on ``^Artboard \\d+$``
+    with exactly one space (ARTBOARDS.md §Numbering and naming)."""
+    import re
+    used: set[int] = set()
+    for a in artboards:
+        if not isinstance(a, dict):
+            continue
+        name = a.get("name", "")
+        if isinstance(name, str):
+            m = re.match(r'^Artboard (\d+)$', name)
+            if m:
+                used.add(int(m.group(1)))
+    n = 1
+    while n in used:
+        n += 1
+    return f"Artboard {n}"
+
+
+def ensure_artboards_invariant(document: dict, id_generator=None) -> bool:
+    """Mutate ``document`` in-place to enforce ``artboards.length >= 1``
+    and populate ``artboard_options`` defaults. Returns True when a
+    default artboard was inserted — callers emit the log line.
+
+    ``id_generator`` is a zero-arg callable returning a fresh id string;
+    tests pass a seeded generator for determinism."""
+    gen = id_generator if id_generator is not None else _generate_artboard_id
+    repaired = False
+    artboards = document.get("artboards")
+    if not isinstance(artboards, list) or len(artboards) == 0:
+        document["artboards"] = [_default_artboard(gen())]
+        repaired = True
+    options = document.get("artboard_options")
+    if not isinstance(options, dict):
+        options = {}
+        document["artboard_options"] = options
+    options.setdefault("fade_region_outside_artboard", True)
+    options.setdefault("update_while_dragging", True)
+    return repaired
 
 
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
-    def __init__(self, defaults: dict | None = None, document: dict | None = None):
+    def __init__(self, defaults: dict | None = None, document: dict | None = None,
+                 artboard_id_generator=None):
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
@@ -29,10 +106,22 @@ class StateStore:
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
         # Phase 3: optional document tree for doc.set / snapshot effects.
-        # Shape: {"layers": [<element>, ...]} where <element> is a dict
-        # with at least {"kind": str, "name": str}. Real apps use a
-        # native Model; tests use plain dicts.
+        # Shape: {"layers": [<element>, ...], "artboards": [<artboard>, ...],
+        # "artboard_options": {...}}. Real apps use a native Model; tests
+        # use plain dicts.
         self._document: dict | None = document
+        # Random-like rng (has .choices()) used for artboard id generation.
+        # ensure_artboards_invariant expects a zero-arg callable, so wrap.
+        self._artboard_id_rng = artboard_id_generator
+        if self._document is not None:
+            id_fn = lambda: _generate_artboard_id(self._artboard_id_rng)
+            repaired = ensure_artboards_invariant(
+                self._document, id_generator=id_fn,
+            )
+            if repaired:
+                logging.getLogger("workspace_interpreter").info(
+                    "Document had no artboards; inserted default."
+                )
         self._snapshots: list[dict] = []
 
     # ── Global state ─────────────────────────────────────────
@@ -117,8 +206,20 @@ class StateStore:
         prop = self._dialog_props.get(key)
         if prop and "get" in prop:
             from workspace_interpreter.expr import evaluate
-            # Build local scope: all sibling state vars by bare name
+            # Build local scope: all sibling state vars by bare name,
+            # plus panel + state + active_document + param for
+            # cross-scope reads (used by ARTBOARDS reference-point
+            # transforms that depend on panel.reference_point).
             local = dict(self._dialog)
+            local["panel"] = (
+                dict(self._panels[self._active_panel])
+                if self._active_panel and self._active_panel in self._panels
+                else {}
+            )
+            local["state"] = dict(self._state)
+            local["active_document"] = self._active_document_view()
+            if self._dialog_params is not None:
+                local["param"] = dict(self._dialog_params)
             result = evaluate(prop["get"], local)
             return result.value
         return self._dialog.get(key)
@@ -130,8 +231,19 @@ class StateStore:
         if prop and "set" in prop:
             from workspace_interpreter.expr import evaluate
             from workspace_interpreter.expr_types import Value, ValueType
-            # Parse the setter as a lambda and apply with the value
+            # Parse the setter as a lambda and apply with the value.
+            # Expose the same cross-scope bindings as the getter so
+            # the setter's body can reference panel.* / state.* etc.
             local = dict(self._dialog)
+            local["panel"] = (
+                dict(self._panels[self._active_panel])
+                if self._active_panel and self._active_panel in self._panels
+                else {}
+            )
+            local["state"] = dict(self._state)
+            local["active_document"] = self._active_document_view()
+            if self._dialog_params is not None:
+                local["param"] = dict(self._dialog_params)
             # Store callback: assignments in the setter write to dialog state
             def store_cb(target, val):
                 self._dialog[target] = val.value
@@ -343,6 +455,189 @@ class StateStore:
             return None
         return children.pop(last)
 
+    # ── Artboards ────────────────────────────────────────────
+
+    def create_artboard(self, overrides: dict | None = None) -> dict | None:
+        """Append a new artboard to ``document.artboards``.
+
+        A fresh 8-char base36 id is minted; on (astronomically unlikely)
+        collision the id generator is retried up to 100 times. Name
+        defaults to the next unused ``Artboard N`` if not supplied in
+        overrides. Field overrides map 1:1 onto artboard fields (``x``,
+        ``y``, ``width``, ``height``, ``fill``, display toggles).
+
+        Returns the new artboard dict (live reference inside the
+        document), or None when there is no document."""
+        if self._document is None:
+            return None
+        artboards = self._document.setdefault("artboards", [])
+        if not isinstance(artboards, list):
+            return None
+        existing_ids = {a.get("id") for a in artboards if isinstance(a, dict)}
+        aid = None
+        for _ in range(100):
+            candidate = _generate_artboard_id(self._artboard_id_rng)
+            if candidate not in existing_ids:
+                aid = candidate
+                break
+        if aid is None:
+            return None
+        overrides = overrides or {}
+        name = overrides.get("name")
+        if not isinstance(name, str) or not name.strip():
+            name = next_artboard_name(artboards)
+        artboard = _default_artboard(aid, name)
+        for k, v in overrides.items():
+            if k == "name":
+                continue
+            if k in artboard:
+                artboard[k] = v
+        artboards.append(artboard)
+        return artboard
+
+    def find_artboard_by_id(self, artboard_id: str) -> dict | None:
+        """Return the live artboard dict with this id, or None."""
+        if self._document is None:
+            return None
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return None
+        for a in artboards:
+            if isinstance(a, dict) and a.get("id") == artboard_id:
+                return a
+        return None
+
+    def delete_artboard_by_id(self, artboard_id: str) -> dict | None:
+        """Remove the artboard with this id from the list. Returns
+        the deleted dict, or None if not found. Callers enforce the
+        at-least-one-artboard invariant (via enabled_when predicates
+        in the panel yaml)."""
+        if self._document is None:
+            return None
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return None
+        for i, a in enumerate(artboards):
+            if isinstance(a, dict) and a.get("id") == artboard_id:
+                return artboards.pop(i)
+        return None
+
+    def set_artboard_field(self, artboard_id: str, field: str, value) -> bool:
+        """Write value to the named field of the artboard with this id.
+        Returns True on success, False if the artboard wasn't found."""
+        ab = self.find_artboard_by_id(artboard_id)
+        if ab is None:
+            return False
+        ab[field] = value
+        return True
+
+    def set_artboard_options_field(self, field: str, value) -> bool:
+        """Write value to ``document.artboard_options[field]``. Used
+        by the dialog's Global section (fade_region_outside_artboard,
+        update_while_dragging). Returns True on success."""
+        if self._document is None:
+            return False
+        options = self._document.setdefault("artboard_options", {})
+        if not isinstance(options, dict):
+            return False
+        options[field] = value
+        return True
+
+    def move_artboards_up(self, selected_ids: list) -> bool:
+        """Apply the swap-with-neighbor-skipping-selected rule for
+        Move Up (ARTBOARDS.md §Reordering). Iterate top-to-bottom;
+        each selected row swaps with the row above it, skipping rows
+        whose upper neighbor is itself selected or which are already
+        at position 1. Returns True if any swap occurred."""
+        if self._document is None:
+            return False
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return False
+        selected_set = {s for s in selected_ids if isinstance(s, str)}
+        changed = False
+        for i in range(len(artboards)):
+            elem = artboards[i]
+            if not isinstance(elem, dict):
+                continue
+            if elem.get("id") not in selected_set:
+                continue
+            if i == 0:
+                continue
+            above = artboards[i - 1]
+            if not isinstance(above, dict):
+                continue
+            if above.get("id") in selected_set:
+                continue
+            artboards[i - 1], artboards[i] = artboards[i], artboards[i - 1]
+            changed = True
+        return changed
+
+    def move_artboards_down(self, selected_ids: list) -> bool:
+        """Symmetric to Move Up. Iterate bottom-to-top; each selected
+        row swaps with the row below it, skipping rows whose lower
+        neighbor is itself selected or which are already at the
+        bottom. Returns True if any swap occurred."""
+        if self._document is None:
+            return False
+        artboards = self._document.get("artboards")
+        if not isinstance(artboards, list):
+            return False
+        selected_set = {s for s in selected_ids if isinstance(s, str)}
+        changed = False
+        for i in range(len(artboards) - 1, -1, -1):
+            elem = artboards[i]
+            if not isinstance(elem, dict):
+                continue
+            if elem.get("id") not in selected_set:
+                continue
+            if i == len(artboards) - 1:
+                continue
+            below = artboards[i + 1]
+            if not isinstance(below, dict):
+                continue
+            if below.get("id") in selected_set:
+                continue
+            artboards[i], artboards[i + 1] = artboards[i + 1], artboards[i]
+            changed = True
+        return changed
+
+    def duplicate_artboard(
+        self, artboard_id: str, offset_x: float = 20, offset_y: float = 20
+    ) -> dict | None:
+        """Deep-copy the artboard with this id, mint a fresh id, pick
+        the next unused ``Artboard N`` name, offset position by
+        ``(offset_x, offset_y)`` pt, and append to
+        ``document.artboards``. Returns the new artboard, or None if
+        the source wasn't found or there is no document.
+
+        Contained-element copying is not implemented here — the
+        artboard-only copy is correct for the Flask phase-1 surface,
+        which has no element model. Native ports that carry elements
+        can override this method."""
+        source = self.find_artboard_by_id(artboard_id)
+        if source is None or self._document is None:
+            return None
+        artboards = self._document.setdefault("artboards", [])
+        if not isinstance(artboards, list):
+            return None
+        existing_ids = {a.get("id") for a in artboards if isinstance(a, dict)}
+        aid: str | None = None
+        for _ in range(100):
+            candidate = _generate_artboard_id(self._artboard_id_rng)
+            if candidate not in existing_ids:
+                aid = candidate
+                break
+        if aid is None:
+            return None
+        dup = copy.deepcopy(source)
+        dup["id"] = aid
+        dup["name"] = next_artboard_name(artboards)
+        dup["x"] = dup.get("x", 0) + offset_x
+        dup["y"] = dup.get("y", 0) + offset_y
+        artboards.append(dup)
+        return dup
+
     def set_element_field(self, path: tuple[int, ...], dotted_field: str, value) -> bool:
         """Write value to the element at path under dotted_field.
         Creates intermediate dicts as needed. Returns True on success."""
@@ -384,12 +679,66 @@ class StateStore:
         Includes top_level_layers and top_level_layer_paths (Phase 3 §7.2).
         Also exposes computed properties for new_layer: next_layer_name and
         new_layer_insert_index — derived from current layers + panel state.
+        Artboard fields (ARTBOARDS.md): artboards, artboard_options,
+        artboards_count, next_artboard_name, current_artboard_id,
+        artboards_panel_selection_ids.
         """
         from workspace_interpreter.expr_types import Value
         canvas_sel = self._canvas_selection_paths()
         has_selection = len(canvas_sel) > 0
         selection_count = len(canvas_sel)
         element_selection = [Value.path(p) for p in canvas_sel]
+        # Artboard-view computation (works whether document is None or not)
+        if self._document is None:
+            raw_artboards: list = []
+            raw_options: dict = {}
+        else:
+            raw_ab = self._document.get("artboards")
+            raw_artboards = raw_ab if isinstance(raw_ab, list) else []
+            raw_opt = self._document.get("artboard_options")
+            raw_options = raw_opt if isinstance(raw_opt, dict) else {}
+        artboards_view: list = []
+        for i, a in enumerate(raw_artboards):
+            if isinstance(a, dict):
+                v = dict(a)
+                v["number"] = i + 1
+                artboards_view.append(v)
+        artboards_count = len(artboards_view)
+        next_ab_name = next_artboard_name(raw_artboards)
+        ab_panel = self._panels.get("artboards", {})
+        ab_sel = ab_panel.get("artboards_panel_selection", [])
+        artboards_panel_selection_ids = (
+            [s for s in ab_sel if isinstance(s, str)]
+            if isinstance(ab_sel, list) else []
+        )
+        current_artboard_id: str | None = None
+        current_artboard: dict | None = None
+        selected_set = set(artboards_panel_selection_ids)
+        if selected_set:
+            for a in raw_artboards:
+                if isinstance(a, dict) and a.get("id") in selected_set:
+                    current_artboard_id = a["id"]
+                    current_artboard = dict(a)
+                    break
+        if current_artboard is None and raw_artboards:
+            first = raw_artboards[0]
+            if isinstance(first, dict):
+                current_artboard_id = first.get("id")
+                current_artboard = dict(first)
+        # When there are no artboards at all (document is None),
+        # current_artboard is {} rather than None so expressions like
+        # current_artboard.width don't null-deref.
+        if current_artboard is None:
+            current_artboard = {}
+        artboards_common = {
+            "artboards": artboards_view,
+            "artboard_options": dict(raw_options),
+            "artboards_count": artboards_count,
+            "next_artboard_name": next_ab_name,
+            "current_artboard_id": current_artboard_id,
+            "current_artboard": current_artboard,
+            "artboards_panel_selection_ids": artboards_panel_selection_ids,
+        }
         if self._document is None:
             sel_count = 0
             if self._active_panel == "layers":
@@ -406,6 +755,7 @@ class StateStore:
                 "has_selection": has_selection,
                 "selection_count": selection_count,
                 "element_selection": element_selection,
+                **artboards_common,
             }
         layers = self._document.get("layers", [])
         top_level_layers = []
@@ -466,6 +816,7 @@ class StateStore:
             "has_selection": has_selection,
             "selection_count": selection_count,
             "element_selection": element_selection,
+            **artboards_common,
         }
 
     def _canvas_selection_paths(self) -> list[tuple[int, ...]]:

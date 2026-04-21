@@ -2795,6 +2795,551 @@
           "expand_compound_shape": true
         }
       ]
+    },
+    "new_artboard": {
+      "description": "Create a new artboard silently (no dialogue). Size inherits from the current artboard (topmost panel-selected, else first). Position is (0,0) if panel-selection is empty, else offset (20,20) pt from the current artboard's top-left. Name is \"Artboard N\" with the smallest unused N.\n",
+      "category": "artboards",
+      "effects": [
+        "snapshot",
+        {
+          "if": {
+            "condition": "active_document.artboards_panel_selection_ids.length > 0",
+            "then": [
+              {
+                "doc.create_artboard": {
+                  "width": "active_document.current_artboard.width",
+                  "height": "active_document.current_artboard.height",
+                  "x": "active_document.current_artboard.x + 20",
+                  "y": "active_document.current_artboard.y + 20"
+                }
+              }
+            ],
+            "else": [
+              {
+                "doc.create_artboard": {
+                  "width": "active_document.current_artboard.width",
+                  "height": "active_document.current_artboard.height",
+                  "x": "0",
+                  "y": "0"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "rearrange_dirty",
+            "value": "true"
+          }
+        }
+      ]
+    },
+    "duplicate_artboards": {
+      "description": "Deep-copy each panel-selected artboard. Each duplicate gets a fresh id, the next unused \"Artboard N\" name, and is offset (20,20) pt from its source's top-left. Contained-element copying is not implemented in Flask (no element model); native ports override the doc.duplicate_artboard store method.\n",
+      "category": "artboards",
+      "enabled_when": "active_document.artboards_panel_selection_ids.length > 0",
+      "effects": [
+        "snapshot",
+        {
+          "foreach": {
+            "source": "active_document.artboards_panel_selection_ids",
+            "as": "ab_id"
+          },
+          "do": [
+            {
+              "doc.duplicate_artboard": "ab_id"
+            }
+          ]
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "rearrange_dirty",
+            "value": "true"
+          }
+        }
+      ]
+    },
+    "delete_artboards": {
+      "description": "Delete panel-selected artboards. Elements inside them remain in the document \u2014 artboards are boundaries, not containers. The at-least-one-artboard invariant is enforced by the menu / footer / keyboard enabled_when predicates; this action assumes the precondition (selection non-empty AND size < total count).\n",
+      "category": "artboards",
+      "enabled_when": "active_document.artboards_panel_selection_ids.length > 0 and active_document.artboards_panel_selection_ids.length < active_document.artboards_count",
+      "effects": [
+        "snapshot",
+        {
+          "foreach": {
+            "source": "active_document.artboards_panel_selection_ids",
+            "as": "ab_id"
+          },
+          "do": [
+            {
+              "doc.delete_artboard_by_id": "ab_id"
+            }
+          ]
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "artboards_panel_selection",
+            "value": "[]"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "panel_selection_anchor",
+            "value": "null"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "rearrange_dirty",
+            "value": "true"
+          }
+        }
+      ]
+    },
+    "delete_empty_artboards": {
+      "description": "Flask-side stub \u2014 element bounds aren't available server-side, so nothing is ever detected as empty. Native ports compute intersection against the element tree and delete artboards with no intersecting geometry, preserving position 1 if all are empty. Single undo op when native.\n",
+      "category": "artboards",
+      "effects": [
+        {
+          "log": "delete_empty_artboards (Flask stub; native ports implement)"
+        }
+      ]
+    },
+    "artboards_panel_select": {
+      "description": "Panel-select an artboard by id. modifier=none replaces the selection with just this id (anchor becomes this id). modifier=shift extends the range from anchor to target in list order. modifier=meta toggles the target id in or out. Shift / meta semantics are wired in native apps; Flask phase-1 handles the common replace path.\n",
+      "category": "artboards",
+      "params": {
+        "artboard_id": {
+          "type": "string"
+        },
+        "modifier": {
+          "type": "string",
+          "default": "none"
+        }
+      },
+      "effects": [
+        {
+          "if": {
+            "condition": "param.modifier == 'none' or param.modifier == null",
+            "then": [
+              {
+                "set_panel_state": {
+                  "panel": "artboards",
+                  "key": "artboards_panel_selection",
+                  "value": "[param.artboard_id]"
+                }
+              },
+              {
+                "set_panel_state": {
+                  "panel": "artboards",
+                  "key": "panel_selection_anchor",
+                  "value": "param.artboard_id"
+                }
+              }
+            ],
+            "else": [
+              {
+                "log": "artboards_panel_select non-none modifier (sub-phase 4 / native)"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "artboards_select_all": {
+      "description": "Select every artboard in the panel (Command-A). Reads the ids from active_document.artboards via map.\n",
+      "category": "artboards",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "artboards_panel_selection",
+            "value": "map(active_document.artboards, fun ab -> ab.id)"
+          }
+        }
+      ]
+    },
+    "rename_artboard": {
+      "description": "Begin inline renaming of a single panel-selected artboard. Sets panel.renaming_artboard to the target id; the row template shows a text_input in place of the name label while the field is set. Triggered by F2, Enter (with single selection), click-and-wait on the name, or the Rename menu entry.\n",
+      "category": "artboards",
+      "params": {
+        "artboard_id": {
+          "type": "string"
+        }
+      },
+      "enabled_when": "active_document.artboards_panel_selection_ids.length == 1",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "renaming_artboard",
+            "value": "param.artboard_id"
+          }
+        }
+      ]
+    },
+    "confirm_artboard_rename": {
+      "description": "Commit the inline rename. Trims leading / trailing whitespace; reverts to the prior name silently if the trimmed result is empty; truncates to 256 characters. Duplicate names are allowed. Single undo op. Triggered by Enter or blur on the rename input.\n",
+      "category": "artboards",
+      "params": {
+        "artboard_id": {
+          "type": "string"
+        },
+        "new_name": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "name",
+            "value": "param.new_name"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "renaming_artboard",
+            "value": "null"
+          }
+        }
+      ]
+    },
+    "cancel_artboard_rename": {
+      "description": "Abandon the inline rename; the name reverts to its value before editing began. Triggered by Escape during rename.\n",
+      "category": "artboards",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "renaming_artboard",
+            "value": "null"
+          }
+        }
+      ]
+    },
+    "reset_artboards_panel": {
+      "description": "Reset panel UI state (panel-selection cleared, scroll to top, reference-point preference restored to center). Does not modify document data.\n",
+      "category": "artboards",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "artboards_panel_selection",
+            "value": "[]"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "panel_selection_anchor",
+            "value": "null"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "reference_point",
+            "value": "'center'"
+          }
+        }
+      ]
+    },
+    "move_artboard_up": {
+      "description": "Move panel-selected artboards one position earlier in the list. Applies the swap-with-neighbor-skipping-selected-neighbors rule: iterate top-to-bottom; each selected row swaps with the row above it, skipping rows already at position 1 or whose upper neighbor is itself selected. Preserves relative order within the selection. Example: selection {1, 3, 5} \u2192 result [1, 3, 2, 5, 4]. Single undo op.\n",
+      "category": "artboards",
+      "enabled_when": "active_document.artboards_panel_selection_ids.length > 0",
+      "effects": [
+        "snapshot",
+        {
+          "doc.move_artboards_up": "active_document.artboards_panel_selection_ids"
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "rearrange_dirty",
+            "value": "true"
+          }
+        }
+      ]
+    },
+    "move_artboard_down": {
+      "description": "Move panel-selected artboards one position later in the list. Symmetric to move_artboard_up \u2014 iterate bottom-to-top; each selected row swaps with the row below it, skipping rows already at the end or whose lower neighbor is itself selected. Single undo op.\n",
+      "category": "artboards",
+      "enabled_when": "active_document.artboards_panel_selection_ids.length > 0",
+      "effects": [
+        "snapshot",
+        {
+          "doc.move_artboards_down": "active_document.artboards_panel_selection_ids"
+        },
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "rearrange_dirty",
+            "value": "true"
+          }
+        }
+      ]
+    },
+    "open_artboard_options": {
+      "description": "Open the Artboard Options Dialogue for the artboard with the given id. The dialog's init expressions pull the artboard's fields and the document-global artboard_options into dialog state, so edits are local until OK.\n",
+      "category": "artboards",
+      "params": {
+        "artboard_id": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "artboard_options",
+            "params": {
+              "artboard_id": "param.artboard_id"
+            }
+          }
+        }
+      ]
+    },
+    "artboard_options_confirm": {
+      "description": "Commit the Artboard Options Dialogue. Writes all per-artboard fields via doc.set_artboard_field, plus the two document-global fields via doc.set_artboard_options_field. Single undo op covers the batch; close_dialog dismisses.\n",
+      "category": "artboards",
+      "params": {
+        "artboard_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        },
+        "fill": {
+          "type": "string"
+        },
+        "show_center_mark": {
+          "type": "bool"
+        },
+        "show_cross_hairs": {
+          "type": "bool"
+        },
+        "show_video_safe_areas": {
+          "type": "bool"
+        },
+        "video_ruler_pixel_aspect_ratio": {
+          "type": "number"
+        },
+        "fade_region_outside_artboard": {
+          "type": "bool"
+        },
+        "update_while_dragging": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "name",
+            "value": "param.name"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "x",
+            "value": "param.x"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "y",
+            "value": "param.y"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "width",
+            "value": "param.width"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "height",
+            "value": "param.height"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "fill",
+            "value": "param.fill"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "show_center_mark",
+            "value": "param.show_center_mark"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "show_cross_hairs",
+            "value": "param.show_cross_hairs"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "show_video_safe_areas",
+            "value": "param.show_video_safe_areas"
+          }
+        },
+        {
+          "doc.set_artboard_field": {
+            "id": "param.artboard_id",
+            "field": "video_ruler_pixel_aspect_ratio",
+            "value": "param.video_ruler_pixel_aspect_ratio"
+          }
+        },
+        {
+          "doc.set_artboard_options_field": {
+            "field": "fade_region_outside_artboard",
+            "value": "param.fade_region_outside_artboard"
+          }
+        },
+        {
+          "doc.set_artboard_options_field": {
+            "field": "update_while_dragging",
+            "value": "param.update_while_dragging"
+          }
+        },
+        "clear_dialog_snapshot",
+        "close_dialog"
+      ]
+    },
+    "delete_artboard_from_dialog": {
+      "description": "Delete the artboard the dialog is editing and close. Disabled in the dialog footer when the document has exactly one artboard (the at-least-one invariant).\n",
+      "category": "artboards",
+      "params": {
+        "artboard_id": {
+          "type": "string"
+        }
+      },
+      "enabled_when": "active_document.artboards_count > 1",
+      "effects": [
+        "snapshot",
+        {
+          "doc.delete_artboard_by_id": "param.artboard_id"
+        },
+        "clear_dialog_snapshot",
+        "close_dialog"
+      ]
+    },
+    "apply_artboard_preset": {
+      "description": "Translate dialog.preset into dialog.width/height (native-app concrete; Flask log).",
+      "category": "artboards",
+      "params": {
+        "preset": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "log": "apply_artboard_preset (sub-phase follow-up / native)"
+        }
+      ]
+    },
+    "toggle_artboard_chain_link": {
+      "description": "Toggle dialog.chain_link_engaged; capture dialog.chain_link_ratio on engage.",
+      "category": "artboards",
+      "effects": [
+        {
+          "log": "toggle_artboard_chain_link (native)"
+        }
+      ]
+    },
+    "toggle_artboard_orientation": {
+      "description": "Swap dialog.width <-> dialog.height around the current reference-point anchor.",
+      "category": "artboards",
+      "effects": [
+        {
+          "log": "toggle_artboard_orientation (native)"
+        }
+      ]
+    },
+    "set_artboard_fill_preset": {
+      "description": "Translate dialog.fill dropdown selection into dialog.fill hex / transparent.",
+      "category": "artboards",
+      "params": {
+        "preset": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "log": "set_artboard_fill_preset (native)"
+        }
+      ]
+    },
+    "set_artboard_reference_point": {
+      "description": "Update the panel.reference_point preference from the 3x3 widget.",
+      "category": "artboards",
+      "params": {
+        "anchor": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "artboards",
+            "key": "reference_point",
+            "value": "param.anchor"
+          }
+        }
+      ]
+    },
+    "convert_to_artboards": {
+      "description": "Phase-1 deferred. Grayed with 'Coming soon' tooltip.",
+      "category": "artboards",
+      "enabled_when": "false",
+      "effects": [
+        {
+          "log": "convert_to_artboards (deferred)"
+        }
+      ]
+    },
+    "rearrange_artboards": {
+      "description": "Phase-1 deferred. Grayed with 'Coming soon' tooltip.",
+      "category": "artboards",
+      "enabled_when": "false",
+      "effects": [
+        {
+          "log": "rearrange_artboards (deferred)"
+        }
+      ]
     }
   },
   "version": 1,
@@ -5861,6 +6406,728 @@
                 "variant": "primary",
                 "bind": {
                   "disabled": "dialog.name == \"\""
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "artboard_options": {
+      "summary": "Artboard Options",
+      "description": "Modal dialog for editing the properties of a single artboard. ARTBOARDS.md \u00a7Artboard Options Dialogue.\nBatched commit: edits don't apply until OK; Cancel discards; a single undo entry records the OK (via snapshot inside the confirm action, plus the dialog-snapshot preview-restore for reversible preview_targets).\nLayout follows the reference image: Name / Preset rows, then a pair of rows with Width / Height on the left and X / Y on the right (with the reference-point widget and chain-link toggle in the middle column). Orientation button and Fill selector share the next row. Display section groups the three show_* toggles plus the Video Ruler Pixel Aspect Ratio input. Global section carries the document-wide fade_region_outside_artboard toggle with the indented update_while_dragging toggle. Info section displays the live Artboards count. Footer: Delete / Cancel / OK.\nPhase-1 deferrals: CHAIN_LINK_BUTTON state persists in dialog state but does not alter Width / Height edits (drag-resize is not wired). update_while_dragging persists but has no observable effect in Flask. video_ruler_pixel_aspect_ratio round-trips but does not distort the canvas.\n",
+      "modal": true,
+      "width": 380,
+      "params": {
+        "artboard_id": {
+          "type": "string"
+        }
+      },
+      "state": {
+        "name": {
+          "type": "string",
+          "default": ""
+        },
+        "width": {
+          "type": "number",
+          "default": 612
+        },
+        "height": {
+          "type": "number",
+          "default": 792
+        },
+        "x_stored": {
+          "type": "number",
+          "default": 0
+        },
+        "y_stored": {
+          "type": "number",
+          "default": 0
+        },
+        "fill": {
+          "type": "color_or_transparent",
+          "default": "transparent"
+        },
+        "show_center_mark": {
+          "type": "bool",
+          "default": false
+        },
+        "show_cross_hairs": {
+          "type": "bool",
+          "default": false
+        },
+        "show_video_safe_areas": {
+          "type": "bool",
+          "default": false
+        },
+        "video_ruler_pixel_aspect_ratio": {
+          "type": "number",
+          "default": 1.0
+        },
+        "fade_region_outside_artboard": {
+          "type": "bool",
+          "default": true
+        },
+        "update_while_dragging": {
+          "type": "bool",
+          "default": true
+        },
+        "preset": {
+          "type": "enum",
+          "values": [
+            "letter",
+            "legal",
+            "tabloid",
+            "a4",
+            "a3",
+            "hd1080",
+            "hd720",
+            "iphone",
+            "ipad_pro_11",
+            "square",
+            "custom"
+          ],
+          "default": "custom"
+        },
+        "chain_link_engaged": {
+          "type": "bool",
+          "default": false
+        },
+        "chain_link_ratio": {
+          "type": "number",
+          "default": 1.0
+        },
+        "x_rp": {
+          "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
+          "set": "fun new -> x_stored := new - anchor_offset_x(panel.reference_point, width)"
+        },
+        "y_rp": {
+          "get": "y_stored + anchor_offset_y(panel.reference_point, height)",
+          "set": "fun new -> y_stored := new - anchor_offset_y(panel.reference_point, height)"
+        }
+      },
+      "init": {
+        "name": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].name",
+        "width": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].width",
+        "height": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].height",
+        "x_stored": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].x",
+        "y_stored": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].y",
+        "fill": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].fill",
+        "show_center_mark": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].show_center_mark",
+        "show_cross_hairs": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].show_cross_hairs",
+        "show_video_safe_areas": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].show_video_safe_areas",
+        "video_ruler_pixel_aspect_ratio": "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].video_ruler_pixel_aspect_ratio",
+        "fade_region_outside_artboard": "active_document.artboard_options.fade_region_outside_artboard",
+        "update_while_dragging": "active_document.artboard_options.update_while_dragging"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 10,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Name:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 9,
+                "children": [
+                  {
+                    "id": "ao_name_input",
+                    "type": "text_input",
+                    "placeholder": "Artboard Name",
+                    "bind": {
+                      "value": "dialog.name"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Preset:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 9,
+                "children": [
+                  {
+                    "id": "ao_preset",
+                    "type": "select",
+                    "options": [
+                      {
+                        "label": "Letter (612 \u00d7 792)",
+                        "value": "letter"
+                      },
+                      {
+                        "label": "Legal (612 \u00d7 1008)",
+                        "value": "legal"
+                      },
+                      {
+                        "label": "Tabloid (792 \u00d7 1224)",
+                        "value": "tabloid"
+                      },
+                      {
+                        "label": "A4 (595.28 \u00d7 841.89)",
+                        "value": "a4"
+                      },
+                      {
+                        "label": "A3 (841.89 \u00d7 1190.55)",
+                        "value": "a3"
+                      },
+                      {
+                        "label": "1080p Full HD (1920 \u00d7 1080)",
+                        "value": "hd1080"
+                      },
+                      {
+                        "label": "720p HD (1280 \u00d7 720)",
+                        "value": "hd720"
+                      },
+                      {
+                        "label": "iPhone (1179 \u00d7 2556)",
+                        "value": "iphone"
+                      },
+                      {
+                        "label": "iPad Pro 11 (1668 \u00d7 2388)",
+                        "value": "ipad_pro_11"
+                      },
+                      {
+                        "label": "Square (1000 \u00d7 1000)",
+                        "value": "square"
+                      },
+                      {
+                        "label": "Custom",
+                        "value": "custom"
+                      }
+                    ],
+                    "bind": {
+                      "value": "dialog.preset"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "description": "Selecting a preset sets dialog.width and dialog.height to the preset's dimensions. \"Custom\" is display-only (cannot be selected) and appears automatically when W/H match no preset. Native apps translate the selected value into W/H assignments.\n",
+                        "action": "apply_artboard_preset",
+                        "params": {
+                          "preset": "dialog.preset"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Width:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ao_width",
+                    "type": "number_input",
+                    "min": 1,
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.width"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 1,
+                "children": [
+                  {
+                    "id": "ao_chain_link",
+                    "type": "icon_button",
+                    "icon": "{{if dialog.chain_link_engaged then 'chain_linked' else 'chain_broken'}}",
+                    "summary": "Lock width / height aspect ratio",
+                    "description": "Toggle \u2014 when engaged, W and H scale proportionally. Dialog-session-only; default off on each open.\n",
+                    "style": {
+                      "size": 16
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "action": "toggle_artboard_chain_link"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 1,
+                "children": [
+                  {
+                    "id": "ao_reference_point",
+                    "type": "reference_point_widget",
+                    "summary": "Reference point",
+                    "description": "3\u00d73 grid; exactly one anchor active. Changes X / Y display, not storage.",
+                    "bind": {
+                      "value": "panel.reference_point"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "action": "set_artboard_reference_point",
+                        "params": {
+                          "anchor": "event.value"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 1,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "X:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ao_x",
+                    "type": "number_input",
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.x_rp"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Height:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ao_height",
+                    "type": "number_input",
+                    "min": 1,
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.height"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 2,
+                "children": []
+              },
+              {
+                "type": "col",
+                "col": 1,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Y:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ao_y",
+                    "type": "number_input",
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.y_rp"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Orientation:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ao_orientation",
+                    "type": "icon_button_group",
+                    "options": [
+                      {
+                        "icon": "orientation_portrait",
+                        "value": "portrait"
+                      },
+                      {
+                        "icon": "orientation_landscape",
+                        "value": "landscape"
+                      }
+                    ],
+                    "bind": {
+                      "value": "if dialog.height >= dialog.width then 'portrait' else 'landscape'"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "action": "toggle_artboard_orientation"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 2,
+                "children": []
+              },
+              {
+                "type": "col",
+                "col": 1,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Fill:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 2,
+                "children": [
+                  {
+                    "id": "ao_fill_dropdown",
+                    "type": "select",
+                    "options": [
+                      {
+                        "label": "Transparent",
+                        "value": "transparent"
+                      },
+                      {
+                        "label": "White",
+                        "value": "white"
+                      },
+                      {
+                        "label": "Black",
+                        "value": "black"
+                      },
+                      {
+                        "label": "Custom\u2026",
+                        "value": "custom"
+                      }
+                    ],
+                    "bind": {
+                      "value": "if dialog.fill == 'transparent' then 'transparent' else if dialog.fill == '#ffffff' then 'white' else if dialog.fill == '#000000' then 'black' else 'custom'"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "action": "set_artboard_fill_preset",
+                        "params": {
+                          "preset": "event.value"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 1,
+                "children": [
+                  {
+                    "id": "ao_fill_swatch",
+                    "type": "color_swatch",
+                    "summary": "Artboard fill",
+                    "description": "Click to open the Color Picker for a custom fill.",
+                    "style": {
+                      "size": 22
+                    },
+                    "bind": {
+                      "color": "dialog.fill"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "action": "open_color_picker",
+                        "params": {
+                          "target": "dialog.fill"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Display",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "id": "ao_show_center_mark",
+            "type": "toggle",
+            "label": "Show Center Mark",
+            "bind": {
+              "checked": "dialog.show_center_mark"
+            }
+          },
+          {
+            "id": "ao_show_cross_hairs",
+            "type": "toggle",
+            "label": "Show Cross Hairs",
+            "bind": {
+              "checked": "dialog.show_cross_hairs"
+            }
+          },
+          {
+            "id": "ao_show_video_safe_areas",
+            "type": "toggle",
+            "label": "Show Video Safe Areas",
+            "bind": {
+              "checked": "dialog.show_video_safe_areas"
+            }
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Video Ruler Pixel Aspect Ratio:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "id": "ao_video_par",
+                    "type": "number_input",
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.video_ruler_pixel_aspect_ratio"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Global",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "id": "ao_fade_region",
+            "type": "toggle",
+            "label": "Fade region outside Artboard",
+            "bind": {
+              "checked": "dialog.fade_region_outside_artboard"
+            }
+          },
+          {
+            "type": "container",
+            "style": {
+              "padding": "0 0 0 20"
+            },
+            "children": [
+              {
+                "id": "ao_update_while_dragging",
+                "type": "toggle",
+                "label": "Update while dragging",
+                "bind": {
+                  "checked": "dialog.update_while_dragging",
+                  "disabled": "not dialog.fade_region_outside_artboard"
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Artboards: {{active_document.artboards_count}}",
+            "style": {
+              "font_size": 11,
+              "color": "{{theme.colors.text_dim}}"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "end"
+            },
+            "children": [
+              {
+                "id": "ao_delete",
+                "type": "button",
+                "label": "Delete",
+                "bind": {
+                  "disabled": "active_document.artboards_count <= 1"
+                },
+                "action": "delete_artboard_from_dialog",
+                "params": {
+                  "artboard_id": "param.artboard_id"
+                }
+              },
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "OK",
+                "action": "artboard_options_confirm",
+                "variant": "primary",
+                "params": {
+                  "artboard_id": "param.artboard_id",
+                  "name": "dialog.name",
+                  "x": "dialog.x_stored",
+                  "y": "dialog.y_stored",
+                  "width": "dialog.width",
+                  "height": "dialog.height",
+                  "fill": "dialog.fill",
+                  "show_center_mark": "dialog.show_center_mark",
+                  "show_cross_hairs": "dialog.show_cross_hairs",
+                  "show_video_safe_areas": "dialog.show_video_safe_areas",
+                  "video_ruler_pixel_aspect_ratio": "dialog.video_ruler_pixel_aspect_ratio",
+                  "fade_region_outside_artboard": "dialog.fade_region_outside_artboard",
+                  "update_while_dragging": "dialog.update_while_dragging"
                 }
               }
             ]
@@ -10692,72 +11959,481 @@
       "id": "artboards_panel_content",
       "type": "panel",
       "summary": "Artboards",
-      "description": "Artboards panel \u2014 initial placeholder implementation. A document has a set of artboards (print page regions) with unique numbers starting at 1 and editable names. New documents start with a single 612\u00d7792pt artboard.\nThis placeholder renders a single editable row (number + name) bound to panel-local state. Real support for multiple artboards, an artboards list, and the Artboard Dialog arrives alongside the Artboard Tool and document-level artboards implementation.\n",
+      "description": "Artboards panel \u2014 every document has at least one artboard (print page region) with a unique internal id, a positional 1-based number, a user-editable name, position/size, and a fill. New documents seed a single 612\u00d7792pt (US Letter) artboard; subsequent New Artboard actions inherit size from the topmost existing artboard. See transcripts/ARTBOARDS.md for the full specification.\n=== Row Layout ===\nEach row is laid out left to right as:\nARTBOARD_NUMBER \u2014 ARTBOARD_NAME \u2014 ARTBOARD_OPTIONS_BUTTON\nARTBOARD_NUMBER is the 1-based position of the row in the list. It is a derived value, not a stored identifier. Delete, reorder, and undo all renumber automatically so the column is always dense (1..N with no gaps). Clicking the number cell makes that row the sole panel-selected row \u2014 a shortcut for \"make current\".\nARTBOARD_NAME is the artboard's user-editable name. Click selects the row using standard click / shift-click / cmd-click rules. Click-and-wait on the name, F2, Enter, or the Rename menu entry enters inline rename mode; Enter or blur commits, Escape cancels. Trim-on-commit strips whitespace; empty names silently revert. Duplicate names are allowed.\nARTBOARD_OPTIONS_BUTTON opens the Artboard Options Dialogue for that row's artboard regardless of panel-selection. No selection side effects.\n=== Panel Selection ===\nPanel-selection is a set of 0..N artboards tracked by stable id. Click replaces the selection with that row; shift-click extends from the anchor to the clicked row; cmd-click toggles the clicked row in or out of the selection. Clicking empty panel area (below the last row) is a no-op. Panel-selection survives reorder because it keys on id, not position.\n=== Current Artboard ===\nCurrent is exactly one artboard, always. Derived as `topmost panel-selected artboard, else artboard at position 1`. Used by ALIGN_TO_ARTBOARD_BUTTON and any future fit-to-artboard / zoom-to-artboard commands. There is no canvas indicator for current \u2014 it's a tiebreaker for commands, not a UI state.\n=== Reordering ===\nDrag panel-selected rows to a new position, use MOVE_UP_BUTTON / MOVE_DOWN_BUTTON in the footer, or press Option+Up / Option+Down. For discontiguous selections the swap-with-neighbor-skipping- selected-neighbors rule applies: iterate top-to-bottom; each selected row swaps with the row above it, skipping rows that are themselves selected or already at position 1. Move Down is symmetric. Each reorder is a single undo op.\n=== Footer ===\nREARRANGE_BUTTON sits at the bottom-left; the remaining buttons cluster at the bottom-right in order MOVE_UP_BUTTON, MOVE_DOWN_ BUTTON, NEW_ARTBOARD_BUTTON, DELETE_ARTBOARD_BUTTON.\nREARRANGE_BUTTON is phase-1 deferred; it opens the Rearrange Dialogue which does not exist yet. An accent dot appears on the button when the artboards list has changed since the Dialogue was last opened; the dot clears on Dialogue open. Because the Dialogue is deferred, the dot lights on first list change and remains lit.\nDELETE_ARTBOARD_BUTTON is grayed when deletion would violate the at-least-one-artboard invariant (see below).\nNEW_ARTBOARD_BUTTON creates silently (no Dialogue). Default size inherits from the topmost existing artboard, else 612\u00d7792 pt. Default position offset `(20, 20)` pt from the topmost panel- selected artboard's top-left, else `(0, 0)`. All display toggles off, transparent fill, name `Artboard N` with smallest unused N.\n=== At-Least-One-Artboard Invariant ===\n`document.artboards.length >= 1` is enforced at every observable state. `Delete Artboards` (menu, footer, Delete / Backspace) is grayed when panel-selection spans all existing artboards. Load- time repair inserts a default artboard when the document has `artboards: []` or no `artboards:` key at all, logging `Document had no artboards; inserted default.`\n=== Phase-1 Deferrals ===\nArtboard Tool (canvas-side create / move / resize), Convert to Artboards (menu grayed), Rearrange Dialogue (menu + footer button grayed), `update_while_dragging` behavior, `video_ruler_pixel_aspect_ratio` visual effect, and all printing. Values for deferred stored fields persist and round-trip.\n",
       "state": {
-        "artboard_number": {
-          "type": "number",
-          "default": 1,
-          "description": "Artboard number (starting at 1)."
+        "artboards_panel_selection": {
+          "type": "list",
+          "item_type": "string",
+          "default": [],
+          "description": "List of artboard ids that are panel-selected"
         },
-        "artboard_name": {
+        "panel_selection_anchor": {
           "type": "string",
-          "default": "Artboard 1",
-          "description": "User-editable artboard name."
+          "default": null,
+          "nullable": true,
+          "description": "Artboard id that anchors shift-click range selection"
+        },
+        "renaming_artboard": {
+          "type": "string",
+          "default": null,
+          "nullable": true,
+          "description": "Id of the artboard currently being renamed inline, or null"
+        },
+        "reference_point": {
+          "type": "enum",
+          "values": [
+            "top_left",
+            "top_center",
+            "top_right",
+            "middle_left",
+            "center",
+            "middle_right",
+            "bottom_left",
+            "bottom_center",
+            "bottom_right"
+          ],
+          "default": "center",
+          "persist": true,
+          "description": "Which of the 9 anchor points the X / Y inputs in the Artboard Options Dialogue display and accept. Underlying storage is always the top-left corner; this widget controls display and entry only. Persists as a panel preference, not per document.\n"
+        },
+        "rearrange_dirty": {
+          "type": "bool",
+          "default": false,
+          "description": "True when the artboards list has changed since the Rearrange Dialogue was last opened. Surfaces as the blue-dot accent on REARRANGE_BUTTON. Phase-1: once set, never cleared (Dialogue is deferred).\n"
         }
       },
-      "init": {},
+      "init": {
+        "artboards_panel_selection": "[]"
+      },
       "menu": [
         {
-          "label": "Close Artboards",
-          "action": "close_panel"
+          "label": "New Artboard",
+          "action": "new_artboard",
+          "description": "Create a new artboard (silent \u2014 no dialogue)"
+        },
+        {
+          "label": "Duplicate Artboards",
+          "action": "duplicate_artboards",
+          "enabled_when": "active_document.artboards_panel_selection_ids.length > 0",
+          "description": "Duplicate panel-selected artboards, including contained elements"
+        },
+        {
+          "label": "Delete Artboards",
+          "action": "delete_artboards",
+          "enabled_when": "active_document.artboards_panel_selection_ids.length > 0 and active_document.artboards_panel_selection_ids.length < active_document.artboards_count",
+          "description": "Delete panel-selected artboards (at least one must remain)"
+        },
+        {
+          "label": "Rename",
+          "action": "rename_artboard",
+          "params": {
+            "artboard_id": "active_document.artboards_panel_selection_ids[0]"
+          },
+          "enabled_when": "active_document.artboards_panel_selection_ids.length == 1",
+          "description": "Inline rename the single panel-selected artboard"
+        },
+        "separator",
+        {
+          "label": "Delete Empty Artboards",
+          "action": "delete_empty_artboards",
+          "description": "Delete every artboard whose bounds don't intersect any element (position 1 preserved if all empty)"
+        },
+        "separator",
+        {
+          "label": "Convert to Artboards",
+          "action": "convert_to_artboards",
+          "enabled_when": "false",
+          "description": "Coming soon \u2014 convert selected elements into artboards"
+        },
+        {
+          "label": "Artboard Options...",
+          "action": "open_artboard_options",
+          "params": {
+            "artboard_id": "active_document.artboards_panel_selection_ids[0]"
+          },
+          "enabled_when": "active_document.artboards_panel_selection_ids.length > 0",
+          "description": "Open the Artboard Options Dialogue for the topmost panel-selected artboard"
+        },
+        {
+          "label": "Rearrange...",
+          "action": "rearrange_artboards",
+          "enabled_when": "false",
+          "description": "Coming soon \u2014 batch-reposition artboards into a grid"
+        },
+        "separator",
+        {
+          "label": "Reset Panel",
+          "action": "reset_artboards_panel",
+          "description": "Reset panel UI state (scroll, reference-point preference). Does not modify document data."
         }
       ],
       "content": {
         "type": "container",
-        "id": "ab_content",
+        "id": "ap_root",
         "layout": "column",
         "style": {
-          "padding": 4,
-          "gap": 6
+          "padding": 0,
+          "gap": 0
         },
         "children": [
           {
+            "id": "ap_list",
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "flex": 1,
+              "overflow_y": "auto",
+              "padding": 0,
+              "gap": 0
+            },
+            "foreach": {
+              "source": "active_document.artboards",
+              "as": "ab"
+            },
+            "do": {
+              "type": "container",
+              "layout": "row",
+              "style": {
+                "height": 24,
+                "padding": "0 4",
+                "gap": 4,
+                "alignment": "center"
+              },
+              "bind": {
+                "background": "if mem(ab.id, active_document.artboards_panel_selection_ids) then '{{theme.colors.selection}}' else 'transparent'"
+              },
+              "behavior": [
+                {
+                  "event": "drag_start",
+                  "description": "Panel-select this artboard (if not already) and begin drag",
+                  "action": "artboards_panel_select",
+                  "params": {
+                    "artboard_id": "ab.id",
+                    "modifier": "none"
+                  }
+                },
+                {
+                  "event": "drag_move",
+                  "description": "Show horizontal insertion line between rows at the drop point"
+                },
+                {
+                  "event": "drag_end",
+                  "description": "Reorder the panel-selected artboards to land at the drop point (single undo op)"
+                }
+              ],
+              "children": [
+                {
+                  "id": "ap_number",
+                  "type": "text",
+                  "content": "{{ab.number}}",
+                  "style": {
+                    "width": 24,
+                    "text_align": "center",
+                    "font_size": 11,
+                    "color": "{{theme.colors.text}}"
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "artboards_panel_select",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "ap_name",
+                  "type": "text",
+                  "content": "{{ab.name}}",
+                  "style": {
+                    "flex": 1,
+                    "font_size": 11,
+                    "color": "{{theme.colors.text}}",
+                    "overflow": "hidden",
+                    "text_overflow": "ellipsis",
+                    "white_space": "nowrap"
+                  },
+                  "bind": {
+                    "visible": "panel.renaming_artboard != ab.id"
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "condition": "not event.shift and not event.meta",
+                      "action": "artboards_panel_select",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "modifier": "none"
+                      }
+                    },
+                    {
+                      "event": "click",
+                      "condition": "event.shift and not event.meta",
+                      "action": "artboards_panel_select",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "modifier": "shift"
+                      }
+                    },
+                    {
+                      "event": "click",
+                      "condition": "event.meta and not event.shift",
+                      "action": "artboards_panel_select",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "modifier": "meta"
+                      }
+                    },
+                    {
+                      "event": "click_and_wait",
+                      "action": "rename_artboard",
+                      "params": {
+                        "artboard_id": "ab.id"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "ap_name_edit",
+                  "type": "text_input",
+                  "style": {
+                    "flex": 1,
+                    "font_size": 11
+                  },
+                  "bind": {
+                    "visible": "panel.renaming_artboard == ab.id",
+                    "value": "ab.name"
+                  },
+                  "behavior": [
+                    {
+                      "event": "keydown",
+                      "condition": "event.key == 'Enter'",
+                      "action": "confirm_artboard_rename"
+                    },
+                    {
+                      "event": "keydown",
+                      "condition": "event.key == 'Escape'",
+                      "action": "cancel_artboard_rename"
+                    },
+                    {
+                      "event": "blur",
+                      "action": "confirm_artboard_rename"
+                    }
+                  ]
+                },
+                {
+                  "id": "ap_options",
+                  "type": "icon_button",
+                  "icon": "artboard_options",
+                  "summary": "Artboard Options",
+                  "description": "Open Artboard Options for this artboard",
+                  "style": {
+                    "size": 16
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "open_artboard_options",
+                      "params": {
+                        "artboard_id": "ab.id"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "context_menu": [
+                {
+                  "label": "Artboard Options...",
+                  "action": "open_artboard_options",
+                  "params": {
+                    "artboard_id": "ab.id"
+                  }
+                },
+                {
+                  "label": "Rename",
+                  "action": "rename_artboard",
+                  "params": {
+                    "artboard_id": "ab.id"
+                  },
+                  "enabled_when": "active_document.artboards_panel_selection_ids.length == 1"
+                },
+                {
+                  "label": "Duplicate Artboards",
+                  "action": "duplicate_artboards",
+                  "enabled_when": "active_document.artboards_panel_selection_ids.length > 0"
+                },
+                {
+                  "label": "Delete Artboards",
+                  "action": "delete_artboards",
+                  "enabled_when": "active_document.artboards_panel_selection_ids.length > 0 and active_document.artboards_panel_selection_ids.length < active_document.artboards_count"
+                },
+                "separator",
+                {
+                  "label": "Convert to Artboards",
+                  "action": "convert_to_artboards",
+                  "enabled_when": "false",
+                  "tooltip": "Coming soon"
+                }
+              ]
+            }
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "id": "ap_footer",
             "type": "container",
             "layout": "row",
             "style": {
+              "padding": "4 6",
               "gap": 4,
               "alignment": "center"
             },
             "children": [
               {
-                "id": "ab_number",
-                "type": "number_input",
-                "summary": "Artboard number",
-                "description": "Artboard number (1-based).",
-                "min": 1,
+                "id": "ap_rearrange",
+                "type": "icon_button",
+                "icon": "rearrange",
+                "summary": "Rearrange Artboards",
+                "description": "Coming soon",
                 "style": {
-                  "width": 48
+                  "size": 16
                 },
                 "bind": {
-                  "value": "panel.artboard_number"
+                  "disabled": "true",
+                  "badge": "panel.rearrange_dirty"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "rearrange_artboards"
+                  }
+                ]
+              },
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
                 }
               },
               {
-                "id": "ab_name",
-                "type": "text_input",
-                "summary": "Artboard name",
-                "description": "User-editable artboard name.",
+                "id": "ap_move_up",
+                "type": "icon_button",
+                "icon": "arrow_up",
+                "summary": "Move Up",
+                "description": "Move panel-selected artboards one position earlier in the list",
                 "style": {
-                  "flex": 1
+                  "size": 16
                 },
                 "bind": {
-                  "value": "panel.artboard_name"
-                }
+                  "disabled": "active_document.artboards_panel_selection_ids.length == 0"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "move_artboard_up"
+                  }
+                ]
+              },
+              {
+                "id": "ap_move_down",
+                "type": "icon_button",
+                "icon": "arrow_down",
+                "summary": "Move Down",
+                "description": "Move panel-selected artboards one position later in the list",
+                "style": {
+                  "size": 16
+                },
+                "bind": {
+                  "disabled": "active_document.artboards_panel_selection_ids.length == 0"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "move_artboard_down"
+                  }
+                ]
+              },
+              {
+                "id": "ap_new",
+                "type": "icon_button",
+                "icon": "artboard_new",
+                "summary": "New Artboard",
+                "description": "Create a new artboard (silent)",
+                "style": {
+                  "size": 16
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "new_artboard"
+                  }
+                ]
+              },
+              {
+                "id": "ap_delete",
+                "type": "icon_button",
+                "icon": "trash",
+                "summary": "Delete Artboards",
+                "description": "Delete panel-selected artboards (at least one must remain)",
+                "style": {
+                  "size": 16
+                },
+                "bind": {
+                  "disabled": "active_document.artboards_panel_selection_ids.length == 0 or active_document.artboards_panel_selection_ids.length >= active_document.artboards_count"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "delete_artboards"
+                  }
+                ]
               }
             ]
           }
         ]
-      }
+      },
+      "keyboard": [
+        {
+          "key": "Delete",
+          "action": "delete_artboards"
+        },
+        {
+          "key": "Backspace",
+          "action": "delete_artboards"
+        },
+        {
+          "key": "F2",
+          "action": "rename_artboard",
+          "params": {
+            "artboard_id": "active_document.artboards_panel_selection_ids[0]"
+          },
+          "enabled_when": "active_document.artboards_panel_selection_ids.length == 1"
+        },
+        {
+          "key": "Enter",
+          "action": "rename_artboard",
+          "params": {
+            "artboard_id": "active_document.artboards_panel_selection_ids[0]"
+          },
+          "enabled_when": "active_document.artboards_panel_selection_ids.length == 1"
+        },
+        {
+          "key": "Meta+A",
+          "action": "artboards_select_all"
+        },
+        {
+          "key": "Alt+ArrowUp",
+          "action": "move_artboard_up"
+        },
+        {
+          "key": "Alt+ArrowDown",
+          "action": "move_artboard_down"
+        }
+      ]
     },
     "boolean_panel_content": {
       "id": "boolean_panel_content",

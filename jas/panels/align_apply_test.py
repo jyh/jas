@@ -90,6 +90,86 @@ class ApplyAlignTest(absltest.TestCase):
         self.assertAlmostEqual(_transform_at(model, (0, 2)).e, -30.0)
 
 
+class AlignToArtboardTest(absltest.TestCase):
+    """Phase G — Align To = artboard references the current artboard's
+    bounds (topmost panel-selected, else artboard[0])."""
+
+    def _model_with_rects_and_artboards(self, rects, selected_paths, artboards):
+        layer = Layer(children=tuple(rects))
+        selection = frozenset(
+            ElementSelection.all(tuple(p)) for p in selected_paths
+        )
+        doc = Document(
+            layers=(layer,),
+            selection=selection,
+            artboards=tuple(artboards),
+        )
+        return Model(document=doc)
+
+    def test_align_left_to_artboard_bounds(self):
+        import dataclasses
+        from document.artboard import Artboard
+        # Artboard at x=100, width=200 → left edge at 100.
+        ab = dataclasses.replace(
+            Artboard.default_with_id("aaaa0001"),
+            x=100.0, y=0.0, width=200.0, height=100.0,
+        )
+        rects = [_rect(10, 0, 10, 10), _rect(60, 0, 10, 10)]
+        model = self._model_with_rects_and_artboards(
+            rects, [(0, 0), (0, 1)], [ab]
+        )
+        ctrl = Controller(model)
+        store = StateStore()
+        store.set("align_to", "artboard")
+        apply_align_operation(store, ctrl, "align_left")
+        # Both should translate right so their left edges hit x=100.
+        t0 = _transform_at(model, (0, 0))
+        self.assertAlmostEqual(t0.e, 90.0)  # 100 - 10
+        t1 = _transform_at(model, (0, 1))
+        self.assertAlmostEqual(t1.e, 40.0)  # 100 - 60
+
+    def test_align_to_artboard_uses_panel_selected(self):
+        import dataclasses
+        from document.artboard import Artboard
+        # Two artboards. Panel-select the second, so it becomes current.
+        ab1 = dataclasses.replace(
+            Artboard.default_with_id("aaaa0001"),
+            x=0.0, y=0.0, width=100.0, height=100.0,
+        )
+        ab2 = dataclasses.replace(
+            Artboard.default_with_id("bbbb0002"),
+            x=500.0, y=0.0, width=200.0, height=100.0,
+        )
+        rects = [_rect(10, 0, 10, 10), _rect(60, 0, 10, 10)]
+        model = self._model_with_rects_and_artboards(
+            rects, [(0, 0), (0, 1)], [ab1, ab2]
+        )
+        ctrl = Controller(model)
+        store = StateStore()
+        store.init_panel("artboards", {"artboards_panel_selection": ["bbbb0002"]})
+        store.set("align_to", "artboard")
+        apply_align_operation(store, ctrl, "align_left")
+        # Align to ab2's left edge (x=500).
+        t0 = _transform_at(model, (0, 0))
+        self.assertAlmostEqual(t0.e, 490.0)  # 500 - 10
+        t1 = _transform_at(model, (0, 1))
+        self.assertAlmostEqual(t1.e, 440.0)  # 500 - 60
+
+    def test_align_to_artboard_fallback_when_no_artboards(self):
+        """When the document has no artboards, fall back to selection
+        bounds (legacy doc support)."""
+        rects = [_rect(10, 0, 10, 10), _rect(30, 0, 10, 10)]
+        model = _model_with_rects(rects, [(0, 0), (0, 1)])
+        ctrl = Controller(model)
+        store = StateStore()
+        store.set("align_to", "artboard")
+        apply_align_operation(store, ctrl, "align_left")
+        # Selection-bounds fallback: left edge = min(10, 30) = 10.
+        self.assertEqual(_transform_at(model, (0, 0)), Transform())
+        t1 = _transform_at(model, (0, 1))
+        self.assertAlmostEqual(t1.e, -20.0)
+
+
 class ResetAlignPanelTest(absltest.TestCase):
 
     def test_reset_align_panel_resets_all_fields(self):

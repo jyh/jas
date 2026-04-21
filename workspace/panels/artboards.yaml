@@ -2,56 +2,419 @@ id: artboards_panel_content
 type: panel
 summary: "Artboards"
 description: >
-  Artboards panel — initial placeholder implementation. A document
-  has a set of artboards (print page regions) with unique numbers
-  starting at 1 and editable names. New documents start with a
-  single 612×792pt artboard.
+  Artboards panel — every document has at least one artboard (print
+  page region) with a unique internal id, a positional 1-based
+  number, a user-editable name, position/size, and a fill. New
+  documents seed a single 612×792pt (US Letter) artboard; subsequent
+  New Artboard actions inherit size from the topmost existing
+  artboard. See transcripts/ARTBOARDS.md for the full specification.
 
-  This placeholder renders a single editable row (number + name)
-  bound to panel-local state. Real support for multiple artboards,
-  an artboards list, and the Artboard Dialog arrives alongside the
-  Artboard Tool and document-level artboards implementation.
+  === Row Layout ===
+
+  Each row is laid out left to right as:
+
+  ARTBOARD_NUMBER — ARTBOARD_NAME — ARTBOARD_OPTIONS_BUTTON
+
+  ARTBOARD_NUMBER is the 1-based position of the row in the list. It
+  is a derived value, not a stored identifier. Delete, reorder, and
+  undo all renumber automatically so the column is always dense
+  (1..N with no gaps). Clicking the number cell makes that row the
+  sole panel-selected row — a shortcut for "make current".
+
+  ARTBOARD_NAME is the artboard's user-editable name. Click selects
+  the row using standard click / shift-click / cmd-click rules.
+  Click-and-wait on the name, F2, Enter, or the Rename menu entry
+  enters inline rename mode; Enter or blur commits, Escape cancels.
+  Trim-on-commit strips whitespace; empty names silently revert.
+  Duplicate names are allowed.
+
+  ARTBOARD_OPTIONS_BUTTON opens the Artboard Options Dialogue for
+  that row's artboard regardless of panel-selection. No selection
+  side effects.
+
+  === Panel Selection ===
+
+  Panel-selection is a set of 0..N artboards tracked by stable id.
+  Click replaces the selection with that row; shift-click extends
+  from the anchor to the clicked row; cmd-click toggles the clicked
+  row in or out of the selection. Clicking empty panel area (below
+  the last row) is a no-op. Panel-selection survives reorder because
+  it keys on id, not position.
+
+  === Current Artboard ===
+
+  Current is exactly one artboard, always. Derived as
+  `topmost panel-selected artboard, else artboard at position 1`.
+  Used by ALIGN_TO_ARTBOARD_BUTTON and any future
+  fit-to-artboard / zoom-to-artboard commands. There is no canvas
+  indicator for current — it's a tiebreaker for commands, not a UI
+  state.
+
+  === Reordering ===
+
+  Drag panel-selected rows to a new position, use MOVE_UP_BUTTON /
+  MOVE_DOWN_BUTTON in the footer, or press Option+Up / Option+Down.
+  For discontiguous selections the swap-with-neighbor-skipping-
+  selected-neighbors rule applies: iterate top-to-bottom; each
+  selected row swaps with the row above it, skipping rows that are
+  themselves selected or already at position 1. Move Down is
+  symmetric. Each reorder is a single undo op.
+
+  === Footer ===
+
+  REARRANGE_BUTTON sits at the bottom-left; the remaining buttons
+  cluster at the bottom-right in order MOVE_UP_BUTTON, MOVE_DOWN_
+  BUTTON, NEW_ARTBOARD_BUTTON, DELETE_ARTBOARD_BUTTON.
+
+  REARRANGE_BUTTON is phase-1 deferred; it opens the Rearrange
+  Dialogue which does not exist yet. An accent dot appears on the
+  button when the artboards list has changed since the Dialogue was
+  last opened; the dot clears on Dialogue open. Because the
+  Dialogue is deferred, the dot lights on first list change and
+  remains lit.
+
+  DELETE_ARTBOARD_BUTTON is grayed when deletion would violate the
+  at-least-one-artboard invariant (see below).
+
+  NEW_ARTBOARD_BUTTON creates silently (no Dialogue). Default size
+  inherits from the topmost existing artboard, else 612×792 pt.
+  Default position offset `(20, 20)` pt from the topmost panel-
+  selected artboard's top-left, else `(0, 0)`. All display toggles
+  off, transparent fill, name `Artboard N` with smallest unused N.
+
+  === At-Least-One-Artboard Invariant ===
+
+  `document.artboards.length >= 1` is enforced at every observable
+  state. `Delete Artboards` (menu, footer, Delete / Backspace) is
+  grayed when panel-selection spans all existing artboards. Load-
+  time repair inserts a default artboard when the document has
+  `artboards: []` or no `artboards:` key at all, logging
+  `Document had no artboards; inserted default.`
+
+  === Phase-1 Deferrals ===
+
+  Artboard Tool (canvas-side create / move / resize), Convert to
+  Artboards (menu grayed), Rearrange Dialogue (menu + footer
+  button grayed), `update_while_dragging` behavior,
+  `video_ruler_pixel_aspect_ratio` visual effect, and all printing.
+  Values for deferred stored fields persist and round-trip.
 
 state:
-  artboard_number:
-    type: number
-    default: 1
-    description: "Artboard number (starting at 1)."
-  artboard_name:
-    type: string
-    default: "Artboard 1"
-    description: "User-editable artboard name."
+  artboards_panel_selection:
+    type: list
+    item_type: string
+    default: []
+    description: "List of artboard ids that are panel-selected"
 
-init: {}
+  panel_selection_anchor:
+    type: string
+    default: null
+    nullable: true
+    description: "Artboard id that anchors shift-click range selection"
+
+  renaming_artboard:
+    type: string
+    default: null
+    nullable: true
+    description: "Id of the artboard currently being renamed inline, or null"
+
+  reference_point:
+    type: enum
+    values:
+      - top_left
+      - top_center
+      - top_right
+      - middle_left
+      - center
+      - middle_right
+      - bottom_left
+      - bottom_center
+      - bottom_right
+    default: center
+    persist: true
+    description: >
+      Which of the 9 anchor points the X / Y inputs in the Artboard
+      Options Dialogue display and accept. Underlying storage is
+      always the top-left corner; this widget controls display and
+      entry only. Persists as a panel preference, not per document.
+
+  rearrange_dirty:
+    type: bool
+    default: false
+    description: >
+      True when the artboards list has changed since the Rearrange
+      Dialogue was last opened. Surfaces as the blue-dot accent on
+      REARRANGE_BUTTON. Phase-1: once set, never cleared (Dialogue
+      is deferred).
+
+init:
+  artboards_panel_selection: "[]"
 
 menu:
-  - label: "Close Artboards"
-    action: close_panel
+  - label: "New Artboard"
+    action: new_artboard
+    description: "Create a new artboard (silent — no dialogue)"
+
+  - label: "Duplicate Artboards"
+    action: duplicate_artboards
+    enabled_when: "active_document.artboards_panel_selection_ids.length > 0"
+    description: "Duplicate panel-selected artboards, including contained elements"
+
+  - label: "Delete Artboards"
+    action: delete_artboards
+    enabled_when: "active_document.artboards_panel_selection_ids.length > 0 and active_document.artboards_panel_selection_ids.length < active_document.artboards_count"
+    description: "Delete panel-selected artboards (at least one must remain)"
+
+  - label: "Rename"
+    action: rename_artboard
+    params: { artboard_id: "active_document.artboards_panel_selection_ids[0]" }
+    enabled_when: "active_document.artboards_panel_selection_ids.length == 1"
+    description: "Inline rename the single panel-selected artboard"
+
+  - separator
+
+  - label: "Delete Empty Artboards"
+    action: delete_empty_artboards
+    description: "Delete every artboard whose bounds don't intersect any element (position 1 preserved if all empty)"
+
+  - separator
+
+  - label: "Convert to Artboards"
+    action: convert_to_artboards
+    enabled_when: "false"
+    description: "Coming soon — convert selected elements into artboards"
+
+  - label: "Artboard Options..."
+    action: open_artboard_options
+    params: { artboard_id: "active_document.artboards_panel_selection_ids[0]" }
+    enabled_when: "active_document.artboards_panel_selection_ids.length > 0"
+    description: "Open the Artboard Options Dialogue for the topmost panel-selected artboard"
+
+  - label: "Rearrange..."
+    action: rearrange_artboards
+    enabled_when: "false"
+    description: "Coming soon — batch-reposition artboards into a grid"
+
+  - separator
+
+  - label: "Reset Panel"
+    action: reset_artboards_panel
+    description: "Reset panel UI state (scroll, reference-point preference). Does not modify document data."
 
 content:
   type: container
-  id: ab_content
+  id: ap_root
   layout: column
-  style: { padding: 4, gap: 6 }
+  style: { padding: 0, gap: 0 }
   children:
 
-    # ── Single artboard row (placeholder) ────────────────────
-    - type: container
+    # ── Row list ──────────────────────────────────────────────
+
+    - id: ap_list
+      type: container
+      layout: column
+      style: { flex: 1, overflow_y: auto, padding: 0, gap: 0 }
+      foreach:
+        source: "active_document.artboards"
+        as: ab
+      do:
+        type: container
+        layout: row
+        style: { height: 24, padding: "0 4", gap: 4, alignment: center }
+        bind:
+          background: "if mem(ab.id, active_document.artboards_panel_selection_ids) then '{{theme.colors.selection}}' else 'transparent'"
+        # Row-level drag-to-reorder. Flask declares the events; native
+        # apps implement the actual drag behavior and insertion-line
+        # rendering. See ARTBOARDS.md §Reordering.
+        behavior:
+          - event: drag_start
+            description: "Panel-select this artboard (if not already) and begin drag"
+            action: artboards_panel_select
+            params: { artboard_id: "ab.id", modifier: "none" }
+          - event: drag_move
+            description: "Show horizontal insertion line between rows at the drop point"
+          - event: drag_end
+            description: "Reorder the panel-selected artboards to land at the drop point (single undo op)"
+        children:
+
+          # ARTBOARD_NUMBER (col-1): click makes current
+          - id: ap_number
+            type: text
+            content: "{{ab.number}}"
+            style: { width: 24, text_align: center, font_size: 11, color: "{{theme.colors.text}}" }
+            behavior:
+              - event: click
+                action: artboards_panel_select
+                params: { artboard_id: "ab.id", modifier: "none" }
+
+          # ARTBOARD_NAME (col-10): click / shift / cmd select,
+          # click-and-wait rename
+          - id: ap_name
+            type: text
+            content: "{{ab.name}}"
+            style: { flex: 1, font_size: 11, color: "{{theme.colors.text}}", overflow: hidden, text_overflow: ellipsis, white_space: nowrap }
+            bind:
+              visible: "panel.renaming_artboard != ab.id"
+            behavior:
+              - event: click
+                condition: "not event.shift and not event.meta"
+                action: artboards_panel_select
+                params: { artboard_id: "ab.id", modifier: "none" }
+              - event: click
+                condition: "event.shift and not event.meta"
+                action: artboards_panel_select
+                params: { artboard_id: "ab.id", modifier: "shift" }
+              - event: click
+                condition: "event.meta and not event.shift"
+                action: artboards_panel_select
+                params: { artboard_id: "ab.id", modifier: "meta" }
+              - event: click_and_wait
+                action: rename_artboard
+                params: { artboard_id: "ab.id" }
+
+          # Inline rename input — visible when this row is the one
+          # being renamed
+          - id: ap_name_edit
+            type: text_input
+            style: { flex: 1, font_size: 11 }
+            bind:
+              visible: "panel.renaming_artboard == ab.id"
+              value: "ab.name"
+            behavior:
+              - event: keydown
+                condition: "event.key == 'Enter'"
+                action: confirm_artboard_rename
+              - event: keydown
+                condition: "event.key == 'Escape'"
+                action: cancel_artboard_rename
+              - event: blur
+                action: confirm_artboard_rename
+
+          # ARTBOARD_OPTIONS_BUTTON (col-1): opens the Dialogue
+          - id: ap_options
+            type: icon_button
+            icon: artboard_options
+            summary: "Artboard Options"
+            description: "Open Artboard Options for this artboard"
+            style: { size: 16 }
+            behavior:
+              - event: click
+                action: open_artboard_options
+                params: { artboard_id: "ab.id" }
+
+        # Right-click context menu. Pre-menu selection rule (replace
+        # panel-selection with this row if it isn't already selected,
+        # else preserve the existing selection) is native behavior;
+        # the menu contents mirror the panel-menu counterparts.
+        # Right-click on empty panel area (below the last row) shows
+        # nothing — achieved by the absence of a container-level
+        # context_menu block.
+        context_menu:
+          - label: "Artboard Options..."
+            action: open_artboard_options
+            params: { artboard_id: "ab.id" }
+          - label: "Rename"
+            action: rename_artboard
+            params: { artboard_id: "ab.id" }
+            enabled_when: "active_document.artboards_panel_selection_ids.length == 1"
+          - label: "Duplicate Artboards"
+            action: duplicate_artboards
+            enabled_when: "active_document.artboards_panel_selection_ids.length > 0"
+          - label: "Delete Artboards"
+            action: delete_artboards
+            enabled_when: "active_document.artboards_panel_selection_ids.length > 0 and active_document.artboards_panel_selection_ids.length < active_document.artboards_count"
+          - separator
+          - label: "Convert to Artboards"
+            action: convert_to_artboards
+            enabled_when: "false"
+            tooltip: "Coming soon"
+
+    # ── Separator ─────────────────────────────────────────────
+
+    - type: separator
+      orientation: horizontal
+
+    # ── Footer ────────────────────────────────────────────────
+
+    - id: ap_footer
+      type: container
       layout: row
-      style: { gap: 4, alignment: center }
+      style: { padding: "4 6", gap: 4, alignment: center }
       children:
-        - id: ab_number
-          type: number_input
-          summary: "Artboard number"
-          description: "Artboard number (1-based)."
-          min: 1
-          style: { width: 48 }
+
+        # REARRANGE_BUTTON — bottom-left, phase-1 deferred
+        - id: ap_rearrange
+          type: icon_button
+          icon: rearrange
+          summary: "Rearrange Artboards"
+          description: "Coming soon"
+          style: { size: 16 }
           bind:
-            value: "panel.artboard_number"
-        - id: ab_name
-          type: text_input
-          summary: "Artboard name"
-          description: "User-editable artboard name."
+            disabled: "true"
+            badge: "panel.rearrange_dirty"
+          behavior:
+            - event: click
+              action: rearrange_artboards
+
+        - type: spacer
           style: { flex: 1 }
+
+        # MOVE_UP_BUTTON
+        - id: ap_move_up
+          type: icon_button
+          icon: arrow_up
+          summary: "Move Up"
+          description: "Move panel-selected artboards one position earlier in the list"
+          style: { size: 16 }
           bind:
-            value: "panel.artboard_name"
+            disabled: "active_document.artboards_panel_selection_ids.length == 0"
+          behavior:
+            - event: click
+              action: move_artboard_up
+
+        # MOVE_DOWN_BUTTON
+        - id: ap_move_down
+          type: icon_button
+          icon: arrow_down
+          summary: "Move Down"
+          description: "Move panel-selected artboards one position later in the list"
+          style: { size: 16 }
+          bind:
+            disabled: "active_document.artboards_panel_selection_ids.length == 0"
+          behavior:
+            - event: click
+              action: move_artboard_down
+
+        # NEW_ARTBOARD_BUTTON — always enabled
+        - id: ap_new
+          type: icon_button
+          icon: artboard_new
+          summary: "New Artboard"
+          description: "Create a new artboard (silent)"
+          style: { size: 16 }
+          behavior:
+            - event: click
+              action: new_artboard
+
+        # DELETE_ARTBOARD_BUTTON — grayed by at-least-one invariant
+        - id: ap_delete
+          type: icon_button
+          icon: trash
+          summary: "Delete Artboards"
+          description: "Delete panel-selected artboards (at least one must remain)"
+          style: { size: 16 }
+          bind:
+            disabled: "active_document.artboards_panel_selection_ids.length == 0 or active_document.artboards_panel_selection_ids.length >= active_document.artboards_count"
+          behavior:
+            - event: click
+              action: delete_artboards
+
+# Panel-level keyboard shortcuts
+keyboard:
+  - { key: "Delete",       action: delete_artboards }
+  - { key: "Backspace",    action: delete_artboards }
+  - { key: "F2",           action: rename_artboard, params: { artboard_id: "active_document.artboards_panel_selection_ids[0]" }, enabled_when: "active_document.artboards_panel_selection_ids.length == 1" }
+  - { key: "Enter",        action: rename_artboard, params: { artboard_id: "active_document.artboards_panel_selection_ids[0]" }, enabled_when: "active_document.artboards_panel_selection_ids.length == 1" }
+  - { key: "Meta+A",       action: artboards_select_all }
+  - { key: "Alt+ArrowUp",  action: move_artboard_up }
+  - { key: "Alt+ArrowDown", action: move_artboard_down }

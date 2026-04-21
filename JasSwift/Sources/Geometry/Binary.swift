@@ -828,7 +828,15 @@ private func unpackDocument(_ v: MsgValue) -> Document {
     }
     let selectedLayer = asInt(arr[1])
     let selection = unpackSelection(arr[2])
-    return Document(layers: layers, selectedLayer: selectedLayer, selection: selection)
+    // Binary format predates the artboards feature — parsed docs have
+    // empty artboards; the app's load-time repair adds a default at
+    // load.
+    return Document(
+        layers: layers,
+        selectedLayer: selectedLayer,
+        selection: selection,
+        artboards: []
+    )
 }
 
 // MARK: - Public API

@@ -463,12 +463,46 @@ let selection_json sel =
 (* Document serializer (public API)                                   *)
 (* ------------------------------------------------------------------ *)
 
-(** Serialize a Document to canonical test JSON. *)
+(** Serialize a single artboard to canonical JSON. *)
+let artboard_json (ab : Artboard.artboard) =
+  let o = json_obj () in
+  json_str o "id" ab.id;
+  json_str o "name" ab.name;
+  json_num o "x" ab.x;
+  json_num o "y" ab.y;
+  json_num o "width" ab.width;
+  json_num o "height" ab.height;
+  json_str o "fill" (Artboard.fill_as_canonical ab.fill);
+  json_bool o "show_center_mark" ab.show_center_mark;
+  json_bool o "show_cross_hairs" ab.show_cross_hairs;
+  json_bool o "show_video_safe_areas" ab.show_video_safe_areas;
+  json_num o "video_ruler_pixel_aspect_ratio" ab.video_ruler_pixel_aspect_ratio;
+  json_build o
+
+let artboards_json artboards =
+  json_array (List.map artboard_json artboards)
+
+let artboard_options_json (opts : Artboard.options) =
+  let o = json_obj () in
+  json_bool o "fade_region_outside_artboard" opts.fade_region_outside_artboard;
+  json_bool o "update_while_dragging" opts.update_while_dragging;
+  json_build o
+
+(** Serialize a Document to canonical test JSON.
+
+    Artboards and artboard_options are omitted when they carry
+    defaults, preserving byte-for-byte compatibility with legacy
+    fixtures that predate the artboards feature (cross-app
+    contract, ART-441). *)
 let document_to_test_json doc =
   let layers =
     Array.to_list doc.layers |> List.map element_json
   in
   let o = json_obj () in
+  if doc.artboard_options <> Artboard.default_options then
+    json_raw o "artboard_options" (artboard_options_json doc.artboard_options);
+  if doc.artboards <> [] then
+    json_raw o "artboards" (artboards_json doc.artboards);
   json_raw o "layers" (json_array layers);
   json_int o "selected_layer" doc.selected_layer;
   json_raw o "selection" (selection_json doc.selection);
@@ -765,12 +799,61 @@ let parse_selection j =
     PathMap.add es.es_path es m
   ) PathMap.empty entries
 
+let parse_artboard j : Artboard.artboard =
+  let open Yojson.Safe.Util in
+  let try_str k = try j |> member k |> to_string with _ -> "" in
+  let try_bool k = try j |> member k |> to_bool with _ -> false in
+  let try_num k = try j |> member k |> to_num with _ -> 0.0 in
+  let raw_aspect = try_num "video_ruler_pixel_aspect_ratio" in
+  {
+    Artboard.id = try_str "id";
+    name = try_str "name";
+    x = try_num "x";
+    y = try_num "y";
+    width = try_num "width";
+    height = try_num "height";
+    fill = Artboard.fill_from_canonical (
+      try try_str "fill" with _ -> "transparent"
+    );
+    show_center_mark = try_bool "show_center_mark";
+    show_cross_hairs = try_bool "show_cross_hairs";
+    show_video_safe_areas = try_bool "show_video_safe_areas";
+    video_ruler_pixel_aspect_ratio =
+      (if raw_aspect = 0.0 then 1.0 else raw_aspect);
+  }
+
+let parse_artboards j =
+  try j |> Yojson.Safe.Util.to_list |> List.map parse_artboard
+  with _ -> []
+
+let parse_artboard_options j : Artboard.options =
+  let open Yojson.Safe.Util in
+  try
+    {
+      Artboard.fade_region_outside_artboard =
+        (try j |> member "fade_region_outside_artboard" |> to_bool with _ -> true);
+      update_while_dragging =
+        (try j |> member "update_while_dragging" |> to_bool with _ -> true);
+    }
+  with _ -> Artboard.default_options
+
 (** Parse canonical test JSON into a Document.
     This is the inverse of [document_to_test_json]. *)
 let test_json_to_document json_str =
+  let open Yojson.Safe.Util in
   let j = Yojson.Safe.from_string json_str in
   let layers = j |> member "layers" |> to_list
     |> List.map parse_element |> Array.of_list in
   let selected_layer = j |> member "selected_layer" |> to_int in
   let selection = parse_selection (j |> member "selection") in
-  make_document ~selected_layer ~selection layers
+  let artboards =
+    match j |> member "artboards" with
+    | `Null -> []
+    | v -> parse_artboards v
+  in
+  let artboard_options =
+    match j |> member "artboard_options" with
+    | `Null -> Artboard.default_options
+    | v -> parse_artboard_options v
+  in
+  make_document ~selected_layer ~selection ~artboards ~artboard_options layers

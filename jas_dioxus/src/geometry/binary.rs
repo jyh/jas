@@ -803,7 +803,16 @@ fn unpack_document(v: &Value) -> Document {
         .map(unpack_element).collect();
     let selected_layer = as_i64(&arr[1]) as usize;
     let selection = unpack_selection(&arr[2]);
-    Document { layers, selected_layer, selection }
+    // Binary format predates the artboards feature — parsed docs
+    // start with empty artboards; the app's load-time repair adds a
+    // default later (ARTBOARDS.md §At-least-one-artboard invariant).
+    Document {
+        layers,
+        selected_layer,
+        selection,
+        artboards: Vec::new(),
+        artboard_options: crate::document::artboard::ArtboardOptions::default(),
+    }
 }
 
 // -- Public API --------------------------------------------------------------

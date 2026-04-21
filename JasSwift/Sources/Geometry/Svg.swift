@@ -1117,14 +1117,23 @@ private func parseElement(_ node: XMLNode) -> Element? {
 public func svgToDocument(_ svg: String) -> Document {
     guard let data = svg.data(using: .utf8) else {
         print("Warning: SVG string is not valid UTF-8")
-        return Document(layers: [Layer(children: [])])
+        // SVG has no artboards concept — return with empty artboards
+        // so the load-time invariant repair (at the app layer) can
+        // seed a default on actual file open.
+        return Document(layers: [Layer(children: [])], artboards: [])
     }
     guard let xmlDoc = try? XMLDocument(data: data, options: []) else {
         print("Warning: Failed to parse SVG XML")
-        return Document(layers: [Layer(children: [])])
+        // SVG has no artboards concept — return with empty artboards
+        // so the load-time invariant repair (at the app layer) can
+        // seed a default on actual file open.
+        return Document(layers: [Layer(children: [])], artboards: [])
     }
     guard let root = xmlDoc.rootElement() else {
-        return Document(layers: [Layer(children: [])])
+        // SVG has no artboards concept — return with empty artboards
+        // so the load-time invariant repair (at the app layer) can
+        // seed a default on actual file open.
+        return Document(layers: [Layer(children: [])], artboards: [])
     }
 
     var layers: [Layer] = []
@@ -1149,6 +1158,6 @@ public func svgToDocument(_ svg: String) -> Document {
         }
     }
     if layers.isEmpty { layers = [Layer(children: [])] }
-    return normalizeDocument(Document(layers: layers))
+    return normalizeDocument(Document(layers: layers, artboards: []))
 }
 

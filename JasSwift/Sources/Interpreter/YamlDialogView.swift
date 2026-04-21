@@ -15,11 +15,35 @@ struct YamlDialogState {
     var params: [String: Any]
 }
 
-/// Open a dialog by ID, initializing its state from the workspace definition.
+/// Open a dialog by ID, initializing its state from the workspace
+/// definition. Back-compatible shim over openYamlDialogWithOuter
+/// without a cross-scope namespace — dialogs whose init expressions
+/// reference `panel.*` or `active_document.*` (Artboard Options)
+/// must call the `_withOuter` variant directly.
 func openYamlDialog(
     dialogId: String,
     rawParams: [String: Any],
     liveState: [String: Any]
+) -> YamlDialogState? {
+    openYamlDialogWithOuter(
+        dialogId: dialogId,
+        rawParams: rawParams,
+        liveState: liveState,
+        outerScope: [:]
+    )
+}
+
+/// As ``openYamlDialog`` but threads an ``outerScope`` dictionary whose
+/// top-level keys (e.g. ``panel``, ``active_document``) are visible to
+/// init expressions alongside ``state``, ``dialog``, ``param``. Required
+/// by the Artboard Options Dialogue whose init expressions call
+/// ``filter(active_document.artboards, ...)`` and
+/// ``panel.reference_point``.
+func openYamlDialogWithOuter(
+    dialogId: String,
+    rawParams: [String: Any],
+    liveState: [String: Any],
+    outerScope: [String: Any]
 ) -> YamlDialogState? {
     guard let ws = WorkspaceData.load() else { return nil }
     guard let dlgDef = ws.dialog(dialogId) else { return nil }
@@ -69,11 +93,10 @@ func openYamlDialog(
         }
         for (key, expr) in deferred {
             let exprStr = expr as? String ?? ""
-            let initCtx: [String: Any] = [
-                "state": liveState,
-                "dialog": dialogState,
-                "param": resolvedParams,
-            ]
+            var initCtx: [String: Any] = outerScope
+            initCtx["state"] = liveState
+            initCtx["dialog"] = dialogState
+            initCtx["param"] = resolvedParams
             let result = evaluate(exprStr, context: initCtx)
             dialogState[key] = valueToAnyDlg(result)
         }
@@ -84,6 +107,47 @@ func openYamlDialog(
         state: dialogState,
         params: resolvedParams
     )
+}
+
+/// Build a ``YamlDialogState`` snapshot from a StateStore that has a
+/// dialog open. Returns nil when the store has no active dialog.
+///
+/// Used by the action → overlay bridge: after running YAML effects,
+/// if ``store.getDialogId()`` transitioned from nil to an id, the
+/// dispatcher calls this helper and assigns the result to the
+/// SwiftUI `yamlDialogState` binding. The Artboard Options Dialogue
+/// is opened this way (via the `open_dialog` effect); the color
+/// picker uses the direct `openYamlDialog` path instead.
+func yamlDialogStateFromStore(_ store: StateStore) -> YamlDialogState? {
+    guard let id = store.getDialogId() else { return nil }
+    return YamlDialogState(
+        id: id,
+        state: store.getDialogState(),
+        params: store.getDialogParams() ?? [:]
+    )
+}
+
+/// Build the evaluation context surfaced to a dialog's content-tree
+/// renderer. Outer-scope keys (``panel``, ``active_document``) are
+/// merged first; the dialog's own ``dialog`` / ``param`` / ``state``
+/// / ``icons`` keys win on collision so dialog-local state is never
+/// stomped by a like-named outer key.
+///
+/// Exposed at file scope so Phase F tests can verify merge order
+/// without standing up a SwiftUI view.
+func buildDialogEvalContext(
+    state: [String: Any],
+    params: [String: Any],
+    outer: [String: Any]
+) -> [String: Any] {
+    var ctx: [String: Any] = outer
+    ctx["dialog"] = state
+    ctx["param"] = params
+    if let ws = WorkspaceData.load() {
+        ctx["state"] = ws.stateDefaults()
+        ctx["icons"] = ws.icons()
+    }
+    return ctx
 }
 
 /// Convert a Value to Any? for storage.
@@ -103,9 +167,32 @@ private func valueToAnyDlg(_ v: Value) -> Any? {
 }
 
 /// SwiftUI view that renders a YAML dialog as a modal overlay.
+///
+/// ``outerScope`` is a closure evaluated on each render that returns a
+/// dictionary merged under the dialog's own ``dialog`` / ``param`` keys.
+/// It exposes ``panel`` + ``active_document`` namespaces to render-time
+/// bind expressions — e.g. the Artboard Options Dialogue uses
+/// ``bind.disabled: active_document.artboards_count <= 1`` on its
+/// Delete button and interpolates ``{{active_document.artboards_count}}``
+/// into a "Artboards: N" label. Default: an empty closure, matching
+/// the back-compat path for dialogs (like color_picker) that read only
+/// ``dialog.*`` / ``state.*``.
 struct YamlDialogOverlay: View {
     @Binding var dialogState: YamlDialogState?
     let theme: Theme
+    var outerScope: () -> [String: Any] = { [:] }
+    /// Active Model used for dialog-body widget dispatch. Needs to
+    /// be the same Model whose StateStore holds the dialog state
+    /// that this overlay is mirroring so that ``close_dialog``
+    /// effects (e.g. via ``artboard_options_confirm``'s tail) zero
+    /// the store we're watching.
+    var model: Model? = nil
+    /// Fired when the overlay is dismissed from the UI (X button or
+    /// backdrop tap). Callers pair it with `model.stateStore.closeDialog()`
+    /// so the SwiftUI binding and the store's dialog tracker stay in
+    /// sync — otherwise a subsequent `open_dialog: <same-id>` effect
+    /// would be a no-op transition and the bridge would miss it.
+    var onDismiss: (() -> Void)? = nil
 
     var body: some View {
         if let ds = dialogState {
@@ -115,6 +202,7 @@ struct YamlDialogOverlay: View {
                     .ignoresSafeArea()
                     .onTapGesture {
                         dialogState = nil
+                        onDismiss?()
                     }
 
                 // Dialog container
@@ -149,7 +237,10 @@ struct YamlDialogOverlay: View {
 
             Spacer()
 
-            Button(action: { dialogState = nil }) {
+            Button(action: {
+                dialogState = nil
+                onDismiss?()
+            }) {
                 SwiftUI.Text("\u{00d7}")
                     .font(.system(size: 16))
                     .foregroundColor(SwiftUI.Color(nsColor: theme.textDim))
@@ -168,22 +259,52 @@ struct YamlDialogOverlay: View {
         let content = dlgDef?["content"] as? [String: Any]
 
         if let content = content {
-            let ctx = buildEvalContext(ds)
-            YamlElementView(element: content, context: ctx)
+            let ctx = buildDialogEvalContext(
+                state: ds.state,
+                params: ds.params,
+                outer: outerScope()
+            )
+            YamlElementView(
+                element: content,
+                context: ctx,
+                model: model,
+                onWidgetAction: handleDialogWidgetAction
+            )
                 .padding(4)
         }
     }
 
-    private func buildEvalContext(_ ds: YamlDialogState) -> [String: Any] {
-        var ctx: [String: Any] = [
-            "dialog": ds.state,
-            "param": ds.params,
-        ]
-        if let ws = WorkspaceData.load() {
-            ctx["state"] = ws.stateDefaults()
-            ctx["icons"] = ws.icons()
+    /// Dispatch a dialog-body widget-level ``action:`` click. Params
+    /// are already resolved against the dialog ctx by YamlElementView.
+    ///
+    /// Two action shapes:
+    /// - ``dismiss_dialog`` — close the store and zero the binding.
+    ///   Matches the Python YamlDialogView._dispatch_dialog_action
+    ///   special case (Cancel button idiom).
+    /// - any other action name — route through
+    ///   ``LayersPanel.dispatchYamlAction`` with the resolved params.
+    ///   If the action's effects include ``close_dialog``, the store's
+    ///   dialog id becomes nil; we mirror that by zeroing the binding.
+    private func handleDialogWidgetAction(_ actionName: String,
+                                           _ params: [String: Any]) {
+        if actionName == "dismiss_dialog" {
+            model?.stateStore.closeDialog()
+            dialogState = nil
+            return
         }
-        return ctx
+        guard let m = model else { return }
+        let abSel = (m.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
+            .compactMap { $0 as? String } ?? []
+        LayersPanel.dispatchYamlAction(
+            actionName, model: m,
+            artboardsPanelSelection: abSel,
+            params: params
+        )
+        // The action's effects may have run close_dialog — sync the
+        // SwiftUI binding so the overlay dismisses.
+        if m.stateStore.getDialogId() == nil {
+            dialogState = nil
+        }
     }
 
     private func dialogWidth(_ ds: YamlDialogState) -> CGFloat {

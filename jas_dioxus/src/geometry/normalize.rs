@@ -17,6 +17,8 @@ pub fn normalize_document(doc: &Document) -> Document {
         layers: doc.layers.iter().map(|l| normalize_element(l)).collect(),
         selected_layer: doc.selected_layer,
         selection: doc.selection.clone(),
+        artboards: doc.artboards.clone(),
+        artboard_options: doc.artboard_options.clone(),
     }
 }
 
