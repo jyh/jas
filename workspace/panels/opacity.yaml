@@ -122,28 +122,16 @@ menu:
   - separator
   - label: "Make Opacity Mask"
     action: make_opacity_mask
-    enabled_when: "false"
-    description: >
-      Phase-1 deferred; enables once element.mask lands in later phases.
-      Native spec: enabled_when: "!selection_has_mask".
+    enabled_when: "!selection_has_mask"
   - label: "Release Opacity Mask"
     action: release_opacity_mask
-    enabled_when: "false"
-    description: >
-      Phase-1 deferred; enables once element.mask lands in later phases.
-      Native spec: enabled_when: "selection_has_mask".
+    enabled_when: "selection_has_mask"
   - label: "Disable Opacity Mask"
     action: disable_opacity_mask
-    enabled_when: "false"
-    description: >
-      status: pending_model. Enables once mask.disabled is added to the
-      document model.
+    enabled_when: "selection_has_mask"
   - label: "Unlink Opacity Mask"
     action: unlink_opacity_mask
-    enabled_when: "false"
-    description: >
-      status: pending_model. Enables once mask.linked and
-      mask.unlink_transform are added to the document model.
+    enabled_when: "selection_has_mask"
   - separator
   - label: "New Opacity Masks Are Clipping"
     action: toggle_new_masks_clipping

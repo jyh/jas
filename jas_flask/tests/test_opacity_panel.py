@@ -154,21 +154,21 @@ class TestOpacityPanel:
         sep_count = sum(1 for m in menu if m == "separator")
         assert sep_count == 3
 
-    def test_menu_make_mask_phase1_deferred(self, panel):
+    def test_menu_make_mask_enabled_when_no_mask(self, panel):
         entry = self._menu_by_label(panel, "Make Opacity Mask")
-        assert entry.get("enabled_when") == "false"
+        assert entry.get("enabled_when") == "!selection_has_mask"
 
-    def test_menu_release_mask_phase1_deferred(self, panel):
+    def test_menu_release_mask_enabled_when_has_mask(self, panel):
         entry = self._menu_by_label(panel, "Release Opacity Mask")
-        assert entry.get("enabled_when") == "false"
+        assert entry.get("enabled_when") == "selection_has_mask"
 
-    def test_menu_disable_mask_pending_model(self, panel):
+    def test_menu_disable_mask_enabled_when_has_mask(self, panel):
         entry = self._menu_by_label(panel, "Disable Opacity Mask")
-        assert entry.get("enabled_when") == "false"
+        assert entry.get("enabled_when") == "selection_has_mask"
 
-    def test_menu_unlink_mask_pending_model(self, panel):
+    def test_menu_unlink_mask_enabled_when_has_mask(self, panel):
         entry = self._menu_by_label(panel, "Unlink Opacity Mask")
-        assert entry.get("enabled_when") == "false"
+        assert entry.get("enabled_when") == "selection_has_mask"
 
     def test_menu_page_isolated_blending_pending_renderer(self, panel):
         entry = self._menu_by_label(panel, "Page Isolated Blending")
