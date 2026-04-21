@@ -9,13 +9,14 @@ module Boolean_apply = Jas.Boolean_apply
 let rect_at x y =
   Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = None; stroke = None; opacity = 1.0; transform = None;
-         locked = false; visibility = Preview; blend_mode = Normal }
+         locked = false; visibility = Preview; blend_mode = Normal; mask = None }
 
 let make_model rects selected_paths =
   let layer = Layer {
     name = "L0";
     children = Array.of_list rects;
     opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal;
+    mask = None;
     isolated_blending = false; knockout_group = false;
   } in
   let sel = List.fold_left (fun acc path ->
@@ -126,7 +127,7 @@ let rect_with_fill x y color =
   Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = Some { fill_color = color; fill_opacity = 1.0 };
          stroke = None; opacity = 1.0; transform = None;
-         locked = false; visibility = Preview; blend_mode = Normal }
+         locked = false; visibility = Preview; blend_mode = Normal; mask = None }
 
 let disjoint_rects () =
   make_model [rect_at 0.0 0.0; rect_at 20.0 0.0] [[0; 0]; [0; 1]]
@@ -151,7 +152,7 @@ let test_trim_fully_covered_operand_vanishes () =
   let front = Rect { x = 0.0; y = 0.0; width = 20.0; height = 20.0;
                      rx = 0.0; ry = 0.0; fill = None; stroke = None;
                      opacity = 1.0; transform = None; locked = false;
-                     visibility = Preview; blend_mode = Normal } in
+                     visibility = Preview; blend_mode = Normal; mask = None } in
   let m = make_model [back; front] [[0; 0]; [0; 1]] in
   Boolean_apply.apply_destructive_boolean m "trim";
   Alcotest.(check int) "front only" 1 (top_children_count m)

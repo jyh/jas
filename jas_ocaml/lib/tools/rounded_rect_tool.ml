@@ -17,6 +17,7 @@ class rounded_rect_tool = object
         rx = rounded_rect_radius; ry = rounded_rect_radius;
         fill = ctx.model#default_fill; stroke = ctx.model#default_stroke;
         opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal;
+        mask = None;
       })
 
   method private draw_preview cr sx sy ex ey =

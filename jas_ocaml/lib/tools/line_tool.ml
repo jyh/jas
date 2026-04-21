@@ -9,6 +9,7 @@ class line_tool = object
       stroke = ctx.model#default_stroke;
       width_points = [];
       opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal;
+      mask = None;
     })
 
   method private draw_preview cr sx sy ex ey =

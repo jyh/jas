@@ -166,11 +166,13 @@ let rec translate_element elem dx dy =
                       isolated_blending; knockout_group; _ } ->
       Element.Group { children = Array.map (fun c -> translate_element c dx dy) children;
                       opacity; transform; locked; visibility; blend_mode;
+                      mask = None;
                       isolated_blending; knockout_group }
     | Element.Layer { name; children; opacity; transform; locked; visibility; blend_mode;
                       isolated_blending; knockout_group; _ } ->
       Element.Layer { name; children = Array.map (fun c -> translate_element c dx dy) children;
                       opacity; transform; locked; visibility; blend_mode;
+                      mask = None;
                       isolated_blending; knockout_group }
     | _ ->
       let n = Element.control_point_count elem in
@@ -239,6 +241,7 @@ let paste_clipboard (model : Model.model) offset () =
             | Element.Layer { name = n; children = ec; opacity; transform; locked; visibility; blend_mode;
                               isolated_blending; knockout_group; _ } ->
               new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform; locked; visibility; blend_mode;
+                                                   mask = None;
                                                    isolated_blending; knockout_group }
             | _ -> ()
           end
