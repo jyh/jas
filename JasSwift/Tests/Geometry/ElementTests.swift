@@ -621,3 +621,48 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
         #expect(abs(b1 - b2) < 0.01)
     }
 }
+
+// MARK: - BlendMode
+
+@Test func blendModeHasSixteenCases() {
+    #expect(BlendMode.allCases.count == 16)
+}
+
+@Test func blendModeContainsAllExpectedCases() {
+    let expected: [BlendMode] = [
+        .normal,
+        .darken, .multiply, .colorBurn,
+        .lighten, .screen, .colorDodge,
+        .overlay, .softLight, .hardLight,
+        .difference, .exclusion,
+        .hue, .saturation, .color, .luminosity,
+    ]
+    for m in expected {
+        #expect(BlendMode.allCases.contains(m))
+    }
+}
+
+@Test func blendModeRawValuesAreSnakeCase() {
+    // Cross-language JSON equivalence: raw values must match opacity.yaml
+    // mode ids and Rust's serde snake_case rename.
+    #expect(BlendMode.normal.rawValue == "normal")
+    #expect(BlendMode.colorBurn.rawValue == "color_burn")
+    #expect(BlendMode.colorDodge.rawValue == "color_dodge")
+    #expect(BlendMode.softLight.rawValue == "soft_light")
+    #expect(BlendMode.hardLight.rawValue == "hard_light")
+    #expect(BlendMode.luminosity.rawValue == "luminosity")
+}
+
+@Test func blendModeRoundTripThroughRawValue() {
+    for m in BlendMode.allCases {
+        let raw = m.rawValue
+        let back = BlendMode(rawValue: raw)
+        #expect(back == m)
+    }
+}
+
+@Test func blendModeInvalidRawValueReturnsNil() {
+    #expect(BlendMode(rawValue: "not_a_mode") == nil)
+    #expect(BlendMode(rawValue: "") == nil)
+    #expect(BlendMode(rawValue: "ColorBurn") == nil)  // wrong case
+}
