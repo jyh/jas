@@ -452,6 +452,21 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         }
     }
 
+    // ── Opacity panel overrides ─────────────────────────────
+    // Phase 1 panel-local: emit the OpacityPanelState fields as-is.
+    // `blend_mode` is serialized via serde (snake_case). The key is
+    // named `blend_mode` rather than `mode` to avoid colliding with
+    // the Color panel's state.mode.
+    let op = &st.opacity_panel;
+    let blend_mode_json = serde_json::to_value(op.blend_mode)
+        .unwrap_or_else(|_| J::String("normal".into()));
+    m.insert("blend_mode".into(), blend_mode_json);
+    m.insert("opacity".into(), serde_json::json!(op.opacity));
+    m.insert("thumbnails_hidden".into(), J::Bool(op.thumbnails_hidden));
+    m.insert("options_shown".into(), J::Bool(op.options_shown));
+    m.insert("new_masks_clipping".into(), J::Bool(op.new_masks_clipping));
+    m.insert("new_masks_inverted".into(), J::Bool(op.new_masks_inverted));
+
     m
 }
 

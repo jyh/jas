@@ -395,15 +395,18 @@ impl Default for BooleanPanelState {
 }
 
 /// Opacity panel state fields — mirror the panel-local state declared in
-/// `workspace/panels/opacity.yaml`. `mode` and `opacity` are working values
-/// shown in the panel controls; later phases synchronize them with the
-/// selection's `element.mode` / `element.opacity`. The `new_masks_*` fields
-/// are document-scoped preferences (Phase 1 stores them on the panel state
-/// until the document model grows per-document preferences).
+/// `workspace/panels/opacity.yaml`. `blend_mode` and `opacity` are working
+/// values shown in the panel controls; later phases synchronize them with
+/// the selection's `element.mode` / `element.opacity`. The `new_masks_*`
+/// fields are document-scoped preferences (Phase 1 stores them on the panel
+/// state until the document model grows per-document preferences).
+///
+/// Named `blend_mode` rather than `mode` to avoid a collision with the Color
+/// panel's `mode` key in the shared live-overrides map.
 #[derive(Debug, Clone)]
 pub(crate) struct OpacityPanelState {
     /// Working blend mode.
-    pub mode: super::super::geometry::element::BlendMode,
+    pub blend_mode: super::super::geometry::element::BlendMode,
     /// Working opacity (0-100). Panel range is percent, distinct from the
     /// model's 0.0-1.0 fraction; later phases convert at the binding edge.
     pub opacity: f64,
@@ -421,7 +424,7 @@ pub(crate) struct OpacityPanelState {
 impl Default for OpacityPanelState {
     fn default() -> Self {
         Self {
-            mode: super::super::geometry::element::BlendMode::Normal,
+            blend_mode: super::super::geometry::element::BlendMode::Normal,
             opacity: 100.0,
             thumbnails_hidden: false,
             options_shown: false,
@@ -2504,9 +2507,9 @@ mod opacity_panel_state_tests {
     use crate::geometry::element::BlendMode;
 
     #[test]
-    fn default_mode_is_normal() {
+    fn default_blend_mode_is_normal() {
         let s = OpacityPanelState::default();
-        assert_eq!(s.mode, BlendMode::Normal);
+        assert_eq!(s.blend_mode, BlendMode::Normal);
     }
 
     #[test]

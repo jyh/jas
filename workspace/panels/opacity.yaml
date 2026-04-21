@@ -51,7 +51,7 @@ description: >
   items and the page-level blending toggles.
 
 state:
-  mode:
+  blend_mode:
     type: enum
     values:
       - normal
@@ -74,6 +74,8 @@ state:
     description: >
       Working blend mode. Phase-1 is panel-local (not yet applied to
       elements); later phases persist as element.mode on the selection.
+      Named `blend_mode` rather than `mode` to avoid a collision with
+      the Color panel's state.mode in the shared panel-overrides map.
   opacity:
     type: number
     default: 100
@@ -183,7 +185,7 @@ content:
             Blend mode for the selection. Sixteen modes grouped into six
             sections by separator.
           bind:
-            value: "panel.mode"
+            value: "panel.blend_mode"
           options:
             - { value: normal,      label: "Normal" }
             - separator
