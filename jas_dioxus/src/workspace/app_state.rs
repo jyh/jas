@@ -150,6 +150,22 @@ pub(crate) struct AppState {
     pub(crate) layers_hidden_types: std::collections::HashSet<String>,
     /// Whether the type filter dropdown is open.
     pub(crate) layers_filter_dropdown_open: bool,
+
+    /// Artboards panel — panel-selected artboard ids. Tracked by stable
+    /// id so selection survives reorder (ARTBOARDS.md §Selection
+    /// semantics).
+    pub(crate) artboards_panel_selection: Vec<String>,
+    /// Anchor id for shift-click range selection in the Artboards panel.
+    pub(crate) artboards_panel_anchor: Option<String>,
+    /// Id of the artboard currently being renamed inline, or None.
+    pub(crate) artboards_renaming: Option<String>,
+    /// Reference-point widget preference. One of the 9 anchor names.
+    /// Persists as a panel preference, not per document.
+    pub(crate) artboards_reference_point: String,
+    /// Blue-dot accent flag on REARRANGE_BUTTON. True after the first
+    /// list change in a session; phase-1 has no clear path (Rearrange
+    /// Dialogue deferred).
+    pub(crate) artboards_rearrange_dirty: bool,
 }
 
 /// Solo/unsolo state for the layers panel.
@@ -471,6 +487,11 @@ impl AppState {
             layers_saved_lock_states: std::collections::HashMap::new(),
             layers_hidden_types: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
+            artboards_panel_selection: Vec::new(),
+            artboards_panel_anchor: None,
+            artboards_renaming: None,
+            artboards_reference_point: "center".to_string(),
+            artboards_rearrange_dirty: false,
         }
     }
 
@@ -969,17 +990,13 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
-        // TODO phase C: thread panel.artboards_panel_selection from the
-        // interpreter StateStore here. For now artboards render without
-        // the panel-selected accent border.
-        let panel_selected_artboards: &[String] = &[];
         render::render(
             &ctx,
             w,
             h,
             tab.model.document(),
             self.boolean_panel.precision,
-            panel_selected_artboards,
+            &self.artboards_panel_selection,
         );
 
         // Draw tool overlay
