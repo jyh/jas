@@ -2,7 +2,7 @@ from absl.testing import absltest
 
 from geometry.element import (
     BlendMode, Color, RgbColor, HsbColor, CmykColor,
-    Fill, Stroke, LineCap, LineJoin, Transform,
+    Fill, Mask, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
@@ -785,6 +785,39 @@ class BlendModeTest(absltest.TestCase):
             BlendMode("")
         with self.assertRaises(ValueError):
             BlendMode("ColorBurn")  # wrong case
+
+
+class MaskTest(absltest.TestCase):
+    """Mask dataclass — storage-only (Phase 3a)."""
+
+    def test_element_default_mask_is_none(self):
+        self.assertIsNone(Rect(x=0, y=0, width=10, height=10).mask)
+        self.assertIsNone(Line(x1=0, y1=0, x2=10, y2=10).mask)
+        self.assertIsNone(Group().mask)
+        self.assertIsNone(Layer(name="L").mask)
+
+    def test_mask_defaults_clip_true_linked_true_disabled_false(self):
+        subtree = Rect(x=0, y=0, width=10, height=10)
+        m = Mask(subtree=subtree)
+        self.assertTrue(m.clip)
+        self.assertFalse(m.invert)
+        self.assertFalse(m.disabled)
+        self.assertTrue(m.linked)
+        self.assertIsNone(m.unlink_transform)
+
+    def test_element_with_mask_propagates(self):
+        subtree = Rect(x=0, y=0, width=10, height=10)
+        m = Mask(subtree=subtree, clip=False, invert=True)
+        r = Rect(x=0, y=0, width=20, height=20, mask=m)
+        self.assertIsNotNone(r.mask)
+        self.assertEqual(r.mask.clip, False)
+        self.assertEqual(r.mask.invert, True)
+        self.assertEqual(r.mask.subtree, subtree)
+
+    def test_mask_immutable(self):
+        m = Mask(subtree=Rect(x=0, y=0, width=10, height=10))
+        with self.assertRaises(AttributeError):
+            m.clip = False
 
 
 if __name__ == "__main__":
