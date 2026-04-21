@@ -174,12 +174,50 @@ and render_text ~packing ~ctx el =
   let lbl = GMisc.label ~text ~packing () in
   lbl#set_xalign 0.0
 
-and render_button ~packing ~ctx:_ el =
+and render_button ~packing ~ctx el =
   let open Yojson.Safe.Util in
-  let label = el |> member "label" |> to_string_option
+  let static_label = el |> member "label" |> to_string_option
     |> Option.value ~default:(el |> member "summary" |> to_string_option |> Option.value ~default:"") in
-  let _btn = GButton.button ~label ~packing () in
-  ()
+  (* bind.label: expression whose evaluated string replaces the
+     static label. op_make_mask uses this to flip between
+     "Make Mask" and "Release" based on selection_has_mask per
+     OPACITY.md §States. *)
+  let label = match el |> member "bind" |> safe_member "label" |> to_string_option with
+    | Some expr ->
+      (match Expr_eval.evaluate expr ctx with
+       | Expr_eval.Str s -> s
+       | _ -> static_label)
+    | None -> static_label in
+  let btn = GButton.button ~label ~packing () in
+  (* Opacity panel: op_make_mask dispatches controller make or
+     release based on selection_has_mask. The button has no
+     ``action`` in yaml — routing is resolved here against the
+     panel id and the element id. Mirrors the Rust and Swift
+     special-cases. *)
+  let id = el |> member "id" |> to_string_option |> Option.value ~default:"" in
+  if !_current_panel_id = Some "opacity_panel_content" && id = "op_make_mask" then begin
+    ignore (btn#connect#clicked ~callback:(fun () ->
+      match !_get_model_ref () with
+      | None -> ()
+      | Some m ->
+        let doc = m#document in
+        let has_mask = Controller.selection_has_mask doc in
+        let ctrl = new Controller.controller ~model:m () in
+        if has_mask then ctrl#release_mask_on_selection
+        else
+          (* clip / invert come from the panel state store's
+             new_masks_clipping / new_masks_inverted keys (seeded
+             from the yaml defaults). *)
+          let bool_of_store key default = match !_current_store with
+            | Some s ->
+              (match State_store.get_panel s "opacity_panel_content" key with
+               | `Bool b -> b
+               | _ -> default)
+            | None -> default in
+          let clip = bool_of_store "new_masks_clipping" true in
+          let invert = bool_of_store "new_masks_inverted" false in
+          ctrl#make_mask_on_selection ~clip ~invert))
+  end
 
 and render_slider ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -297,12 +335,38 @@ and render_toggle ~packing ~ctx el =
   let checked = match bind_expr with
     | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
     | None -> false in
+  let disabled = match el |> member "bind" |> safe_member "disabled" |> to_string_option with
+    | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
+    | None -> false in
   let btn = GButton.check_button ~label ~active:checked ~packing () in
-  (match bind_expr with
-   | Some expr ->
+  btn#misc#set_sensitive (not disabled);
+  (* Opacity panel selection-mask bindings route write-backs to the
+     document controller (the flag lives on the selected element's
+     mask, not on a panel-state key). See OPACITY.md §States.
+     Mirrors the Rust and Swift special-cases. *)
+  let mask_route =
+    if !_current_panel_id = Some "opacity_panel_content" then
+      match bind_expr with
+      | Some "selection_mask_clip" -> Some `Clip
+      | Some "selection_mask_invert" -> Some `Invert
+      | _ -> None
+    else None in
+  (match mask_route with
+   | Some route ->
      ignore (btn#connect#toggled ~callback:(fun () ->
-       _write_back_bind expr (`Bool btn#active)))
-   | None -> ())
+       match !_get_model_ref () with
+       | None -> ()
+       | Some m ->
+         let ctrl = new Controller.controller ~model:m () in
+         (match route with
+          | `Clip -> ctrl#set_mask_clip_on_selection btn#active
+          | `Invert -> ctrl#set_mask_invert_on_selection btn#active)))
+   | None ->
+     (match bind_expr with
+      | Some expr ->
+        ignore (btn#connect#toggled ~callback:(fun () ->
+          _write_back_bind expr (`Bool btn#active)))
+      | None -> ()))
 
 and render_combo_box ~packing ~ctx:_ el =
   let open Yojson.Safe.Util in
@@ -1437,14 +1501,22 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       let active_document_view =
         Active_document_view.build (get_model ())
       in
-      let ctx = `Assoc [
+      (* OPACITY.md §States: surface the three selection predicates at
+         top level so yaml expressions like `bind.checked:
+         "selection_mask_clip"` and `bind.disabled:
+         "!selection_has_mask"` resolve uniformly. Mirrors
+         `build_selection_predicates` in jas_dioxus. *)
+      let selection_preds =
+        Active_document_view.build_selection_predicates (get_model ())
+      in
+      let ctx = `Assoc ([
         ("state", state_obj);
         ("panel", `Assoc panel_defaults);
         ("icons", icons_obj);
         ("data", data_obj);
         ("active_document", active_document_view);
         ("_get_model", `Null)  (* Placeholder; actual model passed via closure *)
-      ] in
+      ] @ selection_preds) in
       (* Panel-local state store: seeded with the yaml-declared
          defaults, lives for the life of the panel body. Widget
          callbacks write into it via [_write_back_bind]; a

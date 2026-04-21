@@ -101,3 +101,27 @@ let build
       ("selection_count", `Int selection_count);
       ("element_selection", element_selection_json);
     ]
+
+(** Build the selection-level predicates referenced by yaml
+    expressions (``selection_has_mask``, ``selection_mask_clip``,
+    ``selection_mask_invert``) per OPACITY.md §States. Mixed
+    selections count as "no mask"; clip/invert come from the first
+    selected element's mask and drive the "first-wins" bindings on
+    CLIP_CHECKBOX / INVERT_MASK_CHECKBOX. Mirrors
+    ``build_selection_predicates`` in ``jas_dioxus``. *)
+let build_selection_predicates (model : Model.model option) : (string * Yojson.Safe.t) list =
+  match model with
+  | None ->
+    [ ("selection_has_mask", `Bool false);
+      ("selection_mask_clip", `Bool false);
+      ("selection_mask_invert", `Bool false) ]
+  | Some m ->
+    let doc = m#document in
+    let has_mask = Controller.selection_has_mask doc in
+    let (clip, invert) = match Controller.first_mask doc with
+      | Some mask -> (mask.Element.clip, mask.Element.invert)
+      | None -> (false, false)
+    in
+    [ ("selection_has_mask", `Bool has_mask);
+      ("selection_mask_clip", `Bool clip);
+      ("selection_mask_invert", `Bool invert) ]
