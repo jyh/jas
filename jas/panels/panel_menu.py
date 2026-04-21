@@ -584,6 +584,23 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
             apply_release_compound_shape(model)
         elif cmd == "expand_compound_shape":
             apply_expand_compound_shape(model)
+    elif kind == PanelKind.OPACITY and model is not None:
+        # Opacity panel mask-lifecycle commands route to the Controller.
+        # new_masks_clipping / new_masks_inverted live in the
+        # state store (not plumbed through panel_dispatch today); using
+        # spec defaults (clip=True, invert=False) until the plumbing
+        # extends - matches OPACITY.md "New Opacity Masks Are Clipping"
+        # checked-by-default.
+        from document.controller import Controller
+        ctrl = Controller(model=model)
+        if cmd == "make_opacity_mask":
+            ctrl.make_mask_on_selection(clip=True, invert=False)
+        elif cmd == "release_opacity_mask":
+            ctrl.release_mask_on_selection()
+        elif cmd == "disable_opacity_mask":
+            ctrl.toggle_mask_disabled_on_selection()
+        elif cmd == "unlink_opacity_mask":
+            ctrl.toggle_mask_linked_on_selection()
 
 
 def panel_is_checked(kind: PanelKind, cmd: str, layout: WorkspaceLayout) -> bool:
