@@ -2932,6 +2932,8 @@ mod align_panel_state_tests {
         let layer = Element::Layer(LayerElem {
             name: "L".into(),
             children: rects.into_iter().map(std::rc::Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let selection: Vec<ElementSelection> = selected.into_iter()

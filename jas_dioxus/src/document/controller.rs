@@ -360,6 +360,8 @@ impl Controller {
         let group = Element::Group(crate::geometry::element::GroupElem {
             children: elements,
             common: crate::geometry::element::CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
         });
         let insert_path = paths[0].clone();
         new_doc = new_doc.insert_element_at(&insert_path, group.clone());
@@ -1564,6 +1566,8 @@ mod tests {
     fn make_group(children: Vec<Element>) -> Element {
         Element::Group(GroupElem {
             children: children.into_iter().map(Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         })
     }
@@ -1582,6 +1586,8 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
             children: vec![Rc::new(rect), Rc::new(group), Rc::new(line)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
@@ -1803,6 +1809,8 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
             children: vec![Rc::new(r1), Rc::new(r2)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
@@ -1917,6 +1925,8 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
             children: vec![Rc::new(r1), Rc::new(r2)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
@@ -1943,6 +1953,8 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
             children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
@@ -1962,6 +1974,8 @@ mod tests {
             let layer = Element::Layer(LayerElem {
                 name: "L0".to_string(),
                 children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
+                isolated_blending: false,
+                knockout_group: false,
                 common: CommonProps::default(),
             });
             let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
@@ -2021,6 +2035,8 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
             children: vec![Rc::new(rect_a), Rc::new(rect_b)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };

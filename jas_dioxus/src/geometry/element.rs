@@ -964,17 +964,35 @@ impl TextPathElem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct GroupElem {
     pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
+    /// When true, children composite in isolation from elements outside the
+    /// group (Opacity panel, Page Isolated Blending). Storage-only in
+    /// Phase 2; renderer support is deferred. Default `false`.
+    #[serde(default)]
+    pub isolated_blending: bool,
+    /// When true, children of this group punch through underlying elements
+    /// rather than blending with them (Opacity panel, Page Knockout Group).
+    /// Storage-only in Phase 2; renderer support is deferred. Default `false`.
+    #[serde(default)]
+    pub knockout_group: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct LayerElem {
     pub name: String,
     pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
+    /// See [`GroupElem::isolated_blending`]. Present on layers so the
+    /// document root (a Layer) can carry the flag today; per-group UI
+    /// exposure is deferred.
+    #[serde(default)]
+    pub isolated_blending: bool,
+    /// See [`GroupElem::knockout_group`].
+    #[serde(default)]
+    pub knockout_group: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -2341,6 +2359,8 @@ mod tests {
     fn group(children: Vec<Element>) -> Element {
         Element::Group(GroupElem {
             children: children.into_iter().map(Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         })
     }
@@ -3029,6 +3049,8 @@ mod tests {
     fn with_fill_on_group_is_noop() {
         let group = Element::Group(GroupElem {
             children: vec![],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let red_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
@@ -3106,6 +3128,8 @@ mod tests {
         let elem = Element::Layer(LayerElem {
             name: "Layer 1".into(),
             children: Vec::new(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps { opacity: 0.75, mode: BlendMode::Normal,
                                   transform: None, locked: true,
                                   visibility: Visibility::Outline },
@@ -3129,6 +3153,8 @@ mod tests {
         let child = rect(0.0, 0.0, 10.0, 10.0);
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(child)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let json = serde_json::to_value(&group).unwrap();

@@ -1544,9 +1544,9 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             let label = node.attrs.get("inkscape:label")
                 .cloned();
             if let Some(name) = label {
-                Some(Element::Layer(LayerElem { children, name, common }))
+                Some(Element::Layer(LayerElem { children, name, common, isolated_blending: false, knockout_group: false }))
             } else {
-                Some(Element::Group(GroupElem { children, common }))
+                Some(Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false }))
             }
         }
         _ => None,
@@ -1575,6 +1575,8 @@ pub fn svg_to_document(svg: &str) -> Document {
                     children: g.children.clone(),
                     name: String::new(),
                     common: g.common.clone(),
+                    isolated_blending: g.isolated_blending,
+                    knockout_group: g.knockout_group,
                 }));
             }
             _ => {
@@ -1586,6 +1588,8 @@ pub fn svg_to_document(svg: &str) -> Document {
                         children: vec![Rc::new(elem)],
                         name: String::new(),
                         common: CommonProps::default(),
+                        isolated_blending: false,
+                        knockout_group: false,
                     }));
                 } else if let Some(Element::Layer(le)) = layers.last_mut() {
                     le.children.push(Rc::new(elem));
@@ -1714,6 +1718,8 @@ mod tests {
             layers: vec![Element::Layer(LayerElem {
                 name: "Layer".to_string(),
                 children: children.into_iter().map(Rc::new).collect(),
+                isolated_blending: false,
+                knockout_group: false,
                 common: CommonProps::default(),
             })],
             selected_layer: 0,
@@ -1847,6 +1853,8 @@ mod tests {
     fn roundtrip_group() {
         let g = Element::Group(GroupElem {
             children: vec![Rc::new(make_rect(0.0, 0.0, 10.0, 10.0)), Rc::new(make_line(0.0, 0.0, 5.0, 5.0))],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let doc = make_doc(vec![g]);
@@ -2091,6 +2099,8 @@ mod tests {
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(inner)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let doc = make_doc(vec![group]);

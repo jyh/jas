@@ -930,13 +930,13 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
         "group" => {
             let children = v["children"].as_array().unwrap_or(&vec![])
                 .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
-            Element::Group(GroupElem { children, common })
+            Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false })
         },
         "layer" => {
             let children = v["children"].as_array().unwrap_or(&vec![])
                 .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
             let name = v["name"].as_str().unwrap_or("Layer").to_string();
-            Element::Layer(LayerElem { name, children, common })
+            Element::Layer(LayerElem { name, children, common, isolated_blending: false, knockout_group: false })
         },
         _ => panic!("Unknown element type: {}", typ),
     }
@@ -1128,6 +1128,8 @@ mod tests {
     fn group_no_fill_stroke() {
         let group = Element::Group(GroupElem {
             children: Vec::new(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let json = element_json(&group);

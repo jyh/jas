@@ -1670,6 +1670,8 @@ fn run_yaml_effect(
                 name,
                 children: Vec::new(),
                 common: crate::geometry::element::CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
             }
         );
         if let Some(as_n) = as_name {
@@ -1832,6 +1834,8 @@ fn run_yaml_effect(
                 name,
                 children,
                 common: CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
             });
             new_doc.layers.push(new_layer);
             tab.model.set_document(new_doc);
@@ -1901,6 +1905,8 @@ fn run_yaml_effect(
         let group = Element::Group(GroupElem {
             children,
             common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
         });
         insert_element_at(&insert_parent, insert_index, group, st);
         return deferred;
@@ -5840,6 +5846,8 @@ mod tests {
             Element::Layer(LayerElem {
                 name,
                 children: Vec::new(),
+                isolated_blending: false,
+                knockout_group: false,
                 common: CommonProps {
                     opacity: 1.0,
                     mode: crate::geometry::element::BlendMode::Normal,
@@ -6000,22 +6008,27 @@ mod tests {
         // Construct a doc: [Layer A, Group G(child1, child2), Layer B]
         let layer_a = Element::Layer(LayerElem {
             name: "A".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let child1 = Element::Layer(LayerElem {
             name: "c1".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let child2 = Element::Layer(LayerElem {
             name: "c2".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(child1), Rc::new(child2)],
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let layer_b = Element::Layer(LayerElem {
             name: "B".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
