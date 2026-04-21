@@ -48,6 +48,7 @@ public enum LayersPanel {
     /// into the evaluation context — needed by Group B actions.
     public static func dispatchYamlAction(_ actionName: String, model: Model,
                                            panelSelection: [[Int]] = [],
+                                           artboardsPanelSelection: [String] = [],
                                            params: [String: Any] = [:],
                                            onCloseDialog: (() -> Void)? = nil) {
         guard let ws = WorkspaceData.load(),
@@ -58,7 +59,8 @@ public enum LayersPanel {
 
         let activeDoc = buildActiveDocumentView(
             model: model,
-            layersPanelSelection: panelSelection
+            layersPanelSelection: panelSelection,
+            artboardsPanelSelection: artboardsPanelSelection
         )
         // Inject panel.layers_panel_selection as list of __path__ markers
         // for Group B actions (delete/duplicate_layer_selection).
@@ -67,6 +69,7 @@ public enum LayersPanel {
         }
         let panel: [String: Any] = [
             "layers_panel_selection": selectionMarkers,
+            "artboards_panel_selection": artboardsPanelSelection,
         ]
         let ctx: [String: Any] = [
             "active_document": activeDoc,
@@ -408,6 +411,274 @@ public enum LayersPanel {
             return nil
         }
 
+        // ── Artboard handlers (ARTBOARDS.md §Menu, §Rename, §Reordering) ──
+        //
+        // All seven mirror the Python / Rust doc.* handlers. They mutate
+        // model.document via the Artboard type helpers and commit via
+        // reassigning model.document.
+
+        let docCreateArtboardHandler: PlatformEffect = { value, callCtx, _ in
+            let spec = (value as? [String: Any]) ?? [:]
+            var doc = model.document
+            let existing = Set(doc.artboards.map(\.id))
+            var id = ""
+            for _ in 0..<100 {
+                let c = generateArtboardId()
+                if !existing.contains(c) { id = c; break }
+            }
+            guard !id.isEmpty else { return nil }
+            var ab = Artboard.defaultWithId(id)
+            ab = ab.with(name: nextArtboardName(doc.artboards))
+            for (k, v) in spec {
+                let val: Value
+                if let s = v as? String {
+                    val = evaluate(s, context: callCtx)
+                } else if let s = v as? Int {
+                    val = .number(Double(s))
+                } else if let s = v as? Double {
+                    val = .number(s)
+                } else if let b = v as? Bool {
+                    val = .bool(b)
+                } else {
+                    continue
+                }
+                switch k {
+                case "name": if case .string(let s) = val { ab = ab.with(name: s) }
+                case "x": if case .number(let n) = val { ab = ab.with(x: n) }
+                case "y": if case .number(let n) = val { ab = ab.with(y: n) }
+                case "width": if case .number(let n) = val { ab = ab.with(width: n) }
+                case "height": if case .number(let n) = val { ab = ab.with(height: n) }
+                case "fill":
+                    if case .string(let s) = val {
+                        ab = ab.with(fill: ArtboardFill.fromCanonical(s))
+                    } else if case .color(let s) = val {
+                        ab = ab.with(fill: ArtboardFill.fromCanonical(s))
+                    }
+                case "show_center_mark": if case .bool(let b) = val { ab = ab.with(showCenterMark: b) }
+                case "show_cross_hairs": if case .bool(let b) = val { ab = ab.with(showCrossHairs: b) }
+                case "show_video_safe_areas": if case .bool(let b) = val { ab = ab.with(showVideoSafeAreas: b) }
+                case "video_ruler_pixel_aspect_ratio":
+                    if case .number(let n) = val { ab = ab.with(videoRulerPixelAspectRatio: n) }
+                default: break
+                }
+            }
+            doc = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards + [ab],
+                artboardOptions: doc.artboardOptions
+            )
+            model.document = doc
+            return ab.id
+        }
+
+        let docDeleteArtboardByIdHandler: PlatformEffect = { value, callCtx, _ in
+            guard let idExpr = value as? String else { return nil }
+            let val = evaluate(idExpr, context: callCtx)
+            guard case .string(let target) = val else { return nil }
+            let doc = model.document
+            let newArtboards = doc.artboards.filter { $0.id != target }
+            if newArtboards.count == doc.artboards.count { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: newArtboards,
+                artboardOptions: doc.artboardOptions
+            )
+            return nil
+        }
+
+        let docDuplicateArtboardHandler: PlatformEffect = { value, callCtx, _ in
+            let idExpr: String
+            var ox = 20.0
+            var oy = 20.0
+            if let s = value as? String {
+                idExpr = s
+            } else if let m = value as? [String: Any] {
+                idExpr = (m["id"] as? String) ?? ""
+                if let s = m["offset_x"] as? String,
+                   case .number(let n) = evaluate(s, context: callCtx) { ox = n }
+                if let s = m["offset_y"] as? String,
+                   case .number(let n) = evaluate(s, context: callCtx) { oy = n }
+            } else {
+                return nil
+            }
+            let idVal = evaluate(idExpr, context: callCtx)
+            guard case .string(let target) = idVal else { return nil }
+            let doc = model.document
+            guard let source = doc.artboards.first(where: { $0.id == target }) else { return nil }
+            let existing = Set(doc.artboards.map(\.id))
+            var newId = ""
+            for _ in 0..<100 {
+                let c = generateArtboardId()
+                if !existing.contains(c) { newId = c; break }
+            }
+            guard !newId.isEmpty else { return nil }
+            let dup = Artboard(
+                id: newId,
+                name: nextArtboardName(doc.artboards),
+                x: source.x + ox,
+                y: source.y + oy,
+                width: source.width,
+                height: source.height,
+                fill: source.fill,
+                showCenterMark: source.showCenterMark,
+                showCrossHairs: source.showCrossHairs,
+                showVideoSafeAreas: source.showVideoSafeAreas,
+                videoRulerPixelAspectRatio: source.videoRulerPixelAspectRatio
+            )
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards + [dup],
+                artboardOptions: doc.artboardOptions
+            )
+            return nil
+        }
+
+        let docSetArtboardFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return nil }
+            let idExpr = (spec["id"] as? String) ?? ""
+            guard let field = spec["field"] as? String else { return nil }
+            let idVal = evaluate(idExpr, context: callCtx)
+            guard case .string(let target) = idVal else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? Double {
+                val = .number(n)
+            } else if let i = spec["value"] as? Int {
+                val = .number(Double(i))
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let newArtboards: [Artboard] = doc.artboards.map { ab in
+                guard ab.id == target else { return ab }
+                switch field {
+                case "name": if case .string(let s) = val { return ab.with(name: s) }
+                case "x": if case .number(let n) = val { return ab.with(x: n) }
+                case "y": if case .number(let n) = val { return ab.with(y: n) }
+                case "width": if case .number(let n) = val { return ab.with(width: n) }
+                case "height": if case .number(let n) = val { return ab.with(height: n) }
+                case "fill":
+                    if case .string(let s) = val {
+                        return ab.with(fill: ArtboardFill.fromCanonical(s))
+                    }
+                    if case .color(let s) = val {
+                        return ab.with(fill: ArtboardFill.fromCanonical(s))
+                    }
+                case "show_center_mark":
+                    if case .bool(let b) = val { return ab.with(showCenterMark: b) }
+                case "show_cross_hairs":
+                    if case .bool(let b) = val { return ab.with(showCrossHairs: b) }
+                case "show_video_safe_areas":
+                    if case .bool(let b) = val { return ab.with(showVideoSafeAreas: b) }
+                case "video_ruler_pixel_aspect_ratio":
+                    if case .number(let n) = val { return ab.with(videoRulerPixelAspectRatio: n) }
+                default: break
+                }
+                return ab
+            }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: newArtboards,
+                artboardOptions: doc.artboardOptions
+            )
+            return nil
+        }
+
+        let docSetArtboardOptionsFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else {
+                return nil
+            }
+            guard case .bool(let flag) = val else { return nil }
+            let doc = model.document
+            let newOpts: ArtboardOptions
+            switch field {
+            case "fade_region_outside_artboard":
+                newOpts = ArtboardOptions(
+                    fadeRegionOutsideArtboard: flag,
+                    updateWhileDragging: doc.artboardOptions.updateWhileDragging
+                )
+            case "update_while_dragging":
+                newOpts = ArtboardOptions(
+                    fadeRegionOutsideArtboard: doc.artboardOptions.fadeRegionOutsideArtboard,
+                    updateWhileDragging: flag
+                )
+            default: return nil
+            }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: newOpts
+            )
+            return nil
+        }
+
+        func reorderArtboards(up: Bool, idsExpr: String, callCtx: [String: Any]) {
+            let val = evaluate(idsExpr, context: callCtx)
+            guard case .list(let items) = val else { return }
+            let ids = items.compactMap { $0.value as? String }
+            let selected = Set(ids)
+            var abs = model.document.artboards
+            var changed = false
+            if up {
+                for i in 0..<abs.count {
+                    if !selected.contains(abs[i].id) { continue }
+                    if i == 0 { continue }
+                    if selected.contains(abs[i - 1].id) { continue }
+                    abs.swapAt(i - 1, i)
+                    changed = true
+                }
+            } else {
+                for i in stride(from: abs.count - 1, through: 0, by: -1) {
+                    if !selected.contains(abs[i].id) { continue }
+                    if i + 1 >= abs.count { continue }
+                    if selected.contains(abs[i + 1].id) { continue }
+                    abs.swapAt(i, i + 1)
+                    changed = true
+                }
+            }
+            guard changed else { return }
+            let doc = model.document
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: abs,
+                artboardOptions: doc.artboardOptions
+            )
+        }
+
+        let docMoveArtboardsUpHandler: PlatformEffect = { value, callCtx, _ in
+            guard let idsExpr = value as? String else { return nil }
+            reorderArtboards(up: true, idsExpr: idsExpr, callCtx: callCtx)
+            return nil
+        }
+
+        let docMoveArtboardsDownHandler: PlatformEffect = { value, callCtx, _ in
+            guard let idsExpr = value as? String else { return nil }
+            reorderArtboards(up: false, idsExpr: idsExpr, callCtx: callCtx)
+            return nil
+        }
+
         var platformEffects: [String: PlatformEffect] = [
             "snapshot": snapshotHandler,
             "doc.set": docSetHandler,
@@ -419,6 +690,13 @@ public enum LayersPanel {
             "doc.wrap_in_layer": docWrapInLayerHandler,
             "doc.wrap_in_group": docWrapInGroupHandler,
             "doc.unpack_group_at": docUnpackGroupAtHandler,
+            "doc.create_artboard": docCreateArtboardHandler,
+            "doc.delete_artboard_by_id": docDeleteArtboardByIdHandler,
+            "doc.duplicate_artboard": docDuplicateArtboardHandler,
+            "doc.set_artboard_field": docSetArtboardFieldHandler,
+            "doc.set_artboard_options_field": docSetArtboardOptionsFieldHandler,
+            "doc.move_artboards_up": docMoveArtboardsUpHandler,
+            "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "list_push": listPushHandler,
             "pop": popHandler,
         ]
