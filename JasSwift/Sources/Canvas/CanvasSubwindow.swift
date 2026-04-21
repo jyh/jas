@@ -1095,6 +1095,148 @@ private func elemChildren(_ e: Element) -> [Element] {
     }
 }
 
+// MARK: - Artboard rendering (ARTBOARDS.md §Canvas appearance)
+//
+// Z-order passes, back to front:
+//   2. draw_artboard_fills       (per artboard, list order)
+//   4. draw_fade_overlay         (dims off-artboard regions)
+//   5. draw_artboard_borders     (thin default borders)
+//   6. draw_artboard_accent      (panel-selected accent — 2px outer)
+//   7. draw_artboard_labels      ("N  Name" above top-left)
+//   8. draw_artboard_display_marks (center mark / cross hairs / safe areas)
+//
+// Phase-D first pass: colours are hardcoded constants; proper theme
+// integration waits on threading the theme through CanvasNSView.
+
+private let artboardBorderColor = CGColor(gray: 0.2, alpha: 1.0)
+private let artboardAccentColor = CGColor(srgbRed: 0, green: 120.0/255.0, blue: 215.0/255.0, alpha: 0.95)
+private let artboardMarkColor = CGColor(gray: 0.6, alpha: 1.0)
+private let artboardLabelColor = CGColor(gray: 0.8, alpha: 1.0)
+private let artboardFadeColor = CGColor(gray: 160.0/255.0, alpha: 0.5)
+
+private func cgColorFromHex(_ hex: String) -> CGColor? {
+    guard hex.hasPrefix("#"), hex.count == 7 else { return nil }
+    let r = hex.dropFirst(1).prefix(2)
+    let g = hex.dropFirst(3).prefix(2)
+    let b = hex.dropFirst(5).prefix(2)
+    guard let rv = UInt8(r, radix: 16),
+          let gv = UInt8(g, radix: 16),
+          let bv = UInt8(b, radix: 16) else { return nil }
+    return CGColor(
+        srgbRed: CGFloat(rv) / 255.0,
+        green: CGFloat(gv) / 255.0,
+        blue: CGFloat(bv) / 255.0,
+        alpha: 1.0
+    )
+}
+
+private func drawArtboardFills(_ ctx: CGContext, _ doc: Document) {
+    for ab in doc.artboards {
+        switch ab.fill {
+        case .transparent:
+            continue  // canvas shows through
+        case .color(let hex):
+            guard let cg = cgColorFromHex(hex) else { continue }
+            ctx.setFillColor(cg)
+            ctx.fill(CGRect(x: ab.x, y: ab.y, width: ab.width, height: ab.height))
+        }
+    }
+}
+
+private func drawFadeOverlay(_ ctx: CGContext, _ doc: Document, bounds: CGRect) {
+    guard doc.artboardOptions.fadeRegionOutsideArtboard else { return }
+    guard !doc.artboards.isEmpty else { return }
+    ctx.saveGState()
+    ctx.setFillColor(artboardFadeColor)
+    ctx.fill(bounds)
+    // Punch artboards out of the mask via destinationOut composite.
+    ctx.setBlendMode(.destinationOut)
+    ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+    for ab in doc.artboards {
+        ctx.fill(CGRect(x: ab.x, y: ab.y, width: ab.width, height: ab.height))
+    }
+    ctx.restoreGState()
+}
+
+private func drawArtboardBorders(_ ctx: CGContext, _ doc: Document) {
+    ctx.setStrokeColor(artboardBorderColor)
+    ctx.setLineWidth(1.0)
+    for ab in doc.artboards {
+        ctx.stroke(CGRect(x: ab.x, y: ab.y, width: ab.width, height: ab.height))
+    }
+}
+
+private func drawArtboardAccent(
+    _ ctx: CGContext, _ doc: Document, selectedIds: [String]
+) {
+    guard !selectedIds.isEmpty else { return }
+    let sel = Set(selectedIds)
+    ctx.setStrokeColor(artboardAccentColor)
+    ctx.setLineWidth(2.0)
+    for ab in doc.artboards {
+        guard sel.contains(ab.id) else { continue }
+        let pad: CGFloat = 1.5
+        ctx.stroke(CGRect(
+            x: ab.x - pad, y: ab.y - pad,
+            width: ab.width + 2 * pad, height: ab.height + 2 * pad
+        ))
+    }
+}
+
+private func drawArtboardLabels(_ ctx: CGContext, _ doc: Document) {
+    for (i, ab) in doc.artboards.enumerated() {
+        let label = "\(i + 1)  \(ab.name)" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor(cgColor: artboardLabelColor) ?? .lightGray,
+        ]
+        let size = label.size(withAttributes: attrs)
+        // Sit label just above the top-left corner.
+        let rect = CGRect(
+            x: ab.x,
+            y: ab.y - size.height - 2,
+            width: size.width,
+            height: size.height
+        )
+        label.draw(in: rect, withAttributes: attrs)
+    }
+}
+
+private func drawArtboardDisplayMarks(_ ctx: CGContext, _ doc: Document) {
+    ctx.setStrokeColor(artboardMarkColor)
+    ctx.setLineWidth(1.0)
+    for ab in doc.artboards {
+        let cx = ab.x + ab.width / 2
+        let cy = ab.y + ab.height / 2
+        if ab.showCenterMark {
+            let arm: CGFloat = 5
+            ctx.move(to: CGPoint(x: cx - arm, y: cy))
+            ctx.addLine(to: CGPoint(x: cx + arm, y: cy))
+            ctx.move(to: CGPoint(x: cx, y: cy - arm))
+            ctx.addLine(to: CGPoint(x: cx, y: cy + arm))
+            ctx.strokePath()
+        }
+        if ab.showCrossHairs {
+            ctx.move(to: CGPoint(x: ab.x, y: cy))
+            ctx.addLine(to: CGPoint(x: ab.x + ab.width, y: cy))
+            ctx.move(to: CGPoint(x: cx, y: ab.y))
+            ctx.addLine(to: CGPoint(x: cx, y: ab.y + ab.height))
+            ctx.strokePath()
+        }
+        if ab.showVideoSafeAreas {
+            for frac in [0.9, 0.8] as [CGFloat] {
+                let w = ab.width * frac
+                let h = ab.height * frac
+                ctx.stroke(CGRect(
+                    x: ab.x + (ab.width - w) / 2,
+                    y: ab.y + (ab.height - h) / 2,
+                    width: w, height: h
+                ))
+            }
+        }
+    }
+}
+
 private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
     for es in doc.selection {
         let path = es.path
@@ -1176,6 +1318,10 @@ func canonicalKeyName(_ event: NSEvent) -> String {
 /// Dispatches mouse/key events through the CanvasTool protocol.
 class CanvasNSView: NSView {
     var document: Document = Document()
+    /// Panel-selected artboard ids (ARTBOARDS.md §Selection
+    /// semantics). Drives the accent-border pass. Set from outside
+    /// by the SwiftUI wrapper / AppState.
+    var artboardsPanelSelection: [String] = []
     var controller: Controller?
     var currentTool: Tool = .selection {
         didSet {
@@ -1426,16 +1572,28 @@ class CanvasNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        // White background
+        // Layer 1: canvas background (white).
         ctx.setFillColor(.white)
         ctx.fill(bounds)
-        // Draw document layers
+        // Layer 2: artboard fills (list order, later wins overlaps).
+        drawArtboardFills(ctx, document)
+        // Layer 3: document element tree.
         for layer in document.layers {
             drawElement(ctx, .layer(layer))
         }
-        // Draw selection overlays
+        // Layer 4: fade overlay (dims regions outside any artboard).
+        drawFadeOverlay(ctx, document, bounds: bounds)
+        // Layer 5: artboard borders.
+        drawArtboardBorders(ctx, document)
+        // Layer 6: accent border for panel-selected artboards.
+        drawArtboardAccent(ctx, document, selectedIds: artboardsPanelSelection)
+        // Layer 7: artboard labels above top-left corner.
+        drawArtboardLabels(ctx, document)
+        // Layer 8: per-artboard display marks.
+        drawArtboardDisplayMarks(ctx, document)
+        // Layer 9: selection overlays.
         drawSelectionOverlays(ctx, document)
-        // Draw active tool overlay
+        // Active tool overlay (drawn above everything).
         if let toolCtx = toolContext {
             activeTool.drawOverlay(toolCtx, ctx)
         }

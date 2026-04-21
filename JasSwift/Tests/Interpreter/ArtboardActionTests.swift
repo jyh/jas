@@ -161,3 +161,81 @@ import Testing
     let json2 = documentToTestJson(doc2)
     #expect(json1 == json2)
 }
+
+// ── Phase F: anchor_offset builtins + dialog computed props ──
+
+@Test func anchorOffsetXCenterHalfWidth() {
+    let ctx: [String: Any] = [:]
+    let v = evaluate("anchor_offset_x('center', 612)", context: ctx)
+    if case .number(let n) = v {
+        #expect(n == 306)
+    } else {
+        Issue.record("Expected number")
+    }
+}
+
+@Test func anchorOffsetYCenterHalfHeight() {
+    let ctx: [String: Any] = [:]
+    let v = evaluate("anchor_offset_y('center', 792)", context: ctx)
+    if case .number(let n) = v {
+        #expect(n == 396)
+    } else {
+        Issue.record("Expected number")
+    }
+}
+
+@Test func anchorOffsetTopLeftZero() {
+    let ctx: [String: Any] = [:]
+    if case .number(let n) = evaluate("anchor_offset_x('top_left', 612)", context: ctx) {
+        #expect(n == 0)
+    } else {
+        Issue.record("Expected number")
+    }
+}
+
+@Test func anchorOffsetBottomRightFull() {
+    let ctx: [String: Any] = [:]
+    if case .number(let n) = evaluate("anchor_offset_x('bottom_right', 612)", context: ctx) {
+        #expect(n == 612)
+    } else {
+        Issue.record("Expected number")
+    }
+}
+
+@Test func dialogComputedPropXRpCenter() {
+    // ART-199: reference_point=center on a 612-wide artboard at x=0
+    // displays X=306 in the dialog.
+    let store = StateStore()
+    let props: [String: [String: Any]] = [
+        "x_rp": [
+            "get": "x_stored + anchor_offset_x(panel.reference_point, width)"
+        ],
+    ]
+    var defaults: [String: Any] = [:]
+    defaults["x_stored"] = 0
+    defaults["width"] = 612
+    store.initDialog("test", defaults: defaults, props: props)
+    let outer: [String: Any] = [
+        "panel": ["reference_point": "center"]
+    ]
+    let x = store.getDialogWithOuter("x_rp", outer: outer)
+    #expect((x as? Int) == 306 || (x as? Double) == 306)
+}
+
+@Test func dialogComputedPropXRpTopLeftShowsRaw() {
+    let store = StateStore()
+    let props: [String: [String: Any]] = [
+        "x_rp": [
+            "get": "x_stored + anchor_offset_x(panel.reference_point, width)"
+        ],
+    ]
+    var defaults: [String: Any] = [:]
+    defaults["x_stored"] = 100
+    defaults["width"] = 612
+    store.initDialog("test", defaults: defaults, props: props)
+    let outer: [String: Any] = [
+        "panel": ["reference_point": "top_left"]
+    ]
+    let x = store.getDialogWithOuter("x_rp", outer: outer)
+    #expect((x as? Int) == 100 || (x as? Double) == 100)
+}

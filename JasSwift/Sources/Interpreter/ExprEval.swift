@@ -1203,6 +1203,41 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard case .list(let items) = v else { return .null }
         return .list(items.reversed())
 
+    // anchor_offset_x / anchor_offset_y: (anchor, size) -> number
+    // — ARTBOARDS.md §Coordinates and units. Maps a reference-point
+    // anchor name to its offset from the artboard's top-left corner.
+    case "anchor_offset_x":
+        guard args.count == 2 else { return .null }
+        let a = evalNode(args[0], ctx)
+        let s = evalNode(args[1], ctx)
+        guard case .string(let anchor) = a, case .number(let size) = s else { return .null }
+        switch anchor {
+        case "top_left", "middle_left", "bottom_left":
+            return .number(0)
+        case "top_center", "center", "bottom_center":
+            return .number(size / 2)
+        case "top_right", "middle_right", "bottom_right":
+            return .number(size)
+        default:
+            return .number(0)
+        }
+
+    case "anchor_offset_y":
+        guard args.count == 2 else { return .null }
+        let a = evalNode(args[0], ctx)
+        let s = evalNode(args[1], ctx)
+        guard case .string(let anchor) = a, case .number(let size) = s else { return .null }
+        switch anchor {
+        case "top_left", "top_center", "top_right":
+            return .number(0)
+        case "middle_left", "center", "middle_right":
+            return .number(size / 2)
+        case "bottom_left", "bottom_center", "bottom_right":
+            return .number(size)
+        default:
+            return .number(0)
+        }
+
     // mem: (element, list) -> bool — list membership
     case "mem":
         guard args.count == 2 else { return .bool(false) }

@@ -15,11 +15,35 @@ struct YamlDialogState {
     var params: [String: Any]
 }
 
-/// Open a dialog by ID, initializing its state from the workspace definition.
+/// Open a dialog by ID, initializing its state from the workspace
+/// definition. Back-compatible shim over openYamlDialogWithOuter
+/// without a cross-scope namespace — dialogs whose init expressions
+/// reference `panel.*` or `active_document.*` (Artboard Options)
+/// must call the `_withOuter` variant directly.
 func openYamlDialog(
     dialogId: String,
     rawParams: [String: Any],
     liveState: [String: Any]
+) -> YamlDialogState? {
+    openYamlDialogWithOuter(
+        dialogId: dialogId,
+        rawParams: rawParams,
+        liveState: liveState,
+        outerScope: [:]
+    )
+}
+
+/// As ``openYamlDialog`` but threads an ``outerScope`` dictionary whose
+/// top-level keys (e.g. ``panel``, ``active_document``) are visible to
+/// init expressions alongside ``state``, ``dialog``, ``param``. Required
+/// by the Artboard Options Dialogue whose init expressions call
+/// ``filter(active_document.artboards, ...)`` and
+/// ``panel.reference_point``.
+func openYamlDialogWithOuter(
+    dialogId: String,
+    rawParams: [String: Any],
+    liveState: [String: Any],
+    outerScope: [String: Any]
 ) -> YamlDialogState? {
     guard let ws = WorkspaceData.load() else { return nil }
     guard let dlgDef = ws.dialog(dialogId) else { return nil }
@@ -69,11 +93,10 @@ func openYamlDialog(
         }
         for (key, expr) in deferred {
             let exprStr = expr as? String ?? ""
-            let initCtx: [String: Any] = [
-                "state": liveState,
-                "dialog": dialogState,
-                "param": resolvedParams,
-            ]
+            var initCtx: [String: Any] = outerScope
+            initCtx["state"] = liveState
+            initCtx["dialog"] = dialogState
+            initCtx["param"] = resolvedParams
             let result = evaluate(exprStr, context: initCtx)
             dialogState[key] = valueToAnyDlg(result)
         }
