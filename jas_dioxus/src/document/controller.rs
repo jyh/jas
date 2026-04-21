@@ -7,19 +7,45 @@
 use std::rc::Rc;
 
 use crate::document::document::{
-    ElementPath, ElementSelection, Selection, SelectionKind, SortedCps,
+    Document, ElementPath, ElementSelection, Selection, SelectionKind, SortedCps,
 };
 use crate::document::model::Model;
 use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
     move_path_handle, with_fill, with_stroke, with_width_points,
-    Element, Fill, Stroke, StrokeWidthPoint,
+    Element, Fill, GroupElem, Mask, Stroke, StrokeWidthPoint,
 };
 use crate::algorithms::hit_test::{element_intersects_polygon, element_intersects_rect, point_in_rect};
 
 // ---------------------------------------------------------------------------
 // Helpers — shared by the Controller's boolean ops
 // ---------------------------------------------------------------------------
+
+// ── Opacity-mask helpers (OPACITY.md § States) ──────────────
+
+/// Return the [`Mask`] on the first selected element, if any.
+/// Drives "first-element-wins" toggles in the Opacity panel (disable,
+/// unlink, and the MAKE_MASK_BUTTON label flip per OPACITY.md § States).
+pub fn first_mask(doc: &Document) -> Option<&Mask> {
+    let first = doc.selection.first()?;
+    doc.get_element(&first.path)?.common().mask.as_deref()
+}
+
+/// True when **every** selected element has an opacity mask attached.
+/// Mixed selections (some masked, some not) count as "no mask" per
+/// OPACITY.md § States, so the MAKE_MASK_BUTTON stays in its "Make Mask"
+/// state and the CLIP / INVERT checkboxes remain disabled for mixed
+/// selections.
+pub fn selection_has_mask(doc: &Document) -> bool {
+    if doc.selection.is_empty() {
+        return false;
+    }
+    doc.selection.iter().all(|es| {
+        doc.get_element(&es.path)
+            .map(|e| e.common().mask.is_some())
+            .unwrap_or(false)
+    })
+}
 
 /// MERGE predicate per BOOLEAN.md §Operand and paint rules.
 /// Two fills merge when both are solid colors with exactly equal
@@ -290,6 +316,128 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(&es.path, with_stroke(elem, stroke));
             }
+        }
+        model.set_document(new_doc);
+    }
+
+    // ── Opacity mask lifecycle (OPACITY.md § States) ───────────
+
+    /// Create an opacity mask on every selected element. The mask
+    /// starts with an empty ``Group`` as its subtree; users populate
+    /// it via the MASK_PREVIEW click to enter mask-editing mode
+    /// (Phase 4). ``clip`` and ``invert`` come from the document
+    /// preferences ``new_masks_clipping`` / ``new_masks_inverted``.
+    /// Elements that already have a mask are left untouched so
+    /// re-clicking MAKE_MASK on a mixed selection is a no-op for the
+    /// already-masked members.
+    pub fn make_mask_on_selection(model: &mut Model, clip: bool, invert: bool) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                if elem.common().mask.is_some() {
+                    continue;
+                }
+                let mut new_elem = elem.clone();
+                new_elem.common_mut().mask = Some(Box::new(Mask {
+                    subtree: Box::new(Element::Group(GroupElem::default())),
+                    clip,
+                    invert,
+                    disabled: false,
+                    linked: true,
+                    unlink_transform: None,
+                }));
+                new_doc = new_doc.replace_element(&es.path, new_elem);
+            }
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Remove the opacity mask from every selected element.
+    /// Matches the "Release Opacity Mask" menu action and the
+    /// MAKE_MASK_BUTTON in its "Has mask" state.
+    pub fn release_mask_on_selection(model: &mut Model) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                if elem.common().mask.is_none() {
+                    continue;
+                }
+                let mut new_elem = elem.clone();
+                new_elem.common_mut().mask = None;
+                new_doc = new_doc.replace_element(&es.path, new_elem);
+            }
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Set ``mask.clip`` on every selected element that has a mask.
+    /// Matches the CLIP_CHECKBOX control.
+    pub fn set_mask_clip_on_selection(model: &mut Model, clip: bool) {
+        Self::update_mask_on_selection(model, |m| m.clip = clip);
+    }
+
+    /// Set ``mask.invert`` on every selected element that has a mask.
+    /// Matches the INVERT_MASK_CHECKBOX control.
+    pub fn set_mask_invert_on_selection(model: &mut Model, invert: bool) {
+        Self::update_mask_on_selection(model, |m| m.invert = invert);
+    }
+
+    /// Toggle ``mask.disabled`` on every selected mask, driven by the
+    /// first selected element's current state (OPACITY.md §Panel menu).
+    /// Matches the "Disable Opacity Mask" menu item.
+    pub fn toggle_mask_disabled_on_selection(model: &mut Model) {
+        let doc = model.document();
+        let current = first_mask(doc).map(|m| m.disabled);
+        let Some(new_state) = current.map(|d| !d) else { return };
+        Self::update_mask_on_selection(model, move |m| m.disabled = new_state);
+    }
+
+    /// Toggle ``mask.linked`` on every selected mask, driven by the
+    /// first selected element's current state. On unlink, captures
+    /// each element's current transform into ``unlink_transform``
+    /// so the mask stays fixed in document coordinates. On relink,
+    /// clears ``unlink_transform``.
+    pub fn toggle_mask_linked_on_selection(model: &mut Model) {
+        let doc = model.document().clone();
+        let current_linked = match first_mask(&doc) {
+            Some(m) => m.linked,
+            None => return,
+        };
+        let new_linked = !current_linked;
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            let Some(elem) = doc.get_element(&es.path) else { continue };
+            let Some(mask) = elem.common().mask.as_ref() else { continue };
+            let elem_transform = elem.transform().cloned();
+            let mut new_elem = elem.clone();
+            if let Some(m) = new_elem.common_mut().mask.as_mut() {
+                m.linked = new_linked;
+                m.unlink_transform = if new_linked { None } else { elem_transform };
+                // Keep the rest of the mask fields untouched.
+                let _ = mask;
+            }
+            new_doc = new_doc.replace_element(&es.path, new_elem);
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Internal helper: apply `f` to every selected element's mask.
+    /// Elements without a mask are skipped.
+    fn update_mask_on_selection(model: &mut Model, mut f: impl FnMut(&mut Mask)) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            let Some(elem) = doc.get_element(&es.path) else { continue };
+            if elem.common().mask.is_none() {
+                continue;
+            }
+            let mut new_elem = elem.clone();
+            if let Some(m) = new_elem.common_mut().mask.as_mut() {
+                f(m.as_mut());
+            }
+            new_doc = new_doc.replace_element(&es.path, new_elem);
         }
         model.set_document(new_doc);
     }
@@ -1476,8 +1624,6 @@ fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
 // ---------------------------------------------------------------------------
 // Selection fill/stroke summaries
 // ---------------------------------------------------------------------------
-
-use crate::document::document::Document;
 
 /// Summary of the fill state across a selection.
 #[derive(Debug, Clone, PartialEq)]
@@ -2678,5 +2824,153 @@ mod tests {
         Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
         let doc = model.document();
         assert_eq!(selection_stroke_summary(doc), StrokeSummary::Uniform(None));
+    }
+
+    // ── Opacity mask lifecycle (Phase 3b) ─────────────────────
+
+    fn setup_two_rect_selection() -> Model {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::add_element(&mut model, make_rect(20.0, 0.0, 10.0, 10.0));
+        Controller::select_all(&mut model);
+        model
+    }
+
+    #[test]
+    fn selection_has_mask_false_for_empty_selection() {
+        let model = Model::default();
+        assert!(!selection_has_mask(model.document()));
+    }
+
+    #[test]
+    fn selection_has_mask_false_for_unmasked_elements() {
+        let model = setup_two_rect_selection();
+        assert!(!selection_has_mask(model.document()));
+    }
+
+    #[test]
+    fn make_mask_creates_mask_on_every_selected_element() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, true, false);
+        assert!(selection_has_mask(model.document()));
+        for es in &model.document().selection {
+            let elem = model.document().get_element(&es.path).unwrap();
+            let mask = elem.common().mask.as_ref().unwrap();
+            assert!(mask.clip);
+            assert!(!mask.invert);
+            assert!(!mask.disabled);
+            assert!(mask.linked);
+        }
+    }
+
+    #[test]
+    fn make_mask_honors_clip_and_invert_args() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, false, true);
+        let first = model.document().selection.first().unwrap();
+        let mask = model.document().get_element(&first.path).unwrap()
+            .common().mask.as_ref().unwrap();
+        assert!(!mask.clip);
+        assert!(mask.invert);
+    }
+
+    #[test]
+    fn make_mask_is_idempotent_for_already_masked_elements() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, true, false);
+        // Toggle invert on one element to detect overwrites.
+        Controller::set_mask_invert_on_selection(&mut model, true);
+        // Second make_mask_on_selection should not overwrite.
+        Controller::make_mask_on_selection(&mut model, true, false);
+        for es in &model.document().selection {
+            let mask = model.document().get_element(&es.path).unwrap()
+                .common().mask.as_ref().unwrap();
+            assert!(mask.invert, "invert should be preserved by idempotent make");
+        }
+    }
+
+    #[test]
+    fn release_mask_clears_masks_on_selection() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, true, false);
+        Controller::release_mask_on_selection(&mut model);
+        assert!(!selection_has_mask(model.document()));
+    }
+
+    #[test]
+    fn set_mask_clip_and_invert_propagate() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, true, false);
+        Controller::set_mask_clip_on_selection(&mut model, false);
+        Controller::set_mask_invert_on_selection(&mut model, true);
+        for es in &model.document().selection {
+            let mask = model.document().get_element(&es.path).unwrap()
+                .common().mask.as_ref().unwrap();
+            assert!(!mask.clip);
+            assert!(mask.invert);
+        }
+    }
+
+    #[test]
+    fn toggle_mask_disabled_flips_every_mask() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, true, false);
+        // First toggle → all disabled=true.
+        Controller::toggle_mask_disabled_on_selection(&mut model);
+        for es in &model.document().selection {
+            let mask = model.document().get_element(&es.path).unwrap()
+                .common().mask.as_ref().unwrap();
+            assert!(mask.disabled);
+        }
+        // Second toggle → all disabled=false.
+        Controller::toggle_mask_disabled_on_selection(&mut model);
+        for es in &model.document().selection {
+            let mask = model.document().get_element(&es.path).unwrap()
+                .common().mask.as_ref().unwrap();
+            assert!(!mask.disabled);
+        }
+    }
+
+    #[test]
+    fn toggle_mask_linked_flips_and_captures_transform_on_unlink() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, true, false);
+        // Unlink: every mask.linked becomes false.
+        Controller::toggle_mask_linked_on_selection(&mut model);
+        for es in &model.document().selection {
+            let mask = model.document().get_element(&es.path).unwrap()
+                .common().mask.as_ref().unwrap();
+            assert!(!mask.linked);
+            // Rects in this test have no transform, so the captured
+            // unlink_transform is None (same as element.transform).
+            assert!(mask.unlink_transform.is_none());
+        }
+        // Relink: clears unlink_transform and sets linked back to true.
+        Controller::toggle_mask_linked_on_selection(&mut model);
+        for es in &model.document().selection {
+            let mask = model.document().get_element(&es.path).unwrap()
+                .common().mask.as_ref().unwrap();
+            assert!(mask.linked);
+            assert!(mask.unlink_transform.is_none());
+        }
+    }
+
+    #[test]
+    fn first_mask_returns_none_when_first_unmasked() {
+        let mut model = setup_two_rect_selection();
+        Controller::make_mask_on_selection(&mut model, true, false);
+        // Clear mask from the first element only.
+        let doc = model.document().clone();
+        let first_path = doc.selection.first().unwrap().path.clone();
+        let mut new_doc = doc.clone();
+        if let Some(elem) = doc.get_element(&first_path) {
+            let mut new_elem = elem.clone();
+            new_elem.common_mut().mask = None;
+            new_doc = new_doc.replace_element(&first_path, new_elem);
+        }
+        model.set_document(new_doc);
+        assert!(first_mask(model.document()).is_none());
+        assert!(!selection_has_mask(model.document()),
+                "mixed selection counts as no-mask");
     }
 }
