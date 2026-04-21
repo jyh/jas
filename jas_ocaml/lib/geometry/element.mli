@@ -249,6 +249,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Rect of {
       x : float; y : float;
@@ -261,6 +262,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -271,6 +273,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -282,6 +285,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Polyline of {
       points : (float * float) list;
@@ -292,6 +296,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Polygon of {
       points : (float * float) list;
@@ -302,6 +307,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Path of {
       d : path_command list;
@@ -313,6 +319,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Text of {
       x : float; y : float;
@@ -342,6 +349,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       (** Ordered, non-empty list of per-range formatting fragments.
           Invariant: [concat_content tspans = content]. Constructors
           initialise to a single-tspan list with empty overrides;
@@ -378,6 +386,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       (** See Text.tspans above. *)
       tspans : tspan array;
     }
@@ -388,6 +397,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       (** Opacity panel "Page Isolated Blending" flag. Storage-only in
           Phase 2; renderer support is deferred. Default [false]. *)
       isolated_blending : bool;
@@ -403,6 +413,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       (** See [Group.isolated_blending]. Present on layers so the
           document root (a Layer) can carry the flag today. *)
       isolated_blending : bool;
@@ -440,6 +451,32 @@ and compound_shape = {
   locked : bool;
   visibility : visibility;
   blend_mode : blend_mode;
+  mask : mask option;
+}
+
+(** Opacity mask attached to an element. See OPACITY.md §Document model.
+    Storage-only in Phase 3a; renderer and UI wiring land in Phase 3b.
+
+    Fields:
+    - [subtree] artwork whose luminance drives the owning element's alpha.
+    - [clip] when true, also clip the element to the mask bounds.
+    - [invert] when true, the luminance mapping is inverted.
+    - [disabled] when true, the element renders as if no mask were
+      attached; the subtree is preserved so re-enabling restores the
+      prior state.
+    - [linked] when true, mask transforms follow the owning element's
+      transform. When false, the mask uses [unlink_transform] as its
+      fixed baseline.
+    - [unlink_transform] captured at unlink time; used as the mask's
+      effective transform while [linked] is false. Cleared on relink.
+*)
+and mask = {
+  subtree : element;
+  clip : bool;
+  invert : bool;
+  disabled : bool;
+  linked : bool;
+  unlink_transform : transform option;
 }
 
 (** Hook for the LiveElement bounds computation. Set by [Live] at

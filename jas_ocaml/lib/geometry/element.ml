@@ -376,6 +376,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Rect of {
       x : float; y : float;
@@ -388,6 +389,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -398,6 +400,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -409,6 +412,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Polyline of {
       points : (float * float) list;
@@ -419,6 +423,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Polygon of {
       points : (float * float) list;
@@ -429,6 +434,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Path of {
       d : path_command list;
@@ -440,6 +446,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
     }
   | Text of {
       x : float; y : float;
@@ -472,6 +479,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       (* See element.mli for the tspans invariant. *)
       tspans : tspan array;
     }
@@ -502,6 +510,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       tspans : tspan array;
     }
   | Group of {
@@ -511,6 +520,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       isolated_blending : bool;
       knockout_group : bool;
     }
@@ -522,6 +532,7 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      mask : mask option;
       isolated_blending : bool;
       knockout_group : bool;
     }
@@ -546,6 +557,16 @@ and compound_shape = {
   locked : bool;
   visibility : visibility;
   blend_mode : blend_mode;
+  mask : mask option;
+}
+
+and mask = {
+  subtree : element;
+  clip : bool;
+  invert : bool;
+  disabled : bool;
+  linked : bool;
+  unlink_transform : transform option;
 }
 
 (** Hook for the LiveElement bounds computation. Set by [Live] at
@@ -835,25 +856,25 @@ let transform_of elem =
   | Live (Compound_shape cs) -> cs.transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
-  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
 
 let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
-  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
 
 let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy r =
-  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
 
 let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy rx ry =
-  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
 
 let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
 
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
-  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /
@@ -907,6 +928,7 @@ let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = 
          text_transform; font_variant; baseline_shift; line_height; letter_spacing;
          xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
          text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+         mask = None;
          tspans = tspans_from_content content }
 
 let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none")
@@ -919,14 +941,17 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
               text_transform; font_variant; baseline_shift; line_height; letter_spacing;
               xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
               fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+              mask = None;
               tspans = tspans_from_content content }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
   Group { children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+          mask = None;
           isolated_blending = false; knockout_group = false }
 
 let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
   Layer { name; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+          mask = None;
           isolated_blending = false; knockout_group = false }
 
 let is_locked = function
@@ -1376,7 +1401,7 @@ let move_control_points ?(is_all = false) elem indices dx dy =
                 fill = r.fill; stroke = r.stroke;
                 opacity = r.opacity; transform = r.transform;
                 locked = r.locked; visibility = r.visibility;
-                blend_mode = r.blend_mode }
+                blend_mode = r.blend_mode; mask = None }
   | Circle r ->
     if is_all then
       Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }

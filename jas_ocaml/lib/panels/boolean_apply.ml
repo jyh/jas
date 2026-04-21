@@ -93,6 +93,7 @@ let apply_make_compound_shape_with_op (model : Model.model)
           locked = false;
           visibility = Element.get_visibility frontmost;
           blend_mode = Element.Normal;
+          mask = None;
         } in
         let compound = Live (Compound_shape cs) in
         model#snapshot;
@@ -252,7 +253,7 @@ let paint_of (elem : element) =
 
 let polygon_from_ring ring (fill, stroke, opacity, transform, locked, visibility) =
   let points = Array.to_list ring in
-  Polygon { points; fill; stroke; opacity; transform; locked; visibility; blend_mode = Element.Normal }
+  Polygon { points; fill; stroke; opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
 
 (* Return (outputs) as a list of (polygon_set, paint) pairs for the
    given op. Returns None for unknown ops. *)

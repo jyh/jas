@@ -197,9 +197,11 @@ let with_children node new_children =
   match node with
   | Group { opacity; transform; locked; visibility; blend_mode; isolated_blending; knockout_group; _ } ->
     Group { children = new_children; opacity; transform; locked; visibility; blend_mode;
+            mask = None;
             isolated_blending; knockout_group }
   | Layer { name; opacity; transform; locked; visibility; blend_mode; isolated_blending; knockout_group; _ } ->
     Layer { name; children = new_children; opacity; transform; locked; visibility; blend_mode;
+            mask = None;
             isolated_blending; knockout_group }
   (* Precondition: elem must be Group or Layer. Called only after children_of. *)
   | _ -> failwith "element has no children"

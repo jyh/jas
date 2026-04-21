@@ -263,6 +263,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -284,6 +285,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -300,6 +302,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -317,6 +320,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -338,6 +342,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -356,6 +361,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -376,6 +382,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -400,6 +407,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -425,6 +433,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
@@ -435,6 +444,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; group; layer "B"|] };
@@ -457,6 +467,7 @@ let menu_tests = [
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
+        mask = None;
         isolated_blending = false; knockout_group = false;
       }
     |] };
@@ -485,6 +496,7 @@ let menu_tests = [
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
+        mask = None;
         isolated_blending = false; knockout_group = false;
       }
     |] };
@@ -514,6 +526,7 @@ let menu_tests = [
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
+        mask = None;
         isolated_blending = false; knockout_group = false;
       }
     |] };
@@ -538,6 +551,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      mask = None;
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in

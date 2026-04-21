@@ -161,6 +161,7 @@ let expand (cs : compound_shape) precision : element list =
         locked = cs.locked;
         visibility = cs.visibility;
         blend_mode = cs.blend_mode;
+        mask = None;
       })
   ) ps
 
