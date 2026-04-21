@@ -972,6 +972,12 @@ class Group(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    # Opacity panel "Page Isolated Blending" flag. Storage-only in Phase 2;
+    # renderer support is deferred. Inherited by Layer.
+    isolated_blending: bool = False
+    # Opacity panel "Page Knockout Group" flag. Storage-only in Phase 2;
+    # renderer support is deferred. Inherited by Layer.
+    knockout_group: bool = False
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.children:
