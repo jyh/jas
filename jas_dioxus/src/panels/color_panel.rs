@@ -130,6 +130,11 @@ mod tests {
             layers_saved_lock_states: std::collections::HashMap::new(),
             layers_hidden_types: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
+            artboards_panel_selection: Vec::new(),
+            artboards_panel_anchor: None,
+            artboards_renaming: None,
+            artboards_reference_point: "center".to_string(),
+            artboards_rearrange_dirty: false,
         }
     }
 
