@@ -171,7 +171,9 @@ mod tests {
 
     fn make_layer(name: &str) -> Element {
         Element::Layer(LayerElem {
-            name: name.to_string(), children: Vec::new(), common: CommonProps::default(),
+            name: name.to_string(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
         })
     }
 

@@ -664,12 +664,12 @@ fn unpack_element(v: &Value) -> Element {
             let name = as_str(&arr[5]).to_string();
             let children: Vec<Rc<Element>> = as_array(&arr[6]).iter()
                 .map(|c| Rc::new(unpack_element(c))).collect();
-            Element::Layer(LayerElem { name, children, common })
+            Element::Layer(LayerElem { name, children, common, isolated_blending: false, knockout_group: false })
         }
         TAG_GROUP => {
             let children: Vec<Rc<Element>> = as_array(&arr[5]).iter()
                 .map(|c| Rc::new(unpack_element(c))).collect();
-            Element::Group(GroupElem { children, common })
+            Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false })
         }
         TAG_LINE => Element::Line(LineElem {
             x1: as_f64(&arr[5]), y1: as_f64(&arr[6]),

@@ -231,6 +231,8 @@ impl Default for Document {
                 name: "Layer".to_string(),
                 children: Vec::new(),
                 common: CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
             })],
             selected_layer: 0,
             selection: Vec::new(),
@@ -457,6 +459,8 @@ mod tests {
         Element::Layer(LayerElem {
             name: name.to_string(),
             children: children.into_iter().map(Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         })
     }
@@ -464,6 +468,8 @@ mod tests {
     fn make_group(children: Vec<Element>) -> Element {
         Element::Group(GroupElem {
             children: children.into_iter().map(Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         })
     }
