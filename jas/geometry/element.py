@@ -249,6 +249,31 @@ class BlendMode(Enum):
     LUMINOSITY   = "luminosity"
 
 
+@dataclass(frozen=True)
+class Mask:
+    """Opacity mask attached to an element. See OPACITY.md § Document model.
+
+    Storage-only in Phase 3a — renderer wiring and the mask UI controls
+    (MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX, LINK_INDICATOR)
+    land in Phase 3b.
+
+    Fields:
+      subtree:          artwork whose luminance drives the owning element's alpha.
+      clip:             also clip the element to the mask bounds.
+      invert:           invert the luminance mapping.
+      disabled:         element renders as if no mask were attached; subtree preserved.
+      linked:           when true, mask follows element's transform; when false
+                        it uses ``unlink_transform`` as its fixed baseline.
+      unlink_transform: captured at unlink time; cleared on relink.
+    """
+    subtree: "Element"
+    clip: bool = True
+    invert: bool = False
+    disabled: bool = False
+    linked: bool = True
+    unlink_transform: "Transform | None" = None
+
+
 class LineCap(Enum):
     """SVG stroke-linecap."""
     BUTT = "butt"
@@ -548,6 +573,7 @@ class Line(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
@@ -578,6 +604,7 @@ class Rect(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
@@ -599,6 +626,7 @@ class Circle(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -623,6 +651,7 @@ class Ellipse(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -644,6 +673,7 @@ class Polyline(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -674,6 +704,7 @@ class Polygon(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -705,6 +736,7 @@ class Path(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
@@ -874,6 +906,7 @@ class Text(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
     # Sentinel default: an empty tuple means "derive from content in
     # __post_init__". Late-import avoids the geometry.element <->
     # geometry.tspan circular dep.
@@ -948,6 +981,7 @@ class TextPath(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
     tspans: tuple = ()
 
     def __post_init__(self):
@@ -972,6 +1006,7 @@ class Group(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
     # Opacity panel "Page Isolated Blending" flag. Storage-only in Phase 2;
     # renderer support is deferred. Inherited by Layer.
     isolated_blending: bool = False
@@ -1046,6 +1081,7 @@ class CompoundShape(LiveElement):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def evaluate(self, precision: float):
         """Flatten operands to polygon sets, apply the boolean
