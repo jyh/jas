@@ -181,6 +181,12 @@ struct YamlDialogOverlay: View {
     @Binding var dialogState: YamlDialogState?
     let theme: Theme
     var outerScope: () -> [String: Any] = { [:] }
+    /// Active Model used for dialog-body widget dispatch. Needs to
+    /// be the same Model whose StateStore holds the dialog state
+    /// that this overlay is mirroring so that ``close_dialog``
+    /// effects (e.g. via ``artboard_options_confirm``'s tail) zero
+    /// the store we're watching.
+    var model: Model? = nil
     /// Fired when the overlay is dismissed from the UI (X button or
     /// backdrop tap). Callers pair it with `model.stateStore.closeDialog()`
     /// so the SwiftUI binding and the store's dialog tracker stay in
@@ -258,8 +264,46 @@ struct YamlDialogOverlay: View {
                 params: ds.params,
                 outer: outerScope()
             )
-            YamlElementView(element: content, context: ctx)
+            YamlElementView(
+                element: content,
+                context: ctx,
+                model: model,
+                onWidgetAction: handleDialogWidgetAction
+            )
                 .padding(4)
+        }
+    }
+
+    /// Dispatch a dialog-body widget-level ``action:`` click. Params
+    /// are already resolved against the dialog ctx by YamlElementView.
+    ///
+    /// Two action shapes:
+    /// - ``dismiss_dialog`` — close the store and zero the binding.
+    ///   Matches the Python YamlDialogView._dispatch_dialog_action
+    ///   special case (Cancel button idiom).
+    /// - any other action name — route through
+    ///   ``LayersPanel.dispatchYamlAction`` with the resolved params.
+    ///   If the action's effects include ``close_dialog``, the store's
+    ///   dialog id becomes nil; we mirror that by zeroing the binding.
+    private func handleDialogWidgetAction(_ actionName: String,
+                                           _ params: [String: Any]) {
+        if actionName == "dismiss_dialog" {
+            model?.stateStore.closeDialog()
+            dialogState = nil
+            return
+        }
+        guard let m = model else { return }
+        let abSel = (m.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
+            .compactMap { $0 as? String } ?? []
+        LayersPanel.dispatchYamlAction(
+            actionName, model: m,
+            artboardsPanelSelection: abSel,
+            params: params
+        )
+        // The action's effects may have run close_dialog — sync the
+        // SwiftUI binding so the overlay dismisses.
+        if m.stateStore.getDialogId() == nil {
+            dialogState = nil
         }
     }
 

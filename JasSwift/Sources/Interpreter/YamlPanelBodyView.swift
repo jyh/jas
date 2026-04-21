@@ -22,6 +22,16 @@ struct YamlElementView: View {
     /// non-nil. `nil` in dialog / non-panel contexts; writes fall back
     /// to the legacy no-op for now.
     var panelId: String? = nil
+    /// Called for widget-level ``action:`` dispatches (button / icon
+    /// button clicks with an ``action:`` key rather than a
+    /// ``behavior: [{event: click, effects: ...}]`` block). Receives
+    /// the action name and the resolved param dict (param expressions
+    /// already evaluated against ``context``).
+    /// YAML dialogs set this to a closure that special-cases
+    /// ``dismiss_dialog`` and otherwise routes through
+    /// ``LayersPanel.dispatchYamlAction``. Nil elsewhere (panel
+    /// content has no widget-level ``action:`` today).
+    var onWidgetAction: ((String, [String: Any]) -> Void)? = nil
 
     var body: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
@@ -160,21 +170,21 @@ struct YamlElementView: View {
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction)
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction)
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction)
                 }
             }
         }
@@ -264,7 +274,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context, model: model, panelId: panelId)
+                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
             }
         }
     }
@@ -288,7 +298,7 @@ struct YamlElementView: View {
     private func renderButton() -> some View {
         let label = element["label"] as? String ?? ""
         let isDisabled = evalBindDisabled()
-        return Button(label) { handleClickBehavior() }
+        return Button(label) { handleWidgetClick() }
             .disabled(isDisabled)
     }
 
@@ -298,7 +308,7 @@ struct YamlElementView: View {
     private func renderIconButton() -> some View {
         let summary = element["summary"] as? String ?? ""
         let isDisabled = evalBindDisabled()
-        Button(summary) { handleClickBehavior() }
+        Button(summary) { handleWidgetClick() }
             .buttonStyle(.plain)
             .disabled(isDisabled)
     }
@@ -309,6 +319,41 @@ struct YamlElementView: View {
         guard let bind = element["bind"] as? [String: Any],
               let expr = bind["disabled"] as? String else { return false }
         return evaluate(expr, context: context).toBool()
+    }
+
+    /// Handle a click on a button / icon_button. Two YAML widget
+    /// shapes are supported:
+    ///
+    /// 1. ``action: <action_name>`` with optional ``params: {...}`` —
+    ///    widget-level action dispatch. Param expressions are
+    ///    evaluated against the current ``context`` (so ``dialog.*``
+    ///    / ``param.*`` / ``active_document.*`` refs resolve), then
+    ///    the caller-supplied ``onWidgetAction`` closure runs the
+    ///    action. Used by dialog OK / Cancel / Delete buttons.
+    ///
+    /// 2. ``behavior: [{event: click, effects: [...]}]`` — inline
+    ///    effects dispatched through ``runEffects`` with the current
+    ///    platform-effect registry. Pre-existing path; kept for
+    ///    buttons whose behavior is a short effect list rather than
+    ///    a named action.
+    private func handleWidgetClick() {
+        if let actionName = element["action"] as? String {
+            let rawParams = (element["params"] as? [String: Any]) ?? [:]
+            var resolved: [String: Any] = [:]
+            for (k, v) in rawParams {
+                if let exprStr = v as? String {
+                    let result = evaluate(exprStr, context: context)
+                    if let any = result.toAny() {
+                        resolved[k] = any
+                    }
+                } else {
+                    resolved[k] = v
+                }
+            }
+            onWidgetAction?(actionName, resolved)
+            return
+        }
+        handleClickBehavior()
     }
 
     /// Run the widget's `behavior: [{event: click, effects: [...]}]`
@@ -482,7 +527,7 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderPanel() -> some View {
         if let content = element["content"] as? [String: Any] {
-            YamlElementView(element: content, context: context, model: model, panelId: panelId)
+            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
         } else {
             renderPlaceholder()
         }
@@ -628,7 +673,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context, model: model, panelId: panelId)
+            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
         }
     }
 }

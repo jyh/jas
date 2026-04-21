@@ -203,6 +203,7 @@ public struct ContentView: View {
                     dialogState: $yamlDialogState,
                     theme: workspace.theme,
                     outerScope: { buildDialogOuterScope() },
+                    model: workspace.activeModel,
                     onDismiss: {
                         // Keep the store's dialog tracker in sync with
                         // the overlay binding — otherwise re-opening
