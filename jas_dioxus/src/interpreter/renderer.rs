@@ -924,6 +924,38 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
     }
 }
 
+/// Write a single Opacity-panel field from a YAML-interpreted value. Keys
+/// match the panel-local state declared in `workspace/panels/opacity.yaml`.
+/// Unknown keys are silently ignored (mirrors `set_stroke_field`). The
+/// `mode` key accepts a snake_case BlendMode id (e.g. `"color_burn"`); the
+/// `opacity` key accepts a number in the 0-100 percent range.
+fn set_opacity_field(
+    op: &mut crate::workspace::app_state::OpacityPanelState,
+    key: &str,
+    val: &serde_json::Value,
+) {
+    use crate::geometry::element::BlendMode;
+    match key {
+        "mode" => {
+            if let Some(s) = val.as_str() {
+                if let Ok(m) = serde_json::from_value::<BlendMode>(serde_json::json!(s)) {
+                    op.mode = m;
+                }
+            }
+        }
+        "opacity" => {
+            if let Some(n) = val.as_f64() {
+                op.opacity = n.clamp(0.0, 100.0);
+            }
+        }
+        "thumbnails_hidden" => { if let Some(b) = val.as_bool() { op.thumbnails_hidden = b; } }
+        "options_shown" => { if let Some(b) = val.as_bool() { op.options_shown = b; } }
+        "new_masks_clipping" => { if let Some(b) = val.as_bool() { op.new_masks_clipping = b; } }
+        "new_masks_inverted" => { if let Some(b) = val.as_bool() { op.new_masks_inverted = b; } }
+        _ => {}
+    }
+}
+
 /// Update a single paragraph panel field. Mutual exclusion side
 /// effects: writing one alignment radio clears the other six;
 /// writing a non-empty bullets value clears numbered_list (and vice
@@ -3243,7 +3275,11 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             }
                             st.apply_stroke_panel_to_selection();
                         }
-                        // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                        Some(PanelKind::Opacity) => {
+                            set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
+                            // Phase 1: panel-local only; selection sync deferred.
+                        }
+                        // Artboards, Layers, Color, Swatches, Properties:
                         // no-op for number_input writes until their per-panel state
                         // structs land. Drops the edit silently rather than
                         // corrupting stroke state.
@@ -3463,6 +3499,10 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                                 Some(PanelKind::Stroke) | None => {
                                     set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
                                     st.apply_stroke_panel_to_selection();
+                                }
+                                Some(PanelKind::Opacity) => {
+                                    set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(v));
+                                    // Phase 1: panel-local only; selection sync deferred.
                                 }
                                 // Artboards, Layers, Color, Swatches, Properties:
                                 // no-op until their per-panel state lands.
@@ -6991,5 +7031,65 @@ mod tests {
             outer["active_document"]["artboards_count"],
             serde_json::json!(1)
         );
+    }
+
+    // ── set_opacity_field (Phase 1.5 wiring) ─────────────────
+
+    #[test]
+    fn set_opacity_field_mode_accepts_snake_case_id() {
+        use crate::geometry::element::BlendMode;
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "mode", &serde_json::json!("multiply"));
+        assert_eq!(op.mode, BlendMode::Multiply);
+        super::set_opacity_field(&mut op, "mode", &serde_json::json!("color_burn"));
+        assert_eq!(op.mode, BlendMode::ColorBurn);
+        super::set_opacity_field(&mut op, "mode", &serde_json::json!("luminosity"));
+        assert_eq!(op.mode, BlendMode::Luminosity);
+    }
+
+    #[test]
+    fn set_opacity_field_mode_ignores_unknown_value() {
+        use crate::geometry::element::BlendMode;
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        op.mode = BlendMode::Multiply;
+        super::set_opacity_field(&mut op, "mode", &serde_json::json!("not_a_mode"));
+        // Ignored — field keeps its prior value.
+        assert_eq!(op.mode, BlendMode::Multiply);
+    }
+
+    #[test]
+    fn set_opacity_field_opacity_clamps_to_0_100() {
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "opacity", &serde_json::json!(42.0));
+        assert_eq!(op.opacity, 42.0);
+        super::set_opacity_field(&mut op, "opacity", &serde_json::json!(150.0));
+        assert_eq!(op.opacity, 100.0);
+        super::set_opacity_field(&mut op, "opacity", &serde_json::json!(-5.0));
+        assert_eq!(op.opacity, 0.0);
+    }
+
+    #[test]
+    fn set_opacity_field_bool_toggles_flow_through() {
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "thumbnails_hidden", &serde_json::json!(true));
+        assert!(op.thumbnails_hidden);
+        super::set_opacity_field(&mut op, "options_shown", &serde_json::json!(true));
+        assert!(op.options_shown);
+        super::set_opacity_field(&mut op, "new_masks_clipping", &serde_json::json!(false));
+        assert!(!op.new_masks_clipping);
+        super::set_opacity_field(&mut op, "new_masks_inverted", &serde_json::json!(true));
+        assert!(op.new_masks_inverted);
+    }
+
+    #[test]
+    fn set_opacity_field_unknown_key_is_noop() {
+        use crate::geometry::element::BlendMode;
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "nonexistent", &serde_json::json!("anything"));
+        // Defaults are preserved.
+        assert_eq!(op.mode, BlendMode::Normal);
+        assert_eq!(op.opacity, 100.0);
+        assert!(!op.thumbnails_hidden);
+        assert!(op.new_masks_clipping);
     }
 }
