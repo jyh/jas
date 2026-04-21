@@ -109,6 +109,29 @@ func openYamlDialogWithOuter(
     )
 }
 
+/// Build the evaluation context surfaced to a dialog's content-tree
+/// renderer. Outer-scope keys (``panel``, ``active_document``) are
+/// merged first; the dialog's own ``dialog`` / ``param`` / ``state``
+/// / ``icons`` keys win on collision so dialog-local state is never
+/// stomped by a like-named outer key.
+///
+/// Exposed at file scope so Phase F tests can verify merge order
+/// without standing up a SwiftUI view.
+func buildDialogEvalContext(
+    state: [String: Any],
+    params: [String: Any],
+    outer: [String: Any]
+) -> [String: Any] {
+    var ctx: [String: Any] = outer
+    ctx["dialog"] = state
+    ctx["param"] = params
+    if let ws = WorkspaceData.load() {
+        ctx["state"] = ws.stateDefaults()
+        ctx["icons"] = ws.icons()
+    }
+    return ctx
+}
+
 /// Convert a Value to Any? for storage.
 private func valueToAnyDlg(_ v: Value) -> Any? {
     switch v {
@@ -126,9 +149,20 @@ private func valueToAnyDlg(_ v: Value) -> Any? {
 }
 
 /// SwiftUI view that renders a YAML dialog as a modal overlay.
+///
+/// ``outerScope`` is a closure evaluated on each render that returns a
+/// dictionary merged under the dialog's own ``dialog`` / ``param`` keys.
+/// It exposes ``panel`` + ``active_document`` namespaces to render-time
+/// bind expressions — e.g. the Artboard Options Dialogue uses
+/// ``bind.disabled: active_document.artboards_count <= 1`` on its
+/// Delete button and interpolates ``{{active_document.artboards_count}}``
+/// into a "Artboards: N" label. Default: an empty closure, matching
+/// the back-compat path for dialogs (like color_picker) that read only
+/// ``dialog.*`` / ``state.*``.
 struct YamlDialogOverlay: View {
     @Binding var dialogState: YamlDialogState?
     let theme: Theme
+    var outerScope: () -> [String: Any] = { [:] }
 
     var body: some View {
         if let ds = dialogState {
@@ -191,22 +225,14 @@ struct YamlDialogOverlay: View {
         let content = dlgDef?["content"] as? [String: Any]
 
         if let content = content {
-            let ctx = buildEvalContext(ds)
+            let ctx = buildDialogEvalContext(
+                state: ds.state,
+                params: ds.params,
+                outer: outerScope()
+            )
             YamlElementView(element: content, context: ctx)
                 .padding(4)
         }
-    }
-
-    private func buildEvalContext(_ ds: YamlDialogState) -> [String: Any] {
-        var ctx: [String: Any] = [
-            "dialog": ds.state,
-            "param": ds.params,
-        ]
-        if let ws = WorkspaceData.load() {
-            ctx["state"] = ws.stateDefaults()
-            ctx["icons"] = ws.icons()
-        }
-        return ctx
     }
 
     private func dialogWidth(_ ds: YamlDialogState) -> CGFloat {
