@@ -173,20 +173,66 @@ public struct ElementSelection: Equatable, Hashable {
 /// A selection is a set of ElementSelection entries (unique by path).
 public typealias Selection = Set<ElementSelection>
 
-/// A document consisting of an ordered list of layers and a selection.
+/// A document consisting of an ordered list of layers, a selection,
+/// and a list of artboards (with document-global options).
 public struct Document: Equatable {
     public let layers: [Layer]
     public let selectedLayer: Int
     public let selection: Selection
+    /// Print-page regions. The at-least-one-artboard invariant
+    /// (ARTBOARDS.md) is enforced by the init: if `artboards` is
+    /// passed empty, a default Letter artboard is seeded. Parsers
+    /// that want the "empty artboards, trust load-time repair
+    /// elsewhere" semantic should use `init(rawLayers:..., rawArtboards:...)`.
+    public let artboards: [Artboard]
+    /// Document-global artboard display toggles (fade outside,
+    /// update while dragging).
+    public let artboardOptions: ArtboardOptions
 
     public init(
         layers: [Layer] = [Layer(children: [])],
         selectedLayer: Int = 0,
-        selection: Selection = []
+        selection: Selection = [],
+        artboards: [Artboard] = [],
+        artboardOptions: ArtboardOptions = .default
     ) {
         self.layers = layers
         self.selectedLayer = selectedLayer
         self.selection = selection
+        self.artboards = artboards
+        self.artboardOptions = artboardOptions
+    }
+
+    /// Fresh-document initializer: seeds one default artboard via the
+    /// at-least-one-artboard invariant (ARTBOARDS.md). Use this for
+    /// explicit "new document" flows (File → New, workspace session
+    /// restore) rather than the generic `init`. Internal rebuilds
+    /// (setDocument, replaceElement, etc.) preserve the caller's
+    /// current artboards, including explicit empty.
+    public static func newEmptyDocument(
+        idGenerator: () -> String = generateArtboardId
+    ) -> Document {
+        Document(
+            layers: [Layer(children: [])],
+            artboards: ensureArtboardsInvariant([], idGenerator: idGenerator).artboards
+        )
+    }
+
+    /// Parser-facing init: accepts whatever artboards the caller
+    /// decoded, no invariant enforcement. Used by `testJsonToDocument`
+    /// and similar legacy-fixture readers.
+    public init(
+        rawLayers: [Layer],
+        rawSelectedLayer: Int,
+        rawSelection: Selection,
+        rawArtboards: [Artboard],
+        rawArtboardOptions: ArtboardOptions
+    ) {
+        self.layers = rawLayers
+        self.selectedLayer = rawSelectedLayer
+        self.selection = rawSelection
+        self.artboards = rawArtboards
+        self.artboardOptions = rawArtboardOptions
     }
 
     /// Return the ElementSelection for the given path, or nil.
@@ -253,7 +299,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions)
     }
     /// Return a new document with newElem inserted immediately after path.
     public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> Document {
@@ -270,7 +316,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions)
     }
 
     /// Return a new document with the element at path removed.
@@ -285,7 +331,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions)
     }
 
     /// Return a new document with all selected elements removed and selection cleared.
@@ -296,7 +342,10 @@ public struct Document: Equatable {
             doc = doc.deleteElement(path)
         }
         return Document(layers: doc.layers,
-                           selectedLayer: doc.selectedLayer, selection: [])
+                           selectedLayer: doc.selectedLayer,
+                           selection: [],
+                           artboards: artboards,
+                           artboardOptions: artboardOptions)
     }
 }
 

@@ -140,7 +140,9 @@ class PathEraserTool: CanvasTool {
 
         if changed {
             let newDoc = Document(layers: newLayers, selectedLayer: doc.selectedLayer,
-                                 selection: Set())
+                                 selection: Set(),
+                                 artboards: doc.artboards,
+                                 artboardOptions: doc.artboardOptions)
             ctx.model.document = newDoc
             ctx.requestUpdate()
         }

@@ -26,7 +26,14 @@ public class Controller {
     }
 
     public func addLayer(_ layer: Layer) {
-        model.document = Document(layers: model.document.layers + [layer])
+        let old = model.document
+        model.document = Document(
+            layers: old.layers + [layer],
+            selectedLayer: old.selectedLayer,
+            selection: old.selection,
+            artboards: old.artboards,
+            artboardOptions: old.artboardOptions
+        )
     }
 
     public func removeLayer(at index: Int) {
