@@ -975,6 +975,27 @@ fn set_paragraph_field(
 }
 
 /// Build an expression evaluation context from AppState + action params.
+/// Build the outer scope to pass into `dialog_view::open_dialog_with_outer`
+/// and `DialogState::eval_context_with_outer`. Exposes the panel +
+/// active_document namespaces that dialog init / get / set
+/// expressions may reference (most notably the Artboard Options
+/// Dialogue's x_rp / y_rp reference-point transforms).
+pub(crate) fn build_dialog_outer_scope(
+    st: &crate::workspace::app_state::AppState,
+) -> serde_json::Value {
+    // Panel scope: only the artboards panel fields are exposed today
+    // since that's the only dialog with panel-referencing init /
+    // prop expressions. Extend as new dialogs need it.
+    let panel = serde_json::json!({
+        "reference_point": st.artboards_reference_point.clone(),
+        "artboards_panel_selection": st.artboards_panel_selection.clone(),
+    });
+    serde_json::json!({
+        "panel": panel,
+        "active_document": build_active_document_view(st),
+    })
+}
+
 fn build_appstate_ctx(
     params: &serde_json::Map<String, serde_json::Value>,
     st: &crate::workspace::app_state::AppState,
@@ -2495,11 +2516,16 @@ fn build_mouse_event_handler(
                 if let Some(od) = eff.get("open_dialog") {
                     let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
-                    let live_state = {
+                    let (live_state, outer_scope) = {
                         let st = app.borrow();
-                        crate::workspace::dock_panel::build_live_state_map(&st)
+                        (
+                            crate::workspace::dock_panel::build_live_state_map(&st),
+                            build_dialog_outer_scope(&st),
+                        )
                     };
-                    super::dialog_view::open_dialog(&mut dialog_signal, dlg_id, &raw_params, &live_state);
+                    super::dialog_view::open_dialog_with_outer(
+                        &mut dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope,
+                    );
                 }
             }
             revision += 1;
@@ -5461,11 +5487,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     if let Some(od) = eff.get("open_dialog") {
                                         let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                         let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
-                                        let live_state = {
+                                        let (live_state, outer_scope) = {
                                             let st = a2.borrow();
-                                            crate::workspace::dock_panel::build_live_state_map(&st)
+                                            (
+                                                crate::workspace::dock_panel::build_live_state_map(&st),
+                                                build_dialog_outer_scope(&st),
+                                            )
                                         };
-                                        super::dialog_view::open_dialog(&mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state);
+                                        super::dialog_view::open_dialog_with_outer(
+                                            &mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state, &outer_scope,
+                                        );
                                     }
                                 }
                                 r += 1;
@@ -6771,5 +6802,192 @@ mod tests {
         assert_eq!(ab.width, 400.0);
         assert_eq!(ab.fill, ArtboardFill::Color("#ff0000".into()));
         assert!(ab.show_center_mark);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Artboard Options Dialogue — expression-evaluator integration
+    // (ARTBOARDS.md §Artboard Options Dialogue)
+    // ─────────────────────────────────────────────────────────────
+    //
+    // The Dioxus open_dialog path needs a Signal and can't be unit-
+    // tested here. These tests exercise the two pieces that matter
+    // independently:
+    //   1. anchor_offset_x / anchor_offset_y builtins produce the
+    //      right numbers for all 9 anchor positions.
+    //   2. DialogState computed-property get/set with an outer
+    //      scope round-trips through the reference-point transform
+    //      without mutating the stored top-left.
+
+    #[test]
+    fn anchor_offset_x_center_half_width() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_x('center', 612)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(306.0));
+    }
+
+    #[test]
+    fn anchor_offset_x_top_left_zero() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_x('top_left', 612)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(0.0));
+    }
+
+    #[test]
+    fn anchor_offset_x_bottom_right_full_size() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_x('bottom_right', 612)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(612.0));
+    }
+
+    #[test]
+    fn anchor_offset_y_center_half_height() {
+        let ctx = serde_json::json!({});
+        let v = super::super::expr::eval("anchor_offset_y('center', 792)", &ctx);
+        assert_eq!(v, super::super::expr_types::Value::Number(396.0));
+    }
+
+    #[test]
+    fn dialog_computed_prop_x_rp_center() {
+        // ART-199 in ARTBOARDS_TESTS.md: with reference_point=center
+        // on a default 612×792 artboard at origin, the Dialogue's
+        // X field reads 306 (= 0 + width/2).
+        use super::super::dialog_view::DialogState;
+        use std::collections::HashMap;
+
+        let mut state = HashMap::new();
+        state.insert("x_stored".to_string(), serde_json::json!(0));
+        state.insert("y_stored".to_string(), serde_json::json!(0));
+        state.insert("width".to_string(), serde_json::json!(612));
+        state.insert("height".to_string(), serde_json::json!(792));
+
+        let mut props = HashMap::new();
+        props.insert(
+            "x_rp".to_string(),
+            serde_json::json!({
+                "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
+            }),
+        );
+        props.insert(
+            "y_rp".to_string(),
+            serde_json::json!({
+                "get": "y_stored + anchor_offset_y(panel.reference_point, height)",
+            }),
+        );
+
+        let ds = DialogState {
+            id: "test".to_string(),
+            state,
+            params: HashMap::new(),
+            anchor: None,
+            props,
+        };
+
+        let outer = serde_json::json!({
+            "panel": { "reference_point": "center" },
+        });
+
+        let x_rp = ds.get_value_with_outer("x_rp", Some(&outer));
+        let y_rp = ds.get_value_with_outer("y_rp", Some(&outer));
+        // value_to_json normalizes whole f64 to i64 — compare ints.
+        assert_eq!(x_rp, serde_json::json!(306));
+        assert_eq!(y_rp, serde_json::json!(396));
+    }
+
+    #[test]
+    fn dialog_computed_prop_x_rp_top_left_shows_raw() {
+        use super::super::dialog_view::DialogState;
+        use std::collections::HashMap;
+
+        let mut state = HashMap::new();
+        state.insert("x_stored".to_string(), serde_json::json!(100));
+        state.insert("y_stored".to_string(), serde_json::json!(200));
+        state.insert("width".to_string(), serde_json::json!(612));
+        state.insert("height".to_string(), serde_json::json!(792));
+
+        let mut props = HashMap::new();
+        props.insert(
+            "x_rp".to_string(),
+            serde_json::json!({
+                "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
+            }),
+        );
+
+        let ds = DialogState {
+            id: "test".to_string(),
+            state,
+            params: HashMap::new(),
+            anchor: None,
+            props,
+        };
+
+        let outer = serde_json::json!({
+            "panel": { "reference_point": "top_left" },
+        });
+        let x_rp = ds.get_value_with_outer("x_rp", Some(&outer));
+        // top_left anchor: displayed X equals stored x (100).
+        assert_eq!(x_rp, serde_json::json!(100));
+    }
+
+    #[test]
+    fn dialog_computed_prop_set_x_rp_writes_top_left() {
+        use super::super::dialog_view::DialogState;
+        use std::collections::HashMap;
+
+        let mut state = HashMap::new();
+        state.insert("x_stored".to_string(), serde_json::json!(0));
+        state.insert("width".to_string(), serde_json::json!(612));
+
+        let mut props = HashMap::new();
+        props.insert(
+            "x_rp".to_string(),
+            serde_json::json!({
+                "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
+                "set": "fun new -> x_stored <- new - anchor_offset_x(panel.reference_point, width)",
+            }),
+        );
+
+        let mut ds = DialogState {
+            id: "test".to_string(),
+            state,
+            params: HashMap::new(),
+            anchor: None,
+            props,
+        };
+
+        let outer = serde_json::json!({
+            "panel": { "reference_point": "center" },
+        });
+        // User types X=406 with center anchor on a 612-wide artboard.
+        // Stored top-left should become 406 - 306 = 100.
+        ds.set_value_with_outer(
+            "x_rp",
+            serde_json::json!(406.0),
+            Some(&outer),
+        );
+        assert_eq!(
+            ds.state.get("x_stored"),
+            Some(&serde_json::json!(100))
+        );
+    }
+
+    #[test]
+    fn build_dialog_outer_scope_has_panel_and_active_document() {
+        let mut st = make_state_with_artboards(&["aaa00001"]);
+        st.artboards_reference_point = "top_left".to_string();
+        st.artboards_panel_selection = vec!["aaa00001".to_string()];
+        let outer = super::build_dialog_outer_scope(&st);
+        assert_eq!(
+            outer["panel"]["reference_point"],
+            serde_json::json!("top_left")
+        );
+        let ids = outer["active_document"]["artboards_panel_selection_ids"]
+            .as_array()
+            .unwrap();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], serde_json::json!("aaa00001"));
+        assert_eq!(
+            outer["active_document"]["artboards_count"],
+            serde_json::json!(1)
+        );
     }
 }
