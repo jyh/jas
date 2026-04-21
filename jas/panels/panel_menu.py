@@ -51,7 +51,7 @@ ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
-    PanelKind.ALIGN, PanelKind.BOOLEAN,
+    PanelKind.ALIGN, PanelKind.BOOLEAN, PanelKind.OPACITY,
 ]
 
 # Color panel mode commands
@@ -81,6 +81,7 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.ARTBOARDS: "Artboards",
     PanelKind.ALIGN: "Align",
     PanelKind.BOOLEAN: "Boolean",
+    PanelKind.OPACITY: "Opacity",
 }
 
 
@@ -172,6 +173,29 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.action("Reset Panel", "reset_artboards_panel"),
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Artboards", "close_panel"),
+        ]
+    if kind == PanelKind.OPACITY:
+        # Ten spec items from OPACITY.md + Close Opacity. Phase-1
+        # toggles are functional via panel-local state; mask-lifecycle
+        # and page-level commands are inert (YAML gates them with
+        # enabled_when: "false"). Mirrors the OpacityPanel shape in
+        # jas_dioxus / JasSwift / jas_ocaml.
+        return [
+            PanelMenuItem.toggle("Hide Thumbnails", "toggle_opacity_thumbnails"),
+            PanelMenuItem.toggle("Show Options", "toggle_opacity_options"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Make Opacity Mask", "make_opacity_mask"),
+            PanelMenuItem.action("Release Opacity Mask", "release_opacity_mask"),
+            PanelMenuItem.action("Disable Opacity Mask", "disable_opacity_mask"),
+            PanelMenuItem.action("Unlink Opacity Mask", "unlink_opacity_mask"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.toggle("New Opacity Masks Are Clipping", "toggle_new_masks_clipping"),
+            PanelMenuItem.toggle("New Opacity Masks Are Inverted", "toggle_new_masks_inverted"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.toggle("Page Isolated Blending", "toggle_page_isolated_blending"),
+            PanelMenuItem.toggle("Page Knockout Group", "toggle_page_knockout_group"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Opacity", "close_panel"),
         ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 

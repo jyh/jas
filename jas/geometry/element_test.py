@@ -1,7 +1,7 @@
 from absl.testing import absltest
 
 from geometry.element import (
-    Color, RgbColor, HsbColor, CmykColor,
+    BlendMode, Color, RgbColor, HsbColor, CmykColor,
     Fill, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
@@ -746,6 +746,45 @@ class GeometricBoundsTest(absltest.TestCase):
         _, _, pw, ph = ln.bounds()
         self.assertGreater(pw, gw)
         self.assertGreater(ph, gh)
+
+
+class BlendModeTest(absltest.TestCase):
+    """BlendMode enum — 16 values matching the cross-language contract."""
+
+    def test_has_sixteen_values(self):
+        self.assertEqual(len(list(BlendMode)), 16)
+
+    def test_contains_all_expected_values(self):
+        expected = [
+            BlendMode.NORMAL,
+            BlendMode.DARKEN, BlendMode.MULTIPLY, BlendMode.COLOR_BURN,
+            BlendMode.LIGHTEN, BlendMode.SCREEN, BlendMode.COLOR_DODGE,
+            BlendMode.OVERLAY, BlendMode.SOFT_LIGHT, BlendMode.HARD_LIGHT,
+            BlendMode.DIFFERENCE, BlendMode.EXCLUSION,
+            BlendMode.HUE, BlendMode.SATURATION, BlendMode.COLOR, BlendMode.LUMINOSITY,
+        ]
+        for m in expected:
+            self.assertIn(m, list(BlendMode))
+
+    def test_raw_values_are_snake_case(self):
+        self.assertEqual(BlendMode.NORMAL.value, "normal")
+        self.assertEqual(BlendMode.COLOR_BURN.value, "color_burn")
+        self.assertEqual(BlendMode.COLOR_DODGE.value, "color_dodge")
+        self.assertEqual(BlendMode.SOFT_LIGHT.value, "soft_light")
+        self.assertEqual(BlendMode.HARD_LIGHT.value, "hard_light")
+        self.assertEqual(BlendMode.LUMINOSITY.value, "luminosity")
+
+    def test_round_trip_through_value(self):
+        for m in BlendMode:
+            self.assertEqual(BlendMode(m.value), m)
+
+    def test_invalid_value_raises(self):
+        with self.assertRaises(ValueError):
+            BlendMode("not_a_mode")
+        with self.assertRaises(ValueError):
+            BlendMode("")
+        with self.assertRaises(ValueError):
+            BlendMode("ColorBurn")  # wrong case
 
 
 if __name__ == "__main__":
