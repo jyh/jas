@@ -16147,7 +16147,7 @@
       "summary": "Opacity",
       "description": "Opacity panel \u2014 sets opacity and blend mode on the current selection, and manages opacity masks on selected elements. See transcripts/OPACITY.md for the full specification.\nFlask's phase-1 scope is yaml wiring only \u2014 the document model for per-element opacity / blend mode / opacity masks lands in later phases in the native apps. Phase-1 behavior in Flask:\n\n  - MODE_DROPDOWN and OPACITY_INPUT are functional; they bind to panel-\n    local `mode` and `opacity` working values.\n  - OPACITY_PREVIEW, LINK_INDICATOR, MASK_PREVIEW render as placeholder\n    boxes.\n  - MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX are present but\n    disabled until the document model carries element.mask.\n  - Mask-lifecycle and page-level menu items use enabled_when: \"false\"\n    until their respective phases land (pending_model for disable_mask /\n    unlink_mask; pending_renderer for page_isolated_blending /\n    page_knockout_group).\n\n=== Layout ===\nRow 1 \u2014 MODE_DROPDOWN (4 cols), \"Opacity:\" label (3 cols), OPACITY_INPUT (4 cols), OPACITY_DISCLOSURE chevron (1 col).\nRow 2 \u2014 OPACITY_PREVIEW (3 cols), LINK_INDICATOR (1 col), MASK_PREVIEW (3 cols), and a buttons column (5 cols) containing MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX. The entire row is hidden when panel.thumbnails_hidden is true.\n=== Mode values ===\nThe 16 blend modes are grouped into six sections by dividers in the dropdown, matching the groups in transcripts/OPACITY.md:\n\n  - [normal]\n  - [darken, multiply, color_burn]\n  - [lighten, screen, color_dodge]\n  - [overlay, soft_light, hard_light]\n  - [difference, exclusion]\n  - [hue, saturation, color, luminosity]\n\n=== Panel menu ===\nTen entries across four groups. Phase-1 actionable: Hide Thumbnails, Show Options, New Opacity Masks Are Clipping, New Opacity Masks Are Inverted (panel-local toggles). Phase-1 deferred: all mask-lifecycle items and the page-level blending toggles.\n",
       "state": {
-        "mode": {
+        "blend_mode": {
           "type": "enum",
           "values": [
             "normal",
@@ -16168,7 +16168,7 @@
             "luminosity"
           ],
           "default": "normal",
-          "description": "Working blend mode. Phase-1 is panel-local (not yet applied to elements); later phases persist as element.mode on the selection.\n"
+          "description": "Working blend mode. Phase-1 is panel-local (not yet applied to elements); later phases persist as element.mode on the selection. Named `blend_mode` rather than `mode` to avoid a collision with the Color panel's state.mode in the shared panel-overrides map.\n"
         },
         "opacity": {
           "type": "number",
@@ -16279,7 +16279,7 @@
                 "summary": "Blend mode",
                 "description": "Blend mode for the selection. Sixteen modes grouped into six sections by separator.\n",
                 "bind": {
-                  "value": "panel.mode"
+                  "value": "panel.blend_mode"
                 },
                 "options": [
                   {

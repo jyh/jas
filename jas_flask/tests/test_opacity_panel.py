@@ -91,17 +91,17 @@ class TestOpacityPanel:
 
     # ── State block ────────────────────────────────────────────
 
-    def test_state_mode_enum_default_normal_sixteen_values(self, panel):
-        entry = panel.get("state", {}).get("mode")
+    def test_state_blend_mode_enum_default_normal_sixteen_values(self, panel):
+        entry = panel.get("state", {}).get("blend_mode")
         assert entry is not None
         assert entry.get("type") == "enum"
         assert entry.get("default") == "normal"
         assert len(entry.get("values", [])) == 16
 
-    def test_state_mode_includes_all_expected_values(self, panel):
-        values = panel.get("state", {}).get("mode", {}).get("values", [])
+    def test_state_blend_mode_includes_all_expected_values(self, panel):
+        values = panel.get("state", {}).get("blend_mode", {}).get("values", [])
         for m in EXPECTED_MODES:
-            assert m in values, f"Mode '{m}' missing from state.mode.values"
+            assert m in values, f"Mode '{m}' missing from state.blend_mode.values"
 
     def test_state_opacity_number_default_100(self, panel):
         entry = panel.get("state", {}).get("opacity")
@@ -206,9 +206,9 @@ class TestOpacityPanel:
         assert "op_opacity" in ids
         assert "op_disclosure" in ids
 
-    def test_mode_dropdown_binds_panel_mode(self, panel):
+    def test_mode_dropdown_binds_panel_blend_mode(self, panel):
         mode_el = self._find_by_id(panel, "op_mode")
-        assert mode_el.get("bind", {}).get("value") == "panel.mode"
+        assert mode_el.get("bind", {}).get("value") == "panel.blend_mode"
 
     def test_opacity_input_binds_panel_opacity(self, panel):
         op_el = self._find_by_id(panel, "op_opacity")

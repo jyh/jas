@@ -927,8 +927,8 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
 /// Write a single Opacity-panel field from a YAML-interpreted value. Keys
 /// match the panel-local state declared in `workspace/panels/opacity.yaml`.
 /// Unknown keys are silently ignored (mirrors `set_stroke_field`). The
-/// `mode` key accepts a snake_case BlendMode id (e.g. `"color_burn"`); the
-/// `opacity` key accepts a number in the 0-100 percent range.
+/// `blend_mode` key accepts a snake_case BlendMode id (e.g. `"color_burn"`);
+/// the `opacity` key accepts a number in the 0-100 percent range.
 fn set_opacity_field(
     op: &mut crate::workspace::app_state::OpacityPanelState,
     key: &str,
@@ -936,10 +936,10 @@ fn set_opacity_field(
 ) {
     use crate::geometry::element::BlendMode;
     match key {
-        "mode" => {
+        "blend_mode" => {
             if let Some(s) = val.as_str() {
                 if let Ok(m) = serde_json::from_value::<BlendMode>(serde_json::json!(s)) {
-                    op.mode = m;
+                    op.blend_mode = m;
                 }
             }
         }
@@ -7036,25 +7036,25 @@ mod tests {
     // ── set_opacity_field (Phase 1.5 wiring) ─────────────────
 
     #[test]
-    fn set_opacity_field_mode_accepts_snake_case_id() {
+    fn set_opacity_field_blend_mode_accepts_snake_case_id() {
         use crate::geometry::element::BlendMode;
         let mut op = crate::workspace::app_state::OpacityPanelState::default();
-        super::set_opacity_field(&mut op, "mode", &serde_json::json!("multiply"));
-        assert_eq!(op.mode, BlendMode::Multiply);
-        super::set_opacity_field(&mut op, "mode", &serde_json::json!("color_burn"));
-        assert_eq!(op.mode, BlendMode::ColorBurn);
-        super::set_opacity_field(&mut op, "mode", &serde_json::json!("luminosity"));
-        assert_eq!(op.mode, BlendMode::Luminosity);
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("multiply"));
+        assert_eq!(op.blend_mode, BlendMode::Multiply);
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("color_burn"));
+        assert_eq!(op.blend_mode, BlendMode::ColorBurn);
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("luminosity"));
+        assert_eq!(op.blend_mode, BlendMode::Luminosity);
     }
 
     #[test]
-    fn set_opacity_field_mode_ignores_unknown_value() {
+    fn set_opacity_field_blend_mode_ignores_unknown_value() {
         use crate::geometry::element::BlendMode;
         let mut op = crate::workspace::app_state::OpacityPanelState::default();
-        op.mode = BlendMode::Multiply;
-        super::set_opacity_field(&mut op, "mode", &serde_json::json!("not_a_mode"));
+        op.blend_mode = BlendMode::Multiply;
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("not_a_mode"));
         // Ignored — field keeps its prior value.
-        assert_eq!(op.mode, BlendMode::Multiply);
+        assert_eq!(op.blend_mode, BlendMode::Multiply);
     }
 
     #[test]
@@ -7087,7 +7087,7 @@ mod tests {
         let mut op = crate::workspace::app_state::OpacityPanelState::default();
         super::set_opacity_field(&mut op, "nonexistent", &serde_json::json!("anything"));
         // Defaults are preserved.
-        assert_eq!(op.mode, BlendMode::Normal);
+        assert_eq!(op.blend_mode, BlendMode::Normal);
         assert_eq!(op.opacity, 100.0);
         assert!(!op.thumbnails_hidden);
         assert!(op.new_masks_clipping);
