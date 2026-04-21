@@ -1074,6 +1074,128 @@ let draw_element_overlay cr (elem : Element.element)
     Cairo.stroke cr
   ) (control_points elem)
 
+(* ── Artboard rendering (ARTBOARDS.md §Canvas appearance) ──────────
+   Z-order passes, back to front:
+     2. draw_artboard_fills       (per artboard, list order)
+     4. draw_fade_overlay         (dims off-artboard regions)
+     5. draw_artboard_borders     (thin default borders)
+     6. draw_artboard_accent      (2px outer for panel-selected)
+     7. draw_artboard_labels      ("N  Name" above top-left)
+     8. draw_artboard_display_marks (center / cross hairs / safe areas)
+
+   Phase-D first pass: colors are fixed constants; theme integration
+   waits on threading the theme through the canvas subwindow. *)
+
+let _hex_to_rgb hex =
+  if String.length hex = 7 && String.get hex 0 = '#' then
+    try
+      let r = int_of_string ("0x" ^ String.sub hex 1 2) in
+      let g = int_of_string ("0x" ^ String.sub hex 3 2) in
+      let b = int_of_string ("0x" ^ String.sub hex 5 2) in
+      Some (float_of_int r /. 255.0,
+            float_of_int g /. 255.0,
+            float_of_int b /. 255.0)
+    with _ -> None
+  else None
+
+let draw_artboard_fills cr (doc : Document.document) =
+  List.iter (fun (ab : Artboard.artboard) ->
+    match ab.fill with
+    | Artboard.Transparent -> ()
+    | Artboard.Color hex ->
+      (match _hex_to_rgb hex with
+       | None -> ()
+       | Some (r, g, b) ->
+         Cairo.set_source_rgb cr r g b;
+         Cairo.rectangle cr ab.x ab.y ~w:ab.width ~h:ab.height;
+         Cairo.fill cr)
+  ) doc.Document.artboards
+
+let draw_fade_overlay cr (doc : Document.document) ~canvas_w ~canvas_h =
+  if doc.Document.artboard_options.Artboard.fade_region_outside_artboard
+     && doc.Document.artboards <> [] then begin
+    Cairo.save cr;
+    Cairo.set_source_rgba cr (160.0 /. 255.0) (160.0 /. 255.0) (160.0 /. 255.0) 0.5;
+    Cairo.rectangle cr 0.0 0.0 ~w:canvas_w ~h:canvas_h;
+    Cairo.fill cr;
+    Cairo.set_operator cr Cairo.DEST_OUT;
+    Cairo.set_source_rgba cr 0.0 0.0 0.0 1.0;
+    List.iter (fun (ab : Artboard.artboard) ->
+      Cairo.rectangle cr ab.x ab.y ~w:ab.width ~h:ab.height;
+      Cairo.fill cr
+    ) doc.Document.artboards;
+    Cairo.restore cr
+  end
+
+let draw_artboard_borders cr (doc : Document.document) =
+  Cairo.set_source_rgb cr 0.2 0.2 0.2;
+  Cairo.set_line_width cr 1.0;
+  List.iter (fun (ab : Artboard.artboard) ->
+    Cairo.rectangle cr ab.x ab.y ~w:ab.width ~h:ab.height;
+    Cairo.stroke cr
+  ) doc.Document.artboards
+
+let draw_artboard_accent cr (doc : Document.document) ~selected_ids =
+  if selected_ids <> [] then begin
+    Cairo.set_source_rgba cr 0.0 (120.0 /. 255.0) (215.0 /. 255.0) 0.95;
+    Cairo.set_line_width cr 2.0;
+    List.iter (fun (ab : Artboard.artboard) ->
+      if List.mem ab.id selected_ids then begin
+        let pad = 1.5 in
+        Cairo.rectangle cr
+          (ab.x -. pad) (ab.y -. pad)
+          ~w:(ab.width +. 2.0 *. pad)
+          ~h:(ab.height +. 2.0 *. pad);
+        Cairo.stroke cr
+      end
+    ) doc.Document.artboards
+  end
+
+let draw_artboard_labels cr (doc : Document.document) =
+  Cairo.set_source_rgb cr 0.78 0.78 0.78;
+  Cairo.select_font_face cr "sans-serif" ~slant:Cairo.Upright ~weight:Cairo.Normal;
+  Cairo.set_font_size cr 11.0;
+  List.iteri (fun i (ab : Artboard.artboard) ->
+    let label = Printf.sprintf "%d  %s" (i + 1) ab.name in
+    (* Sit label just above the top-left corner. *)
+    Cairo.move_to cr ab.x (ab.y -. 3.0);
+    Cairo.show_text cr label
+  ) doc.Document.artboards
+
+let draw_artboard_display_marks cr (doc : Document.document) =
+  Cairo.set_source_rgb cr 0.6 0.6 0.6;
+  Cairo.set_line_width cr 1.0;
+  List.iter (fun (ab : Artboard.artboard) ->
+    let cx = ab.x +. ab.width /. 2.0 in
+    let cy = ab.y +. ab.height /. 2.0 in
+    if ab.show_center_mark then begin
+      let arm = 5.0 in
+      Cairo.move_to cr (cx -. arm) cy;
+      Cairo.line_to cr (cx +. arm) cy;
+      Cairo.move_to cr cx (cy -. arm);
+      Cairo.line_to cr cx (cy +. arm);
+      Cairo.stroke cr
+    end;
+    if ab.show_cross_hairs then begin
+      Cairo.move_to cr ab.x cy;
+      Cairo.line_to cr (ab.x +. ab.width) cy;
+      Cairo.move_to cr cx ab.y;
+      Cairo.line_to cr cx (ab.y +. ab.height);
+      Cairo.stroke cr
+    end;
+    if ab.show_video_safe_areas then begin
+      List.iter (fun frac ->
+        let w = ab.width *. frac in
+        let h = ab.height *. frac in
+        Cairo.rectangle cr
+          (ab.x +. (ab.width -. w) /. 2.0)
+          (ab.y +. (ab.height -. h) /. 2.0)
+          ~w ~h;
+        Cairo.stroke cr
+      ) [0.9; 0.8]
+    end
+  ) doc.Document.artboards
+
 let draw_selection_overlays cr (doc : Document.document) =
   let open Document in
   PathMap.iter (fun path (es : element_selection) ->
@@ -1551,13 +1673,28 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         let alloc = canvas_area#misc#allocation in
         let w = float_of_int alloc.Gtk.width in
         let h = float_of_int alloc.Gtk.height in
+        (* Layer 1: canvas background *)
         Cairo.set_source_rgb cr 1.0 1.0 1.0;
         Cairo.rectangle cr 0.0 0.0 ~w ~h;
         Cairo.fill cr;
+        (* Layer 2: artboard fills *)
+        draw_artboard_fills cr current_doc;
+        (* Layer 3: document element tree *)
         Array.iter (draw_element cr) current_doc.Document.layers;
-        (* Draw selection overlays *)
+        (* Layer 4: fade overlay *)
+        draw_fade_overlay cr current_doc ~canvas_w:w ~canvas_h:h;
+        (* Layer 5: artboard borders *)
+        draw_artboard_borders cr current_doc;
+        (* Layer 6: accent border for panel-selected artboards
+           (empty list until panel_selection is threaded in). *)
+        draw_artboard_accent cr current_doc ~selected_ids:[];
+        (* Layer 7: artboard labels *)
+        draw_artboard_labels cr current_doc;
+        (* Layer 8: per-artboard display marks *)
+        draw_artboard_display_marks cr current_doc;
+        (* Layer 9: selection overlays *)
         draw_selection_overlays cr current_doc;
-        (* Draw active tool overlay *)
+        (* Active tool overlay *)
         _self#switch_tool;
         active_tool#draw_overlay _self#tool_context cr;
         true

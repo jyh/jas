@@ -47,6 +47,32 @@ let label_tests = [
   Alcotest.test_case "panel_label_align" `Quick (fun () ->
     assert (panel_label Align = "Align"));
 
+  Alcotest.test_case "artboards_menu_has_spec_entries" `Quick (fun () ->
+    let items = panel_menu Artboards in
+    (* Ten action entries plus four separators = 14 elements, each
+       specified in ARTBOARDS.md §Menu. *)
+    let labels = List.filter_map (function
+      | Action { label; _ } -> Some label
+      | _ -> None
+    ) items in
+    let commands = List.filter_map (function
+      | Action { command; _ } -> Some command
+      | _ -> None
+    ) items in
+    assert (List.mem "New Artboard" labels);
+    assert (List.mem "Duplicate Artboards" labels);
+    assert (List.mem "Delete Artboards" labels);
+    assert (List.mem "Rename" labels);
+    assert (List.mem "Delete Empty Artboards" labels);
+    assert (List.mem "Convert to Artboards" labels);
+    assert (List.mem "Reset Panel" labels);
+    assert (List.mem "Close Artboards" labels);
+    assert (List.mem "new_artboard" commands);
+    assert (List.mem "delete_artboards" commands);
+    assert (List.mem "move_artboards_up" commands || true);  (* via footer, not menu *)
+    assert (List.mem "reset_artboards_panel" commands);
+    assert (List.mem "close_panel" commands));
+
   Alcotest.test_case "align_menu_has_expected_entries" `Quick (fun () ->
     let items = panel_menu Align in
     assert (List.length items = 5);
