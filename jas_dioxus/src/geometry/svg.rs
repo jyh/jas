@@ -1035,6 +1035,7 @@ fn parse_common(node: &XmlNode) -> CommonProps {
         transform: parse_transform(node),
         locked: false,
         visibility: crate::geometry::element::Visibility::default(),
+        mask: None,
     }
 }
 

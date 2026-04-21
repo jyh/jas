@@ -785,6 +785,7 @@ fn parse_common(v: &serde_json::Value) -> CommonProps {
         transform: parse_transform(&v["transform"]),
         locked: v["locked"].as_bool().unwrap_or(false),
         visibility: parse_visibility(&v["visibility"]),
+        mask: None,
     }
 }
 

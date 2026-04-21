@@ -641,6 +641,36 @@ pub enum BlendMode {
 }
 
 
+/// An opacity mask attached to an element. See OPACITY.md § Document model.
+/// The mask subtree carries the artwork whose luminance drives the element's
+/// alpha at compositing time. Storage-only in Phase 3a — renderer wiring,
+/// MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX, LINK_INDICATOR,
+/// and the disable/unlink menu items land in Phase 3b.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Mask {
+    /// Artwork whose luminance drives the element's alpha.
+    pub subtree: Box<Element>,
+    /// When true, the mask also clips the element to its bounds.
+    pub clip: bool,
+    /// When true, the luminance mapping is inverted (light becomes opaque).
+    pub invert: bool,
+    /// When true, the element renders as if no mask were attached. The mask
+    /// subtree is preserved so re-enabling restores the prior state.
+    #[serde(default)]
+    pub disabled: bool,
+    /// When true, mask transforms follow the element's transform.
+    /// When false, the mask uses `unlink_transform` as its fixed baseline.
+    #[serde(default = "default_mask_linked")]
+    pub linked: bool,
+    /// Captured at unlink time: the element's transform when the link was
+    /// broken. Used as the mask's effective transform while `linked` is
+    /// false. Cleared on relink.
+    #[serde(default)]
+    pub unlink_transform: Option<Transform>,
+}
+
+fn default_mask_linked() -> bool { true }
+
 /// Common properties shared by all visible elements.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CommonProps {
@@ -650,6 +680,11 @@ pub struct CommonProps {
     pub transform: Option<Transform>,
     pub locked: bool,
     pub visibility: Visibility,
+    /// Optional opacity mask attached to this element. When `None`, the
+    /// element composites normally. When `Some(_)`, the mask's artwork
+    /// modulates alpha per OPACITY.md. Storage-only in Phase 3a.
+    #[serde(default)]
+    pub mask: Option<Box<Mask>>,
 }
 
 impl Default for CommonProps {
@@ -660,6 +695,7 @@ impl Default for CommonProps {
             transform: None,
             locked: false,
             visibility: Visibility::Preview,
+            mask: None,
         }
     }
 }
@@ -3132,7 +3168,7 @@ mod tests {
             knockout_group: false,
             common: CommonProps { opacity: 0.75, mode: BlendMode::Normal,
                                   transform: None, locked: true,
-                                  visibility: Visibility::Outline },
+                                  visibility: Visibility::Outline, mask: None },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3233,6 +3269,87 @@ mod tests {
         assert_eq!(c.opacity, 0.5);
     }
 
+    // ── Mask (Phase 3a storage) ─────────────────────────────
+
+    fn make_square_mask() -> Mask {
+        Mask {
+            subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0)),
+            clip: true,
+            invert: false,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }
+    }
+
+    #[test]
+    fn common_props_default_mask_is_none() {
+        let c = CommonProps::default();
+        assert!(c.mask.is_none());
+    }
+
+    #[test]
+    fn mask_default_linked_true_disabled_false() {
+        let json = serde_json::json!({
+            "subtree": rect(0.0, 0.0, 5.0, 5.0),
+            "clip": false,
+            "invert": false,
+        });
+        let m: Mask = serde_json::from_value(json).unwrap();
+        assert!(m.linked, "linked default should be true");
+        assert!(!m.disabled, "disabled default should be false");
+        assert!(m.unlink_transform.is_none());
+    }
+
+    #[test]
+    fn mask_serde_roundtrip() {
+        let m = make_square_mask();
+        let json = serde_json::to_value(&m).unwrap();
+        let back: Mask = serde_json::from_value(json).unwrap();
+        assert_eq!(m, back);
+    }
+
+    #[test]
+    fn element_with_mask_serde_roundtrip() {
+        let elem = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 20.0, height: 20.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                opacity: 1.0,
+                mode: BlendMode::Normal,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Preview,
+                mask: Some(Box::new(make_square_mask())),
+            },
+        });
+        let json = serde_json::to_value(&elem).unwrap();
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert_eq!(elem, back);
+        assert!(back.common().mask.is_some());
+    }
+
+    #[test]
+    fn element_without_mask_deserializes_from_legacy_json() {
+        // Legacy JSON without a `mask` key must still parse, with mask = None.
+        let json = serde_json::json!({
+            "Rect": {
+                "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0,
+                "rx": 0.0, "ry": 0.0,
+                "fill": null, "stroke": null,
+                "common": {
+                    "opacity": 1.0,
+                    "mode": "normal",
+                    "transform": null,
+                    "locked": false,
+                    "visibility": "Preview"
+                }
+            }
+        });
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert!(back.common().mask.is_none());
+    }
+
     #[test]
     fn element_serde_roundtrip_preserves_non_default_mode() {
         let elem = Element::Rect(RectElem {
@@ -3244,6 +3361,7 @@ mod tests {
                 transform: None,
                 locked: false,
                 visibility: Visibility::Preview,
+                mask: None,
             },
         });
         let json = serde_json::to_value(&elem).unwrap();

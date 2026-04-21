@@ -1807,6 +1807,7 @@ mod tests {
                 transform: None,
                 locked: false,
                 visibility: Visibility::Preview,
+                mask: None,
             },
         });
         let shape = RecognizedShape::Rectangle {
