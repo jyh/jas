@@ -1311,7 +1311,9 @@ struct TreeViewContent: View {
                     model.document = Document(
                         layers: model.document.layers,
                         selectedLayer: model.document.selectedLayer,
-                        selection: [ElementSelection.all(path)]
+                        selection: [ElementSelection.all(path)],
+                        artboards: model.document.artboards,
+                        artboardOptions: model.document.artboardOptions
                     )
                 }
         }
@@ -1535,7 +1537,9 @@ struct TreeViewContent: View {
                     model.document = Document(
                         layers: model.document.layers,
                         selectedLayer: model.document.selectedLayer,
-                        selection: [ElementSelection.all(path)]
+                        selection: [ElementSelection.all(path)],
+                        artboards: model.document.artboards,
+                        artboardOptions: model.document.artboardOptions
                     )
                 }
         }

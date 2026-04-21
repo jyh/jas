@@ -121,7 +121,9 @@ public enum LayersPanel {
             )
             model.document = Document(layers: newLayers,
                                        selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection)
+                                       selection: model.document.selection,
+                                       artboards: model.document.artboards,
+                                       artboardOptions: model.document.artboardOptions)
             return nil
         }
         // Phase 3 Group B: delete/clone/insert. The returned Element (top-
@@ -144,7 +146,9 @@ public enum LayersPanel {
                 newLayers.remove(at: indices[0])
                 model.document = Document(layers: newLayers,
                                            selectedLayer: doc.selectedLayer,
-                                           selection: doc.selection)
+                                           selection: doc.selection,
+                                           artboards: doc.artboards,
+                                           artboardOptions: doc.artboardOptions)
                 return removed
             }
             let removed = doc.getElement(indices)
@@ -192,7 +196,9 @@ public enum LayersPanel {
                 newLayers.insert(layer, at: insertIdx)
                 model.document = Document(layers: newLayers,
                                            selectedLayer: doc.selectedLayer,
-                                           selection: doc.selection)
+                                           selection: doc.selection,
+                                           artboards: doc.artboards,
+                                           artboardOptions: doc.artboardOptions)
             } else {
                 model.document = doc.insertElementAfter(indices, element: elem)
             }
@@ -248,7 +254,9 @@ public enum LayersPanel {
             newLayers.append(newLayer)
             model.document = Document(layers: newLayers,
                                        selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection)
+                                       selection: model.document.selection,
+                                       artboards: model.document.artboards,
+                                       artboardOptions: model.document.artboardOptions)
             return nil
         }
 
@@ -360,7 +368,9 @@ public enum LayersPanel {
             newLayers.insert(elem, at: insertIdx)
             model.document = Document(layers: newLayers,
                                        selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection)
+                                       selection: model.document.selection,
+                                       artboards: model.document.artboards,
+                                       artboardOptions: model.document.artboardOptions)
             return nil
         }
 

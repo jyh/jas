@@ -6,7 +6,13 @@
 /// color alpha channels.
 
 public func normalizeDocument(_ doc: Document) -> Document {
-    Document(layers: doc.layers.map { normalizeLayer($0) })
+    Document(
+        layers: doc.layers.map { normalizeLayer($0) },
+        selectedLayer: doc.selectedLayer,
+        selection: doc.selection,
+        artboards: doc.artboards,
+        artboardOptions: doc.artboardOptions
+    )
 }
 
 private func normalizeFill(_ fill: Fill) -> Fill {
