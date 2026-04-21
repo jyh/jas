@@ -2965,8 +2965,51 @@ fn render_icon(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
 
 fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
-    let label = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
+    let static_label = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
+    // bind.label: expression whose evaluated string replaces the
+    // static label. Used by op_make_mask to flip between "Make Mask"
+    // and "Release" based on selection_has_mask. See OPACITY.md § States.
+    let label: String = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("label")).and_then(|v| v.as_str()) {
+        match expr::eval(expr_str, ctx) {
+            Value::Str(s) => s,
+            _ => static_label.to_string(),
+        }
+    } else {
+        static_label.to_string()
+    };
     let style = build_style(el, ctx);
+    let panel_kind = rctx.panel_kind;
+
+    // Opacity panel: op_make_mask dispatches Controller::make or release
+    // based on the current selection_has_mask predicate. Direct route
+    // rather than yaml-actions because the target lives on the
+    // selection's mask field, not on a panel-state key.
+    if panel_kind == Some(PanelKind::Opacity) && id == "op_make_mask" {
+        let selection_has_mask = expr::eval("selection_has_mask", ctx).to_bool();
+        let app = rctx.app.clone();
+        let mut revision = rctx.revision;
+        let handler = EventHandler::new(move |_evt: Event<MouseData>| {
+            let app = app.clone();
+            spawn(async move {
+                {
+                    let mut st = app.borrow_mut();
+                    if selection_has_mask {
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::release_mask_on_selection(&mut tab.model);
+                        }
+                    } else {
+                        let clip = st.opacity_panel.new_masks_clipping;
+                        let invert = st.opacity_panel.new_masks_inverted;
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::make_mask_on_selection(&mut tab.model, clip, invert);
+                        }
+                    }
+                }
+                revision += 1;
+            });
+        });
+        return rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } };
+    }
 
     // Try behavior array first, then shorthand action property
     let on_click = build_click_handler(el, ctx, rctx).or_else(|| {
@@ -3852,6 +3895,7 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     };
 
     let bind_target = classify_bind(bind_expr);
+    let bind_expr_owned = bind_expr.to_string();
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
@@ -3891,6 +3935,39 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             return;
         }
         let new_val = !checked;
+        // Opacity panel selection-mask bindings: `selection_mask_clip` /
+        // `selection_mask_invert` route directly to Controller methods
+        // (the flag lives on the selected element's mask, not on the
+        // panel-local state). See OPACITY.md § States.
+        if panel_kind == Some(PanelKind::Opacity) {
+            let handled = match bind_expr_owned.as_str() {
+                "selection_mask_clip" => {
+                    let app = app.clone();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::set_mask_clip_on_selection(&mut tab.model, new_val);
+                        }
+                    });
+                    true
+                }
+                "selection_mask_invert" => {
+                    let app = app.clone();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::set_mask_invert_on_selection(&mut tab.model, new_val);
+                        }
+                    });
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                revision += 1;
+                return;
+            }
+        }
         match &bind_target {
             BindTarget::Dialog(field) => {
                 if let Some(mut ds) = dialog_signal() {
