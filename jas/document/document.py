@@ -16,8 +16,13 @@ from dataclasses import dataclass, field
 from typing import TypeVar
 
 from geometry.element import Element, Group, Layer
+from document.artboard import Artboard, ArtboardOptions
 
 _G = TypeVar("_G", bound=Group)
+
+
+def _default_artboard_options() -> ArtboardOptions:
+    return ArtboardOptions()
 
 # A path identifies an element by its position in the document tree.
 # Each integer is a child index at that level of the tree.
@@ -156,10 +161,16 @@ Selection = frozenset[ElementSelection]
 
 @dataclass(frozen=True)
 class Document:
-    """A document consisting of an ordered list of layers and a selection."""
+    """A document consisting of an ordered list of layers, a selection,
+    a list of artboards (ARTBOARDS.md), and document-global artboard
+    options."""
     layers: tuple[Layer, ...] = (Layer(),)
     selected_layer: int = 0
     selection: Selection = frozenset()
+    artboards: tuple = ()
+    artboard_options: "ArtboardOptions" = field(
+        default_factory=lambda: _default_artboard_options()
+    )
 
     def get_element_selection(self, path: ElementPath) -> ElementSelection | None:
         """Return the ElementSelection for the given path, or None."""
