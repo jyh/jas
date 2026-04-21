@@ -6,21 +6,24 @@ Follows the procedure in `MANUAL_TESTING.md`. Spec source:
 `workspace/dialogs/rearrange_artboards.yaml` (phase 2, not yet created).
 Design doc: `transcripts/ARTBOARDS.md`.
 
-Primary platform for manual runs: **Flask (jas_flask)** — target of the
-phase-1 implementation. Native apps (Rust / Swift / OCaml / Python) pick up
-the feature in the order Rust → Swift → OCaml → Python per the project
-rule, and are covered in Session P parity.
+Primary platform for manual runs: **Flask (jas_flask)**, then each
+native app. Propagation order per CLAUDE.md is
+Flask → Rust → Swift → OCaml → Python; all five are now
+feature-complete for phase-1 scope (data model, panel, dialog, canvas
+rendering, ALIGN_TO_ARTBOARD). Session P parity covers per-app
+walkthroughs.
 
 This suite was defined **before implementation** per the test-first rule
-in `CLAUDE.md`. Phase-1 sub-phases 1-7 have landed, wiring the
-panel / dialogue / data model / actions through the YAML interpreter;
-canvas rendering and cross-app parity remain.
+in `CLAUDE.md`. Automated coverage landed alongside each port (see
+Automation coverage below); the remaining gap is live manual
+walkthroughs in each native app — sessions A–O per port, tracked in
+Session P.
 
 ---
 
 ## Known broken
 
-_Last reviewed: 2026-04-20_
+_Last reviewed: 2026-04-21_
 
 - **ART-900** [deferred: ARTBOARDS.md §Phase-1 deferrals — Artboard Tool]
   No canvas-side create / click-to-activate / drag-to-move / drag-to-resize.
@@ -49,9 +52,10 @@ _Last reviewed: 2026-04-20_
 
 ## Automation coverage
 
-_Last synced: 2026-04-20_
+_Last synced: 2026-04-21_
 
-**Python — `workspace_interpreter/tests/test_artboards_effects.py`
+**Python (shared interpreter) —
+`workspace_interpreter/tests/test_artboards_effects.py`
 (115 tests).** Full phase-1 data-layer coverage:
 - `color_or_transparent` schema type coercion (5).
 - At-least-one-artboard invariant + load-time repair (6).
@@ -113,15 +117,57 @@ Structural + integration coverage of the panel yaml:
   comparators.
 - Reset Panel menu entry wired to `reset_artboards_panel`.
 
-**Rust / Swift / OCaml / Python-native: not yet.** Native-app
-coverage lands alongside each port in Session P — see transcripts
-for sub-phases that propagate artboards beyond Flask.
+**Rust — `jas_dioxus/src/interpreter/renderer.rs` (~10 artboard-
+specific test functions) + geometry roundtrip fixtures.** Data
+model serialization (byte-for-byte against Flask via
+`geometry/test_json.rs`), the seven doc-effect handlers (new /
+delete / duplicate / set-field / set-options-field / move-up /
+move-down), the canonical `{1,3,5}` → `[1,3,2,5,4]` swap-skip-
+selected case, `apply_artboard_override` per-field sweep, and
+reference-point builtins (`anchor_offset_x/y`). Canvas layers
+(`canvas/render.rs`) lean on the shared roundtrip fixtures for
+data integrity; pixel output is manual-verified (Session G).
 
-Manual-suite items still requiring live verification: canvas
-rendering (Session G all, Session H visuals 170-172, F-107 visual),
-cross-app parity (Session P), and the live Artboard-Tool and
-Rearrange Dialogue behaviors (ART-900, ART-902, ART-904, ART-905 —
-tracked in Known broken).
+**Swift — `JasSwift/Tests/Interpreter/ArtboardActionTests.swift`
+(~28 tests).** Mirrors Rust coverage with Swift idioms. Also covers
+the three Phase F follow-ups landed on the artboards-panel branch:
+render-time dialog outer scope (`buildDialogEvalContext` merges
+panel / active_document under dialog / param), store → SwiftUI
+overlay bridge (`yamlDialogStateFromStore` round-trip), dialog-body
+widget action dispatch (`artboard_options_confirm` field writes +
+close-dialog sync; `delete_artboard_from_dialog` removes and
+closes). Full suite: 1283 Swift tests pass, no regressions.
+
+**OCaml — `jas_ocaml/test/panels/panel_menu_test.ml`.** Panel-menu
+structure test verifies the Artboards `panel_menu` returns the
+expected labels (New / Duplicate / Delete / Rename / Delete Empty /
+Convert / Options / Rearrange / Reset / Close). Core effect-handler
+coverage rides on the shared
+`workspace_interpreter/tests/test_artboards_effects.py` fixtures
+(the OCaml actions pipeline runs the same compiled
+`workspace/actions.yaml`). Cairo canvas helpers (Z-layers 2–8) land
+with the port but aren't unit-tested — they're manual-verified in
+Session G per port.
+
+**Python native (`jas/`) —
+`jas/panels/panel_menu_test.py` (+9 artboard effect tests),
+`jas/panels/active_document_view_test.py` (+4 sync tests),
+`jas/panels/align_apply_test.py` (+3 ALIGN-to-artboard tests),
+`jas/canvas/canvas_test.py` (+9 canvas draw smoke tests),
+`jas/document/artboard_test.py` (14 unit tests).** Full phase
+B–G coverage: platform handlers mutate `model.document.artboards`
+via `dataclasses.replace`; canvas paintEvent renders all seven
+Z-layers; ALIGN references current artboard bounds with
+selection-bounds fallback. Full suite: 1336 pass, no regressions.
+
+**Manual-suite items still requiring live verification:**
+- Canvas rendering visuals across ports (Session G, H-170-172,
+  F-107): native apps each have their own renderer; automated
+  smoke passes guarantee no-crash, not pixel-correct.
+- Cross-app parity walkthroughs (Session P): sessions A–O pass
+  individually against each app. Not yet executed interactively.
+- Live Artboard-Tool and Rearrange Dialogue behaviors (ART-900,
+  ART-902, ART-904, ART-905) — tracked in Known broken.
 
 ---
 
@@ -1148,8 +1194,10 @@ deferred and display the expected affordances.
 
 ## Session P — Cross-app parity (~10 min)
 
-Run once each native app lands the feature. Order per CLAUDE.md:
-Flask → Rust → Swift → OCaml → Python.
+All five apps are feature-complete for phase-1 scope. These manual
+walkthroughs execute sessions A–O interactively in each app; the
+automated suite per port already covers the data / effect / canvas
+layers (see Automation coverage).
 
 **P1**
 
@@ -1159,15 +1207,32 @@ Flask → Rust → Swift → OCaml → Python.
       — last: —
 
 - [ ] **ART-410** [unwired] Rust (jas_dioxus) parity pass.
+      Implementation complete (phases A–G). Canvas renders all 7
+      artboard Z-layers; Artboard Options Dialogue opens via
+      `open_artboard_options` and commits on OK.
       — last: —
 
 - [ ] **ART-420** [unwired] Swift (JasSwift) parity pass.
+      Implementation complete (phases A–G + 3 Phase F follow-ups:
+      render-time dialog outer scope, store→overlay bridge, dialog-
+      body button dispatch). Artboard Options Dialogue is end-to-end
+      functional: menu → overlay shown, populated values, OK commits
+      all fields + dismisses, Cancel dismisses, Delete removes and
+      dismisses.
       — last: —
 
 - [ ] **ART-430** [unwired] OCaml (jas_ocaml) parity pass.
+      Implementation complete (phases A–G). Cairo canvas draws the
+      seven Z-layers; reference-point transforms resolve against
+      panel + active_document outer scope.
       — last: —
 
 - [ ] **ART-440** [unwired] Python (jas) parity pass.
+      Implementation complete (phases A–G). Qt paintEvent threads
+      all nine layers (bg → fills → elements → fade → borders →
+      accent → labels → marks → selection → tool). ALIGN_TO_ARTBOARD
+      references current artboard bounds with selection-bounds
+      fallback when the document has no artboards.
       — last: —
 
 **P2**
@@ -1178,6 +1243,10 @@ Flask → Rust → Swift → OCaml → Python.
       Expect: Identical panel state, canvas rendering, and Dialogue
               values everywhere. Stable `id`s preserved; derived
               `number`s identical; no fields lost or reformatted.
+      Note: 32 cross-language JSON roundtrip fixtures already pass
+            byte-for-byte at the automated layer
+            (`cross_language_test.py`) — this manual item verifies
+            the user-visible equivalence on top of that contract.
       — last: —
 
 - [ ] **ART-442** [unwired] At-least-one invariant enforced in every
