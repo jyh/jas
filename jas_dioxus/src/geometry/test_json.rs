@@ -781,6 +781,7 @@ fn parse_visibility(v: &serde_json::Value) -> Visibility {
 fn parse_common(v: &serde_json::Value) -> CommonProps {
     CommonProps {
         opacity: parse_f(&v["opacity"]),
+        mode: crate::geometry::element::BlendMode::default(),
         transform: parse_transform(&v["transform"]),
         locked: v["locked"].as_bool().unwrap_or(false),
         visibility: parse_visibility(&v["visibility"]),

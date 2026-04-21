@@ -4258,6 +4258,7 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
             "character_panel_content"  => Some(PanelKind::Character),
             "paragraph_panel_content"  => Some(PanelKind::Paragraph),
             "artboards_panel_content"  => Some(PanelKind::Artboards),
+            "opacity_panel_content"    => Some(PanelKind::Opacity),
             _ => None,
         });
         let mut child = rctx.clone();
@@ -5801,6 +5802,7 @@ mod tests {
                 children: Vec::new(),
                 common: CommonProps {
                     opacity: 1.0,
+                    mode: crate::geometry::element::BlendMode::Normal,
                     transform: None,
                     locked,
                     visibility: vis,
