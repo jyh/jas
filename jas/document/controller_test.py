@@ -2,9 +2,9 @@ import dataclasses
 
 from absl.testing import absltest
 
-from document.controller import Controller
+from document.controller import Controller, first_mask, selection_has_mask
 from document.document import Document, ElementSelection
-from geometry.element import Circle, Ellipse, Fill, Group, Layer, Line, Polygon, RgbColor, Rect, Stroke, control_points, control_point_count, move_control_points
+from geometry.element import Circle, Ellipse, Fill, Group, Layer, Line, Mask, Polygon, RgbColor, Rect, Stroke, control_points, control_point_count, move_control_points
 from document.model import Model
 
 
@@ -872,6 +872,96 @@ class FillStrokeControllerTest(absltest.TestCase):
         summary = selection_stroke_summary(doc)
         self.assertIsInstance(summary, StrokeSummaryUniform)
         self.assertIsNone(summary.stroke)
+
+
+class MaskLifecycleTest(absltest.TestCase):
+    """Phase 3b: Controller mask-lifecycle methods."""
+
+    def _setup_two_rect_selection(self) -> Controller:
+        r1 = Rect(x=0, y=0, width=10, height=10)
+        r2 = Rect(x=20, y=0, width=10, height=10)
+        layer = Layer(children=(r1, r2))
+        doc = Document(layers=(layer,), selection=frozenset({
+            ElementSelection.all((0, 0)),
+            ElementSelection.all((0, 1)),
+        }))
+        return Controller(model=Model(document=doc))
+
+    def _all_masks(self, ctrl: Controller):
+        return [ctrl.document.get_element(es.path).mask
+                for es in ctrl.document.selection]
+
+    def test_selection_has_mask_false_for_empty(self):
+        ctrl = Controller()
+        self.assertFalse(selection_has_mask(ctrl.document))
+
+    def test_selection_has_mask_false_for_unmasked(self):
+        ctrl = self._setup_two_rect_selection()
+        self.assertFalse(selection_has_mask(ctrl.document))
+
+    def test_make_mask_creates_mask_on_every_selected(self):
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        self.assertTrue(selection_has_mask(ctrl.document))
+        for m in self._all_masks(ctrl):
+            self.assertIsNotNone(m)
+            self.assertTrue(m.clip)
+            self.assertFalse(m.invert)
+            self.assertFalse(m.disabled)
+            self.assertTrue(m.linked)
+
+    def test_make_mask_honors_clip_invert_args(self):
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=False, invert=True)
+        for m in self._all_masks(ctrl):
+            self.assertFalse(m.clip)
+            self.assertTrue(m.invert)
+
+    def test_make_mask_is_idempotent(self):
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        ctrl.set_mask_invert_on_selection(True)
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        for m in self._all_masks(ctrl):
+            self.assertTrue(m.invert, "second make should not overwrite")
+
+    def test_release_mask_clears_masks(self):
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        ctrl.release_mask_on_selection()
+        self.assertFalse(selection_has_mask(ctrl.document))
+
+    def test_set_mask_clip_and_invert_propagate(self):
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        ctrl.set_mask_clip_on_selection(False)
+        ctrl.set_mask_invert_on_selection(True)
+        for m in self._all_masks(ctrl):
+            self.assertFalse(m.clip)
+            self.assertTrue(m.invert)
+
+    def test_toggle_mask_disabled_flips(self):
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        ctrl.toggle_mask_disabled_on_selection()
+        for m in self._all_masks(ctrl):
+            self.assertTrue(m.disabled)
+        ctrl.toggle_mask_disabled_on_selection()
+        for m in self._all_masks(ctrl):
+            self.assertFalse(m.disabled)
+
+    def test_toggle_mask_linked_flips_and_captures_transform(self):
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        ctrl.toggle_mask_linked_on_selection()
+        for m in self._all_masks(ctrl):
+            self.assertFalse(m.linked)
+            # Rects have no transform so unlink_transform stays None.
+            self.assertIsNone(m.unlink_transform)
+        ctrl.toggle_mask_linked_on_selection()
+        for m in self._all_masks(ctrl):
+            self.assertTrue(m.linked)
+            self.assertIsNone(m.unlink_transform)
 
 
 if __name__ == "__main__":
