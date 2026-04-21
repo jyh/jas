@@ -257,24 +257,29 @@ class TestOpacityPanel:
         vis = row.get("bind", {}).get("visible", "")
         assert "thumbnails_hidden" in vis
 
-    # ── Mask controls: Phase-1 disabled ────────────────────────
+    # ── Mask controls: selection-aware bindings ────────────────
 
-    def test_make_mask_button_phase1_disabled(self, panel):
+    def test_make_mask_button_label_flips_on_selection_has_mask(self, panel):
         btn = self._find_by_id(panel, "op_make_mask")
         assert btn is not None
-        assert btn.get("bind", {}).get("disabled") == "true"
+        label_expr = btn.get("bind", {}).get("label", "")
+        assert "selection_has_mask" in label_expr
+        assert "Make Mask" in label_expr
+        assert "Release" in label_expr
 
-    def test_clip_checkbox_phase1_disabled(self, panel):
+    def test_clip_checkbox_disabled_binding_references_selection_has_mask(self, panel):
         cb = self._find_by_id(panel, "op_clip")
         assert cb is not None
         assert cb.get("type") == "checkbox"
-        assert cb.get("bind", {}).get("disabled") == "true"
+        assert cb.get("bind", {}).get("disabled") == "!selection_has_mask"
+        assert cb.get("bind", {}).get("checked") == "selection_mask_clip"
 
-    def test_invert_mask_checkbox_phase1_disabled(self, panel):
+    def test_invert_mask_checkbox_disabled_binding_references_selection_has_mask(self, panel):
         cb = self._find_by_id(panel, "op_invert_mask")
         assert cb is not None
         assert cb.get("type") == "checkbox"
-        assert cb.get("bind", {}).get("disabled") == "true"
+        assert cb.get("bind", {}).get("disabled") == "!selection_has_mask"
+        assert cb.get("bind", {}).get("checked") == "selection_mask_invert"
 
     # ── Appearance theming ────────────────────────────────────
 

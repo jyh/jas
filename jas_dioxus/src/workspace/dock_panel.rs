@@ -47,6 +47,36 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
 
 /// Build panel state overrides from the live AppState so that the YAML
 /// eval context reflects the current color mode and active color values.
+/// Build the selection-level predicates referenced by yaml expressions
+/// (``selection_has_mask``, ``selection_mask_clip``,
+/// ``selection_mask_invert``) per OPACITY.md § States. Mixed selections
+/// count as "no mask"; the mask's clip / invert are read from the
+/// first selected element's mask, driving the "first-wins" bindings
+/// on CLIP_CHECKBOX / INVERT_MASK_CHECKBOX.
+fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    let (has_mask, clip, invert) = st.tab().map(|t| {
+        let doc = t.model.document();
+        let has = !doc.selection.is_empty() && doc.selection.iter().all(|es| {
+            doc.get_element(&es.path)
+                .map(|e| e.common().mask.is_some())
+                .unwrap_or(false)
+        });
+        let first_mask = doc.selection.first()
+            .and_then(|es| doc.get_element(&es.path))
+            .and_then(|e| e.common().mask.as_ref());
+        let (c, i) = match first_mask {
+            Some(mask) => (mask.clip, mask.invert),
+            None => (false, false),
+        };
+        (has, c, i)
+    }).unwrap_or((false, false, false));
+    m.insert("selection_has_mask".into(), serde_json::Value::Bool(has_mask));
+    m.insert("selection_mask_clip".into(), serde_json::Value::Bool(clip));
+    m.insert("selection_mask_invert".into(), serde_json::Value::Bool(invert));
+    m
+}
+
 fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
     use crate::interpreter::color_util::{rgb_to_hsb, rgb_to_cmyk};
     use serde_json::Value as J;
@@ -590,6 +620,7 @@ pub(crate) fn build_dock_groups(
     mut menu_bar_open: Signal<Option<String>>,
     live_panel_overrides: &serde_json::Map<String, serde_json::Value>,
     live_state_map: &serde_json::Map<String, serde_json::Value>,
+    selection_preds: &serde_json::Map<String, serde_json::Value>,
 ) -> Vec<Result<VNode, RenderError>> {
     let did = dock_id;
     let group_count = groups.len();
@@ -942,17 +973,24 @@ pub(crate) fn build_dock_groups(
                             // panel references. This prevents unrelated state changes
                             // (e.g. active_tool) from invalidating the panel memo cache.
                             let panel_state = build_panel_state_subset(panel_name, live_state_map);
-                            let eval_ctx = serde_json::json!({
-                                "state": panel_state,
-                                "panel": panel_map,
-                                "icons": {},
-                                "data": {
-                                    "swatch_libraries": live_state_map.get("_swatch_libraries")
-                                        .cloned().unwrap_or(serde_json::Value::Null),
-                                    "_doc_generation": live_state_map.get("_doc_generation")
-                                        .cloned().unwrap_or(serde_json::Value::Null)
-                                }
-                            });
+                            let mut eval_map = serde_json::Map::new();
+                            eval_map.insert("state".into(), serde_json::Value::Object(panel_state));
+                            eval_map.insert("panel".into(), serde_json::Value::Object(panel_map));
+                            eval_map.insert("icons".into(), serde_json::json!({}));
+                            eval_map.insert("data".into(), serde_json::json!({
+                                "swatch_libraries": live_state_map.get("_swatch_libraries")
+                                    .cloned().unwrap_or(serde_json::Value::Null),
+                                "_doc_generation": live_state_map.get("_doc_generation")
+                                    .cloned().unwrap_or(serde_json::Value::Null)
+                            }));
+                            // OPACITY.md § States predicates at top level so
+                            // yaml expressions like `enabled_when:
+                            // "selection_has_mask"` and `bind.disabled:
+                            // "!selection_has_mask"` resolve uniformly.
+                            for (k, v) in selection_preds {
+                                eval_map.insert(k.clone(), v.clone());
+                            }
+                            let eval_ctx = serde_json::Value::Object(eval_map);
                             Some((content, eval_ctx))
                         });
                         if let Some((content, eval_ctx)) = panel_body {
@@ -1000,13 +1038,15 @@ pub(crate) fn DockGroupsView() -> Element {
 
     // Extract everything we need from AppState, then drop the borrow
     // so child components (e.g. FillStrokeWidgetView) can borrow it.
-    let (focused_panel, right_dock_snapshot, live_panel_overrides, live_state_map) = {
+    let (focused_panel, right_dock_snapshot, live_panel_overrides, live_state_map,
+         selection_preds) = {
         let st = app.borrow();
         let focused = st.workspace_layout.focused_panel();
         let dock = st.workspace_layout.anchored_dock(DockEdge::Right).cloned();
         let panel_ov = build_live_panel_overrides(&st);
         let state_map = build_live_state_map(&st);
-        (focused, dock, panel_ov, state_map)
+        let preds = build_selection_predicates(&st);
+        (focused, dock, panel_ov, state_map, preds)
     };
 
     let nodes: Vec<Result<VNode, RenderError>> = match right_dock_snapshot.as_ref() {
@@ -1054,6 +1094,7 @@ pub(crate) fn DockGroupsView() -> Element {
                 mbs.open_menu,
                 &live_panel_overrides,
                 &live_state_map,
+                &selection_preds,
             )
         }
     };
@@ -1084,14 +1125,16 @@ pub(crate) fn FloatingDocksView() -> Element {
     let _ = revision();
     let mut title_drag = ds.title_drag;
 
-    let (focused_panel, floating_snapshot, live_panel_overrides, live_state_map, z_order) = {
+    let (focused_panel, floating_snapshot, live_panel_overrides, live_state_map,
+         selection_preds, z_order) = {
         let st = app.borrow();
         let focused = st.workspace_layout.focused_panel();
         let floating = st.workspace_layout.floating.clone();
         let panel_ov = build_live_panel_overrides(&st);
         let state_map = build_live_state_map(&st);
+        let preds = build_selection_predicates(&st);
         let z = st.workspace_layout.z_order.clone();
-        (focused, floating, panel_ov, state_map, z)
+        (focused, floating, panel_ov, state_map, preds, z)
     };
 
     let floating_nodes: Vec<Result<VNode, RenderError>> = floating_snapshot.iter().map(|fd| {
@@ -1114,6 +1157,7 @@ pub(crate) fn FloatingDocksView() -> Element {
             mbs.open_menu,
             &live_panel_overrides,
             &live_state_map,
+            &selection_preds,
         );
         let z = 900 + z_order.iter().position(|&id| id == fid).unwrap_or(0);
 
