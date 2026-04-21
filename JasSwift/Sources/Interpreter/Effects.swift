@@ -1648,11 +1648,21 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
     let reference: AlignReference
     switch alignTo {
     case "artboard":
-        // No artboards in the document model yet; fall back to
-        // selection-union bounds per ALIGN.md §Align To target
-        // Deferred note.
-        let refs = elements.map(\.1)
-        reference = .artboard(alignUnionBounds(refs, boundsFn))
+        // ARTBOARDS.md §Selection semantics — current artboard =
+        // topmost panel-selected, else first. The at-least-one
+        // invariant guarantees doc.artboards[0] exists for any
+        // loaded document; if the array is empty (pathological),
+        // fall back to the selection union so the op still moves
+        // elements.
+        let selectedIds = Set((store.getPanel("artboards", "artboards_panel_selection") as? [String]) ?? [])
+        let currentAb = doc.artboards.first(where: { selectedIds.contains($0.id) })
+            ?? doc.artboards.first
+        if let ab = currentAb {
+            reference = .artboard((ab.x, ab.y, ab.width, ab.height))
+        } else {
+            let refs = elements.map(\.1)
+            reference = .artboard(alignUnionBounds(refs, boundsFn))
+        }
     case "key_object":
         // Decode the key object path marker.
         let keyPath: ElementPath? = {
