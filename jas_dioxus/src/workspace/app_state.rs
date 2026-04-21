@@ -1531,13 +1531,28 @@ impl AppState {
                 aa::AlignReference::Selection(aa::union_bounds(&refs, bounds_fn))
             }
             AlignTo::Artboard => {
-                // Artboards are not yet in the document model; fall
-                // back to the selection union so Artboard mode still
-                // moves elements coherently. TODO(ALIGN §Artboards):
-                // replace with the active artboard rect.
-                let refs: Vec<&crate::geometry::element::Element> =
-                    elements.iter().map(|(_, e)| *e).collect();
-                aa::AlignReference::Artboard(aa::union_bounds(&refs, bounds_fn))
+                // ARTBOARDS.md §Selection semantics — current =
+                // topmost panel-selected artboard, else first. The
+                // at-least-one invariant guarantees artboards[0]
+                // exists; if it somehow doesn't, fall back to the
+                // selection union so the op still moves elements.
+                let selected_set: std::collections::HashSet<&str> = self
+                    .artboards_panel_selection
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect();
+                let current_ab = doc
+                    .artboards
+                    .iter()
+                    .find(|a| selected_set.contains(a.id.as_str()))
+                    .or_else(|| doc.artboards.first());
+                if let Some(ab) = current_ab {
+                    aa::AlignReference::Artboard((ab.x, ab.y, ab.width, ab.height))
+                } else {
+                    let refs: Vec<&crate::geometry::element::Element> =
+                        elements.iter().map(|(_, e)| *e).collect();
+                    aa::AlignReference::Artboard(aa::union_bounds(&refs, bounds_fn))
+                }
             }
             AlignTo::KeyObject => {
                 let Some(key_path) = self.align_panel.key_object_path.clone() else {
