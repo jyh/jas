@@ -552,6 +552,13 @@ val with_transform_translated : dx:float -> dy:float -> element -> element
 
 val with_fill : element -> fill option -> element
 val with_stroke : element -> stroke option -> element
+
+(** Return a copy of [elem] with its opacity mask replaced. Preserves
+    every other field. See OPACITY.md §Document model. *)
+val with_mask : element -> mask option -> element
+
+(** Return the opacity mask attached to [elem], if any. *)
+val get_mask : element -> mask option
 val with_width_points : element -> stroke_width_point list -> element
 val color_to_hex : color -> string
 val color_from_hex : string -> color option

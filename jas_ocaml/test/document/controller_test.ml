@@ -631,4 +631,99 @@ let () =
         let summary = Jas.Controller.selection_stroke_summary fs_doc in
         assert (summary = Jas.Controller.StrokeUniform None));
     ];
+
+    "mask_lifecycle", (
+      (* Reusable fixture: two rects, both selected. *)
+      let setup () =
+        let r1 = make_rect 0.0 0.0 10.0 10.0 in
+        let r2 = make_rect 20.0 0.0 10.0 10.0 in
+        let layer = make_layer ~name:"L0" [|r1; r2|] in
+        let sel = List.fold_left (fun acc p ->
+          Jas.Document.PathMap.add p (Jas.Document.element_selection_all p) acc
+        ) Jas.Document.PathMap.empty [[0; 0]; [0; 1]] in
+        let doc = Jas.Document.make_document ~selection:sel [|layer|] in
+        Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) ()
+      in
+      let mask_at ctrl path =
+        Jas.Element.get_mask (Jas.Document.get_element ctrl#document path)
+      in
+      let all_paths = [[0; 0]; [0; 1]] in
+      let check_all ctrl f =
+        List.iter (fun p ->
+          match mask_at ctrl p with
+          | Some m -> f m
+          | None -> Alcotest.fail "expected mask"
+        ) all_paths
+      in
+      [
+        Alcotest.test_case "selection_has_mask_false_for_empty" `Quick (fun () ->
+          let ctrl = Jas.Controller.create () in
+          assert (not (Jas.Controller.selection_has_mask ctrl#document)));
+
+        Alcotest.test_case "selection_has_mask_false_for_unmasked" `Quick (fun () ->
+          let ctrl = setup () in
+          assert (not (Jas.Controller.selection_has_mask ctrl#document)));
+
+        Alcotest.test_case "make_mask_creates_mask_on_every_selected" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          assert (Jas.Controller.selection_has_mask ctrl#document);
+          check_all ctrl (fun m ->
+            assert m.Jas.Element.clip;
+            assert (not m.Jas.Element.invert);
+            assert (not m.Jas.Element.disabled);
+            assert m.Jas.Element.linked));
+
+        Alcotest.test_case "make_mask_honors_clip_invert_args" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:false ~invert:true;
+          match mask_at ctrl [0; 0] with
+          | None -> assert false
+          | Some m ->
+            assert (not m.Jas.Element.clip);
+            assert m.Jas.Element.invert);
+
+        Alcotest.test_case "make_mask_is_idempotent" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#set_mask_invert_on_selection true;
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          check_all ctrl (fun m -> assert m.Jas.Element.invert));
+
+        Alcotest.test_case "release_mask_clears_masks" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#release_mask_on_selection;
+          assert (not (Jas.Controller.selection_has_mask ctrl#document)));
+
+        Alcotest.test_case "set_mask_clip_and_invert_propagate" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#set_mask_clip_on_selection false;
+          ctrl#set_mask_invert_on_selection true;
+          check_all ctrl (fun m ->
+            assert (not m.Jas.Element.clip);
+            assert m.Jas.Element.invert));
+
+        Alcotest.test_case "toggle_mask_disabled_flips" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#toggle_mask_disabled_on_selection;
+          check_all ctrl (fun m -> assert m.Jas.Element.disabled);
+          ctrl#toggle_mask_disabled_on_selection;
+          check_all ctrl (fun m -> assert (not m.Jas.Element.disabled)));
+
+        Alcotest.test_case "toggle_mask_linked_flips_and_captures_transform" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#toggle_mask_linked_on_selection;
+          check_all ctrl (fun m ->
+            assert (not m.Jas.Element.linked);
+            (* Rects have no transform so unlink_transform stays None. *)
+            assert (m.Jas.Element.unlink_transform = None));
+          ctrl#toggle_mask_linked_on_selection;
+          check_all ctrl (fun m ->
+            assert m.Jas.Element.linked;
+            assert (m.Jas.Element.unlink_transform = None)));
+      ]);
   ]
