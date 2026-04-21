@@ -704,9 +704,19 @@ public enum LayersPanel {
             platformEffects["close_dialog"] = closeDialogHandler
         }
 
-        let store = StateStore()
-        runEffects(effects, ctx: ctx, store: store,
-                   actions: actions, platformEffects: platformEffects)
+        // Use the model's own StateStore so effects (open_dialog,
+        // close_dialog, set_panel_state, and anything reading
+        // panel / dialog scope via expressions) see the live app
+        // state instead of a throwaway fresh store. Required for the
+        // Artboards panel — open_artboard_options writes its dialog
+        // state here and the DockPanelView bridge reads the
+        // transition to show the overlay. ``dialogs`` must be
+        // supplied for open_dialog to locate the dialog definition.
+        let dialogs = ws.data["dialogs"] as? [String: Any]
+        runEffects(effects, ctx: ctx, store: model.stateStore,
+                   actions: actions,
+                   dialogs: dialogs,
+                   platformEffects: platformEffects)
     }
 
     public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
