@@ -446,4 +446,13 @@ public enum LiveVariant: Equatable {
             return .compoundShape(updated)
         }
     }
+
+    public func withMask(_ mask: Mask?) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.mask = mask
+            return .compoundShape(updated)
+        }
+    }
 }
