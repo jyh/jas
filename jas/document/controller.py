@@ -6,6 +6,7 @@ that replaces the old one in the Model.
 """
 
 from collections.abc import Callable
+import dataclasses
 from dataclasses import dataclass, replace
 
 from document.document import (
@@ -14,17 +15,51 @@ from document.document import (
     selection_all, selection_partial,
 )
 from geometry.element import (
-    Element, Fill, Group, Layer, Path, Stroke, StrokeWidthPoint, Visibility,
+    Element, Fill, Group, Layer, Mask, Path, Stroke, StrokeWidthPoint, Visibility,
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
     with_width_points as _with_width_points,
+    with_mask as _with_mask,
     element_fill as _element_fill, element_stroke as _element_stroke,
 )
 from algorithms.hit_test import (
     element_intersects_rect, point_in_rect,
 )
 from document.model import Model
+
+
+# ── Opacity-mask helpers (OPACITY.md § States) ───────────────
+
+def first_mask(document) -> Mask | None:
+    """Return the mask on the first selected element, if any. Drives
+    the first-element-wins toggles in the Opacity panel (disable,
+    unlink, and the MAKE_MASK_BUTTON label flip).
+    """
+    if not document.selection:
+        return None
+    # Selection is a frozenset; pick a deterministic "first" by path.
+    first = min(document.selection, key=lambda es: es.path)
+    try:
+        return document.get_element(first.path).mask
+    except Exception:
+        return None
+
+
+def selection_has_mask(document) -> bool:
+    """True when every selected element has an opacity mask attached.
+    Mixed selections (some masked, some not) count as "no mask" per
+    OPACITY.md § States.
+    """
+    if not document.selection:
+        return False
+    for es in document.selection:
+        try:
+            if document.get_element(es.path).mask is None:
+                return False
+        except Exception:
+            return False
+    return True
 
 
 class Controller:
@@ -491,6 +526,100 @@ class Controller:
             new_elem = _with_width_points(elem, width_points)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    # ── Opacity mask lifecycle (OPACITY.md § States) ─────────────
+
+    def make_mask_on_selection(self, clip: bool, invert: bool) -> None:
+        """Create an opacity mask on every selected element that does
+        not already have one. The subtree starts as an empty ``Group``;
+        users populate it via the MASK_PREVIEW click (Phase 4). ``clip``
+        and ``invert`` come from the document preferences
+        ``new_masks_clipping`` / ``new_masks_inverted``.
+        """
+        doc = self._model.document
+        if not doc.selection:
+            return
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            if elem.mask is not None:
+                continue
+            m = Mask(
+                subtree=Group(),
+                clip=clip,
+                invert=invert,
+                disabled=False,
+                linked=True,
+                unlink_transform=None,
+            )
+            new_doc = new_doc.replace_element(es.path, _with_mask(elem, m))
+        self._model.document = new_doc
+
+    def release_mask_on_selection(self) -> None:
+        """Remove the opacity mask from every selected element."""
+        doc = self._model.document
+        if not doc.selection:
+            return
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            if elem.mask is None:
+                continue
+            new_doc = new_doc.replace_element(es.path, _with_mask(elem, None))
+        self._model.document = new_doc
+
+    def _update_mask_on_selection(self, transform) -> None:
+        """Apply ``transform`` (Mask -> Mask) to every selected element's
+        mask. Elements without a mask are skipped.
+        """
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            if elem.mask is None:
+                continue
+            new_doc = new_doc.replace_element(es.path, _with_mask(elem, transform(elem.mask)))
+        self._model.document = new_doc
+
+    def set_mask_clip_on_selection(self, clip: bool) -> None:
+        """Set ``mask.clip`` on every selected element that has a mask."""
+        self._update_mask_on_selection(lambda m: dataclasses.replace(m, clip=clip))
+
+    def set_mask_invert_on_selection(self, invert: bool) -> None:
+        """Set ``mask.invert`` on every selected element that has a mask."""
+        self._update_mask_on_selection(lambda m: dataclasses.replace(m, invert=invert))
+
+    def toggle_mask_disabled_on_selection(self) -> None:
+        """Toggle ``mask.disabled`` on every selected mask, driven by
+        the first selected element's current state.
+        """
+        fm = first_mask(self._model.document)
+        if fm is None:
+            return
+        new_state = not fm.disabled
+        self._update_mask_on_selection(
+            lambda m: dataclasses.replace(m, disabled=new_state))
+
+    def toggle_mask_linked_on_selection(self) -> None:
+        """Toggle ``mask.linked`` on every selected mask. On unlink,
+        captures each element's current transform into
+        ``unlink_transform``. On relink, clears ``unlink_transform``.
+        """
+        fm = first_mask(self._model.document)
+        if fm is None:
+            return
+        new_linked = not fm.linked
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            if elem.mask is None:
+                continue
+            capture = None if new_linked else getattr(elem, 'transform', None)
+            new_mask = dataclasses.replace(
+                elem.mask, linked=new_linked, unlink_transform=capture)
+            new_doc = new_doc.replace_element(es.path, _with_mask(elem, new_mask))
         self._model.document = new_doc
 
 

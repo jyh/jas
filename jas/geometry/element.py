@@ -1168,6 +1168,16 @@ def with_width_points(element: Element, width_points: tuple[StrokeWidthPoint, ..
     return element
 
 
+def with_mask(element: Element, mask: Mask | None) -> Element:
+    """Return a copy of element with its opacity mask replaced.
+
+    Passing ``None`` removes the mask; passing a ``Mask`` sets or replaces it.
+    Preserves every other field via ``dataclasses.replace``. Storage-only in
+    Phase 3a / 3b; renderer support lands in a later phase.
+    """
+    return dataclasses.replace(element, mask=mask)
+
+
 def element_fill(element: Element) -> Fill | None:
     """Return the element's fill, or None if it has no fill field."""
     return getattr(element, 'fill', None)
