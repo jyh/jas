@@ -46,15 +46,20 @@ module PathMap : Map.S with type key = element_path
 (** A selection is a map from element path to element_selection. *)
 type selection = element_selection PathMap.t
 
-(** A document consisting of an ordered list of layers. *)
+(** A document consisting of an ordered list of layers plus
+    artboards and document-global artboard options. *)
 type document = {
   layers : Element.element array;
   selected_layer : int;
   selection : selection;
+  artboards : Artboard.artboard list;
+  artboard_options : Artboard.options;
 }
 
 val make_document :
   ?selected_layer:int -> ?selection:selection ->
+  ?artboards:Artboard.artboard list ->
+  ?artboard_options:Artboard.options ->
   Element.element array -> document
 
 (** Convenience: build a fully-selected entry. *)
