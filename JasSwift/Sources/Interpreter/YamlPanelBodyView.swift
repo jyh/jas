@@ -296,7 +296,20 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderButton() -> some View {
-        let label = element["label"] as? String ?? ""
+        let staticLabel = element["label"] as? String ?? ""
+        // bind.label: expression whose evaluated string replaces the
+        // static label. op_make_mask uses this to flip between
+        // "Make Mask" and "Release" based on selection_has_mask per
+        // OPACITY.md § States.
+        let label: String = {
+            if let bind = element["bind"] as? [String: Any],
+               let expr = bind["label"] as? String {
+                if case .string(let s) = evaluate(expr, context: context) {
+                    return s
+                }
+            }
+            return staticLabel
+        }()
         let isDisabled = evalBindDisabled()
         return Button(label) { handleWidgetClick() }
             .disabled(isDisabled)
@@ -337,6 +350,25 @@ struct YamlElementView: View {
     ///    buttons whose behavior is a short effect list rather than
     ///    a named action.
     private func handleWidgetClick() {
+        // Opacity panel: op_make_mask dispatches Controller make or
+        // release based on selection_has_mask. The button has no
+        // ``action`` in yaml — routing is resolved here against the
+        // panel id and the element id. Mirrors the Rust special-case
+        // in ``render_button``.
+        if panelId == "opacity_panel_content",
+           let id = element["id"] as? String, id == "op_make_mask",
+           let m = model {
+            let hasMask = evaluate("selection_has_mask", context: context).toBool()
+            let ctrl = Controller(model: m)
+            if hasMask {
+                ctrl.releaseMaskOnSelection()
+            } else {
+                let clip = (context["_opacity_new_masks_clipping"] as? Bool) ?? true
+                let invert = (context["_opacity_new_masks_inverted"] as? Bool) ?? false
+                ctrl.makeMaskOnSelection(clip: clip, invert: invert)
+            }
+            return
+        }
         if let actionName = element["action"] as? String {
             let rawParams = (element["params"] as? [String: Any]) ?? [:]
             var resolved: [String: Any] = [:]
@@ -617,14 +649,43 @@ struct YamlElementView: View {
             return false
         }()
         let writeKey = writeBackKey(checkedExpr)
+        let isDisabled: Bool = {
+            if let disExpr = bind?["disabled"] as? String {
+                return evaluate(disExpr, context: context).toBool()
+            }
+            return false
+        }()
+        // Opacity panel selection-mask bindings route write-backs to
+        // the document controller (the flag lives on the selected
+        // element's mask, not on a panel-state key). See OPACITY.md §
+        // States. Mirrors the Rust ``render_toggle`` special-case.
+        let maskRoute: String? = {
+            guard panelId == "opacity_panel_content" else { return nil }
+            switch checkedExpr?.trimmingCharacters(in: .whitespaces) {
+            case "selection_mask_clip": return "clip"
+            case "selection_mask_invert": return "invert"
+            default: return nil
+            }
+        }()
+        let capturedModel = model
 
         Toggle(label, isOn: Binding<Bool>(
             get: { isChecked },
             set: { newVal in
+                if let route = maskRoute, let m = capturedModel {
+                    let ctrl = Controller(model: m)
+                    if route == "clip" {
+                        ctrl.setMaskClipOnSelection(newVal)
+                    } else {
+                        ctrl.setMaskInvertOnSelection(newVal)
+                    }
+                    return
+                }
                 if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
             }
         ))
             .toggleStyle(.checkbox)
+            .disabled(isDisabled)
     }
 
     // MARK: - Combo Box
