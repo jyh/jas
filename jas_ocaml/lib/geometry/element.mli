@@ -388,6 +388,12 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      (** Opacity panel "Page Isolated Blending" flag. Storage-only in
+          Phase 2; renderer support is deferred. Default [false]. *)
+      isolated_blending : bool;
+      (** Opacity panel "Page Knockout Group" flag. Storage-only in
+          Phase 2; renderer support is deferred. Default [false]. *)
+      knockout_group : bool;
     }
   | Layer of {
       name : string;
@@ -397,6 +403,11 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      (** See [Group.isolated_blending]. Present on layers so the
+          document root (a Layer) can carry the flag today. *)
+      isolated_blending : bool;
+      (** See [Group.knockout_group]. *)
+      knockout_group : bool;
     }
   (** A non-destructive element whose geometry is evaluated on demand
       from its source inputs. See [live_variant] below and

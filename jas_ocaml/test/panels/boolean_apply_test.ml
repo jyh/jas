@@ -16,6 +16,7 @@ let make_model rects selected_paths =
     name = "L0";
     children = Array.of_list rects;
     opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal;
+    isolated_blending = false; knockout_group = false;
   } in
   let sel = List.fold_left (fun acc path ->
     Document.PathMap.add path (Document.make_element_selection path) acc

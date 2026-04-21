@@ -511,6 +511,8 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      isolated_blending : bool;
+      knockout_group : bool;
     }
   | Layer of {
       name : string;
@@ -520,6 +522,8 @@ type element =
       locked : bool;
       visibility : visibility;
       blend_mode : blend_mode;
+      isolated_blending : bool;
+      knockout_group : bool;
     }
   | Live of live_variant
 
@@ -918,10 +922,12 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
               tspans = tspans_from_content content }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Group { children; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Group { children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+          isolated_blending = false; knockout_group = false }
 
 let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Layer { name; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal }
+  Layer { name; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+          isolated_blending = false; knockout_group = false }
 
 let is_locked = function
   | Line { locked; _ } | Rect { locked; _ } | Circle { locked; _ }

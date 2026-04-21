@@ -494,10 +494,12 @@ let rec unpack_element v =
   if tag = tag_layer then
     let name = as_str (List.nth arr 5) in
     let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 6))) in
-    Layer { name; children; opacity; transform; locked; visibility; blend_mode = Element.Normal }
+    Layer { name; children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
+            isolated_blending = false; knockout_group = false }
   else if tag = tag_group then
     let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 5))) in
-    Group { children; opacity; transform; locked; visibility; blend_mode = Element.Normal }
+    Group { children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
+            isolated_blending = false; knockout_group = false }
   else if tag = tag_line then
     let wp = if List.length arr > 10 then unpack_width_points (List.nth arr 10) else [] in
     Line { x1 = as_f64 (List.nth arr 5); y1 = as_f64 (List.nth arr 6);

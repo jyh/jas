@@ -774,12 +774,14 @@ let rec parse_element j =
   | "group" ->
     let children = j |> member "children" |> to_list
       |> List.map parse_element |> Array.of_list in
-    Group { children; opacity; transform; locked; visibility; blend_mode = Normal }
+    Group { children; opacity; transform; locked; visibility; blend_mode = Normal;
+            isolated_blending = false; knockout_group = false }
   | "layer" ->
     let children = j |> member "children" |> to_list
       |> List.map parse_element |> Array.of_list in
     let name = j |> member "name" |> to_string in
-    Layer { name; children; opacity; transform; locked; visibility; blend_mode = Normal }
+    Layer { name; children; opacity; transform; locked; visibility; blend_mode = Normal;
+            isolated_blending = false; knockout_group = false }
   | _ -> failwith (Printf.sprintf "Unknown element type: %s" typ)
 
 let parse_selection j =
