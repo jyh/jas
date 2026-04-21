@@ -239,3 +239,65 @@ import Testing
     let x = store.getDialogWithOuter("x_rp", outer: outer)
     #expect((x as? Int) == 100 || (x as? Double) == 100)
 }
+
+// MARK: - Phase F follow-up: render-time outer scope in YamlDialogOverlay
+// Verifies that buildDialogEvalContext merges outer-scope keys
+// (panel, active_document) alongside dialog / param while preserving
+// dialog-local precedence on collision.
+
+@Test func dialogEvalCtxIncludesOuterScope() {
+    let state: [String: Any] = ["name": "Cover"]
+    let params: [String: Any] = ["artboard_id": "aaa00001"]
+    let outer: [String: Any] = [
+        "panel": ["reference_point": "center"],
+        "active_document": ["artboards_count": 3],
+    ]
+    let ctx = buildDialogEvalContext(state: state, params: params, outer: outer)
+    // Dialog-local keys surfaced intact.
+    #expect((ctx["dialog"] as? [String: Any])?["name"] as? String == "Cover")
+    #expect((ctx["param"] as? [String: Any])?["artboard_id"] as? String == "aaa00001")
+    // Outer-scope keys merged in.
+    #expect((ctx["panel"] as? [String: Any])?["reference_point"] as? String == "center")
+    #expect((ctx["active_document"] as? [String: Any])?["artboards_count"] as? Int == 3)
+}
+
+@Test func dialogEvalCtxDialogWinsOverOuterCollision() {
+    // If an outer caller accidentally published a `dialog` key, the
+    // overlay's own dialog state must win so bind.value: "dialog.foo"
+    // never resolves against the stale outer dict.
+    let state: [String: Any] = ["foo": "live"]
+    let outer: [String: Any] = ["dialog": ["foo": "stale"]]
+    let ctx = buildDialogEvalContext(state: state, params: [:], outer: outer)
+    #expect((ctx["dialog"] as? [String: Any])?["foo"] as? String == "live")
+}
+
+@Test func dialogEvalCtxResolvesOuterPanelExpression() {
+    // Round-trip: feed the merged ctx into the expression evaluator
+    // and confirm panel.* lookups succeed. This is the path used by
+    // bind.* expressions during dialog rendering.
+    let outer: [String: Any] = [
+        "panel": ["reference_point": "top_left"]
+    ]
+    let ctx = buildDialogEvalContext(state: [:], params: [:], outer: outer)
+    let result = evaluate("panel.reference_point", context: ctx)
+    if case .string(let s) = result {
+        #expect(s == "top_left")
+    } else {
+        Issue.record("Expected string result, got \(result)")
+    }
+}
+
+@Test func dialogEvalCtxResolvesActiveDocumentArtboardsCount() {
+    // Mirrors the Artboard Options footer's bind.disabled predicate:
+    // "active_document.artboards_count <= 1".
+    let outer: [String: Any] = [
+        "active_document": ["artboards_count": 1]
+    ]
+    let ctx = buildDialogEvalContext(state: [:], params: [:], outer: outer)
+    let result = evaluate("active_document.artboards_count <= 1", context: ctx)
+    if case .bool(let b) = result {
+        #expect(b == true)
+    } else {
+        Issue.record("Expected bool result, got \(result)")
+    }
+}
