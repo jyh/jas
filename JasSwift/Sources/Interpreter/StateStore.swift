@@ -100,23 +100,35 @@ public class StateStore {
         self.dialogProps = props ?? [:]
     }
 
-    public func getDialog(_ key: String) -> Any? {
+    /// Get a dialog value, evaluating the getter if present.
+    ///
+    /// Dialog getters may reference cross-scope bindings (panel /
+    /// state / active_document / param). Pass them via ``outer``.
+    /// Artboard Options reference-point transforms require this.
+    public func getDialogWithOuter(_ key: String, outer: [String: Any]) -> Any? {
         guard dialogId != nil else { return nil }
         if let prop = dialogProps[key], let getExpr = prop["get"] as? String {
-            // Evaluate getter against sibling dialog state as bare names
-            let local = dialog
+            var local = outer
+            for (k, v) in dialog { local[k] = v }
             let result = evaluate(getExpr, context: local)
             return result.toAny()
         }
         return dialog[key]
     }
 
-    public func setDialog(_ key: String, _ value: Any?) {
+    public func getDialog(_ key: String) -> Any? {
+        getDialogWithOuter(key, outer: [:])
+    }
+
+    /// Set a dialog value, running the setter lambda if present.
+    /// ``outer`` gives the setter access to cross-scope bindings.
+    public func setDialogWithOuter(_ key: String, _ value: Any?, outer: [String: Any]) {
         guard dialogId != nil else { return }
         if let prop = dialogProps[key] {
             if let setExpr = prop["set"] as? String {
                 // Parse the setter as a lambda and apply with the value
-                var local = dialog
+                var local = outer
+                for (k, v) in dialog { local[k] = v }
                 let storeCb: (String, Value) -> Void = { [weak self] target, val in
                     self?.dialog[target] = val.toAny()
                 }
@@ -137,6 +149,10 @@ public class StateStore {
             }
         }
         dialog[key] = value
+    }
+
+    public func setDialog(_ key: String, _ value: Any?) {
+        setDialogWithOuter(key, value, outer: [:])
     }
 
     public func getDialogState() -> [String: Any] {
