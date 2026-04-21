@@ -16,7 +16,8 @@ import Foundation
 /// from callers that don't have layers-panel context.
 public func buildActiveDocumentView(
     model: Model?,
-    layersPanelSelection: [[Int]] = []
+    layersPanelSelection: [[Int]] = [],
+    artboardsPanelSelection: [String] = []
 ) -> [String: Any] {
     guard let m = model else {
         return [
@@ -28,6 +29,16 @@ public func buildActiveDocumentView(
             "has_selection": false,
             "selection_count": 0,
             "element_selection": [] as [Any],
+            "artboards": [] as [Any],
+            "artboard_options": [
+                "fade_region_outside_artboard": true,
+                "update_while_dragging": true,
+            ] as [String: Any],
+            "artboards_count": 0,
+            "next_artboard_name": "Artboard 1",
+            "current_artboard_id": NSNull(),
+            "current_artboard": [:] as [String: Any],
+            "artboards_panel_selection_ids": artboardsPanelSelection,
         ]
     }
     var topLevelLayers: [[String: Any]] = []
@@ -70,6 +81,43 @@ public func buildActiveDocumentView(
     let elementSelection: [[String: Any]] = sortedSelection.map {
         ["__path__": $0.path]
     }
+    // Artboard view (ARTBOARDS.md §Artboard data model).
+    let artboardsView: [[String: Any]] = m.document.artboards.enumerated().map { (i, ab) in
+        [
+            "id": ab.id,
+            "name": ab.name,
+            "number": i + 1,
+            "x": ab.x,
+            "y": ab.y,
+            "width": ab.width,
+            "height": ab.height,
+            "fill": ab.fill.asCanonical,
+            "show_center_mark": ab.showCenterMark,
+            "show_cross_hairs": ab.showCrossHairs,
+            "show_video_safe_areas": ab.showVideoSafeAreas,
+            "video_ruler_pixel_aspect_ratio": ab.videoRulerPixelAspectRatio,
+        ]
+    }
+    let selectedSet = Set(artboardsPanelSelection)
+    let current = m.document.artboards.first(where: { selectedSet.contains($0.id) })
+        ?? m.document.artboards.first
+    let currentArtboardJson: [String: Any]
+    let currentArtboardId: Any
+    if let a = current {
+        currentArtboardJson = [
+            "id": a.id,
+            "name": a.name,
+            "x": a.x,
+            "y": a.y,
+            "width": a.width,
+            "height": a.height,
+        ]
+        currentArtboardId = a.id
+    } else {
+        currentArtboardJson = [:]
+        currentArtboardId = NSNull()
+    }
+    let nextArtboardName_ = nextArtboardName(m.document.artboards)
     return [
         "top_level_layers": topLevelLayers,
         "top_level_layer_paths": topLevelLayerPaths,
@@ -79,5 +127,15 @@ public func buildActiveDocumentView(
         "has_selection": !m.document.selection.isEmpty,
         "selection_count": m.document.selection.count,
         "element_selection": elementSelection,
+        "artboards": artboardsView,
+        "artboard_options": [
+            "fade_region_outside_artboard": m.document.artboardOptions.fadeRegionOutsideArtboard,
+            "update_while_dragging": m.document.artboardOptions.updateWhileDragging,
+        ] as [String: Any],
+        "artboards_count": m.document.artboards.count,
+        "next_artboard_name": nextArtboardName_,
+        "current_artboard_id": currentArtboardId,
+        "current_artboard": currentArtboardJson,
+        "artboards_panel_selection_ids": artboardsPanelSelection,
     ]
 }
