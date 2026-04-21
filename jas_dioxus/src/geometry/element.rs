@@ -613,10 +613,40 @@ pub enum Visibility {
 }
 
 
+/// Blend mode for compositing an element against its parent layer.
+/// Values mirror the Opacity panel's mode dropdown and serialize as
+/// snake_case to match opacity.yaml mode ids (e.g. `color_burn`,
+/// `soft_light`). Default is `Normal` (no compositing effect).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+         serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BlendMode {
+    #[default]
+    Normal,
+    Darken,
+    Multiply,
+    ColorBurn,
+    Lighten,
+    Screen,
+    ColorDodge,
+    Overlay,
+    SoftLight,
+    HardLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+
 /// Common properties shared by all visible elements.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CommonProps {
     pub opacity: f64,
+    #[serde(default)]
+    pub mode: BlendMode,
     pub transform: Option<Transform>,
     pub locked: bool,
     pub visibility: Visibility,
@@ -626,6 +656,7 @@ impl Default for CommonProps {
     fn default() -> Self {
         Self {
             opacity: 1.0,
+            mode: BlendMode::Normal,
             transform: None,
             locked: false,
             visibility: Visibility::Preview,
@@ -995,6 +1026,10 @@ impl Element {
 
     pub fn opacity(&self) -> f64 {
         self.common().opacity
+    }
+
+    pub fn mode(&self) -> BlendMode {
+        self.common().mode
     }
 
     pub fn transform(&self) -> Option<&Transform> {
@@ -3071,8 +3106,9 @@ mod tests {
         let elem = Element::Layer(LayerElem {
             name: "Layer 1".into(),
             children: Vec::new(),
-            common: CommonProps { opacity: 0.75, transform: None,
-                                  locked: true, visibility: Visibility::Outline },
+            common: CommonProps { opacity: 0.75, mode: BlendMode::Normal,
+                                  transform: None, locked: true,
+                                  visibility: Visibility::Outline },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3098,5 +3134,95 @@ mod tests {
         let json = serde_json::to_value(&group).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
         assert_eq!(group, back);
+    }
+
+    // ── BlendMode ─────────────────────────────────────────────
+
+    #[test]
+    fn blend_mode_default_is_normal() {
+        assert_eq!(BlendMode::default(), BlendMode::Normal);
+    }
+
+    #[test]
+    fn blend_mode_has_sixteen_variants() {
+        let all = [
+            BlendMode::Normal,
+            BlendMode::Darken, BlendMode::Multiply, BlendMode::ColorBurn,
+            BlendMode::Lighten, BlendMode::Screen, BlendMode::ColorDodge,
+            BlendMode::Overlay, BlendMode::SoftLight, BlendMode::HardLight,
+            BlendMode::Difference, BlendMode::Exclusion,
+            BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity,
+        ];
+        assert_eq!(all.len(), 16);
+    }
+
+    #[test]
+    fn blend_mode_serde_uses_snake_case() {
+        let json = serde_json::to_value(BlendMode::ColorBurn).unwrap();
+        assert_eq!(json, serde_json::json!("color_burn"));
+        let back: BlendMode = serde_json::from_value(serde_json::json!("soft_light")).unwrap();
+        assert_eq!(back, BlendMode::SoftLight);
+    }
+
+    #[test]
+    fn blend_mode_serde_roundtrip_all_variants() {
+        for mode in [
+            BlendMode::Normal,
+            BlendMode::Darken, BlendMode::Multiply, BlendMode::ColorBurn,
+            BlendMode::Lighten, BlendMode::Screen, BlendMode::ColorDodge,
+            BlendMode::Overlay, BlendMode::SoftLight, BlendMode::HardLight,
+            BlendMode::Difference, BlendMode::Exclusion,
+            BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity,
+        ] {
+            let json = serde_json::to_value(mode).unwrap();
+            let back: BlendMode = serde_json::from_value(json).unwrap();
+            assert_eq!(mode, back);
+        }
+    }
+
+    // ── CommonProps.mode ──────────────────────────────────────
+
+    #[test]
+    fn common_props_default_mode_is_normal() {
+        let c = CommonProps::default();
+        assert_eq!(c.mode, BlendMode::Normal);
+    }
+
+    #[test]
+    fn element_mode_accessor_returns_default() {
+        let r = rect(0.0, 0.0, 10.0, 10.0);
+        assert_eq!(r.mode(), BlendMode::Normal);
+    }
+
+    #[test]
+    fn common_props_serde_defaults_mode_when_missing() {
+        let json = serde_json::json!({
+            "opacity": 0.5,
+            "transform": null,
+            "locked": false,
+            "visibility": "Preview",
+        });
+        let c: CommonProps = serde_json::from_value(json).unwrap();
+        assert_eq!(c.mode, BlendMode::Normal);
+        assert_eq!(c.opacity, 0.5);
+    }
+
+    #[test]
+    fn element_serde_roundtrip_preserves_non_default_mode() {
+        let elem = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                opacity: 1.0,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Preview,
+            },
+        });
+        let json = serde_json::to_value(&elem).unwrap();
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert_eq!(elem, back);
+        assert_eq!(back.mode(), BlendMode::Multiply);
     }
 }

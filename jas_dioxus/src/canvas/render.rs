@@ -35,6 +35,30 @@ fn css_color(c: &Color) -> String {
     }
 }
 
+/// Map a BlendMode to the Canvas2D `globalCompositeOperation` string.
+/// Canvas2D natively supports all 16 separable / non-separable blend modes
+/// used by the Opacity panel; Normal maps to the default `source-over`.
+fn blend_mode_css(mode: BlendMode) -> &'static str {
+    match mode {
+        BlendMode::Normal      => "source-over",
+        BlendMode::Darken      => "darken",
+        BlendMode::Multiply    => "multiply",
+        BlendMode::ColorBurn   => "color-burn",
+        BlendMode::Lighten     => "lighten",
+        BlendMode::Screen      => "screen",
+        BlendMode::ColorDodge  => "color-dodge",
+        BlendMode::Overlay     => "overlay",
+        BlendMode::SoftLight   => "soft-light",
+        BlendMode::HardLight   => "hard-light",
+        BlendMode::Difference  => "difference",
+        BlendMode::Exclusion   => "exclusion",
+        BlendMode::Hue         => "hue",
+        BlendMode::Saturation  => "saturation",
+        BlendMode::Color       => "color",
+        BlendMode::Luminosity  => "luminosity",
+    }
+}
+
 fn apply_fill(ctx: &CanvasRenderingContext2d, fill: Option<&Fill>) -> f64 {
     match fill {
         Some(f) => {
@@ -196,6 +220,7 @@ fn draw_element(
     apply_transform(ctx, elem.transform());
     let base_alpha = elem.opacity();
     ctx.set_global_alpha(base_alpha);
+    ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
 
     match elem {
         Element::Line(e) => {
@@ -1332,6 +1357,51 @@ mod tests {
     fn css_color_mid_gray() {
         let c = Color::Rgb { r: 0.5, g: 0.5, b: 0.5, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(127,127,127)");
+    }
+
+    // ── blend_mode_css ─────────────────────────────────────
+
+    #[test]
+    fn blend_mode_css_normal_is_source_over() {
+        assert_eq!(blend_mode_css(BlendMode::Normal), "source-over");
+    }
+
+    #[test]
+    fn blend_mode_css_maps_all_sixteen_variants() {
+        // Every variant must map to a non-empty Canvas2D composite
+        // operation name. Underscore variants in the Rust enum must
+        // become hyphenated in CSS (color_burn → "color-burn").
+        let pairs = [
+            (BlendMode::Normal,      "source-over"),
+            (BlendMode::Darken,      "darken"),
+            (BlendMode::Multiply,    "multiply"),
+            (BlendMode::ColorBurn,   "color-burn"),
+            (BlendMode::Lighten,     "lighten"),
+            (BlendMode::Screen,      "screen"),
+            (BlendMode::ColorDodge,  "color-dodge"),
+            (BlendMode::Overlay,     "overlay"),
+            (BlendMode::SoftLight,   "soft-light"),
+            (BlendMode::HardLight,   "hard-light"),
+            (BlendMode::Difference,  "difference"),
+            (BlendMode::Exclusion,   "exclusion"),
+            (BlendMode::Hue,         "hue"),
+            (BlendMode::Saturation,  "saturation"),
+            (BlendMode::Color,       "color"),
+            (BlendMode::Luminosity,  "luminosity"),
+        ];
+        assert_eq!(pairs.len(), 16);
+        for (mode, expected) in pairs {
+            assert_eq!(blend_mode_css(mode), expected,
+                       "mapping mismatch for {:?}", mode);
+        }
+    }
+
+    #[test]
+    fn blend_mode_css_hyphenates_compound_names() {
+        assert_eq!(blend_mode_css(BlendMode::ColorBurn), "color-burn");
+        assert_eq!(blend_mode_css(BlendMode::ColorDodge), "color-dodge");
+        assert_eq!(blend_mode_css(BlendMode::SoftLight), "soft-light");
+        assert_eq!(blend_mode_css(BlendMode::HardLight), "hard-light");
     }
 
     #[test]

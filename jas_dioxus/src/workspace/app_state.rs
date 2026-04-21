@@ -114,6 +114,10 @@ pub(crate) struct AppState {
     /// Read by `Controller::apply_destructive_boolean` and compound
     /// shape evaluation. See BOOLEAN.md §Boolean Options dialog.
     pub(crate) boolean_panel: BooleanPanelState,
+    /// Opacity panel state — mirrors state in `workspace/panels/opacity.yaml`.
+    /// `mode` and `opacity` are working values; `new_masks_*` are document
+    /// preferences. See transcripts/OPACITY.md.
+    pub(crate) opacity_panel: OpacityPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -390,6 +394,43 @@ impl Default for BooleanPanelState {
     }
 }
 
+/// Opacity panel state fields — mirror the panel-local state declared in
+/// `workspace/panels/opacity.yaml`. `mode` and `opacity` are working values
+/// shown in the panel controls; later phases synchronize them with the
+/// selection's `element.mode` / `element.opacity`. The `new_masks_*` fields
+/// are document-scoped preferences (Phase 1 stores them on the panel state
+/// until the document model grows per-document preferences).
+#[derive(Debug, Clone)]
+pub(crate) struct OpacityPanelState {
+    /// Working blend mode.
+    pub mode: super::super::geometry::element::BlendMode,
+    /// Working opacity (0-100). Panel range is percent, distinct from the
+    /// model's 0.0-1.0 fraction; later phases convert at the binding edge.
+    pub opacity: f64,
+    /// Panel-local: preview row collapsed when true.
+    pub thumbnails_hidden: bool,
+    /// Panel-local: isolated_blending / knockout_group toggles revealed
+    /// inline when true.
+    pub options_shown: bool,
+    /// Document preference: initial `mask.clip` for newly made masks.
+    pub new_masks_clipping: bool,
+    /// Document preference: initial `mask.invert` for newly made masks.
+    pub new_masks_inverted: bool,
+}
+
+impl Default for OpacityPanelState {
+    fn default() -> Self {
+        Self {
+            mode: super::super::geometry::element::BlendMode::Normal,
+            opacity: 100.0,
+            thumbnails_hidden: false,
+            options_shown: false,
+            new_masks_clipping: true,
+            new_masks_inverted: false,
+        }
+    }
+}
+
 impl AlignTo {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -476,6 +517,7 @@ impl AppState {
             paragraph_panel: ParagraphPanelState::default(),
             align_panel: AlignPanelState::default(),
             boolean_panel: BooleanPanelState::default(),
+            opacity_panel: OpacityPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
@@ -2454,6 +2496,43 @@ pub(crate) fn text_decoration_flags(td: &str) -> (bool, bool) {
         }
     }
     (underline, strikethrough)
+}
+
+#[cfg(test)]
+mod opacity_panel_state_tests {
+    use super::*;
+    use crate::geometry::element::BlendMode;
+
+    #[test]
+    fn default_mode_is_normal() {
+        let s = OpacityPanelState::default();
+        assert_eq!(s.mode, BlendMode::Normal);
+    }
+
+    #[test]
+    fn default_opacity_is_100() {
+        let s = OpacityPanelState::default();
+        assert_eq!(s.opacity, 100.0);
+    }
+
+    #[test]
+    fn default_thumbnails_hidden_false_options_shown_false() {
+        let s = OpacityPanelState::default();
+        assert!(!s.thumbnails_hidden);
+        assert!(!s.options_shown);
+    }
+
+    #[test]
+    fn default_new_masks_clipping_true() {
+        let s = OpacityPanelState::default();
+        assert!(s.new_masks_clipping);
+    }
+
+    #[test]
+    fn default_new_masks_inverted_false() {
+        let s = OpacityPanelState::default();
+        assert!(!s.new_masks_inverted);
+    }
 }
 
 #[cfg(test)]

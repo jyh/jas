@@ -1031,6 +1031,7 @@ fn parse_common(node: &XmlNode) -> CommonProps {
     // DOCUMENT.md for the rationale.
     CommonProps {
         opacity: parse_opacity(node),
+        mode: crate::geometry::element::BlendMode::default(),
         transform: parse_transform(node),
         locked: false,
         visibility: crate::geometry::element::Visibility::default(),
