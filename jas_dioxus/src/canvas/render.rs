@@ -4,6 +4,7 @@
 
 use web_sys::CanvasRenderingContext2d;
 
+use crate::document::artboard::{Artboard, ArtboardFill};
 use crate::document::document::Document;
 use crate::geometry::element::Visibility;
 use crate::geometry::element::*;
@@ -1059,32 +1060,199 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
 }
 
 // ---------------------------------------------------------------------------
+// Artboard rendering (ARTBOARDS.md §Canvas appearance)
+// ---------------------------------------------------------------------------
+//
+// Z-order around the existing element / selection passes:
+//
+//   1. Canvas background (white fill in `render()`)
+//   2. draw_artboard_fills       — per artboard, list order
+//   3. (element tree — unchanged)
+//   4. draw_fade_overlay         — dims off-artboard regions (phase-E)
+//   5. draw_artboard_borders     — thin default borders
+//   6. draw_artboard_accent      — 2px outline for panel-selected
+//   7. draw_artboard_labels      — "N  Name" above top-left
+//   8. draw_artboard_display_marks — center mark / cross hairs / safe areas
+//   9. draw_selection_overlays   — unchanged
+//
+// Phase-D first pass: borders / accent / label / marks are drawn at
+// 1 device-pixel at the current canvas transform — matching the
+// existing selection-overlay idiom. Full zoom-independent screen-
+// pixel sizing waits on passing the canvas scale through `render()`.
+
+const ARTBOARD_BORDER_COLOR: &str = "rgb(48,48,48)";
+const ARTBOARD_ACCENT_COLOR: &str = "rgba(0, 120, 215, 0.95)";
+const ARTBOARD_MARK_COLOR: &str = "rgb(150,150,150)";
+const ARTBOARD_LABEL_COLOR: &str = "rgb(200,200,200)";
+
+fn artboard_fill_css(fill: &ArtboardFill) -> Option<String> {
+    match fill {
+        ArtboardFill::Transparent => None,
+        ArtboardFill::Color(hex) => Some(hex.clone()),
+    }
+}
+
+fn draw_artboard_fills(ctx: &CanvasRenderingContext2d, doc: &Document) {
+    for ab in &doc.artboards {
+        if let Some(css) = artboard_fill_css(&ab.fill) {
+            ctx.set_fill_style_str(&css);
+            ctx.fill_rect(ab.x, ab.y, ab.width, ab.height);
+        }
+        // Transparent: no fill, canvas shows through.
+    }
+}
+
+fn draw_artboard_borders(ctx: &CanvasRenderingContext2d, doc: &Document) {
+    ctx.set_stroke_style_str(ARTBOARD_BORDER_COLOR);
+    ctx.set_line_width(1.0);
+    for ab in &doc.artboards {
+        ctx.stroke_rect(ab.x, ab.y, ab.width, ab.height);
+    }
+}
+
+fn draw_artboard_accent(
+    ctx: &CanvasRenderingContext2d,
+    doc: &Document,
+    panel_selected: &[String],
+) {
+    if panel_selected.is_empty() {
+        return;
+    }
+    ctx.set_stroke_style_str(ARTBOARD_ACCENT_COLOR);
+    ctx.set_line_width(2.0);
+    for ab in &doc.artboards {
+        if panel_selected.iter().any(|id| id == &ab.id) {
+            // 2px outside the 1px default: expand the rect by ~1.5
+            // so the outer edge of the accent sits one pixel outside
+            // the default border's outer edge.
+            let pad = 1.5;
+            ctx.stroke_rect(
+                ab.x - pad,
+                ab.y - pad,
+                ab.width + 2.0 * pad,
+                ab.height + 2.0 * pad,
+            );
+        }
+    }
+}
+
+fn draw_artboard_labels(ctx: &CanvasRenderingContext2d, doc: &Document) {
+    // Font set once; zoom-independent sizing deferred (see module-
+    // level comment). At the current transform, 11px is the closest
+    // equivalent to the theme's panel-row text.
+    ctx.set_font("11px sans-serif");
+    ctx.set_fill_style_str(ARTBOARD_LABEL_COLOR);
+    ctx.set_text_baseline("bottom");
+    ctx.set_text_align("left");
+    for (i, ab) in doc.artboards.iter().enumerate() {
+        let label = format!("{}  {}", i + 1, ab.name);
+        // Label sits just above the top-left corner, offset a few
+        // document units up.
+        let _ = ctx.fill_text(&label, ab.x, ab.y - 3.0);
+    }
+}
+
+fn draw_artboard_center_mark(ctx: &CanvasRenderingContext2d, ab: &Artboard) {
+    let cx = ab.x + ab.width / 2.0;
+    let cy = ab.y + ab.height / 2.0;
+    let arm = 5.0;
+    ctx.set_stroke_style_str(ARTBOARD_MARK_COLOR);
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.move_to(cx - arm, cy);
+    ctx.line_to(cx + arm, cy);
+    ctx.move_to(cx, cy - arm);
+    ctx.line_to(cx, cy + arm);
+    ctx.stroke();
+}
+
+fn draw_artboard_cross_hairs(ctx: &CanvasRenderingContext2d, ab: &Artboard) {
+    let cx = ab.x + ab.width / 2.0;
+    let cy = ab.y + ab.height / 2.0;
+    ctx.set_stroke_style_str(ARTBOARD_MARK_COLOR);
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.move_to(ab.x, cy);
+    ctx.line_to(ab.x + ab.width, cy);
+    ctx.move_to(cx, ab.y);
+    ctx.line_to(cx, ab.y + ab.height);
+    ctx.stroke();
+}
+
+fn draw_artboard_safe_areas(ctx: &CanvasRenderingContext2d, ab: &Artboard) {
+    // Action-safe at 90%, title-safe at 80%, centered.
+    ctx.set_stroke_style_str(ARTBOARD_MARK_COLOR);
+    ctx.set_line_width(1.0);
+    for frac in [0.9_f64, 0.8_f64].iter() {
+        let w = ab.width * frac;
+        let h = ab.height * frac;
+        let x = ab.x + (ab.width - w) / 2.0;
+        let y = ab.y + (ab.height - h) / 2.0;
+        ctx.stroke_rect(x, y, w, h);
+    }
+}
+
+fn draw_artboard_display_marks(ctx: &CanvasRenderingContext2d, doc: &Document) {
+    for ab in &doc.artboards {
+        if ab.show_center_mark {
+            draw_artboard_center_mark(ctx, ab);
+        }
+        if ab.show_cross_hairs {
+            draw_artboard_cross_hairs(ctx, ab);
+        }
+        if ab.show_video_safe_areas {
+            draw_artboard_safe_areas(ctx, ab);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public render function
 // ---------------------------------------------------------------------------
 
-/// Render the entire document to the canvas. `precision` is the
-/// Boolean-panel Precision value used when evaluating compound
-/// shapes (and any other LiveElement that flattens to polygons for
-/// rendering).
+/// Render the entire document to the canvas.
+///
+/// `precision` is the Boolean-panel Precision value used when
+/// evaluating compound shapes. `panel_selected_artboards` is the
+/// ordered list of artboard ids currently panel-selected (used for
+/// the accent border at Z-layer 6); pass `&[]` when the Artboards
+/// panel isn't wired (e.g., Rust Phase C not yet landed).
 pub fn render(
     ctx: &CanvasRenderingContext2d,
     width: f64,
     height: f64,
     doc: &Document,
     precision: f64,
+    panel_selected_artboards: &[String],
 ) {
-    // Clear
+    // Layer 1: canvas background.
     ctx.set_fill_style_str("white");
     ctx.fill_rect(0.0, 0.0, width, height);
 
-    // Draw all layers, starting with the most permissive ancestor
-    // visibility. Each layer's own visibility caps it further, and
-    // the cap propagates down to descendants.
+    // Layer 2: artboard fills (list order, later wins in overlaps).
+    draw_artboard_fills(ctx, doc);
+
+    // Layer 3: document element tree.
     for layer in &doc.layers {
         draw_element(ctx, layer, Visibility::Preview, precision);
     }
 
-    // Draw selection overlays
+    // Layer 4: fade overlay — deferred to phase E.
+
+    // Layer 5: artboard borders (thin, above elements so they're
+    // never occluded).
+    draw_artboard_borders(ctx, doc);
+
+    // Layer 6: accent borders for panel-selected artboards.
+    draw_artboard_accent(ctx, doc, panel_selected_artboards);
+
+    // Layer 7: artboard labels above top-left.
+    draw_artboard_labels(ctx, doc);
+
+    // Layer 8: per-artboard display marks.
+    draw_artboard_display_marks(ctx, doc);
+
+    // Layer 9: selection overlays — unchanged.
     draw_selection_overlays(ctx, doc);
 }
 
