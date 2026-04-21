@@ -93,15 +93,23 @@ end)
 
 type selection = element_selection PathMap.t
 
-(** A document consisting of an ordered array of layers. *)
+(** A document consisting of an ordered array of layers plus
+    artboards and document-global artboard options. *)
 type document = {
   layers : element array;
   selected_layer : int;
   selection : selection;
+  artboards : Artboard.artboard list;
+  artboard_options : Artboard.options;
 }
 
-let make_document ?(selected_layer = 0) ?(selection = PathMap.empty) layers =
-  { layers; selected_layer; selection }
+let make_document
+    ?(selected_layer = 0)
+    ?(selection = PathMap.empty)
+    ?(artboards = [])
+    ?(artboard_options = Artboard.default_options)
+    layers =
+  { layers; selected_layer; selection; artboards; artboard_options }
 
 (** Build a fully-selected entry for [path]. *)
 let element_selection_all path =

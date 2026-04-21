@@ -623,7 +623,11 @@ let unpack_document v =
   let layers = Array.of_list (List.map unpack_element (as_list (List.nth arr 0))) in
   let selected_layer = as_int (List.nth arr 1) in
   let selection = unpack_selection (List.nth arr 2) in
-  { layers; selected_layer; selection }
+  (* Binary format predates artboards — parsed docs have empty
+     artboards; app load-time repair seeds a default. *)
+  { layers; selected_layer; selection;
+    artboards = [];
+    artboard_options = Artboard.default_options }
 
 (* -- Raw deflate compression --------------------------------------------- *)
 
