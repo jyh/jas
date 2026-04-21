@@ -1068,6 +1068,35 @@ let with_stroke elem s =
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
   | Group _ | Layer _ -> elem
 
+(** Return a copy of [elem] with its opacity mask replaced. Passing
+    [None] removes the mask; passing [Some m] sets or replaces it.
+    Unlike [with_fill] / [with_stroke], this preserves every other
+    field (record update with one field changed). See OPACITY.md §
+    Document model. *)
+let with_mask elem (m : mask option) =
+  match elem with
+  | Line r -> Line { r with mask = m }
+  | Rect r -> Rect { r with mask = m }
+  | Circle r -> Circle { r with mask = m }
+  | Ellipse r -> Ellipse { r with mask = m }
+  | Polyline r -> Polyline { r with mask = m }
+  | Polygon r -> Polygon { r with mask = m }
+  | Path r -> Path { r with mask = m }
+  | Text r -> Text { r with mask = m }
+  | Text_path r -> Text_path { r with mask = m }
+  | Group r -> Group { r with mask = m }
+  | Layer r -> Layer { r with mask = m }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with mask = m })
+
+(** Return the opacity mask attached to [elem], if any. *)
+let get_mask elem : mask option =
+  match elem with
+  | Line { mask; _ } | Rect { mask; _ } | Circle { mask; _ }
+  | Ellipse { mask; _ } | Polyline { mask; _ } | Polygon { mask; _ }
+  | Path { mask; _ } | Text { mask; _ } | Text_path { mask; _ }
+  | Group { mask; _ } | Layer { mask; _ } -> mask
+  | Live (Compound_shape cs) -> cs.mask
+
 let with_width_points elem wp =
   match elem with
   | Line r -> Line { r with width_points = wp }
