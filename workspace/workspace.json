@@ -16428,11 +16428,10 @@
                   {
                     "id": "op_make_mask",
                     "type": "button",
-                    "label": "Make Mask",
-                    "summary": "Make Mask",
-                    "description": "Creates an opacity mask on the selected element(s). Phase-1 disabled until element.mask lands. The button label flips to \"Release\" in the Has-mask state per the spec's States section.\n",
+                    "summary": "Make or Release Opacity Mask",
+                    "description": "Creates an opacity mask on the selected element(s), or releases an existing mask. The label flips between \"Make Mask\" and \"Release\" based on selection_has_mask per OPACITY.md \u00a7 States.\n",
                     "bind": {
-                      "disabled": "true"
+                      "label": "if selection_has_mask then \"Release\" else \"Make Mask\""
                     }
                   },
                   {
@@ -16440,9 +16439,10 @@
                     "type": "checkbox",
                     "label": "Clip",
                     "summary": "Clip",
-                    "description": "Toggles whether the opacity mask clips its element. Phase-1 disabled until mask.clip lands.\n",
+                    "description": "Toggles whether the opacity mask clips its element. Disabled when the selection has no mask.\n",
                     "bind": {
-                      "disabled": "true"
+                      "disabled": "!selection_has_mask",
+                      "checked": "selection_mask_clip"
                     }
                   },
                   {
@@ -16450,9 +16450,10 @@
                     "type": "checkbox",
                     "label": "Invert Mask",
                     "summary": "Invert Mask",
-                    "description": "Toggles whether the opacity mask is inverted. Phase-1 disabled until mask.invert lands.\n",
+                    "description": "Toggles whether the opacity mask is inverted. Disabled when the selection has no mask.\n",
                     "bind": {
-                      "disabled": "true"
+                      "disabled": "!selection_has_mask",
+                      "checked": "selection_mask_invert"
                     }
                   }
                 ]
