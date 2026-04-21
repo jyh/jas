@@ -927,6 +927,37 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Null
     end
 
+    (* anchor_offset_x / anchor_offset_y: (anchor, size) -> number
+       — ARTBOARDS.md §Coordinates and units. *)
+    else if name = "anchor_offset_x" then begin
+      if List.length args <> 2 then Null
+      else
+        let a = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let s = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match a, s with
+        | Str anchor, Number size ->
+          (match anchor with
+           | "top_left" | "middle_left" | "bottom_left" -> Number 0.0
+           | "top_center" | "center" | "bottom_center" -> Number (size /. 2.0)
+           | "top_right" | "middle_right" | "bottom_right" -> Number size
+           | _ -> Number 0.0)
+        | _ -> Null
+    end
+    else if name = "anchor_offset_y" then begin
+      if List.length args <> 2 then Null
+      else
+        let a = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let s = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match a, s with
+        | Str anchor, Number size ->
+          (match anchor with
+           | "top_left" | "top_center" | "top_right" -> Number 0.0
+           | "middle_left" | "center" | "middle_right" -> Number (size /. 2.0)
+           | "bottom_left" | "bottom_center" | "bottom_right" -> Number size
+           | _ -> Number 0.0)
+        | _ -> Null
+    end
+
     (* mem: (element, list) -> bool — list membership *)
     else if name = "mem" then begin
       if List.length args <> 2 then Bool false

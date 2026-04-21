@@ -105,7 +105,22 @@ let panel_menu = function
       Action { label = "Reset Panel"; command = "reset_paragraph_panel"; shortcut = "" };
       Separator;
       Action { label = "Close Paragraph"; command = "close_panel"; shortcut = "" } ]
-  | Artboards -> [Action { label = "Close Artboards"; command = "close_panel"; shortcut = "" }]
+  | Artboards -> [
+      Action { label = "New Artboard"; command = "new_artboard"; shortcut = "" };
+      Action { label = "Duplicate Artboards"; command = "duplicate_artboards"; shortcut = "" };
+      Action { label = "Delete Artboards"; command = "delete_artboards"; shortcut = "" };
+      Action { label = "Rename"; command = "rename_artboard"; shortcut = "" };
+      Separator;
+      Action { label = "Delete Empty Artboards"; command = "delete_empty_artboards"; shortcut = "" };
+      Separator;
+      (* Phase-1 deferred per ARTBOARDS.md — YAML action catalog grays these. *)
+      Action { label = "Convert to Artboards"; command = "convert_to_artboards"; shortcut = "" };
+      Action { label = "Artboard Options\xe2\x80\xa6"; command = "open_artboard_options"; shortcut = "" };
+      Action { label = "Rearrange\xe2\x80\xa6"; command = "rearrange_artboards"; shortcut = "" };
+      Separator;
+      Action { label = "Reset Panel"; command = "reset_artboards_panel"; shortcut = "" };
+      Separator;
+      Action { label = "Close Artboards"; command = "close_panel"; shortcut = "" } ]
   | Align -> [
       Toggle { label = "Use Preview Bounds"; command = "toggle_use_preview_bounds" };
       Separator;
@@ -658,6 +673,244 @@ let dispatch_yaml_action
            Boolean_apply.apply_expand_compound_shape m;
            `Null
          in
+         (* ── Artboard handlers (ARTBOARDS.md) ────────────────────
+            Mirror jas_dioxus / JasSwift artboard doc.* effects:
+            create, delete-by-id, duplicate, set-field, set-options-
+            field, move-up, move-down. Each clones the artboards
+            list, mutates, and calls m#set_document. *)
+         let with_artboards new_artboards =
+           let d = m#document in
+           m#set_document { d with Document.artboards = new_artboards }
+         in
+         let apply_artboard_override (ab : Artboard.artboard) field v =
+           match field, v with
+           | "name", Expr_eval.Str s -> { ab with Artboard.name = s }
+           | "x", Expr_eval.Number n -> { ab with Artboard.x = n }
+           | "y", Expr_eval.Number n -> { ab with Artboard.y = n }
+           | "width", Expr_eval.Number n -> { ab with Artboard.width = n }
+           | "height", Expr_eval.Number n -> { ab with Artboard.height = n }
+           | "fill", Expr_eval.Str s ->
+             { ab with Artboard.fill = Artboard.fill_from_canonical s }
+           | "show_center_mark", Expr_eval.Bool b ->
+             { ab with Artboard.show_center_mark = b }
+           | "show_cross_hairs", Expr_eval.Bool b ->
+             { ab with Artboard.show_cross_hairs = b }
+           | "show_video_safe_areas", Expr_eval.Bool b ->
+             { ab with Artboard.show_video_safe_areas = b }
+           | "video_ruler_pixel_aspect_ratio", Expr_eval.Number n ->
+             { ab with Artboard.video_ruler_pixel_aspect_ratio = n }
+           | _ -> ab
+         in
+         let doc_create_artboard_h : Effects.platform_effect = fun value call_ctx _ ->
+           let eval_ctx = `Assoc call_ctx in
+           let d = m#document in
+           (* Mint unique id. *)
+           let existing = List.map (fun (a : Artboard.artboard) -> a.id) d.Document.artboards in
+           let rec mint n =
+             if n > 100 then None
+             else
+               let c = Artboard.generate_id () in
+               if List.mem c existing then mint (n + 1) else Some c
+           in
+           (match mint 0 with
+            | None -> ()
+            | Some id ->
+              let ab0 = Artboard.default_with_id id in
+              let ab0 = { ab0 with Artboard.name = Artboard.next_name d.Document.artboards } in
+              let ab = match value with
+                | `Assoc pairs ->
+                  List.fold_left (fun ab (k, ev) ->
+                    let vv = match ev with
+                      | `String s -> Expr_eval.evaluate s eval_ctx
+                      | `Int n -> Expr_eval.Number (float_of_int n)
+                      | `Float n -> Expr_eval.Number n
+                      | `Bool b -> Expr_eval.Bool b
+                      | _ -> Expr_eval.Null
+                    in
+                    apply_artboard_override ab k vv
+                  ) ab0 pairs
+                | _ -> ab0
+              in
+              with_artboards (d.Document.artboards @ [ab]));
+           `Null
+         in
+         let doc_delete_artboard_by_id_h : Effects.platform_effect = fun value call_ctx _ ->
+           let eval_ctx = `Assoc call_ctx in
+           let id_expr = match value with `String s -> s | _ -> "" in
+           (match Expr_eval.evaluate id_expr eval_ctx with
+            | Expr_eval.Str target ->
+              let d = m#document in
+              let filtered = List.filter
+                (fun (a : Artboard.artboard) -> a.id <> target)
+                d.Document.artboards
+              in
+              if List.length filtered <> List.length d.Document.artboards then
+                with_artboards filtered
+            | _ -> ());
+           `Null
+         in
+         let doc_duplicate_artboard_h : Effects.platform_effect = fun value call_ctx _ ->
+           let eval_ctx = `Assoc call_ctx in
+           let id_expr, ox_expr, oy_expr = match value with
+             | `String s -> s, None, None
+             | `Assoc pairs ->
+               let getp k = match List.assoc_opt k pairs with
+                 | Some (`String s) -> Some s | _ -> None
+               in
+               (match getp "id" with Some s -> s | None -> ""),
+               getp "offset_x", getp "offset_y"
+             | _ -> "", None, None
+           in
+           let eval_num s_opt default =
+             match s_opt with
+             | Some s ->
+               (match Expr_eval.evaluate s eval_ctx with
+                | Expr_eval.Number n -> n | _ -> default)
+             | None -> default
+           in
+           let ox = eval_num ox_expr 20.0 in
+           let oy = eval_num oy_expr 20.0 in
+           (match Expr_eval.evaluate id_expr eval_ctx with
+            | Expr_eval.Str target ->
+              let d = m#document in
+              (match List.find_opt
+                       (fun (a : Artboard.artboard) -> a.id = target)
+                       d.Document.artboards with
+               | None -> ()
+               | Some source ->
+                 let existing = List.map
+                   (fun (a : Artboard.artboard) -> a.id)
+                   d.Document.artboards in
+                 let rec mint n =
+                   if n > 100 then None
+                   else
+                     let c = Artboard.generate_id () in
+                     if List.mem c existing then mint (n + 1) else Some c
+                 in
+                 (match mint 0 with
+                  | None -> ()
+                  | Some new_id ->
+                    let dup = {
+                      source with
+                      Artboard.id = new_id;
+                      name = Artboard.next_name d.Document.artboards;
+                      x = source.x +. ox;
+                      y = source.y +. oy;
+                    } in
+                    with_artboards (d.Document.artboards @ [dup])))
+            | _ -> ());
+           `Null
+         in
+         let doc_set_artboard_field_h : Effects.platform_effect = fun value call_ctx _ ->
+           let eval_ctx = `Assoc call_ctx in
+           (match value with
+            | `Assoc pairs ->
+              let id_expr = match List.assoc_opt "id" pairs with
+                | Some (`String s) -> s | _ -> "" in
+              let field = match List.assoc_opt "field" pairs with
+                | Some (`String s) -> s | _ -> "" in
+              let v_eval = match List.assoc_opt "value" pairs with
+                | Some (`String s) -> Expr_eval.evaluate s eval_ctx
+                | Some (`Int n) -> Expr_eval.Number (float_of_int n)
+                | Some (`Float n) -> Expr_eval.Number n
+                | Some (`Bool b) -> Expr_eval.Bool b
+                | _ -> Expr_eval.Null
+              in
+              (match Expr_eval.evaluate id_expr eval_ctx with
+               | Expr_eval.Str target ->
+                 let d = m#document in
+                 let new_abs = List.map
+                   (fun (a : Artboard.artboard) ->
+                     if a.id = target then apply_artboard_override a field v_eval
+                     else a)
+                   d.Document.artboards in
+                 with_artboards new_abs
+               | _ -> ())
+            | _ -> ());
+           `Null
+         in
+         let doc_set_artboard_options_field_h : Effects.platform_effect = fun value call_ctx _ ->
+           let eval_ctx = `Assoc call_ctx in
+           (match value with
+            | `Assoc pairs ->
+              let field = match List.assoc_opt "field" pairs with
+                | Some (`String s) -> s | _ -> "" in
+              let v = match List.assoc_opt "value" pairs with
+                | Some (`String s) -> Expr_eval.evaluate s eval_ctx
+                | Some (`Bool b) -> Expr_eval.Bool b
+                | _ -> Expr_eval.Null
+              in
+              (match v with
+               | Expr_eval.Bool flag ->
+                 let d = m#document in
+                 let new_opts = match field with
+                   | "fade_region_outside_artboard" ->
+                     { d.Document.artboard_options with
+                       Artboard.fade_region_outside_artboard = flag }
+                   | "update_while_dragging" ->
+                     { d.Document.artboard_options with
+                       Artboard.update_while_dragging = flag }
+                   | _ -> d.Document.artboard_options
+                 in
+                 m#set_document { d with Document.artboard_options = new_opts }
+               | _ -> ())
+            | _ -> ());
+           `Null
+         in
+         let extract_id_list (v : Expr_eval.value) : string list =
+           match v with
+           | Expr_eval.List items ->
+             (* items are Yojson.Safe.t; strings round-trip through
+                JSON encoding of Value.List. *)
+             List.filter_map (function
+               | `String s -> Some s
+               | _ -> None) items
+           | _ -> []
+         in
+         let move_artboards up ids =
+           let d = m#document in
+           let arr = Array.of_list d.Document.artboards in
+           let n = Array.length arr in
+           let selected = List.fold_left (fun set s -> s :: set) [] ids in
+           let is_selected i =
+             i >= 0 && i < n && List.mem arr.(i).Artboard.id selected
+           in
+           let changed = ref false in
+           if up then
+             for i = 0 to n - 1 do
+               if is_selected i && i > 0 && not (is_selected (i - 1)) then begin
+                 let tmp = arr.(i - 1) in
+                 arr.(i - 1) <- arr.(i);
+                 arr.(i) <- tmp;
+                 changed := true
+               end
+             done
+           else
+             for i = n - 1 downto 0 do
+               if is_selected i && i < n - 1 && not (is_selected (i + 1)) then begin
+                 let tmp = arr.(i + 1) in
+                 arr.(i + 1) <- arr.(i);
+                 arr.(i) <- tmp;
+                 changed := true
+               end
+             done;
+           if !changed then
+             with_artboards (Array.to_list arr)
+         in
+         let doc_move_artboards_up_h : Effects.platform_effect = fun value call_ctx _ ->
+           let eval_ctx = `Assoc call_ctx in
+           let ids_expr = match value with `String s -> s | _ -> "" in
+           let ids = extract_id_list (Expr_eval.evaluate ids_expr eval_ctx) in
+           move_artboards true ids;
+           `Null
+         in
+         let doc_move_artboards_down_h : Effects.platform_effect = fun value call_ctx _ ->
+           let eval_ctx = `Assoc call_ctx in
+           let ids_expr = match value with `String s -> s | _ -> "" in
+           let ids = extract_id_list (Expr_eval.evaluate ids_expr eval_ctx) in
+           move_artboards false ids;
+           `Null
+         in
          let base_platform_effects = [
            ("snapshot", snapshot_h);
            ("doc.set", doc_set_h);
@@ -690,6 +943,13 @@ let dispatch_yaml_action
            ("make_compound_shape", make_cs_h);
            ("release_compound_shape", release_cs_h);
            ("expand_compound_shape", expand_cs_h);
+           ("doc.create_artboard", doc_create_artboard_h);
+           ("doc.delete_artboard_by_id", doc_delete_artboard_by_id_h);
+           ("doc.duplicate_artboard", doc_duplicate_artboard_h);
+           ("doc.set_artboard_field", doc_set_artboard_field_h);
+           ("doc.set_artboard_options_field", doc_set_artboard_options_field_h);
+           ("doc.move_artboards_up", doc_move_artboards_up_h);
+           ("doc.move_artboards_down", doc_move_artboards_down_h);
          ] in
          let platform_effects = match on_close_dialog with
            | Some _ -> ("close_dialog", close_dialog_h) :: base_platform_effects
