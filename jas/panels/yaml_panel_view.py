@@ -31,8 +31,12 @@ class YamlPanelView(QWidget):
         self._spec = panel_spec
         self._store = store
         self._dispatch_fn = dispatch_fn
-        self._ctx = ctx or {}
+        self._ctx = dict(ctx or {})
         self._panel_id = panel_spec.get("id", "")
+        # Expose the current panel id so widget renderers can route
+        # bindings that depend on which panel is rendering
+        # (e.g. op_make_mask / selection_mask_* in opacity_panel).
+        self._ctx["_panel_id"] = self._panel_id
 
         # Initialize panel state
         defaults = panel_state_defaults(panel_spec)

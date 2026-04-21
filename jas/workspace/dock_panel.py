@@ -275,9 +275,18 @@ class DockPanelWidget(QWidget):
                 # bind.visible predicates during render. Built fresh per
                 # body creation; live panels re-render via store
                 # subscriptions when state changes.
-                from panels.active_document_view import build_active_document_view
+                from panels.active_document_view import (
+                    build_active_document_view, build_selection_predicates,
+                )
                 model = self._get_model() if self._get_model else None
                 ctx["active_document"] = build_active_document_view(model)
+                # OPACITY.md §States: surface the three predicates at
+                # the top level so yaml expressions like
+                # `bind.checked: "selection_mask_clip"` and
+                # `bind.disabled: "!selection_has_mask"` resolve
+                # uniformly. Mirrors `build_selection_predicates` in
+                # jas_dioxus.
+                ctx.update(build_selection_predicates(model))
             return YamlPanelView(
                 panel_spec=panel_spec,
                 store=self._state_store,
