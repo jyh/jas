@@ -202,7 +202,14 @@ public struct ContentView: View {
                 YamlDialogOverlay(
                     dialogState: $yamlDialogState,
                     theme: workspace.theme,
-                    outerScope: { buildDialogOuterScope() }
+                    outerScope: { buildDialogOuterScope() },
+                    onDismiss: {
+                        // Keep the store's dialog tracker in sync with
+                        // the overlay binding — otherwise re-opening
+                        // the same dialog would be a no-op transition
+                        // and the bridge in DockPanelView wouldn't fire.
+                        workspace.activeModel?.stateStore.closeDialog()
+                    }
                 )
             }
         }
@@ -299,7 +306,8 @@ public struct ContentView: View {
                 dockId: rightDock.id,
                 edge: .right,
                 theme: workspace.theme,
-                model: workspace.activeModel
+                model: workspace.activeModel,
+                yamlDialogState: $yamlDialogState
             )
         } else {
             SwiftUI.Color.clear

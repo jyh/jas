@@ -41,6 +41,11 @@ public struct DockPanelView: View {
     let edge: DockEdge
     let theme: Theme
     var model: Model?
+    /// Binding used to surface YAML dialogs that open via the
+    /// ``open_dialog`` effect (e.g., the Artboard Options Dialogue).
+    /// Optional so other call sites that don't care about dialogs
+    /// can pass ``.constant(nil)``.
+    var yamlDialogState: Binding<YamlDialogState?>? = nil
 
     private var dock: Dock? { workspaceLayout.dock(dockId) }
 
@@ -99,7 +104,8 @@ public struct DockPanelView: View {
                     groupIdx: gi,
                     group: group,
                     theme: theme,
-                    model: model
+                    model: model,
+                    yamlDialogState: yamlDialogState
                 )
             }
             Spacer()
@@ -117,6 +123,10 @@ public struct PanelGroupView: View {
     let group: PanelGroup
     let theme: Theme
     var model: Model?
+    /// Binding used to surface YAML dialogs opened via the
+    /// ``open_dialog`` effect. Nil when the enclosing dock doesn't
+    /// forward one (e.g., the floating-dock variant).
+    var yamlDialogState: Binding<YamlDialogState?>? = nil
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -307,19 +317,35 @@ public struct PanelGroupView: View {
             panelIdx: group.active
         )
         let items = panelMenu(activeKind)
+        // Run a menu command, then bridge any store dialog transition
+        // to the overlay binding so `open_dialog` effects become a
+        // visible modal. Captures the pre-dispatch dialog id on the
+        // active model's store and compares against the post-dispatch
+        // id; an edge from nil to something triggers the binding
+        // update. No-op for models without a store dialog change.
+        let capturedModel = model
+        let capturedDialog = yamlDialogState
+        let dispatchWithDialogBridge: (String) -> Void = { command in
+            let beforeDlg = capturedModel?.stateStore.getDialogId()
+            panelDispatch(activeKind, cmd: command, addr: addr,
+                          layout: &workspaceLayout, model: capturedModel)
+            workspaceLayout.saveIfNeeded()
+            if let m = capturedModel,
+               let binding = capturedDialog,
+               m.stateStore.getDialogId() != beforeDlg,
+               let newState = yamlDialogStateFromStore(m.stateStore) {
+                binding.wrappedValue = newState
+            }
+        }
         return Menu {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 switch item {
                 case .action(let label, let command, _):
-                    Button(label) {
-                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout, model: model)
-                        workspaceLayout.saveIfNeeded()
-                    }
+                    Button(label) { dispatchWithDialogBridge(command) }
                 case .toggle(let label, let command):
                     let checked = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
                     Button {
-                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout, model: model)
-                        workspaceLayout.saveIfNeeded()
+                        dispatchWithDialogBridge(command)
                     } label: {
                         if checked {
                             SwiftUI.Label(label, systemImage: "checkmark")
@@ -330,8 +356,7 @@ public struct PanelGroupView: View {
                 case .radio(let label, let command, _):
                     let selected = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
                     Button {
-                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout, model: model)
-                        workspaceLayout.saveIfNeeded()
+                        dispatchWithDialogBridge(command)
                     } label: {
                         if selected {
                             SwiftUI.Label(label, systemImage: "checkmark")

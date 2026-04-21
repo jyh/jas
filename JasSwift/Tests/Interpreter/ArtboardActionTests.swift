@@ -301,3 +301,66 @@ import Testing
         Issue.record("Expected bool result, got \(result)")
     }
 }
+
+// MARK: - Store → SwiftUI dialog bridge
+// Verifies the helper used by DockPanelView to mirror store-driven
+// dialog openings into the yamlDialogState binding (open_dialog
+// effect path — used by open_artboard_options, which Cancel- or
+// X-button dismissal then clears via onDismiss calling
+// store.closeDialog).
+
+@Test func yamlDialogStateFromStoreReturnsNilWhenClosed() {
+    let store = StateStore()
+    #expect(yamlDialogStateFromStore(store) == nil)
+}
+
+@Test func yamlDialogStateFromStoreMirrorsOpenDialog() {
+    let store = StateStore()
+    store.initDialog(
+        "artboard_options",
+        defaults: ["name": "Cover", "width": 612],
+        params: ["artboard_id": "aaa00001"]
+    )
+    guard let state = yamlDialogStateFromStore(store) else {
+        Issue.record("Expected dialog state, got nil")
+        return
+    }
+    #expect(state.id == "artboard_options")
+    #expect(state.state["name"] as? String == "Cover")
+    #expect(state.state["width"] as? Int == 612)
+    #expect(state.params["artboard_id"] as? String == "aaa00001")
+}
+
+@Test func yamlDialogStateFromStoreAfterCloseReturnsNil() {
+    let store = StateStore()
+    store.initDialog("artboard_options", defaults: [:])
+    #expect(yamlDialogStateFromStore(store) != nil)
+    store.closeDialog()
+    #expect(yamlDialogStateFromStore(store) == nil)
+}
+
+@Test func openArtboardOptionsActionLeavesStoreDialogOpen() {
+    // Integration check: the YAML action → open_dialog effect path
+    // transitions the store from no-dialog to "artboard_options".
+    // The DockPanelView bridge reads this transition to show the
+    // overlay. (The dialog-body button dispatch inside the overlay
+    // is a separate gap; tested here only up to the store state.)
+    let ab = Artboard.defaultWithId("aaa00001").with(
+        x: 0, y: 0, width: 612, height: 792
+    )
+    let model = Model(document: Document(
+        layers: [Layer(children: [])],
+        artboards: [ab]
+    ))
+    #expect(model.stateStore.getDialogId() == nil)
+    LayersPanel.dispatchYamlAction(
+        "open_artboard_options",
+        model: model,
+        params: ["artboard_id": "aaa00001"]
+    )
+    #expect(model.stateStore.getDialogId() == "artboard_options")
+    // And the bridge helper yields a visible dialog state.
+    let state = yamlDialogStateFromStore(model.stateStore)
+    #expect(state?.id == "artboard_options")
+    #expect(state?.params["artboard_id"] as? String == "aaa00001")
+}

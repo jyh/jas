@@ -109,6 +109,24 @@ func openYamlDialogWithOuter(
     )
 }
 
+/// Build a ``YamlDialogState`` snapshot from a StateStore that has a
+/// dialog open. Returns nil when the store has no active dialog.
+///
+/// Used by the action → overlay bridge: after running YAML effects,
+/// if ``store.getDialogId()`` transitioned from nil to an id, the
+/// dispatcher calls this helper and assigns the result to the
+/// SwiftUI `yamlDialogState` binding. The Artboard Options Dialogue
+/// is opened this way (via the `open_dialog` effect); the color
+/// picker uses the direct `openYamlDialog` path instead.
+func yamlDialogStateFromStore(_ store: StateStore) -> YamlDialogState? {
+    guard let id = store.getDialogId() else { return nil }
+    return YamlDialogState(
+        id: id,
+        state: store.getDialogState(),
+        params: store.getDialogParams() ?? [:]
+    )
+}
+
 /// Build the evaluation context surfaced to a dialog's content-tree
 /// renderer. Outer-scope keys (``panel``, ``active_document``) are
 /// merged first; the dialog's own ``dialog`` / ``param`` / ``state``
@@ -163,6 +181,12 @@ struct YamlDialogOverlay: View {
     @Binding var dialogState: YamlDialogState?
     let theme: Theme
     var outerScope: () -> [String: Any] = { [:] }
+    /// Fired when the overlay is dismissed from the UI (X button or
+    /// backdrop tap). Callers pair it with `model.stateStore.closeDialog()`
+    /// so the SwiftUI binding and the store's dialog tracker stay in
+    /// sync — otherwise a subsequent `open_dialog: <same-id>` effect
+    /// would be a no-op transition and the bridge would miss it.
+    var onDismiss: (() -> Void)? = nil
 
     var body: some View {
         if let ds = dialogState {
@@ -172,6 +196,7 @@ struct YamlDialogOverlay: View {
                     .ignoresSafeArea()
                     .onTapGesture {
                         dialogState = nil
+                        onDismiss?()
                     }
 
                 // Dialog container
@@ -206,7 +231,10 @@ struct YamlDialogOverlay: View {
 
             Spacer()
 
-            Button(action: { dialogState = nil }) {
+            Button(action: {
+                dialogState = nil
+                onDismiss?()
+            }) {
                 SwiftUI.Text("\u{00d7}")
                     .font(.system(size: 16))
                     .foregroundColor(SwiftUI.Color(nsColor: theme.textDim))
