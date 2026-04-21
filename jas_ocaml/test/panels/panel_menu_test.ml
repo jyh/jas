@@ -263,6 +263,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer0|] };
@@ -283,6 +284,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer0|] };
@@ -298,6 +300,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "Layer 1"|] };
@@ -314,6 +317,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers =
@@ -334,6 +338,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
@@ -351,6 +356,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
@@ -370,6 +376,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
@@ -393,6 +400,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers =
@@ -417,6 +425,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     let child1 = layer "c1" in
@@ -426,6 +435,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; group; layer "B"|] };
     Jas.Panel_menu.dispatch_yaml_action
@@ -447,6 +457,7 @@ let menu_tests = [
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
+        isolated_blending = false; knockout_group = false;
       }
     |] };
     let params = [
@@ -474,6 +485,7 @@ let menu_tests = [
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
+        isolated_blending = false; knockout_group = false;
       }
     |] };
     let params = [
@@ -502,6 +514,7 @@ let menu_tests = [
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
+        isolated_blending = false; knockout_group = false;
       }
     |] };
     let closed = ref false in
@@ -525,6 +538,7 @@ let menu_tests = [
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
