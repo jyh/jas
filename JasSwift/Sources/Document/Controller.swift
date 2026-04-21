@@ -892,6 +892,111 @@ public class Controller {
         model.document = doc
     }
 
+    // ── Opacity mask lifecycle (OPACITY.md § States) ───────────
+
+    /// Create an opacity mask on every selected element that does not
+    /// already have one. The subtree starts as an empty ``Group``;
+    /// users populate it via the MASK_PREVIEW click (Phase 4).
+    /// ``clip`` and ``invert`` come from the document preferences
+    /// ``new_masks_clipping`` / ``new_masks_inverted``.
+    public func makeMaskOnSelection(clip: Bool, invert: Bool) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            if elem.mask != nil { continue }
+            let m = Mask(
+                subtreeElement: .group(Group(children: [])),
+                clip: clip,
+                invert: invert,
+                disabled: false,
+                linked: true,
+                unlinkTransform: nil
+            )
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: m))
+        }
+        model.document = doc
+    }
+
+    /// Remove the opacity mask from every selected element.
+    public func releaseMaskOnSelection() {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            if elem.mask == nil { continue }
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: nil))
+        }
+        model.document = doc
+    }
+
+    /// Set `mask.clip` on every selected element that has a mask.
+    public func setMaskClipOnSelection(_ clip: Bool) {
+        updateMaskOnSelection { old in
+            Mask(subtreeElement: old.subtreeElement,
+                 clip: clip, invert: old.invert,
+                 disabled: old.disabled, linked: old.linked,
+                 unlinkTransform: old.unlinkTransform)
+        }
+    }
+
+    /// Set `mask.invert` on every selected element that has a mask.
+    public func setMaskInvertOnSelection(_ invert: Bool) {
+        updateMaskOnSelection { old in
+            Mask(subtreeElement: old.subtreeElement,
+                 clip: old.clip, invert: invert,
+                 disabled: old.disabled, linked: old.linked,
+                 unlinkTransform: old.unlinkTransform)
+        }
+    }
+
+    /// Toggle `mask.disabled` on every selected mask, driven by the
+    /// first selected element's current state.
+    public func toggleMaskDisabledOnSelection() {
+        guard let current = firstMask(model.document)?.disabled else { return }
+        let newState = !current
+        updateMaskOnSelection { old in
+            Mask(subtreeElement: old.subtreeElement,
+                 clip: old.clip, invert: old.invert,
+                 disabled: newState, linked: old.linked,
+                 unlinkTransform: old.unlinkTransform)
+        }
+    }
+
+    /// Toggle `mask.linked` on every selected mask. On unlink, captures
+    /// each element's current transform into `unlink_transform`. On
+    /// relink, clears `unlink_transform`.
+    public func toggleMaskLinkedOnSelection() {
+        guard let currentLinked = firstMask(model.document)?.linked else { return }
+        let newLinked = !currentLinked
+        var doc = model.document
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            guard let old = elem.mask else { continue }
+            let newMask = Mask(
+                subtreeElement: old.subtreeElement,
+                clip: old.clip, invert: old.invert,
+                disabled: old.disabled,
+                linked: newLinked,
+                unlinkTransform: newLinked ? nil : elem.transform
+            )
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: newMask))
+        }
+        model.document = doc
+    }
+
+    /// Internal helper: apply `transform` to every selected element's
+    /// mask. Elements without a mask are skipped.
+    private func updateMaskOnSelection(_ transform: (Mask) -> Mask) {
+        var doc = model.document
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            guard let old = elem.mask else { continue }
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: transform(old)))
+        }
+        model.document = doc
+    }
+
     /// Write Character-panel text attributes to every `Text` /
     /// `TextPath` element in the current selection. Non-text elements
     /// in the selection are left alone. Fields not present in `attrs`

@@ -1284,6 +1284,104 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
     }
 }
 
+// MARK: - Selection-level mask helpers (OPACITY.md § States)
+
+/// Return the ``Mask`` on the first selected element, if any.
+/// Drives the "first-element-wins" toggles in the Opacity panel
+/// (disable, unlink, and the MAKE_MASK_BUTTON label flip per
+/// OPACITY.md § States).
+public func firstMask(_ document: Document) -> Mask? {
+    guard let first = document.selection.first else { return nil }
+    return document.getElement(first.path).mask
+}
+
+/// True when **every** selected element has an opacity mask attached.
+/// Mixed selections (some masked, some not) count as "no mask" per
+/// OPACITY.md § States.
+public func selectionHasMask(_ document: Document) -> Bool {
+    if document.selection.isEmpty { return false }
+    return document.selection.allSatisfy { document.getElement($0.path).mask != nil }
+}
+
+/// Return a copy of `element` with its opacity mask replaced. Passing
+/// `nil` removes the mask; passing `Some(mask)` sets / replaces it.
+/// All other fields (including `blendMode`, `isolatedBlending`,
+/// `knockoutGroup`, fills, strokes, and children) are preserved.
+public func withMask(_ element: Element, mask: Mask?) -> Element {
+    switch element {
+    case .line(let v):
+        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                          stroke: v.stroke, widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility,
+                          blendMode: v.blendMode, mask: mask))
+    case .rect(let v):
+        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .circle(let v):
+        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                              fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .ellipse(let v):
+        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .polyline(let v):
+        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .polygon(let v):
+        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                          widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .text(let v):
+        return .text(Text(x: v.x, y: v.y, content: v.content,
+                          fontFamily: v.fontFamily, fontSize: v.fontSize,
+                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                          textDecoration: v.textDecoration,
+                          width: v.width, height: v.height,
+                          fill: v.fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .textPath(let v):
+        return .textPath(TextPath(d: v.d, content: v.content,
+                                  startOffset: v.startOffset,
+                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                                  textDecoration: v.textDecoration,
+                                  fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .group(let v):
+        return .group(Group(children: v.children,
+                            opacity: v.opacity, transform: v.transform,
+                            locked: v.locked, visibility: v.visibility,
+                            blendMode: v.blendMode,
+                            isolatedBlending: v.isolatedBlending,
+                            knockoutGroup: v.knockoutGroup,
+                            mask: mask))
+    case .layer(let v):
+        return .layer(Layer(name: v.name, children: v.children,
+                            opacity: v.opacity, transform: v.transform,
+                            locked: v.locked, visibility: v.visibility,
+                            blendMode: v.blendMode,
+                            isolatedBlending: v.isolatedBlending,
+                            knockoutGroup: v.knockoutGroup,
+                            mask: mask))
+    case .live(let v):
+        return .live(v.withMask(mask))
+    }
+}
+
 /// Return a copy of `element` with width points replaced.
 /// Only Line and Path support width points; others returned unchanged.
 public func withWidthPoints(_ element: Element, widthPoints: [StrokeWidthPoint]) -> Element {
