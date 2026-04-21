@@ -86,6 +86,7 @@ private func panelKindStr(_ k: PanelKind) -> String {
     case .artboards: return "artboards"
     case .align: return "align"
     case .boolean: return "boolean"
+    case .opacity: return "opacity"
     }
 }
 

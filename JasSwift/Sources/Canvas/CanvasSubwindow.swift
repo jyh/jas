@@ -25,6 +25,30 @@ private func cgColor(_ c: Color) -> CGColor {
     return CGColor(red: r, green: g, blue: b, alpha: a)
 }
 
+/// Map a BlendMode to its CoreGraphics counterpart. CoreGraphics natively
+/// supports all 16 of the Opacity panel's modes. `.normal` maps to
+/// `.normal` (i.e. `kCGBlendModeNormal`), the default source-over behavior.
+internal func cgBlendMode(_ m: BlendMode) -> CGBlendMode {
+    switch m {
+    case .normal:      return .normal
+    case .darken:      return .darken
+    case .multiply:    return .multiply
+    case .colorBurn:   return .colorBurn
+    case .lighten:     return .lighten
+    case .screen:      return .screen
+    case .colorDodge:  return .colorDodge
+    case .overlay:     return .overlay
+    case .softLight:   return .softLight
+    case .hardLight:   return .hardLight
+    case .difference:  return .difference
+    case .exclusion:   return .exclusion
+    case .hue:         return .hue
+    case .saturation:  return .saturation
+    case .color:       return .color
+    case .luminosity:  return .luminosity
+    }
+}
+
 private func applyTransform(_ ctx: CGContext, _ t: Transform?) {
     guard let t = t else { return }
     ctx.concatenate(CGAffineTransform(a: t.a, b: t.b, c: t.c, d: t.d, tx: t.e, ty: t.f))
@@ -502,6 +526,7 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
     if effective == .invisible { return }
     let outline = effective == .outline
     ctx.saveGState()
+    ctx.setBlendMode(cgBlendMode(elem.blendMode))
     switch elem {
     case .line(let v):
         ctx.setAlpha(CGFloat(v.opacity))

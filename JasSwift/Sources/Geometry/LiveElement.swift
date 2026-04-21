@@ -92,6 +92,7 @@ public struct CompoundShape: Equatable {
     public var transform: Transform?
     public var locked: Bool
     public var visibility: Visibility
+    public var blendMode: BlendMode
 
     public init(
         operation: CompoundOperation,
@@ -101,7 +102,8 @@ public struct CompoundShape: Equatable {
         opacity: Double = 1.0,
         transform: Transform? = nil,
         locked: Bool = false,
-        visibility: Visibility = .preview
+        visibility: Visibility = .preview,
+        blendMode: BlendMode = .normal
     ) {
         self.operation = operation
         self.operands = operands
@@ -111,6 +113,7 @@ public struct CompoundShape: Equatable {
         self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
     }
 
     /// Evaluate the compound shape: flatten operands to polygon sets,
@@ -367,6 +370,12 @@ public enum LiveVariant: Equatable {
     public var visibility: Visibility {
         switch self {
         case .compoundShape(let cs): return cs.visibility
+        }
+    }
+
+    public var blendMode: BlendMode {
+        switch self {
+        case .compoundShape(let cs): return cs.blendMode
         }
     }
 

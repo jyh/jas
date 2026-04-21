@@ -231,3 +231,34 @@ import AppKit
 @Test func visibilityInvisibleLessThanPreview() {
     #expect(Visibility.invisible < Visibility.preview)
 }
+
+// MARK: - BlendMode to CGBlendMode mapping
+
+@Test func cgBlendModeNormalIsNormal() {
+    #expect(cgBlendMode(.normal) == .normal)
+}
+
+@Test func cgBlendModeMapsAllSixteenVariants() {
+    let pairs: [(BlendMode, CGBlendMode)] = [
+        (.normal,      .normal),
+        (.darken,      .darken),
+        (.multiply,    .multiply),
+        (.colorBurn,   .colorBurn),
+        (.lighten,     .lighten),
+        (.screen,      .screen),
+        (.colorDodge,  .colorDodge),
+        (.overlay,     .overlay),
+        (.softLight,   .softLight),
+        (.hardLight,   .hardLight),
+        (.difference,  .difference),
+        (.exclusion,   .exclusion),
+        (.hue,         .hue),
+        (.saturation,  .saturation),
+        (.color,       .color),
+        (.luminosity,  .luminosity),
+    ]
+    #expect(pairs.count == 16)
+    for (m, expected) in pairs {
+        #expect(cgBlendMode(m) == expected)
+    }
+}
