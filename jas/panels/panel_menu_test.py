@@ -18,7 +18,7 @@ def test_panel_label_all_kinds():
 
 
 def test_all_panel_kinds_count():
-    assert len(ALL_PANEL_KINDS) == 10
+    assert len(ALL_PANEL_KINDS) == 11
 
 
 def test_all_panel_kinds_contains_all():
@@ -31,6 +31,41 @@ def test_all_panel_kinds_contains_all():
     assert PanelKind.PARAGRAPH in ALL_PANEL_KINDS
     assert PanelKind.ARTBOARDS in ALL_PANEL_KINDS
     assert PanelKind.ALIGN in ALL_PANEL_KINDS
+    assert PanelKind.BOOLEAN in ALL_PANEL_KINDS
+    assert PanelKind.OPACITY in ALL_PANEL_KINDS
+
+
+def test_panel_label_opacity():
+    assert panel_label(PanelKind.OPACITY) == "Opacity"
+
+
+def test_opacity_menu_has_ten_spec_items_plus_close():
+    items = panel_menu(PanelKind.OPACITY)
+    seps = sum(1 for it in items if it.kind == PanelMenuItemKind.SEPARATOR)
+    others = len(items) - seps
+    assert seps == 4
+    assert others == 11
+
+
+def test_opacity_menu_has_four_panel_local_toggles():
+    items = panel_menu(PanelKind.OPACITY)
+    toggle_cmds = [it.command for it in items if it.kind == PanelMenuItemKind.TOGGLE]
+    assert "toggle_opacity_thumbnails" in toggle_cmds
+    assert "toggle_opacity_options" in toggle_cmds
+    assert "toggle_new_masks_clipping" in toggle_cmds
+    assert "toggle_new_masks_inverted" in toggle_cmds
+
+
+def test_opacity_menu_mask_lifecycle_actions_in_order():
+    items = panel_menu(PanelKind.OPACITY)
+    action_cmds = [it.command for it in items if it.kind == PanelMenuItemKind.ACTION]
+    assert action_cmds == [
+        "make_opacity_mask",
+        "release_opacity_mask",
+        "disable_opacity_mask",
+        "unlink_opacity_mask",
+        "close_panel",
+    ]
 
 
 def test_panel_label_align():

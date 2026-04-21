@@ -50,12 +50,13 @@ class PanelKind(Enum):
     ARTBOARDS = auto()
     ALIGN = auto()
     BOOLEAN = auto()
+    OPACITY = auto()
 
 ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
-    PanelKind.ALIGN, PanelKind.BOOLEAN,
+    PanelKind.ALIGN, PanelKind.BOOLEAN, PanelKind.OPACITY,
 ]
 
 @dataclass

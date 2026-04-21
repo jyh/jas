@@ -12,7 +12,7 @@ import math
 from document.controller import Controller
 from document.document import Document, ElementSelection
 from geometry.element import (
-    ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
+    ArcTo, BlendMode, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
     LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Text, TextPath,
     Color, Fill, LineCap, LineJoin, Stroke, StrokeAlign, Transform,
@@ -180,6 +180,36 @@ class BoundingBox:
 def _qcolor(c: Color) -> QColor:
     r, g, b, a = c.to_rgba()
     return QColor.fromRgbF(r, g, b, a)
+
+
+def _qt_composition_mode(m: BlendMode) -> QPainter.CompositionMode:
+    """Map a ``BlendMode`` to the QPainter composition mode.
+
+    Qt natively supports all 16 of the Opacity panel's blend modes.
+    ``NORMAL`` maps to ``CompositionMode_SourceOver`` (the Qt default).
+    """
+    cm = QPainter.CompositionMode
+    return {
+        BlendMode.NORMAL:      cm.CompositionMode_SourceOver,
+        BlendMode.DARKEN:      cm.CompositionMode_Darken,
+        BlendMode.MULTIPLY:    cm.CompositionMode_Multiply,
+        BlendMode.COLOR_BURN:  cm.CompositionMode_ColorBurn,
+        BlendMode.LIGHTEN:     cm.CompositionMode_Lighten,
+        BlendMode.SCREEN:      cm.CompositionMode_Screen,
+        BlendMode.COLOR_DODGE: cm.CompositionMode_ColorDodge,
+        BlendMode.OVERLAY:     cm.CompositionMode_Overlay,
+        BlendMode.SOFT_LIGHT:  cm.CompositionMode_SoftLight,
+        BlendMode.HARD_LIGHT:  cm.CompositionMode_HardLight,
+        BlendMode.DIFFERENCE:  cm.CompositionMode_Difference,
+        BlendMode.EXCLUSION:   cm.CompositionMode_Exclusion,
+        # Qt does not expose HSL blend operators by name; fall back to
+        # SourceOver for those four modes. The blend_mode field is still
+        # stored on the element and round-trips through SVG / test JSON.
+        BlendMode.HUE:         cm.CompositionMode_SourceOver,
+        BlendMode.SATURATION:  cm.CompositionMode_SourceOver,
+        BlendMode.COLOR:       cm.CompositionMode_SourceOver,
+        BlendMode.LUMINOSITY:  cm.CompositionMode_SourceOver,
+    }[m]
 
 
 def _apply_fill(painter: QPainter, fill: Fill | None) -> None:
@@ -661,6 +691,10 @@ def _draw_element(painter: QPainter, elem: Element,
     opacity = getattr(elem, 'opacity', 1.0)
     if opacity < 1.0:
         painter.setOpacity(painter.opacity() * opacity)
+
+    blend_mode = getattr(elem, 'blend_mode', None)
+    if blend_mode is not None:
+        painter.setCompositionMode(_qt_composition_mode(blend_mode))
 
     transform = getattr(elem, 'transform', None)
     _apply_transform(painter, transform)
