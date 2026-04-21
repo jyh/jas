@@ -240,7 +240,7 @@ public struct PanelGroupView: View {
             }
             return sel
         }()
-        return [
+        var ctx: [String: Any] = [
             "state": stateMap,
             "panel": panelMap,
             "icons": icons,
@@ -250,6 +250,18 @@ public struct PanelGroupView: View {
                 layersPanelSelection: layersPanelSelection
             )
         ]
+        // OPACITY.md § States predicates at top level so yaml
+        // expressions like `bind.disabled: "!selection_has_mask"` and
+        // `bind.checked: "selection_mask_clip"` resolve uniformly.
+        // Mirrors `build_selection_predicates` in jas_dioxus.
+        for (k, v) in buildSelectionPredicates(model: model) { ctx[k] = v }
+        // Expose the Opacity panel's new-mask preferences so the
+        // op_make_mask button can read them at click time (they live
+        // on WorkspaceLayout.opacityPanel, not in the shared panel
+        // store).
+        ctx["_opacity_new_masks_clipping"] = workspaceLayout.opacityPanel.newMasksClipping
+        ctx["_opacity_new_masks_inverted"] = workspaceLayout.opacityPanel.newMasksInverted
+        return ctx
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
