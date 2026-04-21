@@ -195,3 +195,29 @@ def sync_document_to_store(model, store) -> None:
         store._document = {}
     store._document["artboards"] = artboards
     store._document["artboard_options"] = artboard_options
+
+
+def build_selection_predicates(model) -> dict:
+    """Return the three OPACITY.md §States predicates at top-level
+    for the yaml eval context: ``selection_has_mask``,
+    ``selection_mask_clip``, ``selection_mask_invert``. Mixed
+    selections count as no-mask; clip/invert come from the first
+    selected element's mask and drive the "first-wins" bindings on
+    CLIP_CHECKBOX / INVERT_MASK_CHECKBOX.
+
+    Mirrors ``build_selection_predicates`` in ``jas_dioxus``.
+    """
+    if model is None:
+        return {
+            "selection_has_mask": False,
+            "selection_mask_clip": False,
+            "selection_mask_invert": False,
+        }
+    from document.controller import selection_has_mask, first_mask
+    doc = model.document
+    first = first_mask(doc)
+    return {
+        "selection_has_mask": selection_has_mask(doc),
+        "selection_mask_clip": first.clip if first else False,
+        "selection_mask_invert": first.invert if first else False,
+    }

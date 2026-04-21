@@ -118,8 +118,43 @@ def _render_text(el, store, ctx, dispatch_fn):
 
 
 def _render_button(el, store, ctx, dispatch_fn):
-    label = el.get("label", "")
+    static_label = el.get("label", "")
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    # bind.label: expression whose evaluated string replaces the
+    # static label. op_make_mask uses this to flip between
+    # "Make Mask" and "Release" based on selection_has_mask per
+    # OPACITY.md §States.
+    label_expr = bind.get("label") if isinstance(bind.get("label"), str) else None
+    if label_expr:
+        eval_ctx = store.eval_context(ctx)
+        result = evaluate(label_expr, eval_ctx)
+        label = result.value if isinstance(result.value, str) else static_label
+    else:
+        label = static_label
     btn = QPushButton(label)
+    # Opacity panel: op_make_mask dispatches Controller make or
+    # release based on selection_has_mask. The button has no
+    # `action` in yaml — routing is resolved here against the
+    # panel id and the element id. Mirrors the Rust and Swift
+    # special-cases.
+    if ctx.get("_panel_id") == "opacity_panel_content" and el.get("id") == "op_make_mask":
+        get_model = ctx.get("_get_model")
+        def _on_click():
+            model = get_model() if callable(get_model) else None
+            if model is None:
+                return
+            from document.controller import Controller, selection_has_mask
+            ctrl = Controller(model=model)
+            if selection_has_mask(model.document):
+                ctrl.release_mask_on_selection()
+            else:
+                # clip / invert come from the panel state store's
+                # new_masks_clipping / new_masks_inverted keys.
+                panel_state = store.get_panel_state("opacity_panel_content") or {}
+                clip = bool(panel_state.get("new_masks_clipping", True))
+                invert = bool(panel_state.get("new_masks_inverted", False))
+                ctrl.make_mask_on_selection(clip=clip, invert=invert)
+        btn.clicked.connect(_on_click)
     return btn
 
 
@@ -159,13 +194,43 @@ def _render_text_input(el, store, ctx, dispatch_fn):
 def _render_toggle(el, store, ctx, dispatch_fn):
     label = el.get("label", "")
     cb = QCheckBox(label)
+    _wire_opacity_mask_checkbox(cb, el, store, ctx)
     return cb
 
 
 def _render_checkbox(el, store, ctx, dispatch_fn):
     label = el.get("label", "")
     cb = QCheckBox(label)
+    _wire_opacity_mask_checkbox(cb, el, store, ctx)
     return cb
+
+
+def _wire_opacity_mask_checkbox(cb: QCheckBox, el: dict, store: StateStore, ctx: dict):
+    """Opacity panel selection-mask bindings route write-backs to
+    the document controller (the flag lives on the selected
+    element's mask, not on a panel-state key). See OPACITY.md
+    §States. Mirrors the Rust and Swift special-cases.
+    """
+    if ctx.get("_panel_id") != "opacity_panel_content":
+        return
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    checked_expr = bind.get("checked") if isinstance(bind.get("checked"), str) else None
+    if checked_expr not in ("selection_mask_clip", "selection_mask_invert"):
+        return
+    get_model = ctx.get("_get_model")
+    route = "clip" if checked_expr == "selection_mask_clip" else "invert"
+    def _on_toggled(state):
+        model = get_model() if callable(get_model) else None
+        if model is None:
+            return
+        from document.controller import Controller
+        ctrl = Controller(model=model)
+        new_val = bool(state)
+        if route == "clip":
+            ctrl.set_mask_clip_on_selection(new_val)
+        else:
+            ctrl.set_mask_invert_on_selection(new_val)
+    cb.toggled.connect(_on_toggled)
 
 
 def _render_select(el, store, ctx, dispatch_fn):
