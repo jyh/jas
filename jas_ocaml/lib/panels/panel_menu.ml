@@ -10,7 +10,7 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity |]
 
 (** Paragraph panel state-store handle. The yaml_panel_view sets
     this ref to the panel's [State_store.t] when rendering the
@@ -55,6 +55,7 @@ let panel_label = function
   | Artboards -> "Artboards"
   | Align -> "Align"
   | Boolean -> "Boolean"
+  | Opacity -> "Opacity"
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
@@ -138,6 +139,27 @@ let panel_menu = function
       Action { label = "Reset Panel"; command = "reset_boolean_panel"; shortcut = "" };
       Separator;
       Action { label = "Close Boolean"; command = "close_panel"; shortcut = "" } ]
+  | Opacity -> [
+      (* Mirrors jas_dioxus/src/panels/opacity_panel.rs — ten spec items
+         from OPACITY.md plus a trailing Close Opacity. Phase-1 toggles
+         for thumbnails/options/new-mask defaults are functional via
+         State_store; mask-lifecycle and page-level commands are inert
+         (YAML gates them with enabled_when: "false"). *)
+      Toggle { label = "Hide Thumbnails"; command = "toggle_opacity_thumbnails" };
+      Toggle { label = "Show Options"; command = "toggle_opacity_options" };
+      Separator;
+      Action { label = "Make Opacity Mask"; command = "make_opacity_mask"; shortcut = "" };
+      Action { label = "Release Opacity Mask"; command = "release_opacity_mask"; shortcut = "" };
+      Action { label = "Disable Opacity Mask"; command = "disable_opacity_mask"; shortcut = "" };
+      Action { label = "Unlink Opacity Mask"; command = "unlink_opacity_mask"; shortcut = "" };
+      Separator;
+      Toggle { label = "New Opacity Masks Are Clipping"; command = "toggle_new_masks_clipping" };
+      Toggle { label = "New Opacity Masks Are Inverted"; command = "toggle_new_masks_inverted" };
+      Separator;
+      Toggle { label = "Page Isolated Blending"; command = "toggle_page_isolated_blending" };
+      Toggle { label = "Page Knockout Group"; command = "toggle_page_knockout_group" };
+      Separator;
+      Action { label = "Close Opacity"; command = "close_panel"; shortcut = "" } ]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =

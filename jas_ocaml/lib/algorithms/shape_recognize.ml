@@ -678,27 +678,27 @@ let recognized_to_element shape template =
   | Recognized_line { a = (x1, y1); b = (x2, y2) } ->
     Element.Line { x1; y1; x2; y2; stroke = a.a_stroke; width_points = [];
                    opacity = a.a_opacity;
-                   transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility }
+                   transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_triangle { pts = (p1, p2, p3) } ->
     Element.Polygon { points = [p1; p2; p3]; fill = a.a_fill; stroke = a.a_stroke;
                       opacity = a.a_opacity; transform = a.a_transform;
-                      locked = a.a_locked; visibility = a.a_visibility }
+                      locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_rectangle { x; y; w; h } ->
     Element.Rect { x; y; width = w; height = h; rx = 0.0; ry = 0.0;
                    fill = a.a_fill; stroke = a.a_stroke; opacity = a.a_opacity;
-                   transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility }
+                   transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_round_rect { x; y; w; h; r } ->
     Element.Rect { x; y; width = w; height = h; rx = r; ry = r;
                    fill = a.a_fill; stroke = a.a_stroke; opacity = a.a_opacity;
-                   transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility }
+                   transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_circle { cx; cy; r } ->
     Element.Circle { cx; cy; r; fill = a.a_fill; stroke = a.a_stroke;
                      opacity = a.a_opacity; transform = a.a_transform;
-                     locked = a.a_locked; visibility = a.a_visibility }
+                     locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_ellipse { cx; cy; rx; ry } ->
     Element.Ellipse { cx; cy; rx; ry; fill = a.a_fill; stroke = a.a_stroke;
                       opacity = a.a_opacity; transform = a.a_transform;
-                      locked = a.a_locked; visibility = a.a_visibility }
+                      locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_arrow { tail; tip; head_len; head_half_width; shaft_half_width } ->
     let dx = fst tip -. fst tail and dy = snd tip -. snd tail in
     let len = sqrt (dx *. dx +. dy *. dy) in
@@ -717,11 +717,11 @@ let recognized_to_element shape template =
     ] in
     Element.Polygon { points; fill = a.a_fill; stroke = a.a_stroke;
                       opacity = a.a_opacity; transform = a.a_transform;
-                      locked = a.a_locked; visibility = a.a_visibility }
+                      locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_scribble { points } ->
     Element.Polyline { points; fill = None; stroke = a.a_stroke;
                        opacity = a.a_opacity; transform = a.a_transform;
-                       locked = a.a_locked; visibility = a.a_visibility }
+                       locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
   | Recognized_lemniscate { center; a = la; horizontal } ->
     let n = 96 in
     let d = List.init (n + 1) (fun i ->
@@ -737,7 +737,7 @@ let recognized_to_element shape template =
     Element.Path { d; fill = a.a_fill; stroke = a.a_stroke;
                    width_points = [];
                    opacity = a.a_opacity; transform = a.a_transform;
-                   locked = a.a_locked; visibility = a.a_visibility }
+                   locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal }
 
 let recognize_element element cfg =
   let pts = match element with

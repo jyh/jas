@@ -7,7 +7,7 @@ module Live = Jas.Live
 let rect_at x y =
   Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = None; stroke = None; opacity = 1.0; transform = None;
-         locked = false; visibility = Preview }
+         locked = false; visibility = Preview; blend_mode = Normal }
 
 let bbox_of_ring ring =
   let min_x = ref infinity in
@@ -34,7 +34,7 @@ let test_union_of_two_rects () =
     operation = Op_union;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
-    transform = None; locked = false; visibility = Preview;
+    transform = None; locked = false; visibility = Preview; blend_mode = Normal;
   } in
   let ps = Live.evaluate cs Live.default_precision in
   Alcotest.(check int) "one ring" 1 (List.length ps);
@@ -48,7 +48,7 @@ let test_intersection_of_two_rects () =
     operation = Op_intersection;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
-    transform = None; locked = false; visibility = Preview;
+    transform = None; locked = false; visibility = Preview; blend_mode = Normal;
   } in
   let ps = Live.evaluate cs Live.default_precision in
   Alcotest.(check int) "one ring" 1 (List.length ps);
@@ -62,7 +62,7 @@ let test_exclude_is_symmetric_difference () =
     operation = Op_exclude;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
-    transform = None; locked = false; visibility = Preview;
+    transform = None; locked = false; visibility = Preview; blend_mode = Normal;
   } in
   let ps = Live.evaluate cs Live.default_precision in
   Alcotest.(check int) "two rings" 2 (List.length ps)
@@ -72,7 +72,7 @@ let test_subtract_front () =
     operation = Op_subtract_front;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
-    transform = None; locked = false; visibility = Preview;
+    transform = None; locked = false; visibility = Preview; blend_mode = Normal;
   } in
   let ps = Live.evaluate cs Live.default_precision in
   Alcotest.(check int) "one ring" 1 (List.length ps);
@@ -86,7 +86,7 @@ let test_bounds_reflect_evaluation () =
     operation = Op_union;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
-    transform = None; locked = false; visibility = Preview;
+    transform = None; locked = false; visibility = Preview; blend_mode = Normal;
   } in
   let (bx, by, bw, bh) = Jas.Element.bounds (Live (Compound_shape cs)) in
   Alcotest.(check bool) "bx = 0" true (approx_equal bx 0.0);
@@ -99,7 +99,7 @@ let test_empty_compound_has_empty_bounds () =
     operation = Op_union;
     operands = [||];
     fill = None; stroke = None; opacity = 1.0;
-    transform = None; locked = false; visibility = Preview;
+    transform = None; locked = false; visibility = Preview; blend_mode = Normal;
   } in
   let (bx, by, bw, bh) = Jas.Element.bounds (Live (Compound_shape cs)) in
   Alcotest.(check bool) "bx = 0" true (approx_equal bx 0.0);
@@ -118,6 +118,7 @@ let test_path_flattens_into_polygon_set () =
     ];
     fill = None; stroke = None; width_points = [];
     opacity = 1.0; transform = None; locked = false; visibility = Preview;
+    blend_mode = Normal;
   } in
   let ps = Live.element_to_polygon_set path Live.default_precision in
   Alcotest.(check int) "one ring" 1 (List.length ps)

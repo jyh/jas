@@ -33,7 +33,7 @@ class star_tool = object
       Some (Element.Polygon {
         points = pts;
         fill = ctx.model#default_fill; stroke = ctx.model#default_stroke;
-        opacity = 1.0; transform = None; locked = false; visibility = Preview;
+        opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal;
       })
 
   method private draw_preview cr sx sy ex ey =

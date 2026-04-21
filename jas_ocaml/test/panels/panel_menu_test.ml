@@ -30,7 +30,7 @@ let label_tests = [
     assert (panel_label Properties = "Properties"));
 
   Alcotest.test_case "all_panel_kinds_count" `Quick (fun () ->
-    assert (Array.length all_panel_kinds = 10));
+    assert (Array.length all_panel_kinds = 11));
 
   Alcotest.test_case "all_panel_kinds_contains_all" `Quick (fun () ->
     let has k = Array.exists (( = ) k) all_panel_kinds in
@@ -42,7 +42,12 @@ let label_tests = [
     assert (has Character);
     assert (has Paragraph);
     assert (has Artboards);
-    assert (has Align));
+    assert (has Align);
+    assert (has Boolean);
+    assert (has Opacity));
+
+  Alcotest.test_case "panel_label_opacity" `Quick (fun () ->
+    assert (panel_label Opacity = "Opacity"));
 
   Alcotest.test_case "panel_label_align" `Quick (fun () ->
     assert (panel_label Align = "Align"));
@@ -87,6 +92,40 @@ let label_tests = [
     (match List.nth items 4 with
      | Action { label = "Close Align"; command = "close_panel"; _ } -> ()
      | _ -> assert false));
+
+  Alcotest.test_case "opacity_menu_has_ten_spec_items_plus_close" `Quick (fun () ->
+    let items = panel_menu Opacity in
+    let seps = List.length (List.filter (fun i -> i = Separator) items) in
+    let others = List.length items - seps in
+    (* Ten spec items from OPACITY.md + Close Opacity = 11. Four separators
+       divide the spec groups and precede Close. *)
+    assert (seps = 4);
+    assert (others = 11));
+
+  Alcotest.test_case "opacity_menu_has_four_toggles" `Quick (fun () ->
+    let items = panel_menu Opacity in
+    let toggle_cmds = List.filter_map (function
+      | Toggle { command; _ } -> Some command
+      | _ -> None
+    ) items in
+    assert (List.mem "toggle_opacity_thumbnails" toggle_cmds);
+    assert (List.mem "toggle_opacity_options" toggle_cmds);
+    assert (List.mem "toggle_new_masks_clipping" toggle_cmds);
+    assert (List.mem "toggle_new_masks_inverted" toggle_cmds));
+
+  Alcotest.test_case "opacity_menu_has_four_mask_lifecycle_actions_in_order" `Quick (fun () ->
+    let items = panel_menu Opacity in
+    let action_cmds = List.filter_map (function
+      | Action { command; _ } -> Some command
+      | _ -> None
+    ) items in
+    assert (action_cmds = [
+      "make_opacity_mask";
+      "release_opacity_mask";
+      "disable_opacity_mask";
+      "unlink_opacity_mask";
+      "close_panel";
+    ]));
 ]
 
 (* ================================================================== *)
@@ -223,6 +262,7 @@ let menu_tests = [
       name = "A"; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer0|] };
@@ -242,6 +282,7 @@ let menu_tests = [
       name = "A"; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer0|] };
@@ -256,6 +297,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "Layer 1"|] };
@@ -271,6 +313,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers =
@@ -290,6 +333,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
@@ -306,6 +350,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
@@ -324,6 +369,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
@@ -346,6 +392,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers =
@@ -369,6 +416,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     let child1 = layer "c1" in
@@ -377,6 +425,7 @@ let menu_tests = [
       children = [|child1; child2|];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; group; layer "B"|] };
     Jas.Panel_menu.dispatch_yaml_action
@@ -397,6 +446,7 @@ let menu_tests = [
         name = "Old"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
+        blend_mode = Jas.Element.Normal;
       }
     |] };
     let params = [
@@ -423,6 +473,7 @@ let menu_tests = [
         name = "Existing"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
+        blend_mode = Jas.Element.Normal;
       }
     |] };
     let params = [
@@ -450,6 +501,7 @@ let menu_tests = [
         name = "A"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
+        blend_mode = Jas.Element.Normal;
       }
     |] };
     let closed = ref false in
@@ -472,6 +524,7 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };

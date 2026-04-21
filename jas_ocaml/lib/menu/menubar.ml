@@ -162,12 +162,12 @@ let rec translate_element elem dx dy =
   if dx = 0.0 && dy = 0.0 then elem
   else
     match elem with
-    | Element.Group { children; opacity; transform; locked; visibility; _ } ->
+    | Element.Group { children; opacity; transform; locked; visibility; blend_mode; _ } ->
       Element.Group { children = Array.map (fun c -> translate_element c dx dy) children;
-                      opacity; transform; locked; visibility }
-    | Element.Layer { name; children; opacity; transform; locked; visibility; _ } ->
+                      opacity; transform; locked; visibility; blend_mode }
+    | Element.Layer { name; children; opacity; transform; locked; visibility; blend_mode; _ } ->
       Element.Layer { name; children = Array.map (fun c -> translate_element c dx dy) children;
-                      opacity; transform; locked; visibility }
+                      opacity; transform; locked; visibility; blend_mode }
     | _ ->
       let n = Element.control_point_count elem in
       let indices = List.init n Fun.id in
@@ -232,8 +232,8 @@ let paste_clipboard (model : Model.model) offset () =
                 !new_sel
             ) children;
             match new_layers.(idx) with
-            | Element.Layer { name = n; children = ec; opacity; transform; locked; visibility; _ } ->
-              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform; locked; visibility }
+            | Element.Layer { name = n; children = ec; opacity; transform; locked; visibility; blend_mode; _ } ->
+              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform; locked; visibility; blend_mode }
             | _ -> ()
           end
         ) pasted_doc.Document.layers;
