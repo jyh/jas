@@ -339,6 +339,78 @@ import Testing
     #expect(yamlDialogStateFromStore(store) == nil)
 }
 
+@Test func artboardOptionsConfirmWritesFieldsAndClosesDialog() {
+    // Simulates the Artboard Options OK button dispatch: run the
+    // artboard_options_confirm action with the 13 params the dialog's
+    // YAML button passes. Verifies both the field writes and the
+    // close_dialog effect at the tail, which together make the
+    // dispatch-body bridge end-to-end functional.
+    let ab = Artboard.defaultWithId("aaa00001").with(
+        name: "Artboard 1", x: 0, y: 0, width: 612, height: 792
+    )
+    let model = Model(document: Document(
+        layers: [Layer(children: [])],
+        artboards: [ab]
+    ))
+    // Pretend the dialog was opened: set the store dialog id to
+    // something so we can watch it clear.
+    model.stateStore.initDialog("artboard_options", defaults: [:])
+    #expect(model.stateStore.getDialogId() == "artboard_options")
+
+    LayersPanel.dispatchYamlAction(
+        "artboard_options_confirm",
+        model: model,
+        params: [
+            "artboard_id": "aaa00001",
+            "name": "Cover",
+            "x": 10.0,
+            "y": 20.0,
+            "width": 800.0,
+            "height": 600.0,
+            "fill": "#ff0000",
+            "show_center_mark": true,
+            "show_cross_hairs": false,
+            "show_video_safe_areas": false,
+            "video_ruler_pixel_aspect_ratio": 1.0,
+            "fade_region_outside_artboard": true,
+            "update_while_dragging": true,
+        ]
+    )
+    // Field writes landed on the model.
+    let updated = model.document.artboards[0]
+    #expect(updated.name == "Cover")
+    #expect(updated.x == 10.0)
+    #expect(updated.y == 20.0)
+    #expect(updated.width == 800.0)
+    #expect(updated.height == 600.0)
+    #expect(updated.showCenterMark == true)
+    // close_dialog at the tail cleared the store's dialog id, so the
+    // SwiftUI overlay binding will mirror nil on the next render.
+    #expect(model.stateStore.getDialogId() == nil)
+}
+
+@Test func deleteArtboardFromDialogRemovesAndCloses() {
+    // Delete-from-dialog: the Delete button in the Artboard Options
+    // footer dispatches delete_artboard_from_dialog. That action
+    // deletes the target artboard and closes the dialog in a single
+    // undo op.
+    let a = Artboard.defaultWithId("aaa")
+    let b = Artboard.defaultWithId("bbb")
+    let model = Model(document: Document(
+        layers: [Layer(children: [])],
+        artboards: [a, b]
+    ))
+    model.stateStore.initDialog("artboard_options", defaults: [:])
+    LayersPanel.dispatchYamlAction(
+        "delete_artboard_from_dialog",
+        model: model,
+        params: ["artboard_id": "bbb"]
+    )
+    #expect(model.document.artboards.count == 1)
+    #expect(model.document.artboards[0].id == "aaa")
+    #expect(model.stateStore.getDialogId() == nil)
+}
+
 @Test func openArtboardOptionsActionLeavesStoreDialogOpen() {
     // Integration check: the YAML action → open_dialog effect path
     // transitions the store from no-dialog to "artboard_options".
