@@ -969,7 +969,18 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
-        render::render(&ctx, w, h, tab.model.document(), self.boolean_panel.precision);
+        // TODO phase C: thread panel.artboards_panel_selection from the
+        // interpreter StateStore here. For now artboards render without
+        // the panel-selected accent border.
+        let panel_selected_artboards: &[String] = &[];
+        render::render(
+            &ctx,
+            w,
+            h,
+            tab.model.document(),
+            self.boolean_panel.precision,
+            panel_selected_artboards,
+        );
 
         // Draw tool overlay
         if let Some(tool) = tab.tools.get(&self.active_tool) {
