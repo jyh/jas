@@ -666,3 +666,45 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     #expect(BlendMode(rawValue: "") == nil)
     #expect(BlendMode(rawValue: "ColorBurn") == nil)  // wrong case
 }
+
+// MARK: - Mask (Phase 3a storage)
+
+@Test func elementDefaultMaskIsNil() {
+    let r = Rect(x: 0, y: 0, width: 10, height: 10)
+    #expect(r.mask == nil)
+    let ln = Line(x1: 0, y1: 0, x2: 10, y2: 10)
+    #expect(ln.mask == nil)
+    let g = Group(children: [])
+    #expect(g.mask == nil)
+    let l = Layer(name: "L", children: [])
+    #expect(l.mask == nil)
+}
+
+@Test func maskDefaultsClipTrueLinkedTrueDisabledFalse() {
+    let subtree = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let m = Mask(subtreeElement: subtree)
+    #expect(m.clip == true)
+    #expect(m.invert == false)
+    #expect(m.disabled == false)
+    #expect(m.linked == true)
+    #expect(m.unlinkTransform == nil)
+}
+
+@Test func maskSubtreeElementReturnsTheSingleElement() {
+    let subtree = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let m = Mask(subtreeElement: subtree)
+    #expect(m.subtree.count == 1)
+    #expect(m.subtreeElement == subtree)
+}
+
+@Test func elementWithMaskPropagatesToAccessor() {
+    let subtree = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let m = Mask(subtreeElement: subtree, clip: false, invert: true)
+    let r = Rect(x: 0, y: 0, width: 20, height: 20, mask: m)
+    let elem = Element.rect(r)
+    let back = elem.mask
+    #expect(back != nil)
+    #expect(back?.clip == false)
+    #expect(back?.invert == true)
+    #expect(back?.subtreeElement == subtree)
+}
