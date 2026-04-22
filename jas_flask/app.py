@@ -38,7 +38,7 @@ def _resolve_brand(ws: dict, workspace_path: str | None) -> None:
                 brand[key + "_svg"] = ""
                 continue
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     brand[key + "_svg"] = f.read()
             except OSError:
                 brand[key + "_svg"] = ""
