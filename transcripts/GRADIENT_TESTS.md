@@ -65,6 +65,37 @@ _Last reviewed: 2026-04-22_
 - GRD-116 — List-view items in DOCUMENT_LIBRARY_SIZE_DROPDOWN
   (Small List View, Large List View) are declared but the
   row-render path is not implemented. Thumbnail views work.
+- GRD-117 — DOCUMENT_LIBRARY_DROPDOWN options are hardcoded to the
+  three seed libraries. The Open Gradient Library submenu already
+  discovers libraries dynamically; the dropdown should share that
+  discovery path. Since 2026-04-22.
+- GRD-118 — Document Library per-document persistence. GRADIENT.md
+  §Document libraries specifies that the Document Library travels
+  with document save / load; it is currently panel-local and does
+  not serialise. Since 2026-04-22.
+- GRD-119 — `gradient_panel_content` is compiled into
+  `workspace.json` but not added to the default dock layout
+  (`workspace/layout.yaml`). Adding it would shift group indices
+  and break JasSwift DockTests that hardcode `groups[2].panels`;
+  those tests should be deleted per
+  `feedback_layout_tests` memory before the panel is docked.
+  Since 2026-04-22.
+- GRD-120 — `state.selected_gradient_stop_index` is declared in
+  GRADIENT.md §Canvas editing as shared state between the panel
+  and the on-canvas Gradient tool. The tool does not exist yet
+  (`GRADIENT_TOOL.md` is a stub), so this shared state is unused.
+  Will be consumed when the Gradient tool lands.
+- GRD-121 — On-canvas Gradient tool. GRADIENT_TOOL.md is a stub;
+  full tool design (handle dragging, radial center/radius handles,
+  freeform node placement, visibility rules, coordinate systems,
+  tool registration) is scheduled as its own follow-up track.
+  Out of v1 scope.
+- GRD-122 — Cross-app parity sweep. Phase 10 deliverable calls
+  for building a representative corpus (each spec-covered
+  gradient field) and confirming pixel-identical renders across
+  the four native apps. `GRADIENT_TESTS.md` documents the manual
+  procedure (GRD-M17) but the sweep itself has not been run.
+  Since 2026-04-22.
 
 ---
 
@@ -364,10 +395,12 @@ Items covered by `status: pending_renderer` or `GRD-NNN` known-
 broken entries above; not worth manual testing until their
 implementation lands:
 
-- Freeform gradient visual rendering.
-- Smooth interpolation (OKLab perceptual) visual output.
-- Dither noise visibility.
-- Along-stroke / across-stroke sub-mode rendering.
-- Midpoint-to-stop synthesis for non-50% midpoints.
-- SVG export / import round-trip.
-- Text / TextPath / CompoundShape gradient fills.
+- Freeform gradient visual rendering (GRD-108).
+- Smooth interpolation (OKLab perceptual) visual output (GRD-109).
+- Dither noise visibility (GRD-110).
+- Along-stroke / across-stroke sub-mode rendering (GRD-111).
+- Midpoint-to-stop synthesis for non-50% midpoints (GRD-112).
+- SVG export / import round-trip (GRD-113).
+- Text / TextPath / CompoundShape gradient fills (GRD-114).
+- On-canvas Gradient tool (GRD-121) — separate track per
+  `transcripts/GRADIENT_TOOL.md`.
