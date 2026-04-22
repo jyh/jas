@@ -72,3 +72,43 @@ private func modelWithRect(_ r: Element) -> Model {
     syncGradientPanelFromSelection(store: store, controller: Controller(model: model))
     #expect(store.get("gradient_type") as? String == "radial")
 }
+
+// MARK: - Phase 5: panel writeback
+
+@Test func applyGradientPanelWritesFillGradient() {
+    let model = modelWithRect(rectWithFillGradient(nil))
+    let store = model.stateStore
+    store.set("fill_on_top", true)
+    store.set("gradient_type", "radial")
+    store.set("gradient_angle", 90.0)
+    store.set("gradient_aspect_ratio", 150.0)
+    store.set("gradient_method", "smooth")
+    store.set("gradient_dither", true)
+    store.set("gradient_stroke_sub_mode", "across")
+    store.set("gradient_preview_state", true)
+    applyGradientPanelToSelection(store: store, controller: Controller(model: model))
+    let elem = model.document.getElement([0, 0])
+    let g = elem.fillGradient
+    #expect(g != nil)
+    #expect(g?.type == .radial)
+    #expect(g?.angle == 90)
+    #expect(g?.aspectRatio == 150)
+    #expect(g?.method == .smooth)
+    #expect(g?.dither == true)
+    #expect(g?.strokeSubMode == .across)
+    // preview_state cleared after first edit.
+    #expect((store.get("gradient_preview_state") as? Bool) == false)
+}
+
+@Test func demoteGradientPanelClearsFillGradient() {
+    let g = sampleGradient()
+    let model = modelWithRect(rectWithFillGradient(g))
+    let store = model.stateStore
+    store.set("fill_on_top", true)
+    // Sanity: fillGradient is set.
+    #expect(model.document.getElement([0, 0]).fillGradient == g)
+    demoteGradientPanelSelection(store: store, controller: Controller(model: model))
+    #expect(model.document.getElement([0, 0]).fillGradient == nil)
+    // Underlying solid fill is preserved.
+    #expect(model.document.getElement([0, 0]).fill != nil)
+}

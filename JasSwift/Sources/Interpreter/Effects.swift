@@ -566,6 +566,66 @@ func isStrokeRenderKey(_ key: String) -> Bool {
     strokeRenderKeys.contains(key)
 }
 
+// MARK: - Gradient panel writeback (Phase 5)
+
+/// Apply the current gradient panel state to the selected element(s).
+/// Builds a Gradient from store keys and writes it via the controller.
+/// Mirrors jas_dioxus::AppState::apply_gradient_panel_to_selection.
+public func applyGradientPanelToSelection(store: StateStore, controller: Controller) {
+    let typeStr = (store.get("gradient_type") as? String) ?? "linear"
+    let gType: GradientType
+    switch typeStr {
+    case "radial": gType = .radial
+    case "freeform": gType = .freeform
+    default: gType = .linear
+    }
+    let methodStr = (store.get("gradient_method") as? String) ?? "classic"
+    let gMethod: GradientMethod
+    switch methodStr {
+    case "smooth": gMethod = .smooth
+    case "points": gMethod = .points
+    case "lines": gMethod = .lines
+    default: gMethod = .classic
+    }
+    let subStr = (store.get("gradient_stroke_sub_mode") as? String) ?? "within"
+    let gSub: StrokeSubMode
+    switch subStr {
+    case "along": gSub = .along
+    case "across": gSub = .across
+    default: gSub = .within
+    }
+    let g = Gradient(
+        type: gType,
+        angle: (store.get("gradient_angle") as? Double) ?? 0,
+        aspectRatio: (store.get("gradient_aspect_ratio") as? Double) ?? 100,
+        method: gMethod,
+        dither: (store.get("gradient_dither") as? Bool) ?? false,
+        strokeSubMode: gSub
+        // Stops are panel-local working state; Phase 5 follow-up wires
+        // panel.stops <-> store.gradient_stops binding. For the
+        // foundation, an empty stops list still applies the type /
+        // angle / etc.
+    )
+    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+    if fillOnTop {
+        controller.setSelectionFillGradient(g)
+    } else {
+        controller.setSelectionStrokeGradient(g)
+    }
+    store.set("gradient_preview_state", false)
+}
+
+/// Demote the selection's active-attribute gradient back to a solid.
+/// The underlying solid Fill / Stroke value is left untouched.
+public func demoteGradientPanelSelection(store: StateStore, controller: Controller) {
+    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+    if fillOnTop {
+        controller.setSelectionFillGradient(nil)
+    } else {
+        controller.setSelectionStrokeGradient(nil)
+    }
+}
+
 // MARK: - Gradient panel state binding (Phase 4: read direction)
 
 /// Sync gradient panel state from the selection's active attribute
