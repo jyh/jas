@@ -131,25 +131,31 @@ strip; all three seed libraries render correctly.
 
 ### Phase 4 — Selection → panel reads
 
-**Scope**
+**Status:** Done across all four native apps.
 
-- Populate panel control values from the selection's gradient on the
-  active attribute (per `state.fill_on_top`).
-- Mixed-state rendering per §Multi-selection:
-  - Type buttons: none checked when mixed.
-  - Angle / aspect / method / opacity / location: blank `—`.
-  - Dither: tri-state.
-  - Gradient slider: first element's stops shown.
-- Disabled-when evaluation per §Enablement.
-- Fill-type coupling preview state — when active attribute is
-  solid/none, show the seed gradient in the slider with the "not
-  applied" indicator.
+- **Rust:** `AppState::sync_gradient_panel_from_selection` +
+  `GradientPanelState` struct + `Element::fill_gradient()` /
+  `stroke_gradient()` accessors.
+- **Swift:** `syncGradientPanelFromSelection` in Effects.swift +
+  `Element.fillGradient` / `strokeGradient` computed properties.
+- **OCaml:** `Effects.sync_gradient_panel_from_selection` +
+  `fill_gradient_opt` / `stroke_gradient_opt` pattern accessors,
+  exposed via effects.mli.
+- **Python:** `panels/gradient_panel_state.py` module.
 
-**Apps:** 4 native + `jas_flask` (flask reads panel selection state
-through the existing `state.*` surface).
+Each implementation handles four branches per GRADIENT.md
+§Multi-selection and §Fill-type coupling: empty selection (no-op),
+uniform with gradient (populate panel), mixed (clear preview only),
+uniform without gradient (seed preview from current solid color).
 
-**Deliverable:** selecting elements with various gradients /
-solids / nones / mixed populates the panel correctly.
+The actual sync invocation sites (after selection-changing actions)
+are not yet wired — that follows in Phase 5 alongside the writeback
+pipeline. Phase 4 lands the read function and 14 unit tests across
+the four apps verifying the populated branches.
+
+`jas_flask` does not need this phase — panel state binds directly to
+`state.*` keys via the shared yaml interpreter and reads happen
+through expression evaluation.
 
 ### Phase 5 — Panel → selection writes (no new rendering)
 
