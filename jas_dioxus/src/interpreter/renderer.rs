@@ -6845,6 +6845,96 @@ mod tests {
         assert!(st.paragraph_panel.align_left);  // back to default
     }
 
+    fn select_first_rect(st: &mut AppState, fill_gradient: Option<crate::geometry::element::Gradient>) {
+        use crate::workspace::app_state::TabState;
+        use crate::document::document::ElementSelection;
+        use crate::geometry::element::{
+            CommonProps, Color, Fill, RectElem,
+        };
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let r = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: fill_gradient.map(Box::new),
+            stroke_gradient: None,
+        });
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        if let Some(Element::Layer(layer)) = new_doc.layers.get_mut(0) {
+            layer.children = vec![std::rc::Rc::new(r)];
+        }
+        new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        st.tabs[st.active_tab].model.set_document(new_doc);
+    }
+
+    #[test]
+    fn sync_gradient_panel_uniform_with_gradient() {
+        use crate::geometry::element::{
+            Color, Gradient, GradientStop, GradientType, GradientMethod, StrokeSubMode,
+        };
+        let g = Gradient {
+            gtype: GradientType::Radial,
+            angle: 30.0,
+            aspect_ratio: 200.0,
+            method: GradientMethod::Smooth,
+            dither: true,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 0.0,   midpoint_to_next: 50.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(g.clone()));
+        st.sync_gradient_panel_from_selection();
+        assert_eq!(st.gradient_panel.gtype, "radial");
+        assert_eq!(st.gradient_panel.angle, 30.0);
+        assert_eq!(st.gradient_panel.aspect_ratio, 200.0);
+        assert_eq!(st.gradient_panel.method, "smooth");
+        assert!(st.gradient_panel.dither);
+        assert_eq!(st.gradient_panel.stops.len(), 2);
+        assert!(!st.gradient_panel.preview_state);
+    }
+
+    #[test]
+    fn sync_gradient_panel_solid_seeds_preview() {
+        use crate::geometry::element::Color;
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        // Selected element has a solid red fill, no gradient.
+        select_first_rect(&mut st, None);
+        st.sync_gradient_panel_from_selection();
+        // Preview state set; first stop seeded from the solid color.
+        assert!(st.gradient_panel.preview_state);
+        assert_eq!(st.gradient_panel.gtype, "linear");
+        assert_eq!(st.gradient_panel.stops.len(), 2);
+        assert_eq!(st.gradient_panel.stops[0].color, Color::rgb(1.0, 0.0, 0.0));
+        // Second stop is the conventional white per fill-type-coupling rule.
+        assert_eq!(st.gradient_panel.stops[1].color, Color::WHITE);
+    }
+
+    #[test]
+    fn sync_gradient_panel_no_selection_keeps_defaults() {
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        // Set up a tab without selecting anything.
+        if st.tabs.is_empty() {
+            use crate::workspace::app_state::TabState;
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        // Mutate the panel so we can detect that sync didn't touch it.
+        st.gradient_panel.gtype = "radial".into();
+        st.sync_gradient_panel_from_selection();
+        assert_eq!(st.gradient_panel.gtype, "radial");
+    }
+
     #[test]
     fn sync_paragraph_panel_reads_wrapper_into_typed_struct() {
         use crate::geometry::element::Element;

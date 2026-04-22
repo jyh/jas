@@ -1298,6 +1298,35 @@ impl Element {
         }
     }
 
+    /// Return the optional gradient applied to the element's fill, if any.
+    /// Phase 1b: lives directly on each Element variant rather than nested
+    /// inside Fill — see GRADIENT.md §Document model.
+    pub fn fill_gradient(&self) -> Option<&Gradient> {
+        match self {
+            Element::Rect(e) => e.fill_gradient.as_deref(),
+            Element::Circle(e) => e.fill_gradient.as_deref(),
+            Element::Ellipse(e) => e.fill_gradient.as_deref(),
+            Element::Polyline(e) => e.fill_gradient.as_deref(),
+            Element::Polygon(e) => e.fill_gradient.as_deref(),
+            Element::Path(e) => e.fill_gradient.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Return the optional gradient applied to the element's stroke, if any.
+    pub fn stroke_gradient(&self) -> Option<&Gradient> {
+        match self {
+            Element::Line(e) => e.stroke_gradient.as_deref(),
+            Element::Rect(e) => e.stroke_gradient.as_deref(),
+            Element::Circle(e) => e.stroke_gradient.as_deref(),
+            Element::Ellipse(e) => e.stroke_gradient.as_deref(),
+            Element::Polyline(e) => e.stroke_gradient.as_deref(),
+            Element::Polygon(e) => e.stroke_gradient.as_deref(),
+            Element::Path(e) => e.stroke_gradient.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Return the bounding box as (x, y, width, height).
     pub fn bounds(&self) -> Bounds {
         match self {
