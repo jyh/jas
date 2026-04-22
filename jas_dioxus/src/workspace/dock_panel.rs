@@ -78,6 +78,13 @@ fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("selection_mask_clip".into(), serde_json::Value::Bool(clip));
     m.insert("selection_mask_invert".into(), serde_json::Value::Bool(invert));
     m.insert("selection_mask_linked".into(), serde_json::Value::Bool(linked));
+    // OPACITY.md §Preview interactions: ``editing_target_is_mask``
+    // reflects whether mask-editing mode is active, so OPACITY_PREVIEW
+    // and MASK_PREVIEW can show a persistent highlight on the current
+    // editing target.
+    let editing_mask = matches!(st.tab().map(|t| &t.editing_target),
+        Some(crate::workspace::app_state::EditingTarget::Mask(_)));
+    m.insert("editing_target_is_mask".into(), serde_json::Value::Bool(editing_mask));
     m
 }
 

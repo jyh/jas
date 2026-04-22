@@ -103,7 +103,7 @@ fn render_el(
         "tree_view" => render_tree_view(el, ctx, rctx),
         "element_preview" => render_element_preview(el, ctx, rctx),
         "dropdown" => render_layers_filter_dropdown(el, ctx, rctx),
-        _ => render_placeholder(el, ctx),
+        _ => render_placeholder(el, ctx, rctx),
     }
 }
 
@@ -4436,7 +4436,7 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
         child.panel_kind = panel_kind;
         render_el(content, ctx, &child)
     } else {
-        render_placeholder(el, ctx)
+        render_placeholder(el, ctx, rctx)
     }
 }
 
@@ -5756,7 +5756,7 @@ fn render_element_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx
 fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     if id != "lp_filter_button" {
-        return render_placeholder(el, ctx);
+        return render_placeholder(el, ctx, rctx);
     }
 
     let style = build_style(el, ctx);
@@ -5867,11 +5867,72 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
     }
 }
 
-fn render_placeholder(el: &serde_json::Value, _ctx: &serde_json::Value) -> Element {
+fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
     let summary = el.get("summary")
         .or_else(|| el.get("type"))
         .and_then(|s| s.as_str())
         .unwrap_or("?");
+    let panel_kind = rctx.panel_kind;
+
+    // Opacity panel previews (OPACITY.md §Preview interactions):
+    // op_preview and op_mask_preview handle click to switch the
+    // editing target (content vs mask subtree) and render a
+    // persistent highlight on the active target.
+    let is_opacity_preview =
+        panel_kind == Some(PanelKind::Opacity)
+        && (id == "op_preview" || id == "op_mask_preview");
+    if is_opacity_preview {
+        let editing_mask = expr::eval("editing_target_is_mask", ctx).to_bool();
+        let has_mask = expr::eval("selection_has_mask", ctx).to_bool();
+        let is_mask_preview = id == "op_mask_preview";
+        // Highlight the preview that matches the current editing
+        // target: op_preview when not in mask-editing, op_mask_preview
+        // when in mask-editing.
+        let highlight = editing_mask == is_mask_preview;
+        let border = if highlight { "2px solid #4a90d9" } else { "2px solid transparent" };
+        // Clicking MASK_PREVIEW requires the selection to have a
+        // mask; otherwise the click is a no-op (mirrors the
+        // "Requires element.mask to be present" clause in the spec).
+        let click_enabled = !is_mask_preview || has_mask;
+        let app = rctx.app.clone();
+        let mut revision = rctx.revision;
+        let target_is_mask = is_mask_preview;
+        let on_click = EventHandler::new(move |_evt: Event<MouseData>| {
+            if !click_enabled {
+                return;
+            }
+            let app = app.clone();
+            spawn(async move {
+                use crate::workspace::app_state::EditingTarget;
+                let mut st = app.borrow_mut();
+                if let Some(tab) = st.tab_mut() {
+                    tab.editing_target = if target_is_mask {
+                        // Enter mask-editing on the first selected
+                        // element's path. Guaranteed Some by the
+                        // has_mask check above.
+                        tab.model.document().selection.first()
+                            .map(|es| EditingTarget::Mask(es.path.clone()))
+                            .unwrap_or(EditingTarget::Content)
+                    } else {
+                        EditingTarget::Content
+                    };
+                }
+                revision += 1;
+            });
+        });
+        let cursor = if click_enabled { "pointer" } else { "default" };
+        return rsx! {
+            div {
+                id: "{id}",
+                style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;outline:{border};outline-offset:-2px;cursor:{cursor};",
+                title: "{summary}",
+                onclick: move |evt| on_click.call(evt),
+                "[{summary}]"
+            }
+        };
+    }
+
     rsx! {
         div {
             style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;",
