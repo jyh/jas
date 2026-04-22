@@ -644,7 +644,7 @@ struct YamlElementView: View {
             if gtype == "radial" {
                 Rectangle().fill(
                     RadialGradient(
-                        gradient: Gradient(stops: stops.map {
+                        gradient: SwiftUI.Gradient(stops: stops.map {
                             .init(color: $0.0, location: $0.1)
                         }),
                         center: .center,
@@ -661,7 +661,7 @@ struct YamlElementView: View {
                 let end = UnitPoint(x: 0.5 + 0.5 * cos(rad), y: 0.5 - 0.5 * sin(rad))
                 Rectangle().fill(
                     LinearGradient(
-                        gradient: Gradient(stops: stops.map {
+                        gradient: SwiftUI.Gradient(stops: stops.map {
                             .init(color: $0.0, location: $0.1)
                         }),
                         startPoint: start,
@@ -707,7 +707,7 @@ struct YamlElementView: View {
                 if stops.count >= 2 {
                     Rectangle().fill(
                         LinearGradient(
-                            gradient: Gradient(stops: stops.map {
+                            gradient: SwiftUI.Gradient(stops: stops.map {
                                 .init(color: $0.0, location: $0.1)
                             }),
                             startPoint: .leading,
