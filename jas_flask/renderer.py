@@ -1375,8 +1375,8 @@ def _render_gradient_slider(el, theme, state):
     parts = []
     parts.append(
         f'<div{_id_attr(el)} class="app-gradient-slider"'
-        f' data-type="gradient-slider"{bind_attrs}{data_attrs}'
-        f' style="position:relative;width:100%;height:44px;box-sizing:border-box">'
+        f' data-type="gradient-slider" tabindex="0"{bind_attrs}{data_attrs}'
+        f' style="position:relative;width:100%;height:44px;box-sizing:border-box;outline:none">'
     )
     # The bar itself — clickable for add-stop on empty area.
     parts.append(

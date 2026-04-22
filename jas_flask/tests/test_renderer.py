@@ -1217,3 +1217,55 @@ class TestRenderGradientSlider:
         assert 'data-type="gradient-slider"' in html
         assert 'data-role="stop"' not in html
         assert 'data-role="midpoint"' not in html
+
+    def test_focusable(self, theme, state):
+        """Slider must be keyboard-focusable so keydown events reach it."""
+        from renderer import render_element
+        el = {"type": "gradient_slider"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'tabindex="0"' in html
+
+
+class TestGradientPrimitivesFixture:
+    """Load the Phase 0 fixture YAML and verify end-to-end that both
+    widgets render when composed inside a panel structure with state.
+    """
+
+    def _fixture_path(self):
+        return os.path.join(WORKSPACE_PATH, "tests", "gradient_primitives.yaml")
+
+    def test_fixture_exists(self):
+        assert os.path.exists(self._fixture_path())
+
+    def test_fixture_renders_nine_tiles_and_one_slider(self, theme):
+        import yaml
+        from renderer import render_element
+        with open(self._fixture_path()) as f:
+            fixture = yaml.safe_load(f)
+        state = fixture.get("state", {})
+        # Render each top-level panel item and concatenate.
+        html_parts = []
+        for item in fixture.get("panel", []):
+            if isinstance(item, dict):
+                html_parts.append(str(render_element(item, theme, state, mode="normal")))
+            elif isinstance(item, str):
+                html_parts.append(item)
+            elif isinstance(item, dict) and ".row" in item:
+                pass
+        combined = "".join(html_parts)
+        # The fixture has 9 gradient tiles (3 sizes × 3 gradients).
+        assert combined.count('data-type="gradient-tile"') + \
+            sum(
+                str(render_element(child, theme, state, mode="normal")).count('data-type="gradient-tile"')
+                for item in fixture.get("panel", [])
+                if isinstance(item, dict) and ".row" in item
+                for child in item[".row"]
+                if isinstance(child, dict)
+            ) >= 9
+        # And 1 gradient slider somewhere.
+        slider_count = sum(
+            str(render_element(item, theme, state, mode="normal")).count('data-type="gradient-slider"')
+            for item in fixture.get("panel", [])
+            if isinstance(item, dict) and item.get("type") == "gradient_slider"
+        )
+        assert slider_count >= 1
