@@ -664,52 +664,73 @@ def _apply_outline_style(painter: QPainter) -> None:
     painter.setPen(pen)
 
 
-def _mask_composition_mode(mask) -> QPainter.CompositionMode | None:
-    """Return the QPainter composition mode that applies a [mask] to
-    an element's pixels inside a transparency layer, or ``None`` when
-    the mask configuration isn't yet supported by the renderer.
+import enum
 
-    Track C phase 1 supports ``clip: true`` only — the standard
-    "clip to mask shape" interpretation. ``clip: false`` (element
-    stays visible outside the mask shape) requires a more complex
-    two-pass composite and lands in a later phase. ``disabled`` is
-    treated as no-mask per OPACITY.md §States.
+
+class MaskPlan(enum.Enum):
+    """How the mask subtree's rendered alpha is applied to the
+    element. Selected by ``_mask_plan`` from the mask's ``clip`` and
+    ``invert`` fields; consumed by ``_draw_element_with_mask``.
+    Mirrors the Rust / Swift / OCaml renderer's ``MaskPlan`` /
+    ``mask_plan`` types. OPACITY.md §Rendering.
     """
+    # Element clipped to the mask shape. DestinationIn applied
+    # across the whole offscreen image. `clip: true, invert: false`.
+    CLIP_IN = "clip_in"
+    # Element clipped to the *inverse* of the mask shape.
+    # DestinationOut across the whole offscreen image. Covers both
+    # `clip: true, invert: true` and — for alpha-based masks —
+    # `clip: false, invert: true`, which collapse to the same output
+    # (E * (1 - M) everywhere) since the mask's outside-region alpha
+    # is zero either way.
+    CLIP_OUT = "clip_out"
+    # `clip: false, invert: false`: element stays at full alpha
+    # outside the mask subtree's bounding box; DestinationIn with
+    # the mask applies only inside the bbox via a clipped sub-painter.
+    REVEAL_OUTSIDE_BBOX = "reveal_outside_bbox"
+
+
+def _mask_plan(mask) -> MaskPlan | None:
+    """Pick a ``MaskPlan`` for the mask, or ``None`` when the mask
+    is inactive (``disabled=True``)."""
     if mask.disabled:
         return None
-    if not mask.clip:
-        return None
-    cm = QPainter.CompositionMode
-    if mask.invert:
-        return cm.CompositionMode_DestinationOut
-    return cm.CompositionMode_DestinationIn
+    if mask.clip and not mask.invert:
+        return MaskPlan.CLIP_IN
+    if mask.clip and mask.invert:
+        return MaskPlan.CLIP_OUT
+    # Alpha-based masks can't distinguish `clip: false, invert: true`
+    # from `clip: true, invert: true` (both yield E * (1 - M) when
+    # the mask's outside-region alpha is 0), so route them through
+    # the same composite.
+    if not mask.clip and mask.invert:
+        return MaskPlan.CLIP_OUT
+    return MaskPlan.REVEAL_OUTSIDE_BBOX
 
 
 def _draw_element(painter: QPainter, elem: Element,
                   ancestor_vis=None) -> None:
     """Draw a single element, dispatching to the mask composite
-    path when the element carries an active supported mask."""
+    path when the element carries an active mask."""
     mask = getattr(elem, 'mask', None)
     if mask is not None:
-        mode = _mask_composition_mode(mask)
-        if mode is not None:
-            _draw_element_with_mask(painter, elem, mask, mode, ancestor_vis)
+        plan = _mask_plan(mask)
+        if plan is not None:
+            _draw_element_with_mask(painter, elem, mask, plan, ancestor_vis)
             return
     _draw_element_body(painter, elem, ancestor_vis)
 
 
 def _draw_element_with_mask(painter: QPainter, elem: Element,
-                            mask, mode: QPainter.CompositionMode,
+                            mask, plan: MaskPlan,
                             ancestor_vis) -> None:
-    """Render ``elem`` with its opacity mask composited in. The
-    element body is drawn onto an offscreen ``QImage`` with the
-    main painter's current world transform; the mask subtree is
-    then drawn on top with ``CompositionMode_DestinationIn`` (or
-    ``DestinationOut`` when inverted), leaving only the pixels that
-    survive the mask. The offscreen image is then blitted onto the
-    main painter at device coordinates.
+    """Render ``elem`` with its opacity mask composited in per
+    ``plan``. The element body is drawn onto an offscreen
+    ``QImage`` with the main painter's current world transform;
+    the mask subtree is then composited. The offscreen image is
+    finally blitted onto the main painter at device coordinates.
 
-    OPACITY.md §Rendering, phase 1.
+    OPACITY.md §Rendering.
     """
     from PySide6.QtGui import QImage
     device = painter.device()
@@ -722,6 +743,7 @@ def _draw_element_with_mask(painter: QPainter, elem: Element,
         return
     image = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(0)  # fully transparent
+    cm = QPainter.CompositionMode
     sub = QPainter(image)
     try:
         sub.setRenderHint(
@@ -730,8 +752,26 @@ def _draw_element_with_mask(painter: QPainter, elem: Element,
         )
         sub.setTransform(painter.transform())
         _draw_element_body(sub, elem, ancestor_vis)
-        sub.setCompositionMode(mode)
-        _draw_element(sub, mask.subtree, ancestor_vis)
+        if plan == MaskPlan.CLIP_IN:
+            sub.setCompositionMode(cm.CompositionMode_DestinationIn)
+            _draw_element(sub, mask.subtree, ancestor_vis)
+        elif plan == MaskPlan.CLIP_OUT:
+            sub.setCompositionMode(cm.CompositionMode_DestinationOut)
+            _draw_element(sub, mask.subtree, ancestor_vis)
+        elif plan == MaskPlan.REVEAL_OUTSIDE_BBOX:
+            # `clip: false, invert: false`: keep the element body at
+            # full alpha outside the mask subtree's bounding box;
+            # apply DestinationIn only inside the bbox via a clipped
+            # sub-painter. OPACITY.md §Rendering.
+            bx, by, bw, bh = mask.subtree.bounds()
+            if bw > 0 and bh > 0:
+                sub.save()
+                sub.setClipRect(QRectF(bx, by, bw, bh))
+                sub.setCompositionMode(cm.CompositionMode_DestinationIn)
+                _draw_element(sub, mask.subtree, ancestor_vis)
+                sub.restore()
+            # Empty-bbox mask: body passes through unmodified
+            # (mask has nothing to composite against).
     finally:
         sub.end()
     painter.save()

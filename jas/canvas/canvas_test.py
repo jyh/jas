@@ -351,8 +351,8 @@ class DrawElementTest(absltest.TestCase):
         p.end()
 
 
-class MaskCompositionModeTest(absltest.TestCase):
-    """Test the _mask_composition_mode helper from OPACITY.md §Rendering."""
+class MaskPlanTest(absltest.TestCase):
+    """Test the _mask_plan helper from OPACITY.md §Rendering."""
 
     def _mask(self, clip, invert, disabled):
         from geometry.element import Mask, Group
@@ -362,38 +362,47 @@ class MaskCompositionModeTest(absltest.TestCase):
             linked=True, unlink_transform=None,
         )
 
-    def test_clip_not_inverted_is_destination_in(self):
-        from canvas.canvas import _mask_composition_mode
+    def test_clip_not_inverted_is_clip_in(self):
+        from canvas.canvas import _mask_plan, MaskPlan
         self.assertEqual(
-            _mask_composition_mode(self._mask(True, False, False)),
-            QPainter.CompositionMode.CompositionMode_DestinationIn,
+            _mask_plan(self._mask(True, False, False)),
+            MaskPlan.CLIP_IN,
         )
 
-    def test_clip_inverted_is_destination_out(self):
-        from canvas.canvas import _mask_composition_mode
+    def test_clip_inverted_is_clip_out(self):
+        from canvas.canvas import _mask_plan, MaskPlan
         self.assertEqual(
-            _mask_composition_mode(self._mask(True, True, False)),
-            QPainter.CompositionMode.CompositionMode_DestinationOut,
+            _mask_plan(self._mask(True, True, False)),
+            MaskPlan.CLIP_OUT,
         )
 
     def test_disabled_is_none(self):
         # disabled overrides both clip and invert: falls back to no
         # mask rendering per OPACITY.md §States.
-        from canvas.canvas import _mask_composition_mode
+        from canvas.canvas import _mask_plan
         for clip, invert in [(True, False), (True, True),
                              (False, False), (False, True)]:
             self.assertIsNone(
-                _mask_composition_mode(self._mask(clip, invert, True)))
+                _mask_plan(self._mask(clip, invert, True)))
 
-    def test_no_clip_is_none_phase1(self):
-        # clip=false (element visible outside the mask shape) needs a
-        # two-pass composite; not yet supported — falls back to no
-        # mask. Phase 2 of Track C will handle this.
-        from canvas.canvas import _mask_composition_mode
-        self.assertIsNone(
-            _mask_composition_mode(self._mask(False, False, False)))
-        self.assertIsNone(
-            _mask_composition_mode(self._mask(False, True, False)))
+    def test_no_clip_no_invert_is_reveal_outside_bbox(self):
+        # Phase 2: clip=false, invert=false keeps the element
+        # visible outside the mask subtree's bounding box.
+        from canvas.canvas import _mask_plan, MaskPlan
+        self.assertEqual(
+            _mask_plan(self._mask(False, False, False)),
+            MaskPlan.REVEAL_OUTSIDE_BBOX,
+        )
+
+    def test_no_clip_inverted_collapses_to_clip_out(self):
+        # Alpha-based mask: `clip: false, invert: true` gives the
+        # same output as `clip: true, invert: true` because the
+        # mask's outside-region alpha is zero either way.
+        from canvas.canvas import _mask_plan, MaskPlan
+        self.assertEqual(
+            _mask_plan(self._mask(False, True, False)),
+            MaskPlan.CLIP_OUT,
+        )
 
 
 class ArcToBeziersTest(absltest.TestCase):
