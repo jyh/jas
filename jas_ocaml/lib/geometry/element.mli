@@ -611,6 +611,12 @@ val with_transform_translated : dx:float -> dy:float -> element -> element
 val with_fill : element -> fill option -> element
 val with_stroke : element -> stroke option -> element
 
+(** Phase 5: replace the optional gradient on the element's fill or
+    stroke. Pass [None] to clear. Element variants without fill/stroke
+    return unchanged. *)
+val with_fill_gradient : element -> gradient option -> element
+val with_stroke_gradient : element -> gradient option -> element
+
 (** Return a copy of [elem] with its opacity mask replaced. Preserves
     every other field. See OPACITY.md §Document model. *)
 val with_mask : element -> mask option -> element

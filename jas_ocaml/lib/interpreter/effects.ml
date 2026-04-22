@@ -583,6 +583,47 @@ let sync_stroke_panel_from_selection (store : State_store.t)
 let is_stroke_render_key key =
   List.mem key stroke_render_keys
 
+(* ── Gradient panel writeback — Phase 5 ──────────────────────── *)
+
+(** Build a gradient from the panel state in [store] and write it to
+    every selected element's fill_gradient or stroke_gradient (per
+    [state.fill_on_top]). Clears [gradient_preview_state]. Mirrors
+    [jas_dioxus::AppState::apply_gradient_panel_to_selection]. *)
+let apply_gradient_panel_to_selection (store : State_store.t)
+    (ctrl : Controller.controller) =
+  let open Element in
+  let get_str key default = match State_store.get store key with
+    | `String s -> s | _ -> default in
+  let get_float key default = match State_store.get store key with
+    | `Float f -> f | `Int n -> float_of_int n | _ -> default in
+  let get_bool key default = match State_store.get store key with
+    | `Bool b -> b | _ -> default in
+  let g = {
+    gtype = gradient_type_of_string (get_str "gradient_type" "linear");
+    gangle = get_float "gradient_angle" 0.0;
+    gaspect_ratio = get_float "gradient_aspect_ratio" 100.0;
+    gmethod = gradient_method_of_string (get_str "gradient_method" "classic");
+    gdither = get_bool "gradient_dither" false;
+    gstroke_sub_mode = stroke_sub_mode_of_string (get_str "gradient_stroke_sub_mode" "within");
+    (* Stops are panel-local; Phase 5 follow-up adds explicit
+       store-key binding for the stops list. *)
+    gstops = [];
+    gnodes = [];
+  } in
+  let fill_on_top = get_bool "fill_on_top" true in
+  if fill_on_top then ctrl#set_selection_fill_gradient (Some g)
+  else ctrl#set_selection_stroke_gradient (Some g);
+  State_store.set store "gradient_preview_state" (`Bool false)
+
+(** Demote the selection's active-attribute gradient back to a solid.
+    The underlying solid Fill / Stroke is left untouched. *)
+let demote_gradient_panel_selection (store : State_store.t)
+    (ctrl : Controller.controller) =
+  let fill_on_top = match State_store.get store "fill_on_top" with
+    | `Bool b -> b | _ -> true in
+  if fill_on_top then ctrl#set_selection_fill_gradient None
+  else ctrl#set_selection_stroke_gradient None
+
 (* ── Gradient panel — Phase 4 (selection -> panel reads) ──────── *)
 
 (** Read fill gradient from an Element variant, if present. Phase 1b

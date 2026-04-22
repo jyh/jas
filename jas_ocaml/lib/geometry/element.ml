@@ -1275,6 +1275,31 @@ let with_stroke elem s =
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
   | Group _ | Layer _ -> elem
 
+(** Phase 5: replace the optional fill_gradient on the element. Pass
+    [None] to clear (demote to solid). Variants without fill (Line,
+    Group, Layer, Text, Text_path, Live) return unchanged. *)
+let with_fill_gradient elem g =
+  match elem with
+  | Rect r -> Rect { r with fill_gradient = g }
+  | Circle r -> Circle { r with fill_gradient = g }
+  | Ellipse r -> Ellipse { r with fill_gradient = g }
+  | Polyline r -> Polyline { r with fill_gradient = g }
+  | Polygon r -> Polygon { r with fill_gradient = g }
+  | Path r -> Path { r with fill_gradient = g }
+  | _ -> elem
+
+(** Phase 5: replace the optional stroke_gradient on the element. *)
+let with_stroke_gradient elem g =
+  match elem with
+  | Line r -> Line { r with stroke_gradient = g }
+  | Rect r -> Rect { r with stroke_gradient = g }
+  | Circle r -> Circle { r with stroke_gradient = g }
+  | Ellipse r -> Ellipse { r with stroke_gradient = g }
+  | Polyline r -> Polyline { r with stroke_gradient = g }
+  | Polygon r -> Polygon { r with stroke_gradient = g }
+  | Path r -> Path { r with stroke_gradient = g }
+  | _ -> elem
+
 (** Return a copy of [elem] with its opacity mask replaced. Passing
     [None] removes the mask; passing [Some m] sets or replaces it.
     Unlike [with_fill] / [with_stroke], this preserves every other
