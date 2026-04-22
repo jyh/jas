@@ -23,7 +23,9 @@ import { Scope } from "./scope.mjs";
 import { toBool, toJson, PATH } from "./value.mjs";
 import {
   setSelection, addToSelection, toggleSelection, clearSelection,
+  getElement,
 } from "./document.mjs";
+import { hitTestRect, translateElement } from "./geometry.mjs";
 
 /**
  * Run a list of effects. Each effect is a YAML-derived dict with a
@@ -137,6 +139,38 @@ function runEffect(effect, scope, store, options) {
           if (path) model.mutate((d) => toggleSelection(d, path));
           return;
         }
+        case "doc.translate_selection": {
+          const dx = Number(toJson(evaluate(String(spec.dx ?? "0"), scope))) || 0;
+          const dy = Number(toJson(evaluate(String(spec.dy ?? "0"), scope))) || 0;
+          if (dx === 0 && dy === 0) return;
+          model.mutate((d) => translateSelectedElements(d, dx, dy));
+          return;
+        }
+        case "doc.select_in_rect": {
+          const x1 = Number(toJson(evaluate(String(spec.x1 ?? "0"), scope))) || 0;
+          const y1 = Number(toJson(evaluate(String(spec.y1 ?? "0"), scope))) || 0;
+          const x2 = Number(toJson(evaluate(String(spec.x2 ?? "0"), scope))) || 0;
+          const y2 = Number(toJson(evaluate(String(spec.y2 ?? "0"), scope))) || 0;
+          const additive = toBool(evaluate(String(spec.additive ?? "false"), scope));
+          const rect = {
+            x: Math.min(x1, x2), y: Math.min(y1, y2),
+            width: Math.abs(x2 - x1), height: Math.abs(y2 - y1),
+          };
+          model.mutate((d) => {
+            const paths = hitTestRect(d, rect);
+            if (additive) {
+              let next = d;
+              for (const p of paths) next = addToSelection(next, p);
+              return next;
+            }
+            return setSelection(d, paths);
+          });
+          return;
+        }
+        case "doc.delete_selection": {
+          model.mutate(deleteSelectedElements);
+          return;
+        }
         // Other doc.* effects land in subsequent phases.
       }
     }
@@ -203,4 +237,95 @@ function extractPathList(spec, scope) {
     }
   }
   return [];
+}
+
+/**
+ * Apply a translation to every selected element. Runs recursively
+ * through container paths so dragging a group moves all its children.
+ * Returns a new Document; input is not mutated.
+ */
+function translateSelectedElements(doc, dx, dy) {
+  if (!doc.selection || doc.selection.length === 0) return doc;
+  const layers = doc.layers.slice();
+  const touchedTop = new Set();
+  for (const path of doc.selection) {
+    if (path.length === 0) continue;
+    const topIdx = path[0];
+    if (!touchedTop.has(topIdx)) {
+      touchedTop.add(topIdx);
+      layers[topIdx] = layers[topIdx];
+    }
+  }
+  // Build the new layers by walking each selected path and replacing
+  // the leaf element with its translated counterpart.
+  const replaceAt = (layerIdx, subpath, replacer) => {
+    if (subpath.length === 0) {
+      layers[layerIdx] = replacer(layers[layerIdx]);
+      return;
+    }
+    layers[layerIdx] = replaceElementAt(layers[layerIdx], subpath, replacer);
+  };
+  for (const path of doc.selection) {
+    if (path.length === 0) continue;
+    const [li, ...rest] = path;
+    replaceAt(li, rest, (e) => translateElement(e, dx, dy));
+  }
+  return { ...doc, layers };
+}
+
+function replaceElementAt(elem, subpath, replacer) {
+  if (subpath.length === 0) return replacer(elem);
+  const [head, ...rest] = subpath;
+  if (!elem || !Array.isArray(elem.children)) return elem;
+  const children = elem.children.slice();
+  if (head < 0 || head >= children.length) return elem;
+  children[head] = replaceElementAt(children[head], rest, replacer);
+  return { ...elem, children };
+}
+
+/**
+ * Remove every selected element and clear the selection. Deletions
+ * happen deepest-first (paths sorted by descending length, then by
+ * descending last-index) so index shifts don't invalidate other paths.
+ */
+function deleteSelectedElements(doc) {
+  if (!doc.selection || doc.selection.length === 0) return doc;
+  const sorted = doc.selection.slice().sort((a, b) => {
+    if (a.length !== b.length) return b.length - a.length;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return b[i] - a[i];
+    }
+    return 0;
+  });
+  let layers = doc.layers.slice();
+  for (const path of sorted) {
+    if (path.length === 0) continue;
+    layers = deleteAtPath(layers, path);
+  }
+  return { ...doc, layers, selection: [] };
+}
+
+function deleteAtPath(layers, path) {
+  if (path.length === 1) {
+    const out = layers.slice();
+    out.splice(path[0], 1);
+    return out;
+  }
+  const [li, ...rest] = path;
+  const out = layers.slice();
+  out[li] = deleteInElement(out[li], rest);
+  return out;
+}
+
+function deleteInElement(elem, subpath) {
+  if (!elem || !Array.isArray(elem.children)) return elem;
+  if (subpath.length === 1) {
+    const children = elem.children.slice();
+    children.splice(subpath[0], 1);
+    return { ...elem, children };
+  }
+  const [head, ...rest] = subpath;
+  const children = elem.children.slice();
+  children[head] = deleteInElement(children[head], rest);
+  return { ...elem, children };
 }
