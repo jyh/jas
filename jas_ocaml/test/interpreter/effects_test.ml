@@ -1277,6 +1277,52 @@ let gradient_phase4_tests = [
     set store "gradient_type" (`String "radial");
     sync_gradient_panel_from_selection store ctrl;
     assert (get store "gradient_type" = `String "radial"));
+
+  (* Phase 5 foundation: apply / demote *)
+
+  Alcotest.test_case "apply_writes_fill_gradient" `Quick (fun () ->
+    let model = _make_rect_with_gradient ~fill_gradient:None in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    set store "fill_on_top" (`Bool true);
+    set store "gradient_type" (`String "radial");
+    set store "gradient_angle" (`Float 90.0);
+    set store "gradient_aspect_ratio" (`Float 150.0);
+    set store "gradient_method" (`String "smooth");
+    set store "gradient_dither" (`Bool true);
+    set store "gradient_stroke_sub_mode" (`String "across");
+    set store "gradient_preview_state" (`Bool true);
+    apply_gradient_panel_to_selection store ctrl;
+    let elem = Jas.Document.get_element ctrl#document [0; 0] in
+    let g_opt = match elem with
+      | Jas.Element.Rect { fill_gradient; _ } -> fill_gradient
+      | _ -> None in
+    (match g_opt with
+     | Some g ->
+       assert (g.Jas.Element.gtype = Jas.Element.Gradient_radial);
+       assert (g.Jas.Element.gangle = 90.0);
+       assert (g.Jas.Element.gmethod = Jas.Element.Method_smooth);
+       assert (g.Jas.Element.gdither = true);
+       assert (g.Jas.Element.gstroke_sub_mode = Jas.Element.Sub_mode_across)
+     | None -> assert false);
+    assert (get store "gradient_preview_state" = `Bool false));
+
+  Alcotest.test_case "demote_clears_fill_gradient" `Quick (fun () ->
+    let g = _sample_gradient () in
+    let model = _make_rect_with_gradient ~fill_gradient:(Some g) in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    set store "fill_on_top" (`Bool true);
+    let elem = Jas.Document.get_element ctrl#document [0; 0] in
+    let has_grad e = match e with
+      | Jas.Element.Rect { fill_gradient = Some _; _ } -> true | _ -> false in
+    assert (has_grad elem);
+    demote_gradient_panel_selection store ctrl;
+    let elem = Jas.Document.get_element ctrl#document [0; 0] in
+    assert (not (has_grad elem));
+    let has_fill = match elem with
+      | Jas.Element.Rect { fill = Some _; _ } -> true | _ -> false in
+    assert has_fill);
 ]
 
 let () =
