@@ -139,9 +139,31 @@ fn apply_fill(
 
 /// Return value from apply_stroke: (opacity, alignment).
 fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) -> (f64, StrokeAlign) {
+    apply_stroke_with_gradient(ctx, stroke, None, (0.0, 0.0, 0.0, 0.0))
+}
+
+/// Phase 8: gradient-aware stroke. When `stroke_gradient` is set and
+/// renderable, sets the context stroke style to a CanvasGradient
+/// (within-stroke sub-mode only; along / across remain
+/// `pending_renderer` per GRADIENT.md §Stroke sub-modes).
+fn apply_stroke_with_gradient(
+    ctx: &CanvasRenderingContext2d,
+    stroke: Option<&Stroke>,
+    stroke_gradient: Option<&Gradient>,
+    bbox: (f64, f64, f64, f64),
+) -> (f64, StrokeAlign) {
     match stroke {
         Some(s) => {
-            ctx.set_stroke_style_str(&css_color(&s.color));
+            if let Some(g) = stroke_gradient {
+                let (bx, by, bw, bh) = bbox;
+                if let Some(cg) = make_canvas_gradient(ctx, g, bx, by, bw, bh) {
+                    ctx.set_stroke_style_canvas_gradient(&cg);
+                } else {
+                    ctx.set_stroke_style_str(&css_color(&s.color));
+                }
+            } else {
+                ctx.set_stroke_style_str(&css_color(&s.color));
+            }
             // Inside/outside use 2x width; the clip removes the unwanted half
             let effective_width = match s.align {
                 StrokeAlign::Center => s.width,
@@ -745,10 +767,12 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
+                let bbox = (e.x, e.y, e.width, e.height);
                 fill_op = apply_fill(ctx, e.fill.as_ref(),
-                    e.fill_gradient.as_deref(),
-                    (e.x, e.y, e.width, e.height));
-                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
+                    e.fill_gradient.as_deref(), bbox);
+                (stroke_op, stroke_align) = apply_stroke_with_gradient(
+                    ctx, e.stroke.as_ref(),
+                    e.stroke_gradient.as_deref(), bbox);
             }
             let has_fill = !outline && (e.fill.is_some() || e.fill_gradient.is_some());
             let has_stroke = outline || e.stroke.is_some();
@@ -797,10 +821,12 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
+                let bbox = (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0);
                 fill_op = apply_fill(ctx, e.fill.as_ref(),
-                    e.fill_gradient.as_deref(),
-                    (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0));
-                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
+                    e.fill_gradient.as_deref(), bbox);
+                (stroke_op, stroke_align) = apply_stroke_with_gradient(
+                    ctx, e.stroke.as_ref(),
+                    e.stroke_gradient.as_deref(), bbox);
             }
             ctx.begin_path();
             ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
@@ -818,10 +844,12 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
+                let bbox = (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0);
                 fill_op = apply_fill(ctx, e.fill.as_ref(),
-                    e.fill_gradient.as_deref(),
-                    (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0));
-                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
+                    e.fill_gradient.as_deref(), bbox);
+                (stroke_op, stroke_align) = apply_stroke_with_gradient(
+                    ctx, e.stroke.as_ref(),
+                    e.stroke_gradient.as_deref(), bbox);
             }
             ctx.begin_path();
             ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0.0, 0.0, std::f64::consts::TAU)
@@ -843,7 +871,9 @@ fn draw_element_body(
                 let bbox = poly_bbox(&e.points);
                 fill_op = apply_fill(ctx, e.fill.as_ref(),
                     e.fill_gradient.as_deref(), bbox);
-                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke_with_gradient(
+                    ctx, e.stroke.as_ref(),
+                    e.stroke_gradient.as_deref(), bbox);
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -869,7 +899,9 @@ fn draw_element_body(
                 let bbox = poly_bbox(&e.points);
                 fill_op = apply_fill(ctx, e.fill.as_ref(),
                     e.fill_gradient.as_deref(), bbox);
-                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke_with_gradient(
+                    ctx, e.stroke.as_ref(),
+                    e.stroke_gradient.as_deref(), bbox);
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -896,7 +928,9 @@ fn draw_element_body(
                 let b = elem.bounds();
                 fill_op = apply_fill(ctx, e.fill.as_ref(),
                     e.fill_gradient.as_deref(), b);
-                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke_with_gradient(
+                    ctx, e.stroke.as_ref(),
+                    e.stroke_gradient.as_deref(), b);
             }
             // Fill uses the original path
             if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
