@@ -15607,15 +15607,15 @@
         "separator",
         {
           "label": "Open Gradient Library",
-          "action": "gradient_open_library",
-          "enabled_when": "false",
-          "description": "Phase 9 \u2014 dynamic submenu of workspace/gradients/*.json files.\n"
+          "type": "submenu",
+          "dynamic": true,
+          "description": "Submenu listing all available gradient libraries discovered from workspace/gradients/*.json files. Selecting a library switches the active library in DOCUMENT_LIBRARY_DROPDOWN so its tiles populate the preset strip. Mirrors the Swatches panel Open Swatch Library submenu behavior.\n"
         },
         {
           "label": "Save Gradient Library",
           "action": "gradient_save_library",
           "enabled_when": "false",
-          "description": "Phase 9 \u2014 opens a Save Gradient Library dialog.\n"
+          "description": "Phase 9 \u2014 opens a Save Gradient Library dialog. Deferred pending a Save dialog and file-writing pipeline per app.\n"
         },
         "separator",
         {
