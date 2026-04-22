@@ -1447,8 +1447,55 @@ and render_placeholder ~packing el =
   let summary = match el |> member "summary" |> to_string_option with
     | Some s -> s
     | None -> el |> member "type" |> to_string_option |> Option.value ~default:"?" in
-  let lbl = GMisc.label ~text:(Printf.sprintf "[%s]" summary) ~packing () in
-  lbl#misc#set_size_request ~height:30 ()
+  let id = el |> member "id" |> to_string_option |> Option.value ~default:"" in
+  (* Opacity panel previews (OPACITY.md \167Preview interactions):
+     op_preview / op_mask_preview handle click to switch the
+     editing target and render a persistent highlight on the
+     active target. Mirrors the Rust and Swift special-cases. *)
+  let is_opacity_preview =
+    !_current_panel_id = Some "opacity_panel_content"
+    && (id = "op_preview" || id = "op_mask_preview") in
+  if is_opacity_preview then begin
+    let eb = GBin.event_box ~packing () in
+    let frame = GBin.frame ~packing:eb#add () in
+    frame#set_shadow_type `NONE;
+    frame#misc#set_size_request ~height:30 ();
+    let lbl = GMisc.label ~text:(Printf.sprintf "[%s]" summary)
+                ~packing:frame#add () in
+    ignore lbl;
+    (* Highlight whichever preview matches the current editing
+       target. *)
+    let is_mask_preview = id = "op_mask_preview" in
+    let editing_mask = match !_get_model_ref () with
+      | Some m -> (match m#editing_target with Model.Mask _ -> true | Model.Content -> false)
+      | None -> false in
+    let highlight = editing_mask = is_mask_preview in
+    if highlight then
+      frame#set_shadow_type `OUT
+    else
+      frame#set_shadow_type `NONE;
+    ignore (eb#event#connect#button_press ~callback:(fun _evt ->
+      match !_get_model_ref () with
+      | None -> false
+      | Some m ->
+        if is_mask_preview then begin
+          let doc = m#document in
+          if Controller.selection_has_mask doc then begin
+            let first_path = match Document.PathMap.min_binding_opt doc.Document.selection with
+              | Some (path, _) -> path
+              | None -> [] in
+            m#set_editing_target (Model.Mask first_path);
+            !_rerender_layers ()
+          end
+        end else begin
+          m#set_editing_target Model.Content;
+          !_rerender_layers ()
+        end;
+        true))
+  end else begin
+    let lbl = GMisc.label ~text:(Printf.sprintf "[%s]" summary) ~packing () in
+    lbl#misc#set_size_request ~height:30 ()
+  end
 
 and render_children ~packing ~ctx el =
   let open Yojson.Safe.Util in

@@ -17,6 +17,16 @@ type edit_session_ref = <
   clear_pending_override : unit -> unit
 >
 
+(** The target that drawing tools operate on. The default is the
+    document's normal content; mask-editing mode switches the
+    target to a specific element's mask subtree so new shapes land
+    inside [element.mask.subtree] instead of the selected layer.
+    Mirrors [EditingTarget] in [jas_dioxus] / [EditingTarget] in
+    JasSwift. OPACITY.md \167Preview interactions. *)
+type editing_target =
+  | Content
+  | Mask of int list
+
 let max_undo = 100
 
 let next_untitled = ref 1
@@ -41,6 +51,10 @@ class model ?(document = Document.default_document ()) ?filename () =
       Some (Element.make_stroke Element.black)
     val mutable recent_colors : string list = []
     val mutable current_edit_session : edit_session_ref option = None
+    (* Mask-editing mode state. [Content] is the default; flipped
+       to [Mask path] when the user clicks the Opacity panel's
+       MASK_PREVIEW. OPACITY.md \167Preview interactions. *)
+    val mutable editing_target : editing_target = Content
 
     method document = doc
 
@@ -103,6 +117,10 @@ class model ?(document = Document.default_document ()) ?filename () =
     method current_edit_session = current_edit_session
     method set_current_edit_session (s : edit_session_ref option) =
       current_edit_session <- s
+
+    method editing_target = editing_target
+    method set_editing_target (t : editing_target) =
+      editing_target <- t
   end
 
 let create ?document ?filename () = new model ?document ?filename ()

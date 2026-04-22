@@ -119,7 +119,8 @@ let build_selection_predicates (model : Model.model option) : (string * Yojson.S
       (* Default [linked] to true so the LINK_INDICATOR shows the
          linked glyph when no mask exists — matches the "new masks
          are linked" spec default. *)
-      ("selection_mask_linked", `Bool true) ]
+      ("selection_mask_linked", `Bool true);
+      ("editing_target_is_mask", `Bool false) ]
   | Some m ->
     let doc = m#document in
     let has_mask = Controller.selection_has_mask doc in
@@ -128,7 +129,12 @@ let build_selection_predicates (model : Model.model option) : (string * Yojson.S
         (mask.Element.clip, mask.Element.invert, mask.Element.linked)
       | None -> (false, false, true)
     in
+    let editing_mask = match m#editing_target with
+      | Model.Mask _ -> true
+      | Model.Content -> false
+    in
     [ ("selection_has_mask", `Bool has_mask);
       ("selection_mask_clip", `Bool clip);
       ("selection_mask_invert", `Bool invert);
-      ("selection_mask_linked", `Bool linked) ]
+      ("selection_mask_linked", `Bool linked);
+      ("editing_target_is_mask", `Bool editing_mask) ]
