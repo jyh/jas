@@ -195,6 +195,12 @@ and render_button ~packing ~ctx el =
      panel id and the element id. Mirrors the Rust and Swift
      special-cases. *)
   let id = el |> member "id" |> to_string_option |> Option.value ~default:"" in
+  (* bind.disabled: grey the button out. Used by op_link_indicator
+     to disable while the selection has no mask. *)
+  let disabled = match el |> member "bind" |> safe_member "disabled" |> to_string_option with
+    | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
+    | None -> false in
+  btn#misc#set_sensitive (not disabled);
   if !_current_panel_id = Some "opacity_panel_content" && id = "op_make_mask" then begin
     ignore (btn#connect#clicked ~callback:(fun () ->
       match !_get_model_ref () with
@@ -217,6 +223,17 @@ and render_button ~packing ~ctx el =
           let clip = bool_of_store "new_masks_clipping" true in
           let invert = bool_of_store "new_masks_inverted" false in
           ctrl#make_mask_on_selection ~clip ~invert))
+  end;
+  (* Opacity panel: op_link_indicator toggles mask.linked on every
+     selected mask via Controller. OPACITY.md \167Document model.
+     Mirrors the Rust and Swift special-cases. *)
+  if !_current_panel_id = Some "opacity_panel_content" && id = "op_link_indicator" then begin
+    ignore (btn#connect#clicked ~callback:(fun () ->
+      match !_get_model_ref () with
+      | None -> ()
+      | Some m ->
+        let ctrl = new Controller.controller ~model:m () in
+        ctrl#toggle_mask_linked_on_selection))
   end
 
 and render_slider ~packing ~ctx el =
