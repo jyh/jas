@@ -15761,7 +15761,19 @@
                             "icon": "gradient_linear",
                             "bind": {
                               "checked": "panel.type == 'linear'"
-                            }
+                            },
+                            "behavior": [
+                              {
+                                "event": "click",
+                                "effects": [
+                                  {
+                                    "set": {
+                                      "gradient_type": "\"linear\""
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
                           },
                           {
                             "id": "grad_radial_button",
@@ -15770,7 +15782,19 @@
                             "icon": "gradient_radial",
                             "bind": {
                               "checked": "panel.type == 'radial'"
-                            }
+                            },
+                            "behavior": [
+                              {
+                                "event": "click",
+                                "effects": [
+                                  {
+                                    "set": {
+                                      "gradient_type": "\"radial\""
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
                           },
                           {
                             "id": "grad_freeform_button",
@@ -15859,6 +15883,18 @@
                           90,
                           135,
                           180
+                        ],
+                        "behavior": [
+                          {
+                            "event": "change",
+                            "effects": [
+                              {
+                                "set": {
+                                  "gradient_angle": "value"
+                                }
+                              }
+                            ]
+                          }
                         ]
                       }
                     ]
@@ -15889,6 +15925,18 @@
                           150,
                           200,
                           400
+                        ],
+                        "behavior": [
+                          {
+                            "event": "change",
+                            "effects": [
+                              {
+                                "set": {
+                                  "gradient_aspect_ratio": "value"
+                                }
+                              }
+                            ]
+                          }
                         ]
                       }
                     ]
@@ -15925,6 +15973,18 @@
                             "value": "lines",
                             "label": "Lines (freeform)"
                           }
+                        ],
+                        "behavior": [
+                          {
+                            "event": "change",
+                            "effects": [
+                              {
+                                "set": {
+                                  "gradient_method": "value"
+                                }
+                              }
+                            ]
+                          }
                         ]
                       }
                     ]
@@ -15944,7 +16004,19 @@
                         "label": "Dither",
                         "bind": {
                           "checked": "panel.dither"
-                        }
+                        },
+                        "behavior": [
+                          {
+                            "event": "change",
+                            "effects": [
+                              {
+                                "set": {
+                                  "gradient_dither": "checked"
+                                }
+                              }
+                            ]
+                          }
+                        ]
                       }
                     ]
                   }
