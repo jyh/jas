@@ -83,6 +83,12 @@ class Model:
         # MASK_PREVIEW with a masked selection.
         # OPACITY.md §Preview interactions.
         self.editing_target: EditingTarget = EditingTarget.content()
+        # Mask-isolation path. When non-None, the canvas renders
+        # only the mask subtree of the element at this path,
+        # hiding everything else. Entered by Alt/Option-clicking
+        # MASK_PREVIEW; exited by Alt-clicking again.
+        # OPACITY.md §Preview interactions.
+        self.mask_isolation_path: tuple[int, ...] | None = None
 
     @property
     def filename(self) -> str:
