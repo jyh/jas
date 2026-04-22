@@ -2,7 +2,10 @@
 //!
 //! Draws the document onto an HTML <canvas> via web_sys::CanvasRenderingContext2d.
 
-use web_sys::CanvasRenderingContext2d;
+use std::cell::RefCell;
+
+use wasm_bindgen::JsCast;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::document::artboard::{Artboard, ArtboardFill};
 use crate::document::document::Document;
@@ -202,6 +205,189 @@ fn apply_outline_style(ctx: &CanvasRenderingContext2d) {
 }
 
 fn draw_element(
+    ctx: &CanvasRenderingContext2d,
+    elem: &Element,
+    ancestor_vis: Visibility,
+    precision: f64,
+) {
+    // Opacity mask: when an element carries an active, supported mask,
+    // redirect rendering through [draw_element_with_mask] which
+    // composites the element against the mask's subtree on an
+    // offscreen canvas. OPACITY.md §Rendering. Track C phase 1
+    // supports ``clip: true`` (both invert values); ``clip: false``
+    // and ``linked: false`` fall through to the plain path.
+    if let Some(mask) = elem.common().mask.as_deref() {
+        if let Some(op) = mask_composite_op(mask) {
+            draw_element_with_mask(ctx, elem, mask, op, ancestor_vis, precision);
+            return;
+        }
+    }
+    draw_element_body(ctx, elem, ancestor_vis, precision);
+}
+
+// ---------------------------------------------------------------------------
+// Opacity-mask compositing (OPACITY.md §Rendering)
+// ---------------------------------------------------------------------------
+
+/// Return the Canvas2D ``globalCompositeOperation`` string that
+/// applies the given [Mask] to an element's offscreen image, or
+/// ``None`` when the mask is inactive or its configuration isn't
+/// yet supported by the renderer. The caller falls back to the
+/// no-mask path when this returns ``None``.
+///
+/// Track C phase 1 supports ``clip: true`` only — the standard
+/// "clip to mask shape" interpretation. ``clip: false`` (element
+/// stays visible outside the mask shape) requires a more complex
+/// two-pass composite and lands in a later phase. ``disabled`` is
+/// treated as no-mask per the spec.
+fn mask_composite_op(mask: &Mask) -> Option<&'static str> {
+    if mask.disabled {
+        return None;
+    }
+    if !mask.clip {
+        return None;
+    }
+    Some(if mask.invert { "destination-out" } else { "destination-in" })
+}
+
+thread_local! {
+    /// Reusable offscreen canvas for opacity-mask compositing.
+    /// Created lazily on first use and resized to match the main
+    /// canvas when the dimensions change. Kept as a module-level
+    /// scratch buffer to avoid allocating a new DOM canvas per
+    /// masked element per frame.
+    static MASK_CANVAS: RefCell<Option<HtmlCanvasElement>> = const { RefCell::new(None) };
+}
+
+/// Read the six-component current transform from a Canvas2D
+/// context via JS reflection on ``currentTransform``. Returns
+/// ``None`` when the property isn't present or its fields aren't
+/// numeric (which means we fall back to identity on the caller's
+/// offscreen ctx — a reasonable degradation).
+fn read_ctx_transform(
+    ctx: &CanvasRenderingContext2d,
+) -> Option<(f64, f64, f64, f64, f64, f64)> {
+    let t = js_sys::Reflect::get(ctx, &wasm_bindgen::JsValue::from_str("currentTransform")).ok()?;
+    let a = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("a")).ok()?.as_f64()?;
+    let b = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("b")).ok()?.as_f64()?;
+    let c = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("c")).ok()?.as_f64()?;
+    let d = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("d")).ok()?.as_f64()?;
+    let e = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("e")).ok()?.as_f64()?;
+    let f = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("f")).ok()?.as_f64()?;
+    Some((a, b, c, d, e, f))
+}
+
+/// Obtain (or lazily create) the scratch mask canvas, resized to
+/// ``w x h``. Returns the canvas together with its 2D context.
+/// Returns ``None`` if the DOM isn't reachable (e.g., non-browser
+/// host or the canvas can't be created). Node is *not* appended
+/// to the document — it lives only in memory.
+fn get_mask_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    let canvas: HtmlCanvasElement = MASK_CANVAS.with(|cell| -> Option<HtmlCanvasElement> {
+        if let Some(c) = cell.borrow().clone() {
+            return Some(c);
+        }
+        let window = web_sys::window()?;
+        let doc = window.document()?;
+        let el = doc.create_element("canvas").ok()?;
+        let c: HtmlCanvasElement = el.unchecked_into();
+        *cell.borrow_mut() = Some(c.clone());
+        Some(c)
+    })?;
+    if canvas.width() != w {
+        canvas.set_width(w);
+    }
+    if canvas.height() != h {
+        canvas.set_height(h);
+    }
+    let ctx: CanvasRenderingContext2d = canvas
+        .get_context("2d").ok()??.unchecked_into();
+    Some((canvas, ctx))
+}
+
+/// Render ``elem`` on the main ``ctx`` with its opacity mask
+/// composited in. The element body is drawn to a scratch
+/// offscreen canvas at the same world transform as the main ctx;
+/// the mask's subtree is drawn on top of it with the mask's
+/// composite op (``destination-in`` / ``destination-out`` per
+/// ``mask_composite_op``), leaving only the element pixels that
+/// survive the mask. The scratch canvas is then copied onto the
+/// main ctx at device coordinates.
+fn draw_element_with_mask(
+    ctx: &CanvasRenderingContext2d,
+    elem: &Element,
+    mask: &Mask,
+    composite_op: &str,
+    ancestor_vis: Visibility,
+    precision: f64,
+) {
+    let main_canvas = ctx.canvas();
+    let (w, h) = match &main_canvas {
+        Some(c) => (c.width(), c.height()),
+        None => {
+            // No canvas reachable — fall back to the no-mask path.
+            draw_element_body(ctx, elem, ancestor_vis, precision);
+            return;
+        }
+    };
+    if w == 0 || h == 0 {
+        return;
+    }
+    let (off_canvas, off_ctx) = match get_mask_scratch(w, h) {
+        Some(pair) => pair,
+        None => {
+            draw_element_body(ctx, elem, ancestor_vis, precision);
+            return;
+        }
+    };
+
+    // Reset offscreen state and clear any prior content.
+    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    off_ctx.set_global_composite_operation("source-over").ok();
+    off_ctx.set_global_alpha(1.0);
+    off_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
+
+    // Copy the main ctx's current world transform onto the offscreen
+    // ctx so ``elem`` renders at the same screen position it would
+    // on the main canvas. web-sys 0.3 doesn't expose
+    // ``getTransform()`` / ``DOMMatrix`` under the enabled features,
+    // so read ``currentTransform`` via JS reflection — the object
+    // has ``a``..``f`` number fields matching the 2D matrix.
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) {
+        off_ctx.set_transform(a, b, c, d, e, f).ok();
+    }
+
+    // Pass 1: draw the element body (skipping the mask dispatch so
+    // we don't recurse into ourselves) onto the offscreen canvas.
+    draw_element_body(&off_ctx, elem, ancestor_vis, precision);
+
+    // Pass 2: composite the mask subtree against the element's
+    // pixels using ``destination-in`` (or ``destination-out`` when
+    // the mask is inverted). The subtree is drawn in the element's
+    // own coord system since ``linked: true`` is the phase-1 default.
+    off_ctx.set_global_composite_operation(composite_op).ok();
+    draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+
+    // Copy the composited offscreen pixels onto the main ctx at
+    // device coordinates (0, 0). The main ctx's alpha / blend_mode
+    // will apply to the final blit, matching the non-mask path.
+    ctx.save();
+    ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    ctx.set_global_alpha(elem.opacity());
+    ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
+    ctx.draw_image_with_html_canvas_element(&off_canvas, 0.0, 0.0).ok();
+    ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Element body (non-mask path)
+// ---------------------------------------------------------------------------
+
+/// Render an element's geometry (fill / stroke / children) without
+/// consulting ``common.mask``. Split from [draw_element] so the
+/// mask path can invoke the body directly without recursing through
+/// the mask dispatch.
+fn draw_element_body(
     ctx: &CanvasRenderingContext2d,
     elem: &Element,
     ancestor_vis: Visibility,
@@ -1402,6 +1588,49 @@ mod tests {
         assert_eq!(blend_mode_css(BlendMode::ColorDodge), "color-dodge");
         assert_eq!(blend_mode_css(BlendMode::SoftLight), "soft-light");
         assert_eq!(blend_mode_css(BlendMode::HardLight), "hard-light");
+    }
+
+    // ── mask_composite_op (Track C phase 1) ────────────────
+
+    fn test_mask(clip: bool, invert: bool, disabled: bool) -> Mask {
+        Mask {
+            subtree: Box::new(Element::Group(GroupElem::default())),
+            clip,
+            invert,
+            disabled,
+            linked: true,
+            unlink_transform: None,
+        }
+    }
+
+    #[test]
+    fn mask_composite_op_clip_not_inverted_is_destination_in() {
+        let m = test_mask(true, false, false);
+        assert_eq!(mask_composite_op(&m), Some("destination-in"));
+    }
+
+    #[test]
+    fn mask_composite_op_clip_inverted_is_destination_out() {
+        let m = test_mask(true, true, false);
+        assert_eq!(mask_composite_op(&m), Some("destination-out"));
+    }
+
+    #[test]
+    fn mask_composite_op_disabled_is_none() {
+        // disabled overrides both clip and invert: falls back to no
+        // mask rendering per OPACITY.md § States.
+        assert_eq!(mask_composite_op(&test_mask(true, false, true)), None);
+        assert_eq!(mask_composite_op(&test_mask(true, true, true)), None);
+        assert_eq!(mask_composite_op(&test_mask(false, false, true)), None);
+    }
+
+    #[test]
+    fn mask_composite_op_no_clip_is_none_phase1() {
+        // clip=false (element visible outside the mask shape) needs a
+        // two-pass composite; not yet supported — falls back to no
+        // mask. Phase 2 of Track C will handle this.
+        assert_eq!(mask_composite_op(&test_mask(false, false, false)), None);
+        assert_eq!(mask_composite_op(&test_mask(false, true, false)), None);
     }
 
     #[test]
