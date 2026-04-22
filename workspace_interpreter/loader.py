@@ -42,8 +42,14 @@ def load_workspace(path: str) -> dict:
                     part = yaml.safe_load(f)
                 if isinstance(part, dict):
                     data.update(part)
-        # Load recognized subdirectories
-        for subdir in ("dialogs", "panels", "templates"):
+        # Load recognized subdirectories.
+        #
+        # Dirs where each file is one entity keyed by its ``id`` field
+        # (panels, tools). Dirs where each file's contents merge into
+        # the parent dict (dialogs, templates).
+        keyed_subdirs = ("panels", "tools")
+        merged_subdirs = ("dialogs", "templates")
+        for subdir in keyed_subdirs + merged_subdirs:
             subdir_path = os.path.join(path, subdir)
             if not os.path.isdir(subdir_path):
                 continue
@@ -56,9 +62,9 @@ def load_workspace(path: str) -> dict:
                     part = yaml.safe_load(f)
                 if not isinstance(part, dict):
                     continue
-                if subdir == "panels":
-                    panel_id = part.get("id", os.path.splitext(fname)[0])
-                    merged[panel_id] = part
+                if subdir in keyed_subdirs:
+                    entity_id = part.get("id", os.path.splitext(fname)[0])
+                    merged[entity_id] = part
                 else:
                     merged.update(part)
             if merged:
