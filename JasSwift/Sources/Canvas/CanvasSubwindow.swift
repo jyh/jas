@@ -561,6 +561,22 @@ internal func maskPlan(_ mask: Mask) -> MaskPlan? {
     }
 }
 
+/// Return the transform that should be applied when rendering the
+/// mask's subtree on top of the ancestor coord system. Track C
+/// phase 3, OPACITY.md §Document model:
+///
+/// - ``linked: true``  — mask inherits the element's transform
+///   (mask follows the element).
+/// - ``linked: false`` — mask uses ``unlinkTransform`` (the
+///   element's transform captured at unlink time, frozen so the
+///   mask stays fixed under subsequent element edits).
+///
+/// Returns ``nil`` when the picked transform is absent (identity
+/// case) so the caller can skip the ``applyTransform`` call.
+internal func effectiveMaskTransform(_ mask: Mask, _ elem: Element) -> Transform? {
+    mask.linked ? elem.transform : mask.unlinkTransform
+}
+
 /// Opacity fetched from any Element case. (The Geometry module
 /// already exposes ``blendMode`` / ``mask``; a renderer-local
 /// ``elementOpacity`` keeps this ad-hoc without growing the
@@ -606,6 +622,11 @@ private func drawElementWithMask(
     ctx.setAlpha(1.0)
     ctx.setBlendMode(.normal)
     drawElementBody(ctx, elem, ancestorVis: ancestorVis)
+    // Apply the mask's effective transform (per
+    // ``effectiveMaskTransform``), then composite the mask subtree
+    // against the element body. Track C phase 3.
+    ctx.saveGState()
+    applyTransform(ctx, effectiveMaskTransform(mask, elem))
     switch plan {
     case .clipIn:
         ctx.setBlendMode(.destinationIn)
@@ -629,6 +650,7 @@ private func drawElementWithMask(
         // Empty-bbox mask: no clip; element body passes through
         // unmodified (mask has nothing to composite against).
     }
+    ctx.restoreGState()
     ctx.endTransparencyLayer()
     ctx.restoreGState()
 }

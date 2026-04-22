@@ -306,3 +306,63 @@ private func testMask(clip: Bool, invert: Bool, disabled: Bool) -> Mask {
     // outside-region alpha is zero either way.
     #expect(maskPlan(testMask(clip: false, invert: true, disabled: false)) == .clipOut)
 }
+
+// MARK: - effectiveMaskTransform (Track C phase 3)
+
+private func testTransform(_ e: Double, _ f: Double) -> Transform {
+    // Pure translation by (e, f) for easy identification in tests.
+    Transform(a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: e, f: f)
+}
+
+private func testRect(_ transform: Transform?) -> Element {
+    .rect(Rect(
+        x: 0, y: 0, width: 10, height: 10,
+        transform: transform
+    ))
+}
+
+private func testMaskLinked(_ linked: Bool, unlink: Transform?) -> Mask {
+    Mask(
+        subtreeElement: .group(Group(children: [])),
+        clip: true, invert: false, disabled: false,
+        linked: linked, unlinkTransform: unlink
+    )
+}
+
+@Test func effectiveMaskTransformLinkedReturnsElementTransform() {
+    // linked=true: mask follows the element, so the renderer
+    // should apply `elem.transform`.
+    let mask = testMaskLinked(true, unlink: nil)
+    let elem = testRect(testTransform(5, 7))
+    let t = effectiveMaskTransform(mask, elem)
+    #expect(t != nil)
+    #expect(t?.e == 5)
+    #expect(t?.f == 7)
+}
+
+@Test func effectiveMaskTransformLinkedNilWhenElementHasNoTransform() {
+    // linked=true with no element transform: nil — the
+    // compositing path skips the applyTransform call.
+    let mask = testMaskLinked(true, unlink: nil)
+    let elem = testRect(nil)
+    #expect(effectiveMaskTransform(mask, elem) == nil)
+}
+
+@Test func effectiveMaskTransformUnlinkedReturnsCapturedUnlinkTransform() {
+    // linked=false: mask stays frozen under the unlink-time
+    // transform, regardless of the element's current transform.
+    let mask = testMaskLinked(false, unlink: testTransform(3, 4))
+    let elem = testRect(testTransform(100, 100))
+    let t = effectiveMaskTransform(mask, elem)
+    #expect(t != nil)
+    #expect(t?.e == 3)
+    #expect(t?.f == 4)
+}
+
+@Test func effectiveMaskTransformUnlinkedNilWhenUnlinkMissing() {
+    // linked=false with no captured transform (edge case:
+    // unlinked at identity): nil.
+    let mask = testMaskLinked(false, unlink: nil)
+    let elem = testRect(testTransform(7, 8))
+    #expect(effectiveMaskTransform(mask, elem) == nil)
+}
