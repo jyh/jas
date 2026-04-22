@@ -185,18 +185,50 @@ let apply_outline_style cr =
   Cairo.set_line_cap cr Cairo.BUTT;
   Cairo.set_line_join cr Cairo.JOIN_MITER
 
-(** Draw an element to a Cairo context.
-
-    [ancestor_vis] is the capping visibility inherited from parent
-    Groups/Layers. The element's effective visibility is the minimum
-    of its own and the ancestor's:
-
-    - [Invisible] effective: the subtree is skipped entirely.
-    - [Outline]   effective: every non-Text element is drawn with a
-      thin black hairline stroke and no fill. Text and Text_path
-      remain rendered as Preview.
-    - [Preview]   effective: normal rendering. *)
+(** Render a document element. When the element carries an active,
+    supported opacity mask, rendering is redirected through
+    [draw_element_with_mask] which composites the element body
+    against the mask's subtree using [Cairo.DEST_IN] /
+    [Cairo.DEST_OUT]. Track C phase 1 supports [clip: true] only;
+    [clip: false] and [disabled: true] fall through to the plain
+    path. OPACITY.md \167Rendering. *)
 let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.element) =
+  match Element.get_mask elem with
+  | Some mask ->
+    (match mask_composite_op mask with
+     | Some op -> draw_element_with_mask cr elem mask op ancestor_vis
+     | None -> draw_element_body ~ancestor_vis cr elem)
+  | None -> draw_element_body ~ancestor_vis cr elem
+
+(** Return the Cairo operator that composites a [mask] onto the
+    element's rendered pixels, or [None] when the mask config
+    isn't supported by the renderer. Track C phase 1: [clip: true]
+    maps to [DEST_IN] (or [DEST_OUT] when inverted); [clip: false]
+    returns [None] (two-pass composite lands in a later phase);
+    [disabled: true] returns [None] (render normally per OPACITY.md
+    \167States). *)
+and mask_composite_op (mask : Element.mask) : Cairo.operator option =
+  if mask.Element.disabled then None
+  else if not mask.Element.clip then None
+  else Some (if mask.Element.invert then Cairo.DEST_OUT else Cairo.DEST_IN)
+
+(** Render [elem] on [cr] with its opacity mask composited in. The
+    element body is drawn into a fresh Cairo group; the mask
+    subtree is then painted on top of the group with the mask
+    [op] ([DEST_IN] / [DEST_OUT]), clipping the body to the mask
+    shape. The group is then popped back onto the parent context.
+    OPACITY.md \167Rendering, phase 1. *)
+and draw_element_with_mask cr (elem : Element.element)
+    (mask : Element.mask) (op : Cairo.operator) ancestor_vis =
+  Cairo.Group.push cr;
+  draw_element_body ~ancestor_vis cr elem;
+  Cairo.set_operator cr op;
+  draw_element ~ancestor_vis cr mask.Element.subtree;
+  Cairo.set_operator cr Cairo.OVER;
+  Cairo.Group.pop_to_source cr;
+  Cairo.paint cr
+
+and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.element) =
   let open Element in
   let elem_vis = Element.get_visibility elem in
   let effective = if compare elem_vis ancestor_vis < 0 then elem_vis else ancestor_vis in
