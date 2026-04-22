@@ -73,12 +73,24 @@ function runEffect(effect, scope, store, options) {
   }
 
   // ── State mutation ───────────────────────────────────
+  // Two supported shapes, matching workspace/actions.yaml convention:
+  //   set: { path: expr, path2: expr2, ... }     # dict form (common)
+  //   set: <path>, value: <expr>                 # scalar form
   if ("set" in effect) {
-    const target = normalizeTarget(effect.set);
-    const value = effect.value !== undefined
-      ? toJson(evaluate(String(effect.value), scope))
-      : null;
-    store.set(target, value);
+    const raw = effect.set;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [targetKey, valueExpr] of Object.entries(raw)) {
+        const target = normalizeTarget(targetKey);
+        const value = toJson(evaluate(String(valueExpr), scope));
+        store.set(target, value);
+      }
+    } else {
+      const target = normalizeTarget(raw);
+      const value = effect.value !== undefined
+        ? toJson(evaluate(String(effect.value), scope))
+        : null;
+      store.set(target, value);
+    }
     return;
   }
 
