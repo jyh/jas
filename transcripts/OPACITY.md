@@ -283,3 +283,49 @@ then leaves mask-editing mode.
   Mixed-kind selections show "Mixed"; an empty selection hides the label.
   Deferred because it introduces a dependency on a centralized element-type
   label registry that does not yet exist.
+
+- **Drag from OPACITY_PREVIEW to MASK_PREVIEW** — replace the mask contents
+  with a copy of the element's artwork. Deferred because drag-and-drop is
+  platform-specific (HTML5 DnD in Rust/wasm, NSPasteboard / NSDragging in
+  Swift, GTK DnD in OCaml, QDrag / QMimeData in Python) — a clean
+  cross-app abstraction would need to come first, and a menu-based
+  alternative may satisfy the same use case with less plumbing.
+
+- **Luminance-weighted masks for `ClipOut` / `RevealOutsideBbox`** — the
+  `ClipIn` path (the default for newly-created masks) uses PDF §11
+  luminance promotion in jas_dioxus; the two other compositing plans still
+  use raw alpha. Promoting them requires the same two-buffer readback as
+  ClipIn and is straightforward per app.
+
+- **Luminance-weighted masks in JasSwift / jas_ocaml / jas (python)** — the
+  other three renderers still use raw alpha across all branches. Each
+  needs a two-buffer pipeline with platform-specific pixel readback
+  (`CGContext.data` for CoreGraphics, `Cairo_image_surface.get_data` for
+  Cairo, `QImage.bits`/`constBits` for QImage) and the same BT.601 luma
+  formula.
+
+- **MASK_PREVIEW thumbnail and "empty-mask glyph"** — currently the
+  previews render as `[Mask preview]` placeholder text. The spec calls
+  for a thumbnail of the mask subtree (or a fixed empty-mask glyph when
+  no mask exists). Deferred behind the need for a generic
+  "render an element subtree to a small bitmap" helper.
+
+- **OPACITY_PREVIEW thumbnail** — same story as MASK_PREVIEW; currently a
+  placeholder, spec calls for a thumbnail of the selection's artwork.
+
+- **Path encoding for "inside a mask"** — after a mask-routed
+  `Controller.add_element`, the selection points at the mask-target
+  element rather than the new element inside the subtree, because
+  `ElementPath` has no encoding for "descend into this element's mask".
+  A proper fix extends `ElementPath` with a `Mask` marker or similar and
+  threads it through `get_element` / `replace_element` / serialization /
+  the selection machinery. Moderate architectural change.
+
+- **Swift / Python icon_button SVG rendering** — the `op_link_indicator`
+  widget renders as a text button showing the widget's `summary` in Swift
+  and Python because their icon_button renderers don't parse the SVG
+  strings from `workspace/icons.yaml`. Rust / Flask render the SVG
+  directly via `dangerous_inner_html` / Jinja. Swift would use
+  `QSvgRenderer` equivalent (macOS 14's NSImage SVG support, or a
+  hand-written SVG-path-to-CGPath parser for macOS 13); Python would
+  use `QtSvg.QSvgRenderer → QPixmap → QIcon`.
