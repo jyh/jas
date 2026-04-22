@@ -769,3 +769,29 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     let parsed = try JSONDecoder().decode(GradientStop.self, from: json.data(using: .utf8)!)
     #expect(parsed.midpointToNext == 50)
 }
+
+// Phase 1b: per-element gradient fields.
+
+@Test func rectFillGradientFieldRoundtrips() {
+    let g = Gradient(
+        type: .linear, angle: 45, aspectRatio: 100,
+        stops: [
+            GradientStop(color: "#ff0000", opacity: 100, location: 0,   midpointToNext: 50),
+            GradientStop(color: "#0000ff", opacity: 100, location: 100, midpointToNext: 50),
+        ]
+    )
+    let r = Rect(x: 0, y: 0, width: 10, height: 10, fillGradient: g)
+    #expect(r.fillGradient == g)
+    #expect(r.strokeGradient == nil)
+    // Fields not specified at construction default to nil.
+    let r2 = Rect(x: 0, y: 0, width: 10, height: 10)
+    #expect(r2.fillGradient == nil)
+    #expect(r2.strokeGradient == nil)
+}
+
+@Test func circleStrokeGradientFieldRoundtrips() {
+    let g = Gradient(type: .radial)
+    let c = Circle(cx: 0, cy: 0, r: 10, strokeGradient: g)
+    #expect(c.strokeGradient == g)
+    #expect(c.fillGradient == nil)
+}
