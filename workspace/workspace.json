@@ -15486,6 +15486,559 @@
         ]
       }
     },
+    "gradient_panel_content": {
+      "id": "gradient_panel_content",
+      "type": "panel",
+      "summary": "Gradient",
+      "description": "Gradient panel \u2014 edits the gradient value of the active fill or stroke on the current selection. See transcripts/GRADIENT.md for the full specification.\nPhase 2 scope: yaml wiring + static layout only. Controls render at the positions specified in \u00a7Layout but do not yet write back to the document. Phase 4 wires panel reads; Phase 5 wires panel writes and fill-type coupling. Linear/radial render natively in SVG (Phase 6/7); freeform, smooth method, dither, and along/across stroke sub-modes are flagged status: pending_renderer.\n=== Layout ===\nRow 1 \u2014 \"Presets:\" label, DOCUMENT_LIBRARY_DROPDOWN (selects which library populates the tile strip), DOCUMENT_LIBRARY_SIZE_DROPDOWN (Small / Medium / Large Thumbnail View, plus Small / Large List View flagged pending_renderer).\nRow 2 \u2014 Gradient tile strip; one GRADIENT_TILE per gradient in the active library.\nRow 3 \u2014 Horizontal rule separator.\nRow 4 \u2014 Two-column layout: FILL_STROKE_WIDGET on the left (col-3), middle block on the right (col-9) containing Type / Stroke sub-mode / Angle / Aspect ratio / Method / Dither rows.\nRow 5 \u2014 Stops editor: ADD_TO_SWATCHES_BUTTON (col-2), GRADIENT_SLIDER (col-8), TRASH_BUTTON (col-2).\nRow 6 \u2014 Selected-stop properties: EYEDROPPER_BUTTON (col-2), inner column with Opacity / Location combos.\n=== Panel menu ===\nSix entries across three groups: Reverse Gradient / Distribute Stops Evenly / Reset Midpoints (gradient transformations); Open Gradient Library / Save Gradient Library (library management); Close Gradient (panel management).\n",
+      "state": {
+        "type": {
+          "type": "enum",
+          "values": [
+            "linear",
+            "radial",
+            "freeform"
+          ],
+          "default": "linear",
+          "description": "Working gradient type. Phase-1 is panel-local; Phase 5 persists to the active gradient on selection.\n"
+        },
+        "angle": {
+          "type": "number",
+          "default": 0,
+          "description": "Working gradient angle in degrees, -180..+180. Linear/radial only.\n"
+        },
+        "aspect_ratio": {
+          "type": "number",
+          "default": 100,
+          "description": "Working aspect ratio as a percentage, 1-1000. 100 = isotropic (circle for radial). Linear/radial only.\n"
+        },
+        "method": {
+          "type": "enum",
+          "values": [
+            "classic",
+            "smooth",
+            "points",
+            "lines"
+          ],
+          "default": "classic",
+          "description": "Working interpolation/topology method. classic / smooth apply to linear/radial; points / lines apply to freeform. Smooth and freeform topologies are pending_renderer.\n"
+        },
+        "dither": {
+          "type": "bool",
+          "default": false,
+          "description": "When true, the renderer applies sub-pixel dithering to reduce visible banding. status: pending_renderer in all four apps.\n"
+        },
+        "stroke_sub_mode": {
+          "type": "enum",
+          "values": [
+            "within",
+            "along",
+            "across"
+          ],
+          "default": "within",
+          "description": "How a stroke gradient maps onto the path. along/across are pending_renderer; within renders natively.\n"
+        },
+        "stops": {
+          "type": "list",
+          "default": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ffffff",
+              "opacity": 100,
+              "location": 100,
+              "midpoint_to_next": 50
+            }
+          ],
+          "description": "Working stops for linear/radial. Phase-1 is panel-local; Phase 5 persists to the active gradient on the selection.\n"
+        },
+        "selected_stop_index": {
+          "type": "number",
+          "default": 0,
+          "description": "Index of the selected stop in `stops`. -1 when nothing selected. Shared with the on-canvas Gradient tool (see GRADIENT_TOOL.md).\n"
+        },
+        "selected_midpoint_index": {
+          "type": "number",
+          "default": -1,
+          "description": "Index of the selected midpoint (the midpoint between stops [i] and [i+1]). -1 when nothing selected. Mutually exclusive with selected_stop_index.\n"
+        },
+        "active_library_id": {
+          "type": "string",
+          "default": "",
+          "description": "The currently-selected library id (filename stem). Empty until Phase 3 wires library loading.\n"
+        },
+        "thumbnail_size": {
+          "type": "enum",
+          "values": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "default": "large",
+          "description": "Tile size for the preset strip. Three thumbnail sizes ship in v1; the two list-view items in DOCUMENT_LIBRARY_SIZE_DROPDOWN are status: pending_renderer.\n"
+        },
+        "preview_state": {
+          "type": "bool",
+          "default": false,
+          "description": "True when the active attribute (fill or stroke per state.fill_on_top) is solid or none and the panel is showing a seeded default gradient. Cleared on first edit (which promotes the attribute to a gradient \u2014 see Phase 5 fill-type coupling).\n"
+        }
+      },
+      "menu": [
+        {
+          "label": "Reverse Gradient",
+          "action": "gradient_reverse",
+          "enabled_when": "false",
+          "description": "Phase 5 \u2014 flips stops end-to-end. Disabled until the action pipeline is wired.\n"
+        },
+        {
+          "label": "Distribute Stops Evenly",
+          "action": "gradient_distribute_stops",
+          "enabled_when": "false"
+        },
+        {
+          "label": "Reset Midpoints",
+          "action": "gradient_reset_midpoints",
+          "enabled_when": "false"
+        },
+        "separator",
+        {
+          "label": "Open Gradient Library",
+          "action": "gradient_open_library",
+          "enabled_when": "false",
+          "description": "Phase 9 \u2014 dynamic submenu of workspace/gradients/*.json files.\n"
+        },
+        {
+          "label": "Save Gradient Library",
+          "action": "gradient_save_library",
+          "enabled_when": "false",
+          "description": "Phase 9 \u2014 opens a Save Gradient Library dialog.\n"
+        },
+        "separator",
+        {
+          "label": "Close Gradient",
+          "action": "close_panel",
+          "params": {
+            "panel": "gradient"
+          }
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "grad_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "row",
+            "id": "grad_presets_row",
+            "children": [
+              {
+                "type": "text",
+                "content": "Presets:",
+                "col": 2
+              },
+              {
+                "id": "grad_library_dropdown",
+                "type": "gradient_tile",
+                "col": 8,
+                "summary": "Document Library",
+                "description": "Single-select pulldown. Phase 3 replaces this with a real `select` populated from workspace/gradients/*.json plus the per-document Document Library.\n",
+                "bind": {
+                  "gradient": "panel.stops"
+                },
+                "size": "small"
+              },
+              {
+                "id": "grad_size_dropdown",
+                "type": "select",
+                "col": 2,
+                "summary": "Thumbnail size",
+                "bind": {
+                  "value": "panel.thumbnail_size"
+                },
+                "options": [
+                  {
+                    "value": "small",
+                    "label": "Small Thumbnail View"
+                  },
+                  {
+                    "value": "medium",
+                    "label": "Medium Thumbnail View"
+                  },
+                  {
+                    "value": "large",
+                    "label": "Large Thumbnail View"
+                  },
+                  "separator",
+                  {
+                    "value": "small_list",
+                    "label": "Small List View"
+                  },
+                  {
+                    "value": "large_list",
+                    "label": "Large List View"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "id": "grad_tiles_row",
+            "children": [
+              {
+                "id": "grad_tile_placeholder",
+                "type": "gradient_tile",
+                "bind": {
+                  "gradient": "panel.stops"
+                },
+                "size": "large"
+              }
+            ]
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "row",
+            "id": "grad_main_row",
+            "children": [
+              {
+                "id": "grad_fill_stroke_widget",
+                "type": "fill_stroke_widget",
+                "col": 3
+              },
+              {
+                "type": "container",
+                "col": 9,
+                "layout": "column",
+                "style": {
+                  "gap": 4
+                },
+                "children": [
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Type:",
+                        "col": 3
+                      },
+                      {
+                        "type": "container",
+                        "col": 9,
+                        "layout": "row",
+                        "children": [
+                          {
+                            "id": "grad_linear_button",
+                            "type": "icon_button",
+                            "summary": "Linear",
+                            "icon": "gradient_linear",
+                            "bind": {
+                              "checked": "panel.type == 'linear'"
+                            }
+                          },
+                          {
+                            "id": "grad_radial_button",
+                            "type": "icon_button",
+                            "summary": "Radial",
+                            "icon": "gradient_radial",
+                            "bind": {
+                              "checked": "panel.type == 'radial'"
+                            }
+                          },
+                          {
+                            "id": "grad_freeform_button",
+                            "type": "icon_button",
+                            "summary": "Freeform",
+                            "icon": "gradient_freeform",
+                            "enabled_when": "false",
+                            "bind": {
+                              "checked": "panel.type == 'freeform'"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Stroke:",
+                        "col": 3
+                      },
+                      {
+                        "type": "container",
+                        "col": 9,
+                        "layout": "row",
+                        "children": [
+                          {
+                            "id": "grad_stroke_within_button",
+                            "type": "icon_button",
+                            "summary": "Within stroke",
+                            "icon": "gradient_within_stroke",
+                            "bind": {
+                              "checked": "panel.stroke_sub_mode == 'within'"
+                            }
+                          },
+                          {
+                            "id": "grad_stroke_along_button",
+                            "type": "icon_button",
+                            "summary": "Along stroke",
+                            "icon": "gradient_along_stroke",
+                            "enabled_when": "false",
+                            "bind": {
+                              "checked": "panel.stroke_sub_mode == 'along'"
+                            }
+                          },
+                          {
+                            "id": "grad_stroke_across_button",
+                            "type": "icon_button",
+                            "summary": "Across stroke",
+                            "icon": "gradient_across_stroke",
+                            "enabled_when": "false",
+                            "bind": {
+                              "checked": "panel.stroke_sub_mode == 'across'"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "\u2220",
+                        "col": 3
+                      },
+                      {
+                        "id": "grad_angle_combo",
+                        "type": "combo_box",
+                        "col": 9,
+                        "summary": "Gradient angle (degrees)",
+                        "bind": {
+                          "value": "panel.angle"
+                        },
+                        "min": -180,
+                        "max": 180,
+                        "options": [
+                          -135,
+                          -90,
+                          -45,
+                          0,
+                          45,
+                          90,
+                          135,
+                          180
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "\u2195",
+                        "col": 3
+                      },
+                      {
+                        "id": "grad_aspect_combo",
+                        "type": "combo_box",
+                        "col": 9,
+                        "summary": "Aspect ratio (percentage)",
+                        "bind": {
+                          "value": "panel.aspect_ratio"
+                        },
+                        "min": 1,
+                        "max": 1000,
+                        "options": [
+                          25,
+                          50,
+                          75,
+                          100,
+                          150,
+                          200,
+                          400
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Method:",
+                        "col": 3
+                      },
+                      {
+                        "id": "grad_method_dropdown",
+                        "type": "select",
+                        "col": 9,
+                        "bind": {
+                          "value": "panel.method"
+                        },
+                        "options": [
+                          {
+                            "value": "classic",
+                            "label": "Classic"
+                          },
+                          {
+                            "value": "smooth",
+                            "label": "Smooth"
+                          },
+                          {
+                            "value": "points",
+                            "label": "Points (freeform)"
+                          },
+                          {
+                            "value": "lines",
+                            "label": "Lines (freeform)"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "",
+                        "col": 3
+                      },
+                      {
+                        "id": "grad_dither_checkbox",
+                        "type": "checkbox",
+                        "col": 9,
+                        "label": "Dither",
+                        "bind": {
+                          "checked": "panel.dither"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "id": "grad_stops_row",
+            "children": [
+              {
+                "id": "grad_add_to_swatches_button",
+                "type": "icon_button",
+                "col": 2,
+                "summary": "Add to Swatches",
+                "icon": "add_to_swatches"
+              },
+              {
+                "id": "grad_slider",
+                "type": "gradient_slider",
+                "col": 8,
+                "bind": {
+                  "stops": "panel.stops",
+                  "selected_stop_index": "panel.selected_stop_index",
+                  "selected_midpoint_index": "panel.selected_midpoint_index"
+                }
+              },
+              {
+                "id": "grad_trash_button",
+                "type": "icon_button",
+                "col": 2,
+                "summary": "Delete selected stop",
+                "icon": "trash"
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "id": "grad_stop_props_row",
+            "children": [
+              {
+                "id": "grad_eyedropper_button",
+                "type": "icon_button",
+                "col": 2,
+                "summary": "Pick color for selected stop",
+                "icon": "eyedropper"
+              },
+              {
+                "type": "container",
+                "col": 10,
+                "layout": "column",
+                "style": {
+                  "gap": 4
+                },
+                "children": [
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Opacity:",
+                        "col": 3
+                      },
+                      {
+                        "id": "grad_stop_opacity_combo",
+                        "type": "combo_box",
+                        "col": 9,
+                        "summary": "Selected stop opacity (percentage)",
+                        "bind": {
+                          "value": "panel.stops[panel.selected_stop_index].opacity"
+                        },
+                        "min": 0,
+                        "max": 100,
+                        "options": [
+                          0,
+                          25,
+                          50,
+                          75,
+                          100
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "row",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Location:",
+                        "col": 3
+                      },
+                      {
+                        "id": "grad_stop_location_combo",
+                        "type": "combo_box",
+                        "col": 9,
+                        "summary": "Selected stop location (percentage)",
+                        "bind": {
+                          "value": "panel.stops[panel.selected_stop_index].location"
+                        },
+                        "min": 0,
+                        "max": 100
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
     "layers_panel_content": {
       "id": "layers_panel_content",
       "type": "panel",
