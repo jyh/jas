@@ -110,6 +110,9 @@ pub(crate) struct AppState {
     pub(crate) swatch_libraries: serde_json::Value,
     /// Stroke panel state — mirrored to/from global state for selection sync.
     pub(crate) stroke_panel: StrokePanelState,
+    /// Gradient panel state — mirrored to/from the active fill or stroke
+    /// gradient on the selection. See `transcripts/GRADIENT.md`.
+    pub(crate) gradient_panel: GradientPanelState,
     /// Character panel state — panel-local; pushed to selected Text /
     /// TextPath via apply_character_panel_to_selection.
     pub(crate) character_panel: CharacterPanelState,
@@ -239,6 +242,69 @@ impl Default for StrokePanelState {
             arrow_align: "tip_at_end".into(),
             profile: "uniform".into(),
             profile_flipped: false,
+        }
+    }
+}
+
+/// Gradient panel state fields — mirror the panel-local state declared
+/// in `workspace/panels/gradient.yaml`. Populated by
+/// `sync_gradient_panel_from_selection` when the selection changes;
+/// pushed back to the active gradient on the selection by Phase 5
+/// (panel writes). See `transcripts/GRADIENT.md` §Document model.
+#[derive(Debug, Clone)]
+pub(crate) struct GradientPanelState {
+    /// "linear", "radial", or "freeform".
+    pub gtype: String,
+    /// −180..+180 degrees.
+    pub angle: f64,
+    /// 1–1000 percentage.
+    pub aspect_ratio: f64,
+    /// "classic", "smooth", "points", "lines".
+    pub method: String,
+    pub dither: bool,
+    /// "within", "along", "across".
+    pub stroke_sub_mode: String,
+    /// Working stops list (color hex string + per-stop fields).
+    pub stops: Vec<crate::geometry::element::GradientStop>,
+    /// Index of the selected stop, or `-1` when nothing is selected.
+    pub selected_stop_index: i64,
+    /// Index of the selected midpoint, or `-1` when nothing is selected.
+    pub selected_midpoint_index: i64,
+    /// Active library id (filename stem under workspace/gradients/).
+    pub active_library_id: String,
+    /// "small", "medium", or "large".
+    pub thumbnail_size: String,
+    /// True when the active attribute is solid/none and the panel is
+    /// showing a seeded default — first edit promotes the attribute
+    /// to a gradient.
+    pub preview_state: bool,
+}
+
+impl Default for GradientPanelState {
+    fn default() -> Self {
+        use crate::geometry::element::{Color, GradientStop};
+        Self {
+            gtype: "linear".into(),
+            angle: 0.0,
+            aspect_ratio: 100.0,
+            method: "classic".into(),
+            dither: false,
+            stroke_sub_mode: "within".into(),
+            stops: vec![
+                GradientStop {
+                    color: Color::BLACK, opacity: 100.0,
+                    location: 0.0, midpoint_to_next: 50.0,
+                },
+                GradientStop {
+                    color: Color::WHITE, opacity: 100.0,
+                    location: 100.0, midpoint_to_next: 50.0,
+                },
+            ],
+            selected_stop_index: 0,
+            selected_midpoint_index: -1,
+            active_library_id: "neutrals".into(),
+            thumbnail_size: "large".into(),
+            preview_state: false,
         }
     }
 }
@@ -528,6 +594,7 @@ impl AppState {
                 .map(|ws| ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
             stroke_panel: StrokePanelState::default(),
+            gradient_panel: GradientPanelState::default(),
             character_panel: CharacterPanelState::default(),
             paragraph_panel: ParagraphPanelState::default(),
             align_panel: AlignPanelState::default(),
@@ -988,6 +1055,130 @@ impl AppState {
                 tab.model.default_stroke = Some(s);
             }
             self.app_default_stroke = Some(s);
+        }
+    }
+
+    /// Sync gradient panel state from the selection's active attribute
+    /// (fill or stroke per `fill_on_top`). When the selection is uniform
+    /// on a single gradient, panel fields populate from it. When mixed,
+    /// fields stay at their current values and `selected_stop_index` is
+    /// clamped (the renderer handles mixed-state display per
+    /// GRADIENT.md §Multi-selection). When the active attribute is
+    /// solid/none, `preview_state` is set true so the panel shows a
+    /// seeded default; first edit will promote the attribute via the
+    /// fill-type coupling rule (Phase 5).
+    ///
+    /// Phase 4 scope: read direction only. The panel does not yet
+    /// commit edits back — that lands in Phase 5.
+    pub(crate) fn sync_gradient_panel_from_selection(&mut self) {
+        use crate::geometry::element::{Color, GradientStop};
+
+        let Some(tab) = self.tab() else { return; };
+        let doc = tab.model.document();
+
+        if doc.selection.is_empty() {
+            // No selection: panel keeps current defaults (acts as
+            // "session defaults" mode, mirroring STROKE.md behavior).
+            return;
+        }
+
+        // Read the gradient on the active attribute of every selected
+        // element. Mixed = at least two distinct gradients (or some
+        // have a gradient and others don't). Uniform-with-gradient =
+        // all elements have the same gradient. Uniform-without =
+        // every element has solid/none on the active attribute.
+        let fill_on_top = self.fill_on_top;
+        let mut first: Option<Option<crate::geometry::element::Gradient>> = None;
+        let mut mixed = false;
+        let mut first_solid_color: Option<Color> = None;
+        for es in &doc.selection {
+            let Some(elem) = doc.get_element(&es.path) else { continue; };
+            let gradient = if fill_on_top {
+                elem.fill_gradient().cloned()
+            } else {
+                elem.stroke_gradient().cloned()
+            };
+            // Capture the first element's solid color for the seed.
+            if first_solid_color.is_none() && gradient.is_none() {
+                let solid = if fill_on_top {
+                    elem.fill().map(|f| f.color)
+                } else {
+                    elem.stroke().map(|s| s.color)
+                };
+                first_solid_color = solid;
+            }
+            match &first {
+                None => first = Some(gradient),
+                Some(prev) => {
+                    if prev != &gradient { mixed = true; }
+                }
+            }
+        }
+
+        if mixed {
+            // Mixed selection: leave panel fields at their current values;
+            // the panel renderer reads selection_summary to decide
+            // blank-vs-uniform display per Multi-selection table.
+            self.gradient_panel.preview_state = false;
+            return;
+        }
+
+        match first.flatten() {
+            Some(g) => {
+                // Uniform with gradient — populate the panel.
+                self.gradient_panel.gtype = match g.gtype {
+                    crate::geometry::element::GradientType::Linear => "linear",
+                    crate::geometry::element::GradientType::Radial => "radial",
+                    crate::geometry::element::GradientType::Freeform => "freeform",
+                }.into();
+                self.gradient_panel.angle = g.angle;
+                self.gradient_panel.aspect_ratio = g.aspect_ratio;
+                self.gradient_panel.method = match g.method {
+                    crate::geometry::element::GradientMethod::Classic => "classic",
+                    crate::geometry::element::GradientMethod::Smooth => "smooth",
+                    crate::geometry::element::GradientMethod::Points => "points",
+                    crate::geometry::element::GradientMethod::Lines => "lines",
+                }.into();
+                self.gradient_panel.dither = g.dither;
+                self.gradient_panel.stroke_sub_mode = match g.stroke_sub_mode {
+                    crate::geometry::element::StrokeSubMode::Within => "within",
+                    crate::geometry::element::StrokeSubMode::Along => "along",
+                    crate::geometry::element::StrokeSubMode::Across => "across",
+                }.into();
+                self.gradient_panel.stops = g.stops;
+                // Clamp the selected-stop index to the new stops length.
+                let len = self.gradient_panel.stops.len() as i64;
+                if self.gradient_panel.selected_stop_index >= len {
+                    self.gradient_panel.selected_stop_index = (len - 1).max(0);
+                }
+                self.gradient_panel.preview_state = false;
+            }
+            None => {
+                // Uniform without gradient (active attr is solid/none).
+                // Seed the preview gradient per GRADIENT.md §Fill-type
+                // coupling — promote-from-solid rule. The first edit
+                // (Phase 5) will materialise this onto the elements.
+                let seed_first = first_solid_color.unwrap_or(Color::BLACK);
+                self.gradient_panel.gtype = "linear".into();
+                self.gradient_panel.angle = 0.0;
+                self.gradient_panel.aspect_ratio = 100.0;
+                self.gradient_panel.method = "classic".into();
+                self.gradient_panel.dither = false;
+                self.gradient_panel.stroke_sub_mode = "within".into();
+                self.gradient_panel.stops = vec![
+                    GradientStop {
+                        color: seed_first, opacity: 100.0,
+                        location: 0.0, midpoint_to_next: 50.0,
+                    },
+                    GradientStop {
+                        color: Color::WHITE, opacity: 100.0,
+                        location: 100.0, midpoint_to_next: 50.0,
+                    },
+                ];
+                self.gradient_panel.selected_stop_index = 0;
+                self.gradient_panel.selected_midpoint_index = -1;
+                self.gradient_panel.preview_state = true;
+            }
         }
     }
 
