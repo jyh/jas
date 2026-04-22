@@ -43,39 +43,19 @@ pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>
 
 // ---------------------------------------------------------------------------
 
-/// The target that drawing tools operate on. The default is the
-/// document's normal content; mask-editing mode switches the target
-/// to a specific element's mask subtree so new shapes land inside
-/// ``element.mask.subtree`` instead of the selected layer.
-/// OPACITY.md §Preview interactions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum EditingTarget {
-    /// The document's normal content (default). Drawing tools add
-    /// to ``doc.layers[selected_layer].children``.
-    Content,
-    /// Mask-editing mode: the element at ``path`` has its mask
-    /// subtree as the drawing target. Entered by clicking
-    /// MASK_PREVIEW; exited by clicking OPACITY_PREVIEW.
-    Mask(Vec<usize>),
-}
+/// Re-export of [`crate::document::model::EditingTarget`] — this
+/// lived on ``TabState`` before the editing-target / mask-isolation
+/// state moved to ``Model`` for parity with Swift / OCaml / Python
+/// and to give drawing tools access via ``&mut Model``. Kept as an
+/// alias so existing callers continue to see
+/// ``crate::workspace::app_state::EditingTarget``.
+pub(crate) use crate::document::model::EditingTarget;
 
 /// Per-tab state: each tab has its own document, tools, and clipboard.
 pub(crate) struct TabState {
     pub(crate) model: Model,
     pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
     pub(crate) clipboard: Vec<GeoElement>,
-    /// Mask-editing mode state. Defaults to ``Content``; flipped to
-    /// ``Mask(path)`` when the user clicks the Opacity panel's
-    /// MASK_PREVIEW and the selection has a mask. OPACITY.md
-    /// §Preview interactions.
-    pub(crate) editing_target: EditingTarget,
-    /// Mask-isolation state. When ``Some(path)``, the canvas
-    /// renders only the mask subtree of the element at ``path``,
-    /// hiding everything else. Entered by Alt/Option-clicking
-    /// MASK_PREVIEW; exited by Escape (future) or by clicking
-    /// MASK_PREVIEW / OPACITY_PREVIEW. OPACITY.md §Preview
-    /// interactions.
-    pub(crate) mask_isolation_path: Option<Vec<usize>>,
 }
 
 impl TabState {
@@ -107,8 +87,6 @@ impl TabState {
             model,
             tools,
             clipboard: Vec::new(),
-            editing_target: EditingTarget::Content,
-            mask_isolation_path: None,
         }
     }
 }
@@ -1076,7 +1054,7 @@ impl AppState {
             tab.model.document(),
             self.boolean_panel.precision,
             &self.artboards_panel_selection,
-            tab.mask_isolation_path.as_deref(),
+            tab.model.mask_isolation_path.as_deref(),
         );
 
         // Draw tool overlay
@@ -2578,42 +2556,42 @@ mod editing_target_tests {
     use super::*;
 
     #[test]
-    fn tab_state_defaults_to_content_editing_target() {
+    fn model_defaults_to_content_editing_target() {
         // Default editing target is the document's normal content —
         // mask-editing mode is entered explicitly via the
         // MASK_PREVIEW click. OPACITY.md §Preview interactions.
         let t = TabState::new();
-        assert_eq!(t.editing_target, EditingTarget::Content);
+        assert_eq!(t.model.editing_target, EditingTarget::Content);
     }
 
     #[test]
     fn editing_target_enter_and_exit_mask_mode() {
         let mut t = TabState::new();
-        t.editing_target = EditingTarget::Mask(vec![0, 2, 1]);
-        match &t.editing_target {
+        t.model.editing_target = EditingTarget::Mask(vec![0, 2, 1]);
+        match &t.model.editing_target {
             EditingTarget::Mask(p) => assert_eq!(p, &vec![0, 2, 1]),
             _ => panic!("expected Mask"),
         }
-        t.editing_target = EditingTarget::Content;
-        assert_eq!(t.editing_target, EditingTarget::Content);
+        t.model.editing_target = EditingTarget::Content;
+        assert_eq!(t.model.editing_target, EditingTarget::Content);
     }
 
     #[test]
-    fn tab_state_defaults_to_no_mask_isolation() {
+    fn model_defaults_to_no_mask_isolation() {
         // Mask-isolation is entered explicitly via
         // Alt/Option-clicking MASK_PREVIEW. OPACITY.md §Preview
         // interactions.
         let t = TabState::new();
-        assert!(t.mask_isolation_path.is_none());
+        assert!(t.model.mask_isolation_path.is_none());
     }
 
     #[test]
     fn mask_isolation_round_trips() {
         let mut t = TabState::new();
-        t.mask_isolation_path = Some(vec![0, 3]);
-        assert_eq!(t.mask_isolation_path, Some(vec![0, 3]));
-        t.mask_isolation_path = None;
-        assert!(t.mask_isolation_path.is_none());
+        t.model.mask_isolation_path = Some(vec![0, 3]);
+        assert_eq!(t.model.mask_isolation_path, Some(vec![0, 3]));
+        t.model.mask_isolation_path = None;
+        assert!(t.model.mask_isolation_path.is_none());
     }
 }
 

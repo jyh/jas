@@ -5928,7 +5928,7 @@ fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                     if let Some(tab) = st.tab_mut() {
                         let first_path = tab.model.document().selection.first()
                             .map(|es| es.path.clone());
-                        tab.mask_isolation_path = match (&tab.mask_isolation_path, first_path) {
+                        tab.model.mask_isolation_path = match (&tab.model.mask_isolation_path, first_path) {
                             (Some(_), _) => None,
                             (None, Some(p)) => Some(p),
                             (None, None) => None,
@@ -5939,7 +5939,7 @@ fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                     // content and the first selected element's mask
                     // subtree.
                     if let Some(tab) = st.tab_mut() {
-                        tab.editing_target = if target_is_mask {
+                        tab.model.editing_target = if target_is_mask {
                             tab.model.document().selection.first()
                                 .map(|es| EditingTarget::Mask(es.path.clone()))
                                 .unwrap_or(EditingTarget::Content)

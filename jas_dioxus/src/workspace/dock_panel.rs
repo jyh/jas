@@ -82,7 +82,7 @@ fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_js
     // reflects whether mask-editing mode is active, so OPACITY_PREVIEW
     // and MASK_PREVIEW can show a persistent highlight on the current
     // editing target.
-    let editing_mask = matches!(st.tab().map(|t| &t.editing_target),
+    let editing_mask = matches!(st.tab().map(|t| &t.model.editing_target),
         Some(crate::workspace::app_state::EditingTarget::Mask(_)));
     m.insert("editing_target_is_mask".into(), serde_json::Value::Bool(editing_mask));
     m
