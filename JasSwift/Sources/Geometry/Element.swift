@@ -215,6 +215,75 @@ public enum Visibility: Int, Equatable, Hashable, Comparable {
     }
 }
 
+/// Blend mode for compositing an element against its parent layer.
+/// Values mirror the Opacity panel's mode dropdown. Default is `.normal`.
+/// The `String` raw value is snake_case for cross-language JSON equivalence
+/// (matches `opacity.yaml` mode ids and Rust's serde snake_case rename).
+public enum BlendMode: String, Equatable, Hashable, CaseIterable {
+    case normal
+    case darken
+    case multiply
+    case colorBurn     = "color_burn"
+    case lighten
+    case screen
+    case colorDodge    = "color_dodge"
+    case overlay
+    case softLight     = "soft_light"
+    case hardLight     = "hard_light"
+    case difference
+    case exclusion
+    case hue
+    case saturation
+    case color
+    case luminosity
+}
+
+/// An opacity mask attached to an element. See OPACITY.md § Document model.
+/// Storage-only in Phase 3a — renderer wiring and MAKE_MASK_BUTTON /
+/// CLIP_CHECKBOX / INVERT_MASK_CHECKBOX / LINK_INDICATOR land in Phase 3b.
+///
+/// The mask ``subtree`` is held as a single-element array to satisfy
+/// Swift's value-type recursion constraint (structs cannot directly
+/// contain themselves). Callers should treat it as a single ``Element``:
+/// append exactly one element and read via ``subtreeElement``. Wrap
+/// multi-element masks in a ``Group`` or ``Layer``.
+public struct Mask: Equatable {
+    /// Singleton-array holding the mask's single root element.
+    public let subtree: [Element]
+    public let clip: Bool
+    public let invert: Bool
+    /// When true, the element renders as if no mask were attached.
+    public let disabled: Bool
+    /// When true, mask transforms follow the element's transform. When
+    /// false, the mask uses ``unlinkTransform`` as its fixed baseline.
+    public let linked: Bool
+    /// Captured at unlink time; used as the mask's effective transform
+    /// while ``linked`` is false. Cleared on relink.
+    public let unlinkTransform: Transform?
+
+    public init(
+        subtreeElement: Element,
+        clip: Bool = true,
+        invert: Bool = false,
+        disabled: Bool = false,
+        linked: Bool = true,
+        unlinkTransform: Transform? = nil
+    ) {
+        self.subtree = [subtreeElement]
+        self.clip = clip
+        self.invert = invert
+        self.disabled = disabled
+        self.linked = linked
+        self.unlinkTransform = unlinkTransform
+    }
+
+    /// The mask's single root element. Traps if the subtree invariant is violated.
+    public var subtreeElement: Element {
+        precondition(subtree.count == 1, "Mask.subtree must hold exactly one element")
+        return subtree[0]
+    }
+}
+
 public enum LineCap: Equatable, Hashable {
     case butt
     case round
@@ -898,6 +967,43 @@ public enum Element: Equatable {
         }
     }
 
+    /// Blend mode of this element. Default `.normal` for every element kind;
+    /// applied via `CGContext.setBlendMode` at render time.
+    public var blendMode: BlendMode {
+        switch self {
+        case .line(let v): return v.blendMode
+        case .rect(let v): return v.blendMode
+        case .circle(let v): return v.blendMode
+        case .ellipse(let v): return v.blendMode
+        case .polyline(let v): return v.blendMode
+        case .polygon(let v): return v.blendMode
+        case .path(let v): return v.blendMode
+        case .text(let v): return v.blendMode
+        case .textPath(let v): return v.blendMode
+        case .group(let v): return v.blendMode
+        case .layer(let v): return v.blendMode
+        case .live(let v): return v.blendMode
+        }
+    }
+
+    /// Optional opacity mask attached to this element. Phase 3a storage-only.
+    public var mask: Mask? {
+        switch self {
+        case .line(let v): return v.mask
+        case .rect(let v): return v.mask
+        case .circle(let v): return v.mask
+        case .ellipse(let v): return v.mask
+        case .polyline(let v): return v.mask
+        case .polygon(let v): return v.mask
+        case .path(let v): return v.mask
+        case .text(let v): return v.mask
+        case .textPath(let v): return v.mask
+        case .group(let v): return v.mask
+        case .layer(let v): return v.mask
+        case .live(let v): return v.mask
+        }
+    }
+
     /// The element's transform, if any.
     public var transform: Transform? {
         switch self {
@@ -1178,6 +1284,104 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
     }
 }
 
+// MARK: - Selection-level mask helpers (OPACITY.md § States)
+
+/// Return the ``Mask`` on the first selected element, if any.
+/// Drives the "first-element-wins" toggles in the Opacity panel
+/// (disable, unlink, and the MAKE_MASK_BUTTON label flip per
+/// OPACITY.md § States).
+public func firstMask(_ document: Document) -> Mask? {
+    guard let first = document.selection.first else { return nil }
+    return document.getElement(first.path).mask
+}
+
+/// True when **every** selected element has an opacity mask attached.
+/// Mixed selections (some masked, some not) count as "no mask" per
+/// OPACITY.md § States.
+public func selectionHasMask(_ document: Document) -> Bool {
+    if document.selection.isEmpty { return false }
+    return document.selection.allSatisfy { document.getElement($0.path).mask != nil }
+}
+
+/// Return a copy of `element` with its opacity mask replaced. Passing
+/// `nil` removes the mask; passing `Some(mask)` sets / replaces it.
+/// All other fields (including `blendMode`, `isolatedBlending`,
+/// `knockoutGroup`, fills, strokes, and children) are preserved.
+public func withMask(_ element: Element, mask: Mask?) -> Element {
+    switch element {
+    case .line(let v):
+        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                          stroke: v.stroke, widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility,
+                          blendMode: v.blendMode, mask: mask))
+    case .rect(let v):
+        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .circle(let v):
+        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                              fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .ellipse(let v):
+        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .polyline(let v):
+        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .polygon(let v):
+        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                          widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .text(let v):
+        return .text(Text(x: v.x, y: v.y, content: v.content,
+                          fontFamily: v.fontFamily, fontSize: v.fontSize,
+                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                          textDecoration: v.textDecoration,
+                          width: v.width, height: v.height,
+                          fill: v.fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .textPath(let v):
+        return .textPath(TextPath(d: v.d, content: v.content,
+                                  startOffset: v.startOffset,
+                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                                  textDecoration: v.textDecoration,
+                                  fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+    case .group(let v):
+        return .group(Group(children: v.children,
+                            opacity: v.opacity, transform: v.transform,
+                            locked: v.locked, visibility: v.visibility,
+                            blendMode: v.blendMode,
+                            isolatedBlending: v.isolatedBlending,
+                            knockoutGroup: v.knockoutGroup,
+                            mask: mask))
+    case .layer(let v):
+        return .layer(Layer(name: v.name, children: v.children,
+                            opacity: v.opacity, transform: v.transform,
+                            locked: v.locked, visibility: v.visibility,
+                            blendMode: v.blendMode,
+                            isolatedBlending: v.isolatedBlending,
+                            knockoutGroup: v.knockoutGroup,
+                            mask: mask))
+    case .live(let v):
+        return .live(v.withMask(mask))
+    }
+}
+
 /// Return a copy of `element` with width points replaced.
 /// Only Line and Path support width points; others returned unchanged.
 public func withWidthPoints(_ element: Element, widthPoints: [StrokeWidthPoint]) -> Element {
@@ -1449,17 +1653,23 @@ public struct Line: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(x1: Double, y1: Double, x2: Double, y2: Double,
                 stroke: Stroke? = nil, widthPoints: [StrokeWidthPoint] = [],
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
         self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     public var bounds: BBox {
@@ -1478,18 +1688,24 @@ public struct Rect: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(x: Double, y: Double, width: Double, height: Double,
                 rx: Double = 0, ry: Double = 0,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.x = x; self.y = y; self.width = width; self.height = height
         self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     public var bounds: BBox { inflateBounds((x, y, width, height), stroke) }
@@ -1504,16 +1720,22 @@ public struct Circle: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(cx: Double, cy: Double, r: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.cx = cx; self.cy = cy; self.r = r
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     public var bounds: BBox { inflateBounds((cx - r, cy - r, r * 2, r * 2), stroke) }
@@ -1528,16 +1750,22 @@ public struct Ellipse: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(cx: Double, cy: Double, rx: Double, ry: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     public var bounds: BBox { inflateBounds((cx - rx, cy - ry, rx * 2, ry * 2), stroke) }
@@ -1552,16 +1780,22 @@ public struct Polyline: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     public var bounds: BBox {
@@ -1589,16 +1823,22 @@ public struct Polygon: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     public var bounds: BBox {
@@ -1711,18 +1951,24 @@ public struct Path: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 widthPoints: [StrokeWidthPoint] = [],
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.d = d
         self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     public var bounds: BBox {
@@ -1771,6 +2017,8 @@ public struct Text: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     /// Primary tspans-based initializer. Used by canonical JSON /
     /// SVG parsers that have already split the text into tspans.
@@ -1788,7 +2036,9 @@ public struct Text: Equatable {
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.x = x; self.y = y; self.tspans = tspans
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
@@ -1802,6 +2052,8 @@ public struct Text: Equatable {
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     /// Backward-compatible convenience initializer that wraps a flat
@@ -1820,7 +2072,9 @@ public struct Text: Equatable {
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         let t = Tspan(id: 0, content: content)
         self.init(x: x, y: y, tspans: [t],
                   fontFamily: fontFamily, fontSize: fontSize,
@@ -1933,6 +2187,8 @@ public struct TextPath: Equatable {
 
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
 
     public init(d: [PathCommand], tspans: [Tspan],
                 startOffset: Double = 0.0,
@@ -1948,7 +2204,9 @@ public struct TextPath: Equatable {
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         self.d = d; self.tspans = tspans; self.startOffset = startOffset
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
@@ -1961,6 +2219,8 @@ public struct TextPath: Equatable {
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     /// Backward-compatible initializer: wraps a flat content string in
@@ -1979,7 +2239,9 @@ public struct TextPath: Equatable {
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                mask: Mask? = nil) {
         let t = Tspan(id: 0, content: content)
         self.init(d: d, tspans: [t], startOffset: startOffset,
                   fontFamily: fontFamily, fontSize: fontSize,
@@ -2042,14 +2304,30 @@ public struct Group: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
+    /// Opacity panel "Page Isolated Blending" flag. Storage-only in
+    /// Phase 2; renderer support is deferred. Default false.
+    public let isolatedBlending: Bool
+    /// Opacity panel "Page Knockout Group" flag. Storage-only in
+    /// Phase 2; renderer support is deferred. Default false.
+    public let knockoutGroup: Bool
 
     public init(children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                isolatedBlending: Bool = false,
+                knockoutGroup: Bool = false,
+                mask: Mask? = nil) {
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.isolatedBlending = isolatedBlending
+        self.knockoutGroup = knockoutGroup
+        self.mask = mask
     }
 
     public var bounds: BBox {
@@ -2070,15 +2348,30 @@ public struct Layer: Equatable {
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
+    public let blendMode: BlendMode
+    public let mask: Mask?
+    /// See ``Group/isolatedBlending``. Present on layers so the
+    /// document root (a Layer) can carry the flag today.
+    public let isolatedBlending: Bool
+    /// See ``Group/knockoutGroup``.
+    public let knockoutGroup: Bool
 
     public init(name: String = "Layer", children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
-                visibility: Visibility = .preview) {
+                visibility: Visibility = .preview,
+                blendMode: BlendMode = .normal,
+                isolatedBlending: Bool = false,
+                knockoutGroup: Bool = false,
+                mask: Mask? = nil) {
         self.name = name
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.isolatedBlending = isolatedBlending
+        self.knockoutGroup = knockoutGroup
+        self.mask = mask
     }
 
     public var bounds: BBox {

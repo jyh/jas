@@ -39,12 +39,12 @@ public enum DockEdge: Hashable, Codable {
 }
 
 public enum PanelKind: Hashable, Codable {
-    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean
+    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean, opacity
 
     /// All panel kinds, for iteration.
     public static let all: [PanelKind] = [
         .layers, .color, .swatches, .stroke, .properties,
-        .character, .paragraph, .artboards, .align, .boolean,
+        .character, .paragraph, .artboards, .align, .boolean, .opacity,
     ]
 }
 
@@ -253,6 +253,8 @@ public struct WorkspaceLayout: Codable {
     var nextId: Int
     /// Color panel mode (transient, not serialized).
     public var colorPanelMode: ColorPanelMode = .hsb
+    /// Opacity panel state (transient, not serialized). See OPACITY.md.
+    public var opacityPanel: OpacityPanelState = OpacityPanelState()
     // Generation tracking (not serialized)
     private var generation: UInt64 = 0
     private var savedGeneration: UInt64 = 0
@@ -614,6 +616,7 @@ public struct WorkspaceLayout: Codable {
         case .artboards: return "Artboards"
         case .align: return "Align"
         case .boolean: return "Boolean"
+        case .opacity: return "Opacity"
         }
     }
 

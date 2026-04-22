@@ -31,6 +31,7 @@ PANEL_KIND_TO_CONTENT_ID = {
     PanelKind.ARTBOARDS: "artboards_panel_content",
     PanelKind.ALIGN: "align_panel_content",
     PanelKind.BOOLEAN: "boolean_panel_content",
+    PanelKind.OPACITY: "opacity_panel_content",
 }
 
 # Module-level cache for loaded panel specs

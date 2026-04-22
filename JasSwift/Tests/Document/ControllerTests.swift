@@ -817,3 +817,176 @@ private func makeMarqueeCtrl() -> Controller {
     let summary = selectionStrokeSummary(doc)
     #expect(summary == .uniform(stroke))
 }
+
+// MARK: - Opacity mask lifecycle (Phase 3b)
+
+private func setupTwoRectSelection() -> Controller {
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(Rect(x: 20, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r1, r2])
+    let doc = Document(layers: [layer], selection: [
+        ElementSelection.all([0, 0]),
+        ElementSelection.all([0, 1]),
+    ])
+    return Controller(model: Model(document: doc))
+}
+
+@Test func selectionHasMaskFalseForEmpty() {
+    let ctrl = Controller()
+    #expect(selectionHasMask(ctrl.document) == false)
+}
+
+@Test func selectionHasMaskFalseForUnmasked() {
+    let ctrl = setupTwoRectSelection()
+    #expect(selectionHasMask(ctrl.document) == false)
+}
+
+@Test func makeMaskCreatesMaskOnEverySelected() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    #expect(selectionHasMask(ctrl.document) == true)
+    for es in ctrl.document.selection {
+        let m = ctrl.document.getElement(es.path).mask
+        #expect(m != nil)
+        #expect(m?.clip == true)
+        #expect(m?.invert == false)
+        #expect(m?.disabled == false)
+        #expect(m?.linked == true)
+    }
+}
+
+@Test func makeMaskHonorsClipInvertArgs() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: false, invert: true)
+    guard let first = ctrl.document.selection.first else {
+        Issue.record("expected a selection"); return
+    }
+    let m = ctrl.document.getElement(first.path).mask
+    #expect(m?.clip == false)
+    #expect(m?.invert == true)
+}
+
+@Test func makeMaskIsIdempotent() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    ctrl.setMaskInvertOnSelection(true)
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    for es in ctrl.document.selection {
+        let m = ctrl.document.getElement(es.path).mask
+        #expect(m?.invert == true, "second make should not overwrite")
+    }
+}
+
+@Test func releaseMaskClears() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    ctrl.releaseMaskOnSelection()
+    #expect(selectionHasMask(ctrl.document) == false)
+}
+
+@Test func setMaskClipAndInvertPropagate() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    ctrl.setMaskClipOnSelection(false)
+    ctrl.setMaskInvertOnSelection(true)
+    for es in ctrl.document.selection {
+        let m = ctrl.document.getElement(es.path).mask
+        #expect(m?.clip == false)
+        #expect(m?.invert == true)
+    }
+}
+
+@Test func toggleMaskDisabledFlips() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    ctrl.toggleMaskDisabledOnSelection()
+    for es in ctrl.document.selection {
+        #expect(ctrl.document.getElement(es.path).mask?.disabled == true)
+    }
+    ctrl.toggleMaskDisabledOnSelection()
+    for es in ctrl.document.selection {
+        #expect(ctrl.document.getElement(es.path).mask?.disabled == false)
+    }
+}
+
+@Test func toggleMaskLinkedFlipsAndCapturesTransform() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    ctrl.toggleMaskLinkedOnSelection()
+    for es in ctrl.document.selection {
+        let m = ctrl.document.getElement(es.path).mask
+        #expect(m?.linked == false)
+        #expect(m?.unlinkTransform == nil)  // Rects have no transform
+    }
+    ctrl.toggleMaskLinkedOnSelection()
+    for es in ctrl.document.selection {
+        let m = ctrl.document.getElement(es.path).mask
+        #expect(m?.linked == true)
+        #expect(m?.unlinkTransform == nil)
+    }
+}
+
+@Test func firstMaskReturnsNilWhenFirstUnmasked() {
+    let ctrl = setupTwoRectSelection()
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    var doc = ctrl.document
+    let firstPath = doc.selection.first!.path
+    let elem = doc.getElement(firstPath)
+    doc = doc.replaceElement(firstPath, with: withMask(elem, mask: nil))
+    ctrl.model.document = doc
+    #expect(firstMask(ctrl.document) == nil)
+    #expect(selectionHasMask(ctrl.document) == false)
+}
+
+// ── Mask editor routing (OPACITY.md §Preview interactions) ──
+
+@Test func addElementMaskModeRoutesIntoMaskSubtree() {
+    // Build a model with one rect masked, flip into mask-mode,
+    // and add a second element. It should land inside the mask
+    // subtree, not on the layer.
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r1])
+    let doc = Document(layers: [layer], selection: [ElementSelection.all([0, 0])])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.makeMaskOnSelection(clip: true, invert: false)
+    let maskPath = [0, 0]
+    let layerCountBefore = ctrl.document.layers[0].children.count
+    ctrl.model.editingTarget = .mask(maskPath)
+
+    ctrl.addElement(Element.rect(Rect(x: 100, y: 100, width: 5, height: 5)))
+
+    // Layer child count unchanged.
+    #expect(ctrl.document.layers[0].children.count == layerCountBefore)
+    // Mask subtree now has exactly one child: the rect we added.
+    let elem = ctrl.document.getElement(maskPath)
+    #expect(elem.mask != nil)
+    guard case .group(let g) = elem.mask!.subtreeElement else {
+        Issue.record("expected mask subtree to be a Group")
+        return
+    }
+    #expect(g.children.count == 1)
+    guard case .rect = g.children[0] else {
+        Issue.record("expected added child to be a rect")
+        return
+    }
+}
+
+@Test func addElementMaskModeFallsBackWhenNoMask() {
+    // editingTarget says .mask(path) but the element at path
+    // has no mask — falls back to layer-append so the user's
+    // stroke isn't lost.
+    let ctrl = setupTwoRectSelection()
+    let layerCountBefore = ctrl.document.layers[0].children.count
+    ctrl.model.editingTarget = .mask([0, 0])
+    ctrl.addElement(Element.rect(Rect(x: 100, y: 100, width: 5, height: 5)))
+    #expect(ctrl.document.layers[0].children.count == layerCountBefore + 1)
+}
+
+@Test func addElementContentModeIgnoresEditingTarget() {
+    // Sanity check that content-mode (the default) appends to
+    // the layer as before.
+    let ctrl = setupTwoRectSelection()
+    let layerCountBefore = ctrl.document.layers[0].children.count
+    ctrl.addElement(Element.rect(Rect(x: 100, y: 100, width: 5, height: 5)))
+    #expect(ctrl.document.layers[0].children.count == layerCountBefore + 1)
+}

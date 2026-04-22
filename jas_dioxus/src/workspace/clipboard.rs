@@ -251,6 +251,8 @@ pub(crate) fn selection_to_svg(st: &AppState) -> Option<String> {
             children: elements.into_iter().map(Rc::new).collect(),
             name: String::new(),
             common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
         })],
         selected_layer: 0,
         selection: Vec::new(),

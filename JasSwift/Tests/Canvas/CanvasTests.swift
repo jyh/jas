@@ -231,3 +231,138 @@ import AppKit
 @Test func visibilityInvisibleLessThanPreview() {
     #expect(Visibility.invisible < Visibility.preview)
 }
+
+// MARK: - BlendMode to CGBlendMode mapping
+
+@Test func cgBlendModeNormalIsNormal() {
+    #expect(cgBlendMode(.normal) == .normal)
+}
+
+@Test func cgBlendModeMapsAllSixteenVariants() {
+    let pairs: [(BlendMode, CGBlendMode)] = [
+        (.normal,      .normal),
+        (.darken,      .darken),
+        (.multiply,    .multiply),
+        (.colorBurn,   .colorBurn),
+        (.lighten,     .lighten),
+        (.screen,      .screen),
+        (.colorDodge,  .colorDodge),
+        (.overlay,     .overlay),
+        (.softLight,   .softLight),
+        (.hardLight,   .hardLight),
+        (.difference,  .difference),
+        (.exclusion,   .exclusion),
+        (.hue,         .hue),
+        (.saturation,  .saturation),
+        (.color,       .color),
+        (.luminosity,  .luminosity),
+    ]
+    #expect(pairs.count == 16)
+    for (m, expected) in pairs {
+        #expect(cgBlendMode(m) == expected)
+    }
+}
+
+// MARK: - maskPlan (Track C)
+
+private func testMask(clip: Bool, invert: Bool, disabled: Bool) -> Mask {
+    Mask(
+        subtreeElement: .group(Group(children: [])),
+        clip: clip,
+        invert: invert,
+        disabled: disabled,
+        linked: true,
+        unlinkTransform: nil
+    )
+}
+
+@Test func maskPlanClipNotInvertedIsClipIn() {
+    #expect(maskPlan(testMask(clip: true, invert: false, disabled: false)) == .clipIn)
+}
+
+@Test func maskPlanClipInvertedIsClipOut() {
+    #expect(maskPlan(testMask(clip: true, invert: true, disabled: false)) == .clipOut)
+}
+
+@Test func maskPlanDisabledIsNil() {
+    // disabled overrides both clip and invert: falls back to no
+    // mask rendering per OPACITY.md §States.
+    #expect(maskPlan(testMask(clip: true, invert: false, disabled: true)) == nil)
+    #expect(maskPlan(testMask(clip: true, invert: true, disabled: true)) == nil)
+    #expect(maskPlan(testMask(clip: false, invert: false, disabled: true)) == nil)
+    #expect(maskPlan(testMask(clip: false, invert: true, disabled: true)) == nil)
+}
+
+@Test func maskPlanNoClipNoInvertIsRevealOutsideBbox() {
+    // Phase 2: clip=false, invert=false keeps the element visible
+    // outside the mask subtree's bounding box and clips to the
+    // mask inside it.
+    #expect(maskPlan(testMask(clip: false, invert: false, disabled: false)) == .revealOutsideBbox)
+}
+
+@Test func maskPlanNoClipInvertedCollapsesToClipOut() {
+    // Alpha-based mask: `clip: false, invert: true` gives the same
+    // output as `clip: true, invert: true` because the mask's
+    // outside-region alpha is zero either way.
+    #expect(maskPlan(testMask(clip: false, invert: true, disabled: false)) == .clipOut)
+}
+
+// MARK: - effectiveMaskTransform (Track C phase 3)
+
+private func testTransform(_ e: Double, _ f: Double) -> Transform {
+    // Pure translation by (e, f) for easy identification in tests.
+    Transform(a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: e, f: f)
+}
+
+private func testRect(_ transform: Transform?) -> Element {
+    .rect(Rect(
+        x: 0, y: 0, width: 10, height: 10,
+        transform: transform
+    ))
+}
+
+private func testMaskLinked(_ linked: Bool, unlink: Transform?) -> Mask {
+    Mask(
+        subtreeElement: .group(Group(children: [])),
+        clip: true, invert: false, disabled: false,
+        linked: linked, unlinkTransform: unlink
+    )
+}
+
+@Test func effectiveMaskTransformLinkedReturnsElementTransform() {
+    // linked=true: mask follows the element, so the renderer
+    // should apply `elem.transform`.
+    let mask = testMaskLinked(true, unlink: nil)
+    let elem = testRect(testTransform(5, 7))
+    let t = effectiveMaskTransform(mask, elem)
+    #expect(t != nil)
+    #expect(t?.e == 5)
+    #expect(t?.f == 7)
+}
+
+@Test func effectiveMaskTransformLinkedNilWhenElementHasNoTransform() {
+    // linked=true with no element transform: nil — the
+    // compositing path skips the applyTransform call.
+    let mask = testMaskLinked(true, unlink: nil)
+    let elem = testRect(nil)
+    #expect(effectiveMaskTransform(mask, elem) == nil)
+}
+
+@Test func effectiveMaskTransformUnlinkedReturnsCapturedUnlinkTransform() {
+    // linked=false: mask stays frozen under the unlink-time
+    // transform, regardless of the element's current transform.
+    let mask = testMaskLinked(false, unlink: testTransform(3, 4))
+    let elem = testRect(testTransform(100, 100))
+    let t = effectiveMaskTransform(mask, elem)
+    #expect(t != nil)
+    #expect(t?.e == 3)
+    #expect(t?.f == 4)
+}
+
+@Test func effectiveMaskTransformUnlinkedNilWhenUnlinkMissing() {
+    // linked=false with no captured transform (edge case:
+    // unlinked at identity): nil.
+    let mask = testMaskLinked(false, unlink: nil)
+    let elem = testRect(testTransform(7, 8))
+    #expect(effectiveMaskTransform(mask, elem) == nil)
+}

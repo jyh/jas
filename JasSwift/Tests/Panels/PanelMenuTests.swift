@@ -10,7 +10,7 @@ import Testing
 }
 
 @Test func panelKindAllCount() {
-    #expect(PanelKind.all.count == 10)
+    #expect(PanelKind.all.count == 11)
 }
 
 @Test func panelKindAllContainsAllVariants() {
@@ -23,6 +23,8 @@ import Testing
     #expect(PanelKind.all.contains(.paragraph))
     #expect(PanelKind.all.contains(.artboards))
     #expect(PanelKind.all.contains(.align))
+    #expect(PanelKind.all.contains(.boolean))
+    #expect(PanelKind.all.contains(.opacity))
 }
 
 @Test func alignPanelMenuHasExpectedEntries() {

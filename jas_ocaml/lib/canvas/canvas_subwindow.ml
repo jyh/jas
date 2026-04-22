@@ -185,18 +185,109 @@ let apply_outline_style cr =
   Cairo.set_line_cap cr Cairo.BUTT;
   Cairo.set_line_join cr Cairo.JOIN_MITER
 
-(** Draw an element to a Cairo context.
+(** How the mask subtree's rendered alpha is applied to the element.
+    Mirrors the Rust [MaskPlan] enum in
+    [jas_dioxus/src/canvas/render.rs]. OPACITY.md \167Rendering. *)
+type mask_plan =
+  | Clip_in             (** [clip: true, invert: false]: [Cairo.DEST_IN]  *)
+  | Clip_out            (** [clip: true, invert: true]:  [Cairo.DEST_OUT];
+                            also [clip: false, invert: true] which
+                            collapses to the same op for alpha-based
+                            masks (zero-alpha outside region gives
+                            [E * (1 - 0) = E] either way)            *)
+  | Reveal_outside_bbox (** [clip: false, invert: false]: element stays
+                            at full alpha outside the mask subtree's
+                            bounding box; [DEST_IN] is applied only
+                            inside the bbox via a clipped sub-context *)
 
-    [ancestor_vis] is the capping visibility inherited from parent
-    Groups/Layers. The element's effective visibility is the minimum
-    of its own and the ancestor's:
-
-    - [Invisible] effective: the subtree is skipped entirely.
-    - [Outline]   effective: every non-Text element is drawn with a
-      thin black hairline stroke and no fill. Text and Text_path
-      remain rendered as Preview.
-    - [Preview]   effective: normal rendering. *)
+(** Render a document element. When the element carries an active
+    mask, rendering is redirected through [draw_element_with_mask]
+    which composites the element body against the mask's subtree
+    according to [mask_plan]. OPACITY.md \167Rendering. *)
 let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.element) =
+  match Element.get_mask elem with
+  | Some mask ->
+    (match mask_plan mask with
+     | Some plan -> draw_element_with_mask cr elem mask plan ancestor_vis
+     | None -> draw_element_body ~ancestor_vis cr elem)
+  | None -> draw_element_body ~ancestor_vis cr elem
+
+(** Pick a [mask_plan] for the mask, or [None] when the mask is
+    inactive ([disabled: true]). *)
+and mask_plan (mask : Element.mask) : mask_plan option =
+  if mask.Element.disabled then None
+  else match mask.Element.clip, mask.Element.invert with
+    | true, false -> Some Clip_in
+    | true, true -> Some Clip_out
+    (* Alpha-based masks can't distinguish [clip: false,
+       invert: true] from [clip: true, invert: true] (both yield
+       [E * (1 - M)] when the mask's outside-region alpha is 0),
+       so route them through the same composite. *)
+    | false, true -> Some Clip_out
+    | false, false -> Some Reveal_outside_bbox
+
+(** Return the transform that should be applied when rendering the
+    mask's subtree on top of the ancestor coord system. Track C
+    phase 3, OPACITY.md \167Document model:
+
+    - [linked: true]  — mask inherits [Element.get_transform elem]
+      (mask follows the element).
+    - [linked: false] — mask uses [mask.unlink_transform] (the
+      element's transform captured at unlink time, frozen so the
+      mask stays fixed under subsequent element edits).
+
+    Returns [None] when the picked transform is absent (identity
+    case) so the caller can skip the [apply_transform] call. *)
+and effective_mask_transform (mask : Element.mask) (elem : Element.element)
+    : Element.transform option =
+  if mask.Element.linked then Element.get_transform elem
+  else mask.Element.unlink_transform
+
+(** Render [elem] on [cr] with its opacity mask composited in per
+    [plan]. The element body is drawn into a fresh Cairo group; the
+    mask subtree is then painted on top of the group; the group is
+    popped back onto the parent context.  OPACITY.md \167Rendering. *)
+and draw_element_with_mask cr (elem : Element.element)
+    (mask : Element.mask) (plan : mask_plan) ancestor_vis =
+  Cairo.Group.push cr;
+  draw_element_body ~ancestor_vis cr elem;
+  (* Apply the mask's effective transform (per
+     [effective_mask_transform]), then composite the mask subtree
+     against the element body. Track C phase 3. *)
+  Cairo.save cr;
+  apply_transform cr (effective_mask_transform mask elem);
+  (match plan with
+   | Clip_in ->
+     Cairo.set_operator cr Cairo.DEST_IN;
+     draw_element ~ancestor_vis cr mask.Element.subtree;
+     Cairo.set_operator cr Cairo.OVER
+   | Clip_out ->
+     Cairo.set_operator cr Cairo.DEST_OUT;
+     draw_element ~ancestor_vis cr mask.Element.subtree;
+     Cairo.set_operator cr Cairo.OVER
+   | Reveal_outside_bbox ->
+     (* [clip: false, invert: false]: keep the element body at full
+        alpha outside the mask subtree's bounding box; apply
+        [DEST_IN] only inside the bbox via a clipped sub-context.
+        Outside the clip, the body from the first pass passes through
+        untouched.  OPACITY.md \167Rendering. *)
+     let (bx, by, bw, bh) = Element.bounds mask.Element.subtree in
+     if bw > 0.0 && bh > 0.0 then begin
+       Cairo.save cr;
+       Cairo.rectangle cr bx by ~w:bw ~h:bh;
+       Cairo.clip cr;
+       Cairo.set_operator cr Cairo.DEST_IN;
+       draw_element ~ancestor_vis cr mask.Element.subtree;
+       Cairo.set_operator cr Cairo.OVER;
+       Cairo.restore cr
+     end
+     (* Empty-bbox mask: body passes through unmodified. *)
+  );
+  Cairo.restore cr;
+  Cairo.Group.pop_to_source cr;
+  Cairo.paint cr
+
+and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.element) =
   let open Element in
   let elem_vis = Element.get_visibility elem in
   let effective = if compare elem_vis ancestor_vis < 0 then elem_vis else ancestor_vis in
@@ -204,6 +295,13 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
   else
   let outline = effective = Element.Outline in
   Cairo.save cr;
+  (* Phase-1: element.blend_mode is stored on every element and round-trips
+     through test_json, but the OCaml cairo2 binding only exposes the basic
+     Porter-Duff operators (OVER, IN, OUT, etc.) — not the CSS/SVG blend
+     operators MULTIPLY / DARKEN / HSL_HUE etc. that the underlying Cairo C
+     library supports. Until the binding is upgraded (or a raw-cairo wrapper
+     is added), all blend_mode values render as source-over. *)
+  let _ = Element.get_blend_mode elem in
   begin match elem with
   | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; _ } ->
     Cairo.Group.push cr;
@@ -1679,8 +1777,20 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.fill cr;
         (* Layer 2: artboard fills *)
         draw_artboard_fills cr current_doc;
-        (* Layer 3: document element tree *)
-        Array.iter (draw_element cr) current_doc.Document.layers;
+        (* Layer 3: document element tree. In mask-isolation mode
+           (OPACITY.md \167Preview interactions), render only the
+           mask subtree of the isolated element — everything else
+           on the canvas is hidden until the user exits isolation. *)
+        (match model#mask_isolation_path with
+         | Some path ->
+           (try
+              let elem = Document.get_element current_doc path in
+              match Element.get_mask elem with
+              | Some mask -> draw_element cr mask.Element.subtree
+              | None -> ()
+            with _ -> ())
+         | None ->
+           Array.iter (draw_element cr) current_doc.Document.layers);
         (* Layer 4: fade overlay *)
         draw_fade_overlay cr current_doc ~canvas_w:w ~canvas_h:h;
         (* Layer 5: artboard borders *)

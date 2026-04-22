@@ -208,7 +208,8 @@ let () =
         let filled_rect = Rect { x = 0.0; y = 0.0; width = 100.0; height = 100.0;
                                   rx = 0.0; ry = 0.0; fill;
                                   stroke = None; opacity = 1.0; transform = None; locked = false;
-                                  visibility = Jas.Element.Preview } in
+                                  visibility = Jas.Element.Preview;
+                                  blend_mode = Jas.Element.Normal; mask = None } in
         let fr_layer = make_layer ~name:"L0" [|filled_rect|] in
         let fr_doc = Jas.Document.make_document [|fr_layer|] in
         let fr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fr_doc ()) () in
@@ -630,4 +631,155 @@ let () =
         let summary = Jas.Controller.selection_stroke_summary fs_doc in
         assert (summary = Jas.Controller.StrokeUniform None));
     ];
+
+    "mask_lifecycle", (
+      (* Reusable fixture: two rects, both selected. *)
+      let setup () =
+        let r1 = make_rect 0.0 0.0 10.0 10.0 in
+        let r2 = make_rect 20.0 0.0 10.0 10.0 in
+        let layer = make_layer ~name:"L0" [|r1; r2|] in
+        let sel = List.fold_left (fun acc p ->
+          Jas.Document.PathMap.add p (Jas.Document.element_selection_all p) acc
+        ) Jas.Document.PathMap.empty [[0; 0]; [0; 1]] in
+        let doc = Jas.Document.make_document ~selection:sel [|layer|] in
+        Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) ()
+      in
+      let mask_at ctrl path =
+        Jas.Element.get_mask (Jas.Document.get_element ctrl#document path)
+      in
+      let all_paths = [[0; 0]; [0; 1]] in
+      let check_all ctrl f =
+        List.iter (fun p ->
+          match mask_at ctrl p with
+          | Some m -> f m
+          | None -> Alcotest.fail "expected mask"
+        ) all_paths
+      in
+      [
+        Alcotest.test_case "selection_has_mask_false_for_empty" `Quick (fun () ->
+          let ctrl = Jas.Controller.create () in
+          assert (not (Jas.Controller.selection_has_mask ctrl#document)));
+
+        Alcotest.test_case "selection_has_mask_false_for_unmasked" `Quick (fun () ->
+          let ctrl = setup () in
+          assert (not (Jas.Controller.selection_has_mask ctrl#document)));
+
+        Alcotest.test_case "make_mask_creates_mask_on_every_selected" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          assert (Jas.Controller.selection_has_mask ctrl#document);
+          check_all ctrl (fun m ->
+            assert m.Jas.Element.clip;
+            assert (not m.Jas.Element.invert);
+            assert (not m.Jas.Element.disabled);
+            assert m.Jas.Element.linked));
+
+        Alcotest.test_case "make_mask_honors_clip_invert_args" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:false ~invert:true;
+          match mask_at ctrl [0; 0] with
+          | None -> assert false
+          | Some m ->
+            assert (not m.Jas.Element.clip);
+            assert m.Jas.Element.invert);
+
+        Alcotest.test_case "make_mask_is_idempotent" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#set_mask_invert_on_selection true;
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          check_all ctrl (fun m -> assert m.Jas.Element.invert));
+
+        Alcotest.test_case "release_mask_clears_masks" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#release_mask_on_selection;
+          assert (not (Jas.Controller.selection_has_mask ctrl#document)));
+
+        Alcotest.test_case "set_mask_clip_and_invert_propagate" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#set_mask_clip_on_selection false;
+          ctrl#set_mask_invert_on_selection true;
+          check_all ctrl (fun m ->
+            assert (not m.Jas.Element.clip);
+            assert m.Jas.Element.invert));
+
+        Alcotest.test_case "toggle_mask_disabled_flips" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#toggle_mask_disabled_on_selection;
+          check_all ctrl (fun m -> assert m.Jas.Element.disabled);
+          ctrl#toggle_mask_disabled_on_selection;
+          check_all ctrl (fun m -> assert (not m.Jas.Element.disabled)));
+
+        Alcotest.test_case "toggle_mask_linked_flips_and_captures_transform" `Quick (fun () ->
+          let ctrl = setup () in
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          ctrl#toggle_mask_linked_on_selection;
+          check_all ctrl (fun m ->
+            assert (not m.Jas.Element.linked);
+            (* Rects have no transform so unlink_transform stays None. *)
+            assert (m.Jas.Element.unlink_transform = None));
+          ctrl#toggle_mask_linked_on_selection;
+          check_all ctrl (fun m ->
+            assert m.Jas.Element.linked;
+            assert (m.Jas.Element.unlink_transform = None)));
+
+        (* ── Mask editor routing (OPACITY.md section Preview
+           interactions) ──────────────────────────────────── *)
+
+        Alcotest.test_case "add_element_mask_mode_routes_into_mask_subtree" `Quick (fun () ->
+          let ctrl = setup () in
+          (* Mask the selection; pick the first selected element as
+             the mask-edit target. *)
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          let doc = ctrl#model#document in
+          let path = match Jas.Document.PathMap.min_binding_opt doc.Jas.Document.selection with
+            | Some (p, _) -> p | None -> [] in
+          let layer_count_before = match doc.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children
+            | _ -> 0 in
+          ctrl#model#set_editing_target (Jas.Model.Mask path);
+          ctrl#add_element (Jas.Element.make_rect 100.0 100.0 5.0 5.0);
+          (* Layer child count unchanged. *)
+          let doc2 = ctrl#model#document in
+          let layer_count_after = match doc2.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children
+            | _ -> 0 in
+          assert (layer_count_after = layer_count_before);
+          (* Mask subtree gained one child. *)
+          let target = Jas.Document.get_element doc2 path in
+          (match Jas.Element.get_mask target with
+           | Some mask ->
+             (match mask.Jas.Element.subtree with
+              | Jas.Element.Group g -> assert (Array.length g.children = 1)
+              | _ -> Alcotest.fail "mask subtree not a Group")
+           | None -> Alcotest.fail "mask was dropped"));
+
+        Alcotest.test_case "add_element_mask_mode_falls_back_when_no_mask" `Quick (fun () ->
+          (* editing_target says Mask(path) but the element at path
+             has no mask — falls back to layer-append. *)
+          let ctrl = setup () in
+          let doc = ctrl#model#document in
+          let path = match Jas.Document.PathMap.min_binding_opt doc.Jas.Document.selection with
+            | Some (p, _) -> p | None -> [0; 0] in
+          let before = match doc.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          ctrl#model#set_editing_target (Jas.Model.Mask path);
+          ctrl#add_element (Jas.Element.make_rect 100.0 100.0 5.0 5.0);
+          let after = match ctrl#model#document.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          assert (after = before + 1));
+
+        Alcotest.test_case "add_element_content_mode_ignores_editing_target" `Quick (fun () ->
+          (* Sanity: content-mode (default) appends to layer as before. *)
+          let ctrl = setup () in
+          let before = match ctrl#model#document.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          ctrl#add_element (Jas.Element.make_rect 100.0 100.0 5.0 5.0);
+          let after = match ctrl#model#document.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          assert (after = before + 1));
+      ]);
   ]

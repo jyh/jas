@@ -53,6 +53,7 @@ pub enum PanelKind {
     Artboards,
     Align,
     Boolean,
+    Opacity,
 }
 
 impl PanelKind {
@@ -68,6 +69,7 @@ impl PanelKind {
         Self::Artboards,
         Self::Align,
         Self::Boolean,
+        Self::Opacity,
     ];
 }
 
@@ -1803,7 +1805,7 @@ mod tests {
 
     #[test]
     fn panel_kind_all_count() {
-        assert_eq!(PanelKind::ALL.len(), 10);
+        assert_eq!(PanelKind::ALL.len(), 11);
     }
 
     #[test]
@@ -1816,6 +1818,7 @@ mod tests {
         assert!(PanelKind::ALL.contains(&PanelKind::Character));
         assert!(PanelKind::ALL.contains(&PanelKind::Paragraph));
         assert!(PanelKind::ALL.contains(&PanelKind::Artboards));
+        assert!(PanelKind::ALL.contains(&PanelKind::Opacity));
     }
 
     #[test]

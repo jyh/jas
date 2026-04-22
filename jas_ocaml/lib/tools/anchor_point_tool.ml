@@ -92,8 +92,8 @@ let each_path_element doc f =
 (** Replace a path element's command list, preserving all other fields. *)
 let replace_path_cmds elem new_cmds =
   match elem with
-  | Element.Path { fill; stroke; width_points; opacity; transform; locked; visibility; _ } ->
-    Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility }
+  | Element.Path { fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; _ } ->
+    Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None }
   | _ -> elem
 
 (** Apply new commands to the path at `path` and push back into the model. *)

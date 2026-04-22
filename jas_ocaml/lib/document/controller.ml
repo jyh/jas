@@ -8,6 +8,33 @@ let point_in_rect = Hit_test.point_in_rect
 let element_intersects_rect = Hit_test.element_intersects_rect
 let element_intersects_polygon = Hit_test.element_intersects_polygon
 
+(* ── Opacity-mask helpers (OPACITY.md §States) ───────────── *)
+
+(** Return the [mask] on the first selected element, if any. *)
+let first_mask (doc : Document.document) : Element.mask option =
+  match Document.PathMap.min_binding_opt doc.Document.selection with
+  | None -> None
+  | Some (path, _) ->
+    try
+      let elem = Document.get_element doc path in
+      Element.get_mask elem
+    with _ -> None
+
+(** True when every selected element has a mask attached. Mixed
+    selections (some masked, some not) count as "no mask" per
+    OPACITY.md §States. *)
+let selection_has_mask (doc : Document.document) : bool =
+  if Document.PathMap.is_empty doc.Document.selection then false
+  else
+    Document.PathMap.for_all (fun path _ ->
+      try
+        let elem = Document.get_element doc path in
+        match Element.get_mask elem with
+        | Some _ -> true
+        | None -> false
+      with _ -> false
+    ) doc.Document.selection
+
 (* Move helper: collapse a SelectionKind into the (is_all, indices)
    pair that [Element.move_control_points] consumes. *)
 let move_kind elem (kind : Document.selection_kind) dx dy =
@@ -42,24 +69,60 @@ class controller ?(model = Model.create ()) () =
       model#set_document { doc with Document.layers = layers }
 
     method add_element (elem : Element.element) =
+      (* OPACITY.md \167Preview interactions: in mask-editing mode,
+         route the new element into the masked element's mask
+         subtree instead of the selected layer. On any "can't route
+         here" failure, fall through to the content path so the
+         user's stroke isn't lost. *)
+      (match model#editing_target with
+       | Model.Mask path when self#try_add_to_mask elem path -> ()
+       | _ ->
+         let doc = model#document in
+         let idx = doc.Document.selected_layer in
+         let child_idx = match doc.Document.layers.(idx) with
+           | Element.Layer layer -> Array.length layer.children
+           | _ -> 0 in
+         let new_layers = Array.mapi (fun i l ->
+           if i = idx then
+             match l with
+             | Element.Layer layer ->
+               Element.Layer { layer with children = Array.append layer.children [| elem |] }
+             | _ -> l
+           else l
+         ) doc.Document.layers in
+         let path = [idx; child_idx] in
+         let es = Document.element_selection_all path in
+         let sel = Document.PathMap.singleton path es in
+         model#set_document { doc with Document.layers = new_layers;
+                                       Document.selection = sel })
+
+    (** Append [elem] to the mask subtree of the element at [path].
+        Returns [true] on success, [false] when the target has no
+        mask or the subtree root isn't a [Group] — the caller then
+        falls back to layer-append. OPACITY.md \167Preview
+        interactions. *)
+    method private try_add_to_mask (elem : Element.element) (path : int list) : bool =
       let doc = model#document in
-      let idx = doc.Document.selected_layer in
-      let child_idx = match doc.Document.layers.(idx) with
-        | Element.Layer layer -> Array.length layer.children
-        | _ -> 0 in
-      let new_layers = Array.mapi (fun i l ->
-        if i = idx then
-          match l with
-          | Element.Layer layer ->
-            Element.Layer { layer with children = Array.append layer.children [| elem |] }
-          | _ -> l
-        else l
-      ) doc.Document.layers in
-      let path = [idx; child_idx] in
-      let es = Document.element_selection_all path in
-      let sel = Document.PathMap.singleton path es in
-      model#set_document { doc with Document.layers = new_layers;
-                                    Document.selection = sel }
+      try
+        let target = Document.get_element doc path in
+        match Element.get_mask target with
+        | None -> false
+        | Some mask ->
+          (match mask.Element.subtree with
+           | Element.Group g ->
+             let new_group =
+               Element.Group { g with children = Array.append g.children [| elem |] } in
+             let new_mask = { mask with Element.subtree = new_group } in
+             let new_target = Element.with_mask target (Some new_mask) in
+             let new_doc = Document.replace_element doc path new_target in
+             (* No canonical "inside a mask" path — select the
+                mask-target element itself after the add. *)
+             let es = Document.element_selection_all path in
+             let sel = Document.PathMap.singleton path es in
+             model#set_document { new_doc with Document.selection = sel };
+             true
+           | _ -> false)
+      with _ -> false
 
     method private toggle_selection current new_sel =
       (* XOR per element.
@@ -398,6 +461,108 @@ class controller ?(model = Model.create ()) () =
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
       model#set_document new_doc
+
+    (* ── Opacity mask lifecycle (OPACITY.md §States) ─────────── *)
+
+    (** Create an opacity mask on every selected element that does
+        not already have one. The subtree starts as an empty [Group];
+        users populate it via the MASK_PREVIEW click (Phase 4).
+        [clip] and [invert] come from the document preferences
+        [new_masks_clipping] / [new_masks_inverted]. *)
+    method make_mask_on_selection ~clip ~invert =
+      let doc = model#document in
+      let empty_group =
+        Element.Group { children = [||]; opacity = 1.0; transform = None;
+                        locked = false; visibility = Element.Preview;
+                        blend_mode = Element.Normal; mask = None;
+                        isolated_blending = false; knockout_group = false }
+      in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        match Element.get_mask elem with
+        | Some _ -> acc
+        | None ->
+          let m : Element.mask = {
+            subtree = empty_group;
+            clip; invert;
+            disabled = false;
+            linked = true;
+            unlink_transform = None;
+          } in
+          Document.replace_element acc path
+            (Element.with_mask elem (Some m))
+      ) doc.Document.selection doc in
+      model#set_document new_doc
+
+    (** Remove the opacity mask from every selected element. *)
+    method release_mask_on_selection =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        match Element.get_mask elem with
+        | None -> acc
+        | Some _ -> Document.replace_element acc path
+                      (Element.with_mask elem None)
+      ) doc.Document.selection doc in
+      model#set_document new_doc
+
+    (** Internal: apply [f] to every selected element's mask. Elements
+        without a mask are skipped. *)
+    method private update_mask_on_selection (f : Element.mask -> Element.mask) =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        match Element.get_mask elem with
+        | None -> acc
+        | Some m -> Document.replace_element acc path
+                      (Element.with_mask elem (Some (f m)))
+      ) doc.Document.selection doc in
+      model#set_document new_doc
+
+    (** Set [mask.clip] on every selected element that has a mask. *)
+    method set_mask_clip_on_selection (clip : bool) =
+      self#update_mask_on_selection (fun m -> { m with clip })
+
+    (** Set [mask.invert] on every selected element that has a mask. *)
+    method set_mask_invert_on_selection (invert : bool) =
+      self#update_mask_on_selection (fun m -> { m with invert })
+
+    (** Toggle [mask.disabled] on every selected mask, driven by the
+        first selected element's current state. *)
+    method toggle_mask_disabled_on_selection =
+      match first_mask model#document with
+      | None -> ()
+      | Some m ->
+        let new_state = not m.Element.disabled in
+        self#update_mask_on_selection (fun m -> { m with disabled = new_state })
+
+    (** Toggle [mask.linked] on every selected mask. On unlink, captures
+        each element's current transform into [unlink_transform] so the
+        mask stays fixed in document coordinates. On relink, clears
+        [unlink_transform]. *)
+    method toggle_mask_linked_on_selection =
+      match first_mask model#document with
+      | None -> ()
+      | Some m ->
+        let new_linked = not m.Element.linked in
+        let doc = model#document in
+        let new_doc = Document.PathMap.fold (fun path _ acc ->
+          let elem = Document.get_element acc path in
+          match Element.get_mask elem with
+          | None -> acc
+          | Some old ->
+            let capture =
+              if new_linked then None
+              else Element.get_transform elem
+            in
+            let new_mask = { old with
+              Element.linked = new_linked;
+              Element.unlink_transform = capture;
+            } in
+            Document.replace_element acc path
+              (Element.with_mask elem (Some new_mask))
+        ) doc.Document.selection doc in
+        model#set_document new_doc
   end
 
 (* ------------------------------------------------------------------ *)

@@ -373,7 +373,8 @@ class path_eraser_tool = object (_self)
     let changed = ref false in
     let new_layers = Array.map (fun layer ->
       match layer with
-      | Element.Layer { name; children; opacity; transform; locked; visibility } ->
+      | Element.Layer { name; children; opacity; transform; locked; visibility; blend_mode;
+                        isolated_blending; knockout_group; _ } ->
         let new_children = ref [] in
         Array.iter (fun child ->
           match child with
@@ -409,7 +410,9 @@ class path_eraser_tool = object (_self)
           | _ -> new_children := child :: !new_children
         ) children;
         if !changed then
-          Element.Layer { name; children = Array.of_list (List.rev !new_children); opacity; transform; locked; visibility }
+          Element.Layer { name; children = Array.of_list (List.rev !new_children); opacity; transform; locked; visibility; blend_mode;
+                           mask = None;
+                           isolated_blending; knockout_group }
         else layer
       | _ -> layer
     ) doc.Document.layers in

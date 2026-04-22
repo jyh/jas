@@ -156,6 +156,7 @@ pub fn panel_kind_to_content_id(kind: crate::workspace::workspace::PanelKind) ->
         PanelKind::Artboards => "artboards_panel_content",
         PanelKind::Align => "align_panel_content",
         PanelKind::Boolean => "boolean_panel_content",
+        PanelKind::Opacity => "opacity_panel_content",
     }
 }
 

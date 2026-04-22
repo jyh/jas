@@ -42,7 +42,25 @@ public class Controller {
         model.document = Document(layers: layers)
     }
 
+    /// Add an element to the current editing target and select the
+    /// new element. In content-mode (the default), the element is
+    /// appended to the selected layer. In mask-editing mode
+    /// (OPACITY.md §Preview interactions) the element is appended
+    /// to the masked element's mask subtree instead — mask-mode
+    /// falls back to the layer path when the mask subtree isn't a
+    /// container (shouldn't happen with masks created via
+    /// ``makeMaskOnSelection``, but protects against
+    /// externally-built masks).
     public func addElement(_ element: Element) {
+        // Mask-mode: append to mask subtree and bail out on
+        // success. On any "can't route here" failure we fall
+        // through to the content path so the user's stroke isn't
+        // lost.
+        if case .mask(let path) = model.editingTarget {
+            if addElementToMask(element, at: path) {
+                return
+            }
+        }
         let doc = model.document
         let idx = doc.selectedLayer
         let target = doc.layers[idx]
@@ -54,6 +72,49 @@ public class Controller {
         let es = ElementSelection.all([idx, childIdx])
         model.document = Document(layers: layers, selectedLayer: idx,
                                      selection: [es])
+    }
+
+    /// Append ``element`` to the mask subtree of the element at
+    /// ``path``. Returns ``true`` when the append succeeded,
+    /// ``false`` when the target element has no mask or the mask
+    /// subtree root isn't a ``group`` element — the caller then
+    /// falls back to layer-append. OPACITY.md §Preview
+    /// interactions.
+    private func addElementToMask(_ element: Element, at path: [Int]) -> Bool {
+        let doc = model.document
+        let target = doc.getElement(path)
+        guard let mask = target.mask else { return false }
+        // Only Group / Layer accept new children; on any other root
+        // the caller falls back to layer-append.
+        guard case .group(let g) = mask.subtreeElement else { return false }
+        let newGroup = Group(
+            children: g.children + [element],
+            opacity: g.opacity,
+            transform: g.transform,
+            locked: g.locked,
+            visibility: g.visibility,
+            blendMode: g.blendMode,
+            isolatedBlending: g.isolatedBlending,
+            knockoutGroup: g.knockoutGroup,
+            mask: g.mask
+        )
+        let newMask = Mask(
+            subtreeElement: .group(newGroup),
+            clip: mask.clip,
+            invert: mask.invert,
+            disabled: mask.disabled,
+            linked: mask.linked,
+            unlinkTransform: mask.unlinkTransform
+        )
+        let newTarget = withMask(target, mask: newMask)
+        var newDoc = doc.replaceElement(path, with: newTarget)
+        // No canonical path for "inside a mask" — select the
+        // mask-target element itself after the add.
+        newDoc = Document(layers: newDoc.layers,
+                         selectedLayer: newDoc.selectedLayer,
+                         selection: [ElementSelection.all(path)])
+        model.document = newDoc
+        return true
     }
 
     /// XOR two selections per element. See the Rust port for the semantic
@@ -888,6 +949,111 @@ public class Controller {
             let elem = doc.getElement(es.path)
             let newElem = withStroke(elem, stroke: stroke)
             doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
+    // ── Opacity mask lifecycle (OPACITY.md § States) ───────────
+
+    /// Create an opacity mask on every selected element that does not
+    /// already have one. The subtree starts as an empty ``Group``;
+    /// users populate it via the MASK_PREVIEW click (Phase 4).
+    /// ``clip`` and ``invert`` come from the document preferences
+    /// ``new_masks_clipping`` / ``new_masks_inverted``.
+    public func makeMaskOnSelection(clip: Bool, invert: Bool) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            if elem.mask != nil { continue }
+            let m = Mask(
+                subtreeElement: .group(Group(children: [])),
+                clip: clip,
+                invert: invert,
+                disabled: false,
+                linked: true,
+                unlinkTransform: nil
+            )
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: m))
+        }
+        model.document = doc
+    }
+
+    /// Remove the opacity mask from every selected element.
+    public func releaseMaskOnSelection() {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            if elem.mask == nil { continue }
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: nil))
+        }
+        model.document = doc
+    }
+
+    /// Set `mask.clip` on every selected element that has a mask.
+    public func setMaskClipOnSelection(_ clip: Bool) {
+        updateMaskOnSelection { old in
+            Mask(subtreeElement: old.subtreeElement,
+                 clip: clip, invert: old.invert,
+                 disabled: old.disabled, linked: old.linked,
+                 unlinkTransform: old.unlinkTransform)
+        }
+    }
+
+    /// Set `mask.invert` on every selected element that has a mask.
+    public func setMaskInvertOnSelection(_ invert: Bool) {
+        updateMaskOnSelection { old in
+            Mask(subtreeElement: old.subtreeElement,
+                 clip: old.clip, invert: invert,
+                 disabled: old.disabled, linked: old.linked,
+                 unlinkTransform: old.unlinkTransform)
+        }
+    }
+
+    /// Toggle `mask.disabled` on every selected mask, driven by the
+    /// first selected element's current state.
+    public func toggleMaskDisabledOnSelection() {
+        guard let current = firstMask(model.document)?.disabled else { return }
+        let newState = !current
+        updateMaskOnSelection { old in
+            Mask(subtreeElement: old.subtreeElement,
+                 clip: old.clip, invert: old.invert,
+                 disabled: newState, linked: old.linked,
+                 unlinkTransform: old.unlinkTransform)
+        }
+    }
+
+    /// Toggle `mask.linked` on every selected mask. On unlink, captures
+    /// each element's current transform into `unlink_transform`. On
+    /// relink, clears `unlink_transform`.
+    public func toggleMaskLinkedOnSelection() {
+        guard let currentLinked = firstMask(model.document)?.linked else { return }
+        let newLinked = !currentLinked
+        var doc = model.document
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            guard let old = elem.mask else { continue }
+            let newMask = Mask(
+                subtreeElement: old.subtreeElement,
+                clip: old.clip, invert: old.invert,
+                disabled: old.disabled,
+                linked: newLinked,
+                unlinkTransform: newLinked ? nil : elem.transform
+            )
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: newMask))
+        }
+        model.document = doc
+    }
+
+    /// Internal helper: apply `transform` to every selected element's
+    /// mask. Elements without a mask are skipped.
+    private func updateMaskOnSelection(_ transform: (Mask) -> Mask) {
+        var doc = model.document
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            guard let old = elem.mask else { continue }
+            doc = doc.replaceElement(es.path, with: withMask(elem, mask: transform(old)))
         }
         model.document = doc
     }

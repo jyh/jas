@@ -613,22 +613,89 @@ pub enum Visibility {
 }
 
 
+/// Blend mode for compositing an element against its parent layer.
+/// Values mirror the Opacity panel's mode dropdown and serialize as
+/// snake_case to match opacity.yaml mode ids (e.g. `color_burn`,
+/// `soft_light`). Default is `Normal` (no compositing effect).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+         serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BlendMode {
+    #[default]
+    Normal,
+    Darken,
+    Multiply,
+    ColorBurn,
+    Lighten,
+    Screen,
+    ColorDodge,
+    Overlay,
+    SoftLight,
+    HardLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+
+/// An opacity mask attached to an element. See OPACITY.md § Document model.
+/// The mask subtree carries the artwork whose luminance drives the element's
+/// alpha at compositing time. Storage-only in Phase 3a — renderer wiring,
+/// MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX, LINK_INDICATOR,
+/// and the disable/unlink menu items land in Phase 3b.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Mask {
+    /// Artwork whose luminance drives the element's alpha.
+    pub subtree: Box<Element>,
+    /// When true, the mask also clips the element to its bounds.
+    pub clip: bool,
+    /// When true, the luminance mapping is inverted (light becomes opaque).
+    pub invert: bool,
+    /// When true, the element renders as if no mask were attached. The mask
+    /// subtree is preserved so re-enabling restores the prior state.
+    #[serde(default)]
+    pub disabled: bool,
+    /// When true, mask transforms follow the element's transform.
+    /// When false, the mask uses `unlink_transform` as its fixed baseline.
+    #[serde(default = "default_mask_linked")]
+    pub linked: bool,
+    /// Captured at unlink time: the element's transform when the link was
+    /// broken. Used as the mask's effective transform while `linked` is
+    /// false. Cleared on relink.
+    #[serde(default)]
+    pub unlink_transform: Option<Transform>,
+}
+
+fn default_mask_linked() -> bool { true }
+
 /// Common properties shared by all visible elements.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CommonProps {
     pub opacity: f64,
+    #[serde(default)]
+    pub mode: BlendMode,
     pub transform: Option<Transform>,
     pub locked: bool,
     pub visibility: Visibility,
+    /// Optional opacity mask attached to this element. When `None`, the
+    /// element composites normally. When `Some(_)`, the mask's artwork
+    /// modulates alpha per OPACITY.md. Storage-only in Phase 3a.
+    #[serde(default)]
+    pub mask: Option<Box<Mask>>,
 }
 
 impl Default for CommonProps {
     fn default() -> Self {
         Self {
             opacity: 1.0,
+            mode: BlendMode::Normal,
             transform: None,
             locked: false,
             visibility: Visibility::Preview,
+            mask: None,
         }
     }
 }
@@ -933,17 +1000,35 @@ impl TextPathElem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct GroupElem {
     pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
+    /// When true, children composite in isolation from elements outside the
+    /// group (Opacity panel, Page Isolated Blending). Storage-only in
+    /// Phase 2; renderer support is deferred. Default `false`.
+    #[serde(default)]
+    pub isolated_blending: bool,
+    /// When true, children of this group punch through underlying elements
+    /// rather than blending with them (Opacity panel, Page Knockout Group).
+    /// Storage-only in Phase 2; renderer support is deferred. Default `false`.
+    #[serde(default)]
+    pub knockout_group: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct LayerElem {
     pub name: String,
     pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
+    /// See [`GroupElem::isolated_blending`]. Present on layers so the
+    /// document root (a Layer) can carry the flag today; per-group UI
+    /// exposure is deferred.
+    #[serde(default)]
+    pub isolated_blending: bool,
+    /// See [`GroupElem::knockout_group`].
+    #[serde(default)]
+    pub knockout_group: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -995,6 +1080,10 @@ impl Element {
 
     pub fn opacity(&self) -> f64 {
         self.common().opacity
+    }
+
+    pub fn mode(&self) -> BlendMode {
+        self.common().mode
     }
 
     pub fn transform(&self) -> Option<&Transform> {
@@ -2306,6 +2395,8 @@ mod tests {
     fn group(children: Vec<Element>) -> Element {
         Element::Group(GroupElem {
             children: children.into_iter().map(Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         })
     }
@@ -2994,6 +3085,8 @@ mod tests {
     fn with_fill_on_group_is_noop() {
         let group = Element::Group(GroupElem {
             children: vec![],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let red_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
@@ -3071,8 +3164,11 @@ mod tests {
         let elem = Element::Layer(LayerElem {
             name: "Layer 1".into(),
             children: Vec::new(),
-            common: CommonProps { opacity: 0.75, transform: None,
-                                  locked: true, visibility: Visibility::Outline },
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { opacity: 0.75, mode: BlendMode::Normal,
+                                  transform: None, locked: true,
+                                  visibility: Visibility::Outline, mask: None },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3093,10 +3189,184 @@ mod tests {
         let child = rect(0.0, 0.0, 10.0, 10.0);
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(child)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let json = serde_json::to_value(&group).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
         assert_eq!(group, back);
+    }
+
+    // ── BlendMode ─────────────────────────────────────────────
+
+    #[test]
+    fn blend_mode_default_is_normal() {
+        assert_eq!(BlendMode::default(), BlendMode::Normal);
+    }
+
+    #[test]
+    fn blend_mode_has_sixteen_variants() {
+        let all = [
+            BlendMode::Normal,
+            BlendMode::Darken, BlendMode::Multiply, BlendMode::ColorBurn,
+            BlendMode::Lighten, BlendMode::Screen, BlendMode::ColorDodge,
+            BlendMode::Overlay, BlendMode::SoftLight, BlendMode::HardLight,
+            BlendMode::Difference, BlendMode::Exclusion,
+            BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity,
+        ];
+        assert_eq!(all.len(), 16);
+    }
+
+    #[test]
+    fn blend_mode_serde_uses_snake_case() {
+        let json = serde_json::to_value(BlendMode::ColorBurn).unwrap();
+        assert_eq!(json, serde_json::json!("color_burn"));
+        let back: BlendMode = serde_json::from_value(serde_json::json!("soft_light")).unwrap();
+        assert_eq!(back, BlendMode::SoftLight);
+    }
+
+    #[test]
+    fn blend_mode_serde_roundtrip_all_variants() {
+        for mode in [
+            BlendMode::Normal,
+            BlendMode::Darken, BlendMode::Multiply, BlendMode::ColorBurn,
+            BlendMode::Lighten, BlendMode::Screen, BlendMode::ColorDodge,
+            BlendMode::Overlay, BlendMode::SoftLight, BlendMode::HardLight,
+            BlendMode::Difference, BlendMode::Exclusion,
+            BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity,
+        ] {
+            let json = serde_json::to_value(mode).unwrap();
+            let back: BlendMode = serde_json::from_value(json).unwrap();
+            assert_eq!(mode, back);
+        }
+    }
+
+    // ── CommonProps.mode ──────────────────────────────────────
+
+    #[test]
+    fn common_props_default_mode_is_normal() {
+        let c = CommonProps::default();
+        assert_eq!(c.mode, BlendMode::Normal);
+    }
+
+    #[test]
+    fn element_mode_accessor_returns_default() {
+        let r = rect(0.0, 0.0, 10.0, 10.0);
+        assert_eq!(r.mode(), BlendMode::Normal);
+    }
+
+    #[test]
+    fn common_props_serde_defaults_mode_when_missing() {
+        let json = serde_json::json!({
+            "opacity": 0.5,
+            "transform": null,
+            "locked": false,
+            "visibility": "Preview",
+        });
+        let c: CommonProps = serde_json::from_value(json).unwrap();
+        assert_eq!(c.mode, BlendMode::Normal);
+        assert_eq!(c.opacity, 0.5);
+    }
+
+    // ── Mask (Phase 3a storage) ─────────────────────────────
+
+    fn make_square_mask() -> Mask {
+        Mask {
+            subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0)),
+            clip: true,
+            invert: false,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }
+    }
+
+    #[test]
+    fn common_props_default_mask_is_none() {
+        let c = CommonProps::default();
+        assert!(c.mask.is_none());
+    }
+
+    #[test]
+    fn mask_default_linked_true_disabled_false() {
+        let json = serde_json::json!({
+            "subtree": rect(0.0, 0.0, 5.0, 5.0),
+            "clip": false,
+            "invert": false,
+        });
+        let m: Mask = serde_json::from_value(json).unwrap();
+        assert!(m.linked, "linked default should be true");
+        assert!(!m.disabled, "disabled default should be false");
+        assert!(m.unlink_transform.is_none());
+    }
+
+    #[test]
+    fn mask_serde_roundtrip() {
+        let m = make_square_mask();
+        let json = serde_json::to_value(&m).unwrap();
+        let back: Mask = serde_json::from_value(json).unwrap();
+        assert_eq!(m, back);
+    }
+
+    #[test]
+    fn element_with_mask_serde_roundtrip() {
+        let elem = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 20.0, height: 20.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                opacity: 1.0,
+                mode: BlendMode::Normal,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Preview,
+                mask: Some(Box::new(make_square_mask())),
+            },
+        });
+        let json = serde_json::to_value(&elem).unwrap();
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert_eq!(elem, back);
+        assert!(back.common().mask.is_some());
+    }
+
+    #[test]
+    fn element_without_mask_deserializes_from_legacy_json() {
+        // Legacy JSON without a `mask` key must still parse, with mask = None.
+        let json = serde_json::json!({
+            "Rect": {
+                "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0,
+                "rx": 0.0, "ry": 0.0,
+                "fill": null, "stroke": null,
+                "common": {
+                    "opacity": 1.0,
+                    "mode": "normal",
+                    "transform": null,
+                    "locked": false,
+                    "visibility": "Preview"
+                }
+            }
+        });
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert!(back.common().mask.is_none());
+    }
+
+    #[test]
+    fn element_serde_roundtrip_preserves_non_default_mode() {
+        let elem = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                opacity: 1.0,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Preview,
+                mask: None,
+            },
+        });
+        let json = serde_json::to_value(&elem).unwrap();
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert_eq!(elem, back);
+        assert_eq!(back.mode(), BlendMode::Multiply);
     }
 }

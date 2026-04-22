@@ -122,6 +122,7 @@ mod tests {
             paragraph_panel: crate::workspace::app_state::ParagraphPanelState::default(),
             align_panel: crate::workspace::app_state::AlignPanelState::default(),
             boolean_panel: crate::workspace::app_state::BooleanPanelState::default(),
+            opacity_panel: crate::workspace::app_state::OpacityPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),

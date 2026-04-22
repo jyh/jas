@@ -357,10 +357,21 @@ pub(crate) fn make_keydown_handler(
             Key::Escape | Key::Enter => {
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
                     let kind = st.active_tool;
-                    if let Some(tab) = st.tab_mut()
-                        && let Some(tool) = tab.tools.get_mut(&kind) {
+                    if let Some(tab) = st.tab_mut() {
+                        if let Some(tool) = tab.tools.get_mut(&kind) {
                             tool.on_key(&mut tab.model, "Escape");
                         }
+                        // OPACITY.md §Preview interactions: Escape
+                        // exits mask-isolation first (if active);
+                        // otherwise exits mask-editing mode back to
+                        // content-mode.
+                        use crate::document::model::EditingTarget;
+                        if tab.model.mask_isolation_path.is_some() {
+                            tab.model.mask_isolation_path = None;
+                        } else if let EditingTarget::Mask(_) = tab.model.editing_target {
+                            tab.model.editing_target = EditingTarget::Content;
+                        }
+                    }
                 }));
             }
             // --- Fill/Stroke shortcuts ---

@@ -43,6 +43,14 @@ pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>
 
 // ---------------------------------------------------------------------------
 
+/// Re-export of [`crate::document::model::EditingTarget`] — this
+/// lived on ``TabState`` before the editing-target / mask-isolation
+/// state moved to ``Model`` for parity with Swift / OCaml / Python
+/// and to give drawing tools access via ``&mut Model``. Kept as an
+/// alias so existing callers continue to see
+/// ``crate::workspace::app_state::EditingTarget``.
+pub(crate) use crate::document::model::EditingTarget;
+
 /// Per-tab state: each tab has its own document, tools, and clipboard.
 pub(crate) struct TabState {
     pub(crate) model: Model,
@@ -75,7 +83,11 @@ impl TabState {
         tools.insert(ToolKind::Star, Box::new(StarTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));
         tools.insert(ToolKind::Lasso, Box::new(LassoTool::new()));
-        Self { model, tools, clipboard: Vec::new() }
+        Self {
+            model,
+            tools,
+            clipboard: Vec::new(),
+        }
     }
 }
 
@@ -114,6 +126,10 @@ pub(crate) struct AppState {
     /// Read by `Controller::apply_destructive_boolean` and compound
     /// shape evaluation. See BOOLEAN.md §Boolean Options dialog.
     pub(crate) boolean_panel: BooleanPanelState,
+    /// Opacity panel state — mirrors state in `workspace/panels/opacity.yaml`.
+    /// `mode` and `opacity` are working values; `new_masks_*` are document
+    /// preferences. See transcripts/OPACITY.md.
+    pub(crate) opacity_panel: OpacityPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -390,6 +406,46 @@ impl Default for BooleanPanelState {
     }
 }
 
+/// Opacity panel state fields — mirror the panel-local state declared in
+/// `workspace/panels/opacity.yaml`. `blend_mode` and `opacity` are working
+/// values shown in the panel controls; later phases synchronize them with
+/// the selection's `element.mode` / `element.opacity`. The `new_masks_*`
+/// fields are document-scoped preferences (Phase 1 stores them on the panel
+/// state until the document model grows per-document preferences).
+///
+/// Named `blend_mode` rather than `mode` to avoid a collision with the Color
+/// panel's `mode` key in the shared live-overrides map.
+#[derive(Debug, Clone)]
+pub(crate) struct OpacityPanelState {
+    /// Working blend mode.
+    pub blend_mode: super::super::geometry::element::BlendMode,
+    /// Working opacity (0-100). Panel range is percent, distinct from the
+    /// model's 0.0-1.0 fraction; later phases convert at the binding edge.
+    pub opacity: f64,
+    /// Panel-local: preview row collapsed when true.
+    pub thumbnails_hidden: bool,
+    /// Panel-local: isolated_blending / knockout_group toggles revealed
+    /// inline when true.
+    pub options_shown: bool,
+    /// Document preference: initial `mask.clip` for newly made masks.
+    pub new_masks_clipping: bool,
+    /// Document preference: initial `mask.invert` for newly made masks.
+    pub new_masks_inverted: bool,
+}
+
+impl Default for OpacityPanelState {
+    fn default() -> Self {
+        Self {
+            blend_mode: super::super::geometry::element::BlendMode::Normal,
+            opacity: 100.0,
+            thumbnails_hidden: false,
+            options_shown: false,
+            new_masks_clipping: true,
+            new_masks_inverted: false,
+        }
+    }
+}
+
 impl AlignTo {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -476,6 +532,7 @@ impl AppState {
             paragraph_panel: ParagraphPanelState::default(),
             align_panel: AlignPanelState::default(),
             boolean_panel: BooleanPanelState::default(),
+            opacity_panel: OpacityPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
@@ -997,6 +1054,7 @@ impl AppState {
             tab.model.document(),
             self.boolean_panel.precision,
             &self.artboards_panel_selection,
+            tab.model.mask_isolation_path.as_deref(),
         );
 
         // Draw tool overlay
@@ -2457,6 +2515,87 @@ pub(crate) fn text_decoration_flags(td: &str) -> (bool, bool) {
 }
 
 #[cfg(test)]
+mod opacity_panel_state_tests {
+    use super::*;
+    use crate::geometry::element::BlendMode;
+
+    #[test]
+    fn default_blend_mode_is_normal() {
+        let s = OpacityPanelState::default();
+        assert_eq!(s.blend_mode, BlendMode::Normal);
+    }
+
+    #[test]
+    fn default_opacity_is_100() {
+        let s = OpacityPanelState::default();
+        assert_eq!(s.opacity, 100.0);
+    }
+
+    #[test]
+    fn default_thumbnails_hidden_false_options_shown_false() {
+        let s = OpacityPanelState::default();
+        assert!(!s.thumbnails_hidden);
+        assert!(!s.options_shown);
+    }
+
+    #[test]
+    fn default_new_masks_clipping_true() {
+        let s = OpacityPanelState::default();
+        assert!(s.new_masks_clipping);
+    }
+
+    #[test]
+    fn default_new_masks_inverted_false() {
+        let s = OpacityPanelState::default();
+        assert!(!s.new_masks_inverted);
+    }
+}
+
+#[cfg(test)]
+mod editing_target_tests {
+    use super::*;
+
+    #[test]
+    fn model_defaults_to_content_editing_target() {
+        // Default editing target is the document's normal content —
+        // mask-editing mode is entered explicitly via the
+        // MASK_PREVIEW click. OPACITY.md §Preview interactions.
+        let t = TabState::new();
+        assert_eq!(t.model.editing_target, EditingTarget::Content);
+    }
+
+    #[test]
+    fn editing_target_enter_and_exit_mask_mode() {
+        let mut t = TabState::new();
+        t.model.editing_target = EditingTarget::Mask(vec![0, 2, 1]);
+        match &t.model.editing_target {
+            EditingTarget::Mask(p) => assert_eq!(p, &vec![0, 2, 1]),
+            _ => panic!("expected Mask"),
+        }
+        t.model.editing_target = EditingTarget::Content;
+        assert_eq!(t.model.editing_target, EditingTarget::Content);
+    }
+
+    #[test]
+    fn model_defaults_to_no_mask_isolation() {
+        // Mask-isolation is entered explicitly via
+        // Alt/Option-clicking MASK_PREVIEW. OPACITY.md §Preview
+        // interactions.
+        let t = TabState::new();
+        assert!(t.model.mask_isolation_path.is_none());
+    }
+
+    #[test]
+    fn mask_isolation_round_trips() {
+        let mut t = TabState::new();
+        t.model.mask_isolation_path = Some(vec![0, 3]);
+        assert_eq!(t.model.mask_isolation_path, Some(vec![0, 3]));
+        t.model.mask_isolation_path = None;
+        assert!(t.model.mask_isolation_path.is_none());
+    }
+}
+
+#[cfg(test)]
 mod pending_override_tests {
     use super::*;
     use crate::geometry::element::Element;
@@ -2850,6 +2989,8 @@ mod align_panel_state_tests {
         let layer = Element::Layer(LayerElem {
             name: "L".into(),
             children: rects.into_iter().map(std::rc::Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let selection: Vec<ElementSelection> = selected.into_iter()

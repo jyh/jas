@@ -104,6 +104,7 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Artboards => "artboards",
         PanelKind::Align => "align",
         PanelKind::Boolean => "boolean",
+        PanelKind::Opacity => "opacity",
     }
 }
 

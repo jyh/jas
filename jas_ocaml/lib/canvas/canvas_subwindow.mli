@@ -38,3 +38,28 @@ val create :
   ?on_save:(unit -> unit) ->
   ?bbox:bounding_box ->
   GPack.notebook -> canvas_subwindow
+
+(** How the mask subtree's rendered alpha is applied to the
+    element. Selected by [mask_plan] from the mask's [clip] and
+    [invert] fields; consumed by the renderer's
+    [draw_element_with_mask] dispatch. OPACITY.md \167Rendering. *)
+type mask_plan =
+  | Clip_in
+  | Clip_out
+  | Reveal_outside_bbox
+
+(** Pick a [mask_plan] for the mask, or [None] when the mask is
+    inactive ([disabled: true]). *)
+val mask_plan : Element.mask -> mask_plan option
+
+(** Return the transform that should be applied when rendering
+    the mask's subtree on top of the ancestor coord system.
+    Track C phase 3, OPACITY.md \167Document model:
+
+    - [linked: true]  — mask inherits [Element.get_transform elem].
+    - [linked: false] — mask uses [mask.unlink_transform]
+      (captured at unlink time, frozen).
+
+    Returns [None] when the picked transform is absent. *)
+val effective_mask_transform
+  : Element.mask -> Element.element -> Element.transform option

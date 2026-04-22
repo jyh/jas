@@ -1,8 +1,8 @@
 from absl.testing import absltest
 
 from geometry.element import (
-    Color, RgbColor, HsbColor, CmykColor,
-    Fill, Stroke, LineCap, LineJoin, Transform,
+    BlendMode, Color, RgbColor, HsbColor, CmykColor,
+    Fill, Mask, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
@@ -746,6 +746,78 @@ class GeometricBoundsTest(absltest.TestCase):
         _, _, pw, ph = ln.bounds()
         self.assertGreater(pw, gw)
         self.assertGreater(ph, gh)
+
+
+class BlendModeTest(absltest.TestCase):
+    """BlendMode enum — 16 values matching the cross-language contract."""
+
+    def test_has_sixteen_values(self):
+        self.assertEqual(len(list(BlendMode)), 16)
+
+    def test_contains_all_expected_values(self):
+        expected = [
+            BlendMode.NORMAL,
+            BlendMode.DARKEN, BlendMode.MULTIPLY, BlendMode.COLOR_BURN,
+            BlendMode.LIGHTEN, BlendMode.SCREEN, BlendMode.COLOR_DODGE,
+            BlendMode.OVERLAY, BlendMode.SOFT_LIGHT, BlendMode.HARD_LIGHT,
+            BlendMode.DIFFERENCE, BlendMode.EXCLUSION,
+            BlendMode.HUE, BlendMode.SATURATION, BlendMode.COLOR, BlendMode.LUMINOSITY,
+        ]
+        for m in expected:
+            self.assertIn(m, list(BlendMode))
+
+    def test_raw_values_are_snake_case(self):
+        self.assertEqual(BlendMode.NORMAL.value, "normal")
+        self.assertEqual(BlendMode.COLOR_BURN.value, "color_burn")
+        self.assertEqual(BlendMode.COLOR_DODGE.value, "color_dodge")
+        self.assertEqual(BlendMode.SOFT_LIGHT.value, "soft_light")
+        self.assertEqual(BlendMode.HARD_LIGHT.value, "hard_light")
+        self.assertEqual(BlendMode.LUMINOSITY.value, "luminosity")
+
+    def test_round_trip_through_value(self):
+        for m in BlendMode:
+            self.assertEqual(BlendMode(m.value), m)
+
+    def test_invalid_value_raises(self):
+        with self.assertRaises(ValueError):
+            BlendMode("not_a_mode")
+        with self.assertRaises(ValueError):
+            BlendMode("")
+        with self.assertRaises(ValueError):
+            BlendMode("ColorBurn")  # wrong case
+
+
+class MaskTest(absltest.TestCase):
+    """Mask dataclass — storage-only (Phase 3a)."""
+
+    def test_element_default_mask_is_none(self):
+        self.assertIsNone(Rect(x=0, y=0, width=10, height=10).mask)
+        self.assertIsNone(Line(x1=0, y1=0, x2=10, y2=10).mask)
+        self.assertIsNone(Group().mask)
+        self.assertIsNone(Layer(name="L").mask)
+
+    def test_mask_defaults_clip_true_linked_true_disabled_false(self):
+        subtree = Rect(x=0, y=0, width=10, height=10)
+        m = Mask(subtree=subtree)
+        self.assertTrue(m.clip)
+        self.assertFalse(m.invert)
+        self.assertFalse(m.disabled)
+        self.assertTrue(m.linked)
+        self.assertIsNone(m.unlink_transform)
+
+    def test_element_with_mask_propagates(self):
+        subtree = Rect(x=0, y=0, width=10, height=10)
+        m = Mask(subtree=subtree, clip=False, invert=True)
+        r = Rect(x=0, y=0, width=20, height=20, mask=m)
+        self.assertIsNotNone(r.mask)
+        self.assertEqual(r.mask.clip, False)
+        self.assertEqual(r.mask.invert, True)
+        self.assertEqual(r.mask.subtree, subtree)
+
+    def test_mask_immutable(self):
+        m = Mask(subtree=Rect(x=0, y=0, width=10, height=10))
+        with self.assertRaises(AttributeError):
+            m.clip = False
 
 
 if __name__ == "__main__":

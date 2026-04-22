@@ -475,19 +475,19 @@ let () =
       Alcotest.test_case "recognize_element_skips_rect" `Quick (fun () ->
         let open Jas.Element in
         let elem = Rect { x = 0.0; y = 0.0; width = 100.0; height = 60.0; rx = 0.0; ry = 0.0;
-          fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+          fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal; mask = None } in
         assert (recognize_element elem cfg = None));
 
       Alcotest.test_case "recognize_element_skips_circle" `Quick (fun () ->
         let open Jas.Element in
         let elem = Circle { cx = 50.0; cy = 50.0; r = 30.0;
-          fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+          fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal; mask = None } in
         assert (recognize_element elem cfg = None));
 
       Alcotest.test_case "recognize_element_skips_polygon" `Quick (fun () ->
         let open Jas.Element in
         let elem = Polygon { points = [(0.0, 0.0); (100.0, 0.0); (50.0, 86.6)];
-          fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+          fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal; mask = None } in
         assert (recognize_element elem cfg = None));
 
       Alcotest.test_case "recognize_element_converts_path_circle" `Quick (fun () ->

@@ -4027,6 +4027,14 @@
     "boolean_expand": {
       "viewbox": "0 0 16 16",
       "svg": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-dasharray=\"1.4 1\"/> <polygon points=\"5,8 11,8 8,5\" fill=\"currentColor\"/> <polygon points=\"5,8 11,8 8,11\" fill=\"currentColor\"/>\n"
+    },
+    "link_linked": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2.5,11.5 a2.5,2.5 0 0 1 0,-3.5 l2,-2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n<path d=\"M13.5,4.5 a2.5,2.5 0 0 1 0,3.5 l-2,2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n<line x1=\"5.5\" y1=\"8.5\" x2=\"10.5\" y2=\"7.5\"\n      stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
+    },
+    "link_unlinked": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2.5,11.5 a2.5,2.5 0 0 1 0,-3.5 l2,-2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n<path d=\"M13.5,4.5 a2.5,2.5 0 0 1 0,3.5 l-2,2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n<line x1=\"6\" y1=\"11\" x2=\"10\" y2=\"5\"\n      stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/>\n"
     }
   },
   "layout": {
@@ -16135,6 +16143,332 @@
               {
                 "key": "Escape",
                 "action": "{{if panel.renaming_element != null then 'cancel_rename' else 'exit_isolation_mode'}}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "opacity_panel_content": {
+      "id": "opacity_panel_content",
+      "type": "panel",
+      "summary": "Opacity",
+      "description": "Opacity panel \u2014 sets opacity and blend mode on the current selection, and manages opacity masks on selected elements. See transcripts/OPACITY.md for the full specification.\nFlask's phase-1 scope is yaml wiring only \u2014 the document model for per-element opacity / blend mode / opacity masks lands in later phases in the native apps. Phase-1 behavior in Flask:\n\n  - MODE_DROPDOWN and OPACITY_INPUT are functional; they bind to panel-\n    local `mode` and `opacity` working values.\n  - OPACITY_PREVIEW, LINK_INDICATOR, MASK_PREVIEW render as placeholder\n    boxes.\n  - MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX are present but\n    disabled until the document model carries element.mask.\n  - Mask-lifecycle and page-level menu items use enabled_when: \"false\"\n    until their respective phases land (pending_model for disable_mask /\n    unlink_mask; pending_renderer for page_isolated_blending /\n    page_knockout_group).\n\n=== Layout ===\nRow 1 \u2014 MODE_DROPDOWN (4 cols), \"Opacity:\" label (3 cols), OPACITY_INPUT (4 cols), OPACITY_DISCLOSURE chevron (1 col).\nRow 2 \u2014 OPACITY_PREVIEW (3 cols), LINK_INDICATOR (1 col), MASK_PREVIEW (3 cols), and a buttons column (5 cols) containing MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX. The entire row is hidden when panel.thumbnails_hidden is true.\n=== Mode values ===\nThe 16 blend modes are grouped into six sections by dividers in the dropdown, matching the groups in transcripts/OPACITY.md:\n\n  - [normal]\n  - [darken, multiply, color_burn]\n  - [lighten, screen, color_dodge]\n  - [overlay, soft_light, hard_light]\n  - [difference, exclusion]\n  - [hue, saturation, color, luminosity]\n\n=== Panel menu ===\nTen entries across four groups. Phase-1 actionable: Hide Thumbnails, Show Options, New Opacity Masks Are Clipping, New Opacity Masks Are Inverted (panel-local toggles). Phase-1 deferred: all mask-lifecycle items and the page-level blending toggles.\n",
+      "state": {
+        "blend_mode": {
+          "type": "enum",
+          "values": [
+            "normal",
+            "darken",
+            "multiply",
+            "color_burn",
+            "lighten",
+            "screen",
+            "color_dodge",
+            "overlay",
+            "soft_light",
+            "hard_light",
+            "difference",
+            "exclusion",
+            "hue",
+            "saturation",
+            "color",
+            "luminosity"
+          ],
+          "default": "normal",
+          "description": "Working blend mode. Phase-1 is panel-local (not yet applied to elements); later phases persist as element.mode on the selection. Named `blend_mode` rather than `mode` to avoid a collision with the Color panel's state.mode in the shared panel-overrides map.\n"
+        },
+        "opacity": {
+          "type": "number",
+          "default": 100,
+          "description": "Working opacity value (0-100). Phase-1 is panel-local (not yet applied to elements); later phases persist as element.opacity on the selection.\n"
+        },
+        "thumbnails_hidden": {
+          "type": "bool",
+          "default": false,
+          "description": "When true, the preview row (OPACITY_PREVIEW, LINK_INDICATOR, MASK_PREVIEW, and the mask-buttons column) is collapsed.\n"
+        },
+        "options_shown": {
+          "type": "bool",
+          "default": false,
+          "description": "When true, the isolated_blending and knockout_group toggles are revealed inline in the panel body below the preview row. Phase-1 has no inline controls for these yet; the flag is tracked for parity with the panel menu checkmark.\n"
+        },
+        "new_masks_clipping": {
+          "type": "bool",
+          "default": true,
+          "per_document": true,
+          "description": "Document preference for the initial state of mask.clip on newly made opacity masks. Does not affect existing masks.\n"
+        },
+        "new_masks_inverted": {
+          "type": "bool",
+          "default": false,
+          "per_document": true,
+          "description": "Document preference for the initial state of mask.invert on newly made opacity masks. Does not affect existing masks.\n"
+        }
+      },
+      "menu": [
+        {
+          "label": "Hide Thumbnails",
+          "action": "toggle_opacity_thumbnails",
+          "checked_when": "panel.thumbnails_hidden"
+        },
+        {
+          "label": "Show Options",
+          "action": "toggle_opacity_options",
+          "checked_when": "panel.options_shown"
+        },
+        "separator",
+        {
+          "label": "Make Opacity Mask",
+          "action": "make_opacity_mask",
+          "enabled_when": "!selection_has_mask"
+        },
+        {
+          "label": "Release Opacity Mask",
+          "action": "release_opacity_mask",
+          "enabled_when": "selection_has_mask"
+        },
+        {
+          "label": "Disable Opacity Mask",
+          "action": "disable_opacity_mask",
+          "enabled_when": "selection_has_mask"
+        },
+        {
+          "label": "Unlink Opacity Mask",
+          "action": "unlink_opacity_mask",
+          "enabled_when": "selection_has_mask"
+        },
+        "separator",
+        {
+          "label": "New Opacity Masks Are Clipping",
+          "action": "toggle_new_masks_clipping",
+          "checked_when": "panel.new_masks_clipping"
+        },
+        {
+          "label": "New Opacity Masks Are Inverted",
+          "action": "toggle_new_masks_inverted",
+          "checked_when": "panel.new_masks_inverted"
+        },
+        "separator",
+        {
+          "label": "Page Isolated Blending",
+          "action": "toggle_page_isolated_blending",
+          "enabled_when": "false",
+          "description": "status: pending_renderer. Enables once the renderer supports isolated blending for the document root group.\n"
+        },
+        {
+          "label": "Page Knockout Group",
+          "action": "toggle_page_knockout_group",
+          "enabled_when": "false",
+          "description": "status: pending_renderer. Enables once the renderer supports knockout group compositing for the document root group.\n"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "op_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "row",
+            "id": "op_controls_row",
+            "children": [
+              {
+                "id": "op_mode",
+                "type": "select",
+                "col": 4,
+                "summary": "Blend mode",
+                "description": "Blend mode for the selection. Sixteen modes grouped into six sections by separator.\n",
+                "bind": {
+                  "value": "panel.blend_mode"
+                },
+                "options": [
+                  {
+                    "value": "normal",
+                    "label": "Normal"
+                  },
+                  "separator",
+                  {
+                    "value": "darken",
+                    "label": "Darken"
+                  },
+                  {
+                    "value": "multiply",
+                    "label": "Multiply"
+                  },
+                  {
+                    "value": "color_burn",
+                    "label": "Color Burn"
+                  },
+                  "separator",
+                  {
+                    "value": "lighten",
+                    "label": "Lighten"
+                  },
+                  {
+                    "value": "screen",
+                    "label": "Screen"
+                  },
+                  {
+                    "value": "color_dodge",
+                    "label": "Color Dodge"
+                  },
+                  "separator",
+                  {
+                    "value": "overlay",
+                    "label": "Overlay"
+                  },
+                  {
+                    "value": "soft_light",
+                    "label": "Soft Light"
+                  },
+                  {
+                    "value": "hard_light",
+                    "label": "Hard Light"
+                  },
+                  "separator",
+                  {
+                    "value": "difference",
+                    "label": "Difference"
+                  },
+                  {
+                    "value": "exclusion",
+                    "label": "Exclusion"
+                  },
+                  "separator",
+                  {
+                    "value": "hue",
+                    "label": "Hue"
+                  },
+                  {
+                    "value": "saturation",
+                    "label": "Saturation"
+                  },
+                  {
+                    "value": "color",
+                    "label": "Color"
+                  },
+                  {
+                    "value": "luminosity",
+                    "label": "Luminosity"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "col": 3,
+                "content": "Opacity:",
+                "style": {
+                  "color": "{{theme.colors.text}}",
+                  "font_size": 12
+                }
+              },
+              {
+                "id": "op_opacity",
+                "type": "number_input",
+                "col": 4,
+                "summary": "Opacity",
+                "description": "Numeric opacity for the selection, 0-100%.",
+                "min": 0,
+                "max": 100,
+                "suffix": "%",
+                "bind": {
+                  "value": "panel.opacity"
+                }
+              },
+              {
+                "id": "op_disclosure",
+                "type": "icon_button",
+                "col": 1,
+                "icon": "disclosure_right",
+                "summary": "Opacity slider",
+                "description": "Opens a popover containing a horizontal opacity slider bound to panel.opacity.\n",
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "open_opacity_slider_popover"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "id": "op_preview_row",
+            "layout": "row",
+            "bind": {
+              "visible": "!panel.thumbnails_hidden"
+            },
+            "children": [
+              {
+                "id": "op_preview",
+                "type": "placeholder",
+                "col": 3,
+                "summary": "Opacity preview",
+                "description": "Thumbnail of the selection. Phase-1 renders as a placeholder box in Flask; native apps render actual selection artwork.\nClicking this preview sets the editing target to the element's main content (exits mask-editing mode) per OPACITY.md \u00a7Preview interactions. The native renderers draw a persistent highlight on this preview while it is the active editing target (i.e., while ``editing_target_is_mask`` is false).\n"
+              },
+              {
+                "id": "op_link_indicator",
+                "type": "icon_button",
+                "col": 1,
+                "summary": "Link mask transform",
+                "description": "Icon showing whether the mask's transform is linked to the element's. The glyph flips between a connected chain (``link_linked``) and a broken chain (``link_unlinked``) based on the first selected element's mask.linked. Clicking toggles mask.linked on every selected mask via ``Controller::toggle_mask_linked_on_selection``. Disabled when the selection has no mask. OPACITY.md \u00a7Document model.\n",
+                "bind": {
+                  "icon": "if selection_mask_linked then \"link_linked\" else \"link_unlinked\"",
+                  "disabled": "!selection_has_mask"
+                }
+              },
+              {
+                "id": "op_mask_preview",
+                "type": "placeholder",
+                "col": 3,
+                "summary": "Mask preview",
+                "description": "Thumbnail of the opacity mask (or an empty-mask glyph when no mask exists). Phase-1 renders as a placeholder box.\nClicking this preview enters mask-editing mode per OPACITY.md \u00a7Preview interactions: the editing target switches to the first selected element's mask subtree, and subsequent tool drawing adds to ``element.mask.subtree`` instead of the active layer. Requires ``selection_has_mask``; a no-op otherwise. The native renderers draw a persistent highlight on this preview while mask-editing is active (``editing_target_is_mask`` is true).\n"
+              },
+              {
+                "type": "container",
+                "id": "op_buttons_col",
+                "layout": "column",
+                "col": 5,
+                "style": {
+                  "gap": 2
+                },
+                "children": [
+                  {
+                    "id": "op_make_mask",
+                    "type": "button",
+                    "summary": "Make or Release Opacity Mask",
+                    "description": "Creates an opacity mask on the selected element(s), or releases an existing mask. The label flips between \"Make Mask\" and \"Release\" based on selection_has_mask per OPACITY.md \u00a7 States.\n",
+                    "bind": {
+                      "label": "if selection_has_mask then \"Release\" else \"Make Mask\""
+                    }
+                  },
+                  {
+                    "id": "op_clip",
+                    "type": "checkbox",
+                    "label": "Clip",
+                    "summary": "Clip",
+                    "description": "Toggles whether the opacity mask clips its element. Disabled when the selection has no mask.\n",
+                    "bind": {
+                      "disabled": "!selection_has_mask",
+                      "checked": "selection_mask_clip"
+                    }
+                  },
+                  {
+                    "id": "op_invert_mask",
+                    "type": "checkbox",
+                    "label": "Invert Mask",
+                    "summary": "Invert Mask",
+                    "description": "Toggles whether the opacity mask is inverted. Disabled when the selection has no mask.\n",
+                    "bind": {
+                      "disabled": "!selection_has_mask",
+                      "checked": "selection_mask_invert"
+                    }
+                  }
+                ]
               }
             ]
           }
