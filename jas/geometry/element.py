@@ -1287,6 +1287,21 @@ def with_stroke(element: Element, stroke: Stroke | None) -> Element:
     return element
 
 
+def with_fill_gradient(element: Element, gradient: Gradient | None) -> Element:
+    """Phase 5: replace the optional fill_gradient on the element. Pass
+    None to clear (demote to solid)."""
+    if hasattr(element, 'fill_gradient'):
+        return dataclasses.replace(element, fill_gradient=gradient)
+    return element
+
+
+def with_stroke_gradient(element: Element, gradient: Gradient | None) -> Element:
+    """Phase 5: replace the optional stroke_gradient on the element."""
+    if hasattr(element, 'stroke_gradient'):
+        return dataclasses.replace(element, stroke_gradient=gradient)
+    return element
+
+
 def with_width_points(element: Element, width_points: tuple[StrokeWidthPoint, ...]) -> Element:
     """Return a copy of element with width_points replaced.
 
