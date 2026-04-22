@@ -513,9 +513,9 @@ Shared state (read/written by this panel and others):
 
 ## Multi-selection
 
-Mirroring the OPACITY.md convention, each control is evaluated
-independently against the current selection. The panel is fully
-editable for mixed selections; any edit applies to every element.
+Each control is evaluated independently against the current selection.
+The panel is fully editable for mixed selections; any edit applies to
+every element in the selection.
 
 | Control | Uniform selection | Mixed selection |
 |---|---|---|
