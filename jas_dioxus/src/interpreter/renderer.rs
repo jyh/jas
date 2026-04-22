@@ -92,6 +92,8 @@ fn render_el(
         "toggle" | "checkbox" => render_toggle(el, ctx, rctx),
         "combo_box" => render_combo_box(el, ctx, rctx),
         "color_swatch" => render_color_swatch(el, ctx, rctx),
+        "gradient_tile" => render_gradient_tile(el, ctx, rctx),
+        "gradient_slider" => render_gradient_slider(el, ctx, rctx),
         "fill_stroke_widget" => render_fill_stroke_widget(el, ctx, rctx),
         "color_bar" => render_color_bar(el, ctx, rctx),
         "color_gradient" => render_color_gradient(el, ctx, rctx),
@@ -4147,6 +4149,184 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             style: "{style}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
+        }
+    }
+}
+
+/// Evaluate a bind expression and parse its result back to a JSON value.
+///
+/// The expression language serializes objects (like a gradient value) to a
+/// JSON string via `Value::Str`. This helper reverses that so widget code
+/// can read structured fields back out.
+fn eval_bind_object(expr: &str, ctx: &serde_json::Value) -> Option<serde_json::Value> {
+    let v = expr::eval(expr, ctx);
+    match v {
+        Value::Str(s) => serde_json::from_str::<serde_json::Value>(&s).ok(),
+        Value::List(items) => Some(serde_json::Value::Array(items)),
+        _ => None,
+    }
+}
+
+/// Build a CSS background from a gradient JSON value.
+fn gradient_css_background(gradient: &serde_json::Value) -> Option<String> {
+    let stops = gradient.get("stops")?.as_array()?;
+    if stops.len() < 2 {
+        return None;
+    }
+    let mut stop_strs = Vec::new();
+    for s in stops {
+        let color = s.get("color").and_then(|v| v.as_str()).unwrap_or("#000000");
+        let loc = s.get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let opacity = s.get("opacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let color_css = if opacity < 100.0 && color.starts_with('#') && color.len() == 7 {
+            let r = u8::from_str_radix(&color[1..3], 16).unwrap_or(0);
+            let g = u8::from_str_radix(&color[3..5], 16).unwrap_or(0);
+            let b = u8::from_str_radix(&color[5..7], 16).unwrap_or(0);
+            format!("rgba({},{},{},{:.3})", r, g, b, opacity / 100.0)
+        } else {
+            color.to_string()
+        };
+        stop_strs.push(format!("{} {}%", color_css, loc));
+    }
+    let gtype = gradient.get("type").and_then(|v| v.as_str()).unwrap_or("linear");
+    if gtype == "radial" {
+        Some(format!("radial-gradient(circle, {})", stop_strs.join(", ")))
+    } else {
+        let angle = gradient.get("angle").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        // Our angle convention: 0 = horizontal (to-right). CSS linear-gradient
+        // angle: 0deg is bottom-to-top, 90deg is left-to-right. So CSS angle =
+        // 90 - angle.
+        let css_angle = ((90.0 - angle).rem_euclid(360.0)) as i64;
+        Some(format!("linear-gradient({}deg, {})", css_angle, stop_strs.join(", ")))
+    }
+}
+
+/// gradient_tile — clickable gradient preview; click fires the behavior list.
+fn render_gradient_tile(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let size_key = el.get("size").and_then(|v| v.as_str()).unwrap_or("large");
+    let sz: i64 = match size_key { "small" => 16, "medium" => 32, _ => 64 };
+
+    let gradient_expr = el.get("bind")
+        .and_then(|b| b.get("gradient"))
+        .and_then(|v| v.as_str());
+    let bg = gradient_expr
+        .and_then(|e| eval_bind_object(e, ctx))
+        .and_then(|g| gradient_css_background(&g))
+        .unwrap_or_else(|| "#888".to_string());
+
+    let on_click = build_click_handler(el, ctx, rctx);
+
+    let data_bind = gradient_expr.map(|s| s.to_string()).unwrap_or_default();
+
+    rsx! {
+        div {
+            id: "{id}",
+            class: "jas-gradient-tile",
+            "data-type": "gradient-tile",
+            "data-bind-gradient": "{data_bind}",
+            style: "width:{sz}px;height:{sz}px;background:{bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:pointer;",
+            onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+        }
+    }
+}
+
+/// gradient_slider — 1-D color-stops editor.
+///
+/// Phase 0 scope: renders the bar + stop markers + midpoint markers with
+/// click / dblclick handlers. Full pointer drag state machine (drag, drag
+/// past neighbor, drag-off-bar delete) is deferred to Phase 5 when the
+/// action pipeline is wired. Keyboard handlers are similarly deferred.
+fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let stops_expr = el.get("bind").and_then(|b| b.get("stops")).and_then(|v| v.as_str());
+    let sel_stop_expr = el.get("bind").and_then(|b| b.get("selected_stop_index")).and_then(|v| v.as_str());
+    let sel_mid_expr = el.get("bind").and_then(|b| b.get("selected_midpoint_index")).and_then(|v| v.as_str());
+
+    let stops = stops_expr.and_then(|e| eval_bind_object(e, ctx));
+    let stops_arr: Vec<serde_json::Value> = stops
+        .as_ref()
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let sel_stop: i64 = sel_stop_expr
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n as i64, _ => -1 })
+        .unwrap_or(-1);
+    let sel_mid: i64 = sel_mid_expr
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n as i64, _ => -1 })
+        .unwrap_or(-1);
+
+    // Build a linear preview of the stops for the bar background.
+    let bar_bg = if stops_arr.len() >= 2 {
+        let preview = serde_json::json!({
+            "type": "linear",
+            "angle": 0,
+            "stops": stops_arr.clone(),
+        });
+        gradient_css_background(&preview).unwrap_or_else(|| "#888".to_string())
+    } else {
+        "#888".to_string()
+    };
+
+    let on_click = build_click_handler(el, ctx, rctx);
+
+    let stops_bind = stops_expr.map(|s| s.to_string()).unwrap_or_default();
+    let sel_stop_bind = sel_stop_expr.map(|s| s.to_string()).unwrap_or_default();
+    let sel_mid_bind = sel_mid_expr.map(|s| s.to_string()).unwrap_or_default();
+
+    // Build midpoint and stop markers as Element lists so the rsx! macro can
+    // splice them in.
+    let mut midpoint_markers: Vec<Element> = Vec::new();
+    for i in 0..stops_arr.len().saturating_sub(1) {
+        let left = stops_arr[i].get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let right = stops_arr[i + 1].get("location").and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let pct = stops_arr[i].get("midpoint_to_next").and_then(|v| v.as_f64()).unwrap_or(50.0);
+        let mid_loc = left + (right - left) * (pct / 100.0);
+        let sel_class = if sel_mid == i as i64 { " jas-gradient-midpoint-selected" } else { "" };
+        midpoint_markers.push(rsx! {
+            div {
+                class: "jas-gradient-midpoint{sel_class}",
+                "data-role": "midpoint",
+                "data-midpoint-index": "{i}",
+                style: "position:absolute;left:calc({mid_loc}% - 5px);top:2px;width:10px;height:10px;transform:rotate(45deg);background:#888;border:1px solid #333;box-sizing:border-box;cursor:grab;",
+            }
+        });
+    }
+
+    let mut stop_markers: Vec<Element> = Vec::new();
+    for (i, s) in stops_arr.iter().enumerate() {
+        let loc = s.get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let color = s.get("color").and_then(|v| v.as_str()).unwrap_or("#000000").to_string();
+        let sel_class = if sel_stop == i as i64 { " jas-gradient-stop-selected" } else { "" };
+        stop_markers.push(rsx! {
+            div {
+                class: "jas-gradient-stop{sel_class}",
+                "data-role": "stop",
+                "data-stop-index": "{i}",
+                style: "position:absolute;left:calc({loc}% - 7px);top:30px;width:14px;height:14px;border-radius:50%;background:{color};border:1.5px solid #333;box-sizing:border-box;cursor:grab;",
+            }
+        });
+    }
+
+    rsx! {
+        div {
+            id: "{id}",
+            class: "jas-gradient-slider",
+            "data-type": "gradient-slider",
+            "data-bind-stops": "{stops_bind}",
+            "data-bind-selected-stop-index": "{sel_stop_bind}",
+            "data-bind-selected-midpoint-index": "{sel_mid_bind}",
+            tabindex: "0",
+            style: "position:relative;width:100%;height:44px;box-sizing:border-box;outline:none;",
+            onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+            div {
+                class: "jas-gradient-slider-bar",
+                "data-role": "bar",
+                style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
+            }
+            {midpoint_markers.into_iter()}
+            {stop_markers.into_iter()}
         }
     }
 }
