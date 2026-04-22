@@ -296,6 +296,11 @@ thread_local! {
     /// scratch buffer to avoid allocating a new DOM canvas per
     /// masked element per frame.
     static MASK_CANVAS: RefCell<Option<HtmlCanvasElement>> = const { RefCell::new(None) };
+    /// Second scratch canvas, used to render the mask subtree in
+    /// isolation before its alpha is promoted to luminance (see
+    /// [promote_mask_to_luminance]). Only populated when the
+    /// ClipIn path enters the luminance branch.
+    static MASK_LUMA_CANVAS: RefCell<Option<HtmlCanvasElement>> = const { RefCell::new(None) };
 }
 
 /// Read the six-component current transform from a Canvas2D
@@ -322,16 +327,30 @@ fn read_ctx_transform(
 /// host or the canvas can't be created). Node is *not* appended
 /// to the document — it lives only in memory.
 fn get_mask_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
-    let canvas: HtmlCanvasElement = MASK_CANVAS.with(|cell| -> Option<HtmlCanvasElement> {
-        if let Some(c) = cell.borrow().clone() {
-            return Some(c);
+    scratch_from_cell(&MASK_CANVAS, w, h)
+}
+
+/// Second scratch canvas, used by the luminance-based mask path
+/// to render the mask subtree in isolation before its alpha is
+/// replaced by luminance.
+fn get_mask_luma_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    scratch_from_cell(&MASK_LUMA_CANVAS, w, h)
+}
+
+fn scratch_from_cell(
+    cell: &'static std::thread::LocalKey<RefCell<Option<HtmlCanvasElement>>>,
+    w: u32, h: u32,
+) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    let canvas: HtmlCanvasElement = cell.with(|c| -> Option<HtmlCanvasElement> {
+        if let Some(v) = c.borrow().clone() {
+            return Some(v);
         }
         let window = web_sys::window()?;
         let doc = window.document()?;
         let el = doc.create_element("canvas").ok()?;
-        let c: HtmlCanvasElement = el.unchecked_into();
-        *cell.borrow_mut() = Some(c.clone());
-        Some(c)
+        let v: HtmlCanvasElement = el.unchecked_into();
+        *c.borrow_mut() = Some(v.clone());
+        Some(v)
     })?;
     if canvas.width() != w {
         canvas.set_width(w);
@@ -342,6 +361,107 @@ fn get_mask_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderin
     let ctx: CanvasRenderingContext2d = canvas
         .get_context("2d").ok()??.unchecked_into();
     Some((canvas, ctx))
+}
+
+/// Promote the alpha channel of ``ctx``'s pixels within the given
+/// device-space rectangle from raw alpha to luminance-scaled
+/// alpha: ``A' = A * (0.299*R + 0.587*G + 0.114*B) / 255``. This
+/// matches PDF §11's soft-mask convention — a black-opaque mask
+/// reads as fully transparent, a white-opaque mask as fully
+/// opaque, and a gray-opaque mask as partially opaque. Restricted
+/// to the given rect for performance (typical masks occupy a
+/// small fraction of the canvas).
+///
+/// Returns ``true`` on success. On ``None`` returns (ImageData
+/// unavailable) the caller falls back to alpha-based masking so
+/// the user's mask still has *some* effect, just not the
+/// luminance-weighted one.
+fn promote_mask_to_luminance(
+    ctx: &CanvasRenderingContext2d,
+    dx: i32, dy: i32, dw: u32, dh: u32,
+) -> Option<()> {
+    if dw == 0 || dh == 0 {
+        return Some(());
+    }
+    let image_data = ctx
+        .get_image_data(dx as f64, dy as f64, dw as f64, dh as f64)
+        .ok()?;
+    let data = image_data.data();
+    let mut bytes: Vec<u8> = data.to_vec();
+    promote_bytes_to_luminance(&mut bytes);
+    let clamped = wasm_bindgen::Clamped(bytes.as_slice());
+    let new_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        clamped, dw, dh,
+    ).ok()?;
+    ctx.put_image_data(&new_data, dx as f64, dy as f64).ok()?;
+    Some(())
+}
+
+/// Replace each RGBA pixel's alpha channel with
+/// ``A' = A * (0.299*R + 0.587*G + 0.114*B) / 255``. Pure
+/// function, testable without a live canvas.
+fn promote_bytes_to_luminance(bytes: &mut [u8]) {
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        let r = bytes[i] as f64;
+        let g = bytes[i + 1] as f64;
+        let b = bytes[i + 2] as f64;
+        let a = bytes[i + 3] as f64;
+        // ITU-R BT.601 luma weights; integers would be faster but
+        // the f64 form is clear and the inner loop is
+        // getImageData-bound anyway.
+        let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        let new_alpha = (lum * a / 255.0).round().clamp(0.0, 255.0) as u8;
+        bytes[i + 3] = new_alpha;
+        i += 4;
+    }
+}
+
+/// Apply the ``ClipIn`` luminance composite on an offscreen
+/// canvas that already holds the rendered element body. Returns
+/// ``true`` on success, ``false`` when any intermediate step
+/// fails so the caller can fall back to alpha-based compositing.
+/// ``off_ctx`` must carry the mask's effective transform applied
+/// on top of the main world transform.
+///
+/// Steps:
+///   1. Render the mask subtree in isolation onto the luma
+///      scratch canvas (a fresh transparent buffer, same
+///      transform as ``off_ctx``).
+///   2. Promote that scratch's pixels from raw alpha to
+///      luminance-scaled alpha (black-opaque → fully transparent,
+///      white-opaque → fully opaque, gray → partial).
+///   3. Blit the luma scratch onto the element-body buffer with
+///      ``destination-in``; the luminance alpha clips the element.
+fn apply_clip_in_luminance(
+    off_ctx: &CanvasRenderingContext2d,
+    w: u32,
+    h: u32,
+    mask: &Mask,
+    ancestor_vis: Visibility,
+    precision: f64,
+) -> bool {
+    let (luma_canvas, luma_ctx) = match get_mask_luma_scratch(w, h) {
+        Some(p) => p,
+        None => return false,
+    };
+    luma_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    luma_ctx.set_global_composite_operation("source-over").ok();
+    luma_ctx.set_global_alpha(1.0);
+    luma_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(off_ctx) {
+        luma_ctx.set_transform(a, b, c, d, e, f).ok();
+    }
+    draw_element(&luma_ctx, &mask.subtree, ancestor_vis, precision);
+    if promote_mask_to_luminance(&luma_ctx, 0, 0, w, h).is_none() {
+        return false;
+    }
+    off_ctx.save();
+    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    off_ctx.set_global_composite_operation("destination-in").ok();
+    let _ = off_ctx.draw_image_with_html_canvas_element(&luma_canvas, 0.0, 0.0);
+    off_ctx.restore();
+    true
 }
 
 /// Render ``elem`` on the main ``ctx`` with its opacity mask
@@ -407,10 +527,26 @@ fn draw_element_with_mask(
     }
     match plan {
         MaskPlan::ClipIn => {
-            // `destination-in` over the whole canvas — the element
-            // is clipped to the mask shape.
-            off_ctx.set_global_composite_operation("destination-in").ok();
-            draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+            // Luminance-based soft-mask composite. The mask subtree
+            // is rendered to a separate scratch, its alpha is
+            // replaced by the per-pixel luminance (so a black
+            // opaque mask reads as fully transparent and a white
+            // opaque mask reads as fully opaque), and then the
+            // result is drawn onto the element buffer with
+            // ``destination-in``. Matches PDF §11's soft-mask
+            // convention. OPACITY.md §Rendering.
+            //
+            // If any step of the luminance path fails (ImageData
+            // unavailable, zero-size canvas, …) we fall back to
+            // the alpha-based composite so the user still sees
+            // *something*.
+            let fell_back = !apply_clip_in_luminance(
+                &off_ctx, w, h, mask, ancestor_vis, precision,
+            );
+            if fell_back {
+                off_ctx.set_global_composite_operation("destination-in").ok();
+                draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+            }
         }
         MaskPlan::ClipOut => {
             // `destination-out` over the whole canvas — the mask
@@ -1733,6 +1869,76 @@ mod tests {
             mask_plan(&test_mask(false, true, false)),
             Some(MaskPlan::ClipOut)
         );
+    }
+
+    // ── promote_bytes_to_luminance (PDF §11 soft-mask) ─────
+
+    fn pixel(r: u8, g: u8, b: u8, a: u8) -> [u8; 4] { [r, g, b, a] }
+
+    #[test]
+    fn luminance_white_opaque_keeps_alpha() {
+        let mut bytes = pixel(255, 255, 255, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 255);
+    }
+
+    #[test]
+    fn luminance_black_opaque_drops_to_zero() {
+        let mut bytes = pixel(0, 0, 0, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 0);
+    }
+
+    #[test]
+    fn luminance_mid_gray_halves_alpha() {
+        // Mid-gray (128,128,128) has luminance ≈ 128. Alpha 255 in,
+        // expect ~128 out.
+        let mut bytes = pixel(128, 128, 128, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        // Allow ±1 for rounding.
+        assert!((bytes[3] as i32 - 128).abs() <= 1, "got {}", bytes[3]);
+    }
+
+    #[test]
+    fn luminance_transparent_stays_transparent() {
+        // Regardless of RGB, an alpha-0 pixel must stay alpha-0
+        // (so the mask's "outside rendered region" doesn't
+        // accidentally become opaque).
+        let mut bytes = pixel(255, 255, 255, 0).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 0);
+    }
+
+    #[test]
+    fn luminance_respects_source_alpha() {
+        // Half-alpha white should end up at half alpha.
+        let mut bytes = pixel(255, 255, 255, 128).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 128);
+    }
+
+    #[test]
+    fn luminance_bt601_red_weight() {
+        // Pure red (255,0,0) → luminance = 0.299 * 255 ≈ 76.
+        let mut bytes = pixel(255, 0, 0, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert!((bytes[3] as i32 - 76).abs() <= 1, "got {}", bytes[3]);
+    }
+
+    #[test]
+    fn luminance_bt601_green_weight() {
+        // Pure green → luminance = 0.587 * 255 ≈ 150.
+        let mut bytes = pixel(0, 255, 0, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert!((bytes[3] as i32 - 150).abs() <= 1, "got {}", bytes[3]);
+    }
+
+    #[test]
+    fn luminance_bt601_blue_weight() {
+        // Pure blue → luminance = 0.114 * 255 ≈ 29.
+        let mut bytes = pixel(0, 0, 255, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert!((bytes[3] as i32 - 29).abs() <= 1, "got {}", bytes[3]);
     }
 
     // ── effective_mask_transform (Track C phase 3) ────────
