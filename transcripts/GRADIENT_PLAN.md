@@ -285,21 +285,47 @@ supported by Canvas2D / CGContext / Cairo / QPainter gradient APIs.
 
 ### Phase 9 — Library management
 
-**Scope**
+**Status:** Foundation partially landed.
 
-- **Open Gradient Library** submenu — dynamic listing of
-  `workspace/gradients/*.json` files. Selecting switches the active
-  library.
-- **Save Gradient Library** dialog — prompts for name; writes the
-  document's gradient library to `workspace/gradients/<name>.json`.
-- Document Library persists with document save / load.
-- Tile thumbnail sizes (small/medium/large) render at correct sizes.
+- **Open Gradient Library** submenu — declared as `dynamic: true`
+  in `gradient.yaml`, matching the Swatches panel convention. Menu
+  renderer walks `data.gradient_libraries` (populated by the loader
+  from Phase 3) and emits submenu entries per discovered library.
+  Selecting one switches `panel.active_library_id`.
+- **Tile click applies** — each `GRADIENT_TILE` in the strip fires
+  six `set` effects on click, threading the tile's gradient value
+  through the subscription chain to the selected elements'
+  `fill_gradient` field.
+- Thumbnail sizes (small/medium/large): working.
+- List views (small list / large list): declared in the size
+  dropdown, `status: pending_renderer` until the row-render path
+  lands.
 
-**Apps:** 4 native + `jas_flask` (flask has file I/O for yaml; JSON
-loading is analogous).
+**Pending for Phase 9 completion:**
 
-**Deliverable:** new libraries can be saved and re-opened; Document
-Library survives document reload; thumbnail sizes work.
+- **Save Gradient Library** dialog — prompts for name and writes
+  the Document Library to `workspace/gradients/<name>.json`.
+  Requires a save-dialog primitive and per-app file-writing
+  pipeline.
+- **Document Library persistence** — per-document, travels with
+  document save / load. Document Library state is currently
+  panel-local; a serialisation round-trip is needed.
+
+### Phase 10 — Cross-app parity + manual tests
+
+**Status:** Manual test suite drafted; parity sweep pending.
+
+- **`transcripts/GRADIENT_TESTS.md`** — 17 manual test cases
+  covering panel rendering, tile click, type / angle / aspect /
+  method / dither controls, stroke gradient, multi-selection,
+  library browsing, and cross-app parity. 16 known-broken items
+  track the remaining gaps. Covers automation across flask
+  (18 tests), Rust (12), Swift (10), OCaml (10), Python (17),
+  workspace_interpreter (1).
+
+**Pending:** actual cross-app parity run — build the document in
+each of the four native apps, confirm identical output, fix any
+divergences.
 
 ### Phase 10 — Cross-app parity + polish + manual tests
 
