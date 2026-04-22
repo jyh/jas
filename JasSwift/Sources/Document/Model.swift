@@ -54,6 +54,12 @@ public class Model: ObservableObject {
     /// Flipped by clicking the Opacity panel's OPACITY_PREVIEW or
     /// MASK_PREVIEW. OPACITY.md §Preview interactions.
     @Published public var editingTarget: EditingTarget = .content
+    /// Mask-isolation path. When non-nil, the canvas renders only
+    /// the mask subtree of the element at this path, hiding
+    /// everything else. Entered by Alt/Option-clicking MASK_PREVIEW;
+    /// exited by Alt-clicking MASK_PREVIEW again (or Escape in a
+    /// future increment). OPACITY.md §Preview interactions.
+    @Published public var maskIsolationPath: [Int]? = nil
     /// Live reference to the active in-place text-editing session, if
     /// any. TypeTool and TypeOnPathTool publish their session here
     /// while editing so the Character-panel write pipeline can route

@@ -659,9 +659,30 @@ struct YamlElementView: View {
                 .contentShape(SwiftUI.Rectangle())
                 .onTapGesture {
                     guard clickEnabled, let m = model else { return }
-                    m.editingTarget = isMaskPreview
-                        ? .mask(m.document.selection.first?.path ?? [])
-                        : .content
+                    // MASK_PREVIEW supports modifier-clicks per
+                    // OPACITY.md §Preview interactions. Query the
+                    // current NSEvent modifier flags at tap time.
+                    let flags = NSEvent.modifierFlags
+                    let shift = flags.contains(.shift)
+                    let alt = flags.contains(.option)
+                    if isMaskPreview && shift {
+                        // Shift-click: toggle mask.disabled on every
+                        // selected mask via Controller.
+                        Controller(model: m).toggleMaskDisabledOnSelection()
+                    } else if isMaskPreview && alt {
+                        // Alt-click: toggle mask isolation on the
+                        // first selected element's mask.
+                        if m.maskIsolationPath != nil {
+                            m.maskIsolationPath = nil
+                        } else {
+                            m.maskIsolationPath = m.document.selection.first?.path
+                        }
+                    } else {
+                        // Plain click: flip editing target.
+                        m.editingTarget = isMaskPreview
+                            ? .mask(m.document.selection.first?.path ?? [])
+                            : .content
+                    }
                 }
         } else {
             SwiftUI.Text("[\(summary)]")
