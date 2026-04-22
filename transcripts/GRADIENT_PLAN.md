@@ -40,29 +40,51 @@ rendering work.
 both widgets with dummy data; all gestures and keyboard actions fire
 the right events.
 
-### Phase 1 — Document model
+### Phase 1 — Document model: types only
 
-Extend `element.fill` / `element.stroke` to a discriminated union.
+Define the gradient data types as standalone, JSON-roundtrippable
+structs. **Integration with `Fill` / `Stroke` is deferred** to a
+later phase (1b) when there is a real consumer (Phase 5 panel
+writes), because adding a `gradient: Option<Gradient>` field to Fill
+requires removing `Copy` and rippling clones through ~50 callsites
+per app — a refactor that is unjustified until the panel needs it.
 
 **Scope**
 
 - Add the gradient-object shape (`type`, `angle`, `aspect_ratio`,
   `method`, `dither`, `stroke_sub_mode`, `stops[]`, `nodes[]`) per
-  `GRADIENT.md` §Document model.
-- Parsers accept either a color string or a gradient object in
-  `fill` / `stroke` slots.
-- Serializers emit the correct form per the identity-value rule from
-  §SVG attribute mapping. `jas:*` extension attributes emitted for
-  midpoint / method / dither when non-default.
-- Round-trip test per app: every gradient field survives save → load
-  unchanged.
+  `GRADIENT.md` §Document model. New types: `Gradient`,
+  `GradientStop`, `GradientNode`, `GradientType`, `GradientMethod`,
+  `StrokeSubMode`.
+- Per-app JSON round-trip tests: every variant of every field
+  survives serialise → deserialise unchanged.
+- Wire-format conformance: `type` / `method` / `stroke_sub_mode`
+  serialise as the lowercase strings GRADIENT.md uses.
+- `midpoint_to_next` defaults to 50 when absent on parse.
 
-**Apps:** 4 native (Rust, Swift, OCaml, Python). `jas_flask` gets
-state-shape support only — it has no SVG serializer.
+**Apps:** 4 native (Rust, Swift, OCaml, Python). `jas_flask` is not
+applicable here — it has no document-model layer of its own; the
+gradient values flow through state as JSON dicts.
 
-**Deliverable:** SVGs with gradients round-trip across all four
-native apps; `jas:*` custom attributes preserve midpoints and other
-non-SVG-native fields.
+**Deliverable:** the gradient data types exist in each app and pass
+JSON round-trip tests; nothing else changes.
+
+### Phase 1b — Fill/Stroke integration (deferred until Phase 5)
+
+Wire `Option<Gradient>` into `Fill` and `Stroke`, update SVG parser
+to accept `url(#id)` gradient references and inline them, and update
+SVG serialiser to synthesise `<defs>` blocks for emitted gradients.
+
+**Why deferred:** the `Fill` / `Stroke` integration requires either
+(a) removing `Copy` from these types and rippling `.clone()` /
+`&` borrows through every call site that constructs or pattern-matches
+a fill/stroke, or (b) introducing a document-level gradient table
+indexed by `Option<GradientId>` (a u32) so Fill stays `Copy`.
+Approach (b) introduces a new identity concept (gradient IDs) that
+contradicts `project_element_identity_paths`. Approach (a) is a real
+refactor (~50 sites in Rust, similar in the other languages) that is
+hard to justify before there is a consumer. Phase 5 (panel writes)
+is the natural consumer; the integration work happens then.
 
 ### Phase 2 — Static panel UI
 
