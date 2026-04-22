@@ -481,11 +481,24 @@ def _draw_segmented_text(painter: QPainter, t) -> None:
         cx += w
 
 
-def _apply_stroke(painter: QPainter, stroke: Stroke | None) -> tuple[float, StrokeAlign]:
-    """Apply stroke properties to the painter. Returns (opacity, align)."""
+def _apply_stroke(painter: QPainter, stroke: Stroke | None,
+                  stroke_gradient=None, bbox: tuple[float, float, float, float] | None = None) -> tuple[float, StrokeAlign]:
+    """Apply stroke properties to the painter. Returns (opacity, align).
+
+    Phase 8: when stroke_gradient is set and renderable, uses a
+    QBrush(QGradient) as the pen brush. Within-stroke sub-mode only.
+    """
     if stroke is not None:
         effective_width = stroke.width if stroke.align == StrokeAlign.CENTER else stroke.width * 2.0
-        pen = QPen(_qcolor(stroke.color), effective_width)
+        pen_brush = None
+        if stroke_gradient is not None and bbox is not None:
+            g = _make_qgradient(stroke_gradient, bbox)
+            if g is not None:
+                pen_brush = QBrush(g)
+        if pen_brush is not None:
+            pen = QPen(pen_brush, effective_width)
+        else:
+            pen = QPen(_qcolor(stroke.color), effective_width)
         pen.setCapStyle(_CAP_MAP[stroke.linecap])
         pen.setJoinStyle(_JOIN_MAP[stroke.linejoin])
         pen.setMiterLimit(stroke.miter_limit)
@@ -943,8 +956,10 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), (x, y, w, h))
-                _apply_stroke(painter, stroke)
+                bbox = (x, y, w, h)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), bbox)
+                _apply_stroke(painter, stroke,
+                              getattr(elem, "stroke_gradient", None), bbox)
             if rx > 0 or ry > 0:
                 painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
             else:
@@ -954,27 +969,30 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
-                            (cx - r, cy - r, r * 2, r * 2))
-                _apply_stroke(painter, stroke)
+                bbox = (cx - r, cy - r, r * 2, r * 2)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), bbox)
+                _apply_stroke(painter, stroke,
+                              getattr(elem, "stroke_gradient", None), bbox)
             painter.drawEllipse(QPointF(cx, cy), r, r)
 
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry, fill=fill, stroke=stroke):
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
-                            (cx - rx, cy - ry, rx * 2, ry * 2))
-                _apply_stroke(painter, stroke)
+                bbox = (cx - rx, cy - ry, rx * 2, ry * 2)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), bbox)
+                _apply_stroke(painter, stroke,
+                              getattr(elem, "stroke_gradient", None), bbox)
             painter.drawEllipse(QPointF(cx, cy), rx, ry)
 
         case Polyline(points=points, fill=fill, stroke=stroke):
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
-                            _poly_bbox(points))
-                _apply_stroke(painter, stroke)
+                bbox = _poly_bbox(points)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), bbox)
+                _apply_stroke(painter, stroke,
+                              getattr(elem, "stroke_gradient", None), bbox)
             if points:
                 qpoints = [QPointF(x, y) for x, y in points]
                 painter.drawPolyline(qpoints)
@@ -983,9 +1001,10 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
-                            _poly_bbox(points))
-                _apply_stroke(painter, stroke)
+                bbox = _poly_bbox(points)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), bbox)
+                _apply_stroke(painter, stroke,
+                              getattr(elem, "stroke_gradient", None), bbox)
             if points:
                 qpoints = [QPointF(x, y) for x, y in points]
                 painter.drawPolygon(qpoints)
