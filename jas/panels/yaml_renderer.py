@@ -1264,14 +1264,38 @@ def _render_placeholder(el, store, ctx, dispatch_fn):
         # otherwise the click is a no-op.
         click_enabled = (not is_mask_preview) or has_mask
         get_model = ctx.get("_get_model")
-        def _on_click(_evt):
+        def _on_click(evt):
             if not click_enabled:
                 return
             model = get_model() if callable(get_model) else None
             if model is None:
                 return
             from document.model import EditingTarget
-            if is_mask_preview:
+            from document.controller import Controller
+            # MASK_PREVIEW supports modifier-clicks per OPACITY.md
+            # §Preview interactions. Query the QMouseEvent's
+            # modifiers at click time.
+            mods = evt.modifiers()
+            shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+            alt = bool(mods & Qt.KeyboardModifier.AltModifier)
+            if is_mask_preview and shift:
+                # Shift-click: toggle mask.disabled on every
+                # selected mask via Controller.
+                Controller(model=model).toggle_mask_disabled_on_selection()
+            elif is_mask_preview and alt:
+                # Alt-click: toggle mask isolation on the first
+                # selected element's mask.
+                if model.mask_isolation_path is not None:
+                    model.mask_isolation_path = None
+                else:
+                    first = next(iter(sorted(
+                        (es.path for es in model.document.selection),
+                        key=lambda p: p,
+                    )), None)
+                    if first is not None:
+                        model.mask_isolation_path = first
+            elif is_mask_preview:
+                # Plain click: enter mask-editing mode.
                 first = next(iter(sorted(
                     (es.path for es in model.document.selection),
                     key=lambda p: p,
@@ -1280,6 +1304,7 @@ def _render_placeholder(el, store, ctx, dispatch_fn):
                     return
                 model.editing_target = EditingTarget.mask(first)
             else:
+                # op_preview click: exit mask-editing mode.
                 model.editing_target = EditingTarget.content()
             # Bump the panel-state version so the panel re-renders
             # with the new highlight.

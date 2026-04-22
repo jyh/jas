@@ -1786,9 +1786,22 @@ class CanvasWidget(QWidget):
         doc = self._model.document
         # Z-layer 2: per-artboard fills.
         _draw_artboard_fills(painter, doc)
-        # Z-layer 3: document elements.
-        for layer in doc.layers:
-            _draw_element(painter, layer)
+        # Z-layer 3: document elements. In mask-isolation mode
+        # (OPACITY.md §Preview interactions), render only the mask
+        # subtree of the isolated element — everything else on the
+        # canvas is hidden until the user exits isolation.
+        isolation_path = getattr(self._model, "mask_isolation_path", None)
+        if isolation_path is not None:
+            try:
+                elem = doc.get_element(tuple(isolation_path))
+                mask = getattr(elem, "mask", None)
+                if mask is not None:
+                    _draw_element(painter, mask.subtree)
+            except (IndexError, KeyError):
+                pass
+        else:
+            for layer in doc.layers:
+                _draw_element(painter, layer)
         # Z-layer 4: fade overlay (off-artboard dimming).
         _draw_fade_overlay(painter, doc, self.width(), self.height())
         # Z-layer 5-8: artboard chrome.
