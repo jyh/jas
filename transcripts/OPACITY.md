@@ -172,6 +172,28 @@ Relinking clears `mask.unlink_transform` and restores inheritance.
 `mask.disabled` and `mask.linked` are orthogonal; neither implies the other,
 and disabling does not restore linkage.
 
+### Rendering
+
+An opacity mask composites the element body against the mask subtree's
+rendered alpha channel. Writing `E(x, y)` for the element's alpha at a
+pixel, `M(x, y)` for the mask subtree's rendered alpha, and `B` for the
+mask subtree's bounding box:
+
+| `clip` | `invert` | Output alpha at `(x, y)`                                    |
+|--------|----------|-------------------------------------------------------------|
+| true   | false    | `E * M`                                                     |
+| true   | true     | `E * (1 - M)`                                               |
+| false  | false    | `E * M` inside `B`, `E` outside `B` (reveal-by-default)     |
+| false  | true     | `E * (1 - M)` inside `B`, `E` outside `B`                   |
+
+`clip: true` treats the area outside the mask subtree's rendered region as
+fully transparent — the element is clipped to the mask shape. `clip: false`
+treats it as fully opaque — the element stays visible outside the mask
+subtree's bounding box, and the mask only modulates opacity within `B`.
+Both modes are implemented via alpha compositing; a future phase may
+promote `M` to mask subtree luminance so that a black-opaque mask reads
+as fully transparent (matching the PDF §11 soft-mask convention).
+
 Every group element additionally carries:
 
 | Field                     | Type    | Default |
