@@ -521,18 +521,44 @@ private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
     }
 }
 
-/// Return the CGBlendMode that applies a [Mask] to an element's
-/// pixels inside a transparency layer, or ``nil`` when the mask
-/// configuration isn't yet supported by the renderer. Track C
-/// phase 1 supports ``clip: true`` (both invert values);
-/// ``clip: false`` (element visible outside the mask shape) needs a
-/// two-pass composite and lands in a later phase. ``disabled: true``
-/// returns ``nil`` so the element renders normally per OPACITY.md
-/// §States.
-internal func maskCompositeBlendMode(_ mask: Mask) -> CGBlendMode? {
+/// How the mask subtree's rendered alpha is applied to the element.
+/// Selected by ``maskPlan`` from the mask's ``clip`` and ``invert``
+/// fields; consumed by ``drawElementWithMask``. Mirrors the Rust
+/// renderer's ``MaskPlan`` enum in
+/// ``jas_dioxus/src/canvas/render.rs``.
+internal enum MaskPlan: Equatable {
+    /// Element clipped to the mask shape. ``.destinationIn`` applied
+    /// across the whole transparency layer. `clip: true,
+    /// invert: false`.
+    case clipIn
+    /// Element clipped to the *inverse* of the mask shape.
+    /// ``.destinationOut`` across the whole transparency layer.
+    /// Covers both `clip: true, invert: true` and — for alpha-based
+    /// masks — `clip: false, invert: true`, which collapse to the
+    /// same output (`E * (1 - M)` everywhere) since the mask's
+    /// "outside" region contributes zero alpha either way.
+    case clipOut
+    /// `clip: false, invert: false`: element stays at full alpha
+    /// outside the mask subtree's bounding box; ``.destinationIn``
+    /// with the mask applies only inside the bbox via a clipped
+    /// transparency layer. OPACITY.md §Rendering.
+    case revealOutsideBbox
+}
+
+/// Pick a ``MaskPlan`` for the mask, or ``nil`` when the mask is
+/// inactive (``disabled: true``).
+internal func maskPlan(_ mask: Mask) -> MaskPlan? {
     if mask.disabled { return nil }
-    if !mask.clip { return nil }
-    return mask.invert ? .destinationOut : .destinationIn
+    switch (mask.clip, mask.invert) {
+    case (true, false): return .clipIn
+    case (true, true): return .clipOut
+    // Alpha-based masks can't distinguish `clip: false,
+    // invert: true` from `clip: true, invert: true` (both yield
+    // `E * (1 - M)` when the mask's outside-region alpha is 0),
+    // so route them through the same composite.
+    case (false, true): return .clipOut
+    case (false, false): return .revealOutsideBbox
+    }
 }
 
 /// Opacity fetched from any Element case. (The Geometry module
@@ -558,17 +584,15 @@ private func elementOpacity(_ e: Element) -> Double {
 
 /// Render an element's opacity mask via a CoreGraphics transparency
 /// layer. The element body is drawn on a transparent layer; the
-/// mask subtree is then composited on top with
-/// ``destinationIn`` / ``destinationOut`` so only the element
-/// pixels that survive the mask remain. The layer is then merged
-/// back into the parent context with the element's own alpha and
-/// blend mode applied once at the composite-back step. OPACITY.md
-/// §Rendering, phase 1.
+/// mask subtree is then composited on top according to ``plan``.
+/// The layer is finally merged back into the parent context with
+/// the element's own alpha and blend mode applied once at the
+/// composite-back step. OPACITY.md §Rendering.
 private func drawElementWithMask(
     _ ctx: CGContext,
     _ elem: Element,
     _ mask: Mask,
-    blendMode: CGBlendMode,
+    plan: MaskPlan,
     ancestorVis: Visibility
 ) {
     ctx.saveGState()
@@ -582,20 +606,41 @@ private func drawElementWithMask(
     ctx.setAlpha(1.0)
     ctx.setBlendMode(.normal)
     drawElementBody(ctx, elem, ancestorVis: ancestorVis)
-    ctx.setBlendMode(blendMode)
-    drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+    switch plan {
+    case .clipIn:
+        ctx.setBlendMode(.destinationIn)
+        drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+    case .clipOut:
+        ctx.setBlendMode(.destinationOut)
+        drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+    case .revealOutsideBbox:
+        // `clip: false, invert: false`: keep the element body at
+        // full alpha outside the mask subtree's bounding box; apply
+        // ``.destinationIn`` only inside the bbox via a second
+        // clipped transparency layer. OPACITY.md §Rendering.
+        let (bx, by, bw, bh) = mask.subtreeElement.bounds
+        if bw > 0 && bh > 0 {
+            ctx.saveGState()
+            ctx.clip(to: CGRect(x: bx, y: by, width: bw, height: bh))
+            ctx.setBlendMode(.destinationIn)
+            drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+            ctx.restoreGState()
+        }
+        // Empty-bbox mask: no clip; element body passes through
+        // unmodified (mask has nothing to composite against).
+    }
     ctx.endTransparencyLayer()
     ctx.restoreGState()
 }
 
 private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
-    // Opacity mask: when an element carries an active supported
-    // mask, redirect rendering through a transparency-layer
-    // composite. ``disabled`` / ``clip: false`` / ``linked: false``
-    // all fall through to the plain path for now. OPACITY.md
-    // §Rendering.
-    if let mask = elem.mask, let mode = maskCompositeBlendMode(mask) {
-        drawElementWithMask(ctx, elem, mask, blendMode: mode, ancestorVis: ancestorVis)
+    // Opacity mask: when an element carries an active mask,
+    // redirect rendering through the mask composite path. The plan
+    // encodes which of the three supported composite strategies to
+    // use. ``disabled`` / ``linked: false`` fall through to the
+    // plain path for now. OPACITY.md §Rendering.
+    if let mask = elem.mask, let plan = maskPlan(mask) {
+        drawElementWithMask(ctx, elem, mask, plan: plan, ancestorVis: ancestorVis)
         return
     }
     drawElementBody(ctx, elem, ancestorVis: ancestorVis)
