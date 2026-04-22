@@ -1053,3 +1053,167 @@ class TestBooleanActions:
     ])
     def test_menu_action_registered(self, actions, op):
         assert op in actions, f"{op} menu action missing from workspace"
+
+
+class TestRenderGradientTile:
+    """gradient_tile — a clickable preview tile for a gradient value."""
+
+    def _gradient(self):
+        return {
+            "type": "linear",
+            "angle": 0,
+            "aspect_ratio": 100,
+            "method": "classic",
+            "dither": False,
+            "stops": [
+                {"color": "#ff0000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+                {"color": "#0000ff", "opacity": 100, "location": 100},
+            ],
+        }
+
+    def test_registered(self, theme, state):
+        from renderer import render_element
+        el = {"type": "gradient_tile"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-type="gradient-tile"' in html
+
+    def test_size_small(self, theme, state):
+        from renderer import render_element
+        el = {"type": "gradient_tile", "size": "small"}
+        html = render_element(el, theme, state, mode="normal")
+        assert "width:16px" in html and "height:16px" in html
+
+    def test_size_medium(self, theme, state):
+        from renderer import render_element
+        el = {"type": "gradient_tile", "size": "medium"}
+        html = render_element(el, theme, state, mode="normal")
+        assert "width:32px" in html and "height:32px" in html
+
+    def test_size_large_is_default(self, theme, state):
+        from renderer import render_element
+        el = {"type": "gradient_tile"}
+        html = render_element(el, theme, state, mode="normal")
+        assert "width:64px" in html and "height:64px" in html
+
+    def test_linear_gradient_background(self, theme, state):
+        from renderer import render_element
+        st = dict(state)
+        st["g"] = self._gradient()
+        el = {"type": "gradient_tile", "bind": {"gradient": "g"}, "size": "medium"}
+        html = render_element(el, theme, st, mode="normal")
+        assert "linear-gradient" in html
+        assert "#ff0000" in html and "#0000ff" in html
+
+    def test_radial_gradient_background(self, theme, state):
+        from renderer import render_element
+        g = self._gradient()
+        g["type"] = "radial"
+        st = dict(state)
+        st["g"] = g
+        el = {"type": "gradient_tile", "bind": {"gradient": "g"}}
+        html = render_element(el, theme, st, mode="normal")
+        assert "radial-gradient" in html
+
+    def test_data_bind_gradient_attribute(self, theme, state):
+        """The bind expression is emitted for JS round-trip."""
+        from renderer import render_element
+        el = {"type": "gradient_tile", "bind": {"gradient": "g"}}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-bind-gradient="g"' in html
+
+
+class TestRenderGradientSlider:
+    """gradient_slider — 1-D color-stops editor with drag/click gestures (JS-driven)."""
+
+    def _two_stops(self):
+        return [
+            {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+            {"color": "#ffffff", "opacity": 100, "location": 100},
+        ]
+
+    def _three_stops(self):
+        return [
+            {"color": "#ff0000", "opacity": 100, "location": 0, "midpoint_to_next": 40},
+            {"color": "#00ff00", "opacity": 100, "location": 50, "midpoint_to_next": 60},
+            {"color": "#0000ff", "opacity": 100, "location": 100},
+        ]
+
+    def test_registered(self, theme, state):
+        from renderer import render_element
+        el = {"type": "gradient_slider"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-type="gradient-slider"' in html
+
+    def test_bar_background_is_gradient(self, theme, state):
+        from renderer import render_element
+        st = dict(state)
+        st["stops"] = self._two_stops()
+        el = {"type": "gradient_slider", "bind": {"stops": "stops"}}
+        html = render_element(el, theme, st, mode="normal")
+        assert "linear-gradient" in html
+        assert "#000000" in html and "#ffffff" in html
+
+    def test_stop_marker_per_stop(self, theme, state):
+        from renderer import render_element
+        st = dict(state)
+        st["stops"] = self._three_stops()
+        el = {"type": "gradient_slider", "bind": {"stops": "stops"}}
+        html = render_element(el, theme, st, mode="normal")
+        assert html.count('data-role="stop"') == 3
+
+    def test_midpoint_marker_between_each_pair(self, theme, state):
+        from renderer import render_element
+        st = dict(state)
+        st["stops"] = self._three_stops()
+        el = {"type": "gradient_slider", "bind": {"stops": "stops"}}
+        html = render_element(el, theme, st, mode="normal")
+        # Three stops → two adjacent pairs → two midpoint markers.
+        assert html.count('data-role="midpoint"') == 2
+
+    def test_selected_stop_has_accent(self, theme, state):
+        from renderer import render_element
+        st = dict(state)
+        st["stops"] = self._three_stops()
+        st["sel"] = 1
+        el = {
+            "type": "gradient_slider",
+            "bind": {"stops": "stops", "selected_stop_index": "sel"},
+        }
+        html = render_element(el, theme, st, mode="normal")
+        assert "app-gradient-stop-selected" in html
+
+    def test_selected_midpoint_has_accent(self, theme, state):
+        from renderer import render_element
+        st = dict(state)
+        st["stops"] = self._three_stops()
+        st["mid"] = 0
+        el = {
+            "type": "gradient_slider",
+            "bind": {"stops": "stops", "selected_midpoint_index": "mid"},
+        }
+        html = render_element(el, theme, st, mode="normal")
+        assert "app-gradient-midpoint-selected" in html
+
+    def test_data_bind_attributes(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "gradient_slider",
+            "bind": {
+                "stops": "s",
+                "selected_stop_index": "i",
+                "selected_midpoint_index": "m",
+            },
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-bind-stops="s"' in html
+        assert 'data-bind-selected-stop-index="i"' in html
+        assert 'data-bind-selected-midpoint-index="m"' in html
+
+    def test_empty_stops_renders_bar_only(self, theme, state):
+        """No stops expression → bar renders but no stop or midpoint markers."""
+        from renderer import render_element
+        el = {"type": "gradient_slider"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-type="gradient-slider"' in html
+        assert 'data-role="stop"' not in html
+        assert 'data-role="midpoint"' not in html
