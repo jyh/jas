@@ -581,6 +581,62 @@ let menu_tests = [
     List.iter (fun cmd ->
       panel_dispatch Layers cmd addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ()
     ) cmds);
+
+  (* Opacity panel new_masks_* plumbing: toggle commands flip the
+     stored bool, panel_is_checked mirrors it, and subsequent
+     [make_opacity_mask] dispatches read the live values. *)
+  Alcotest.test_case "opacity_toggle_new_masks_clipping_flips_store" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    Jas.State_store.init_panel store "opacity_panel_content"
+      [("new_masks_clipping", `Bool true);
+       ("new_masks_inverted", `Bool false);
+       ("thumbnails_hidden", `Bool false);
+       ("options_shown", `Bool false)];
+    Jas.Panel_menu.opacity_store_ref := Some store;
+    assert (panel_is_checked Opacity "toggle_new_masks_clipping" l);
+    panel_dispatch Opacity "toggle_new_masks_clipping" addr l
+      ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ();
+    assert (not (panel_is_checked Opacity "toggle_new_masks_clipping" l));
+    panel_dispatch Opacity "toggle_new_masks_clipping" addr l
+      ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ();
+    assert (panel_is_checked Opacity "toggle_new_masks_clipping" l);
+    Jas.Panel_menu.opacity_store_ref := None);
+
+  Alcotest.test_case "opacity_make_mask_reads_live_new_masks_flags" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    (* Start with clipping=false, inverted=true (non-defaults) so we
+       can tell the dispatch read the live store, not hardcoded
+       defaults. *)
+    Jas.State_store.init_panel store "opacity_panel_content"
+      [("new_masks_clipping", `Bool false);
+       ("new_masks_inverted", `Bool true)];
+    Jas.Panel_menu.opacity_store_ref := Some store;
+    (* Seed a single rect selected at [0;0]. *)
+    let m = Jas.Model.create () in
+    let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer ~name:"L" [|rect|] in
+    let doc = { (m#document) with
+      Jas.Document.layers = [|layer|];
+      selection = Jas.Document.PathMap.singleton [0;0]
+        (Jas.Document.element_selection_all [0;0]);
+    } in
+    m#set_document doc;
+    panel_dispatch Opacity "make_opacity_mask" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    (* The new mask on the rect should have clip=false, invert=true
+       matching the live store. *)
+    let mask = match Jas.Element.get_mask (Jas.Document.get_element m#document [0;0]) with
+      | Some mk -> mk
+      | None -> failwith "make_opacity_mask did not create a mask" in
+    assert (mask.Jas.Element.clip = false);
+    assert (mask.Jas.Element.invert = true);
+    Jas.Panel_menu.opacity_store_ref := None);
 ]
 
 (* ================================================================== *)

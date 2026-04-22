@@ -1558,4 +1558,11 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
             Effects.sync_paragraph_panel_from_selection store ctrl
           | None -> ())
        end);
+      (* Opacity panel — stash the store handle in panel_menu so
+         the hamburger-menu toggle commands
+         (toggle_new_masks_clipping / toggle_new_masks_inverted /
+         toggle_opacity_thumbnails / toggle_opacity_options) and
+         the [make_opacity_mask] dispatch can reach it. *)
+      (if kind = Opacity then
+         Panel_menu.opacity_store_ref := Some store);
       render_element ~packing ~ctx content
