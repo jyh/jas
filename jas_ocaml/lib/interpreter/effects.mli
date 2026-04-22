@@ -52,6 +52,14 @@ val sync_stroke_panel_from_selection :
 (** Check whether a state key is a rendering-affecting stroke key. *)
 val is_stroke_render_key : string -> bool
 
+(** Sync the state store's [gradient_*] keys from the selection's
+    active attribute (fill or stroke per [state.fill_on_top]). See
+    GRADIENT.md §Multi-selection and §Fill-type coupling for the
+    branching rules. Phase 4: read direction only; Phase 5 wires the
+    writeback. *)
+val sync_gradient_panel_from_selection :
+  State_store.t -> Controller.controller -> unit
+
 (** Compute [text_selected] / [area_text_selected] from the current
     selection and write them to the [paragraph_panel_content] panel
     scope so PARAGRAPH.md §Text-kind gating disables JUSTIFY_*,

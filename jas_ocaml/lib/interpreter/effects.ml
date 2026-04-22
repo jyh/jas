@@ -583,6 +583,120 @@ let sync_stroke_panel_from_selection (store : State_store.t)
 let is_stroke_render_key key =
   List.mem key stroke_render_keys
 
+(* ── Gradient panel — Phase 4 (selection -> panel reads) ──────── *)
+
+(** Read fill gradient from an Element variant, if present. Phase 1b
+    placed gradient fields directly on each element variant. *)
+let fill_gradient_opt = function
+  | Element.Rect { fill_gradient; _ }
+  | Element.Circle { fill_gradient; _ }
+  | Element.Ellipse { fill_gradient; _ }
+  | Element.Polyline { fill_gradient; _ }
+  | Element.Polygon { fill_gradient; _ }
+  | Element.Path { fill_gradient; _ } -> fill_gradient
+  | _ -> None
+
+let stroke_gradient_opt = function
+  | Element.Line { stroke_gradient; _ }
+  | Element.Rect { stroke_gradient; _ }
+  | Element.Circle { stroke_gradient; _ }
+  | Element.Ellipse { stroke_gradient; _ }
+  | Element.Polyline { stroke_gradient; _ }
+  | Element.Polygon { stroke_gradient; _ }
+  | Element.Path { stroke_gradient; _ } -> stroke_gradient
+  | _ -> None
+
+let fill_color_opt = function
+  | Element.Rect { fill = Some f; _ }
+  | Element.Circle { fill = Some f; _ }
+  | Element.Ellipse { fill = Some f; _ }
+  | Element.Polyline { fill = Some f; _ }
+  | Element.Polygon { fill = Some f; _ }
+  | Element.Path { fill = Some f; _ } -> Some f.Element.fill_color
+  | _ -> None
+
+let stroke_color_opt = function
+  | Element.Line { stroke = Some s; _ }
+  | Element.Rect { stroke = Some s; _ }
+  | Element.Circle { stroke = Some s; _ }
+  | Element.Ellipse { stroke = Some s; _ }
+  | Element.Polyline { stroke = Some s; _ }
+  | Element.Polygon { stroke = Some s; _ }
+  | Element.Path { stroke = Some s; _ } -> Some s.Element.stroke_color
+  | _ -> None
+
+(** Sync gradient panel state from the selection's active attribute
+    (fill or stroke per [state.fill_on_top]).
+
+    Behavior per GRADIENT.md §Multi-selection and §Fill-type coupling:
+      - Empty selection: leave panel state alone (session defaults).
+      - Uniform with gradient: populate panel fields from the shared
+        gradient on the active attribute.
+      - Mixed: leave panel fields alone; the renderer handles
+        blank-vs-uniform display per the multi-selection table.
+      - Uniform without gradient: seed a preview gradient (first stop
+        from current solid color, second stop white) and set
+        [gradient_preview_state] = true. First edit (Phase 5) will
+        materialise this onto the elements.
+
+    Mirrors [jas_dioxus::AppState::sync_gradient_panel_from_selection]
+    and [JasSwift.syncGradientPanelFromSelection]. Phase 4 lands the
+    read direction; Phase 5 wires the writeback. *)
+let sync_gradient_panel_from_selection (store : State_store.t)
+    (ctrl : Controller.controller) =
+  let doc = ctrl#document in
+  if Document.PathMap.is_empty doc.Document.selection then ()
+  else begin
+    let fill_on_top = match State_store.get store "fill_on_top" with
+      | `Bool b -> b | _ -> true in
+    let elements = Document.PathMap.bindings doc.Document.selection
+                   |> List.map (fun (path, _) -> Document.get_element doc path) in
+    let pick g_of e = if fill_on_top then fill_gradient_opt e else g_of e in
+    let pick_g e = if fill_on_top then fill_gradient_opt e else stroke_gradient_opt e in
+    let _ = pick in
+    let pick_solid e = if fill_on_top then fill_color_opt e else stroke_color_opt e in
+    let gradients = List.map pick_g elements in
+    let mixed = match gradients with
+      | [] -> false
+      | first :: rest -> List.exists (fun g -> g <> first) rest in
+    if mixed then begin
+      State_store.set store "gradient_preview_state" (`Bool false)
+    end else begin
+      match List.hd gradients with
+      | Some g ->
+        let type_str = Element.gradient_type_to_string g.Element.gtype in
+        let method_str = Element.gradient_method_to_string g.Element.gmethod in
+        let sub_mode_str = Element.stroke_sub_mode_to_string g.Element.gstroke_sub_mode in
+        State_store.set store "gradient_type" (`String type_str);
+        State_store.set store "gradient_angle" (`Float g.Element.gangle);
+        State_store.set store "gradient_aspect_ratio" (`Float g.Element.gaspect_ratio);
+        State_store.set store "gradient_method" (`String method_str);
+        State_store.set store "gradient_dither" (`Bool g.Element.gdither);
+        State_store.set store "gradient_stroke_sub_mode" (`String sub_mode_str);
+        State_store.set store "gradient_stops_count" (`Int (List.length g.Element.gstops));
+        State_store.set store "gradient_preview_state" (`Bool false)
+      | None ->
+        let seed_hex =
+          match List.find_map pick_solid elements with
+          | Some c ->
+            let (r, g, b, _) = Element.color_to_rgba c in
+            Printf.sprintf "#%02x%02x%02x"
+              (int_of_float (r *. 255.0))
+              (int_of_float (g *. 255.0))
+              (int_of_float (b *. 255.0))
+          | None -> "#000000"
+        in
+        State_store.set store "gradient_type" (`String "linear");
+        State_store.set store "gradient_angle" (`Float 0.0);
+        State_store.set store "gradient_aspect_ratio" (`Float 100.0);
+        State_store.set store "gradient_method" (`String "classic");
+        State_store.set store "gradient_dither" (`Bool false);
+        State_store.set store "gradient_stroke_sub_mode" (`String "within");
+        State_store.set store "gradient_seed_first_color" (`String seed_hex);
+        State_store.set store "gradient_preview_state" (`Bool true)
+    end
+  end
+
 (* ── Paragraph panel — text-kind gating (Phase 3a) ──────────── *)
 
 (** Compute [text_selected] / [area_text_selected] from the current
