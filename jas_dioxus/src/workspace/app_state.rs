@@ -2976,6 +2976,8 @@ mod align_panel_state_tests {
             x, y, width: w, height: h, rx: 0.0, ry: 0.0,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -3202,12 +3204,14 @@ mod align_panel_state_tests {
                 stroke: Some(Stroke::new(Color::BLACK, 1.0)),
                 width_points: Vec::new(),
                 common: CommonProps::default(),
+                            stroke_gradient: None,
             }),
             Element::Line(LineElem {
                 x1: 100.0, y1: 5.0, x2: 100.0, y2: 15.0,
                 stroke: Some(Stroke::new(Color::BLACK, 1.0)),
                 width_points: Vec::new(),
                 common: CommonProps::default(),
+                            stroke_gradient: None,
             }),
         ];
         let mut st = state_with_three_rects(

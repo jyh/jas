@@ -294,6 +294,8 @@ mod tests {
             stroke: None,
             width_points: vec![],
             common: Default::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
         }
     }
 
@@ -308,6 +310,8 @@ mod tests {
             stroke: None,
             width_points: vec![],
             common: Default::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
         }
     }
 

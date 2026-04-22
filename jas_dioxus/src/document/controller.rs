@@ -1118,6 +1118,8 @@ impl Controller {
                         fill,
                         stroke,
                         common: common.clone(),
+                                            fill_gradient: None,
+                        stroke_gradient: None,
                     })));
                 }
             }
@@ -1754,6 +1756,8 @@ mod tests {
             x, y, width: w, height: h, rx: 0.0, ry: 0.0,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -1763,6 +1767,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: vec![],
             common: CommonProps::default(),
+                    stroke_gradient: None,
         })
     }
 
@@ -2183,10 +2188,14 @@ mod tests {
         let r1 = Element::Rect(RectElem {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(red), stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let r2 = Element::Rect(RectElem {
             x: 5.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(blue), stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
@@ -2215,6 +2224,8 @@ mod tests {
         let unpainted_rect = |x: f64| Rc::new(Element::Rect(RectElem {
             x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: None, stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         }));
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
@@ -2601,6 +2612,8 @@ mod tests {
             cx, cy, r,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -2609,6 +2622,8 @@ mod tests {
             cx, cy, rx, ry,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 

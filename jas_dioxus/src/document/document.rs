@@ -443,6 +443,8 @@ mod tests {
             x, y, width: w, height: h, rx: 0.0, ry: 0.0,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -452,6 +454,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: vec![],
             common: CommonProps::default(),
+                    stroke_gradient: None,
         })
     }
 

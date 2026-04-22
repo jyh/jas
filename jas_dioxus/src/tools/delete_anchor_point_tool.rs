@@ -202,6 +202,8 @@ impl CanvasTool for DeleteAnchorPointTool {
                         stroke: pe.stroke,
                         width_points: pe.width_points.clone(),
                         common: pe.common.clone(),
+                                            fill_gradient: None,
+                        stroke_gradient: None,
                     });
                     let mut doc = model.document().replace_element(&path, new_elem.clone());
                     // Select all remaining control points
