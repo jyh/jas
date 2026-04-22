@@ -1,7 +1,8 @@
 //! Panel definitions: one module per panel kind.
 //!
-//! Each panel module defines its label, menu items, dispatch function,
-//! and checked-state query. This module provides unified lookup functions
+//! Each panel module defines its menu items, dispatch function,
+//! and checked-state query. Panel labels are read from the workspace
+//! YAML `summary:` field. This module provides unified lookup functions
 //! that dispatch by [`PanelKind`].
 
 pub mod panel_menu;
@@ -20,25 +21,20 @@ pub mod properties_panel;
 pub mod stroke_panel;
 pub mod swatches_panel;
 
+use crate::interpreter::workspace::{Workspace, panel_kind_to_content_id};
 use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::{PanelAddr, PanelKind};
 use panel_menu::PanelMenuItem;
 
-/// Human-readable label for a panel kind.
-pub fn panel_label(kind: PanelKind) -> &'static str {
-    match kind {
-        PanelKind::Layers => layers_panel::LABEL,
-        PanelKind::Color => color_panel::LABEL,
-        PanelKind::Swatches => swatches_panel::LABEL,
-        PanelKind::Stroke => stroke_panel::LABEL,
-        PanelKind::Properties => properties_panel::LABEL,
-        PanelKind::Character => character_panel::LABEL,
-        PanelKind::Paragraph => paragraph_panel::LABEL,
-        PanelKind::Artboards => artboards_panel::LABEL,
-        PanelKind::Align => align_panel::LABEL,
-        PanelKind::Boolean => boolean_panel::LABEL,
-        PanelKind::Opacity => opacity_panel::LABEL,
-    }
+/// Human-readable label for a panel kind, read from the workspace YAML
+/// `summary:` field of the panel's content spec.
+pub fn panel_label(kind: PanelKind) -> String {
+    let content_id = panel_kind_to_content_id(kind);
+    Workspace::load()
+        .and_then(|ws| ws.panel(content_id)?.get("summary")?.as_str().map(String::from))
+        .unwrap_or_else(|| {
+            content_id.strip_suffix("_panel_content").unwrap_or("Panel").to_string()
+        })
 }
 
 /// Menu items for a panel kind.
@@ -109,7 +105,7 @@ mod tests {
         assert_eq!(panel_label(PanelKind::Layers), "Layers");
         assert_eq!(panel_label(PanelKind::Color), "Color");
         assert_eq!(panel_label(PanelKind::Stroke), "Stroke");
-        assert_eq!(panel_label(PanelKind::Properties), "Properties");
+        assert_eq!(panel_label(PanelKind::Properties), "Object properties");
         assert_eq!(panel_label(PanelKind::Align), "Align");
     }
 
