@@ -263,7 +263,7 @@ import AppKit
     }
 }
 
-// MARK: - maskCompositeBlendMode (Track C phase 1)
+// MARK: - maskPlan (Track C)
 
 private func testMask(clip: Bool, invert: Bool, disabled: Bool) -> Mask {
     Mask(
@@ -276,26 +276,33 @@ private func testMask(clip: Bool, invert: Bool, disabled: Bool) -> Mask {
     )
 }
 
-@Test func maskCompositeBlendModeClipNotInvertedIsDestinationIn() {
-    #expect(maskCompositeBlendMode(testMask(clip: true, invert: false, disabled: false)) == .destinationIn)
+@Test func maskPlanClipNotInvertedIsClipIn() {
+    #expect(maskPlan(testMask(clip: true, invert: false, disabled: false)) == .clipIn)
 }
 
-@Test func maskCompositeBlendModeClipInvertedIsDestinationOut() {
-    #expect(maskCompositeBlendMode(testMask(clip: true, invert: true, disabled: false)) == .destinationOut)
+@Test func maskPlanClipInvertedIsClipOut() {
+    #expect(maskPlan(testMask(clip: true, invert: true, disabled: false)) == .clipOut)
 }
 
-@Test func maskCompositeBlendModeDisabledIsNil() {
+@Test func maskPlanDisabledIsNil() {
     // disabled overrides both clip and invert: falls back to no
     // mask rendering per OPACITY.md §States.
-    #expect(maskCompositeBlendMode(testMask(clip: true, invert: false, disabled: true)) == nil)
-    #expect(maskCompositeBlendMode(testMask(clip: true, invert: true, disabled: true)) == nil)
-    #expect(maskCompositeBlendMode(testMask(clip: false, invert: false, disabled: true)) == nil)
+    #expect(maskPlan(testMask(clip: true, invert: false, disabled: true)) == nil)
+    #expect(maskPlan(testMask(clip: true, invert: true, disabled: true)) == nil)
+    #expect(maskPlan(testMask(clip: false, invert: false, disabled: true)) == nil)
+    #expect(maskPlan(testMask(clip: false, invert: true, disabled: true)) == nil)
 }
 
-@Test func maskCompositeBlendModeNoClipIsNilPhase1() {
-    // clip=false (element visible outside the mask shape) needs a
-    // two-pass composite; not yet supported — falls back to no
-    // mask. Phase 2 of Track C will handle this.
-    #expect(maskCompositeBlendMode(testMask(clip: false, invert: false, disabled: false)) == nil)
-    #expect(maskCompositeBlendMode(testMask(clip: false, invert: true, disabled: false)) == nil)
+@Test func maskPlanNoClipNoInvertIsRevealOutsideBbox() {
+    // Phase 2: clip=false, invert=false keeps the element visible
+    // outside the mask subtree's bounding box and clips to the
+    // mask inside it.
+    #expect(maskPlan(testMask(clip: false, invert: false, disabled: false)) == .revealOutsideBbox)
+}
+
+@Test func maskPlanNoClipInvertedCollapsesToClipOut() {
+    // Alpha-based mask: `clip: false, invert: true` gives the same
+    // output as `clip: true, invert: true` because the mask's
+    // outside-region alpha is zero either way.
+    #expect(maskPlan(testMask(clip: false, invert: true, disabled: false)) == .clipOut)
 }
