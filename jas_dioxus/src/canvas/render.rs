@@ -1547,6 +1547,7 @@ pub fn render(
     doc: &Document,
     precision: f64,
     panel_selected_artboards: &[String],
+    mask_isolation_path: Option<&[usize]>,
 ) {
     // Layer 1: canvas background.
     ctx.set_fill_style_str("white");
@@ -1555,9 +1556,20 @@ pub fn render(
     // Layer 2: artboard fills (list order, later wins in overlaps).
     draw_artboard_fills(ctx, doc);
 
-    // Layer 3: document element tree.
-    for layer in &doc.layers {
-        draw_element(ctx, layer, Visibility::Preview, precision);
+    // Layer 3: document element tree. In mask-isolation mode
+    // (OPACITY.md §Preview interactions), render only the mask
+    // subtree of the isolated element — everything else on the
+    // canvas is hidden until the user exits isolation.
+    if let Some(path) = mask_isolation_path {
+        if let Some(elem) = doc.get_element(&path.to_vec()) {
+            if let Some(mask) = elem.common().mask.as_deref() {
+                draw_element(ctx, &mask.subtree, Visibility::Preview, precision);
+            }
+        }
+    } else {
+        for layer in &doc.layers {
+            draw_element(ctx, layer, Visibility::Preview, precision);
+        }
     }
 
     // Layer 4: fade overlay (dims regions outside any artboard).
