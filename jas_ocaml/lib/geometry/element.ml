@@ -571,6 +571,7 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      stroke_gradient : gradient option;
     }
   | Rect of {
       x : float; y : float;
@@ -584,6 +585,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -595,6 +598,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -607,6 +612,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Polyline of {
       points : (float * float) list;
@@ -618,6 +625,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Polygon of {
       points : (float * float) list;
@@ -629,6 +638,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Path of {
       d : path_command list;
@@ -641,6 +652,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Text of {
       x : float; y : float;
@@ -1050,25 +1063,25 @@ let transform_of elem =
   | Live (Compound_shape cs) -> cs.transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
-  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
+  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
 
 let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
-  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
+  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy r =
-  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
+  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy rx ry =
-  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
+  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
+  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
+  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
-  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None }
+  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /
@@ -1608,6 +1621,7 @@ let move_control_points ?(is_all = false) elem indices dx dy =
       y1 = r.y1 +. (if is_all || mem 0 then dy else 0.0);
       x2 = r.x2 +. (if is_all || mem 1 then dx else 0.0);
       y2 = r.y2 +. (if is_all || mem 1 then dy else 0.0);
+      stroke_gradient = None;
     }
   | Rect r ->
     if is_all then
@@ -1624,7 +1638,10 @@ let move_control_points ?(is_all = false) elem indices dx dy =
                 fill = r.fill; stroke = r.stroke;
                 opacity = r.opacity; transform = r.transform;
                 locked = r.locked; visibility = r.visibility;
-                blend_mode = r.blend_mode; mask = None }
+                blend_mode = r.blend_mode; mask = None;
+                  fill_gradient = None;
+                  stroke_gradient = None;
+                }
   | Circle r ->
     if is_all then
       Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }

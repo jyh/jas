@@ -295,6 +295,7 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      stroke_gradient : gradient option;
     }
   | Rect of {
       x : float; y : float;
@@ -308,6 +309,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -319,6 +322,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -331,6 +336,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Polyline of {
       points : (float * float) list;
@@ -342,6 +349,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Polygon of {
       points : (float * float) list;
@@ -353,6 +362,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Path of {
       d : path_command list;
@@ -365,6 +376,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Text of {
       x : float; y : float;

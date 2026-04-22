@@ -400,7 +400,7 @@ class add_anchor_point_tool = object (_self)
         let new_cmds = toggle_smooth_corner d anchor_idx in
         let new_elem = match elem with
           | Element.Path { fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; _ } ->
-            Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None }
+            Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None; fill_gradient = None; stroke_gradient = None }
           | _ -> elem
         in
         let new_doc = Document.replace_element doc path new_elem in
@@ -417,7 +417,7 @@ class add_anchor_point_tool = object (_self)
            let (new_cmds, first_new_idx, ax, ay) = insert_point_in_path d seg_idx t in
            let new_elem = match elem with
              | Element.Path { fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; _ } ->
-               Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None }
+               Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None; fill_gradient = None; stroke_gradient = None }
              | _ -> elem
            in
            let new_doc = Document.replace_element doc path new_elem in
@@ -491,7 +491,7 @@ class add_anchor_point_tool = object (_self)
         in
         let new_elem = match elem with
           | Element.Path { fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; _ } ->
-            Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None }
+            Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None; fill_gradient = None; stroke_gradient = None }
           | _ -> elem
         in
         let new_doc = Document.replace_element doc ds.elem_path new_elem in
