@@ -62,7 +62,69 @@ fn blend_mode_css(mode: BlendMode) -> &'static str {
     }
 }
 
-fn apply_fill(ctx: &CanvasRenderingContext2d, fill: Option<&Fill>) -> f64 {
+/// Build a CanvasGradient from a `Gradient` and the element's bounding box.
+/// Returns None if the gradient is freeform (rendering deferred to a later
+/// phase) or has fewer than 2 stops.
+fn make_canvas_gradient(
+    ctx: &CanvasRenderingContext2d,
+    g: &Gradient,
+    bx: f64, by: f64, bw: f64, bh: f64,
+) -> Option<web_sys::CanvasGradient> {
+    if g.stops.len() < 2 { return None; }
+    let cg = match g.gtype {
+        GradientType::Linear => {
+            // Angle convention: 0° = left-to-right; positive rotates CCW.
+            // Endpoints lie on the bbox boundary aligned with the angle.
+            let cx = bx + bw / 2.0;
+            let cy = by + bh / 2.0;
+            let rad = g.angle * std::f64::consts::PI / 180.0;
+            let half_diag = (bw * bw + bh * bh).sqrt() / 2.0;
+            let dx = rad.cos() * half_diag;
+            let dy = -rad.sin() * half_diag; // canvas y is down
+            ctx.create_linear_gradient(cx - dx, cy - dy, cx + dx, cy + dy)
+        }
+        GradientType::Radial => {
+            let cx = bx + bw / 2.0;
+            let cy = by + bh / 2.0;
+            let r = (bw.max(bh) / 2.0) * (g.aspect_ratio / 100.0).max(0.01);
+            ctx.create_radial_gradient(cx, cy, 0.0, cx, cy, r).ok()?
+        }
+        GradientType::Freeform => return None,
+    };
+    for stop in &g.stops {
+        let mut c = stop.color.with_alpha(stop.opacity / 100.0);
+        // The opacity field is applied via alpha so a per-stop opacity of
+        // 50 becomes a stop with an rgba color at 50% alpha.
+        if stop.opacity == 100.0 {
+            c = stop.color;
+        }
+        let _ = cg.add_color_stop((stop.location / 100.0) as f32, &css_color(&c));
+    }
+    Some(cg)
+}
+
+fn poly_bbox(pts: &[(f64, f64)]) -> (f64, f64, f64, f64) {
+    if pts.is_empty() { return (0.0, 0.0, 0.0, 0.0); }
+    let (mut x_min, mut y_min) = pts[0];
+    let (mut x_max, mut y_max) = pts[0];
+    for &(x, y) in &pts[1..] {
+        if x < x_min { x_min = x; } if x > x_max { x_max = x; }
+        if y < y_min { y_min = y; } if y > y_max { y_max = y; }
+    }
+    (x_min, y_min, x_max - x_min, y_max - y_min)
+}
+
+fn apply_fill(
+    ctx: &CanvasRenderingContext2d, fill: Option<&Fill>,
+    fill_gradient: Option<&Gradient>, bbox: (f64, f64, f64, f64),
+) -> f64 {
+    if let Some(g) = fill_gradient {
+        let (bx, by, bw, bh) = bbox;
+        if let Some(cg) = make_canvas_gradient(ctx, g, bx, by, bw, bh) {
+            ctx.set_fill_style_canvas_gradient(&cg);
+            return fill.map(|f| f.opacity).unwrap_or(1.0);
+        }
+    }
     match fill {
         Some(f) => {
             ctx.set_fill_style_str(&css_color(&f.color));
@@ -683,10 +745,12 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
-                fill_op = apply_fill(ctx, e.fill.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref(),
+                    e.fill_gradient.as_deref(),
+                    (e.x, e.y, e.width, e.height));
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
-            let has_fill = !outline && e.fill.is_some();
+            let has_fill = !outline && (e.fill.is_some() || e.fill_gradient.is_some());
             let has_stroke = outline || e.stroke.is_some();
             if e.rx > 0.0 || e.ry > 0.0 {
                 let rx = e.rx.max(0.0).min(e.width / 2.0);
@@ -733,12 +797,14 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
-                fill_op = apply_fill(ctx, e.fill.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref(),
+                    e.fill_gradient.as_deref(),
+                    (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0));
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
-            if !outline && e.fill.is_some() {
+            if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
                 ctx.set_global_alpha(base_alpha * fill_op);
                 ctx.fill();
             }
@@ -752,13 +818,15 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
-                fill_op = apply_fill(ctx, e.fill.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref(),
+                    e.fill_gradient.as_deref(),
+                    (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0));
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0.0, 0.0, std::f64::consts::TAU)
                 .ok();
-            if !outline && e.fill.is_some() {
+            if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
                 ctx.set_global_alpha(base_alpha * fill_op);
                 ctx.fill();
             }
@@ -772,7 +840,9 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
-                fill_op = apply_fill(ctx, e.fill.as_ref());
+                let bbox = poly_bbox(&e.points);
+                fill_op = apply_fill(ctx, e.fill.as_ref(),
+                    e.fill_gradient.as_deref(), bbox);
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             if !e.points.is_empty() {
@@ -781,7 +851,7 @@ fn draw_element_body(
                 for &(x, y) in &e.points[1..] {
                     ctx.line_to(x, y);
                 }
-                if !outline && e.fill.is_some() {
+                if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
                     ctx.set_global_alpha(base_alpha * fill_op);
                     ctx.fill();
                 }
@@ -796,7 +866,9 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
-                fill_op = apply_fill(ctx, e.fill.as_ref());
+                let bbox = poly_bbox(&e.points);
+                fill_op = apply_fill(ctx, e.fill.as_ref(),
+                    e.fill_gradient.as_deref(), bbox);
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             if !e.points.is_empty() {
@@ -806,7 +878,7 @@ fn draw_element_body(
                     ctx.line_to(x, y);
                 }
                 ctx.close_path();
-                if !outline && e.fill.is_some() {
+                if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
                     ctx.set_global_alpha(base_alpha * fill_op);
                     ctx.fill();
                 }
@@ -821,11 +893,13 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
-                fill_op = apply_fill(ctx, e.fill.as_ref());
+                let b = elem.bounds();
+                fill_op = apply_fill(ctx, e.fill.as_ref(),
+                    e.fill_gradient.as_deref(), b);
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             // Fill uses the original path
-            if !outline && e.fill.is_some() {
+            if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
                 ctx.begin_path();
                 build_path(ctx, &e.d);
                 ctx.set_global_alpha(base_alpha * fill_op);
@@ -875,7 +949,7 @@ fn draw_element_body(
             }
         }
         Element::Text(e) => {
-            let fill_op = apply_fill(ctx, e.fill.as_ref());
+            let fill_op = apply_fill(ctx, e.fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
             ctx.set_global_alpha(base_alpha * fill_op);
             // Multi-tspan text renders each tspan with its own
             // effective font (family / size / weight / style) and
@@ -1093,7 +1167,7 @@ fn draw_element_body(
             // Draw text along the path
             let content_str = e.content();
             if !content_str.is_empty() && !e.d.is_empty() {
-                let fill_op = apply_fill(ctx, e.fill.as_ref());
+                let fill_op = apply_fill(ctx, e.fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
                 ctx.set_global_alpha(base_alpha * fill_op);
                 let font = format!(
                     "{} {} {}px {}",
@@ -1157,7 +1231,7 @@ fn draw_element_body(
                     if outline {
                         apply_outline_style(ctx);
                     } else {
-                        fill_op = apply_fill(ctx, cs.fill.as_ref());
+                        fill_op = apply_fill(ctx, cs.fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
                         (stroke_op, stroke_align) =
                             apply_stroke(ctx, cs.stroke.as_ref());
                     }
