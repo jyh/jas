@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/preferences.schema.json",
+  "title": "Preferences",
+  "description": "User-settable preference defaults. UI preference dialogs mutate these at runtime; defaults here are the initial values.",
+  "type": "object",
+  "required": ["preferences"],
+  "additionalProperties": true,
+  "properties": {
+    "preferences": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "autosave": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval_seconds": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "units": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "default": { "type": "string", "enum": ["px", "mm", "in", "pt"] },
+            "show_in_panels": { "type": "boolean" }
+          }
+        },
+        "smart_guides": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "snap_threshold_px": { "type": "number", "minimum": 0 }
+          }
+        },
+        "grid": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "visible": { "type": "boolean" },
+            "spacing_px": { "type": "number", "minimum": 0 },
+            "subdivisions": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "zoom_step": { "type": "number", "minimum": 1 },
+            "min_zoom": { "type": "number", "minimum": 0 },
+            "max_zoom": { "type": "number", "minimum": 0 },
+            "fit_padding_px": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}
