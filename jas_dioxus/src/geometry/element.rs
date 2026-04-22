@@ -2469,6 +2469,37 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
     }
 }
 
+/// Return a copy of the element with its `fill_gradient` replaced.
+/// Elements that do not support a fill gradient (Line, Text, TextPath,
+/// Group, Layer, Live) are returned unchanged.
+pub fn with_fill_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> Element {
+    match elem {
+        Element::Rect(e) => Element::Rect(RectElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Circle(e) => Element::Circle(CircleElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Ellipse(e) => Element::Ellipse(EllipseElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Polyline(e) => Element::Polyline(PolylineElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Polygon(e) => Element::Polygon(PolygonElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Path(e) => Element::Path(PathElem { fill_gradient: gradient, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
+/// Return a copy of the element with its `stroke_gradient` replaced.
+/// Elements that do not support a stroke gradient (Text, TextPath,
+/// Group, Layer, Live) are returned unchanged.
+pub fn with_stroke_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> Element {
+    match elem {
+        Element::Line(e) => Element::Line(LineElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Rect(e) => Element::Rect(RectElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Circle(e) => Element::Circle(CircleElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Ellipse(e) => Element::Ellipse(EllipseElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Polyline(e) => Element::Polyline(PolylineElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Polygon(e) => Element::Polygon(PolygonElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Path(e) => Element::Path(PathElem { stroke_gradient: gradient, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
 /// Return a copy of the element with its fill replaced.
 /// Elements that do not support fill (Line, Group, Layer) are returned unchanged.
 pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {

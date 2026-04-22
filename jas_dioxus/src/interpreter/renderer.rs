@@ -6920,6 +6920,73 @@ mod tests {
     }
 
     #[test]
+    fn apply_gradient_panel_writes_fill_gradient() {
+        use crate::geometry::element::{
+            Color, Element, GradientStop, GradientType, GradientMethod, StrokeSubMode,
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, None);
+        // Configure panel state, then apply.
+        st.gradient_panel.gtype = "radial".into();
+        st.gradient_panel.angle = 90.0;
+        st.gradient_panel.aspect_ratio = 150.0;
+        st.gradient_panel.method = "smooth".into();
+        st.gradient_panel.dither = true;
+        st.gradient_panel.stroke_sub_mode = "across".into();
+        st.gradient_panel.stops = vec![
+            GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 0.0,   midpoint_to_next: 50.0 },
+            GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+        ];
+        st.gradient_panel.preview_state = true; // pretend we're promoting
+        st.apply_gradient_panel_to_selection();
+        // Preview-state cleared after first edit.
+        assert!(!st.gradient_panel.preview_state);
+        // Element gained a fill_gradient with the panel values.
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        let g = elem.fill_gradient().expect("fill_gradient should be set");
+        assert_eq!(g.gtype, GradientType::Radial);
+        assert_eq!(g.angle, 90.0);
+        assert_eq!(g.aspect_ratio, 150.0);
+        assert_eq!(g.method, GradientMethod::Smooth);
+        assert!(g.dither);
+        assert_eq!(g.stroke_sub_mode, StrokeSubMode::Across);
+        assert_eq!(g.stops.len(), 2);
+    }
+
+    #[test]
+    fn demote_gradient_panel_clears_fill_gradient() {
+        use crate::geometry::element::{
+            Color, Gradient, GradientStop, GradientType, GradientMethod, StrokeSubMode,
+        };
+        let g = Gradient {
+            gtype: GradientType::Linear,
+            angle: 0.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::Classic,
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 0.0,   midpoint_to_next: 50.0 },
+                GradientStop { color: Color::WHITE, opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(g));
+        // Sanity: gradient is set.
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        assert!(elem.fill_gradient().is_some());
+        st.demote_gradient_panel_selection();
+        // After demote, fill_gradient is None.
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        assert!(elem.fill_gradient().is_none());
+        // The element's solid fill is untouched.
+        assert!(elem.fill().is_some());
+    }
+
+    #[test]
     fn sync_gradient_panel_no_selection_keeps_defaults() {
         let mut st = AppState::new();
         st.fill_on_top = true;
