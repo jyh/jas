@@ -593,6 +593,8 @@ impl CanvasTool for AddAnchorPointTool {
                     stroke: pe.stroke,
                     width_points: pe.width_points.clone(),
                     common: pe.common.clone(),
+                                    fill_gradient: None,
+                    stroke_gradient: None,
                 });
                 let doc = model.document().replace_element(&path, new_elem);
                 model.set_document(doc);
@@ -609,6 +611,8 @@ impl CanvasTool for AddAnchorPointTool {
                     stroke: pe.stroke,
                     width_points: pe.width_points.clone(),
                     common: pe.common.clone(),
+                                    fill_gradient: None,
+                    stroke_gradient: None,
                 });
                 let mut doc = model.document().replace_element(&path, new_elem);
 
@@ -689,6 +693,8 @@ impl CanvasTool for AddAnchorPointTool {
                         stroke: pe.stroke,
                         width_points: pe.width_points.clone(),
                         common: pe.common.clone(),
+                                            fill_gradient: None,
+                        stroke_gradient: None,
                     });
                     let new_doc = doc.replace_element(&elem_path, new_elem);
                     model.set_document(new_doc);
@@ -714,6 +720,8 @@ impl CanvasTool for AddAnchorPointTool {
                         stroke: pe.stroke,
                         width_points: pe.width_points.clone(),
                         common: pe.common.clone(),
+                                            fill_gradient: None,
+                        stroke_gradient: None,
                     });
                     let new_doc = doc.replace_element(&elem_path, new_elem);
                     model.set_document(new_doc);

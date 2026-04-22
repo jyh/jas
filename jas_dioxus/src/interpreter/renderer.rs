@@ -92,6 +92,8 @@ fn render_el(
         "toggle" | "checkbox" => render_toggle(el, ctx, rctx),
         "combo_box" => render_combo_box(el, ctx, rctx),
         "color_swatch" => render_color_swatch(el, ctx, rctx),
+        "gradient_tile" => render_gradient_tile(el, ctx, rctx),
+        "gradient_slider" => render_gradient_slider(el, ctx, rctx),
         "fill_stroke_widget" => render_fill_stroke_widget(el, ctx, rctx),
         "color_bar" => render_color_bar(el, ctx, rctx),
         "color_gradient" => render_color_gradient(el, ctx, rctx),
@@ -466,8 +468,15 @@ fn apply_set_effects(
     }
 
     // Apply all successful writes as a batch
+    let mut any_gradient_key = false;
     for (key, val) in pending {
+        if key.starts_with("gradient_") { any_gradient_key = true; }
         set_app_state_field(key.as_str(), &val, st);
+    }
+    // Phase 5 follow-up: after any gradient_* write, apply the
+    // updated panel state to the selected element(s).
+    if any_gradient_key {
+        st.apply_gradient_panel_to_selection();
     }
 }
 
@@ -548,6 +557,14 @@ fn set_app_state_field(
         "stroke_arrow_align" => { if let Some(s) = val.as_str() { st.stroke_panel.arrow_align = s.into(); } }
         "stroke_profile" => { if let Some(s) = val.as_str() { st.stroke_panel.profile = s.into(); } }
         "stroke_profile_flipped" => { if let Some(b) = val.as_bool() { st.stroke_panel.profile_flipped = b; } }
+        // Gradient panel fields (Phase 5 follow-up). Each write
+        // also triggers apply_gradient_panel_to_selection below.
+        "gradient_type" => { if let Some(s) = val.as_str() { st.gradient_panel.gtype = s.into(); } }
+        "gradient_angle" => { if let Some(n) = val.as_f64() { st.gradient_panel.angle = n; } }
+        "gradient_aspect_ratio" => { if let Some(n) = val.as_f64() { st.gradient_panel.aspect_ratio = n; } }
+        "gradient_method" => { if let Some(s) = val.as_str() { st.gradient_panel.method = s.into(); } }
+        "gradient_dither" => { if let Some(b) = val.as_bool() { st.gradient_panel.dither = b; } }
+        "gradient_stroke_sub_mode" => { if let Some(s) = val.as_str() { st.gradient_panel.stroke_sub_mode = s.into(); } }
         // Align panel fields — mirrors of AlignPanelState per
         // ALIGN.md Panel state.
         "align_to" => {
@@ -4151,6 +4168,184 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     }
 }
 
+/// Evaluate a bind expression and parse its result back to a JSON value.
+///
+/// The expression language serializes objects (like a gradient value) to a
+/// JSON string via `Value::Str`. This helper reverses that so widget code
+/// can read structured fields back out.
+fn eval_bind_object(expr: &str, ctx: &serde_json::Value) -> Option<serde_json::Value> {
+    let v = expr::eval(expr, ctx);
+    match v {
+        Value::Str(s) => serde_json::from_str::<serde_json::Value>(&s).ok(),
+        Value::List(items) => Some(serde_json::Value::Array(items)),
+        _ => None,
+    }
+}
+
+/// Build a CSS background from a gradient JSON value.
+fn gradient_css_background(gradient: &serde_json::Value) -> Option<String> {
+    let stops = gradient.get("stops")?.as_array()?;
+    if stops.len() < 2 {
+        return None;
+    }
+    let mut stop_strs = Vec::new();
+    for s in stops {
+        let color = s.get("color").and_then(|v| v.as_str()).unwrap_or("#000000");
+        let loc = s.get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let opacity = s.get("opacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let color_css = if opacity < 100.0 && color.starts_with('#') && color.len() == 7 {
+            let r = u8::from_str_radix(&color[1..3], 16).unwrap_or(0);
+            let g = u8::from_str_radix(&color[3..5], 16).unwrap_or(0);
+            let b = u8::from_str_radix(&color[5..7], 16).unwrap_or(0);
+            format!("rgba({},{},{},{:.3})", r, g, b, opacity / 100.0)
+        } else {
+            color.to_string()
+        };
+        stop_strs.push(format!("{} {}%", color_css, loc));
+    }
+    let gtype = gradient.get("type").and_then(|v| v.as_str()).unwrap_or("linear");
+    if gtype == "radial" {
+        Some(format!("radial-gradient(circle, {})", stop_strs.join(", ")))
+    } else {
+        let angle = gradient.get("angle").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        // Our angle convention: 0 = horizontal (to-right). CSS linear-gradient
+        // angle: 0deg is bottom-to-top, 90deg is left-to-right. So CSS angle =
+        // 90 - angle.
+        let css_angle = ((90.0 - angle).rem_euclid(360.0)) as i64;
+        Some(format!("linear-gradient({}deg, {})", css_angle, stop_strs.join(", ")))
+    }
+}
+
+/// gradient_tile — clickable gradient preview; click fires the behavior list.
+fn render_gradient_tile(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let size_key = el.get("size").and_then(|v| v.as_str()).unwrap_or("large");
+    let sz: i64 = match size_key { "small" => 16, "medium" => 32, _ => 64 };
+
+    let gradient_expr = el.get("bind")
+        .and_then(|b| b.get("gradient"))
+        .and_then(|v| v.as_str());
+    let bg = gradient_expr
+        .and_then(|e| eval_bind_object(e, ctx))
+        .and_then(|g| gradient_css_background(&g))
+        .unwrap_or_else(|| "#888".to_string());
+
+    let on_click = build_click_handler(el, ctx, rctx);
+
+    let data_bind = gradient_expr.map(|s| s.to_string()).unwrap_or_default();
+
+    rsx! {
+        div {
+            id: "{id}",
+            class: "jas-gradient-tile",
+            "data-type": "gradient-tile",
+            "data-bind-gradient": "{data_bind}",
+            style: "width:{sz}px;height:{sz}px;background:{bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:pointer;",
+            onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+        }
+    }
+}
+
+/// gradient_slider — 1-D color-stops editor.
+///
+/// Phase 0 scope: renders the bar + stop markers + midpoint markers with
+/// click / dblclick handlers. Full pointer drag state machine (drag, drag
+/// past neighbor, drag-off-bar delete) is deferred to Phase 5 when the
+/// action pipeline is wired. Keyboard handlers are similarly deferred.
+fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let stops_expr = el.get("bind").and_then(|b| b.get("stops")).and_then(|v| v.as_str());
+    let sel_stop_expr = el.get("bind").and_then(|b| b.get("selected_stop_index")).and_then(|v| v.as_str());
+    let sel_mid_expr = el.get("bind").and_then(|b| b.get("selected_midpoint_index")).and_then(|v| v.as_str());
+
+    let stops = stops_expr.and_then(|e| eval_bind_object(e, ctx));
+    let stops_arr: Vec<serde_json::Value> = stops
+        .as_ref()
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let sel_stop: i64 = sel_stop_expr
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n as i64, _ => -1 })
+        .unwrap_or(-1);
+    let sel_mid: i64 = sel_mid_expr
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n as i64, _ => -1 })
+        .unwrap_or(-1);
+
+    // Build a linear preview of the stops for the bar background.
+    let bar_bg = if stops_arr.len() >= 2 {
+        let preview = serde_json::json!({
+            "type": "linear",
+            "angle": 0,
+            "stops": stops_arr.clone(),
+        });
+        gradient_css_background(&preview).unwrap_or_else(|| "#888".to_string())
+    } else {
+        "#888".to_string()
+    };
+
+    let on_click = build_click_handler(el, ctx, rctx);
+
+    let stops_bind = stops_expr.map(|s| s.to_string()).unwrap_or_default();
+    let sel_stop_bind = sel_stop_expr.map(|s| s.to_string()).unwrap_or_default();
+    let sel_mid_bind = sel_mid_expr.map(|s| s.to_string()).unwrap_or_default();
+
+    // Build midpoint and stop markers as Element lists so the rsx! macro can
+    // splice them in.
+    let mut midpoint_markers: Vec<Element> = Vec::new();
+    for i in 0..stops_arr.len().saturating_sub(1) {
+        let left = stops_arr[i].get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let right = stops_arr[i + 1].get("location").and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let pct = stops_arr[i].get("midpoint_to_next").and_then(|v| v.as_f64()).unwrap_or(50.0);
+        let mid_loc = left + (right - left) * (pct / 100.0);
+        let sel_class = if sel_mid == i as i64 { " jas-gradient-midpoint-selected" } else { "" };
+        midpoint_markers.push(rsx! {
+            div {
+                class: "jas-gradient-midpoint{sel_class}",
+                "data-role": "midpoint",
+                "data-midpoint-index": "{i}",
+                style: "position:absolute;left:calc({mid_loc}% - 5px);top:2px;width:10px;height:10px;transform:rotate(45deg);background:#888;border:1px solid #333;box-sizing:border-box;cursor:grab;",
+            }
+        });
+    }
+
+    let mut stop_markers: Vec<Element> = Vec::new();
+    for (i, s) in stops_arr.iter().enumerate() {
+        let loc = s.get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let color = s.get("color").and_then(|v| v.as_str()).unwrap_or("#000000").to_string();
+        let sel_class = if sel_stop == i as i64 { " jas-gradient-stop-selected" } else { "" };
+        stop_markers.push(rsx! {
+            div {
+                class: "jas-gradient-stop{sel_class}",
+                "data-role": "stop",
+                "data-stop-index": "{i}",
+                style: "position:absolute;left:calc({loc}% - 7px);top:30px;width:14px;height:14px;border-radius:50%;background:{color};border:1.5px solid #333;box-sizing:border-box;cursor:grab;",
+            }
+        });
+    }
+
+    rsx! {
+        div {
+            id: "{id}",
+            class: "jas-gradient-slider",
+            "data-type": "gradient-slider",
+            "data-bind-stops": "{stops_bind}",
+            "data-bind-selected-stop-index": "{sel_stop_bind}",
+            "data-bind-selected-midpoint-index": "{sel_mid_bind}",
+            tabindex: "0",
+            style: "position:relative;width:100%;height:44px;box-sizing:border-box;outline:none;",
+            onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+            div {
+                class: "jas-gradient-slider-bar",
+                "data-role": "bar",
+                style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
+            }
+            {midpoint_markers.into_iter()}
+            {stop_markers.into_iter()}
+        }
+    }
+}
+
 fn render_color_bar(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     use crate::geometry::element::Color;
 
@@ -6663,6 +6858,163 @@ mod tests {
         assert!(!st.paragraph_panel.hyphenate);
         assert_eq!(st.paragraph_panel.bullets, "");
         assert!(st.paragraph_panel.align_left);  // back to default
+    }
+
+    fn select_first_rect(st: &mut AppState, fill_gradient: Option<crate::geometry::element::Gradient>) {
+        use crate::workspace::app_state::TabState;
+        use crate::document::document::ElementSelection;
+        use crate::geometry::element::{
+            CommonProps, Color, Fill, RectElem,
+        };
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let r = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: fill_gradient.map(Box::new),
+            stroke_gradient: None,
+        });
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        if let Some(Element::Layer(layer)) = new_doc.layers.get_mut(0) {
+            layer.children = vec![std::rc::Rc::new(r)];
+        }
+        new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        st.tabs[st.active_tab].model.set_document(new_doc);
+    }
+
+    #[test]
+    fn sync_gradient_panel_uniform_with_gradient() {
+        use crate::geometry::element::{
+            Color, Gradient, GradientStop, GradientType, GradientMethod, StrokeSubMode,
+        };
+        let g = Gradient {
+            gtype: GradientType::Radial,
+            angle: 30.0,
+            aspect_ratio: 200.0,
+            method: GradientMethod::Smooth,
+            dither: true,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 0.0,   midpoint_to_next: 50.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(g.clone()));
+        st.sync_gradient_panel_from_selection();
+        assert_eq!(st.gradient_panel.gtype, "radial");
+        assert_eq!(st.gradient_panel.angle, 30.0);
+        assert_eq!(st.gradient_panel.aspect_ratio, 200.0);
+        assert_eq!(st.gradient_panel.method, "smooth");
+        assert!(st.gradient_panel.dither);
+        assert_eq!(st.gradient_panel.stops.len(), 2);
+        assert!(!st.gradient_panel.preview_state);
+    }
+
+    #[test]
+    fn sync_gradient_panel_solid_seeds_preview() {
+        use crate::geometry::element::Color;
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        // Selected element has a solid red fill, no gradient.
+        select_first_rect(&mut st, None);
+        st.sync_gradient_panel_from_selection();
+        // Preview state set; first stop seeded from the solid color.
+        assert!(st.gradient_panel.preview_state);
+        assert_eq!(st.gradient_panel.gtype, "linear");
+        assert_eq!(st.gradient_panel.stops.len(), 2);
+        assert_eq!(st.gradient_panel.stops[0].color, Color::rgb(1.0, 0.0, 0.0));
+        // Second stop is the conventional white per fill-type-coupling rule.
+        assert_eq!(st.gradient_panel.stops[1].color, Color::WHITE);
+    }
+
+    #[test]
+    fn apply_gradient_panel_writes_fill_gradient() {
+        use crate::geometry::element::{
+            Color, Element, GradientStop, GradientType, GradientMethod, StrokeSubMode,
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, None);
+        // Configure panel state, then apply.
+        st.gradient_panel.gtype = "radial".into();
+        st.gradient_panel.angle = 90.0;
+        st.gradient_panel.aspect_ratio = 150.0;
+        st.gradient_panel.method = "smooth".into();
+        st.gradient_panel.dither = true;
+        st.gradient_panel.stroke_sub_mode = "across".into();
+        st.gradient_panel.stops = vec![
+            GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 0.0,   midpoint_to_next: 50.0 },
+            GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+        ];
+        st.gradient_panel.preview_state = true; // pretend we're promoting
+        st.apply_gradient_panel_to_selection();
+        // Preview-state cleared after first edit.
+        assert!(!st.gradient_panel.preview_state);
+        // Element gained a fill_gradient with the panel values.
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        let g = elem.fill_gradient().expect("fill_gradient should be set");
+        assert_eq!(g.gtype, GradientType::Radial);
+        assert_eq!(g.angle, 90.0);
+        assert_eq!(g.aspect_ratio, 150.0);
+        assert_eq!(g.method, GradientMethod::Smooth);
+        assert!(g.dither);
+        assert_eq!(g.stroke_sub_mode, StrokeSubMode::Across);
+        assert_eq!(g.stops.len(), 2);
+    }
+
+    #[test]
+    fn demote_gradient_panel_clears_fill_gradient() {
+        use crate::geometry::element::{
+            Color, Gradient, GradientStop, GradientType, GradientMethod, StrokeSubMode,
+        };
+        let g = Gradient {
+            gtype: GradientType::Linear,
+            angle: 0.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::Classic,
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 0.0,   midpoint_to_next: 50.0 },
+                GradientStop { color: Color::WHITE, opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(g));
+        // Sanity: gradient is set.
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        assert!(elem.fill_gradient().is_some());
+        st.demote_gradient_panel_selection();
+        // After demote, fill_gradient is None.
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        assert!(elem.fill_gradient().is_none());
+        // The element's solid fill is untouched.
+        assert!(elem.fill().is_some());
+    }
+
+    #[test]
+    fn sync_gradient_panel_no_selection_keeps_defaults() {
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        // Set up a tab without selecting anything.
+        if st.tabs.is_empty() {
+            use crate::workspace::app_state::TabState;
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        // Mutate the panel so we can detect that sync didn't touch it.
+        st.gradient_panel.gtype = "radial".into();
+        st.sync_gradient_panel_from_selection();
+        assert_eq!(st.gradient_panel.gtype, "radial");
     }
 
     #[test]

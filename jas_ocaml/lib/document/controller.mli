@@ -27,6 +27,8 @@ class controller : ?model:Model.model -> unit -> object
   method copy_selection : float -> float -> unit
   method set_selection_fill : Element.fill option -> unit
   method set_selection_stroke : Element.stroke option -> unit
+  method set_selection_fill_gradient : Element.gradient option -> unit
+  method set_selection_stroke_gradient : Element.gradient option -> unit
   method set_selection_width_profile : Element.stroke_width_point list -> unit
   method make_mask_on_selection : clip:bool -> invert:bool -> unit
   method release_mask_on_selection : unit

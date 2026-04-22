@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JasLib
 
@@ -707,4 +708,90 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     #expect(back?.clip == false)
     #expect(back?.invert == true)
     #expect(back?.subtreeElement == subtree)
+}
+
+// MARK: - Gradient JSON round-trip (Phase 1)
+
+@Test func gradientJsonRoundtripLinear() throws {
+    let g = Gradient(
+        type: .linear, angle: 45, aspectRatio: 100,
+        method: .classic, dither: false, strokeSubMode: .within,
+        stops: [
+            GradientStop(color: "#ff0000", opacity: 100, location: 0,   midpointToNext: 50),
+            GradientStop(color: "#0000ff", opacity: 100, location: 100, midpointToNext: 50),
+        ]
+    )
+    let data = try JSONEncoder().encode(g)
+    let parsed = try JSONDecoder().decode(Gradient.self, from: data)
+    #expect(parsed == g)
+}
+
+@Test func gradientJsonRoundtripRadialMidpointsMethodDither() throws {
+    let g = Gradient(
+        type: .radial, angle: 0, aspectRatio: 200,
+        method: .smooth, dither: true, strokeSubMode: .across,
+        stops: [
+            GradientStop(color: "#ffff00", opacity: 100, location: 0,   midpointToNext: 30),
+            GradientStop(color: "#800080", opacity:  50, location: 50,  midpointToNext: 70),
+            GradientStop(color: "#000000", opacity:   0, location: 100, midpointToNext: 50),
+        ]
+    )
+    let data = try JSONEncoder().encode(g)
+    let parsed = try JSONDecoder().decode(Gradient.self, from: data)
+    #expect(parsed == g)
+}
+
+@Test func gradientJsonRoundtripFreeform() throws {
+    let g = Gradient(
+        type: .freeform, method: .points,
+        nodes: [
+            GradientNode(x: 0.25, y: 0.25, color: "#ff0000", opacity: 100, spread: 30),
+            GradientNode(x: 0.75, y: 0.75, color: "#0000ff", opacity: 100, spread: 25),
+        ]
+    )
+    let data = try JSONEncoder().encode(g)
+    let parsed = try JSONDecoder().decode(Gradient.self, from: data)
+    #expect(parsed == g)
+}
+
+@Test func gradientSerdeFieldNames() throws {
+    let g = Gradient()
+    let data = try JSONEncoder().encode(g)
+    let s = String(data: data, encoding: .utf8)!
+    #expect(s.contains("\"type\":\"linear\""))
+    #expect(s.contains("\"method\":\"classic\""))
+    #expect(s.contains("\"stroke_sub_mode\":\"within\""))
+}
+
+@Test func gradientStopDefaultMidpoint() throws {
+    // midpoint_to_next defaults to 50 when absent on parse.
+    let json = "{\"color\":\"#ff0000\",\"opacity\":100,\"location\":25}"
+    let parsed = try JSONDecoder().decode(GradientStop.self, from: json.data(using: .utf8)!)
+    #expect(parsed.midpointToNext == 50)
+}
+
+// Phase 1b: per-element gradient fields.
+
+@Test func rectFillGradientFieldRoundtrips() {
+    let g = Gradient(
+        type: .linear, angle: 45, aspectRatio: 100,
+        stops: [
+            GradientStop(color: "#ff0000", opacity: 100, location: 0,   midpointToNext: 50),
+            GradientStop(color: "#0000ff", opacity: 100, location: 100, midpointToNext: 50),
+        ]
+    )
+    let r = Rect(x: 0, y: 0, width: 10, height: 10, fillGradient: g)
+    #expect(r.fillGradient == g)
+    #expect(r.strokeGradient == nil)
+    // Fields not specified at construction default to nil.
+    let r2 = Rect(x: 0, y: 0, width: 10, height: 10)
+    #expect(r2.fillGradient == nil)
+    #expect(r2.strokeGradient == nil)
+}
+
+@Test func circleStrokeGradientFieldRoundtrips() {
+    let g = Gradient(type: .radial)
+    let c = Circle(cx: 0, cy: 0, r: 10, strokeGradient: g)
+    #expect(c.strokeGradient == g)
+    #expect(c.fillGradient == nil)
 }

@@ -335,6 +335,126 @@ public enum ArrowAlign: Equatable, Hashable {
     case centerAtEnd
 }
 
+/// Gradient type. See transcripts/GRADIENT.md §Gradient types.
+public enum GradientType: String, Codable, Equatable, Hashable {
+    case linear
+    case radial
+    case freeform
+}
+
+/// Gradient interpolation / topology method. classic / smooth apply to
+/// linear/radial; points / lines apply to freeform.
+public enum GradientMethod: String, Codable, Equatable, Hashable {
+    case classic
+    case smooth
+    case points
+    case lines
+}
+
+/// Stroke sub-mode — how a gradient on a stroke maps onto the path.
+public enum StrokeSubMode: String, Codable, Equatable, Hashable {
+    case within
+    case along
+    case across
+}
+
+/// A single color stop inside a linear/radial gradient.
+///
+/// `color` is stored as a hex string ("#rrggbb") for wire-format
+/// compatibility with the other apps. Codable handles this directly
+/// since String is Codable.
+public struct GradientStop: Codable, Equatable, Hashable {
+    public let color: String
+    /// Opacity 0–100 (percentage).
+    public let opacity: Double
+    /// Location 0–100 (percentage along the gradient strip).
+    public let location: Double
+    /// Midpoint between this stop and the next, stored as a
+    /// percentage-between value (0–100, where 50 = halfway).
+    /// Defaults to 50 when absent on parse.
+    public let midpointToNext: Double
+
+    public init(color: String, opacity: Double = 100, location: Double, midpointToNext: Double = 50) {
+        self.color = color
+        self.opacity = opacity
+        self.location = location
+        self.midpointToNext = midpointToNext
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case color
+        case opacity
+        case location
+        case midpointToNext = "midpoint_to_next"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        color = try c.decode(String.self, forKey: .color)
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 100
+        location = try c.decode(Double.self, forKey: .location)
+        midpointToNext = try c.decodeIfPresent(Double.self, forKey: .midpointToNext) ?? 50
+    }
+}
+
+/// A single node of a freeform gradient.
+public struct GradientNode: Codable, Equatable, Hashable {
+    public let x: Double
+    public let y: Double
+    public let color: String
+    public let opacity: Double
+    public let spread: Double
+
+    public init(x: Double, y: Double, color: String, opacity: Double = 100, spread: Double = 25) {
+        self.x = x; self.y = y; self.color = color
+        self.opacity = opacity; self.spread = spread
+    }
+}
+
+/// A gradient value usable as a fill or stroke. See GRADIENT.md §Document model.
+public struct Gradient: Codable, Equatable, Hashable {
+    public let type: GradientType
+    public let angle: Double
+    public let aspectRatio: Double
+    public let method: GradientMethod
+    public let dither: Bool
+    public let strokeSubMode: StrokeSubMode
+    public let stops: [GradientStop]
+    public let nodes: [GradientNode]
+
+    public init(type: GradientType = .linear, angle: Double = 0, aspectRatio: Double = 100,
+                method: GradientMethod = .classic, dither: Bool = false,
+                strokeSubMode: StrokeSubMode = .within,
+                stops: [GradientStop] = [], nodes: [GradientNode] = []) {
+        self.type = type; self.angle = angle; self.aspectRatio = aspectRatio
+        self.method = method; self.dither = dither; self.strokeSubMode = strokeSubMode
+        self.stops = stops; self.nodes = nodes
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case angle
+        case aspectRatio = "aspect_ratio"
+        case method
+        case dither
+        case strokeSubMode = "stroke_sub_mode"
+        case stops
+        case nodes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decodeIfPresent(GradientType.self, forKey: .type) ?? .linear
+        angle = try c.decodeIfPresent(Double.self, forKey: .angle) ?? 0
+        aspectRatio = try c.decodeIfPresent(Double.self, forKey: .aspectRatio) ?? 100
+        method = try c.decodeIfPresent(GradientMethod.self, forKey: .method) ?? .classic
+        dither = try c.decodeIfPresent(Bool.self, forKey: .dither) ?? false
+        strokeSubMode = try c.decodeIfPresent(StrokeSubMode.self, forKey: .strokeSubMode) ?? .within
+        stops = try c.decodeIfPresent([GradientStop].self, forKey: .stops) ?? []
+        nodes = try c.decodeIfPresent([GradientNode].self, forKey: .nodes) ?? []
+    }
+}
+
 /// SVG fill presentation attribute.
 public struct Fill: Equatable, Hashable {
     public let color: Color
@@ -864,6 +984,35 @@ public enum Element: Equatable {
         }
     }
 
+    /// Optional gradient applied to the element's fill, if any.
+    /// Phase 1b: lives directly on each Element variant rather than nested
+    /// inside Fill. See GRADIENT.md §Document model.
+    public var fillGradient: Gradient? {
+        switch self {
+        case .rect(let v): return v.fillGradient
+        case .circle(let v): return v.fillGradient
+        case .ellipse(let v): return v.fillGradient
+        case .polyline(let v): return v.fillGradient
+        case .polygon(let v): return v.fillGradient
+        case .path(let v): return v.fillGradient
+        default: return nil
+        }
+    }
+
+    /// Optional gradient applied to the element's stroke, if any.
+    public var strokeGradient: Gradient? {
+        switch self {
+        case .line(let v): return v.strokeGradient
+        case .rect(let v): return v.strokeGradient
+        case .circle(let v): return v.strokeGradient
+        case .ellipse(let v): return v.strokeGradient
+        case .polyline(let v): return v.strokeGradient
+        case .polygon(let v): return v.strokeGradient
+        case .path(let v): return v.strokeGradient
+        default: return nil
+        }
+    }
+
     public var isLocked: Bool {
         switch self {
         case .line(let v): return v.locked
@@ -1165,6 +1314,98 @@ public enum Element: Equatable {
 
 /// Return a copy of `element` with the fill replaced. Line has no fill
 /// (returned unchanged). Group and Layer have no fill (returned unchanged).
+/// Return a copy of the element with its `fillGradient` replaced.
+/// Elements that do not support a fill gradient are returned unchanged.
+public func withFillGradient(_ element: Element, fillGradient: Gradient?) -> Element {
+    switch element {
+    case .rect(let v):
+        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: fillGradient, strokeGradient: v.strokeGradient))
+    case .circle(let v):
+        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                              fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                              fillGradient: fillGradient, strokeGradient: v.strokeGradient))
+    case .ellipse(let v):
+        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                fillGradient: fillGradient, strokeGradient: v.strokeGradient))
+    case .polyline(let v):
+        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                  fillGradient: fillGradient, strokeGradient: v.strokeGradient))
+    case .polygon(let v):
+        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                fillGradient: fillGradient, strokeGradient: v.strokeGradient))
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                          widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: fillGradient, strokeGradient: v.strokeGradient))
+    default:
+        return element
+    }
+}
+
+/// Return a copy of the element with its `strokeGradient` replaced.
+/// Elements that do not support a stroke gradient are returned unchanged.
+public func withStrokeGradient(_ element: Element, strokeGradient: Gradient?) -> Element {
+    switch element {
+    case .line(let v):
+        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                          stroke: v.stroke, widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          strokeGradient: strokeGradient))
+    case .rect(let v):
+        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: v.fillGradient, strokeGradient: strokeGradient))
+    case .circle(let v):
+        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                              fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                              fillGradient: v.fillGradient, strokeGradient: strokeGradient))
+    case .ellipse(let v):
+        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                fillGradient: v.fillGradient, strokeGradient: strokeGradient))
+    case .polyline(let v):
+        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                  fillGradient: v.fillGradient, strokeGradient: strokeGradient))
+    case .polygon(let v):
+        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                fillGradient: v.fillGradient, strokeGradient: strokeGradient))
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                          widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: v.fillGradient, strokeGradient: strokeGradient))
+    default:
+        return element
+    }
+}
+
 public func withFill(_ element: Element, fill: Fill?) -> Element {
     switch element {
     case .line:
@@ -1655,6 +1896,10 @@ public struct Line: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    /// Optional gradient applied to the stroke (in lieu of `stroke.color`).
+    /// Phase 1b adds gradient paint per-element. See GRADIENT.md
+    /// §Document model.
+    public let strokeGradient: Gradient?
 
     public init(x1: Double, y1: Double, x2: Double, y2: Double,
                 stroke: Stroke? = nil, widthPoints: [StrokeWidthPoint] = [],
@@ -1662,7 +1907,8 @@ public struct Line: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                strokeGradient: Gradient? = nil) {
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
         self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -1670,6 +1916,7 @@ public struct Line: Equatable {
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {
@@ -1690,6 +1937,8 @@ public struct Rect: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(x: Double, y: Double, width: Double, height: Double,
                 rx: Double = 0, ry: Double = 0,
@@ -1698,7 +1947,9 @@ public struct Rect: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.x = x; self.y = y; self.width = width; self.height = height
         self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
@@ -1706,6 +1957,8 @@ public struct Rect: Equatable {
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox { inflateBounds((x, y, width, height), stroke) }
@@ -1722,6 +1975,8 @@ public struct Circle: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(cx: Double, cy: Double, r: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1729,13 +1984,17 @@ public struct Circle: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.cx = cx; self.cy = cy; self.r = r
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox { inflateBounds((cx - r, cy - r, r * 2, r * 2), stroke) }
@@ -1752,6 +2011,8 @@ public struct Ellipse: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(cx: Double, cy: Double, rx: Double, ry: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1759,13 +2020,17 @@ public struct Ellipse: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox { inflateBounds((cx - rx, cy - ry, rx * 2, ry * 2), stroke) }
@@ -1782,6 +2047,8 @@ public struct Polyline: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1789,13 +2056,17 @@ public struct Polyline: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {
@@ -1825,6 +2096,8 @@ public struct Polygon: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1832,13 +2105,17 @@ public struct Polygon: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {
@@ -1953,6 +2230,8 @@ public struct Path: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1961,7 +2240,9 @@ public struct Path: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.d = d
         self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -1969,6 +2250,8 @@ public struct Path: Equatable {
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {

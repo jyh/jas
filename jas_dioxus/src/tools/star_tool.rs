@@ -108,6 +108,8 @@ impl CanvasTool for StarTool {
                     fill: model.default_fill,
                     stroke: model.default_stroke,
                     common: CommonProps::default(),
+                                    fill_gradient: None,
+                    stroke_gradient: None,
                 });
                 Controller::add_element(model, elem);
             }

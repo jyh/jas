@@ -1203,6 +1203,128 @@ let preview_snapshot_tests = [
     assert (get_dialog_id s = None));
 ]
 
+(* ── Phase 4: gradient panel sync from selection ──────────── *)
+
+let _make_rect_with_gradient ~fill_gradient =
+  let fill = Some (Jas.Element.make_fill Jas.Element.black) in
+  let rect = Jas.Element.Rect {
+    x = 0.0; y = 0.0; width = 100.0; height = 50.0;
+    rx = 0.0; ry = 0.0;
+    fill; stroke = None;
+    opacity = 1.0; transform = None;
+    locked = false; visibility = Jas.Element.Preview;
+    blend_mode = Jas.Element.Normal;
+    mask = None;
+    fill_gradient; stroke_gradient = None;
+  } in
+  let layer = Jas.Element.make_layer [| rect |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0])
+  in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let _sample_gradient () =
+  let open Jas.Element in
+  {
+    gtype = Gradient_radial;
+    gangle = 30.0;
+    gaspect_ratio = 200.0;
+    gmethod = Method_smooth;
+    gdither = true;
+    gstroke_sub_mode = Sub_mode_within;
+    gstops = [
+      { stop_color = "#00ff00"; stop_opacity = 100.0; stop_location = 0.0;   stop_midpoint_to_next = 50.0 };
+      { stop_color = "#0000ff"; stop_opacity = 100.0; stop_location = 100.0; stop_midpoint_to_next = 50.0 };
+    ];
+    gnodes = [];
+  }
+
+let gradient_phase4_tests = [
+  Alcotest.test_case "uniform_with_gradient_populates_panel" `Quick (fun () ->
+    let g = _sample_gradient () in
+    let model = _make_rect_with_gradient ~fill_gradient:(Some g) in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    set store "fill_on_top" (`Bool true);
+    sync_gradient_panel_from_selection store ctrl;
+    assert (get store "gradient_type" = `String "radial");
+    assert (get store "gradient_angle" = `Float 30.0);
+    assert (get store "gradient_aspect_ratio" = `Float 200.0);
+    assert (get store "gradient_method" = `String "smooth");
+    assert (get store "gradient_dither" = `Bool true);
+    assert (get store "gradient_preview_state" = `Bool false));
+
+  Alcotest.test_case "solid_seeds_preview_with_solid_color" `Quick (fun () ->
+    (* Rect has solid black fill, no gradient. Preview-state seeds
+       first stop from the solid color (#000000). *)
+    let model = _make_rect_with_gradient ~fill_gradient:None in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    set store "fill_on_top" (`Bool true);
+    sync_gradient_panel_from_selection store ctrl;
+    assert (get store "gradient_preview_state" = `Bool true);
+    assert (get store "gradient_type" = `String "linear");
+    assert (get store "gradient_seed_first_color" = `String "#000000"));
+
+  Alcotest.test_case "empty_selection_leaves_store_alone" `Quick (fun () ->
+    let layer = Jas.Element.make_layer [||] in
+    let doc = Jas.Document.make_document [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    set store "gradient_type" (`String "radial");
+    sync_gradient_panel_from_selection store ctrl;
+    assert (get store "gradient_type" = `String "radial"));
+
+  (* Phase 5 foundation: apply / demote *)
+
+  Alcotest.test_case "apply_writes_fill_gradient" `Quick (fun () ->
+    let model = _make_rect_with_gradient ~fill_gradient:None in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    set store "fill_on_top" (`Bool true);
+    set store "gradient_type" (`String "radial");
+    set store "gradient_angle" (`Float 90.0);
+    set store "gradient_aspect_ratio" (`Float 150.0);
+    set store "gradient_method" (`String "smooth");
+    set store "gradient_dither" (`Bool true);
+    set store "gradient_stroke_sub_mode" (`String "across");
+    set store "gradient_preview_state" (`Bool true);
+    apply_gradient_panel_to_selection store ctrl;
+    let elem = Jas.Document.get_element ctrl#document [0; 0] in
+    let g_opt = match elem with
+      | Jas.Element.Rect { fill_gradient; _ } -> fill_gradient
+      | _ -> None in
+    (match g_opt with
+     | Some g ->
+       assert (g.Jas.Element.gtype = Jas.Element.Gradient_radial);
+       assert (g.Jas.Element.gangle = 90.0);
+       assert (g.Jas.Element.gmethod = Jas.Element.Method_smooth);
+       assert (g.Jas.Element.gdither = true);
+       assert (g.Jas.Element.gstroke_sub_mode = Jas.Element.Sub_mode_across)
+     | None -> assert false);
+    assert (get store "gradient_preview_state" = `Bool false));
+
+  Alcotest.test_case "demote_clears_fill_gradient" `Quick (fun () ->
+    let g = _sample_gradient () in
+    let model = _make_rect_with_gradient ~fill_gradient:(Some g) in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    set store "fill_on_top" (`Bool true);
+    let elem = Jas.Document.get_element ctrl#document [0; 0] in
+    let has_grad e = match e with
+      | Jas.Element.Rect { fill_gradient = Some _; _ } -> true | _ -> false in
+    assert (has_grad elem);
+    demote_gradient_panel_selection store ctrl;
+    let elem = Jas.Document.get_element ctrl#document [0; 0] in
+    assert (not (has_grad elem));
+    let has_fill = match elem with
+      | Jas.Element.Rect { fill = Some _; _ } -> true | _ -> false in
+    assert has_fill);
+]
+
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
@@ -1225,4 +1347,5 @@ let () =
     "Paragraph Phase 8", paragraph_phase8_tests;
     "Paragraph Phase 9", paragraph_phase9_tests;
     "Preview snapshot", preview_snapshot_tests;
+    "Gradient Phase 4", gradient_phase4_tests;
   ]

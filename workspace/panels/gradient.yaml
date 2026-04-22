@@ -1,0 +1,430 @@
+id: gradient_panel_content
+type: panel
+summary: "Gradient"
+description: >
+  Gradient panel — edits the gradient value of the active fill or stroke
+  on the current selection. See transcripts/GRADIENT.md for the full
+  specification.
+
+  Phase 2 scope: yaml wiring + static layout only. Controls render at
+  the positions specified in §Layout but do not yet write back to the
+  document. Phase 4 wires panel reads; Phase 5 wires panel writes and
+  fill-type coupling. Linear/radial render natively in SVG (Phase 6/7);
+  freeform, smooth method, dither, and along/across stroke sub-modes
+  are flagged status: pending_renderer.
+
+  === Layout ===
+
+  Row 1 — "Presets:" label, DOCUMENT_LIBRARY_DROPDOWN (selects which
+  library populates the tile strip), DOCUMENT_LIBRARY_SIZE_DROPDOWN
+  (Small / Medium / Large Thumbnail View, plus Small / Large List View
+  flagged pending_renderer).
+
+  Row 2 — Gradient tile strip; one GRADIENT_TILE per gradient in the
+  active library.
+
+  Row 3 — Horizontal rule separator.
+
+  Row 4 — Two-column layout: FILL_STROKE_WIDGET on the left (col-3),
+  middle block on the right (col-9) containing Type / Stroke sub-mode /
+  Angle / Aspect ratio / Method / Dither rows.
+
+  Row 5 — Stops editor: ADD_TO_SWATCHES_BUTTON (col-2), GRADIENT_SLIDER
+  (col-8), TRASH_BUTTON (col-2).
+
+  Row 6 — Selected-stop properties: EYEDROPPER_BUTTON (col-2), inner
+  column with Opacity / Location combos.
+
+  === Panel menu ===
+
+  Six entries across three groups: Reverse Gradient / Distribute Stops
+  Evenly / Reset Midpoints (gradient transformations); Open Gradient
+  Library / Save Gradient Library (library management); Close Gradient
+  (panel management).
+
+state:
+  type:
+    type: enum
+    values: [linear, radial, freeform]
+    default: linear
+    description: >
+      Working gradient type. Phase-1 is panel-local; Phase 5 persists
+      to the active gradient on selection.
+  angle:
+    type: number
+    default: 0
+    description: >
+      Working gradient angle in degrees, -180..+180. Linear/radial only.
+  aspect_ratio:
+    type: number
+    default: 100
+    description: >
+      Working aspect ratio as a percentage, 1-1000. 100 = isotropic
+      (circle for radial). Linear/radial only.
+  method:
+    type: enum
+    values: [classic, smooth, points, lines]
+    default: classic
+    description: >
+      Working interpolation/topology method. classic / smooth apply to
+      linear/radial; points / lines apply to freeform. Smooth and
+      freeform topologies are pending_renderer.
+  dither:
+    type: bool
+    default: false
+    description: >
+      When true, the renderer applies sub-pixel dithering to reduce
+      visible banding. status: pending_renderer in all four apps.
+  stroke_sub_mode:
+    type: enum
+    values: [within, along, across]
+    default: within
+    description: >
+      How a stroke gradient maps onto the path. along/across are
+      pending_renderer; within renders natively.
+  stops:
+    type: list
+    default: [
+      { color: "#000000", opacity: 100, location: 0,   midpoint_to_next: 50 },
+      { color: "#ffffff", opacity: 100, location: 100, midpoint_to_next: 50 },
+    ]
+    description: >
+      Working stops for linear/radial. Phase-1 is panel-local; Phase 5
+      persists to the active gradient on the selection.
+  selected_stop_index:
+    type: number
+    default: 0
+    description: >
+      Index of the selected stop in `stops`. -1 when nothing selected.
+      Shared with the on-canvas Gradient tool (see GRADIENT_TOOL.md).
+  selected_midpoint_index:
+    type: number
+    default: -1
+    description: >
+      Index of the selected midpoint (the midpoint between stops
+      [i] and [i+1]). -1 when nothing selected. Mutually exclusive
+      with selected_stop_index.
+  active_library_id:
+    type: string
+    default: "neutrals"
+    description: >
+      The currently-selected library id (filename stem). Defaults to
+      one of the bundled seed libraries so the tile strip is non-empty
+      when the panel opens. Phase 9 wires the dynamic list of all
+      discovered libraries.
+  thumbnail_size:
+    type: enum
+    values: [small, medium, large]
+    default: large
+    description: >
+      Tile size for the preset strip. Three thumbnail sizes ship in
+      v1; the two list-view items in DOCUMENT_LIBRARY_SIZE_DROPDOWN
+      are status: pending_renderer.
+  preview_state:
+    type: bool
+    default: false
+    description: >
+      True when the active attribute (fill or stroke per
+      state.fill_on_top) is solid or none and the panel is showing a
+      seeded default gradient. Cleared on first edit (which promotes
+      the attribute to a gradient — see Phase 5 fill-type coupling).
+
+menu:
+  - label: "Reverse Gradient"
+    action: gradient_reverse
+    enabled_when: "false"
+    description: >
+      Phase 5 — flips stops end-to-end. Disabled until the action
+      pipeline is wired.
+  - label: "Distribute Stops Evenly"
+    action: gradient_distribute_stops
+    enabled_when: "false"
+  - label: "Reset Midpoints"
+    action: gradient_reset_midpoints
+    enabled_when: "false"
+  - separator
+  - label: "Open Gradient Library"
+    type: submenu
+    dynamic: true
+    description: >
+      Submenu listing all available gradient libraries discovered from
+      workspace/gradients/*.json files. Selecting a library switches
+      the active library in DOCUMENT_LIBRARY_DROPDOWN so its tiles
+      populate the preset strip. Mirrors the Swatches panel Open
+      Swatch Library submenu behavior.
+  - label: "Save Gradient Library"
+    action: gradient_save_library
+    enabled_when: "false"
+    description: >
+      Phase 9 — opens a Save Gradient Library dialog. Deferred
+      pending a Save dialog and file-writing pipeline per app.
+  - separator
+  - label: "Close Gradient"
+    action: close_panel
+    params: { panel: gradient }
+
+content:
+  type: container
+  id: grad_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # ── Row 1: Presets header ──
+    - type: row
+      id: grad_presets_row
+      children:
+        - { type: text, content: "Presets:", col: 2 }
+        - id: grad_library_dropdown
+          type: select
+          col: 8
+          summary: "Active gradient library"
+          description: >
+            Single-select. Phase 3 ships three seed libraries; Phase 9
+            wires a dynamic list discovered from
+            workspace/gradients/*.json plus the per-document Document
+            Library.
+          bind: { value: "panel.active_library_id" }
+          options:
+            - { value: neutrals,      label: "Neutrals" }
+            - { value: spectrums,     label: "Spectrums" }
+            - { value: simple_radial, label: "Simple Radial" }
+        - id: grad_size_dropdown
+          type: select
+          col: 2
+          summary: "Thumbnail size"
+          bind: { value: "panel.thumbnail_size" }
+          options:
+            - { value: small,         label: "Small Thumbnail View" }
+            - { value: medium,        label: "Medium Thumbnail View" }
+            - { value: large,         label: "Large Thumbnail View" }
+            - separator
+            - { value: small_list,    label: "Small List View" }
+            - { value: large_list,    label: "Large List View" }
+
+    # ── Row 2: Tile strip ──
+    # foreach over the active library's gradients. Tile size is
+    # bound to panel.thumbnail_size; Phase 3 ships small/medium/large.
+    # Click applies the tile's gradient to the active attribute via
+    # six `set` effects — each hits the subscription chain and
+    # ultimately flows to element.fill_gradient / stroke_gradient.
+    - type: container
+      id: grad_tiles_row
+      layout: wrap
+      style: { gap: 2 }
+      foreach:
+        source: "data.gradient_libraries[panel.active_library_id].gradients"
+        as: g
+      do:
+        type: gradient_tile
+        bind: { gradient: "g" }
+        size: "{{panel.thumbnail_size}}"
+        behavior:
+          - event: click
+            effects:
+              - set: { gradient_type: "g.type" }
+              - set: { gradient_angle: "g.angle" }
+              - set: { gradient_aspect_ratio: "g.aspect_ratio" }
+              - set: { gradient_method: "g.method" }
+              - set: { gradient_dither: "g.dither" }
+              - set: { gradient_stroke_sub_mode: "g.stroke_sub_mode" }
+
+    # ── Row 3: Separator ──
+    - { type: separator }
+
+    # ── Row 4: Fill/stroke widget + middle block ──
+    - type: row
+      id: grad_main_row
+      children:
+        - id: grad_fill_stroke_widget
+          type: fill_stroke_widget
+          col: 3
+
+        - type: container
+          col: 9
+          layout: column
+          style: { gap: 4 }
+          children:
+
+            # Type
+            - type: row
+              children:
+                - { type: text, content: "Type:", col: 3 }
+                - type: container
+                  col: 9
+                  layout: row
+                  children:
+                    - id: grad_linear_button
+                      type: icon_button
+                      summary: "Linear"
+                      icon: gradient_linear
+                      bind: { checked: "panel.type == 'linear'" }
+                      behavior:
+                        - event: click
+                          effects:
+                            - set: { gradient_type: '"linear"' }
+                    - id: grad_radial_button
+                      type: icon_button
+                      summary: "Radial"
+                      icon: gradient_radial
+                      bind: { checked: "panel.type == 'radial'" }
+                      behavior:
+                        - event: click
+                          effects:
+                            - set: { gradient_type: '"radial"' }
+                    - id: grad_freeform_button
+                      type: icon_button
+                      summary: "Freeform"
+                      icon: gradient_freeform
+                      enabled_when: "false"  # status: pending_renderer
+                      bind: { checked: "panel.type == 'freeform'" }
+
+            # Stroke sub-mode
+            - type: row
+              children:
+                - { type: text, content: "Stroke:", col: 3 }
+                - type: container
+                  col: 9
+                  layout: row
+                  children:
+                    - id: grad_stroke_within_button
+                      type: icon_button
+                      summary: "Within stroke"
+                      icon: gradient_within_stroke
+                      bind: { checked: "panel.stroke_sub_mode == 'within'" }
+                    - id: grad_stroke_along_button
+                      type: icon_button
+                      summary: "Along stroke"
+                      icon: gradient_along_stroke
+                      enabled_when: "false"  # status: pending_renderer
+                      bind: { checked: "panel.stroke_sub_mode == 'along'" }
+                    - id: grad_stroke_across_button
+                      type: icon_button
+                      summary: "Across stroke"
+                      icon: gradient_across_stroke
+                      enabled_when: "false"  # status: pending_renderer
+                      bind: { checked: "panel.stroke_sub_mode == 'across'" }
+
+            # Angle
+            - type: row
+              children:
+                - { type: text, content: "∠", col: 3 }
+                - id: grad_angle_combo
+                  type: combo_box
+                  col: 9
+                  summary: "Gradient angle (degrees)"
+                  bind: { value: "panel.angle" }
+                  min: -180
+                  max: 180
+                  options: [-135, -90, -45, 0, 45, 90, 135, 180]
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_angle: "value" }
+
+            # Aspect ratio
+            - type: row
+              children:
+                - { type: text, content: "↕", col: 3 }
+                - id: grad_aspect_combo
+                  type: combo_box
+                  col: 9
+                  summary: "Aspect ratio (percentage)"
+                  bind: { value: "panel.aspect_ratio" }
+                  min: 1
+                  max: 1000
+                  options: [25, 50, 75, 100, 150, 200, 400]
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_aspect_ratio: "value" }
+
+            # Method
+            - type: row
+              children:
+                - { type: text, content: "Method:", col: 3 }
+                - id: grad_method_dropdown
+                  type: select
+                  col: 9
+                  bind: { value: "panel.method" }
+                  options:
+                    - { value: classic, label: "Classic" }
+                    - { value: smooth,  label: "Smooth" }
+                    - { value: points,  label: "Points (freeform)" }
+                    - { value: lines,   label: "Lines (freeform)" }
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_method: "value" }
+
+            # Dither
+            - type: row
+              children:
+                - { type: text, content: "", col: 3 }
+                - id: grad_dither_checkbox
+                  type: checkbox
+                  col: 9
+                  label: "Dither"
+                  bind: { checked: "panel.dither" }
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_dither: "checked" }
+
+    # ── Row 5: Stops editor ──
+    - type: row
+      id: grad_stops_row
+      children:
+        - id: grad_add_to_swatches_button
+          type: icon_button
+          col: 2
+          summary: "Add to Swatches"
+          icon: add_to_swatches
+        - id: grad_slider
+          type: gradient_slider
+          col: 8
+          bind:
+            stops: "panel.stops"
+            selected_stop_index: "panel.selected_stop_index"
+            selected_midpoint_index: "panel.selected_midpoint_index"
+        - id: grad_trash_button
+          type: icon_button
+          col: 2
+          summary: "Delete selected stop"
+          icon: trash
+
+    # ── Row 6: Selected-stop properties ──
+    - type: row
+      id: grad_stop_props_row
+      children:
+        - id: grad_eyedropper_button
+          type: icon_button
+          col: 2
+          summary: "Pick color for selected stop"
+          icon: eyedropper
+        - type: container
+          col: 10
+          layout: column
+          style: { gap: 4 }
+          children:
+            - type: row
+              children:
+                - { type: text, content: "Opacity:", col: 3 }
+                - id: grad_stop_opacity_combo
+                  type: combo_box
+                  col: 9
+                  summary: "Selected stop opacity (percentage)"
+                  bind: { value: "panel.stops[panel.selected_stop_index].opacity" }
+                  min: 0
+                  max: 100
+                  options: [0, 25, 50, 75, 100]
+            - type: row
+              children:
+                - { type: text, content: "Location:", col: 3 }
+                - id: grad_stop_location_combo
+                  type: combo_box
+                  col: 9
+                  summary: "Selected stop location (percentage)"
+                  bind: { value: "panel.stops[panel.selected_stop_index].location" }
+                  min: 0
+                  max: 100

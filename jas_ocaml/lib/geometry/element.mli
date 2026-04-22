@@ -99,6 +99,51 @@ val arrowhead_of_string : string -> arrowhead
 (** Convert an arrowhead enum to its name string. *)
 val string_of_arrowhead : arrowhead -> string
 
+(** Gradient type. See transcripts/GRADIENT.md §Gradient types. *)
+type gradient_type = Gradient_linear | Gradient_radial | Gradient_freeform
+
+type gradient_method = Method_classic | Method_smooth | Method_points | Method_lines
+
+type stroke_sub_mode = Sub_mode_within | Sub_mode_along | Sub_mode_across
+
+type gradient_stop = {
+  stop_color : string;
+  stop_opacity : float;
+  stop_location : float;
+  stop_midpoint_to_next : float;
+}
+
+type gradient_node = {
+  node_x : float;
+  node_y : float;
+  node_color : string;
+  node_opacity : float;
+  node_spread : float;
+}
+
+type gradient = {
+  gtype : gradient_type;
+  gangle : float;
+  gaspect_ratio : float;
+  gmethod : gradient_method;
+  gdither : bool;
+  gstroke_sub_mode : stroke_sub_mode;
+  gstops : gradient_stop list;
+  gnodes : gradient_node list;
+}
+
+val default_gradient : gradient
+
+val gradient_type_to_string : gradient_type -> string
+val gradient_type_of_string : string -> gradient_type
+val gradient_method_to_string : gradient_method -> string
+val gradient_method_of_string : string -> gradient_method
+val stroke_sub_mode_to_string : stroke_sub_mode -> string
+val stroke_sub_mode_of_string : string -> stroke_sub_mode
+
+val gradient_to_json : gradient -> Yojson.Safe.t
+val gradient_of_json : Yojson.Safe.t -> gradient
+
 (** SVG fill presentation attribute. *)
 type fill = { fill_color : color; fill_opacity : float }
 
@@ -250,6 +295,7 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      stroke_gradient : gradient option;
     }
   | Rect of {
       x : float; y : float;
@@ -263,6 +309,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -274,6 +322,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -286,6 +336,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Polyline of {
       points : (float * float) list;
@@ -297,6 +349,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Polygon of {
       points : (float * float) list;
@@ -308,6 +362,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Path of {
       d : path_command list;
@@ -320,6 +376,8 @@ type element =
       visibility : visibility;
       blend_mode : blend_mode;
       mask : mask option;
+      fill_gradient : gradient option;
+      stroke_gradient : gradient option;
     }
   | Text of {
       x : float; y : float;
@@ -552,6 +610,12 @@ val with_transform_translated : dx:float -> dy:float -> element -> element
 
 val with_fill : element -> fill option -> element
 val with_stroke : element -> stroke option -> element
+
+(** Phase 5: replace the optional gradient on the element's fill or
+    stroke. Pass [None] to clear. Element variants without fill/stroke
+    return unchanged. *)
+val with_fill_gradient : element -> gradient option -> element
+val with_stroke_gradient : element -> gradient option -> element
 
 (** Return a copy of [elem] with its opacity mask replaced. Preserves
     every other field. See OPACITY.md §Document model. *)

@@ -815,6 +815,8 @@ mod tests {
             stroke: Some(crate::geometry::element::Stroke::new(Color::BLACK, 1.0)),
             width_points: vec![],
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         if let Some(children) = doc.layers[0].children_mut() {
             children.push(Rc::new(path));

@@ -7,6 +7,7 @@ from geometry.element import (
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
     with_fill, with_stroke,
+    Gradient, GradientStop, GradientNode, GradientType, GradientMethod, StrokeSubMode,
 )
 
 
@@ -818,6 +819,91 @@ class MaskTest(absltest.TestCase):
         m = Mask(subtree=Rect(x=0, y=0, width=10, height=10))
         with self.assertRaises(AttributeError):
             m.clip = False
+
+    # Phase 1: gradient JSON round-trip.
+
+    def test_gradient_roundtrip_linear(self):
+        g = Gradient(
+            type=GradientType.LINEAR, angle=45, aspect_ratio=100,
+            method=GradientMethod.CLASSIC, dither=False,
+            stroke_sub_mode=StrokeSubMode.WITHIN,
+            stops=(
+                GradientStop(color="#ff0000", opacity=100, location=0,   midpoint_to_next=50),
+                GradientStop(color="#0000ff", opacity=100, location=100, midpoint_to_next=50),
+            ),
+        )
+        self.assertEqual(Gradient.from_json(g.to_json()), g)
+
+    def test_gradient_roundtrip_radial_midpoints_method_dither(self):
+        g = Gradient(
+            type=GradientType.RADIAL, angle=0, aspect_ratio=200,
+            method=GradientMethod.SMOOTH, dither=True,
+            stroke_sub_mode=StrokeSubMode.ACROSS,
+            stops=(
+                GradientStop(color="#ffff00", opacity=100, location=0,   midpoint_to_next=30),
+                GradientStop(color="#800080", opacity=50,  location=50,  midpoint_to_next=70),
+                GradientStop(color="#000000", opacity=0,   location=100, midpoint_to_next=50),
+            ),
+        )
+        self.assertEqual(Gradient.from_json(g.to_json()), g)
+
+    def test_gradient_roundtrip_freeform(self):
+        g = Gradient(
+            type=GradientType.FREEFORM, method=GradientMethod.POINTS,
+            nodes=(
+                GradientNode(x=0.25, y=0.25, color="#ff0000", opacity=100, spread=30),
+                GradientNode(x=0.75, y=0.75, color="#0000ff", opacity=100, spread=25),
+            ),
+        )
+        self.assertEqual(Gradient.from_json(g.to_json()), g)
+
+    def test_gradient_wire_format_strings(self):
+        g = Gradient()
+        j = g.to_json()
+        self.assertEqual(j["type"], "linear")
+        self.assertEqual(j["method"], "classic")
+        self.assertEqual(j["stroke_sub_mode"], "within")
+
+    def test_gradient_stop_default_midpoint(self):
+        # midpoint_to_next defaults to 50 when absent on parse.
+        parsed = Gradient.from_json({
+            "type": "linear", "angle": 0, "aspect_ratio": 100,
+            "method": "classic", "dither": False, "stroke_sub_mode": "within",
+            "stops": [{"color": "#ff0000", "opacity": 100, "location": 25}],
+            "nodes": [],
+        })
+        self.assertEqual(parsed.stops[0].midpoint_to_next, 50.0)
+
+    # Phase 1b: per-element gradient fields.
+
+    def test_rect_fill_gradient_field(self):
+        g = Gradient(
+            type=GradientType.LINEAR, angle=45, aspect_ratio=100,
+            stops=(
+                GradientStop(color="#ff0000", opacity=100, location=0,   midpoint_to_next=50),
+                GradientStop(color="#0000ff", opacity=100, location=100, midpoint_to_next=50),
+            ),
+        )
+        r = Rect(x=0, y=0, width=10, height=10, fill_gradient=g)
+        self.assertEqual(r.fill_gradient, g)
+        self.assertIsNone(r.stroke_gradient)
+        # Default: both fields None when not specified.
+        r2 = Rect(x=0, y=0, width=10, height=10)
+        self.assertIsNone(r2.fill_gradient)
+        self.assertIsNone(r2.stroke_gradient)
+
+    def test_circle_stroke_gradient_field(self):
+        g = Gradient(type=GradientType.RADIAL)
+        c = Circle(cx=0, cy=0, r=10, stroke_gradient=g)
+        self.assertEqual(c.stroke_gradient, g)
+        self.assertIsNone(c.fill_gradient)
+
+    def test_line_only_has_stroke_gradient(self):
+        # Line has no fill, so it only gets stroke_gradient.
+        from dataclasses import fields
+        line_field_names = {f.name for f in fields(Line)}
+        self.assertIn("stroke_gradient", line_field_names)
+        self.assertNotIn("fill_gradient", line_field_names)
 
 
 if __name__ == "__main__":

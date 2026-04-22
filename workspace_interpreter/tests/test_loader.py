@@ -71,6 +71,31 @@ class TestLoadSubdirectories:
         data = load_workspace(workspace_path)
         assert "swatch_libraries" in data
 
+    def test_load_gradient_libraries(self, workspace_path):
+        import os
+        gradients_dir = os.path.join(workspace_path, "gradients")
+        if not os.path.isdir(gradients_dir):
+            pytest.skip("gradients/ directory not present on this branch")
+        data = load_workspace(workspace_path)
+        assert "gradient_libraries" in data
+        libs = data["gradient_libraries"]
+        # Phase 3 ships three seed libraries.
+        assert "neutrals" in libs
+        assert "spectrums" in libs
+        assert "simple_radial" in libs
+        # Each library carries a name + description + non-empty gradients list.
+        for name, lib in libs.items():
+            assert "name" in lib, name
+            assert "description" in lib, name
+            assert "gradients" in lib, name
+            assert len(lib["gradients"]) > 0, name
+        # Spot-check a gradient shape against GRADIENT.md §Document model.
+        first = libs["neutrals"]["gradients"][0]
+        for key in ("name", "type", "stops"):
+            assert key in first
+        for stop_key in ("color", "opacity", "location"):
+            assert stop_key in first["stops"][0]
+
 
 class TestResolveIncludes:
     def test_no_include_keys_remain(self, workspace_path):

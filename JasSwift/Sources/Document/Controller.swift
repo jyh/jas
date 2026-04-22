@@ -953,6 +953,32 @@ public class Controller {
         model.document = doc
     }
 
+    /// Set the fillGradient of every element in the current selection.
+    /// Phase 5 — pass `nil` to demote (clear gradient; existing solid
+    /// fill remains).
+    public func setSelectionFillGradient(_ gradient: Gradient?) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withFillGradient(elem, fillGradient: gradient)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
+    /// Set the strokeGradient of every element in the current selection.
+    public func setSelectionStrokeGradient(_ gradient: Gradient?) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withStrokeGradient(elem, strokeGradient: gradient)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
     // ── Opacity mask lifecycle (OPACITY.md § States) ───────────
 
     /// Create an opacity mask on every selected element that does not

@@ -162,6 +162,8 @@ let expand (cs : compound_shape) precision : element list =
         visibility = cs.visibility;
         blend_mode = cs.blend_mode;
         mask = None;
+        fill_gradient = None;
+        stroke_gradient = None;
       })
   ) ps
 

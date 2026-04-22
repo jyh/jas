@@ -377,6 +377,42 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Set the `fill_gradient` field of every selected element to the
+    /// given value. Phase 5 — used by `apply_gradient_panel_to_selection`.
+    /// Pass `None` to clear (demote to solid; the existing `fill` value
+    /// remains as the demote-target color per GRADIENT.md §Fill-type
+    /// coupling).
+    pub fn set_selection_fill_gradient(model: &mut Model, gradient: Option<Box<crate::geometry::element::Gradient>>) {
+        use crate::geometry::element::with_fill_gradient;
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    with_fill_gradient(elem, gradient.clone()),
+                );
+            }
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Set the `stroke_gradient` field of every selected element.
+    pub fn set_selection_stroke_gradient(model: &mut Model, gradient: Option<Box<crate::geometry::element::Gradient>>) {
+        use crate::geometry::element::with_stroke_gradient;
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    with_stroke_gradient(elem, gradient.clone()),
+                );
+            }
+        }
+        model.set_document(new_doc);
+    }
+
     // ── Opacity mask lifecycle (OPACITY.md § States) ───────────
 
     /// Create an opacity mask on every selected element. The mask
@@ -1118,6 +1154,8 @@ impl Controller {
                         fill,
                         stroke,
                         common: common.clone(),
+                                            fill_gradient: None,
+                        stroke_gradient: None,
                     })));
                 }
             }
@@ -1754,6 +1792,8 @@ mod tests {
             x, y, width: w, height: h, rx: 0.0, ry: 0.0,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -1763,6 +1803,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: vec![],
             common: CommonProps::default(),
+                    stroke_gradient: None,
         })
     }
 
@@ -2183,10 +2224,14 @@ mod tests {
         let r1 = Element::Rect(RectElem {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(red), stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let r2 = Element::Rect(RectElem {
             x: 5.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(blue), stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
@@ -2215,6 +2260,8 @@ mod tests {
         let unpainted_rect = |x: f64| Rc::new(Element::Rect(RectElem {
             x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: None, stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         }));
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
@@ -2601,6 +2648,8 @@ mod tests {
             cx, cy, r,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -2609,6 +2658,8 @@ mod tests {
             cx, cy, rx, ry,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 

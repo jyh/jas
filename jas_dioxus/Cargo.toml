@@ -33,6 +33,7 @@ dioxus = { version = "0.6", features = ["web"], optional = true }
 web-sys = { version = "0.3", optional = true, features = [
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    "CanvasGradient",
     "ImageData",
     "MouseEvent",
     "KeyboardEvent",

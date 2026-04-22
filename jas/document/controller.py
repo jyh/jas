@@ -15,10 +15,12 @@ from document.document import (
     selection_all, selection_partial,
 )
 from geometry.element import (
-    Element, Fill, Group, Layer, Mask, Path, Stroke, StrokeWidthPoint, Visibility,
+    Element, Fill, Gradient, Group, Layer, Mask, Path, Stroke, StrokeWidthPoint, Visibility,
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
+    with_fill_gradient as _with_fill_gradient,
+    with_stroke_gradient as _with_stroke_gradient,
     with_width_points as _with_width_points,
     with_mask as _with_mask,
     element_fill as _element_fill, element_stroke as _element_stroke,
@@ -557,6 +559,32 @@ class Controller:
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
             new_elem = _with_stroke(elem, stroke)
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    def set_selection_fill_gradient(self, gradient: Gradient | None) -> None:
+        """Phase 5: set the fill_gradient of all selected elements.
+
+        Pass None to clear (demote to solid; the underlying solid Fill
+        is left untouched as the demote-target color).
+        """
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = _with_fill_gradient(elem, gradient)
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    def set_selection_stroke_gradient(self, gradient: Gradient | None) -> None:
+        """Phase 5: set the stroke_gradient of all selected elements."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = _with_stroke_gradient(elem, gradient)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.document = new_doc

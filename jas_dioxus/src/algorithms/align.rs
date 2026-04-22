@@ -520,6 +520,8 @@ mod tests {
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -529,6 +531,8 @@ mod tests {
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
