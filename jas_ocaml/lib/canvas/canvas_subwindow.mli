@@ -39,8 +39,15 @@ val create :
   ?bbox:bounding_box ->
   GPack.notebook -> canvas_subwindow
 
-(** Return the Cairo operator that composites a [mask] onto the
-    masked element's pixels during rendering. OPACITY.md \167Rendering,
-    phase 1. Returns [None] when the mask is disabled or the
-    config isn't yet supported ([clip: false]). *)
-val mask_composite_op : Element.mask -> Cairo.operator option
+(** How the mask subtree's rendered alpha is applied to the
+    element. Selected by [mask_plan] from the mask's [clip] and
+    [invert] fields; consumed by the renderer's
+    [draw_element_with_mask] dispatch. OPACITY.md \167Rendering. *)
+type mask_plan =
+  | Clip_in
+  | Clip_out
+  | Reveal_outside_bbox
+
+(** Pick a [mask_plan] for the mask, or [None] when the mask is
+    inactive ([disabled: true]). *)
+val mask_plan : Element.mask -> mask_plan option
