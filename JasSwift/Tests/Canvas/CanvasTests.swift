@@ -262,3 +262,40 @@ import AppKit
         #expect(cgBlendMode(m) == expected)
     }
 }
+
+// MARK: - maskCompositeBlendMode (Track C phase 1)
+
+private func testMask(clip: Bool, invert: Bool, disabled: Bool) -> Mask {
+    Mask(
+        subtreeElement: .group(Group(children: [])),
+        clip: clip,
+        invert: invert,
+        disabled: disabled,
+        linked: true,
+        unlinkTransform: nil
+    )
+}
+
+@Test func maskCompositeBlendModeClipNotInvertedIsDestinationIn() {
+    #expect(maskCompositeBlendMode(testMask(clip: true, invert: false, disabled: false)) == .destinationIn)
+}
+
+@Test func maskCompositeBlendModeClipInvertedIsDestinationOut() {
+    #expect(maskCompositeBlendMode(testMask(clip: true, invert: true, disabled: false)) == .destinationOut)
+}
+
+@Test func maskCompositeBlendModeDisabledIsNil() {
+    // disabled overrides both clip and invert: falls back to no
+    // mask rendering per OPACITY.md §States.
+    #expect(maskCompositeBlendMode(testMask(clip: true, invert: false, disabled: true)) == nil)
+    #expect(maskCompositeBlendMode(testMask(clip: true, invert: true, disabled: true)) == nil)
+    #expect(maskCompositeBlendMode(testMask(clip: false, invert: false, disabled: true)) == nil)
+}
+
+@Test func maskCompositeBlendModeNoClipIsNilPhase1() {
+    // clip=false (element visible outside the mask shape) needs a
+    // two-pass composite; not yet supported — falls back to no
+    // mask. Phase 2 of Track C will handle this.
+    #expect(maskCompositeBlendMode(testMask(clip: false, invert: false, disabled: false)) == nil)
+    #expect(maskCompositeBlendMode(testMask(clip: false, invert: true, disabled: false)) == nil)
+}
