@@ -581,3 +581,77 @@ def test_artboard_options_toggle_fade():
     )
     assert model.document.artboard_options.fade_region_outside_artboard is False
     assert model.document.artboard_options.update_while_dragging is True
+
+
+# ---------------------------------------------------------------------------
+# Opacity panel — new_masks_* State_store plumbing (Track A)
+# ---------------------------------------------------------------------------
+
+
+def _opacity_test_addr(layout):
+    """Return a PanelAddr pointing at the first panel in the first
+    group of the right dock — sufficient for close_panel dispatch; the
+    Opacity toggle / make-mask dispatches don't consult ``addr``."""
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    return PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=0), panel_idx=0)
+
+
+def test_opacity_toggle_new_masks_clipping_flips_store():
+    from workspace_interpreter.state_store import StateStore
+    from panels.panel_menu import set_opacity_store
+    layout = WorkspaceLayout.default_layout()
+    addr = _opacity_test_addr(layout)
+    store = StateStore()
+    store.init_panel("opacity_panel_content", {
+        "new_masks_clipping": True,
+        "new_masks_inverted": False,
+        "thumbnails_hidden": False,
+        "options_shown": False,
+    })
+    set_opacity_store(store)
+    try:
+        # Defaults (before any toggle): checked reflects stored True.
+        assert panel_is_checked(PanelKind.OPACITY, "toggle_new_masks_clipping", layout) is True
+        panel_dispatch(PanelKind.OPACITY, "toggle_new_masks_clipping", addr, layout)
+        assert panel_is_checked(PanelKind.OPACITY, "toggle_new_masks_clipping", layout) is False
+        panel_dispatch(PanelKind.OPACITY, "toggle_new_masks_clipping", addr, layout)
+        assert panel_is_checked(PanelKind.OPACITY, "toggle_new_masks_clipping", layout) is True
+    finally:
+        set_opacity_store(None)
+
+
+def test_opacity_make_mask_reads_live_new_masks_flags():
+    from dataclasses import replace
+    from document.model import Model
+    from document.document import ElementSelection
+    from geometry.element import Rect, Layer
+    from workspace_interpreter.state_store import StateStore
+    from panels.panel_menu import set_opacity_store
+
+    layout = WorkspaceLayout.default_layout()
+    addr = _opacity_test_addr(layout)
+
+    # Seed the store with non-default flags so the dispatch can be
+    # shown to read the live values, not hardcoded spec defaults.
+    store = StateStore()
+    store.init_panel("opacity_panel_content", {
+        "new_masks_clipping": False,
+        "new_masks_inverted": True,
+    })
+    set_opacity_store(store)
+    try:
+        model = Model()
+        rect = Rect(x=0.0, y=0.0, width=10.0, height=10.0)
+        layer = Layer(name="L", children=(rect,))
+        model.document = replace(
+            model.document,
+            layers=(layer,),
+            selection=frozenset({ElementSelection.all((0, 0))}),
+        )
+        panel_dispatch(PanelKind.OPACITY, "make_opacity_mask", addr, layout, model=model)
+        mask = model.document.get_element((0, 0)).mask
+        assert mask is not None, "make_opacity_mask did not create a mask"
+        assert mask.clip is False
+        assert mask.invert is True
+    finally:
+        set_opacity_store(None)
