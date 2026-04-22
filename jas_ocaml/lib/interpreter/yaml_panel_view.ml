@@ -1474,11 +1474,36 @@ and render_placeholder ~packing el =
       frame#set_shadow_type `OUT
     else
       frame#set_shadow_type `NONE;
-    ignore (eb#event#connect#button_press ~callback:(fun _evt ->
+    ignore (eb#event#connect#button_press ~callback:(fun evt ->
       match !_get_model_ref () with
       | None -> false
       | Some m ->
-        if is_mask_preview then begin
+        let modifiers = Gdk.Convert.modifier (GdkEvent.Button.state evt) in
+        let shift = List.mem `SHIFT modifiers in
+        let alt = List.mem `MOD1 modifiers in
+        if is_mask_preview && shift then begin
+          (* Shift-click: toggle mask.disabled on every selected
+             mask. OPACITY.md \167Preview interactions. *)
+          let doc = m#document in
+          if Controller.selection_has_mask doc then begin
+            let ctrl = new Controller.controller ~model:m () in
+            ctrl#toggle_mask_disabled_on_selection;
+            !_rerender_layers ()
+          end
+        end else if is_mask_preview && alt then begin
+          (* Alt-click: toggle mask isolation — the canvas hides
+             everything except the first selected element's mask
+             subtree while isolation is active. *)
+          let doc = m#document in
+          (match m#mask_isolation_path with
+           | Some _ -> m#set_mask_isolation_path None
+           | None ->
+             if Controller.selection_has_mask doc then
+               match Document.PathMap.min_binding_opt doc.Document.selection with
+               | Some (path, _) -> m#set_mask_isolation_path (Some path)
+               | None -> ());
+          !_rerender_layers ()
+        end else if is_mask_preview then begin
           let doc = m#document in
           if Controller.selection_has_mask doc then begin
             let first_path = match Document.PathMap.min_binding_opt doc.Document.selection with

@@ -1777,8 +1777,20 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.fill cr;
         (* Layer 2: artboard fills *)
         draw_artboard_fills cr current_doc;
-        (* Layer 3: document element tree *)
-        Array.iter (draw_element cr) current_doc.Document.layers;
+        (* Layer 3: document element tree. In mask-isolation mode
+           (OPACITY.md \167Preview interactions), render only the
+           mask subtree of the isolated element — everything else
+           on the canvas is hidden until the user exits isolation. *)
+        (match model#mask_isolation_path with
+         | Some path ->
+           (try
+              let elem = Document.get_element current_doc path in
+              match Element.get_mask elem with
+              | Some mask -> draw_element cr mask.Element.subtree
+              | None -> ()
+            with _ -> ())
+         | None ->
+           Array.iter (draw_element cr) current_doc.Document.layers);
         (* Layer 4: fade overlay *)
         draw_fade_overlay cr current_doc ~canvas_w:w ~canvas_h:h;
         (* Layer 5: artboard borders *)

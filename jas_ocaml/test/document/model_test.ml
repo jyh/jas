@@ -90,5 +90,18 @@ let () =
          | Jas.Model.Content -> Alcotest.fail "expected Mask");
         m#set_editing_target Jas.Model.Content;
         assert (m#editing_target = Jas.Model.Content));
+
+      Alcotest.test_case "defaults to no mask isolation" `Quick (fun () ->
+        (* Mask-isolation is entered explicitly via Alt-click on
+           MASK_PREVIEW. OPACITY.md section Preview interactions. *)
+        let m = Jas.Model.create () in
+        assert (m#mask_isolation_path = None));
+
+      Alcotest.test_case "mask isolation path round-trips" `Quick (fun () ->
+        let m = Jas.Model.create () in
+        m#set_mask_isolation_path (Some [0; 3]);
+        assert (m#mask_isolation_path = Some [0; 3]);
+        m#set_mask_isolation_path None;
+        assert (m#mask_isolation_path = None));
     ];
   ]
