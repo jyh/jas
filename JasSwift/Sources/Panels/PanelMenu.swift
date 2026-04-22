@@ -1,23 +1,17 @@
 /// Unified panel menu lookup functions.
 ///
-/// Each panel kind delegates to its own module for label, menu items,
-/// dispatch, and checked-state queries.
+/// Each panel kind delegates to its own module for menu items, dispatch,
+/// and checked-state queries. Labels are read from the workspace YAML
+/// `summary:` field of the panel's content spec.
 
-/// Human-readable label for a panel kind.
+/// Human-readable label for a panel kind, read from the workspace YAML
+/// `summary:` field of the panel's content spec.
 public func panelLabel(_ kind: PanelKind) -> String {
-    switch kind {
-    case .layers: return LayersPanel.label
-    case .color: return ColorPanel.label
-    case .swatches: return SwatchesPanel.label
-    case .stroke: return StrokePanel.label
-    case .properties: return PropertiesPanel.label
-    case .character: return CharacterPanel.label
-    case .paragraph: return ParagraphPanel.label
-    case .artboards: return ArtboardsPanel.label
-    case .align: return AlignPanel.label
-    case .boolean: return BooleanPanel.label
-    case .opacity: return OpacityPanel.label
+    let contentId = panelKindToContentId(kind)
+    if let summary = WorkspaceData.load()?.panel(contentId)?["summary"] as? String {
+        return summary
     }
+    return contentId.replacingOccurrences(of: "_panel_content", with: "")
 }
 
 /// Menu items for a panel kind.

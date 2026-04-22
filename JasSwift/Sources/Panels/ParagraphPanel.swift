@@ -7,8 +7,6 @@
 /// corresponding paragraph attributes from the selection.
 
 public enum ParagraphPanel {
-    public static let label = "Paragraph"
-
     public static func menuItems() -> [PanelMenuItem] {
         [
             .toggle(label: "Hanging Punctuation", command: "toggle_hanging_punctuation"),

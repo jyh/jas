@@ -485,11 +485,11 @@ private func testLayout() -> WorkspaceLayout {
 // MARK: - Labels
 
 @Test func panelLabelValues() {
-    #expect(WorkspaceLayout.panelLabel(.layers) == "Layers")
-    #expect(WorkspaceLayout.panelLabel(.color) == "Color")
-    #expect(WorkspaceLayout.panelLabel(.swatches) == "Swatches")
-    #expect(WorkspaceLayout.panelLabel(.stroke) == "Stroke")
-    #expect(WorkspaceLayout.panelLabel(.properties) == "Properties")
+    #expect(panelLabel(.layers) == "Layers")
+    #expect(panelLabel(.color) == "Color")
+    #expect(panelLabel(.swatches) == "Swatches")
+    #expect(panelLabel(.stroke) == "Stroke")
+    #expect(panelLabel(.properties) == "Object properties")
 }
 
 @Test func panelGroupActivePanel() {
