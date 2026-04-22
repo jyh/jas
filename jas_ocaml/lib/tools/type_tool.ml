@@ -468,11 +468,12 @@ class type_tool = object (_self)
        Cairo.stroke cr;
        Cairo.set_dash cr [||]
      | _ -> ());
-    (* Editing overlay: selection rects, bounding box, caret *)
-    match _self#build_layout ctx with
-    | None -> ()
-    | Some (tr, lay) ->
-      let s = match session with Some s -> s | None -> assert false in
+    (* Editing overlay: selection rects, bounding box, caret. Only
+       drawn when there is both a rendered layout and an active
+       editing session; absent either, this frame has no overlay. *)
+    match _self#build_layout ctx, session with
+    | None, _ | _, None -> ()
+    | Some (tr, lay), Some s ->
       if Text_edit.has_selection s then begin
         let (lo, hi) = Text_edit.selection_range s in
         Cairo.set_source_rgba cr 0.529 0.808 0.980 0.45;
