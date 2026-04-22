@@ -4656,6 +4656,221 @@ struct TreeRow {
     visibility_str: String, // "preview", "outline", "invisible"
 }
 
+// ─── Tree view helpers ────────────────────────────────────────
+//
+// Hoisted from render_tree_view so the main function focuses on
+// interaction / rsx! assembly rather than data-flattening plumbing.
+// Pure utilities: no AppState, no closures — only element geometry,
+// paths, and icon lookup.
+
+use crate::geometry::element::{Element as GeoElement, Visibility};
+use std::collections::HashSet as TreeHashSet;
+
+const LAYER_COLORS: [&str; 9] = [
+    "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
+    "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
+];
+
+fn tree_icon_svg(icon_name: &str) -> String {
+    let ws = super::workspace::Workspace::load();
+    if let Some(ws) = &ws {
+        if let Some(icon_def) = ws.icons().get(icon_name) {
+            let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+            let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+            return format!(
+                r#"<svg viewBox="{viewbox}" width="14" height="14" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#
+            );
+        }
+    }
+    String::new()
+}
+
+fn tree_type_label(elem: &GeoElement) -> &'static str {
+    match elem {
+        GeoElement::Line(_) => "Line",
+        GeoElement::Rect(_) => "Rectangle",
+        GeoElement::Circle(_) => "Circle",
+        GeoElement::Ellipse(_) => "Ellipse",
+        GeoElement::Polyline(_) => "Polyline",
+        GeoElement::Polygon(_) => "Polygon",
+        GeoElement::Path(_) => "Path",
+        GeoElement::Text(_) => "Text",
+        GeoElement::TextPath(_) => "Text Path",
+        GeoElement::Group(_) => "Group",
+        GeoElement::Layer(_) => "Layer",
+        GeoElement::Live(v) => match v {
+            crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
+        },
+    }
+}
+
+/// Build a fitted-viewBox SVG thumbnail for a single element.
+/// Returns an empty string for zero-extent or degenerate bounds.
+fn tree_preview_svg(elem: &GeoElement) -> String {
+    let (x, y, w, h) = elem.bounds();
+    if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
+        return String::new();
+    }
+    let pad = (w.max(h) * 0.02).max(0.5);
+    let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
+    let inner = crate::geometry::svg::element_svg(elem, "");
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">{inner}</svg>"#
+    )
+}
+
+fn tree_elem_display_name(elem: &GeoElement) -> (String, bool) {
+    if let GeoElement::Layer(le) = elem {
+        if !le.name.is_empty() {
+            return (le.name.clone(), true);
+        }
+    }
+    (format!("<{}>", tree_type_label(elem)), false)
+}
+
+fn tree_flatten_rc_children(
+    children: &[std::rc::Rc<GeoElement>],
+    depth: usize,
+    path_prefix: &[usize],
+    layer_color: &str,
+    selected_paths: &TreeHashSet<Vec<usize>>,
+    collapsed_paths: &TreeHashSet<Vec<usize>>,
+    panel_selection: &[Vec<usize>],
+    renaming_path: &Option<Vec<usize>>,
+    rows: &mut Vec<TreeRow>,
+) {
+    for (i, child_rc) in children.iter().enumerate().rev() {
+        let child = child_rc.as_ref();
+        let mut path = path_prefix.to_vec();
+        path.push(i);
+
+        let is_container = child.is_group_or_layer();
+        let is_selected = selected_paths.contains(&path);
+        let is_renaming = renaming_path.as_ref() == Some(&path);
+        let is_layer = child.is_layer();
+        let is_collapsed = collapsed_paths.contains(&path);
+        let is_panel_selected = panel_selection.contains(&path);
+
+        let current_layer_color = if is_layer {
+            if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()].to_string() } else { layer_color.to_string() }
+        } else {
+            layer_color.to_string()
+        };
+
+        let vis_str = match child.visibility() {
+            Visibility::Preview => "preview",
+            Visibility::Outline => "outline",
+            Visibility::Invisible => "invisible",
+        };
+        let eye_icon = match child.visibility() {
+            Visibility::Preview => "eye_preview",
+            Visibility::Outline => "eye_outline",
+            Visibility::Invisible => "eye_invisible",
+        };
+        let lock_icon = if child.locked() { "lock_locked" } else { "lock_unlocked" };
+
+        let twirl_svg = if is_container {
+            tree_icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
+        } else {
+            String::new()
+        };
+        let (display_name, is_named) = tree_elem_display_name(child);
+
+        let preview_svg = tree_preview_svg(child);
+        rows.push(TreeRow {
+            path: path.clone(),
+            depth,
+            eye_icon_svg: tree_icon_svg(eye_icon),
+            lock_icon_svg: tree_icon_svg(lock_icon),
+            twirl_svg,
+            preview_svg,
+            is_container,
+            display_name,
+            is_named,
+            is_selected,
+            is_renaming,
+            is_layer,
+            is_collapsed,
+            is_panel_selected,
+            layer_color: current_layer_color.clone(),
+            visibility_str: vis_str.to_string(),
+        });
+
+        if !is_collapsed {
+            if let Some(grandchildren) = child.children() {
+                tree_flatten_rc_children(grandchildren, depth + 1, &path, &current_layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, rows);
+            }
+        }
+    }
+}
+
+fn tree_flatten_layers(
+    layers: &[GeoElement],
+    selected_paths: &TreeHashSet<Vec<usize>>,
+    collapsed_paths: &TreeHashSet<Vec<usize>>,
+    panel_selection: &[Vec<usize>],
+    renaming_path: &Option<Vec<usize>>,
+) -> Vec<TreeRow> {
+    let mut rows = Vec::new();
+    for (i, elem) in layers.iter().enumerate().rev() {
+        let path = vec![i];
+        let is_container = elem.is_group_or_layer();
+        let is_selected = selected_paths.contains(&path);
+        let is_renaming = renaming_path.as_ref() == Some(&path);
+        let is_layer = elem.is_layer();
+        let is_collapsed = collapsed_paths.contains(&path);
+        let is_panel_selected = panel_selection.contains(&path);
+        let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
+
+        let vis_str = match elem.visibility() {
+            Visibility::Preview => "preview",
+            Visibility::Outline => "outline",
+            Visibility::Invisible => "invisible",
+        };
+        let eye_icon = match elem.visibility() {
+            Visibility::Preview => "eye_preview",
+            Visibility::Outline => "eye_outline",
+            Visibility::Invisible => "eye_invisible",
+        };
+        let lock_icon = if elem.locked() { "lock_locked" } else { "lock_unlocked" };
+        let twirl_svg = if is_container {
+            tree_icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
+        } else {
+            String::new()
+        };
+        let (display_name, is_named) = tree_elem_display_name(elem);
+
+        let preview_svg = tree_preview_svg(elem);
+        rows.push(TreeRow {
+            path: path.clone(),
+            depth: 0,
+            eye_icon_svg: tree_icon_svg(eye_icon),
+            lock_icon_svg: tree_icon_svg(lock_icon),
+            twirl_svg,
+            preview_svg,
+            is_container,
+            display_name,
+            is_named,
+            is_selected,
+            is_renaming,
+            is_layer,
+            is_collapsed,
+            is_panel_selected,
+            layer_color: layer_color.clone(),
+            visibility_str: vis_str.to_string(),
+        });
+
+        if !is_collapsed {
+            if let Some(children) = elem.children() {
+                tree_flatten_rc_children(children, 1, &path, &layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, &mut rows);
+            }
+        }
+    }
+    rows
+}
+
+// ──────────────────────────────────────────────────────────────
+
 /// Render a tree_view widget showing the live document element tree.
 ///
 /// Reads the active document from AppState and renders each element as
@@ -4663,216 +4878,8 @@ struct TreeRow {
 /// and selection indicator. Clicking the eye cycles visibility; clicking
 /// the lock toggles lock state.
 fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
-    use crate::geometry::element::{Element as GeoElement, Visibility};
-    use std::collections::HashSet;
-
     let id = get_id(el);
     let style = build_style(el, ctx);
-
-    const LAYER_COLORS: [&str; 9] = [
-        "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
-        "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
-    ];
-
-    fn icon_svg(icon_name: &str) -> String {
-        let ws = super::workspace::Workspace::load();
-        if let Some(ws) = &ws {
-            if let Some(icon_def) = ws.icons().get(icon_name) {
-                let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
-                let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
-                return format!(
-                    r#"<svg viewBox="{viewbox}" width="14" height="14" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#
-                );
-            }
-        }
-        String::new()
-    }
-
-    fn type_label(elem: &GeoElement) -> &'static str {
-        match elem {
-            GeoElement::Line(_) => "Line",
-            GeoElement::Rect(_) => "Rectangle",
-            GeoElement::Circle(_) => "Circle",
-            GeoElement::Ellipse(_) => "Ellipse",
-            GeoElement::Polyline(_) => "Polyline",
-            GeoElement::Polygon(_) => "Polygon",
-            GeoElement::Path(_) => "Path",
-            GeoElement::Text(_) => "Text",
-            GeoElement::TextPath(_) => "Text Path",
-            GeoElement::Group(_) => "Group",
-            GeoElement::Layer(_) => "Layer",
-            GeoElement::Live(v) => match v {
-                crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
-            },
-        }
-    }
-
-    /// Build a fitted-viewBox SVG thumbnail for a single element.
-    /// Returns an empty string for zero-extent or degenerate bounds.
-    fn build_preview_svg(elem: &GeoElement) -> String {
-        let (x, y, w, h) = elem.bounds();
-        if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
-            return String::new();
-        }
-        let pad = (w.max(h) * 0.02).max(0.5);
-        let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
-        let inner = crate::geometry::svg::element_svg(elem, "");
-        format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">{inner}</svg>"#
-        )
-    }
-
-    fn elem_display_name(elem: &GeoElement) -> (String, bool) {
-        if let GeoElement::Layer(le) = elem {
-            if !le.name.is_empty() {
-                return (le.name.clone(), true);
-            }
-        }
-        (format!("<{}>", type_label(elem)), false)
-    }
-
-    fn flatten_rc_children(
-        children: &[std::rc::Rc<GeoElement>],
-        depth: usize,
-        path_prefix: &[usize],
-        layer_color: &str,
-        selected_paths: &HashSet<Vec<usize>>,
-        collapsed_paths: &HashSet<Vec<usize>>,
-        panel_selection: &[Vec<usize>],
-        renaming_path: &Option<Vec<usize>>,
-        rows: &mut Vec<TreeRow>,
-    ) {
-        for (i, child_rc) in children.iter().enumerate().rev() {
-            let child = child_rc.as_ref();
-            let mut path = path_prefix.to_vec();
-            path.push(i);
-
-            let is_container = child.is_group_or_layer();
-            let is_selected = selected_paths.contains(&path);
-            let is_renaming = renaming_path.as_ref() == Some(&path);
-            let is_layer = child.is_layer();
-            let is_collapsed = collapsed_paths.contains(&path);
-            let is_panel_selected = panel_selection.contains(&path);
-
-            let current_layer_color = if is_layer {
-                if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()].to_string() } else { layer_color.to_string() }
-            } else {
-                layer_color.to_string()
-            };
-
-            let vis_str = match child.visibility() {
-                Visibility::Preview => "preview",
-                Visibility::Outline => "outline",
-                Visibility::Invisible => "invisible",
-            };
-            let eye_icon = match child.visibility() {
-                Visibility::Preview => "eye_preview",
-                Visibility::Outline => "eye_outline",
-                Visibility::Invisible => "eye_invisible",
-            };
-            let lock_icon = if child.locked() { "lock_locked" } else { "lock_unlocked" };
-
-            let twirl_svg = if is_container {
-                icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
-            } else {
-                String::new()
-            };
-            let (display_name, is_named) = elem_display_name(child);
-
-            let preview_svg = build_preview_svg(child);
-            rows.push(TreeRow {
-                path: path.clone(),
-                depth,
-                eye_icon_svg: icon_svg(eye_icon),
-                lock_icon_svg: icon_svg(lock_icon),
-                twirl_svg,
-                preview_svg,
-                is_container,
-                display_name,
-                is_named,
-                is_selected,
-                is_renaming,
-                is_layer,
-                is_collapsed,
-                is_panel_selected,
-                layer_color: current_layer_color.clone(),
-                visibility_str: vis_str.to_string(),
-            });
-
-            // Only recurse if expanded
-            if !is_collapsed {
-                if let Some(grandchildren) = child.children() {
-                    flatten_rc_children(grandchildren, depth + 1, &path, &current_layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, rows);
-                }
-            }
-        }
-    }
-
-    fn flatten_layers(
-        layers: &[GeoElement],
-        selected_paths: &HashSet<Vec<usize>>,
-        collapsed_paths: &HashSet<Vec<usize>>,
-        panel_selection: &[Vec<usize>],
-        renaming_path: &Option<Vec<usize>>,
-    ) -> Vec<TreeRow> {
-        let mut rows = Vec::new();
-        for (i, elem) in layers.iter().enumerate().rev() {
-            let path = vec![i];
-            let is_container = elem.is_group_or_layer();
-            let is_selected = selected_paths.contains(&path);
-            let is_renaming = renaming_path.as_ref() == Some(&path);
-            let is_layer = elem.is_layer();
-            let is_collapsed = collapsed_paths.contains(&path);
-            let is_panel_selected = panel_selection.contains(&path);
-            let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
-
-            let vis_str = match elem.visibility() {
-                Visibility::Preview => "preview",
-                Visibility::Outline => "outline",
-                Visibility::Invisible => "invisible",
-            };
-            let eye_icon = match elem.visibility() {
-                Visibility::Preview => "eye_preview",
-                Visibility::Outline => "eye_outline",
-                Visibility::Invisible => "eye_invisible",
-            };
-            let lock_icon = if elem.locked() { "lock_locked" } else { "lock_unlocked" };
-            let twirl_svg = if is_container {
-                icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
-            } else {
-                String::new()
-            };
-            let (display_name, is_named) = elem_display_name(elem);
-
-            let preview_svg = build_preview_svg(elem);
-            rows.push(TreeRow {
-                path: path.clone(),
-                depth: 0,
-                eye_icon_svg: icon_svg(eye_icon),
-                lock_icon_svg: icon_svg(lock_icon),
-                twirl_svg,
-                preview_svg,
-                is_container,
-                display_name,
-                is_named,
-                is_selected,
-                is_renaming,
-                is_layer,
-                is_collapsed,
-                is_panel_selected,
-                layer_color: layer_color.clone(),
-                visibility_str: vis_str.to_string(),
-            });
-
-            // Only recurse if expanded
-            if !is_collapsed {
-                if let Some(children) = elem.children() {
-                    flatten_rc_children(children, 1, &path, &layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, &mut rows);
-                }
-            }
-        }
-        rows
-    }
 
     // Read search query from AppState (populated by the search input handler)
     let search_query: String = rctx.app.borrow().layers_search_query.to_lowercase();
@@ -4956,7 +4963,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             let renaming_path = st.layers_renaming.clone();
             let collapsed_paths = &st.layers_collapsed;
             let panel_selection = &st.layers_panel_selection;
-            flatten_layers(&doc.layers, &selected_paths, collapsed_paths, panel_selection, &renaming_path)
+            tree_flatten_layers(&doc.layers, &selected_paths, collapsed_paths, panel_selection, &renaming_path)
         } else {
             Vec::new()
         }
