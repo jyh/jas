@@ -93,6 +93,24 @@ def load_workspace(path: str) -> dict:
                 if isinstance(lib_data, dict):
                     swatch_libraries[lib_name] = lib_data
             data["swatch_libraries"] = swatch_libraries
+        # Load gradient libraries from gradients/ directory.
+        # Mirrors the swatch library loader. Each file is keyed by its
+        # filename stem (e.g. neutrals.json → "neutrals") and contains
+        # { name, description, gradients: [...] } per GRADIENT.md
+        # §Document libraries.
+        gradients_dir = os.path.join(path, "gradients")
+        if os.path.isdir(gradients_dir):
+            gradient_libraries = data.get("gradient_libraries", {})
+            for fname in sorted(os.listdir(gradients_dir)):
+                if not fname.endswith(".json"):
+                    continue
+                lib_name = os.path.splitext(fname)[0]
+                fpath = os.path.join(gradients_dir, fname)
+                with open(fpath, "r") as f:
+                    lib_data = json.load(f)
+                if isinstance(lib_data, dict):
+                    gradient_libraries[lib_name] = lib_data
+            data["gradient_libraries"] = gradient_libraries
     else:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
