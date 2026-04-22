@@ -5,9 +5,41 @@ whenever the document is replaced.
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from document.document import Document
 from geometry.element import Fill, RgbColor, Stroke
+
+
+@dataclass(frozen=True)
+class EditingTarget:
+    """The target that drawing tools operate on. The default is the
+    document's normal content; mask-editing mode switches the
+    target to a specific element's mask subtree so new shapes land
+    inside ``element.mask.subtree`` instead of the selected layer.
+
+    ``mask_path is None`` means content-editing mode (the default);
+    a tuple-of-ints ``mask_path`` identifies the masked element
+    whose subtree is the drawing target.
+
+    Mirrors ``EditingTarget`` in ``jas_dioxus`` / ``JasSwift`` /
+    ``jas_ocaml``. OPACITY.md §Preview interactions.
+    """
+    mask_path: tuple[int, ...] | None = None
+
+    @staticmethod
+    def content() -> "EditingTarget":
+        """The default editing target — the document's normal content."""
+        return EditingTarget(mask_path=None)
+
+    @staticmethod
+    def mask(path: tuple[int, ...] | list[int]) -> "EditingTarget":
+        """Mask-editing mode: ``path`` identifies the masked element."""
+        return EditingTarget(mask_path=tuple(path))
+
+    @property
+    def is_mask(self) -> bool:
+        return self.mask_path is not None
 
 _MAX_UNDO = 100
 _next_untitled = 1
@@ -46,6 +78,11 @@ class Model:
         # import at module top to keep document/ free of tools/
         # dependencies.
         self.current_edit_session = None
+        # Mask-editing mode state. Defaults to content-mode; flipped
+        # to mask-mode when the user clicks the Opacity panel's
+        # MASK_PREVIEW with a masked selection.
+        # OPACITY.md §Preview interactions.
+        self.editing_target: EditingTarget = EditingTarget.content()
 
     @property
     def filename(self) -> str:
