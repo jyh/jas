@@ -321,9 +321,31 @@ struct YamlElementView: View {
     private func renderIconButton() -> some View {
         let summary = element["summary"] as? String ?? ""
         let isDisabled = evalBindDisabled()
-        Button(summary) { handleWidgetClick() }
+        // bind.icon: expression whose evaluated string names the
+        // icon glyph. Swift's icon_button renderer currently shows
+        // the summary as its label rather than the glyph; the
+        // resolved icon name is captured here so future icon-
+        // rendering support can pick it up without another YAML
+        // change. Used by op_link_indicator to flip between
+        // ``link_linked`` / ``link_unlinked`` as mask.linked
+        // changes.
+        let _ = resolvedIconName()
+        return Button(summary) { handleWidgetClick() }
             .buttonStyle(.plain)
             .disabled(isDisabled)
+    }
+
+    /// Resolve the icon name from ``bind.icon`` (if present, as a
+    /// yaml expression returning a string) or the static ``icon``
+    /// field, falling back to ``""``.
+    private func resolvedIconName() -> String {
+        if let bind = element["bind"] as? [String: Any],
+           let expr = bind["icon"] as? String {
+            if case .string(let s) = evaluate(expr, context: context) {
+                return s
+            }
+        }
+        return element["icon"] as? String ?? ""
     }
 
     /// Evaluate `bind.disabled` if present; returns `false` when
@@ -367,6 +389,16 @@ struct YamlElementView: View {
                 let invert = (context["_opacity_new_masks_inverted"] as? Bool) ?? false
                 ctrl.makeMaskOnSelection(clip: clip, invert: invert)
             }
+            return
+        }
+        // Opacity panel: op_link_indicator toggles mask.linked on
+        // every selected mask via Controller. OPACITY.md §Document
+        // model. Mirrors the Rust special-case in
+        // ``render_icon_button``.
+        if panelId == "opacity_panel_content",
+           let id = element["id"] as? String, id == "op_link_indicator",
+           let m = model {
+            Controller(model: m).toggleMaskLinkedOnSelection()
             return
         }
         if let actionName = element["action"] as? String {
