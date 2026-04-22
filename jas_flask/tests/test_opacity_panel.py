@@ -242,10 +242,19 @@ class TestOpacityPanel:
         assert el is not None
         assert el.get("type") == "placeholder"
 
-    def test_link_indicator_is_placeholder(self, panel):
+    def test_link_indicator_is_icon_button_with_dynamic_icon(self, panel):
+        # OPACITY.md §Document model: LINK_INDICATOR's glyph flips
+        # between the linked and unlinked chain icons based on the
+        # first selected mask's `linked` field, and the button is
+        # disabled when the selection has no mask.
         el = self._find_by_id(panel, "op_link_indicator")
         assert el is not None
-        assert el.get("type") == "placeholder"
+        assert el.get("type") == "icon_button"
+        bind = el.get("bind") or {}
+        assert "selection_mask_linked" in bind.get("icon", "")
+        assert "link_linked" in bind.get("icon", "")
+        assert "link_unlinked" in bind.get("icon", "")
+        assert bind.get("disabled") == "!selection_has_mask"
 
     def test_mask_preview_is_placeholder(self, panel):
         el = self._find_by_id(panel, "op_mask_preview")

@@ -242,13 +242,20 @@ content:
             box in Flask; native apps render actual selection artwork.
 
         - id: op_link_indicator
-          type: placeholder
+          type: icon_button
           col: 1
-          summary: "Link indicator"
+          summary: "Link mask transform"
           description: >
-            Icon showing whether mask transforms are linked to the
-            element's. Phase-1 renders as a placeholder box; clicking is
-            spec'd to toggle mask.linked once the field lands.
+            Icon showing whether the mask's transform is linked to the
+            element's. The glyph flips between a connected chain
+            (``link_linked``) and a broken chain (``link_unlinked``)
+            based on the first selected element's mask.linked. Clicking
+            toggles mask.linked on every selected mask via
+            ``Controller::toggle_mask_linked_on_selection``. Disabled
+            when the selection has no mask. OPACITY.md §Document model.
+          bind:
+            icon: 'if selection_mask_linked then "link_linked" else "link_unlinked"'
+            disabled: "!selection_has_mask"
 
         - id: op_mask_preview
           type: placeholder

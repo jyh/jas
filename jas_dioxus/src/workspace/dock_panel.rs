@@ -55,7 +55,7 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
 /// on CLIP_CHECKBOX / INVERT_MASK_CHECKBOX.
 fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
     let mut m = serde_json::Map::new();
-    let (has_mask, clip, invert) = st.tab().map(|t| {
+    let (has_mask, clip, invert, linked) = st.tab().map(|t| {
         let doc = t.model.document();
         let has = !doc.selection.is_empty() && doc.selection.iter().all(|es| {
             doc.get_element(&es.path)
@@ -65,15 +65,19 @@ fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_js
         let first_mask = doc.selection.first()
             .and_then(|es| doc.get_element(&es.path))
             .and_then(|e| e.common().mask.as_ref());
-        let (c, i) = match first_mask {
-            Some(mask) => (mask.clip, mask.invert),
-            None => (false, false),
+        let (c, i, l) = match first_mask {
+            // Default ``linked`` to true so the LINK_INDICATOR shows
+            // the linked glyph when no mask exists — matches the
+            // "New masks are linked" spec default.
+            Some(mask) => (mask.clip, mask.invert, mask.linked),
+            None => (false, false, true),
         };
-        (has, c, i)
-    }).unwrap_or((false, false, false));
+        (has, c, i, l)
+    }).unwrap_or((false, false, false, true));
     m.insert("selection_has_mask".into(), serde_json::Value::Bool(has_mask));
     m.insert("selection_mask_clip".into(), serde_json::Value::Bool(clip));
     m.insert("selection_mask_invert".into(), serde_json::Value::Bool(invert));
+    m.insert("selection_mask_linked".into(), serde_json::Value::Bool(linked));
     m
 }
 
