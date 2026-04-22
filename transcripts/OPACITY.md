@@ -190,9 +190,18 @@ mask subtree's bounding box:
 fully transparent — the element is clipped to the mask shape. `clip: false`
 treats it as fully opaque — the element stays visible outside the mask
 subtree's bounding box, and the mask only modulates opacity within `B`.
-Both modes are implemented via alpha compositing; a future phase may
-promote `M` to mask subtree luminance so that a black-opaque mask reads
-as fully transparent (matching the PDF §11 soft-mask convention).
+
+`M` is the mask subtree's **luminance-weighted** alpha:
+`M = A * (0.299*R + 0.587*G + 0.114*B) / 255` (ITU-R BT.601 weights), so a
+black-opaque shape acts as a fully-transparent mask (element hidden), a
+white-opaque shape as a fully-opaque mask (element revealed), and gray
+shapes modulate partially. This matches the PDF §11 soft-mask convention.
+The jas_dioxus renderer applies this for the `clip: true, invert: false`
+path; the `ClipOut` / `RevealOutsideBbox` branches still use raw alpha and
+may be promoted in a later phase. The Swift / OCaml / Python renderers
+still use raw alpha across all branches — luminance promotion requires
+per-pixel readback support equivalent to Canvas2D's `getImageData`, which
+each app would add separately.
 
 Every group element additionally carries:
 
