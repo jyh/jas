@@ -55,6 +55,12 @@ class model ?(document = Document.default_document ()) ?filename () =
        to [Mask path] when the user clicks the Opacity panel's
        MASK_PREVIEW. OPACITY.md \167Preview interactions. *)
     val mutable editing_target : editing_target = Content
+    (* Mask-isolation path. When [Some path], the canvas renders
+       only the mask subtree of the element at [path], hiding
+       everything else. Entered by Alt/Option-clicking
+       MASK_PREVIEW; exited by Alt-clicking again.
+       OPACITY.md \167Preview interactions. *)
+    val mutable mask_isolation_path : int list option = None
 
     method document = doc
 
@@ -121,6 +127,10 @@ class model ?(document = Document.default_document ()) ?filename () =
     method editing_target = editing_target
     method set_editing_target (t : editing_target) =
       editing_target <- t
+
+    method mask_isolation_path = mask_isolation_path
+    method set_mask_isolation_path (p : int list option) =
+      mask_isolation_path <- p
   end
 
 let create ?document ?filename () = new model ?document ?filename ()

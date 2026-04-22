@@ -44,6 +44,8 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   method set_current_edit_session : edit_session_ref option -> unit
   method editing_target : editing_target
   method set_editing_target : editing_target -> unit
+  method mask_isolation_path : int list option
+  method set_mask_isolation_path : int list option -> unit
 end
 
 val create : ?document:Document.document -> ?filename:string -> unit -> model
