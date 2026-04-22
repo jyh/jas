@@ -15269,27 +15269,29 @@
       "handlers": {
         "on_enter": [
           {
-            "set": "$tool.selection.mode",
-            "value": "idle"
+            "set": {
+              "tool.selection.mode": "'idle'"
+            }
           }
         ],
         "on_leave": [
           {
-            "set": "$tool.selection.mode",
-            "value": "idle"
+            "set": {
+              "tool.selection.mode": "'idle'"
+            }
           }
         ],
         "on_mousedown": [
           {
             "let": {
-              "hit": "hit_test($event.x, $event.y)"
+              "hit": "hit_test(event.x, event.y)"
             },
             "in": [
               {
-                "if": "$hit == null",
+                "if": "hit == null",
                 "then": [
                   {
-                    "if": "not $event.modifiers.shift",
+                    "if": "not event.modifiers.shift",
                     "then": [
                       {
                         "doc.clear_selection": {}
@@ -15297,24 +15299,29 @@
                     ]
                   },
                   {
-                    "set": "$tool.selection.mode",
-                    "value": "marquee"
+                    "set": {
+                      "tool.selection.mode": "'marquee'"
+                    }
                   },
                   {
-                    "set": "$tool.selection.marquee_start_x",
-                    "value": "$event.x"
+                    "set": {
+                      "tool.selection.marquee_start_x": "event.x"
+                    }
                   },
                   {
-                    "set": "$tool.selection.marquee_start_y",
-                    "value": "$event.y"
+                    "set": {
+                      "tool.selection.marquee_start_y": "event.y"
+                    }
                   },
                   {
-                    "set": "$tool.selection.marquee_end_x",
-                    "value": "$event.x"
+                    "set": {
+                      "tool.selection.marquee_end_x": "event.x"
+                    }
                   },
                   {
-                    "set": "$tool.selection.marquee_end_y",
-                    "value": "$event.y"
+                    "set": {
+                      "tool.selection.marquee_end_y": "event.y"
+                    }
                   }
                 ],
                 "else": [
@@ -15322,38 +15329,36 @@
                     "doc.snapshot": {}
                   },
                   {
-                    "if": "$event.modifiers.shift",
+                    "if": "event.modifiers.shift",
                     "then": [
                       {
-                        "doc.toggle_selection": "$hit"
+                        "doc.toggle_selection": "hit"
                       }
                     ],
                     "else": [
                       {
-                        "if": "not selection_contains($hit)",
-                        "then": [
-                          {
-                            "doc.set_selection": {
-                              "paths": [
-                                "$hit"
-                              ]
-                            }
-                          }
-                        ]
+                        "doc.set_selection": {
+                          "paths": [
+                            "hit"
+                          ]
+                        }
                       }
                     ]
                   },
                   {
-                    "set": "$tool.selection.mode",
-                    "value": "drag_move"
+                    "set": {
+                      "tool.selection.mode": "'drag_move'"
+                    }
                   },
                   {
-                    "set": "$tool.selection.drag_start_x",
-                    "value": "$event.x"
+                    "set": {
+                      "tool.selection.drag_start_x": "event.x"
+                    }
                   },
                   {
-                    "set": "$tool.selection.drag_start_y",
-                    "value": "$event.y"
+                    "set": {
+                      "tool.selection.drag_start_y": "event.y"
+                    }
                   }
                 ]
               }
@@ -15362,94 +15367,84 @@
         ],
         "on_mousemove": [
           {
-            "if": "$tool.selection.mode == 'marquee'",
+            "if": "tool.selection.mode == 'marquee'",
             "then": [
               {
-                "set": "$tool.selection.marquee_end_x",
-                "value": "$event.x"
+                "set": {
+                  "tool.selection.marquee_end_x": "event.x"
+                }
               },
               {
-                "set": "$tool.selection.marquee_end_y",
-                "value": "$event.y"
+                "set": {
+                  "tool.selection.marquee_end_y": "event.y"
+                }
               }
             ]
           },
           {
-            "if": "$tool.selection.mode == 'drag_move'",
+            "if": "tool.selection.mode == 'drag_move'",
             "then": [
               {
                 "doc.translate_selection": {
-                  "dx": "$event.x - $tool.selection.drag_start_x",
-                  "dy": "$event.y - $tool.selection.drag_start_y"
+                  "dx": "event.x - tool.selection.drag_start_x",
+                  "dy": "event.y - tool.selection.drag_start_y"
                 }
               },
               {
-                "set": "$tool.selection.drag_start_x",
-                "value": "$event.x"
+                "set": {
+                  "tool.selection.drag_start_x": "event.x"
+                }
               },
               {
-                "set": "$tool.selection.drag_start_y",
-                "value": "$event.y"
+                "set": {
+                  "tool.selection.drag_start_y": "event.y"
+                }
               }
             ]
           }
         ],
         "on_mouseup": [
           {
-            "if": "$tool.selection.mode == 'marquee'",
+            "if": "tool.selection.mode == 'marquee'",
             "then": [
               {
                 "doc.select_in_rect": {
-                  "x1": "min($tool.selection.marquee_start_x, $tool.selection.marquee_end_x)",
-                  "y1": "min($tool.selection.marquee_start_y, $tool.selection.marquee_end_y)",
-                  "x2": "max($tool.selection.marquee_start_x, $tool.selection.marquee_end_x)",
-                  "y2": "max($tool.selection.marquee_start_y, $tool.selection.marquee_end_y)",
-                  "additive": "$event.modifiers.shift"
+                  "x1": "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)",
+                  "y1": "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)",
+                  "x2": "max(tool.selection.marquee_start_x, tool.selection.marquee_end_x)",
+                  "y2": "max(tool.selection.marquee_start_y, tool.selection.marquee_end_y)",
+                  "additive": "event.modifiers.shift"
                 }
               }
             ]
           },
           {
-            "set": "$tool.selection.mode",
-            "value": "idle"
+            "set": {
+              "tool.selection.mode": "'idle'"
+            }
           }
         ],
         "on_keydown": [
           {
-            "if": "$event.key == 'Escape'",
+            "if": "event.key == 'Escape'",
             "then": [
               {
-                "set": "$tool.selection.mode",
-                "value": "idle"
-              }
-            ]
-          },
-          {
-            "if": "$event.key == 'Delete' or $event.key == 'Backspace'",
-            "then": [
-              {
-                "if": "not selection_empty()",
-                "then": [
-                  {
-                    "doc.snapshot": {}
-                  },
-                  {
-                    "doc.delete_selection": {}
-                  }
-                ]
+                "set": {
+                  "tool.selection.mode": "'idle'"
+                }
               }
             ]
           }
         ]
       },
       "overlay": {
-        "if": "$tool.selection.mode == 'marquee'",
+        "if": "tool.selection.mode == 'marquee'",
         "render": {
           "type": "rect",
-          "x": "min($tool.selection.marquee_start_x, $tool.selection.marquee_end_x)",
-          "y": "min($tool.selection.marquee_start_y, $tool.selection.marquee_end_y)",
-          "width": "abs($tool.selection.marquee_end_x - $tool.selection.marquee_start_x)",
-          "height": "abs($tool.selection.marquee_end_y - $tool.selection.marquee_start_y)",
+          "x": "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)",
+          "y": "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)",
+          "width": "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)",
+          "height": "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)",
           "style": "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
         }
       }
