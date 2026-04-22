@@ -690,6 +690,7 @@ class Line(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    stroke_gradient: Gradient | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
@@ -721,6 +722,8 @@ class Rect(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    fill_gradient: Gradient | None = None
+    stroke_gradient: Gradient | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
@@ -743,6 +746,8 @@ class Circle(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    fill_gradient: Gradient | None = None
+    stroke_gradient: Gradient | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -768,6 +773,8 @@ class Ellipse(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    fill_gradient: Gradient | None = None
+    stroke_gradient: Gradient | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -790,6 +797,8 @@ class Polyline(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    fill_gradient: Gradient | None = None
+    stroke_gradient: Gradient | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -821,6 +830,8 @@ class Polygon(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    fill_gradient: Gradient | None = None
+    stroke_gradient: Gradient | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -853,6 +864,8 @@ class Path(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    fill_gradient: Gradient | None = None
+    stroke_gradient: Gradient | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)

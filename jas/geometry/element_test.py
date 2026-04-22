@@ -874,6 +874,37 @@ class MaskTest(absltest.TestCase):
         })
         self.assertEqual(parsed.stops[0].midpoint_to_next, 50.0)
 
+    # Phase 1b: per-element gradient fields.
+
+    def test_rect_fill_gradient_field(self):
+        g = Gradient(
+            type=GradientType.LINEAR, angle=45, aspect_ratio=100,
+            stops=(
+                GradientStop(color="#ff0000", opacity=100, location=0,   midpoint_to_next=50),
+                GradientStop(color="#0000ff", opacity=100, location=100, midpoint_to_next=50),
+            ),
+        )
+        r = Rect(x=0, y=0, width=10, height=10, fill_gradient=g)
+        self.assertEqual(r.fill_gradient, g)
+        self.assertIsNone(r.stroke_gradient)
+        # Default: both fields None when not specified.
+        r2 = Rect(x=0, y=0, width=10, height=10)
+        self.assertIsNone(r2.fill_gradient)
+        self.assertIsNone(r2.stroke_gradient)
+
+    def test_circle_stroke_gradient_field(self):
+        g = Gradient(type=GradientType.RADIAL)
+        c = Circle(cx=0, cy=0, r=10, stroke_gradient=g)
+        self.assertEqual(c.stroke_gradient, g)
+        self.assertIsNone(c.fill_gradient)
+
+    def test_line_only_has_stroke_gradient(self):
+        # Line has no fill, so it only gets stroke_gradient.
+        from dataclasses import fields
+        line_field_names = {f.name for f in fields(Line)}
+        self.assertIn("stroke_gradient", line_field_names)
+        self.assertNotIn("fill_gradient", line_field_names)
+
 
 if __name__ == "__main__":
     absltest.main()
