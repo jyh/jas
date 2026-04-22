@@ -4,9 +4,6 @@ use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
-/// Human-readable label for this panel.
-pub const LABEL: &str = "Stroke";
-
 /// Menu items for the Stroke panel.
 pub fn menu_items() -> Vec<PanelMenuItem> {
     vec![

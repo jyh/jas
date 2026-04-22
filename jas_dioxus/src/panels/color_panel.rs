@@ -6,9 +6,6 @@ use crate::workspace::color_panel_view::ColorMode;
 use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
-/// Human-readable label for this panel.
-pub const LABEL: &str = "Color";
-
 /// Menu items for the Color panel.
 pub fn menu_items() -> Vec<PanelMenuItem> {
     vec![

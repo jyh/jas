@@ -11,8 +11,6 @@ use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
-pub const LABEL: &str = "Align";
-
 pub fn menu_items() -> Vec<PanelMenuItem> {
     vec![
         PanelMenuItem::Toggle {

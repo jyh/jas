@@ -776,7 +776,7 @@ pub(crate) fn build_dock_groups(
         let chevron = if group_collapsed { "\u{00BB}" } else { "\u{00AB}" };
         let body_label = group.active_panel()
             .map(crate::panels::panel_label)
-            .unwrap_or("");
+            .unwrap_or_default();
         // Pre-compute active panel info for hamburger menu button
         let active_panel_info = group.active_panel().map(|kind| (kind, group.active));
 

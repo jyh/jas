@@ -14,9 +14,6 @@ use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
-/// Human-readable label for this panel.
-pub const LABEL: &str = "Opacity";
-
 /// Menu items for the Opacity panel.
 ///
 /// The YAML mirror lives in `workspace/panels/opacity.yaml`. Items whose
