@@ -67,6 +67,10 @@ struct YamlElementView: View {
                 renderComboBox()
             case "color_swatch":
                 renderColorSwatch()
+            case "gradient_tile":
+                renderGradientTile()
+            case "gradient_slider":
+                renderGradientSlider()
             case "fill_stroke_widget":
                 renderContainer()
             case "separator":
@@ -554,6 +558,237 @@ struct YamlElementView: View {
                 .frame(width: size, height: size)
                 .border(SwiftUI.Color.gray, width: 1)
         }
+    }
+
+    // MARK: - Gradient primitives
+
+    /// Parse a bind expression that resolves to an object value.
+    /// Object values are serialized to JSON strings by the expression
+    /// language (see ExprTypes.swift fromJson:object branch).
+    private func evaluateBindObject(_ expr: String) -> Any? {
+        let result = evaluate(expr, context: context)
+        switch result {
+        case .string(let s):
+            guard let data = s.data(using: .utf8) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data)
+        case .list(let arr):
+            return arr.map { $0.value }
+        default:
+            return nil
+        }
+    }
+
+    /// Parse a hex color like "#ff6600" into a SwiftUI Color.
+    private func cssHexColor(_ hex: String, opacity: Double = 1.0) -> SwiftUI.Color {
+        let (r, g, b) = parseHex(hex)
+        return SwiftUI.Color(
+            red: Double(r) / 255.0,
+            green: Double(g) / 255.0,
+            blue: Double(b) / 255.0,
+            opacity: opacity
+        )
+    }
+
+    /// Build the list of (color, location) pairs for a gradient's stops.
+    private func extractStops(_ stops: [[String: Any]]) -> [(SwiftUI.Color, Double)] {
+        stops.compactMap { s in
+            guard let color = s["color"] as? String else { return nil }
+            let loc = (s["location"] as? Double) ?? (s["location"] as? NSNumber).map { $0.doubleValue } ?? 0.0
+            let opacity = (s["opacity"] as? Double) ?? (s["opacity"] as? NSNumber).map { $0.doubleValue } ?? 100.0
+            return (cssHexColor(color, opacity: opacity / 100.0), loc / 100.0)
+        }
+    }
+
+    /// gradient_tile — click-to-apply gradient preview.
+    @ViewBuilder
+    private func renderGradientTile() -> some View {
+        let sizeKey = element["size"] as? String ?? "large"
+        let sz: CGFloat = {
+            switch sizeKey {
+            case "small": return 16
+            case "medium": return 32
+            default: return 64
+            }
+        }()
+        let bind = element["bind"] as? [String: Any]
+        let gradientExpr = bind?["gradient"] as? String
+        let gradientObj = gradientExpr.flatMap { evaluateBindObject($0) } as? [String: Any]
+        let gtype = (gradientObj?["type"] as? String) ?? "linear"
+        let stopsArr = (gradientObj?["stops"] as? [[String: Any]]) ?? []
+        let stops = extractStops(stopsArr)
+        let angle = (gradientObj?["angle"] as? Double) ?? 0
+
+        gradientTileBody(
+            sz: sz, stops: stops, gtype: gtype, angle: angle
+        )
+        .onTapGesture {
+            if let behaviors = element["behavior"] as? [[String: Any]] {
+                for b in behaviors where (b["event"] as? String) == "click" {
+                    if let action = b["action"] as? String {
+                        let params = (b["params"] as? [String: Any]) ?? [:]
+                        onWidgetAction?(action, params)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func gradientTileBody(
+        sz: CGFloat,
+        stops: [(SwiftUI.Color, Double)],
+        gtype: String,
+        angle: Double
+    ) -> some View {
+        if stops.count >= 2 {
+            if gtype == "radial" {
+                Rectangle().fill(
+                    RadialGradient(
+                        gradient: Gradient(stops: stops.map {
+                            .init(color: $0.0, location: $0.1)
+                        }),
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: sz / 2
+                    )
+                )
+                .frame(width: sz, height: sz)
+                .border(SwiftUI.Color.gray, width: 1)
+            } else {
+                // Angle convention: 0° = left-to-right; positive rotates CCW.
+                let rad = angle * .pi / 180.0
+                let start = UnitPoint(x: 0.5 - 0.5 * cos(rad), y: 0.5 + 0.5 * sin(rad))
+                let end = UnitPoint(x: 0.5 + 0.5 * cos(rad), y: 0.5 - 0.5 * sin(rad))
+                Rectangle().fill(
+                    LinearGradient(
+                        gradient: Gradient(stops: stops.map {
+                            .init(color: $0.0, location: $0.1)
+                        }),
+                        startPoint: start,
+                        endPoint: end
+                    )
+                )
+                .frame(width: sz, height: sz)
+                .border(SwiftUI.Color.gray, width: 1)
+            }
+        } else {
+            Rectangle().fill(SwiftUI.Color.gray)
+                .frame(width: sz, height: sz)
+                .border(SwiftUI.Color.gray, width: 1)
+        }
+    }
+
+    /// gradient_slider — 1-D stops editor.
+    ///
+    /// Phase 0 scope: visual tree + tap-to-select gestures on stop and
+    /// midpoint markers. Full drag state (drag, drag-off-bar delete) and
+    /// keyboard handling are deferred to Phase 5.
+    @ViewBuilder
+    private func renderGradientSlider() -> some View {
+        let bind = element["bind"] as? [String: Any]
+        let stopsExpr = bind?["stops"] as? String
+        let selStopExpr = bind?["selected_stop_index"] as? String
+        let selMidExpr = bind?["selected_midpoint_index"] as? String
+
+        let stopsRaw: [[String: Any]] = (stopsExpr.flatMap { evaluateBindObject($0) } as? [[String: Any]]) ?? []
+
+        let selStop: Int = selStopExpr.map {
+            if case .number(let n) = evaluate($0, context: context) { return Int(n) } else { return -1 }
+        } ?? -1
+        let selMid: Int = selMidExpr.map {
+            if case .number(let n) = evaluate($0, context: context) { return Int(n) } else { return -1 }
+        } ?? -1
+
+        let stops = extractStops(stopsRaw)
+
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                // Bar
+                if stops.count >= 2 {
+                    Rectangle().fill(
+                        LinearGradient(
+                            gradient: Gradient(stops: stops.map {
+                                .init(color: $0.0, location: $0.1)
+                            }),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: geo.size.width, height: 16)
+                    .border(SwiftUI.Color.gray, width: 1)
+                    .offset(x: 0, y: 14)
+                } else {
+                    Rectangle().fill(SwiftUI.Color.gray)
+                        .frame(width: geo.size.width, height: 16)
+                        .offset(x: 0, y: 14)
+                }
+
+                // Midpoint markers (diamonds, above bar)
+                ForEach(0..<max(stopsRaw.count - 1, 0), id: \.self) { i in
+                    let left = (stopsRaw[i]["location"] as? Double) ?? 0.0
+                    let right = (stopsRaw[i + 1]["location"] as? Double) ?? 100.0
+                    let pct = (stopsRaw[i]["midpoint_to_next"] as? Double) ?? 50.0
+                    let midLoc = left + (right - left) * (pct / 100.0)
+                    let x = CGFloat(midLoc / 100.0) * geo.size.width - 5
+                    Rectangle()
+                        .fill(SwiftUI.Color(white: 0.55))
+                        .border(SwiftUI.Color.black, width: 1)
+                        .frame(width: 10, height: 10)
+                        .rotationEffect(.degrees(45))
+                        .offset(x: x, y: 2)
+                        .overlay(
+                            Rectangle()
+                                .stroke(selMid == i ? SwiftUI.Color.accentColor : SwiftUI.Color.clear, lineWidth: 2)
+                                .frame(width: 10, height: 10)
+                                .rotationEffect(.degrees(45))
+                                .offset(x: x, y: 2)
+                        )
+                        .onTapGesture {
+                            onWidgetAction?("gradient_slider_midpoint_click", ["midpoint_index": i])
+                        }
+                }
+
+                // Stop markers (circles, below bar)
+                ForEach(0..<stopsRaw.count, id: \.self) { i in
+                    stopMarker(
+                        index: i,
+                        stop: stopsRaw[i],
+                        width: geo.size.width,
+                        selected: selStop == i
+                    )
+                }
+            }
+        }
+        .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private func stopMarker(
+        index: Int,
+        stop: [String: Any],
+        width: CGFloat,
+        selected: Bool
+    ) -> some View {
+        let loc = (stop["location"] as? Double) ?? 0.0
+        let colorHex = (stop["color"] as? String) ?? "#000000"
+        let opacity = (stop["opacity"] as? Double) ?? 100.0
+        let x = CGFloat(loc / 100.0) * width - 7
+        SwiftUI.Circle()
+            .fill(cssHexColor(colorHex, opacity: opacity / 100.0))
+            .frame(width: 14, height: 14)
+            .overlay(
+                SwiftUI.Circle().stroke(
+                    selected ? SwiftUI.Color.accentColor : SwiftUI.Color.black,
+                    lineWidth: selected ? 2 : 1
+                )
+            )
+            .offset(x: x, y: 30)
+            .onTapGesture(count: 2) {
+                onWidgetAction?("gradient_slider_stop_dblclick", ["stop_index": index])
+            }
+            .onTapGesture(count: 1) {
+                onWidgetAction?("gradient_slider_stop_click", ["stop_index": index])
+            }
     }
 
     // MARK: - Separator
