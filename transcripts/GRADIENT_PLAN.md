@@ -69,22 +69,32 @@ gradient values flow through state as JSON dicts.
 **Deliverable:** the gradient data types exist in each app and pass
 JSON round-trip tests; nothing else changes.
 
-### Phase 1b — Fill/Stroke integration (deferred until Phase 5)
+### Phase 1b — Per-element gradient fields
 
-Wire `Option<Gradient>` into `Fill` and `Stroke`, update SVG parser
-to accept `url(#id)` gradient references and inline them, and update
-SVG serialiser to synthesise `<defs>` blocks for emitted gradients.
+Adds `fill_gradient` and `stroke_gradient` directly to each Element
+variant rather than nesting inside Fill/Stroke. Approach (c) from
+the architectural fork: keeps Fill/Stroke `Copy`, avoids the
+~50-site cascade of approach (a), and avoids the new gradient-ID
+identity concept of approach (b).
 
-**Why deferred:** the `Fill` / `Stroke` integration requires either
-(a) removing `Copy` from these types and rippling `.clone()` /
-`&` borrows through every call site that constructs or pattern-matches
-a fill/stroke, or (b) introducing a document-level gradient table
-indexed by `Option<GradientId>` (a u32) so Fill stays `Copy`.
-Approach (b) introduces a new identity concept (gradient IDs) that
-contradicts `project_element_identity_paths`. Approach (a) is a real
-refactor (~50 sites in Rust, similar in the other languages) that is
-hard to justify before there is a consumer. Phase 5 (panel writes)
-is the natural consumer; the integration work happens then.
+**Status:** Done across all four native apps.
+
+- **Rust** (`jas_dioxus`): `Option<Box<Gradient>>` on each variant
+  struct; `serde(default, skip_serializing_if = is_none)` so JSON
+  fixtures continue to parse without the new fields.
+- **Swift** (`JasSwift`): `Gradient?` on each variant struct with
+  defaulted-init params, so existing call sites continue to work
+  unchanged.
+- **OCaml** (`jas_ocaml`): `gradient option` on each inline-record
+  variant in both element.ml and element.mli; construction sites
+  patched via a Python walker that distinguishes constructors from
+  patterns by inspecting whether the body ends with a wildcard.
+- **Python** (`jas`): `Gradient | None = None` on each Element
+  dataclass.
+
+SVG-level integration (parsing `url(#id)` references and emitting
+`<defs>` blocks) is Phase 6/7 work; Phase 1b lands the storage
+shape so Phase 4 reads + Phase 5 writes can target real fields.
 
 ### Phase 2 — Static panel UI
 
