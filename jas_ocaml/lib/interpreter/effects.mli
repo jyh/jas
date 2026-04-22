@@ -72,6 +72,15 @@ val apply_gradient_panel_to_selection :
 val demote_gradient_panel_selection :
   State_store.t -> Controller.controller -> unit
 
+(** Phase 5 follow-up: subscribe to gradient_* key writes on the
+    global store, calling apply_gradient_panel_to_selection when any
+    render-affecting key changes. Mirrors [subscribe_stroke_panel]. *)
+val subscribe_gradient_panel :
+  State_store.t -> (unit -> Controller.controller) -> unit
+
+(** Check whether a state key is a render-affecting gradient key. *)
+val is_gradient_render_key : string -> bool
+
 (** Compute [text_selected] / [area_text_selected] from the current
     selection and write them to the [paragraph_panel_content] panel
     scope so PARAGRAPH.md §Text-kind gating disables JUSTIFY_*,

@@ -1513,6 +1513,24 @@ let subscribe_stroke_panel (store : State_store.t)
     if is_stroke_render_key key then
       apply_stroke_panel_to_selection store (ctrl_getter ()))
 
+(** Phase 5 follow-up: subscribe to gradient panel state changes on
+    the global store. Every write to a gradient_* key triggers
+    apply_gradient_panel_to_selection so the selection sees the
+    edit immediately. Mirrors [subscribe_stroke_panel]. *)
+let gradient_render_keys = [
+  "gradient_type"; "gradient_angle"; "gradient_aspect_ratio";
+  "gradient_method"; "gradient_dither"; "gradient_stroke_sub_mode";
+]
+
+let is_gradient_render_key key =
+  List.mem key gradient_render_keys
+
+let subscribe_gradient_panel (store : State_store.t)
+    (ctrl_getter : unit -> Controller.controller) : unit =
+  State_store.subscribe_global store (fun key _value ->
+    if is_gradient_render_key key then
+      apply_gradient_panel_to_selection store (ctrl_getter ()))
+
 (* ── Phase 4: paragraph panel→selection writes ──────────── *)
 
 let _opt_f v = if Float.equal v 0.0 then None else Some v

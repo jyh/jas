@@ -242,11 +242,19 @@ content:
                       summary: "Linear"
                       icon: gradient_linear
                       bind: { checked: "panel.type == 'linear'" }
+                      behavior:
+                        - event: click
+                          effects:
+                            - set: { gradient_type: '"linear"' }
                     - id: grad_radial_button
                       type: icon_button
                       summary: "Radial"
                       icon: gradient_radial
                       bind: { checked: "panel.type == 'radial'" }
+                      behavior:
+                        - event: click
+                          effects:
+                            - set: { gradient_type: '"radial"' }
                     - id: grad_freeform_button
                       type: icon_button
                       summary: "Freeform"
@@ -292,6 +300,10 @@ content:
                   min: -180
                   max: 180
                   options: [-135, -90, -45, 0, 45, 90, 135, 180]
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_angle: "value" }
 
             # Aspect ratio
             - type: row
@@ -305,6 +317,10 @@ content:
                   min: 1
                   max: 1000
                   options: [25, 50, 75, 100, 150, 200, 400]
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_aspect_ratio: "value" }
 
             # Method
             - type: row
@@ -319,6 +335,10 @@ content:
                     - { value: smooth,  label: "Smooth" }
                     - { value: points,  label: "Points (freeform)" }
                     - { value: lines,   label: "Lines (freeform)" }
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_method: "value" }
 
             # Dither
             - type: row
@@ -329,6 +349,10 @@ content:
                   col: 9
                   label: "Dither"
                   bind: { checked: "panel.dither" }
+                  behavior:
+                    - event: change
+                      effects:
+                        - set: { gradient_dither: "checked" }
 
     # ── Row 5: Stops editor ──
     - type: row
