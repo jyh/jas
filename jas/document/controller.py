@@ -100,7 +100,23 @@ class Controller:
         )
 
     def add_element(self, element: Element) -> None:
-        """Append an element to the selected layer and select it."""
+        """Append ``element`` to the current editing target and
+        select the new element. In content-mode (the default), the
+        element is appended to the selected layer. In mask-editing
+        mode (OPACITY.md §Preview interactions) the element is
+        appended to the masked element's mask subtree instead —
+        mask-mode falls back to the layer path when the mask
+        subtree isn't a Group (shouldn't happen with masks created
+        via ``make_mask_on_selection``, but protects against
+        externally-built masks).
+        """
+        # Mask-mode: append to the mask subtree and bail on success.
+        # On any "can't route here" failure we fall through to the
+        # content path so the user's stroke isn't lost.
+        target = getattr(self._model, "editing_target", None)
+        if target is not None and target.is_mask:
+            if self._add_element_to_mask(element, target.mask_path):
+                return
         doc = self._model.document
         idx = doc.selected_layer
         layer = doc.layers[idx]
@@ -110,6 +126,36 @@ class Controller:
         es = ElementSelection.all((idx, child_idx))
         self._model.document = replace(doc, layers=new_layers,
                                        selection=frozenset({es}))
+
+    def _add_element_to_mask(self, element: Element,
+                              path: tuple[int, ...]) -> bool:
+        """Append ``element`` to the mask subtree of the element at
+        ``path``. Returns ``True`` on success, ``False`` when the
+        target has no mask or the subtree root isn't a ``Group``.
+        """
+        from geometry.element import Group, with_mask
+        doc = self._model.document
+        try:
+            target = doc.get_element(path)
+        except (IndexError, KeyError):
+            return False
+        mask = getattr(target, "mask", None)
+        if mask is None:
+            return False
+        if not isinstance(mask.subtree, Group):
+            return False
+        new_group = replace(
+            mask.subtree,
+            children=mask.subtree.children + (element,),
+        )
+        new_mask = replace(mask, subtree=new_group)
+        new_target = with_mask(target, new_mask)
+        new_doc = doc.replace_element(path, new_target)
+        # No canonical "inside a mask" path — select the mask-target
+        # element itself after the add.
+        es = ElementSelection.all(path)
+        self._model.document = replace(new_doc, selection=frozenset({es}))
+        return True
 
     @staticmethod
     def _toggle_selection(current: Selection, new: Selection) -> Selection:

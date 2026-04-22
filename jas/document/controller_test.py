@@ -963,6 +963,53 @@ class MaskLifecycleTest(absltest.TestCase):
             self.assertTrue(m.linked)
             self.assertIsNone(m.unlink_transform)
 
+    # ── Mask editor routing (OPACITY.md §Preview interactions) ──
+
+    def test_add_element_mask_mode_routes_into_mask_subtree(self):
+        # Mask the selection; flip into mask-mode; add a shape. It
+        # should land inside the mask subtree, not on the layer.
+        from document.model import EditingTarget
+        from geometry.element import Group, Rect
+        ctrl = self._setup_two_rect_selection()
+        ctrl.make_mask_on_selection(clip=True, invert=False)
+        first_path = sorted(es.path for es in ctrl.document.selection)[0]
+        layer_count_before = len(ctrl.document.layers[0].children)
+        ctrl.model.editing_target = EditingTarget.mask(first_path)
+
+        ctrl.add_element(Rect(x=100, y=100, width=5, height=5))
+
+        # Layer child count unchanged.
+        self.assertEqual(
+            len(ctrl.document.layers[0].children), layer_count_before)
+        # Mask subtree now has exactly one child: the rect we added.
+        target = ctrl.document.get_element(first_path)
+        self.assertIsNotNone(target.mask)
+        self.assertIsInstance(target.mask.subtree, Group)
+        self.assertEqual(len(target.mask.subtree.children), 1)
+        self.assertIsInstance(target.mask.subtree.children[0], Rect)
+
+    def test_add_element_mask_mode_falls_back_when_no_mask(self):
+        # editing_target says mask(path) but the element at path
+        # has no mask — falls back to layer-append.
+        from document.model import EditingTarget
+        from geometry.element import Rect
+        ctrl = self._setup_two_rect_selection()
+        first_path = sorted(es.path for es in ctrl.document.selection)[0]
+        layer_count_before = len(ctrl.document.layers[0].children)
+        ctrl.model.editing_target = EditingTarget.mask(first_path)
+        ctrl.add_element(Rect(x=100, y=100, width=5, height=5))
+        self.assertEqual(
+            len(ctrl.document.layers[0].children), layer_count_before + 1)
+
+    def test_add_element_content_mode_ignores_editing_target(self):
+        # Sanity: content-mode (default) appends to the layer.
+        from geometry.element import Rect
+        ctrl = self._setup_two_rect_selection()
+        layer_count_before = len(ctrl.document.layers[0].children)
+        ctrl.add_element(Rect(x=100, y=100, width=5, height=5))
+        self.assertEqual(
+            len(ctrl.document.layers[0].children), layer_count_before + 1)
+
 
 if __name__ == "__main__":
     absltest.main()
