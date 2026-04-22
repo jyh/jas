@@ -180,28 +180,42 @@ will call.
 
 8 new tests across the four apps verify the apply and demote paths.
 
-**Pending (follow-up wiring):**
+**Phase 5 follow-up (wired):** yaml controls + subscription across
+all 4 native apps for the basic parameter panel:
 
-- Bind individual panel-control events to call `apply`:
-  - Type buttons commit → `gradient.type`.
-  - Angle / aspect / method / dither commit → corresponding fields.
-  - Stroke sub-mode buttons commit.
-  - Gradient slider stop / midpoint edits commit (panel.stops list
-    binding to store keys).
-  - Stop opacity / location combos commit → selected stop's fields.
-  - Tile click → copy gradient value onto active attribute.
+- `workspace/panels/gradient.yaml` fires `set: {gradient_X: ...}`
+  effects on click / change for LINEAR_BUTTON, RADIAL_BUTTON,
+  ANGLE_COMBO, ASPECT_RATIO_COMBO, METHOD_DROPDOWN, DITHER_CHECKBOX.
+- Subscription wiring that listens to `gradient_*` state writes
+  and calls `apply_gradient_panel_to_selection`:
+  - **OCaml:** `Effects.subscribe_gradient_panel` uses
+    `State_store.subscribe_global`.
+  - **Rust:** `apply_set_effects` in `interpreter/renderer.rs`
+    tracks whether any `gradient_*` key was in the set batch and
+    calls `apply_gradient_panel_to_selection` after. Schema
+    entries added for all six keys.
+  - **Swift:** `runOne` set handler fires the
+    `apply_gradient_panel` platform hook when any render key appears
+    in the batch. Host registers the hook pointing at
+    `applyGradientPanelToSelection`.
+  - **Python:** `subscribe_gradient_panel` uses
+    `StateStore.subscribe`.
+
+**Still pending (the non-trivial remainder):**
+
+- Gradient slider stop / midpoint edits commit: requires
+  `panel.stops <-> store.gradient_stops` synchronisation (the list
+  of stops is not yet a set of store keys).
+- Stop opacity / location combos commit.
+- Tile click → copy gradient value onto active attribute.
 - Hook fill/stroke widget Color button to call `demote`.
-- `ADD_TO_SWATCHES_BUTTON` → append to Document Library with
-  auto-name.
+- `ADD_TO_SWATCHES_BUTTON` → append to Document Library.
 - `TRASH_BUTTON` → delete selected stop (min-2 floor).
 - Panel menu actions: Reverse, Distribute Stops, Reset Midpoints.
 - `EYEDROPPER_BUTTON` → color pick into selected stop.
-- Double-click stop → opens `workspace/dialogs/color_picker.yaml`
-  seeded with the stop's color.
-
-The foundation pass leaves stops as panel-local working state with
-no store binding. The follow-up adds explicit
-`panel.stops <-> store.gradient_stops` synchronisation.
+- Double-click stop → opens `workspace/dialogs/color_picker.yaml`.
+- Stroke sub-mode buttons commit (for stroke_gradient, which
+  depends on Phase 8 stroke rendering).
 
 **Apps:** 4 native + `jas_flask`.
 
