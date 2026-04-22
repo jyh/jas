@@ -269,6 +269,26 @@ fn mask_plan(mask: &Mask) -> Option<MaskPlan> {
     })
 }
 
+/// Return the transform that should be applied when rendering the
+/// mask's subtree on top of the ancestor coord system. Track C
+/// phase 3, OPACITY.md §Document model:
+///
+/// - ``linked: true``  — mask inherits the element's transform
+///   (mask follows the element).
+/// - ``linked: false`` — mask uses ``unlink_transform`` (the
+///   element's transform captured at unlink time, frozen so the
+///   mask stays fixed under subsequent element edits).
+fn effective_mask_transform<'a>(
+    mask: &'a Mask,
+    elem: &'a Element,
+) -> Option<&'a Transform> {
+    if mask.linked {
+        elem.transform()
+    } else {
+        mask.unlink_transform.as_ref()
+    }
+}
+
 thread_local! {
     /// Reusable offscreen canvas for opacity-mask compositing.
     /// Created lazily on first use and resized to match the main
@@ -378,7 +398,13 @@ fn draw_element_with_mask(
     // we don't recurse into ourselves) onto the offscreen canvas.
     draw_element_body(&off_ctx, elem, ancestor_vis, precision);
 
-    // Pass 2: composite the mask subtree against the element body.
+    // Pass 2: apply the mask's effective transform (per
+    // ``effective_mask_transform``), then composite the mask
+    // subtree against the element body.
+    off_ctx.save();
+    if let Some(t) = effective_mask_transform(mask, elem) {
+        off_ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f).ok();
+    }
     match plan {
         MaskPlan::ClipIn => {
             // `destination-in` over the whole canvas — the element
@@ -415,6 +441,7 @@ fn draw_element_with_mask(
             // composite against).
         }
     }
+    off_ctx.restore();
 
     // Copy the composited offscreen pixels onto the main ctx at
     // device coordinates (0, 0). The main ctx's alpha / blend_mode
@@ -1694,6 +1721,87 @@ mod tests {
             mask_plan(&test_mask(false, true, false)),
             Some(MaskPlan::ClipOut)
         );
+    }
+
+    // ── effective_mask_transform (Track C phase 3) ────────
+
+    fn test_transform(e: f64, f: f64) -> Transform {
+        // Pure translation by (e, f) for easy identification in tests.
+        Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e, f }
+    }
+
+    fn test_rect_with_transform(t: Option<Transform>) -> Element {
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                opacity: 1.0,
+                mode: BlendMode::Normal,
+                transform: t,
+                locked: false,
+                visibility: Visibility::Preview,
+                mask: None,
+            },
+        })
+    }
+
+    fn test_mask_linked(
+        linked: bool,
+        unlink: Option<Transform>,
+    ) -> Mask {
+        Mask {
+            subtree: Box::new(Element::Group(GroupElem::default())),
+            clip: true,
+            invert: false,
+            disabled: false,
+            linked,
+            unlink_transform: unlink,
+        }
+    }
+
+    #[test]
+    fn effective_mask_transform_linked_returns_element_transform() {
+        // linked=true: mask follows the element, so the renderer
+        // should apply ``elem.transform()``.
+        let mask = test_mask_linked(true, None);
+        let elem = test_rect_with_transform(Some(test_transform(5.0, 7.0)));
+        let t = effective_mask_transform(&mask, &elem)
+            .expect("expected Some element transform");
+        assert_eq!(t.e, 5.0);
+        assert_eq!(t.f, 7.0);
+    }
+
+    #[test]
+    fn effective_mask_transform_linked_none_when_element_has_no_transform() {
+        // linked=true with no element transform: None — the
+        // compositing path skips the ``ctx.transform`` call.
+        let mask = test_mask_linked(true, None);
+        let elem = test_rect_with_transform(None);
+        assert!(effective_mask_transform(&mask, &elem).is_none());
+    }
+
+    #[test]
+    fn effective_mask_transform_unlinked_returns_captured_unlink_transform() {
+        // linked=false: mask stays frozen under the unlink-time
+        // transform, regardless of the element's current transform.
+        let unlink = test_transform(3.0, 4.0);
+        let mask = test_mask_linked(false, Some(unlink));
+        let elem = test_rect_with_transform(Some(test_transform(100.0, 100.0)));
+        let t = effective_mask_transform(&mask, &elem)
+            .expect("expected Some unlink transform");
+        assert_eq!(t.e, 3.0);
+        assert_eq!(t.f, 4.0);
+    }
+
+    #[test]
+    fn effective_mask_transform_unlinked_none_when_unlink_missing() {
+        // linked=false with no captured transform (edge case:
+        // unlinked at identity): None. Compositing skips the
+        // transform call and the mask renders in ancestor coords.
+        let mask = test_mask_linked(false, None);
+        let elem = test_rect_with_transform(Some(test_transform(7.0, 8.0)));
+        assert!(effective_mask_transform(&mask, &elem).is_none());
     }
 
     #[test]
