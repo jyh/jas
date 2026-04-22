@@ -1,0 +1,68 @@
+# Phase 0 fixture — exercises the gradient_tile and gradient_slider
+# widget primitives with dummy data. Loaded by a pytest that asserts
+# the rendered output contains all the expected DOM structure, and
+# optionally can be served as an ad-hoc panel for manual JS verification.
+#
+# See transcripts/GRADIENT_PLAN.md §Phase 0.
+
+description: "gradient_tile + gradient_slider primitives exercise fixture"
+
+state:
+  gradient_bw:
+    type: linear
+    angle: 0
+    aspect_ratio: 100
+    method: classic
+    dither: false
+    stops:
+      - { color: "#000000", opacity: 100, location: 0, midpoint_to_next: 50 }
+      - { color: "#ffffff", opacity: 100, location: 100 }
+  gradient_rgb:
+    type: linear
+    angle: 45
+    aspect_ratio: 100
+    method: classic
+    dither: false
+    stops:
+      - { color: "#ff0000", opacity: 100, location: 0, midpoint_to_next: 40 }
+      - { color: "#00ff00", opacity: 100, location: 50, midpoint_to_next: 60 }
+      - { color: "#0000ff", opacity: 100, location: 100 }
+  gradient_radial:
+    type: radial
+    angle: 0
+    aspect_ratio: 100
+    method: classic
+    dither: false
+    stops:
+      - { color: "#ffcc00", opacity: 100, location: 0, midpoint_to_next: 50 }
+      - { color: "#660033", opacity: 0, location: 100 }
+  slider_stops:
+    - { color: "#ff0000", opacity: 100, location: 0, midpoint_to_next: 40 }
+    - { color: "#00ff00", opacity: 100, location: 50, midpoint_to_next: 60 }
+    - { color: "#0000ff", opacity: 100, location: 100 }
+  selected_stop_index: 1
+  selected_midpoint_index: null
+
+panel:
+  - .row:
+    - "Small:"
+    - { type: gradient_tile, bind: { gradient: gradient_bw },     size: small  }
+    - { type: gradient_tile, bind: { gradient: gradient_rgb },    size: small  }
+    - { type: gradient_tile, bind: { gradient: gradient_radial }, size: small  }
+  - .row:
+    - "Medium:"
+    - { type: gradient_tile, bind: { gradient: gradient_bw },     size: medium }
+    - { type: gradient_tile, bind: { gradient: gradient_rgb },    size: medium }
+    - { type: gradient_tile, bind: { gradient: gradient_radial }, size: medium }
+  - .row:
+    - "Large:"
+    - { type: gradient_tile, bind: { gradient: gradient_bw },     size: large  }
+    - { type: gradient_tile, bind: { gradient: gradient_rgb },    size: large  }
+    - { type: gradient_tile, bind: { gradient: gradient_radial }, size: large  }
+  - .hr
+  - "Slider (3 stops, stop index 1 selected):"
+  - type: gradient_slider
+    bind:
+      stops: slider_stops
+      selected_stop_index: selected_stop_index
+      selected_midpoint_index: selected_midpoint_index
