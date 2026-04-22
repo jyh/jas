@@ -266,7 +266,12 @@ class MainWindow(QMainWindow):
             ws_path = os.path.join(os.path.dirname(__file__), "..", "workspace")
             ws = load_workspace(ws_path)
             self._yaml_state = StateStore(state_defaults(ws.get("state", {})))
-        except Exception:
+        except (OSError, ValueError) as e:
+            import logging
+            logging.warning(
+                "Failed to load workspace from %s; using empty state. Error: %s",
+                ws_path, e,
+            )
             self._yaml_state = StateStore()
         register_color_bar()
 

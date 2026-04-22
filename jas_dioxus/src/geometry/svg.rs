@@ -858,7 +858,9 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
             // the base's override fields and gets the matching
             // rotate angle; the last angle is reused for any
             // trailing glyphs past the end of the list (per SVG).
-            let last_angle = *rotate_vals.last().unwrap();
+            let last_angle = *rotate_vals
+                .last()
+                .expect("unreachable: match arms above cover len 0 and 1");
             chars
                 .into_iter()
                 .enumerate()
