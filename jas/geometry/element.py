@@ -331,6 +331,122 @@ class ArrowAlign(Enum):
     CENTER_AT_END = "center_at_end"
 
 
+class GradientType(Enum):
+    """Gradient type. See transcripts/GRADIENT.md §Gradient types."""
+    LINEAR = "linear"
+    RADIAL = "radial"
+    FREEFORM = "freeform"
+
+
+class GradientMethod(Enum):
+    """Gradient interpolation / topology method. classic / smooth apply
+    to linear/radial; points / lines apply to freeform."""
+    CLASSIC = "classic"
+    SMOOTH = "smooth"
+    POINTS = "points"
+    LINES = "lines"
+
+
+class StrokeSubMode(Enum):
+    """Stroke sub-mode: how a gradient on a stroke maps onto the path."""
+    WITHIN = "within"
+    ALONG = "along"
+    ACROSS = "across"
+
+
+@dataclass(frozen=True)
+class GradientStop:
+    """A single color stop inside a linear/radial gradient.
+
+    Color is stored as a hex string (e.g. "#rrggbb") to match the wire
+    format used by the Rust, Swift, and OCaml ports.
+    """
+    color: str
+    location: float
+    opacity: float = 100.0
+    midpoint_to_next: float = 50.0
+
+
+@dataclass(frozen=True)
+class GradientNode:
+    """A single node of a freeform gradient."""
+    x: float
+    y: float
+    color: str
+    opacity: float = 100.0
+    spread: float = 25.0
+
+
+@dataclass(frozen=True)
+class Gradient:
+    """A gradient value usable as a fill or stroke. See GRADIENT.md
+    §Document model."""
+    type: GradientType = GradientType.LINEAR
+    angle: float = 0.0
+    aspect_ratio: float = 100.0
+    method: GradientMethod = GradientMethod.CLASSIC
+    dither: bool = False
+    stroke_sub_mode: StrokeSubMode = StrokeSubMode.WITHIN
+    stops: tuple[GradientStop, ...] = ()
+    nodes: tuple[GradientNode, ...] = ()
+
+    def to_json(self) -> dict:
+        return {
+            "type": self.type.value,
+            "angle": self.angle,
+            "aspect_ratio": self.aspect_ratio,
+            "method": self.method.value,
+            "dither": self.dither,
+            "stroke_sub_mode": self.stroke_sub_mode.value,
+            "stops": [
+                {
+                    "color": s.color,
+                    "opacity": s.opacity,
+                    "location": s.location,
+                    "midpoint_to_next": s.midpoint_to_next,
+                }
+                for s in self.stops
+            ],
+            "nodes": [
+                {
+                    "x": n.x, "y": n.y,
+                    "color": n.color, "opacity": n.opacity, "spread": n.spread,
+                }
+                for n in self.nodes
+            ],
+        }
+
+    @classmethod
+    def from_json(cls, data: dict) -> "Gradient":
+        return cls(
+            type=GradientType(data.get("type", "linear")),
+            angle=float(data.get("angle", 0)),
+            aspect_ratio=float(data.get("aspect_ratio", 100)),
+            method=GradientMethod(data.get("method", "classic")),
+            dither=bool(data.get("dither", False)),
+            stroke_sub_mode=StrokeSubMode(data.get("stroke_sub_mode", "within")),
+            stops=tuple(
+                GradientStop(
+                    color=s["color"],
+                    location=float(s["location"]),
+                    opacity=float(s.get("opacity", 100)),
+                    midpoint_to_next=float(s.get("midpoint_to_next", 50)),
+                )
+                for s in data.get("stops") or []
+            ),
+            nodes=tuple(
+                GradientNode(
+                    x=float(n["x"]),
+                    y=float(n["y"]),
+                    color=n["color"],
+                    opacity=float(n.get("opacity", 100)),
+                    spread=float(n.get("spread", 25)),
+                )
+                for n in data.get("nodes") or []
+            ),
+        )
+
+
 @dataclass(frozen=True)
 class Fill:
     """SVG fill presentation attribute. None means fill='none'."""

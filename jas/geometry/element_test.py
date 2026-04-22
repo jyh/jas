@@ -7,6 +7,7 @@ from geometry.element import (
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
     with_fill, with_stroke,
+    Gradient, GradientStop, GradientNode, GradientType, GradientMethod, StrokeSubMode,
 )
 
 
@@ -818,6 +819,60 @@ class MaskTest(absltest.TestCase):
         m = Mask(subtree=Rect(x=0, y=0, width=10, height=10))
         with self.assertRaises(AttributeError):
             m.clip = False
+
+    # Phase 1: gradient JSON round-trip.
+
+    def test_gradient_roundtrip_linear(self):
+        g = Gradient(
+            type=GradientType.LINEAR, angle=45, aspect_ratio=100,
+            method=GradientMethod.CLASSIC, dither=False,
+            stroke_sub_mode=StrokeSubMode.WITHIN,
+            stops=(
+                GradientStop(color="#ff0000", opacity=100, location=0,   midpoint_to_next=50),
+                GradientStop(color="#0000ff", opacity=100, location=100, midpoint_to_next=50),
+            ),
+        )
+        self.assertEqual(Gradient.from_json(g.to_json()), g)
+
+    def test_gradient_roundtrip_radial_midpoints_method_dither(self):
+        g = Gradient(
+            type=GradientType.RADIAL, angle=0, aspect_ratio=200,
+            method=GradientMethod.SMOOTH, dither=True,
+            stroke_sub_mode=StrokeSubMode.ACROSS,
+            stops=(
+                GradientStop(color="#ffff00", opacity=100, location=0,   midpoint_to_next=30),
+                GradientStop(color="#800080", opacity=50,  location=50,  midpoint_to_next=70),
+                GradientStop(color="#000000", opacity=0,   location=100, midpoint_to_next=50),
+            ),
+        )
+        self.assertEqual(Gradient.from_json(g.to_json()), g)
+
+    def test_gradient_roundtrip_freeform(self):
+        g = Gradient(
+            type=GradientType.FREEFORM, method=GradientMethod.POINTS,
+            nodes=(
+                GradientNode(x=0.25, y=0.25, color="#ff0000", opacity=100, spread=30),
+                GradientNode(x=0.75, y=0.75, color="#0000ff", opacity=100, spread=25),
+            ),
+        )
+        self.assertEqual(Gradient.from_json(g.to_json()), g)
+
+    def test_gradient_wire_format_strings(self):
+        g = Gradient()
+        j = g.to_json()
+        self.assertEqual(j["type"], "linear")
+        self.assertEqual(j["method"], "classic")
+        self.assertEqual(j["stroke_sub_mode"], "within")
+
+    def test_gradient_stop_default_midpoint(self):
+        # midpoint_to_next defaults to 50 when absent on parse.
+        parsed = Gradient.from_json({
+            "type": "linear", "angle": 0, "aspect_ratio": 100,
+            "method": "classic", "dither": False, "stroke_sub_mode": "within",
+            "stops": [{"color": "#ff0000", "opacity": 100, "location": 25}],
+            "nodes": [],
+        })
+        self.assertEqual(parsed.stops[0].midpoint_to_next, 50.0)
 
 
 if __name__ == "__main__":
