@@ -200,6 +200,9 @@ content:
     # ── Row 2: Tile strip ──
     # foreach over the active library's gradients. Tile size is
     # bound to panel.thumbnail_size; Phase 3 ships small/medium/large.
+    # Click applies the tile's gradient to the active attribute via
+    # six `set` effects — each hits the subscription chain and
+    # ultimately flows to element.fill_gradient / stroke_gradient.
     - type: container
       id: grad_tiles_row
       layout: wrap
@@ -211,6 +214,15 @@ content:
         type: gradient_tile
         bind: { gradient: "g" }
         size: "{{panel.thumbnail_size}}"
+        behavior:
+          - event: click
+            effects:
+              - set: { gradient_type: "g.type" }
+              - set: { gradient_angle: "g.angle" }
+              - set: { gradient_aspect_ratio: "g.aspect_ratio" }
+              - set: { gradient_method: "g.method" }
+              - set: { gradient_dither: "g.dither" }
+              - set: { gradient_stroke_sub_mode: "g.stroke_sub_mode" }
 
     # ── Row 3: Separator ──
     - { type: separator }

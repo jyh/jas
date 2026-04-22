@@ -15718,7 +15718,44 @@
               "bind": {
                 "gradient": "g"
               },
-              "size": "{{panel.thumbnail_size}}"
+              "size": "{{panel.thumbnail_size}}",
+              "behavior": [
+                {
+                  "event": "click",
+                  "effects": [
+                    {
+                      "set": {
+                        "gradient_type": "g.type"
+                      }
+                    },
+                    {
+                      "set": {
+                        "gradient_angle": "g.angle"
+                      }
+                    },
+                    {
+                      "set": {
+                        "gradient_aspect_ratio": "g.aspect_ratio"
+                      }
+                    },
+                    {
+                      "set": {
+                        "gradient_method": "g.method"
+                      }
+                    },
+                    {
+                      "set": {
+                        "gradient_dither": "g.dither"
+                      }
+                    },
+                    {
+                      "set": {
+                        "gradient_stroke_sub_mode": "g.stroke_sub_mode"
+                      }
+                    }
+                  ]
+                }
+              ]
             }
           },
           {
