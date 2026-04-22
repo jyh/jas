@@ -10,6 +10,8 @@ from absl.testing import absltest
 from panels.gradient_panel_state import (
     apply_gradient_panel_to_selection,
     demote_gradient_panel_selection,
+    is_gradient_render_key,
+    subscribe_gradient_panel,
     sync_gradient_panel_from_selection,
 )
 
@@ -168,6 +170,37 @@ class TestApplyAndDemoteGradientPanel(absltest.TestCase):
         self.assertIsNone(model.document.get_element((0, 0)).fill_gradient)
         # Underlying solid fill preserved.
         self.assertIsNotNone(model.document.get_element((0, 0)).fill)
+
+
+class TestSubscribeGradientPanel(absltest.TestCase):
+    """Phase 5 follow-up: subscribing to gradient_* key writes triggers
+    apply_gradient_panel_to_selection automatically."""
+
+    def test_is_gradient_render_key(self):
+        self.assertTrue(is_gradient_render_key("gradient_type"))
+        self.assertTrue(is_gradient_render_key("gradient_angle"))
+        self.assertFalse(is_gradient_render_key("stroke_cap"))
+        self.assertFalse(is_gradient_render_key("gradient_stops_count"))
+
+    def test_subscribe_triggers_apply_on_gradient_write(self):
+        from document.controller import Controller
+        from geometry.element import Rect, Fill, RgbColor, Layer
+        from document.document import Document, ElementSelection
+        from document.model import Model
+        from workspace_interpreter.state_store import StateStore
+        rect = Rect(x=0, y=0, width=100, height=50,
+                    fill=Fill(color=RgbColor(1, 0, 0)), fill_gradient=None)
+        layer = Layer(children=(rect,), name="L")
+        doc = Document(layers=(layer,), selection=(ElementSelection.all((0, 0)),))
+        model = Model(doc)
+        store = StateStore()
+        store.set("fill_on_top", True)
+        subscribe_gradient_panel(store, lambda: Controller(model))
+        # Write a gradient_* key — should trigger apply.
+        store.set("gradient_type", "radial")
+        elem = model.document.get_element((0, 0))
+        self.assertIsNotNone(elem.fill_gradient)
+        self.assertEqual(elem.fill_gradient.type.value, "radial")
 
 
 if __name__ == "__main__":
