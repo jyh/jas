@@ -3070,9 +3070,17 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
+    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.checked for active/highlighted state
     let checked = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()) {
+        expr::eval(expr_str, ctx).to_bool()
+    } else {
+        false
+    };
+    // Evaluate bind.disabled to grey the button out. Used by
+    // op_link_indicator to disable while the selection has no mask.
+    let disabled = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
         expr::eval(expr_str, ctx).to_bool()
     } else {
         false
@@ -3095,8 +3103,19 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         String::new()
     };
 
-    // Look up icon SVG from the icons map in ctx
-    let icon_name = el.get("icon").and_then(|i| i.as_str()).unwrap_or("");
+    // Resolve the icon name. ``bind.icon`` (yaml expression) wins
+    // when present so widgets like the Opacity panel's
+    // op_link_indicator can flip between glyphs as mask.linked
+    // changes; falls back to the static ``icon`` field otherwise.
+    let icon_name: String = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("icon")).and_then(|v| v.as_str()) {
+        match expr::eval(expr_str, ctx) {
+            Value::Str(s) => s,
+            _ => el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string(),
+        }
+    } else {
+        el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string()
+    };
+    let icon_name = icon_name.as_str();
     // Look up icon from ctx first, then fall back to cached workspace
     let ws_for_icons = super::workspace::Workspace::load();
     let icon_svg = if !icon_name.is_empty() {
@@ -3113,14 +3132,43 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         String::new()
     };
 
-    let on_click = build_click_handler(el, ctx, rctx);
+    // Opacity panel: op_link_indicator click toggles mask.linked on
+    // every selected mask via Controller. Same pattern as
+    // op_make_mask in render_button. OPACITY.md §Document model.
+    let opacity_link_click: Option<EventHandler<Event<MouseData>>> =
+        if panel_kind == Some(PanelKind::Opacity) && id == "op_link_indicator" {
+            let app = rctx.app.clone();
+            let mut revision = rctx.revision;
+            Some(EventHandler::new(move |_evt: Event<MouseData>| {
+                let app = app.clone();
+                spawn(async move {
+                    let mut st = app.borrow_mut();
+                    if let Some(tab) = st.tab_mut() {
+                        crate::document::controller::Controller::toggle_mask_linked_on_selection(&mut tab.model);
+                    }
+                    revision += 1;
+                });
+            }))
+        } else {
+            None
+        };
+
+    let on_click = opacity_link_click.or_else(|| build_click_handler(el, ctx, rctx));
     let on_mousedown = build_mousedown_handler(el, ctx, rctx);
     let on_mouseup = build_mouseup_handler(el, ctx, rctx);
+    // Disabled styling: grey out + block pointer events so the
+    // button doesn't respond to clicks. Opacity panel's
+    // LINK_INDICATOR disables itself when the selection has no mask.
+    let disabled_style = if disabled {
+        "opacity:0.35;pointer-events:none;"
+    } else {
+        ""
+    };
 
     rsx! {
         div {
             id: "{id}",
-            style: "cursor:pointer;{bg_style}{style}",
+            style: "cursor:pointer;{disabled_style}{bg_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
