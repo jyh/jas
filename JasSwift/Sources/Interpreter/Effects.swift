@@ -566,6 +566,100 @@ func isStrokeRenderKey(_ key: String) -> Bool {
     strokeRenderKeys.contains(key)
 }
 
+// MARK: - Gradient panel state binding (Phase 4: read direction)
+
+/// Sync gradient panel state from the selection's active attribute
+/// (fill or stroke per `state.fill_on_top`). Mirrors
+/// jas_dioxus::AppState::sync_gradient_panel_from_selection.
+///
+/// Behavior per GRADIENT.md §Multi-selection and §Fill-type coupling:
+///   - Empty selection: leave panel state alone (session defaults).
+///   - Uniform with gradient: populate panel fields from the shared
+///     gradient on the active attribute.
+///   - Mixed (different gradients across selection, or some gradient
+///     and some solid/none): leave panel fields alone; the renderer
+///     handles blank-vs-uniform display per the multi-selection table.
+///   - Uniform without gradient (solid/none on every selected
+///     element's active attribute): seed a preview gradient (first
+///     stop = current solid color, second stop = white) and set
+///     `gradient_preview_state = true`. First edit (Phase 5) will
+///     materialise this onto the elements.
+public func syncGradientPanelFromSelection(store: StateStore, controller: Controller) {
+    let doc = controller.model.document
+    if doc.selection.isEmpty { return }
+
+    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+
+    var first: Gradient? = nil
+    var firstSet = false
+    var mixed = false
+    var firstSolidColor: Color? = nil
+    for es in doc.selection {
+        let elem = doc.getElement(es.path)
+        let g = fillOnTop ? elem.fillGradient : elem.strokeGradient
+        if firstSolidColor == nil && g == nil {
+            let solid = fillOnTop ? elem.fill?.color : elem.stroke?.color
+            firstSolidColor = solid
+        }
+        if !firstSet {
+            first = g
+            firstSet = true
+        } else if first != g {
+            mixed = true
+        }
+    }
+    if mixed {
+        store.set("gradient_preview_state", false)
+        return
+    }
+    if let g = first {
+        let typeStr: String
+        switch g.type {
+        case .linear: typeStr = "linear"
+        case .radial: typeStr = "radial"
+        case .freeform: typeStr = "freeform"
+        }
+        let methodStr: String
+        switch g.method {
+        case .classic: methodStr = "classic"
+        case .smooth: methodStr = "smooth"
+        case .points: methodStr = "points"
+        case .lines: methodStr = "lines"
+        }
+        let subModeStr: String
+        switch g.strokeSubMode {
+        case .within: subModeStr = "within"
+        case .along: subModeStr = "along"
+        case .across: subModeStr = "across"
+        }
+        store.set("gradient_type", typeStr)
+        store.set("gradient_angle", g.angle)
+        store.set("gradient_aspect_ratio", g.aspectRatio)
+        store.set("gradient_method", methodStr)
+        store.set("gradient_dither", g.dither)
+        store.set("gradient_stroke_sub_mode", subModeStr)
+        store.set("gradient_stops_count", Double(g.stops.count))
+        store.set("gradient_preview_state", false)
+        return
+    }
+    // Uniform without gradient — seed preview gradient.
+    let seedHex: String
+    if let c = firstSolidColor {
+        seedHex = "#" + c.toHex()
+    } else {
+        seedHex = "#000000"
+    }
+    store.set("gradient_type", "linear")
+    store.set("gradient_angle", 0.0)
+    store.set("gradient_aspect_ratio", 100.0)
+    store.set("gradient_method", "classic")
+    store.set("gradient_dither", false)
+    store.set("gradient_stroke_sub_mode", "within")
+    // Seed first stop at the solid color, second stop white.
+    store.set("gradient_seed_first_color", seedHex)
+    store.set("gradient_preview_state", true)
+}
+
 // MARK: - Character panel state binding
 
 /// Character-panel state keys stored under the `character_panel`

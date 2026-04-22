@@ -984,6 +984,35 @@ public enum Element: Equatable {
         }
     }
 
+    /// Optional gradient applied to the element's fill, if any.
+    /// Phase 1b: lives directly on each Element variant rather than nested
+    /// inside Fill. See GRADIENT.md §Document model.
+    public var fillGradient: Gradient? {
+        switch self {
+        case .rect(let v): return v.fillGradient
+        case .circle(let v): return v.fillGradient
+        case .ellipse(let v): return v.fillGradient
+        case .polyline(let v): return v.fillGradient
+        case .polygon(let v): return v.fillGradient
+        case .path(let v): return v.fillGradient
+        default: return nil
+        }
+    }
+
+    /// Optional gradient applied to the element's stroke, if any.
+    public var strokeGradient: Gradient? {
+        switch self {
+        case .line(let v): return v.strokeGradient
+        case .rect(let v): return v.strokeGradient
+        case .circle(let v): return v.strokeGradient
+        case .ellipse(let v): return v.strokeGradient
+        case .polyline(let v): return v.strokeGradient
+        case .polygon(let v): return v.strokeGradient
+        case .path(let v): return v.strokeGradient
+        default: return nil
+        }
+    }
+
     public var isLocked: Bool {
         switch self {
         case .line(let v): return v.locked
