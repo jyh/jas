@@ -159,17 +159,38 @@ through expression evaluation.
 
 ### Phase 5 — Panel → selection writes (no new rendering)
 
-**Scope**
+**Status:** Foundation done across all four native apps; UI-event
+wiring still pending.
 
-- Type buttons commit → `gradient.type`.
-- Angle / aspect / method / dither commit → corresponding fields.
-- Stroke sub-mode buttons commit → `gradient.stroke_sub_mode`.
-- Gradient slider operations commit → `gradient.stops[]` changes.
-- Stop opacity / location combos commit → selected stop's fields.
-- Tile click → copy gradient value onto active attribute.
-- Fill-type promotion on first edit — per §Fill-type coupling.
-- Fill-type demotion via the fill/stroke widget's Color button uses
-  `gradient.stops[0].color`.
+**Foundation (done):** apply / demote primitives that the UI events
+will call.
+
+- **Element layer** (`with_fill_gradient`, `with_stroke_gradient`)
+  — pure helpers that return a copy of the element with the
+  gradient field replaced.
+- **Controller layer**
+  (`set_selection_fill_gradient`, `set_selection_stroke_gradient`) —
+  iterate the selection and write each element's gradient field.
+- **AppState/Effects layer**
+  (`apply_gradient_panel_to_selection`, `demote_gradient_panel_selection`) —
+  build a Gradient from the panel state, write via the controller,
+  clear `gradient_preview_state`. Demote clears the gradient and
+  leaves the underlying solid Fill / Stroke as the demote-target
+  color (per GRADIENT.md §Fill-type coupling).
+
+8 new tests across the four apps verify the apply and demote paths.
+
+**Pending (follow-up wiring):**
+
+- Bind individual panel-control events to call `apply`:
+  - Type buttons commit → `gradient.type`.
+  - Angle / aspect / method / dither commit → corresponding fields.
+  - Stroke sub-mode buttons commit.
+  - Gradient slider stop / midpoint edits commit (panel.stops list
+    binding to store keys).
+  - Stop opacity / location combos commit → selected stop's fields.
+  - Tile click → copy gradient value onto active attribute.
+- Hook fill/stroke widget Color button to call `demote`.
 - `ADD_TO_SWATCHES_BUTTON` → append to Document Library with
   auto-name.
 - `TRASH_BUTTON` → delete selected stop (min-2 floor).
@@ -177,6 +198,10 @@ through expression evaluation.
 - `EYEDROPPER_BUTTON` → color pick into selected stop.
 - Double-click stop → opens `workspace/dialogs/color_picker.yaml`
   seeded with the stop's color.
+
+The foundation pass leaves stops as panel-local working state with
+no store binding. The follow-up adds explicit
+`panel.stops <-> store.gradient_stops` synchronisation.
 
 **Apps:** 4 native + `jas_flask`.
 
