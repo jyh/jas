@@ -260,16 +260,28 @@ paths.
 
 ### Phase 8 — Stroke gradient (within-stroke sub-mode)
 
-**Scope**
+**Status:** Done across all four native apps.
 
-- `state.fill_on_top == stroke` → panel edits the stroke gradient.
-- SVG emit: `stroke="url(#gN)"` — native for `within_stroke`.
-- Stroke sub-mode row enablement per §Enablement.
+- **Rust:** `apply_stroke_with_gradient` uses
+  `set_stroke_style_canvas_gradient`.
+- **OCaml:** `fill_stroke_gradient_full` sets the gradient as Cairo
+  source after `apply_stroke` (Cairo's unified source semantics).
+- **Python:** `_apply_stroke` builds `QPen(QBrush(QGradient))` —
+  Qt supports a gradient brush on the pen natively.
+- **Swift:** `fillStrokedPathWithGradient` uses
+  `replacePathWithStrokedPath` to convert the stroked outline into
+  a fillable path, then fills it with the gradient (CGContext
+  gradient APIs are fill-oriented).
 
-**Apps:** 4 native.
+All four handle the four paint combinations: fill-gradient + stroke-
+gradient, fill-gradient + solid-stroke, solid-fill + stroke-gradient,
+solid + solid. `state.fill_on_top` flips which attribute the panel
+edits; the renderer reads both fields regardless.
 
-**Deliverable:** a stroke with a gradient renders correctly in all
-four apps.
+Along-stroke / across-stroke sub-modes remain `pending_renderer`
+per GRADIENT.md §Stroke sub-modes — they require path-arc-length /
+perpendicular-distance parameterization that isn't natively
+supported by Canvas2D / CGContext / Cairo / QPainter gradient APIs.
 
 ### Phase 9 — Library management
 
