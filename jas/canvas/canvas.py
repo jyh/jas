@@ -664,8 +664,84 @@ def _apply_outline_style(painter: QPainter) -> None:
     painter.setPen(pen)
 
 
+def _mask_composition_mode(mask) -> QPainter.CompositionMode | None:
+    """Return the QPainter composition mode that applies a [mask] to
+    an element's pixels inside a transparency layer, or ``None`` when
+    the mask configuration isn't yet supported by the renderer.
+
+    Track C phase 1 supports ``clip: true`` only — the standard
+    "clip to mask shape" interpretation. ``clip: false`` (element
+    stays visible outside the mask shape) requires a more complex
+    two-pass composite and lands in a later phase. ``disabled`` is
+    treated as no-mask per OPACITY.md §States.
+    """
+    if mask.disabled:
+        return None
+    if not mask.clip:
+        return None
+    cm = QPainter.CompositionMode
+    if mask.invert:
+        return cm.CompositionMode_DestinationOut
+    return cm.CompositionMode_DestinationIn
+
+
 def _draw_element(painter: QPainter, elem: Element,
                   ancestor_vis=None) -> None:
+    """Draw a single element, dispatching to the mask composite
+    path when the element carries an active supported mask."""
+    mask = getattr(elem, 'mask', None)
+    if mask is not None:
+        mode = _mask_composition_mode(mask)
+        if mode is not None:
+            _draw_element_with_mask(painter, elem, mask, mode, ancestor_vis)
+            return
+    _draw_element_body(painter, elem, ancestor_vis)
+
+
+def _draw_element_with_mask(painter: QPainter, elem: Element,
+                            mask, mode: QPainter.CompositionMode,
+                            ancestor_vis) -> None:
+    """Render ``elem`` with its opacity mask composited in. The
+    element body is drawn onto an offscreen ``QImage`` with the
+    main painter's current world transform; the mask subtree is
+    then drawn on top with ``CompositionMode_DestinationIn`` (or
+    ``DestinationOut`` when inverted), leaving only the pixels that
+    survive the mask. The offscreen image is then blitted onto the
+    main painter at device coordinates.
+
+    OPACITY.md §Rendering, phase 1.
+    """
+    from PySide6.QtGui import QImage
+    device = painter.device()
+    if device is None:
+        _draw_element_body(painter, elem, ancestor_vis)
+        return
+    w = int(device.width())
+    h = int(device.height())
+    if w <= 0 or h <= 0:
+        return
+    image = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)  # fully transparent
+    sub = QPainter(image)
+    try:
+        sub.setRenderHint(
+            QPainter.RenderHint.Antialiasing,
+            bool(painter.renderHints() & QPainter.RenderHint.Antialiasing),
+        )
+        sub.setTransform(painter.transform())
+        _draw_element_body(sub, elem, ancestor_vis)
+        sub.setCompositionMode(mode)
+        _draw_element(sub, mask.subtree, ancestor_vis)
+    finally:
+        sub.end()
+    painter.save()
+    painter.resetTransform()
+    painter.drawImage(0, 0, image)
+    painter.restore()
+
+
+def _draw_element_body(painter: QPainter, elem: Element,
+                       ancestor_vis=None) -> None:
     """Draw a single element using the QPainter.
 
     ``ancestor_vis`` is the capping visibility inherited from parent

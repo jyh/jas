@@ -351,6 +351,51 @@ class DrawElementTest(absltest.TestCase):
         p.end()
 
 
+class MaskCompositionModeTest(absltest.TestCase):
+    """Test the _mask_composition_mode helper from OPACITY.md §Rendering."""
+
+    def _mask(self, clip, invert, disabled):
+        from geometry.element import Mask, Group
+        return Mask(
+            subtree=Group(children=()),
+            clip=clip, invert=invert, disabled=disabled,
+            linked=True, unlink_transform=None,
+        )
+
+    def test_clip_not_inverted_is_destination_in(self):
+        from canvas.canvas import _mask_composition_mode
+        self.assertEqual(
+            _mask_composition_mode(self._mask(True, False, False)),
+            QPainter.CompositionMode.CompositionMode_DestinationIn,
+        )
+
+    def test_clip_inverted_is_destination_out(self):
+        from canvas.canvas import _mask_composition_mode
+        self.assertEqual(
+            _mask_composition_mode(self._mask(True, True, False)),
+            QPainter.CompositionMode.CompositionMode_DestinationOut,
+        )
+
+    def test_disabled_is_none(self):
+        # disabled overrides both clip and invert: falls back to no
+        # mask rendering per OPACITY.md §States.
+        from canvas.canvas import _mask_composition_mode
+        for clip, invert in [(True, False), (True, True),
+                             (False, False), (False, True)]:
+            self.assertIsNone(
+                _mask_composition_mode(self._mask(clip, invert, True)))
+
+    def test_no_clip_is_none_phase1(self):
+        # clip=false (element visible outside the mask shape) needs a
+        # two-pass composite; not yet supported — falls back to no
+        # mask. Phase 2 of Track C will handle this.
+        from canvas.canvas import _mask_composition_mode
+        self.assertIsNone(
+            _mask_composition_mode(self._mask(False, False, False)))
+        self.assertIsNone(
+            _mask_composition_mode(self._mask(False, True, False)))
+
+
 class ArcToBeziersTest(absltest.TestCase):
     """Tests for _arc_to_beziers arc-to-cubic conversion."""
 
