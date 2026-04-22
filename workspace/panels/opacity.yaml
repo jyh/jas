@@ -1,0 +1,322 @@
+id: opacity_panel_content
+type: panel
+summary: "Opacity"
+description: >
+  Opacity panel — sets opacity and blend mode on the current selection, and
+  manages opacity masks on selected elements. See transcripts/OPACITY.md for
+  the full specification.
+
+  Flask's phase-1 scope is yaml wiring only — the document model for
+  per-element opacity / blend mode / opacity masks lands in later phases in
+  the native apps. Phase-1 behavior in Flask:
+
+    - MODE_DROPDOWN and OPACITY_INPUT are functional; they bind to panel-
+      local `mode` and `opacity` working values.
+    - OPACITY_PREVIEW, LINK_INDICATOR, MASK_PREVIEW render as placeholder
+      boxes.
+    - MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX are present but
+      disabled until the document model carries element.mask.
+    - Mask-lifecycle and page-level menu items use enabled_when: "false"
+      until their respective phases land (pending_model for disable_mask /
+      unlink_mask; pending_renderer for page_isolated_blending /
+      page_knockout_group).
+
+  === Layout ===
+
+  Row 1 — MODE_DROPDOWN (4 cols), "Opacity:" label (3 cols), OPACITY_INPUT
+  (4 cols), OPACITY_DISCLOSURE chevron (1 col).
+
+  Row 2 — OPACITY_PREVIEW (3 cols), LINK_INDICATOR (1 col), MASK_PREVIEW
+  (3 cols), and a buttons column (5 cols) containing MAKE_MASK_BUTTON,
+  CLIP_CHECKBOX, INVERT_MASK_CHECKBOX. The entire row is hidden when
+  panel.thumbnails_hidden is true.
+
+  === Mode values ===
+
+  The 16 blend modes are grouped into six sections by dividers in the
+  dropdown, matching the groups in transcripts/OPACITY.md:
+
+    - [normal]
+    - [darken, multiply, color_burn]
+    - [lighten, screen, color_dodge]
+    - [overlay, soft_light, hard_light]
+    - [difference, exclusion]
+    - [hue, saturation, color, luminosity]
+
+  === Panel menu ===
+
+  Ten entries across four groups. Phase-1 actionable: Hide Thumbnails,
+  Show Options, New Opacity Masks Are Clipping, New Opacity Masks Are
+  Inverted (panel-local toggles). Phase-1 deferred: all mask-lifecycle
+  items and the page-level blending toggles.
+
+state:
+  blend_mode:
+    type: enum
+    values:
+      - normal
+      - darken
+      - multiply
+      - color_burn
+      - lighten
+      - screen
+      - color_dodge
+      - overlay
+      - soft_light
+      - hard_light
+      - difference
+      - exclusion
+      - hue
+      - saturation
+      - color
+      - luminosity
+    default: normal
+    description: >
+      Working blend mode. Phase-1 is panel-local (not yet applied to
+      elements); later phases persist as element.mode on the selection.
+      Named `blend_mode` rather than `mode` to avoid a collision with
+      the Color panel's state.mode in the shared panel-overrides map.
+  opacity:
+    type: number
+    default: 100
+    description: >
+      Working opacity value (0-100). Phase-1 is panel-local (not yet
+      applied to elements); later phases persist as element.opacity on
+      the selection.
+  thumbnails_hidden:
+    type: bool
+    default: false
+    description: >
+      When true, the preview row (OPACITY_PREVIEW, LINK_INDICATOR,
+      MASK_PREVIEW, and the mask-buttons column) is collapsed.
+  options_shown:
+    type: bool
+    default: false
+    description: >
+      When true, the isolated_blending and knockout_group toggles are
+      revealed inline in the panel body below the preview row. Phase-1
+      has no inline controls for these yet; the flag is tracked for
+      parity with the panel menu checkmark.
+  new_masks_clipping:
+    type: bool
+    default: true
+    per_document: true
+    description: >
+      Document preference for the initial state of mask.clip on newly
+      made opacity masks. Does not affect existing masks.
+  new_masks_inverted:
+    type: bool
+    default: false
+    per_document: true
+    description: >
+      Document preference for the initial state of mask.invert on newly
+      made opacity masks. Does not affect existing masks.
+
+menu:
+  - label: "Hide Thumbnails"
+    action: toggle_opacity_thumbnails
+    checked_when: "panel.thumbnails_hidden"
+  - label: "Show Options"
+    action: toggle_opacity_options
+    checked_when: "panel.options_shown"
+  - separator
+  - label: "Make Opacity Mask"
+    action: make_opacity_mask
+    enabled_when: "!selection_has_mask"
+  - label: "Release Opacity Mask"
+    action: release_opacity_mask
+    enabled_when: "selection_has_mask"
+  - label: "Disable Opacity Mask"
+    action: disable_opacity_mask
+    enabled_when: "selection_has_mask"
+  - label: "Unlink Opacity Mask"
+    action: unlink_opacity_mask
+    enabled_when: "selection_has_mask"
+  - separator
+  - label: "New Opacity Masks Are Clipping"
+    action: toggle_new_masks_clipping
+    checked_when: "panel.new_masks_clipping"
+  - label: "New Opacity Masks Are Inverted"
+    action: toggle_new_masks_inverted
+    checked_when: "panel.new_masks_inverted"
+  - separator
+  - label: "Page Isolated Blending"
+    action: toggle_page_isolated_blending
+    enabled_when: "false"
+    description: >
+      status: pending_renderer. Enables once the renderer supports
+      isolated blending for the document root group.
+  - label: "Page Knockout Group"
+    action: toggle_page_knockout_group
+    enabled_when: "false"
+    description: >
+      status: pending_renderer. Enables once the renderer supports
+      knockout group compositing for the document root group.
+
+content:
+  type: container
+  id: op_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # ── Row 1: Mode, Opacity label, Opacity input, Disclosure ──
+    - type: row
+      id: op_controls_row
+      children:
+
+        - id: op_mode
+          type: select
+          col: 4
+          summary: "Blend mode"
+          description: >
+            Blend mode for the selection. Sixteen modes grouped into six
+            sections by separator.
+          bind:
+            value: "panel.blend_mode"
+          options:
+            - { value: normal,      label: "Normal" }
+            - separator
+            - { value: darken,      label: "Darken" }
+            - { value: multiply,    label: "Multiply" }
+            - { value: color_burn,  label: "Color Burn" }
+            - separator
+            - { value: lighten,     label: "Lighten" }
+            - { value: screen,      label: "Screen" }
+            - { value: color_dodge, label: "Color Dodge" }
+            - separator
+            - { value: overlay,     label: "Overlay" }
+            - { value: soft_light,  label: "Soft Light" }
+            - { value: hard_light,  label: "Hard Light" }
+            - separator
+            - { value: difference,  label: "Difference" }
+            - { value: exclusion,   label: "Exclusion" }
+            - separator
+            - { value: hue,         label: "Hue" }
+            - { value: saturation,  label: "Saturation" }
+            - { value: color,       label: "Color" }
+            - { value: luminosity,  label: "Luminosity" }
+
+        - type: text
+          col: 3
+          content: "Opacity:"
+          style: { color: "{{theme.colors.text}}", font_size: 12 }
+
+        - id: op_opacity
+          type: number_input
+          col: 4
+          summary: "Opacity"
+          description: "Numeric opacity for the selection, 0-100%."
+          min: 0
+          max: 100
+          suffix: "%"
+          bind:
+            value: "panel.opacity"
+
+        - id: op_disclosure
+          type: icon_button
+          col: 1
+          icon: disclosure_right
+          summary: "Opacity slider"
+          description: >
+            Opens a popover containing a horizontal opacity slider bound
+            to panel.opacity.
+          behavior:
+            - event: click
+              action: open_opacity_slider_popover
+
+    # ── Row 2: Preview cells + Mask buttons ────────────────────
+    - type: container
+      id: op_preview_row
+      layout: row
+      bind:
+        visible: "!panel.thumbnails_hidden"
+      children:
+
+        - id: op_preview
+          type: placeholder
+          col: 3
+          summary: "Opacity preview"
+          description: >
+            Thumbnail of the selection. Phase-1 renders as a placeholder
+            box in Flask; native apps render actual selection artwork.
+
+            Clicking this preview sets the editing target to the
+            element's main content (exits mask-editing mode) per
+            OPACITY.md §Preview interactions. The native renderers
+            draw a persistent highlight on this preview while it is
+            the active editing target (i.e., while
+            ``editing_target_is_mask`` is false).
+
+        - id: op_link_indicator
+          type: icon_button
+          col: 1
+          summary: "Link mask transform"
+          description: >
+            Icon showing whether the mask's transform is linked to the
+            element's. The glyph flips between a connected chain
+            (``link_linked``) and a broken chain (``link_unlinked``)
+            based on the first selected element's mask.linked. Clicking
+            toggles mask.linked on every selected mask via
+            ``Controller::toggle_mask_linked_on_selection``. Disabled
+            when the selection has no mask. OPACITY.md §Document model.
+          bind:
+            icon: 'if selection_mask_linked then "link_linked" else "link_unlinked"'
+            disabled: "!selection_has_mask"
+
+        - id: op_mask_preview
+          type: placeholder
+          col: 3
+          summary: "Mask preview"
+          description: >
+            Thumbnail of the opacity mask (or an empty-mask glyph when
+            no mask exists). Phase-1 renders as a placeholder box.
+
+            Clicking this preview enters mask-editing mode per
+            OPACITY.md §Preview interactions: the editing target
+            switches to the first selected element's mask subtree,
+            and subsequent tool drawing adds to ``element.mask.subtree``
+            instead of the active layer. Requires ``selection_has_mask``;
+            a no-op otherwise. The native renderers draw a
+            persistent highlight on this preview while mask-editing
+            is active (``editing_target_is_mask`` is true).
+
+        - type: container
+          id: op_buttons_col
+          layout: column
+          col: 5
+          style: { gap: 2 }
+          children:
+
+            - id: op_make_mask
+              type: button
+              summary: "Make or Release Opacity Mask"
+              description: >
+                Creates an opacity mask on the selected element(s), or
+                releases an existing mask. The label flips between
+                "Make Mask" and "Release" based on selection_has_mask
+                per OPACITY.md § States.
+              bind:
+                label: 'if selection_has_mask then "Release" else "Make Mask"'
+
+            - id: op_clip
+              type: checkbox
+              label: "Clip"
+              summary: "Clip"
+              description: >
+                Toggles whether the opacity mask clips its element.
+                Disabled when the selection has no mask.
+              bind:
+                disabled: "!selection_has_mask"
+                checked: "selection_mask_clip"
+
+            - id: op_invert_mask
+              type: checkbox
+              label: "Invert Mask"
+              summary: "Invert Mask"
+              description: >
+                Toggles whether the opacity mask is inverted. Disabled
+                when the selection has no mask.
+              bind:
+                disabled: "!selection_has_mask"
+                checked: "selection_mask_invert"

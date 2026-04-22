@@ -12,6 +12,14 @@ type edit_session_ref = <
   clear_pending_override : unit -> unit
 >
 
+(** The target that drawing tools operate on. The default is the
+    document's normal content; mask-editing mode switches the
+    target to a specific element's mask subtree. OPACITY.md
+    \167Preview interactions. *)
+type editing_target =
+  | Content
+  | Mask of int list
+
 class model : ?document:Document.document -> ?filename:string -> unit -> object
   method document : Document.document
   method set_document : Document.document -> unit
@@ -34,6 +42,10 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   method set_recent_colors : string list -> unit
   method current_edit_session : edit_session_ref option
   method set_current_edit_session : edit_session_ref option -> unit
+  method editing_target : editing_target
+  method set_editing_target : editing_target -> unit
+  method mask_isolation_path : int list option
+  method set_mask_isolation_path : int list option -> unit
 end
 
 val create : ?document:Document.document -> ?filename:string -> unit -> model

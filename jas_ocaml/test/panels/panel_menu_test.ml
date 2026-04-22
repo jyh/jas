@@ -30,7 +30,7 @@ let label_tests = [
     assert (panel_label Properties = "Properties"));
 
   Alcotest.test_case "all_panel_kinds_count" `Quick (fun () ->
-    assert (Array.length all_panel_kinds = 10));
+    assert (Array.length all_panel_kinds = 11));
 
   Alcotest.test_case "all_panel_kinds_contains_all" `Quick (fun () ->
     let has k = Array.exists (( = ) k) all_panel_kinds in
@@ -42,7 +42,12 @@ let label_tests = [
     assert (has Character);
     assert (has Paragraph);
     assert (has Artboards);
-    assert (has Align));
+    assert (has Align);
+    assert (has Boolean);
+    assert (has Opacity));
+
+  Alcotest.test_case "panel_label_opacity" `Quick (fun () ->
+    assert (panel_label Opacity = "Opacity"));
 
   Alcotest.test_case "panel_label_align" `Quick (fun () ->
     assert (panel_label Align = "Align"));
@@ -87,6 +92,40 @@ let label_tests = [
     (match List.nth items 4 with
      | Action { label = "Close Align"; command = "close_panel"; _ } -> ()
      | _ -> assert false));
+
+  Alcotest.test_case "opacity_menu_has_ten_spec_items_plus_close" `Quick (fun () ->
+    let items = panel_menu Opacity in
+    let seps = List.length (List.filter (fun i -> i = Separator) items) in
+    let others = List.length items - seps in
+    (* Ten spec items from OPACITY.md + Close Opacity = 11. Four separators
+       divide the spec groups and precede Close. *)
+    assert (seps = 4);
+    assert (others = 11));
+
+  Alcotest.test_case "opacity_menu_has_four_toggles" `Quick (fun () ->
+    let items = panel_menu Opacity in
+    let toggle_cmds = List.filter_map (function
+      | Toggle { command; _ } -> Some command
+      | _ -> None
+    ) items in
+    assert (List.mem "toggle_opacity_thumbnails" toggle_cmds);
+    assert (List.mem "toggle_opacity_options" toggle_cmds);
+    assert (List.mem "toggle_new_masks_clipping" toggle_cmds);
+    assert (List.mem "toggle_new_masks_inverted" toggle_cmds));
+
+  Alcotest.test_case "opacity_menu_has_four_mask_lifecycle_actions_in_order" `Quick (fun () ->
+    let items = panel_menu Opacity in
+    let action_cmds = List.filter_map (function
+      | Action { command; _ } -> Some command
+      | _ -> None
+    ) items in
+    assert (action_cmds = [
+      "make_opacity_mask";
+      "release_opacity_mask";
+      "disable_opacity_mask";
+      "unlink_opacity_mask";
+      "close_panel";
+    ]));
 ]
 
 (* ================================================================== *)
@@ -223,6 +262,9 @@ let menu_tests = [
       name = "A"; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer0|] };
@@ -242,6 +284,9 @@ let menu_tests = [
       name = "A"; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer0|] };
@@ -256,6 +301,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "Layer 1"|] };
@@ -271,6 +319,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers =
@@ -290,6 +341,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
@@ -306,6 +360,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
@@ -324,6 +381,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
@@ -346,6 +406,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers =
@@ -369,6 +432,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     let child1 = layer "c1" in
@@ -377,6 +443,9 @@ let menu_tests = [
       children = [|child1; child2|];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; group; layer "B"|] };
     Jas.Panel_menu.dispatch_yaml_action
@@ -397,6 +466,9 @@ let menu_tests = [
         name = "Old"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
+        blend_mode = Jas.Element.Normal;
+        mask = None;
+        isolated_blending = false; knockout_group = false;
       }
     |] };
     let params = [
@@ -423,6 +495,9 @@ let menu_tests = [
         name = "Existing"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
+        blend_mode = Jas.Element.Normal;
+        mask = None;
+        isolated_blending = false; knockout_group = false;
       }
     |] };
     let params = [
@@ -450,6 +525,9 @@ let menu_tests = [
         name = "A"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
+        blend_mode = Jas.Element.Normal;
+        mask = None;
+        isolated_blending = false; knockout_group = false;
       }
     |] };
     let closed = ref false in
@@ -472,6 +550,9 @@ let menu_tests = [
       name = a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
+      blend_mode = Jas.Element.Normal;
+      mask = None;
+      isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
@@ -500,6 +581,62 @@ let menu_tests = [
     List.iter (fun cmd ->
       panel_dispatch Layers cmd addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ()
     ) cmds);
+
+  (* Opacity panel new_masks_* plumbing: toggle commands flip the
+     stored bool, panel_is_checked mirrors it, and subsequent
+     [make_opacity_mask] dispatches read the live values. *)
+  Alcotest.test_case "opacity_toggle_new_masks_clipping_flips_store" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    Jas.State_store.init_panel store "opacity_panel_content"
+      [("new_masks_clipping", `Bool true);
+       ("new_masks_inverted", `Bool false);
+       ("thumbnails_hidden", `Bool false);
+       ("options_shown", `Bool false)];
+    Jas.Panel_menu.opacity_store_ref := Some store;
+    assert (panel_is_checked Opacity "toggle_new_masks_clipping" l);
+    panel_dispatch Opacity "toggle_new_masks_clipping" addr l
+      ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ();
+    assert (not (panel_is_checked Opacity "toggle_new_masks_clipping" l));
+    panel_dispatch Opacity "toggle_new_masks_clipping" addr l
+      ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ();
+    assert (panel_is_checked Opacity "toggle_new_masks_clipping" l);
+    Jas.Panel_menu.opacity_store_ref := None);
+
+  Alcotest.test_case "opacity_make_mask_reads_live_new_masks_flags" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    (* Start with clipping=false, inverted=true (non-defaults) so we
+       can tell the dispatch read the live store, not hardcoded
+       defaults. *)
+    Jas.State_store.init_panel store "opacity_panel_content"
+      [("new_masks_clipping", `Bool false);
+       ("new_masks_inverted", `Bool true)];
+    Jas.Panel_menu.opacity_store_ref := Some store;
+    (* Seed a single rect selected at [0;0]. *)
+    let m = Jas.Model.create () in
+    let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer ~name:"L" [|rect|] in
+    let doc = { (m#document) with
+      Jas.Document.layers = [|layer|];
+      selection = Jas.Document.PathMap.singleton [0;0]
+        (Jas.Document.element_selection_all [0;0]);
+    } in
+    m#set_document doc;
+    panel_dispatch Opacity "make_opacity_mask" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    (* The new mask on the rect should have clip=false, invert=true
+       matching the live store. *)
+    let mask = match Jas.Element.get_mask (Jas.Document.get_element m#document [0;0]) with
+      | Some mk -> mk
+      | None -> failwith "make_opacity_mask did not create a mask" in
+    assert (mask.Jas.Element.clip = false);
+    assert (mask.Jas.Element.invert = true);
+    Jas.Panel_menu.opacity_store_ref := None);
 ]
 
 (* ================================================================== *)

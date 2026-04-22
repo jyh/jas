@@ -408,6 +408,8 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
             children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let doc = Document {
@@ -521,6 +523,8 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
             children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         });
         let doc = Document {

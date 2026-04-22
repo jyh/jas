@@ -45,6 +45,35 @@ val color_to_cmyka : color -> float * float * float * float * float
     cap inherited from its parent Group or Layer. *)
 type visibility = Invisible | Outline | Preview
 
+(** Blend mode for compositing an element against its parent layer.
+    Values mirror the Opacity panel mode dropdown. Default is [Normal].
+    Serialize via [blend_mode_to_string] using snake_case to match the
+    [opacity.yaml] mode ids and the cross-language JSON equivalence
+    contract shared with Rust and Swift. *)
+type blend_mode =
+  | Normal
+  | Darken
+  | Multiply
+  | Color_burn
+  | Lighten
+  | Screen
+  | Color_dodge
+  | Overlay
+  | Soft_light
+  | Hard_light
+  | Difference
+  | Exclusion
+  | Hue
+  | Saturation
+  | Color
+  | Luminosity
+
+(** snake_case string id for a blend mode (e.g. [Color_burn] -> ["color_burn"]). *)
+val blend_mode_to_string : blend_mode -> string
+
+(** Parse a snake_case id into a [blend_mode]. Returns [None] on unknown. *)
+val blend_mode_of_string : string -> blend_mode option
+
 (** SVG stroke-linecap. *)
 type linecap = Butt | Round_cap | Square
 
@@ -219,6 +248,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
     }
   | Rect of {
       x : float; y : float;
@@ -230,6 +261,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -239,6 +272,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -249,6 +284,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
     }
   | Polyline of {
       points : (float * float) list;
@@ -258,6 +295,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
     }
   | Polygon of {
       points : (float * float) list;
@@ -267,6 +306,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
     }
   | Path of {
       d : path_command list;
@@ -277,6 +318,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
     }
   | Text of {
       x : float; y : float;
@@ -305,6 +348,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
       (** Ordered, non-empty list of per-range formatting fragments.
           Invariant: [concat_content tspans = content]. Constructors
           initialise to a single-tspan list with empty overrides;
@@ -340,6 +385,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
       (** See Text.tspans above. *)
       tspans : tspan array;
     }
@@ -349,6 +396,14 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
+      (** Opacity panel "Page Isolated Blending" flag. Storage-only in
+          Phase 2; renderer support is deferred. Default [false]. *)
+      isolated_blending : bool;
+      (** Opacity panel "Page Knockout Group" flag. Storage-only in
+          Phase 2; renderer support is deferred. Default [false]. *)
+      knockout_group : bool;
     }
   | Layer of {
       name : string;
@@ -357,6 +412,13 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      blend_mode : blend_mode;
+      mask : mask option;
+      (** See [Group.isolated_blending]. Present on layers so the
+          document root (a Layer) can carry the flag today. *)
+      isolated_blending : bool;
+      (** See [Group.knockout_group]. *)
+      knockout_group : bool;
     }
   (** A non-destructive element whose geometry is evaluated on demand
       from its source inputs. See [live_variant] below and
@@ -388,6 +450,33 @@ and compound_shape = {
   transform : transform option;
   locked : bool;
   visibility : visibility;
+  blend_mode : blend_mode;
+  mask : mask option;
+}
+
+(** Opacity mask attached to an element. See OPACITY.md §Document model.
+    Storage-only in Phase 3a; renderer and UI wiring land in Phase 3b.
+
+    Fields:
+    - [subtree] artwork whose luminance drives the owning element's alpha.
+    - [clip] when true, also clip the element to the mask bounds.
+    - [invert] when true, the luminance mapping is inverted.
+    - [disabled] when true, the element renders as if no mask were
+      attached; the subtree is preserved so re-enabling restores the
+      prior state.
+    - [linked] when true, mask transforms follow the owning element's
+      transform. When false, the mask uses [unlink_transform] as its
+      fixed baseline.
+    - [unlink_transform] captured at unlink time; used as the mask's
+      effective transform while [linked] is false. Cleared on relink.
+*)
+and mask = {
+  subtree : element;
+  clip : bool;
+  invert : bool;
+  disabled : bool;
+  linked : bool;
+  unlink_transform : transform option;
 }
 
 (** Hook for the LiveElement bounds computation. Set by [Live] at
@@ -451,6 +540,7 @@ val set_locked : bool -> element -> element
 (** {2 Visibility} *)
 
 val get_visibility : element -> visibility
+val get_blend_mode : element -> blend_mode
 val set_visibility : visibility -> element -> element
 
 val get_transform : element -> transform option
@@ -462,6 +552,13 @@ val with_transform_translated : dx:float -> dy:float -> element -> element
 
 val with_fill : element -> fill option -> element
 val with_stroke : element -> stroke option -> element
+
+(** Return a copy of [elem] with its opacity mask replaced. Preserves
+    every other field. See OPACITY.md §Document model. *)
+val with_mask : element -> mask option -> element
+
+(** Return the opacity mask attached to [elem], if any. *)
+val get_mask : element -> mask option
 val with_width_points : element -> stroke_width_point list -> element
 val color_to_hex : color -> string
 val color_from_hex : string -> color option

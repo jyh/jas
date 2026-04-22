@@ -25,6 +25,30 @@ private func cgColor(_ c: Color) -> CGColor {
     return CGColor(red: r, green: g, blue: b, alpha: a)
 }
 
+/// Map a BlendMode to its CoreGraphics counterpart. CoreGraphics natively
+/// supports all 16 of the Opacity panel's modes. `.normal` maps to
+/// `.normal` (i.e. `kCGBlendModeNormal`), the default source-over behavior.
+internal func cgBlendMode(_ m: BlendMode) -> CGBlendMode {
+    switch m {
+    case .normal:      return .normal
+    case .darken:      return .darken
+    case .multiply:    return .multiply
+    case .colorBurn:   return .colorBurn
+    case .lighten:     return .lighten
+    case .screen:      return .screen
+    case .colorDodge:  return .colorDodge
+    case .overlay:     return .overlay
+    case .softLight:   return .softLight
+    case .hardLight:   return .hardLight
+    case .difference:  return .difference
+    case .exclusion:   return .exclusion
+    case .hue:         return .hue
+    case .saturation:  return .saturation
+    case .color:       return .color
+    case .luminosity:  return .luminosity
+    }
+}
+
 private func applyTransform(_ ctx: CGContext, _ t: Transform?) {
     guard let t = t else { return }
     ctx.concatenate(CGAffineTransform(a: t.a, b: t.b, c: t.c, d: t.d, tx: t.e, ty: t.f))
@@ -497,11 +521,159 @@ private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
     }
 }
 
+/// How the mask subtree's rendered alpha is applied to the element.
+/// Selected by ``maskPlan`` from the mask's ``clip`` and ``invert``
+/// fields; consumed by ``drawElementWithMask``. Mirrors the Rust
+/// renderer's ``MaskPlan`` enum in
+/// ``jas_dioxus/src/canvas/render.rs``.
+internal enum MaskPlan: Equatable {
+    /// Element clipped to the mask shape. ``.destinationIn`` applied
+    /// across the whole transparency layer. `clip: true,
+    /// invert: false`.
+    case clipIn
+    /// Element clipped to the *inverse* of the mask shape.
+    /// ``.destinationOut`` across the whole transparency layer.
+    /// Covers both `clip: true, invert: true` and — for alpha-based
+    /// masks — `clip: false, invert: true`, which collapse to the
+    /// same output (`E * (1 - M)` everywhere) since the mask's
+    /// "outside" region contributes zero alpha either way.
+    case clipOut
+    /// `clip: false, invert: false`: element stays at full alpha
+    /// outside the mask subtree's bounding box; ``.destinationIn``
+    /// with the mask applies only inside the bbox via a clipped
+    /// transparency layer. OPACITY.md §Rendering.
+    case revealOutsideBbox
+}
+
+/// Pick a ``MaskPlan`` for the mask, or ``nil`` when the mask is
+/// inactive (``disabled: true``).
+internal func maskPlan(_ mask: Mask) -> MaskPlan? {
+    if mask.disabled { return nil }
+    switch (mask.clip, mask.invert) {
+    case (true, false): return .clipIn
+    case (true, true): return .clipOut
+    // Alpha-based masks can't distinguish `clip: false,
+    // invert: true` from `clip: true, invert: true` (both yield
+    // `E * (1 - M)` when the mask's outside-region alpha is 0),
+    // so route them through the same composite.
+    case (false, true): return .clipOut
+    case (false, false): return .revealOutsideBbox
+    }
+}
+
+/// Return the transform that should be applied when rendering the
+/// mask's subtree on top of the ancestor coord system. Track C
+/// phase 3, OPACITY.md §Document model:
+///
+/// - ``linked: true``  — mask inherits the element's transform
+///   (mask follows the element).
+/// - ``linked: false`` — mask uses ``unlinkTransform`` (the
+///   element's transform captured at unlink time, frozen so the
+///   mask stays fixed under subsequent element edits).
+///
+/// Returns ``nil`` when the picked transform is absent (identity
+/// case) so the caller can skip the ``applyTransform`` call.
+internal func effectiveMaskTransform(_ mask: Mask, _ elem: Element) -> Transform? {
+    mask.linked ? elem.transform : mask.unlinkTransform
+}
+
+/// Opacity fetched from any Element case. (The Geometry module
+/// already exposes ``blendMode`` / ``mask``; a renderer-local
+/// ``elementOpacity`` keeps this ad-hoc without growing the
+/// cross-app API surface — only the mask composite path needs it.)
+private func elementOpacity(_ e: Element) -> Double {
+    switch e {
+    case .line(let v): return v.opacity
+    case .rect(let v): return v.opacity
+    case .circle(let v): return v.opacity
+    case .ellipse(let v): return v.opacity
+    case .polyline(let v): return v.opacity
+    case .polygon(let v): return v.opacity
+    case .path(let v): return v.opacity
+    case .text(let v): return v.opacity
+    case .textPath(let v): return v.opacity
+    case .group(let v): return v.opacity
+    case .layer(let v): return v.opacity
+    case .live(let v): return v.opacity
+    }
+}
+
+/// Render an element's opacity mask via a CoreGraphics transparency
+/// layer. The element body is drawn on a transparent layer; the
+/// mask subtree is then composited on top according to ``plan``.
+/// The layer is finally merged back into the parent context with
+/// the element's own alpha and blend mode applied once at the
+/// composite-back step. OPACITY.md §Rendering.
+private func drawElementWithMask(
+    _ ctx: CGContext,
+    _ elem: Element,
+    _ mask: Mask,
+    plan: MaskPlan,
+    ancestorVis: Visibility
+) {
+    ctx.saveGState()
+    // Alpha + blend apply at layer-composite time.
+    ctx.setAlpha(CGFloat(elementOpacity(elem)))
+    ctx.setBlendMode(cgBlendMode(elem.blendMode))
+    ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+    // Inside the layer start from an identity compositing state so
+    // the element body / mask subtree don't double-apply the
+    // outer alpha / blend.
+    ctx.setAlpha(1.0)
+    ctx.setBlendMode(.normal)
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis)
+    // Apply the mask's effective transform (per
+    // ``effectiveMaskTransform``), then composite the mask subtree
+    // against the element body. Track C phase 3.
+    ctx.saveGState()
+    applyTransform(ctx, effectiveMaskTransform(mask, elem))
+    switch plan {
+    case .clipIn:
+        ctx.setBlendMode(.destinationIn)
+        drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+    case .clipOut:
+        ctx.setBlendMode(.destinationOut)
+        drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+    case .revealOutsideBbox:
+        // `clip: false, invert: false`: keep the element body at
+        // full alpha outside the mask subtree's bounding box; apply
+        // ``.destinationIn`` only inside the bbox via a second
+        // clipped transparency layer. OPACITY.md §Rendering.
+        let (bx, by, bw, bh) = mask.subtreeElement.bounds
+        if bw > 0 && bh > 0 {
+            ctx.saveGState()
+            ctx.clip(to: CGRect(x: bx, y: by, width: bw, height: bh))
+            ctx.setBlendMode(.destinationIn)
+            drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+            ctx.restoreGState()
+        }
+        // Empty-bbox mask: no clip; element body passes through
+        // unmodified (mask has nothing to composite against).
+    }
+    ctx.restoreGState()
+    ctx.endTransparencyLayer()
+    ctx.restoreGState()
+}
+
 private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
+    // Opacity mask: when an element carries an active mask,
+    // redirect rendering through the mask composite path. The plan
+    // encodes which of the three supported composite strategies to
+    // use. ``disabled`` / ``linked: false`` fall through to the
+    // plain path for now. OPACITY.md §Rendering.
+    if let mask = elem.mask, let plan = maskPlan(mask) {
+        drawElementWithMask(ctx, elem, mask, plan: plan, ancestorVis: ancestorVis)
+        return
+    }
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis)
+}
+
+private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
     let effective = min(ancestorVis, elem.visibility)
     if effective == .invisible { return }
     let outline = effective == .outline
     ctx.saveGState()
+    ctx.setBlendMode(cgBlendMode(elem.blendMode))
     switch elem {
     case .line(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -1577,9 +1749,18 @@ class CanvasNSView: NSView {
         ctx.fill(bounds)
         // Layer 2: artboard fills (list order, later wins overlaps).
         drawArtboardFills(ctx, document)
-        // Layer 3: document element tree.
-        for layer in document.layers {
-            drawElement(ctx, .layer(layer))
+        // Layer 3: document element tree. In mask-isolation mode
+        // (OPACITY.md §Preview interactions), render only the mask
+        // subtree of the isolated element — everything else on the
+        // canvas is hidden until the user exits isolation.
+        let isolationPath = controller?.model.maskIsolationPath
+        if let path = isolationPath,
+           let mask = document.getElement(path).mask {
+            drawElement(ctx, mask.subtreeElement)
+        } else {
+            for layer in document.layers {
+                drawElement(ctx, .layer(layer))
+            }
         }
         // Layer 4: fade overlay (dims regions outside any artboard).
         drawFadeOverlay(ctx, document, bounds: bounds)
@@ -1741,6 +1922,21 @@ class CanvasNSView: NSView {
             if let model = controller?.model, !model.document.selection.isEmpty {
                 model.snapshot()
                 model.document = model.document.deleteSelection()
+            }
+        case "\u{1B}":  // Escape
+            // OPACITY.md §Preview interactions: Escape exits
+            // mask-isolation first (if active); otherwise exits
+            // mask-editing mode back to content-mode.
+            if let model = controller?.model {
+                if model.maskIsolationPath != nil {
+                    model.maskIsolationPath = nil
+                } else if case .mask = model.editingTarget {
+                    model.editingTarget = .content
+                } else {
+                    super.keyDown(with: event)
+                }
+            } else {
+                super.keyDown(with: event)
             }
         default:
             switch chars {

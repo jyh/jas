@@ -93,5 +93,42 @@ class ModelTest(absltest.TestCase):
         self.assertEqual(len(model.document.layers), 1)
 
 
+class EditingTargetTest(absltest.TestCase):
+    """Test the mask-editor UI state on Model (OPACITY.md §Preview
+    interactions)."""
+
+    def test_defaults_to_content(self):
+        # Default editing target is the document's normal content —
+        # mask-editing mode is entered explicitly via the
+        # MASK_PREVIEW click.
+        from document.model import EditingTarget
+        model = Model()
+        self.assertEqual(model.editing_target, EditingTarget.content())
+        self.assertFalse(model.editing_target.is_mask)
+
+    def test_round_trips_through_mask_mode(self):
+        from document.model import EditingTarget
+        model = Model()
+        model.editing_target = EditingTarget.mask([0, 2, 1])
+        self.assertTrue(model.editing_target.is_mask)
+        self.assertEqual(model.editing_target.mask_path, (0, 2, 1))
+        model.editing_target = EditingTarget.content()
+        self.assertFalse(model.editing_target.is_mask)
+        self.assertIsNone(model.editing_target.mask_path)
+
+    def test_defaults_to_no_mask_isolation(self):
+        # Mask-isolation is entered explicitly via Alt-click on
+        # MASK_PREVIEW. OPACITY.md §Preview interactions.
+        model = Model()
+        self.assertIsNone(model.mask_isolation_path)
+
+    def test_mask_isolation_path_round_trips(self):
+        model = Model()
+        model.mask_isolation_path = (0, 3)
+        self.assertEqual(model.mask_isolation_path, (0, 3))
+        model.mask_isolation_path = None
+        self.assertIsNone(model.mask_isolation_path)
+
+
 if __name__ == "__main__":
     absltest.main()

@@ -14,6 +14,7 @@ pub mod boolean_panel;
 pub mod character_panel;
 pub mod color_panel;
 pub mod layers_panel;
+pub mod opacity_panel;
 pub mod paragraph_panel;
 pub mod properties_panel;
 pub mod stroke_panel;
@@ -36,6 +37,7 @@ pub fn panel_label(kind: PanelKind) -> &'static str {
         PanelKind::Artboards => artboards_panel::LABEL,
         PanelKind::Align => align_panel::LABEL,
         PanelKind::Boolean => boolean_panel::LABEL,
+        PanelKind::Opacity => opacity_panel::LABEL,
     }
 }
 
@@ -52,6 +54,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Artboards => artboards_panel::menu_items(),
         PanelKind::Align => align_panel::menu_items(),
         PanelKind::Boolean => boolean_panel::menu_items(),
+        PanelKind::Opacity => opacity_panel::menu_items(),
     }
 }
 
@@ -73,6 +76,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Artboards => artboards_panel::dispatch(cmd, addr, state),
         PanelKind::Align => align_panel::dispatch(cmd, addr, state),
         PanelKind::Boolean => boolean_panel::dispatch(cmd, addr, state),
+        PanelKind::Opacity => opacity_panel::dispatch(cmd, addr, state),
     }
 }
 
@@ -89,6 +93,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Artboards => artboards_panel::is_checked(cmd, state),
         PanelKind::Align => align_panel::is_checked(cmd, state),
         PanelKind::Boolean => boolean_panel::is_checked(cmd, state),
+        PanelKind::Opacity => opacity_panel::is_checked(cmd, state),
     }
 }
 
@@ -209,6 +214,7 @@ mod tests {
             paragraph_panel: crate::workspace::app_state::ParagraphPanelState::default(),
             align_panel: crate::workspace::app_state::AlignPanelState::default(),
             boolean_panel: crate::workspace::app_state::BooleanPanelState::default(),
+            opacity_panel: crate::workspace::app_state::OpacityPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),

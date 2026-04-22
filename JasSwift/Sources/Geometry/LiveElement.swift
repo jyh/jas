@@ -92,6 +92,8 @@ public struct CompoundShape: Equatable {
     public var transform: Transform?
     public var locked: Bool
     public var visibility: Visibility
+    public var blendMode: BlendMode
+    public var mask: Mask?
 
     public init(
         operation: CompoundOperation,
@@ -101,7 +103,9 @@ public struct CompoundShape: Equatable {
         opacity: Double = 1.0,
         transform: Transform? = nil,
         locked: Bool = false,
-        visibility: Visibility = .preview
+        visibility: Visibility = .preview,
+        blendMode: BlendMode = .normal,
+        mask: Mask? = nil
     ) {
         self.operation = operation
         self.operands = operands
@@ -111,6 +115,8 @@ public struct CompoundShape: Equatable {
         self.transform = transform
         self.locked = locked
         self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
     }
 
     /// Evaluate the compound shape: flatten operands to polygon sets,
@@ -370,6 +376,18 @@ public enum LiveVariant: Equatable {
         }
     }
 
+    public var blendMode: BlendMode {
+        switch self {
+        case .compoundShape(let cs): return cs.blendMode
+        }
+    }
+
+    public var mask: Mask? {
+        switch self {
+        case .compoundShape(let cs): return cs.mask
+        }
+    }
+
     public var operands: [Element] {
         switch self {
         case .compoundShape(let cs): return cs.operands
@@ -425,6 +443,15 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs):
             var updated = cs
             updated.stroke = stroke
+            return .compoundShape(updated)
+        }
+    }
+
+    public func withMask(_ mask: Mask?) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.mask = mask
             return .compoundShape(updated)
         }
     }

@@ -10,7 +10,7 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity |]
 
 (** Paragraph panel state-store handle. The yaml_panel_view sets
     this ref to the panel's [State_store.t] when rendering the
@@ -20,6 +20,29 @@ let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character;
     that would create a module dep cycle). [None] means the
     Paragraph panel isn't currently mounted. Phase 4. *)
 let paragraph_store_ref : State_store.t option ref = ref None
+
+(** Opacity panel state-store handle. Same pattern as
+    [paragraph_store_ref]: yaml_panel_view sets this when the
+    Opacity panel mounts so menu commands like
+    [toggle_new_masks_clipping] / [toggle_new_masks_inverted] can
+    flip the stored panel-local bools, and [make_opacity_mask] can
+    read the current [new_masks_clipping] / [new_masks_inverted]
+    values (rather than hardcoding the yaml defaults). [None] means
+    the Opacity panel isn't currently mounted. OPACITY.md §Panel
+    menu. *)
+let opacity_store_ref : State_store.t option ref = ref None
+
+(** Read a bool from the Opacity panel's state store, falling back
+    to [default] when the ref isn't set or the key is missing /
+    non-bool. Used by [make_opacity_mask] dispatch and
+    [panel_is_checked] for the four opacity panel toggles. *)
+let _opacity_store_bool (key : string) ~(default : bool) : bool =
+  match !opacity_store_ref with
+  | None -> default
+  | Some store ->
+    (match State_store.get_panel store "opacity_panel_content" key with
+     | `Bool b -> b
+     | _ -> default)
 
 (** Helper: dispatch a Paragraph menu command through the live
     State_store + Controller. No-op when the store ref is unset
@@ -55,6 +78,7 @@ let panel_label = function
   | Artboards -> "Artboards"
   | Align -> "Align"
   | Boolean -> "Boolean"
+  | Opacity -> "Opacity"
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
@@ -138,6 +162,27 @@ let panel_menu = function
       Action { label = "Reset Panel"; command = "reset_boolean_panel"; shortcut = "" };
       Separator;
       Action { label = "Close Boolean"; command = "close_panel"; shortcut = "" } ]
+  | Opacity -> [
+      (* Mirrors jas_dioxus/src/panels/opacity_panel.rs — ten spec items
+         from OPACITY.md plus a trailing Close Opacity. Phase-1 toggles
+         for thumbnails/options/new-mask defaults are functional via
+         State_store; mask-lifecycle and page-level commands are inert
+         (YAML gates them with enabled_when: "false"). *)
+      Toggle { label = "Hide Thumbnails"; command = "toggle_opacity_thumbnails" };
+      Toggle { label = "Show Options"; command = "toggle_opacity_options" };
+      Separator;
+      Action { label = "Make Opacity Mask"; command = "make_opacity_mask"; shortcut = "" };
+      Action { label = "Release Opacity Mask"; command = "release_opacity_mask"; shortcut = "" };
+      Action { label = "Disable Opacity Mask"; command = "disable_opacity_mask"; shortcut = "" };
+      Action { label = "Unlink Opacity Mask"; command = "unlink_opacity_mask"; shortcut = "" };
+      Separator;
+      Toggle { label = "New Opacity Masks Are Clipping"; command = "toggle_new_masks_clipping" };
+      Toggle { label = "New Opacity Masks Are Inverted"; command = "toggle_new_masks_inverted" };
+      Separator;
+      Toggle { label = "Page Isolated Blending"; command = "toggle_page_isolated_blending" };
+      Toggle { label = "Page Knockout Group"; command = "toggle_page_knockout_group" };
+      Separator;
+      Action { label = "Close Opacity"; command = "close_panel"; shortcut = "" } ]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =
@@ -1026,10 +1071,59 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     Boolean_apply.apply_release_compound_shape (get_model ())
   | "expand_compound_shape" when kind = Boolean ->
     Boolean_apply.apply_expand_compound_shape (get_model ())
+  (* Opacity panel mask-lifecycle commands route to the controller.
+     new_masks_clipping / new_masks_inverted now come from the
+     panel's State_store (seeded from yaml defaults; toggles below
+     flip the stored values). *)
+  | "make_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    let clip = _opacity_store_bool "new_masks_clipping" ~default:true in
+    let invert = _opacity_store_bool "new_masks_inverted" ~default:false in
+    ctrl#make_mask_on_selection ~clip ~invert
+  | "release_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    ctrl#release_mask_on_selection
+  | "disable_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    ctrl#toggle_mask_disabled_on_selection
+  | "unlink_opacity_mask" when kind = Opacity ->
+    let ctrl = new Controller.controller ~model:(get_model ()) () in
+    ctrl#toggle_mask_linked_on_selection
+  (* Opacity panel-local toggles flip the stored bool in the
+     State_store so subsequent [make_opacity_mask] dispatches and
+     the menu's [checked_when] predicates see the live value. *)
+  | ("toggle_opacity_thumbnails" | "toggle_opacity_options"
+     | "toggle_new_masks_clipping" | "toggle_new_masks_inverted")
+    when kind = Opacity ->
+    (match !opacity_store_ref with
+     | None -> ()
+     | Some store ->
+       let key = match cmd with
+         | "toggle_opacity_thumbnails" -> "thumbnails_hidden"
+         | "toggle_opacity_options" -> "options_shown"
+         | "toggle_new_masks_clipping" -> "new_masks_clipping"
+         | "toggle_new_masks_inverted" -> "new_masks_inverted"
+         | _ -> assert false in
+       let default = match key with
+         | "new_masks_clipping" -> true
+         | _ -> false in
+       let cur = _opacity_store_bool key ~default in
+       State_store.set_panel store "opacity_panel_content"
+         key (`Bool (not cur)))
   | _ -> ()
 
 (** Query whether a toggle/radio command is checked. *)
 let panel_is_checked _kind cmd layout =
   match color_panel_mode_of_command cmd with
   | Some mode -> layout.color_panel_mode = mode
-  | None -> false
+  | None ->
+    match cmd with
+    | "toggle_opacity_thumbnails" ->
+      _opacity_store_bool "thumbnails_hidden" ~default:false
+    | "toggle_opacity_options" ->
+      _opacity_store_bool "options_shown" ~default:false
+    | "toggle_new_masks_clipping" ->
+      _opacity_store_bool "new_masks_clipping" ~default:true
+    | "toggle_new_masks_inverted" ->
+      _opacity_store_bool "new_masks_inverted" ~default:false
+    | _ -> false

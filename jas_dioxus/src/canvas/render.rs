@@ -2,7 +2,10 @@
 //!
 //! Draws the document onto an HTML <canvas> via web_sys::CanvasRenderingContext2d.
 
-use web_sys::CanvasRenderingContext2d;
+use std::cell::RefCell;
+
+use wasm_bindgen::JsCast;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::document::artboard::{Artboard, ArtboardFill};
 use crate::document::document::Document;
@@ -32,6 +35,30 @@ fn css_color(c: &Color) -> String {
             (b * 255.0) as u8,
             a,
         )
+    }
+}
+
+/// Map a BlendMode to the Canvas2D `globalCompositeOperation` string.
+/// Canvas2D natively supports all 16 separable / non-separable blend modes
+/// used by the Opacity panel; Normal maps to the default `source-over`.
+fn blend_mode_css(mode: BlendMode) -> &'static str {
+    match mode {
+        BlendMode::Normal      => "source-over",
+        BlendMode::Darken      => "darken",
+        BlendMode::Multiply    => "multiply",
+        BlendMode::ColorBurn   => "color-burn",
+        BlendMode::Lighten     => "lighten",
+        BlendMode::Screen      => "screen",
+        BlendMode::ColorDodge  => "color-dodge",
+        BlendMode::Overlay     => "overlay",
+        BlendMode::SoftLight   => "soft-light",
+        BlendMode::HardLight   => "hard-light",
+        BlendMode::Difference  => "difference",
+        BlendMode::Exclusion   => "exclusion",
+        BlendMode::Hue         => "hue",
+        BlendMode::Saturation  => "saturation",
+        BlendMode::Color       => "color",
+        BlendMode::Luminosity  => "luminosity",
     }
 }
 
@@ -183,6 +210,400 @@ fn draw_element(
     ancestor_vis: Visibility,
     precision: f64,
 ) {
+    // Opacity mask: when an element carries an active mask,
+    // redirect rendering through the mask composite path. The plan
+    // encodes which of the three supported composite strategies to
+    // use. OPACITY.md §Rendering.
+    if let Some(mask) = elem.common().mask.as_deref() {
+        if let Some(plan) = mask_plan(mask) {
+            draw_element_with_mask(ctx, elem, mask, plan, ancestor_vis, precision);
+            return;
+        }
+    }
+    draw_element_body(ctx, elem, ancestor_vis, precision);
+}
+
+// ---------------------------------------------------------------------------
+// Opacity-mask compositing (OPACITY.md §Rendering)
+// ---------------------------------------------------------------------------
+
+/// How the mask subtree's rendered alpha is applied to the element.
+/// Selected by [mask_plan] from the mask's ``clip`` and ``invert``
+/// fields; consumed by [draw_element_with_mask].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MaskPlan {
+    /// Element clipped to the mask shape. ``destination-in`` applied
+    /// on the full offscreen canvas. `clip: true, invert: false`.
+    ClipIn,
+    /// Element clipped to the *inverse* of the mask shape.
+    /// ``destination-out`` on the full offscreen canvas. Covers
+    /// both `clip: true, invert: true` and — for alpha-based masks
+    /// — `clip: false, invert: true`, which collapse to the same
+    /// output (`E * (1 - M)` everywhere) since the mask's
+    /// "outside" region contributes zero alpha either way.
+    ClipOut,
+    /// `clip: false, invert: false`: element stays at full alpha
+    /// outside the mask subtree's bounding box; ``destination-in``
+    /// with the mask applies only inside the bbox via a clip path.
+    /// OPACITY.md §Rendering.
+    RevealOutsideBbox,
+}
+
+/// Pick a [MaskPlan] for the mask, or ``None`` when the mask is
+/// inactive (``disabled: true``). The plan encodes how
+/// [draw_element_with_mask] should composite the mask subtree
+/// against the element body.
+fn mask_plan(mask: &Mask) -> Option<MaskPlan> {
+    if mask.disabled {
+        return None;
+    }
+    Some(match (mask.clip, mask.invert) {
+        (true, false) => MaskPlan::ClipIn,
+        (true, true) => MaskPlan::ClipOut,
+        // Alpha-based masks can't distinguish `clip: false,
+        // invert: true` from `clip: true, invert: true` (both yield
+        // `E * (1 - M)` when the mask's outside-region alpha is 0),
+        // so route them through the same composite.
+        (false, true) => MaskPlan::ClipOut,
+        (false, false) => MaskPlan::RevealOutsideBbox,
+    })
+}
+
+/// Return the transform that should be applied when rendering the
+/// mask's subtree on top of the ancestor coord system. Track C
+/// phase 3, OPACITY.md §Document model:
+///
+/// - ``linked: true``  — mask inherits the element's transform
+///   (mask follows the element).
+/// - ``linked: false`` — mask uses ``unlink_transform`` (the
+///   element's transform captured at unlink time, frozen so the
+///   mask stays fixed under subsequent element edits).
+fn effective_mask_transform<'a>(
+    mask: &'a Mask,
+    elem: &'a Element,
+) -> Option<&'a Transform> {
+    if mask.linked {
+        elem.transform()
+    } else {
+        mask.unlink_transform.as_ref()
+    }
+}
+
+thread_local! {
+    /// Reusable offscreen canvas for opacity-mask compositing.
+    /// Created lazily on first use and resized to match the main
+    /// canvas when the dimensions change. Kept as a module-level
+    /// scratch buffer to avoid allocating a new DOM canvas per
+    /// masked element per frame.
+    static MASK_CANVAS: RefCell<Option<HtmlCanvasElement>> = const { RefCell::new(None) };
+    /// Second scratch canvas, used to render the mask subtree in
+    /// isolation before its alpha is promoted to luminance (see
+    /// [promote_mask_to_luminance]). Only populated when the
+    /// ClipIn path enters the luminance branch.
+    static MASK_LUMA_CANVAS: RefCell<Option<HtmlCanvasElement>> = const { RefCell::new(None) };
+}
+
+/// Read the six-component current transform from a Canvas2D
+/// context via JS reflection on ``currentTransform``. Returns
+/// ``None`` when the property isn't present or its fields aren't
+/// numeric (which means we fall back to identity on the caller's
+/// offscreen ctx — a reasonable degradation).
+fn read_ctx_transform(
+    ctx: &CanvasRenderingContext2d,
+) -> Option<(f64, f64, f64, f64, f64, f64)> {
+    let t = js_sys::Reflect::get(ctx, &wasm_bindgen::JsValue::from_str("currentTransform")).ok()?;
+    let a = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("a")).ok()?.as_f64()?;
+    let b = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("b")).ok()?.as_f64()?;
+    let c = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("c")).ok()?.as_f64()?;
+    let d = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("d")).ok()?.as_f64()?;
+    let e = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("e")).ok()?.as_f64()?;
+    let f = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("f")).ok()?.as_f64()?;
+    Some((a, b, c, d, e, f))
+}
+
+/// Obtain (or lazily create) the scratch mask canvas, resized to
+/// ``w x h``. Returns the canvas together with its 2D context.
+/// Returns ``None`` if the DOM isn't reachable (e.g., non-browser
+/// host or the canvas can't be created). Node is *not* appended
+/// to the document — it lives only in memory.
+fn get_mask_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    scratch_from_cell(&MASK_CANVAS, w, h)
+}
+
+/// Second scratch canvas, used by the luminance-based mask path
+/// to render the mask subtree in isolation before its alpha is
+/// replaced by luminance.
+fn get_mask_luma_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    scratch_from_cell(&MASK_LUMA_CANVAS, w, h)
+}
+
+fn scratch_from_cell(
+    cell: &'static std::thread::LocalKey<RefCell<Option<HtmlCanvasElement>>>,
+    w: u32, h: u32,
+) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    let canvas: HtmlCanvasElement = cell.with(|c| -> Option<HtmlCanvasElement> {
+        if let Some(v) = c.borrow().clone() {
+            return Some(v);
+        }
+        let window = web_sys::window()?;
+        let doc = window.document()?;
+        let el = doc.create_element("canvas").ok()?;
+        let v: HtmlCanvasElement = el.unchecked_into();
+        *c.borrow_mut() = Some(v.clone());
+        Some(v)
+    })?;
+    if canvas.width() != w {
+        canvas.set_width(w);
+    }
+    if canvas.height() != h {
+        canvas.set_height(h);
+    }
+    let ctx: CanvasRenderingContext2d = canvas
+        .get_context("2d").ok()??.unchecked_into();
+    Some((canvas, ctx))
+}
+
+/// Promote the alpha channel of ``ctx``'s pixels within the given
+/// device-space rectangle from raw alpha to luminance-scaled
+/// alpha: ``A' = A * (0.299*R + 0.587*G + 0.114*B) / 255``. This
+/// matches PDF §11's soft-mask convention — a black-opaque mask
+/// reads as fully transparent, a white-opaque mask as fully
+/// opaque, and a gray-opaque mask as partially opaque. Restricted
+/// to the given rect for performance (typical masks occupy a
+/// small fraction of the canvas).
+///
+/// Returns ``true`` on success. On ``None`` returns (ImageData
+/// unavailable) the caller falls back to alpha-based masking so
+/// the user's mask still has *some* effect, just not the
+/// luminance-weighted one.
+fn promote_mask_to_luminance(
+    ctx: &CanvasRenderingContext2d,
+    dx: i32, dy: i32, dw: u32, dh: u32,
+) -> Option<()> {
+    if dw == 0 || dh == 0 {
+        return Some(());
+    }
+    let image_data = ctx
+        .get_image_data(dx as f64, dy as f64, dw as f64, dh as f64)
+        .ok()?;
+    let data = image_data.data();
+    let mut bytes: Vec<u8> = data.to_vec();
+    promote_bytes_to_luminance(&mut bytes);
+    let clamped = wasm_bindgen::Clamped(bytes.as_slice());
+    let new_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        clamped, dw, dh,
+    ).ok()?;
+    ctx.put_image_data(&new_data, dx as f64, dy as f64).ok()?;
+    Some(())
+}
+
+/// Replace each RGBA pixel's alpha channel with
+/// ``A' = A * (0.299*R + 0.587*G + 0.114*B) / 255``. Pure
+/// function, testable without a live canvas.
+fn promote_bytes_to_luminance(bytes: &mut [u8]) {
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        let r = bytes[i] as f64;
+        let g = bytes[i + 1] as f64;
+        let b = bytes[i + 2] as f64;
+        let a = bytes[i + 3] as f64;
+        // ITU-R BT.601 luma weights; integers would be faster but
+        // the f64 form is clear and the inner loop is
+        // getImageData-bound anyway.
+        let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        let new_alpha = (lum * a / 255.0).round().clamp(0.0, 255.0) as u8;
+        bytes[i + 3] = new_alpha;
+        i += 4;
+    }
+}
+
+/// Apply the ``ClipIn`` luminance composite on an offscreen
+/// canvas that already holds the rendered element body. Returns
+/// ``true`` on success, ``false`` when any intermediate step
+/// fails so the caller can fall back to alpha-based compositing.
+/// ``off_ctx`` must carry the mask's effective transform applied
+/// on top of the main world transform.
+///
+/// Steps:
+///   1. Render the mask subtree in isolation onto the luma
+///      scratch canvas (a fresh transparent buffer, same
+///      transform as ``off_ctx``).
+///   2. Promote that scratch's pixels from raw alpha to
+///      luminance-scaled alpha (black-opaque → fully transparent,
+///      white-opaque → fully opaque, gray → partial).
+///   3. Blit the luma scratch onto the element-body buffer with
+///      ``destination-in``; the luminance alpha clips the element.
+fn apply_clip_in_luminance(
+    off_ctx: &CanvasRenderingContext2d,
+    w: u32,
+    h: u32,
+    mask: &Mask,
+    ancestor_vis: Visibility,
+    precision: f64,
+) -> bool {
+    let (luma_canvas, luma_ctx) = match get_mask_luma_scratch(w, h) {
+        Some(p) => p,
+        None => return false,
+    };
+    luma_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    luma_ctx.set_global_composite_operation("source-over").ok();
+    luma_ctx.set_global_alpha(1.0);
+    luma_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(off_ctx) {
+        luma_ctx.set_transform(a, b, c, d, e, f).ok();
+    }
+    draw_element(&luma_ctx, &mask.subtree, ancestor_vis, precision);
+    if promote_mask_to_luminance(&luma_ctx, 0, 0, w, h).is_none() {
+        return false;
+    }
+    off_ctx.save();
+    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    off_ctx.set_global_composite_operation("destination-in").ok();
+    let _ = off_ctx.draw_image_with_html_canvas_element(&luma_canvas, 0.0, 0.0);
+    off_ctx.restore();
+    true
+}
+
+/// Render ``elem`` on the main ``ctx`` with its opacity mask
+/// composited in. The element body is drawn to a scratch
+/// offscreen canvas at the same world transform as the main ctx;
+/// the mask's subtree is then composited according to ``plan``.
+/// The scratch canvas is finally copied onto the main ctx at
+/// device coordinates.
+fn draw_element_with_mask(
+    ctx: &CanvasRenderingContext2d,
+    elem: &Element,
+    mask: &Mask,
+    plan: MaskPlan,
+    ancestor_vis: Visibility,
+    precision: f64,
+) {
+    let main_canvas = ctx.canvas();
+    let (w, h) = match &main_canvas {
+        Some(c) => (c.width(), c.height()),
+        None => {
+            // No canvas reachable — fall back to the no-mask path.
+            draw_element_body(ctx, elem, ancestor_vis, precision);
+            return;
+        }
+    };
+    if w == 0 || h == 0 {
+        return;
+    }
+    let (off_canvas, off_ctx) = match get_mask_scratch(w, h) {
+        Some(pair) => pair,
+        None => {
+            draw_element_body(ctx, elem, ancestor_vis, precision);
+            return;
+        }
+    };
+
+    // Reset offscreen state and clear any prior content.
+    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    off_ctx.set_global_composite_operation("source-over").ok();
+    off_ctx.set_global_alpha(1.0);
+    off_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
+
+    // Copy the main ctx's current world transform onto the offscreen
+    // ctx so ``elem`` renders at the same screen position it would
+    // on the main canvas. web-sys 0.3 doesn't expose
+    // ``getTransform()`` / ``DOMMatrix`` under the enabled features,
+    // so read ``currentTransform`` via JS reflection — the object
+    // has ``a``..``f`` number fields matching the 2D matrix.
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) {
+        off_ctx.set_transform(a, b, c, d, e, f).ok();
+    }
+
+    // Pass 1: draw the element body (skipping the mask dispatch so
+    // we don't recurse into ourselves) onto the offscreen canvas.
+    draw_element_body(&off_ctx, elem, ancestor_vis, precision);
+
+    // Pass 2: apply the mask's effective transform (per
+    // ``effective_mask_transform``), then composite the mask
+    // subtree against the element body.
+    off_ctx.save();
+    if let Some(t) = effective_mask_transform(mask, elem) {
+        off_ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f).ok();
+    }
+    match plan {
+        MaskPlan::ClipIn => {
+            // Luminance-based soft-mask composite. The mask subtree
+            // is rendered to a separate scratch, its alpha is
+            // replaced by the per-pixel luminance (so a black
+            // opaque mask reads as fully transparent and a white
+            // opaque mask reads as fully opaque), and then the
+            // result is drawn onto the element buffer with
+            // ``destination-in``. Matches PDF §11's soft-mask
+            // convention. OPACITY.md §Rendering.
+            //
+            // If any step of the luminance path fails (ImageData
+            // unavailable, zero-size canvas, …) we fall back to
+            // the alpha-based composite so the user still sees
+            // *something*.
+            let fell_back = !apply_clip_in_luminance(
+                &off_ctx, w, h, mask, ancestor_vis, precision,
+            );
+            if fell_back {
+                off_ctx.set_global_composite_operation("destination-in").ok();
+                draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+            }
+        }
+        MaskPlan::ClipOut => {
+            // `destination-out` over the whole canvas — the mask
+            // shape erases the element.
+            off_ctx.set_global_composite_operation("destination-out").ok();
+            draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+        }
+        MaskPlan::RevealOutsideBbox => {
+            // `clip: false, invert: false`: the element keeps full
+            // alpha outside the mask subtree's bounding box, and is
+            // clipped to the mask shape only inside it. Implement
+            // by clipping the Canvas2D state to the bbox rectangle
+            // before applying `destination-in`; outside the clip,
+            // the element remains untouched.
+            let (bx, by, bw, bh) = mask.subtree.bounds();
+            if bw > 0.0 && bh > 0.0 {
+                off_ctx.save();
+                off_ctx.begin_path();
+                off_ctx.rect(bx, by, bw, bh);
+                off_ctx.clip();
+                off_ctx.set_global_composite_operation("destination-in").ok();
+                draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+                off_ctx.set_global_composite_operation("source-over").ok();
+                off_ctx.restore();
+            }
+            // Empty-bbox mask: no clip region; the element
+            // body passes through unmodified (mask has nothing to
+            // composite against).
+        }
+    }
+    off_ctx.restore();
+
+    // Copy the composited offscreen pixels onto the main ctx at
+    // device coordinates (0, 0). The main ctx's alpha / blend_mode
+    // will apply to the final blit, matching the non-mask path.
+    ctx.save();
+    ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    ctx.set_global_alpha(elem.opacity());
+    ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
+    ctx.draw_image_with_html_canvas_element(&off_canvas, 0.0, 0.0).ok();
+    ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Element body (non-mask path)
+// ---------------------------------------------------------------------------
+
+/// Render an element's geometry (fill / stroke / children) without
+/// consulting ``common.mask``. Split from [draw_element] so the
+/// mask path can invoke the body directly without recursing through
+/// the mask dispatch.
+fn draw_element_body(
+    ctx: &CanvasRenderingContext2d,
+    elem: &Element,
+    ancestor_vis: Visibility,
+    precision: f64,
+) {
     // Effective visibility is the minimum of the inherited (capping)
     // visibility and this element's own. Groups/Layers propagate the
     // cap down to their children; Invisible stops the recursion.
@@ -196,6 +617,7 @@ fn draw_element(
     apply_transform(ctx, elem.transform());
     let base_alpha = elem.opacity();
     ctx.set_global_alpha(base_alpha);
+    ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
 
     match elem {
         Element::Line(e) => {
@@ -1261,6 +1683,7 @@ pub fn render(
     doc: &Document,
     precision: f64,
     panel_selected_artboards: &[String],
+    mask_isolation_path: Option<&[usize]>,
 ) {
     // Layer 1: canvas background.
     ctx.set_fill_style_str("white");
@@ -1269,9 +1692,20 @@ pub fn render(
     // Layer 2: artboard fills (list order, later wins in overlaps).
     draw_artboard_fills(ctx, doc);
 
-    // Layer 3: document element tree.
-    for layer in &doc.layers {
-        draw_element(ctx, layer, Visibility::Preview, precision);
+    // Layer 3: document element tree. In mask-isolation mode
+    // (OPACITY.md §Preview interactions), render only the mask
+    // subtree of the isolated element — everything else on the
+    // canvas is hidden until the user exits isolation.
+    if let Some(path) = mask_isolation_path {
+        if let Some(elem) = doc.get_element(&path.to_vec()) {
+            if let Some(mask) = elem.common().mask.as_deref() {
+                draw_element(ctx, &mask.subtree, Visibility::Preview, precision);
+            }
+        }
+    } else {
+        for layer in &doc.layers {
+            draw_element(ctx, layer, Visibility::Preview, precision);
+        }
     }
 
     // Layer 4: fade overlay (dims regions outside any artboard).
@@ -1332,6 +1766,260 @@ mod tests {
     fn css_color_mid_gray() {
         let c = Color::Rgb { r: 0.5, g: 0.5, b: 0.5, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(127,127,127)");
+    }
+
+    // ── blend_mode_css ─────────────────────────────────────
+
+    #[test]
+    fn blend_mode_css_normal_is_source_over() {
+        assert_eq!(blend_mode_css(BlendMode::Normal), "source-over");
+    }
+
+    #[test]
+    fn blend_mode_css_maps_all_sixteen_variants() {
+        // Every variant must map to a non-empty Canvas2D composite
+        // operation name. Underscore variants in the Rust enum must
+        // become hyphenated in CSS (color_burn → "color-burn").
+        let pairs = [
+            (BlendMode::Normal,      "source-over"),
+            (BlendMode::Darken,      "darken"),
+            (BlendMode::Multiply,    "multiply"),
+            (BlendMode::ColorBurn,   "color-burn"),
+            (BlendMode::Lighten,     "lighten"),
+            (BlendMode::Screen,      "screen"),
+            (BlendMode::ColorDodge,  "color-dodge"),
+            (BlendMode::Overlay,     "overlay"),
+            (BlendMode::SoftLight,   "soft-light"),
+            (BlendMode::HardLight,   "hard-light"),
+            (BlendMode::Difference,  "difference"),
+            (BlendMode::Exclusion,   "exclusion"),
+            (BlendMode::Hue,         "hue"),
+            (BlendMode::Saturation,  "saturation"),
+            (BlendMode::Color,       "color"),
+            (BlendMode::Luminosity,  "luminosity"),
+        ];
+        assert_eq!(pairs.len(), 16);
+        for (mode, expected) in pairs {
+            assert_eq!(blend_mode_css(mode), expected,
+                       "mapping mismatch for {:?}", mode);
+        }
+    }
+
+    #[test]
+    fn blend_mode_css_hyphenates_compound_names() {
+        assert_eq!(blend_mode_css(BlendMode::ColorBurn), "color-burn");
+        assert_eq!(blend_mode_css(BlendMode::ColorDodge), "color-dodge");
+        assert_eq!(blend_mode_css(BlendMode::SoftLight), "soft-light");
+        assert_eq!(blend_mode_css(BlendMode::HardLight), "hard-light");
+    }
+
+    // ── mask_plan (Track C) ────────────────────────────────
+
+    fn test_mask(clip: bool, invert: bool, disabled: bool) -> Mask {
+        Mask {
+            subtree: Box::new(Element::Group(GroupElem::default())),
+            clip,
+            invert,
+            disabled,
+            linked: true,
+            unlink_transform: None,
+        }
+    }
+
+    #[test]
+    fn mask_plan_clip_not_inverted_is_clip_in() {
+        let m = test_mask(true, false, false);
+        assert_eq!(mask_plan(&m), Some(MaskPlan::ClipIn));
+    }
+
+    #[test]
+    fn mask_plan_clip_inverted_is_clip_out() {
+        let m = test_mask(true, true, false);
+        assert_eq!(mask_plan(&m), Some(MaskPlan::ClipOut));
+    }
+
+    #[test]
+    fn mask_plan_disabled_is_none() {
+        // disabled overrides both clip and invert: falls back to no
+        // mask rendering per OPACITY.md §States.
+        assert_eq!(mask_plan(&test_mask(true, false, true)), None);
+        assert_eq!(mask_plan(&test_mask(true, true, true)), None);
+        assert_eq!(mask_plan(&test_mask(false, false, true)), None);
+        assert_eq!(mask_plan(&test_mask(false, true, true)), None);
+    }
+
+    #[test]
+    fn mask_plan_no_clip_no_invert_is_reveal_outside_bbox() {
+        // Phase 2: clip=false, invert=false keeps the element
+        // visible outside the mask subtree's bounding box and
+        // clips to the mask inside it.
+        assert_eq!(
+            mask_plan(&test_mask(false, false, false)),
+            Some(MaskPlan::RevealOutsideBbox)
+        );
+    }
+
+    #[test]
+    fn mask_plan_no_clip_inverted_collapses_to_clip_out() {
+        // Alpha-based mask: `clip: false, invert: true` gives the
+        // same output as `clip: true, invert: true` because the
+        // mask's outside-region alpha is zero either way. Phase 2
+        // routes them through the same `ClipOut` path.
+        assert_eq!(
+            mask_plan(&test_mask(false, true, false)),
+            Some(MaskPlan::ClipOut)
+        );
+    }
+
+    // ── promote_bytes_to_luminance (PDF §11 soft-mask) ─────
+
+    fn pixel(r: u8, g: u8, b: u8, a: u8) -> [u8; 4] { [r, g, b, a] }
+
+    #[test]
+    fn luminance_white_opaque_keeps_alpha() {
+        let mut bytes = pixel(255, 255, 255, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 255);
+    }
+
+    #[test]
+    fn luminance_black_opaque_drops_to_zero() {
+        let mut bytes = pixel(0, 0, 0, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 0);
+    }
+
+    #[test]
+    fn luminance_mid_gray_halves_alpha() {
+        // Mid-gray (128,128,128) has luminance ≈ 128. Alpha 255 in,
+        // expect ~128 out.
+        let mut bytes = pixel(128, 128, 128, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        // Allow ±1 for rounding.
+        assert!((bytes[3] as i32 - 128).abs() <= 1, "got {}", bytes[3]);
+    }
+
+    #[test]
+    fn luminance_transparent_stays_transparent() {
+        // Regardless of RGB, an alpha-0 pixel must stay alpha-0
+        // (so the mask's "outside rendered region" doesn't
+        // accidentally become opaque).
+        let mut bytes = pixel(255, 255, 255, 0).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 0);
+    }
+
+    #[test]
+    fn luminance_respects_source_alpha() {
+        // Half-alpha white should end up at half alpha.
+        let mut bytes = pixel(255, 255, 255, 128).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert_eq!(bytes[3], 128);
+    }
+
+    #[test]
+    fn luminance_bt601_red_weight() {
+        // Pure red (255,0,0) → luminance = 0.299 * 255 ≈ 76.
+        let mut bytes = pixel(255, 0, 0, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert!((bytes[3] as i32 - 76).abs() <= 1, "got {}", bytes[3]);
+    }
+
+    #[test]
+    fn luminance_bt601_green_weight() {
+        // Pure green → luminance = 0.587 * 255 ≈ 150.
+        let mut bytes = pixel(0, 255, 0, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert!((bytes[3] as i32 - 150).abs() <= 1, "got {}", bytes[3]);
+    }
+
+    #[test]
+    fn luminance_bt601_blue_weight() {
+        // Pure blue → luminance = 0.114 * 255 ≈ 29.
+        let mut bytes = pixel(0, 0, 255, 255).to_vec();
+        promote_bytes_to_luminance(&mut bytes);
+        assert!((bytes[3] as i32 - 29).abs() <= 1, "got {}", bytes[3]);
+    }
+
+    // ── effective_mask_transform (Track C phase 3) ────────
+
+    fn test_transform(e: f64, f: f64) -> Transform {
+        // Pure translation by (e, f) for easy identification in tests.
+        Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e, f }
+    }
+
+    fn test_rect_with_transform(t: Option<Transform>) -> Element {
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                opacity: 1.0,
+                mode: BlendMode::Normal,
+                transform: t,
+                locked: false,
+                visibility: Visibility::Preview,
+                mask: None,
+            },
+        })
+    }
+
+    fn test_mask_linked(
+        linked: bool,
+        unlink: Option<Transform>,
+    ) -> Mask {
+        Mask {
+            subtree: Box::new(Element::Group(GroupElem::default())),
+            clip: true,
+            invert: false,
+            disabled: false,
+            linked,
+            unlink_transform: unlink,
+        }
+    }
+
+    #[test]
+    fn effective_mask_transform_linked_returns_element_transform() {
+        // linked=true: mask follows the element, so the renderer
+        // should apply ``elem.transform()``.
+        let mask = test_mask_linked(true, None);
+        let elem = test_rect_with_transform(Some(test_transform(5.0, 7.0)));
+        let t = effective_mask_transform(&mask, &elem)
+            .expect("expected Some element transform");
+        assert_eq!(t.e, 5.0);
+        assert_eq!(t.f, 7.0);
+    }
+
+    #[test]
+    fn effective_mask_transform_linked_none_when_element_has_no_transform() {
+        // linked=true with no element transform: None — the
+        // compositing path skips the ``ctx.transform`` call.
+        let mask = test_mask_linked(true, None);
+        let elem = test_rect_with_transform(None);
+        assert!(effective_mask_transform(&mask, &elem).is_none());
+    }
+
+    #[test]
+    fn effective_mask_transform_unlinked_returns_captured_unlink_transform() {
+        // linked=false: mask stays frozen under the unlink-time
+        // transform, regardless of the element's current transform.
+        let unlink = test_transform(3.0, 4.0);
+        let mask = test_mask_linked(false, Some(unlink));
+        let elem = test_rect_with_transform(Some(test_transform(100.0, 100.0)));
+        let t = effective_mask_transform(&mask, &elem)
+            .expect("expected Some unlink transform");
+        assert_eq!(t.e, 3.0);
+        assert_eq!(t.f, 4.0);
+    }
+
+    #[test]
+    fn effective_mask_transform_unlinked_none_when_unlink_missing() {
+        // linked=false with no captured transform (edge case:
+        // unlinked at identity): None. Compositing skips the
+        // transform call and the mask renders in ancestor coords.
+        let mask = test_mask_linked(false, None);
+        let elem = test_rect_with_transform(Some(test_transform(7.0, 8.0)));
+        assert!(effective_mask_transform(&mask, &elem).is_none());
     }
 
     #[test]

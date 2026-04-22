@@ -223,6 +223,57 @@ class Visibility(Enum):
         return self.value <= other.value
 
 
+class BlendMode(Enum):
+    """Blend mode for compositing an element against its parent layer.
+
+    Values mirror the Opacity panel mode dropdown. Default is ``NORMAL``.
+    String values are snake_case for cross-language JSON equivalence
+    (match ``opacity.yaml`` mode ids and the BlendMode enum in
+    jas_dioxus, JasSwift, jas_ocaml).
+    """
+    NORMAL       = "normal"
+    DARKEN       = "darken"
+    MULTIPLY     = "multiply"
+    COLOR_BURN   = "color_burn"
+    LIGHTEN      = "lighten"
+    SCREEN       = "screen"
+    COLOR_DODGE  = "color_dodge"
+    OVERLAY      = "overlay"
+    SOFT_LIGHT   = "soft_light"
+    HARD_LIGHT   = "hard_light"
+    DIFFERENCE   = "difference"
+    EXCLUSION    = "exclusion"
+    HUE          = "hue"
+    SATURATION   = "saturation"
+    COLOR        = "color"
+    LUMINOSITY   = "luminosity"
+
+
+@dataclass(frozen=True)
+class Mask:
+    """Opacity mask attached to an element. See OPACITY.md § Document model.
+
+    Storage-only in Phase 3a — renderer wiring and the mask UI controls
+    (MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX, LINK_INDICATOR)
+    land in Phase 3b.
+
+    Fields:
+      subtree:          artwork whose luminance drives the owning element's alpha.
+      clip:             also clip the element to the mask bounds.
+      invert:           invert the luminance mapping.
+      disabled:         element renders as if no mask were attached; subtree preserved.
+      linked:           when true, mask follows element's transform; when false
+                        it uses ``unlink_transform`` as its fixed baseline.
+      unlink_transform: captured at unlink time; cleared on relink.
+    """
+    subtree: "Element"
+    clip: bool = True
+    invert: bool = False
+    disabled: bool = False
+    linked: bool = True
+    unlink_transform: "Transform | None" = None
+
+
 class LineCap(Enum):
     """SVG stroke-linecap."""
     BUTT = "butt"
@@ -521,6 +572,8 @@ class Line(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
@@ -550,6 +603,8 @@ class Rect(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
@@ -570,6 +625,8 @@ class Circle(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -593,6 +650,8 @@ class Ellipse(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -613,6 +672,8 @@ class Polyline(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -642,6 +703,8 @@ class Polygon(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -672,6 +735,8 @@ class Path(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
@@ -840,6 +905,8 @@ class Text(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
     # Sentinel default: an empty tuple means "derive from content in
     # __post_init__". Late-import avoids the geometry.element <->
     # geometry.tspan circular dep.
@@ -913,6 +980,8 @@ class TextPath(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
     tspans: tuple = ()
 
     def __post_init__(self):
@@ -936,6 +1005,14 @@ class Group(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
+    # Opacity panel "Page Isolated Blending" flag. Storage-only in Phase 2;
+    # renderer support is deferred. Inherited by Layer.
+    isolated_blending: bool = False
+    # Opacity panel "Page Knockout Group" flag. Storage-only in Phase 2;
+    # renderer support is deferred. Inherited by Layer.
+    knockout_group: bool = False
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.children:
@@ -1003,6 +1080,8 @@ class CompoundShape(LiveElement):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
 
     def evaluate(self, precision: float):
         """Flatten operands to polygon sets, apply the boolean
@@ -1087,6 +1166,16 @@ def with_width_points(element: Element, width_points: tuple[StrokeWidthPoint, ..
     if isinstance(element, (Line, Path)):
         return dataclasses.replace(element, width_points=width_points)
     return element
+
+
+def with_mask(element: Element, mask: Mask | None) -> Element:
+    """Return a copy of element with its opacity mask replaced.
+
+    Passing ``None`` removes the mask; passing a ``Mask`` sets or replaces it.
+    Preserves every other field via ``dataclasses.replace``. Storage-only in
+    Phase 3a / 3b; renderer support lands in a later phase.
+    """
+    return dataclasses.replace(element, mask=mask)
 
 
 def element_fill(element: Element) -> Fill | None:

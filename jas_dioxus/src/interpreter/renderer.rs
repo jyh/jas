@@ -103,7 +103,7 @@ fn render_el(
         "tree_view" => render_tree_view(el, ctx, rctx),
         "element_preview" => render_element_preview(el, ctx, rctx),
         "dropdown" => render_layers_filter_dropdown(el, ctx, rctx),
-        _ => render_placeholder(el, ctx),
+        _ => render_placeholder(el, ctx, rctx),
     }
 }
 
@@ -924,6 +924,38 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
     }
 }
 
+/// Write a single Opacity-panel field from a YAML-interpreted value. Keys
+/// match the panel-local state declared in `workspace/panels/opacity.yaml`.
+/// Unknown keys are silently ignored (mirrors `set_stroke_field`). The
+/// `blend_mode` key accepts a snake_case BlendMode id (e.g. `"color_burn"`);
+/// the `opacity` key accepts a number in the 0-100 percent range.
+fn set_opacity_field(
+    op: &mut crate::workspace::app_state::OpacityPanelState,
+    key: &str,
+    val: &serde_json::Value,
+) {
+    use crate::geometry::element::BlendMode;
+    match key {
+        "blend_mode" => {
+            if let Some(s) = val.as_str() {
+                if let Ok(m) = serde_json::from_value::<BlendMode>(serde_json::json!(s)) {
+                    op.blend_mode = m;
+                }
+            }
+        }
+        "opacity" => {
+            if let Some(n) = val.as_f64() {
+                op.opacity = n.clamp(0.0, 100.0);
+            }
+        }
+        "thumbnails_hidden" => { if let Some(b) = val.as_bool() { op.thumbnails_hidden = b; } }
+        "options_shown" => { if let Some(b) = val.as_bool() { op.options_shown = b; } }
+        "new_masks_clipping" => { if let Some(b) = val.as_bool() { op.new_masks_clipping = b; } }
+        "new_masks_inverted" => { if let Some(b) = val.as_bool() { op.new_masks_inverted = b; } }
+        _ => {}
+    }
+}
+
 /// Update a single paragraph panel field. Mutual exclusion side
 /// effects: writing one alignment radio clears the other six;
 /// writing a non-empty bullets value clears numbered_list (and vice
@@ -1638,6 +1670,8 @@ fn run_yaml_effect(
                 name,
                 children: Vec::new(),
                 common: crate::geometry::element::CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
             }
         );
         if let Some(as_n) = as_name {
@@ -1800,6 +1834,8 @@ fn run_yaml_effect(
                 name,
                 children,
                 common: CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
             });
             new_doc.layers.push(new_layer);
             tab.model.set_document(new_doc);
@@ -1869,6 +1905,8 @@ fn run_yaml_effect(
         let group = Element::Group(GroupElem {
             children,
             common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
         });
         insert_element_at(&insert_parent, insert_index, group, st);
         return deferred;
@@ -2927,8 +2965,51 @@ fn render_icon(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
 
 fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
-    let label = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
+    let static_label = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
+    // bind.label: expression whose evaluated string replaces the
+    // static label. Used by op_make_mask to flip between "Make Mask"
+    // and "Release" based on selection_has_mask. See OPACITY.md § States.
+    let label: String = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("label")).and_then(|v| v.as_str()) {
+        match expr::eval(expr_str, ctx) {
+            Value::Str(s) => s,
+            _ => static_label.to_string(),
+        }
+    } else {
+        static_label.to_string()
+    };
     let style = build_style(el, ctx);
+    let panel_kind = rctx.panel_kind;
+
+    // Opacity panel: op_make_mask dispatches Controller::make or release
+    // based on the current selection_has_mask predicate. Direct route
+    // rather than yaml-actions because the target lives on the
+    // selection's mask field, not on a panel-state key.
+    if panel_kind == Some(PanelKind::Opacity) && id == "op_make_mask" {
+        let selection_has_mask = expr::eval("selection_has_mask", ctx).to_bool();
+        let app = rctx.app.clone();
+        let mut revision = rctx.revision;
+        let handler = EventHandler::new(move |_evt: Event<MouseData>| {
+            let app = app.clone();
+            spawn(async move {
+                {
+                    let mut st = app.borrow_mut();
+                    if selection_has_mask {
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::release_mask_on_selection(&mut tab.model);
+                        }
+                    } else {
+                        let clip = st.opacity_panel.new_masks_clipping;
+                        let invert = st.opacity_panel.new_masks_inverted;
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::make_mask_on_selection(&mut tab.model, clip, invert);
+                        }
+                    }
+                }
+                revision += 1;
+            });
+        });
+        return rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } };
+    }
 
     // Try behavior array first, then shorthand action property
     let on_click = build_click_handler(el, ctx, rctx).or_else(|| {
@@ -2989,9 +3070,17 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
+    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.checked for active/highlighted state
     let checked = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()) {
+        expr::eval(expr_str, ctx).to_bool()
+    } else {
+        false
+    };
+    // Evaluate bind.disabled to grey the button out. Used by
+    // op_link_indicator to disable while the selection has no mask.
+    let disabled = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
         expr::eval(expr_str, ctx).to_bool()
     } else {
         false
@@ -3014,8 +3103,19 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         String::new()
     };
 
-    // Look up icon SVG from the icons map in ctx
-    let icon_name = el.get("icon").and_then(|i| i.as_str()).unwrap_or("");
+    // Resolve the icon name. ``bind.icon`` (yaml expression) wins
+    // when present so widgets like the Opacity panel's
+    // op_link_indicator can flip between glyphs as mask.linked
+    // changes; falls back to the static ``icon`` field otherwise.
+    let icon_name: String = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("icon")).and_then(|v| v.as_str()) {
+        match expr::eval(expr_str, ctx) {
+            Value::Str(s) => s,
+            _ => el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string(),
+        }
+    } else {
+        el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string()
+    };
+    let icon_name = icon_name.as_str();
     // Look up icon from ctx first, then fall back to cached workspace
     let ws_for_icons = super::workspace::Workspace::load();
     let icon_svg = if !icon_name.is_empty() {
@@ -3032,14 +3132,43 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         String::new()
     };
 
-    let on_click = build_click_handler(el, ctx, rctx);
+    // Opacity panel: op_link_indicator click toggles mask.linked on
+    // every selected mask via Controller. Same pattern as
+    // op_make_mask in render_button. OPACITY.md §Document model.
+    let opacity_link_click: Option<EventHandler<Event<MouseData>>> =
+        if panel_kind == Some(PanelKind::Opacity) && id == "op_link_indicator" {
+            let app = rctx.app.clone();
+            let mut revision = rctx.revision;
+            Some(EventHandler::new(move |_evt: Event<MouseData>| {
+                let app = app.clone();
+                spawn(async move {
+                    let mut st = app.borrow_mut();
+                    if let Some(tab) = st.tab_mut() {
+                        crate::document::controller::Controller::toggle_mask_linked_on_selection(&mut tab.model);
+                    }
+                    revision += 1;
+                });
+            }))
+        } else {
+            None
+        };
+
+    let on_click = opacity_link_click.or_else(|| build_click_handler(el, ctx, rctx));
     let on_mousedown = build_mousedown_handler(el, ctx, rctx);
     let on_mouseup = build_mouseup_handler(el, ctx, rctx);
+    // Disabled styling: grey out + block pointer events so the
+    // button doesn't respond to clicks. Opacity panel's
+    // LINK_INDICATOR disables itself when the selection has no mask.
+    let disabled_style = if disabled {
+        "opacity:0.35;pointer-events:none;"
+    } else {
+        ""
+    };
 
     rsx! {
         div {
             id: "{id}",
-            style: "cursor:pointer;{bg_style}{style}",
+            style: "cursor:pointer;{disabled_style}{bg_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
@@ -3243,7 +3372,11 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             }
                             st.apply_stroke_panel_to_selection();
                         }
-                        // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                        Some(PanelKind::Opacity) => {
+                            set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
+                            // Phase 1: panel-local only; selection sync deferred.
+                        }
+                        // Artboards, Layers, Color, Swatches, Properties:
                         // no-op for number_input writes until their per-panel state
                         // structs land. Drops the edit silently rather than
                         // corrupting stroke state.
@@ -3463,6 +3596,10 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                                 Some(PanelKind::Stroke) | None => {
                                     set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
                                     st.apply_stroke_panel_to_selection();
+                                }
+                                Some(PanelKind::Opacity) => {
+                                    set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(v));
+                                    // Phase 1: panel-local only; selection sync deferred.
                                 }
                                 // Artboards, Layers, Color, Swatches, Properties:
                                 // no-op until their per-panel state lands.
@@ -3806,6 +3943,7 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     };
 
     let bind_target = classify_bind(bind_expr);
+    let bind_expr_owned = bind_expr.to_string();
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
@@ -3845,6 +3983,39 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             return;
         }
         let new_val = !checked;
+        // Opacity panel selection-mask bindings: `selection_mask_clip` /
+        // `selection_mask_invert` route directly to Controller methods
+        // (the flag lives on the selected element's mask, not on the
+        // panel-local state). See OPACITY.md § States.
+        if panel_kind == Some(PanelKind::Opacity) {
+            let handled = match bind_expr_owned.as_str() {
+                "selection_mask_clip" => {
+                    let app = app.clone();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::set_mask_clip_on_selection(&mut tab.model, new_val);
+                        }
+                    });
+                    true
+                }
+                "selection_mask_invert" => {
+                    let app = app.clone();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        if let Some(tab) = st.tab_mut() {
+                            crate::document::controller::Controller::set_mask_invert_on_selection(&mut tab.model, new_val);
+                        }
+                    });
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                revision += 1;
+                return;
+            }
+        }
         match &bind_target {
             BindTarget::Dialog(field) => {
                 if let Some(mut ds) = dialog_signal() {
@@ -4258,13 +4429,14 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
             "character_panel_content"  => Some(PanelKind::Character),
             "paragraph_panel_content"  => Some(PanelKind::Paragraph),
             "artboards_panel_content"  => Some(PanelKind::Artboards),
+            "opacity_panel_content"    => Some(PanelKind::Opacity),
             _ => None,
         });
         let mut child = rctx.clone();
         child.panel_kind = panel_kind;
         render_el(content, ctx, &child)
     } else {
-        render_placeholder(el, ctx)
+        render_placeholder(el, ctx, rctx)
     }
 }
 
@@ -5584,7 +5756,7 @@ fn render_element_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx
 fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     if id != "lp_filter_button" {
-        return render_placeholder(el, ctx);
+        return render_placeholder(el, ctx, rctx);
     }
 
     let style = build_style(el, ctx);
@@ -5695,11 +5867,102 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
     }
 }
 
-fn render_placeholder(el: &serde_json::Value, _ctx: &serde_json::Value) -> Element {
+fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
     let summary = el.get("summary")
         .or_else(|| el.get("type"))
         .and_then(|s| s.as_str())
         .unwrap_or("?");
+    let panel_kind = rctx.panel_kind;
+
+    // Opacity panel previews (OPACITY.md §Preview interactions):
+    // op_preview and op_mask_preview handle click to switch the
+    // editing target (content vs mask subtree) and render a
+    // persistent highlight on the active target.
+    let is_opacity_preview =
+        panel_kind == Some(PanelKind::Opacity)
+        && (id == "op_preview" || id == "op_mask_preview");
+    if is_opacity_preview {
+        let editing_mask = expr::eval("editing_target_is_mask", ctx).to_bool();
+        let has_mask = expr::eval("selection_has_mask", ctx).to_bool();
+        let is_mask_preview = id == "op_mask_preview";
+        // Highlight the preview that matches the current editing
+        // target: op_preview when not in mask-editing, op_mask_preview
+        // when in mask-editing.
+        let highlight = editing_mask == is_mask_preview;
+        let border = if highlight { "2px solid #4a90d9" } else { "2px solid transparent" };
+        // Clicking MASK_PREVIEW requires the selection to have a
+        // mask; otherwise the click is a no-op (mirrors the
+        // "Requires element.mask to be present" clause in the spec).
+        let click_enabled = !is_mask_preview || has_mask;
+        let app = rctx.app.clone();
+        let mut revision = rctx.revision;
+        let target_is_mask = is_mask_preview;
+        // MASK_PREVIEW supports modifier-clicks per OPACITY.md
+        // §Preview interactions:
+        //   * plain click → enter mask-editing mode (routed above)
+        //   * Alt/Option-click → toggle mask isolation (render only
+        //     the mask subtree on the canvas)
+        //   * Shift-click → toggle mask.disabled
+        let on_click = EventHandler::new(move |evt: Event<MouseData>| {
+            if !click_enabled {
+                return;
+            }
+            let mods = evt.data().modifiers();
+            let alt = mods.alt();
+            let shift = mods.shift();
+            let app = app.clone();
+            spawn(async move {
+                use crate::workspace::app_state::EditingTarget;
+                let mut st = app.borrow_mut();
+                if target_is_mask && shift {
+                    // Shift-click: toggle mask.disabled on every
+                    // selected mask via the existing Controller.
+                    if let Some(tab) = st.tab_mut() {
+                        crate::document::controller::Controller::toggle_mask_disabled_on_selection(&mut tab.model);
+                    }
+                } else if target_is_mask && alt {
+                    // Alt-click: toggle mask isolation on the first
+                    // selected element's mask. Enters isolation if
+                    // off; exits otherwise.
+                    if let Some(tab) = st.tab_mut() {
+                        let first_path = tab.model.document().selection.first()
+                            .map(|es| es.path.clone());
+                        tab.model.mask_isolation_path = match (&tab.model.mask_isolation_path, first_path) {
+                            (Some(_), _) => None,
+                            (None, Some(p)) => Some(p),
+                            (None, None) => None,
+                        };
+                    }
+                } else {
+                    // Plain click: flip editing target between
+                    // content and the first selected element's mask
+                    // subtree.
+                    if let Some(tab) = st.tab_mut() {
+                        tab.model.editing_target = if target_is_mask {
+                            tab.model.document().selection.first()
+                                .map(|es| EditingTarget::Mask(es.path.clone()))
+                                .unwrap_or(EditingTarget::Content)
+                        } else {
+                            EditingTarget::Content
+                        };
+                    }
+                }
+                revision += 1;
+            });
+        });
+        let cursor = if click_enabled { "pointer" } else { "default" };
+        return rsx! {
+            div {
+                id: "{id}",
+                style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;outline:{border};outline-offset:-2px;cursor:{cursor};",
+                title: "{summary}",
+                onclick: move |evt| on_click.call(evt),
+                "[{summary}]"
+            }
+        };
+    }
+
     rsx! {
         div {
             style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;",
@@ -5799,11 +6062,15 @@ mod tests {
             Element::Layer(LayerElem {
                 name,
                 children: Vec::new(),
+                isolated_blending: false,
+                knockout_group: false,
                 common: CommonProps {
                     opacity: 1.0,
+                    mode: crate::geometry::element::BlendMode::Normal,
                     transform: None,
                     locked,
                     visibility: vis,
+                    mask: None,
                 },
             })
         }).collect();
@@ -5958,22 +6225,27 @@ mod tests {
         // Construct a doc: [Layer A, Group G(child1, child2), Layer B]
         let layer_a = Element::Layer(LayerElem {
             name: "A".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let child1 = Element::Layer(LayerElem {
             name: "c1".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let child2 = Element::Layer(LayerElem {
             name: "c2".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(child1), Rc::new(child2)],
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let layer_b = Element::Layer(LayerElem {
             name: "B".into(), children: Vec::new(),
+            isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
@@ -6989,5 +7261,65 @@ mod tests {
             outer["active_document"]["artboards_count"],
             serde_json::json!(1)
         );
+    }
+
+    // ── set_opacity_field (Phase 1.5 wiring) ─────────────────
+
+    #[test]
+    fn set_opacity_field_blend_mode_accepts_snake_case_id() {
+        use crate::geometry::element::BlendMode;
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("multiply"));
+        assert_eq!(op.blend_mode, BlendMode::Multiply);
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("color_burn"));
+        assert_eq!(op.blend_mode, BlendMode::ColorBurn);
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("luminosity"));
+        assert_eq!(op.blend_mode, BlendMode::Luminosity);
+    }
+
+    #[test]
+    fn set_opacity_field_blend_mode_ignores_unknown_value() {
+        use crate::geometry::element::BlendMode;
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        op.blend_mode = BlendMode::Multiply;
+        super::set_opacity_field(&mut op, "blend_mode", &serde_json::json!("not_a_mode"));
+        // Ignored — field keeps its prior value.
+        assert_eq!(op.blend_mode, BlendMode::Multiply);
+    }
+
+    #[test]
+    fn set_opacity_field_opacity_clamps_to_0_100() {
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "opacity", &serde_json::json!(42.0));
+        assert_eq!(op.opacity, 42.0);
+        super::set_opacity_field(&mut op, "opacity", &serde_json::json!(150.0));
+        assert_eq!(op.opacity, 100.0);
+        super::set_opacity_field(&mut op, "opacity", &serde_json::json!(-5.0));
+        assert_eq!(op.opacity, 0.0);
+    }
+
+    #[test]
+    fn set_opacity_field_bool_toggles_flow_through() {
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "thumbnails_hidden", &serde_json::json!(true));
+        assert!(op.thumbnails_hidden);
+        super::set_opacity_field(&mut op, "options_shown", &serde_json::json!(true));
+        assert!(op.options_shown);
+        super::set_opacity_field(&mut op, "new_masks_clipping", &serde_json::json!(false));
+        assert!(!op.new_masks_clipping);
+        super::set_opacity_field(&mut op, "new_masks_inverted", &serde_json::json!(true));
+        assert!(op.new_masks_inverted);
+    }
+
+    #[test]
+    fn set_opacity_field_unknown_key_is_noop() {
+        use crate::geometry::element::BlendMode;
+        let mut op = crate::workspace::app_state::OpacityPanelState::default();
+        super::set_opacity_field(&mut op, "nonexistent", &serde_json::json!("anything"));
+        // Defaults are preserved.
+        assert_eq!(op.blend_mode, BlendMode::Normal);
+        assert_eq!(op.opacity, 100.0);
+        assert!(!op.thumbnails_hidden);
+        assert!(op.new_masks_clipping);
     }
 }

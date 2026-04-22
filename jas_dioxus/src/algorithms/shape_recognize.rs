@@ -1803,9 +1803,11 @@ mod tests {
             width_points: Vec::new(),
             common: CommonProps {
                 opacity: 0.7,
+                mode: crate::geometry::element::BlendMode::Normal,
                 transform: None,
                 locked: false,
                 visibility: Visibility::Preview,
+                mask: None,
             },
         });
         let shape = RecognizedShape::Rectangle {

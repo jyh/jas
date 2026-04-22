@@ -74,5 +74,34 @@ let () =
         assert (Array.length model8#document.Jas.Document.layers = 1);
         model8#redo;
         assert (Array.length model8#document.Jas.Document.layers = 1));
+
+      (* ── EditingTarget (Mask editor UI) ─────────────────
+         OPACITY.md section Preview interactions. *)
+
+      Alcotest.test_case "defaults to Content editing target" `Quick (fun () ->
+        let m = Jas.Model.create () in
+        assert (m#editing_target = Jas.Model.Content));
+
+      Alcotest.test_case "editing target round-trips through Mask mode" `Quick (fun () ->
+        let m = Jas.Model.create () in
+        m#set_editing_target (Jas.Model.Mask [0; 2; 1]);
+        (match m#editing_target with
+         | Jas.Model.Mask p -> assert (p = [0; 2; 1])
+         | Jas.Model.Content -> Alcotest.fail "expected Mask");
+        m#set_editing_target Jas.Model.Content;
+        assert (m#editing_target = Jas.Model.Content));
+
+      Alcotest.test_case "defaults to no mask isolation" `Quick (fun () ->
+        (* Mask-isolation is entered explicitly via Alt-click on
+           MASK_PREVIEW. OPACITY.md section Preview interactions. *)
+        let m = Jas.Model.create () in
+        assert (m#mask_isolation_path = None));
+
+      Alcotest.test_case "mask isolation path round-trips" `Quick (fun () ->
+        let m = Jas.Model.create () in
+        m#set_mask_isolation_path (Some [0; 3]);
+        assert (m#mask_isolation_path = Some [0; 3]);
+        m#set_mask_isolation_path None;
+        assert (m#mask_isolation_path = None));
     ];
   ]

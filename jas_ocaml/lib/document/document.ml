@@ -195,10 +195,14 @@ let array_replace_nth arr n x =
 (** Return the node with new_children substituted. *)
 let with_children node new_children =
   match node with
-  | Group { opacity; transform; locked; visibility; _ } ->
-    Group { children = new_children; opacity; transform; locked; visibility }
-  | Layer { name; opacity; transform; locked; visibility; _ } ->
-    Layer { name; children = new_children; opacity; transform; locked; visibility }
+  | Group { opacity; transform; locked; visibility; blend_mode; isolated_blending; knockout_group; _ } ->
+    Group { children = new_children; opacity; transform; locked; visibility; blend_mode;
+            mask = None;
+            isolated_blending; knockout_group }
+  | Layer { name; opacity; transform; locked; visibility; blend_mode; isolated_blending; knockout_group; _ } ->
+    Layer { name; children = new_children; opacity; transform; locked; visibility; blend_mode;
+            mask = None;
+            isolated_blending; knockout_group }
   (* Precondition: elem must be Group or Layer. Called only after children_of. *)
   | _ -> failwith "element has no children"
 

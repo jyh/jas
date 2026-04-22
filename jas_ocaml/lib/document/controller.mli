@@ -28,7 +28,20 @@ class controller : ?model:Model.model -> unit -> object
   method set_selection_fill : Element.fill option -> unit
   method set_selection_stroke : Element.stroke option -> unit
   method set_selection_width_profile : Element.stroke_width_point list -> unit
+  method make_mask_on_selection : clip:bool -> invert:bool -> unit
+  method release_mask_on_selection : unit
+  method set_mask_clip_on_selection : bool -> unit
+  method set_mask_invert_on_selection : bool -> unit
+  method toggle_mask_disabled_on_selection : unit
+  method toggle_mask_linked_on_selection : unit
 end
+
+(** Return the mask on the first selected element, if any. *)
+val first_mask : Document.document -> Element.mask option
+
+(** True when every selected element has an opacity mask attached.
+    Mixed selections count as "no mask" per OPACITY.md §States. *)
+val selection_has_mask : Document.document -> bool
 
 type fill_summary = FillNoSelection | FillUniform of Element.fill option | FillMixed
 type stroke_summary = StrokeNoSelection | StrokeUniform of Element.stroke option | StrokeMixed

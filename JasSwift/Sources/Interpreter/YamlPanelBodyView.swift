@@ -296,7 +296,20 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderButton() -> some View {
-        let label = element["label"] as? String ?? ""
+        let staticLabel = element["label"] as? String ?? ""
+        // bind.label: expression whose evaluated string replaces the
+        // static label. op_make_mask uses this to flip between
+        // "Make Mask" and "Release" based on selection_has_mask per
+        // OPACITY.md § States.
+        let label: String = {
+            if let bind = element["bind"] as? [String: Any],
+               let expr = bind["label"] as? String {
+                if case .string(let s) = evaluate(expr, context: context) {
+                    return s
+                }
+            }
+            return staticLabel
+        }()
         let isDisabled = evalBindDisabled()
         return Button(label) { handleWidgetClick() }
             .disabled(isDisabled)
@@ -308,9 +321,31 @@ struct YamlElementView: View {
     private func renderIconButton() -> some View {
         let summary = element["summary"] as? String ?? ""
         let isDisabled = evalBindDisabled()
-        Button(summary) { handleWidgetClick() }
+        // bind.icon: expression whose evaluated string names the
+        // icon glyph. Swift's icon_button renderer currently shows
+        // the summary as its label rather than the glyph; the
+        // resolved icon name is captured here so future icon-
+        // rendering support can pick it up without another YAML
+        // change. Used by op_link_indicator to flip between
+        // ``link_linked`` / ``link_unlinked`` as mask.linked
+        // changes.
+        let _ = resolvedIconName()
+        return Button(summary) { handleWidgetClick() }
             .buttonStyle(.plain)
             .disabled(isDisabled)
+    }
+
+    /// Resolve the icon name from ``bind.icon`` (if present, as a
+    /// yaml expression returning a string) or the static ``icon``
+    /// field, falling back to ``""``.
+    private func resolvedIconName() -> String {
+        if let bind = element["bind"] as? [String: Any],
+           let expr = bind["icon"] as? String {
+            if case .string(let s) = evaluate(expr, context: context) {
+                return s
+            }
+        }
+        return element["icon"] as? String ?? ""
     }
 
     /// Evaluate `bind.disabled` if present; returns `false` when
@@ -337,6 +372,35 @@ struct YamlElementView: View {
     ///    buttons whose behavior is a short effect list rather than
     ///    a named action.
     private func handleWidgetClick() {
+        // Opacity panel: op_make_mask dispatches Controller make or
+        // release based on selection_has_mask. The button has no
+        // ``action`` in yaml — routing is resolved here against the
+        // panel id and the element id. Mirrors the Rust special-case
+        // in ``render_button``.
+        if panelId == "opacity_panel_content",
+           let id = element["id"] as? String, id == "op_make_mask",
+           let m = model {
+            let hasMask = evaluate("selection_has_mask", context: context).toBool()
+            let ctrl = Controller(model: m)
+            if hasMask {
+                ctrl.releaseMaskOnSelection()
+            } else {
+                let clip = (context["_opacity_new_masks_clipping"] as? Bool) ?? true
+                let invert = (context["_opacity_new_masks_inverted"] as? Bool) ?? false
+                ctrl.makeMaskOnSelection(clip: clip, invert: invert)
+            }
+            return
+        }
+        // Opacity panel: op_link_indicator toggles mask.linked on
+        // every selected mask via Controller. OPACITY.md §Document
+        // model. Mirrors the Rust special-case in
+        // ``render_icon_button``.
+        if panelId == "opacity_panel_content",
+           let id = element["id"] as? String, id == "op_link_indicator",
+           let m = model {
+            Controller(model: m).toggleMaskLinkedOnSelection()
+            return
+        }
         if let actionName = element["action"] as? String {
             let rawParams = (element["params"] as? [String: Any]) ?? [:]
             var resolved: [String: Any] = [:]
@@ -564,9 +628,67 @@ struct YamlElementView: View {
         let summary = element["summary"] as? String
             ?? element["type"] as? String
             ?? "?"
-        SwiftUI.Text("[\(summary)]")
-            .foregroundColor(.gray)
-            .frame(minHeight: 30)
+        // Opacity panel previews (OPACITY.md §Preview interactions):
+        // op_preview / op_mask_preview handle click to switch the
+        // editing target and render a persistent highlight on the
+        // active target. Mirrors the Rust special-case in
+        // ``render_placeholder``.
+        let id = element["id"] as? String
+        if panelId == "opacity_panel_content",
+           let id, id == "op_preview" || id == "op_mask_preview" {
+            let editingMask = evaluate("editing_target_is_mask", context: context).toBool()
+            let hasMask = evaluate("selection_has_mask", context: context).toBool()
+            let isMaskPreview = id == "op_mask_preview"
+            // Highlight the preview that matches the current editing
+            // target: op_preview when content-mode, op_mask_preview
+            // when mask-mode.
+            let highlight = editingMask == isMaskPreview
+            // MASK_PREVIEW click requires the selection to have a
+            // mask; otherwise the click is a no-op.
+            let clickEnabled = !isMaskPreview || hasMask
+            SwiftUI.Text("[\(summary)]")
+                .foregroundColor(.gray)
+                .frame(minHeight: 30)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(highlight
+                                ? SwiftUI.Color(red: 74 / 255, green: 144 / 255, blue: 217 / 255)
+                                : SwiftUI.Color.clear,
+                                lineWidth: 2)
+                )
+                .contentShape(SwiftUI.Rectangle())
+                .onTapGesture {
+                    guard clickEnabled, let m = model else { return }
+                    // MASK_PREVIEW supports modifier-clicks per
+                    // OPACITY.md §Preview interactions. Query the
+                    // current NSEvent modifier flags at tap time.
+                    let flags = NSEvent.modifierFlags
+                    let shift = flags.contains(.shift)
+                    let alt = flags.contains(.option)
+                    if isMaskPreview && shift {
+                        // Shift-click: toggle mask.disabled on every
+                        // selected mask via Controller.
+                        Controller(model: m).toggleMaskDisabledOnSelection()
+                    } else if isMaskPreview && alt {
+                        // Alt-click: toggle mask isolation on the
+                        // first selected element's mask.
+                        if m.maskIsolationPath != nil {
+                            m.maskIsolationPath = nil
+                        } else {
+                            m.maskIsolationPath = m.document.selection.first?.path
+                        }
+                    } else {
+                        // Plain click: flip editing target.
+                        m.editingTarget = isMaskPreview
+                            ? .mask(m.document.selection.first?.path ?? [])
+                            : .content
+                    }
+                }
+        } else {
+            SwiftUI.Text("[\(summary)]")
+                .foregroundColor(.gray)
+                .frame(minHeight: 30)
+        }
     }
 
     // MARK: - Select
@@ -617,14 +739,43 @@ struct YamlElementView: View {
             return false
         }()
         let writeKey = writeBackKey(checkedExpr)
+        let isDisabled: Bool = {
+            if let disExpr = bind?["disabled"] as? String {
+                return evaluate(disExpr, context: context).toBool()
+            }
+            return false
+        }()
+        // Opacity panel selection-mask bindings route write-backs to
+        // the document controller (the flag lives on the selected
+        // element's mask, not on a panel-state key). See OPACITY.md §
+        // States. Mirrors the Rust ``render_toggle`` special-case.
+        let maskRoute: String? = {
+            guard panelId == "opacity_panel_content" else { return nil }
+            switch checkedExpr?.trimmingCharacters(in: .whitespaces) {
+            case "selection_mask_clip": return "clip"
+            case "selection_mask_invert": return "invert"
+            default: return nil
+            }
+        }()
+        let capturedModel = model
 
         Toggle(label, isOn: Binding<Bool>(
             get: { isChecked },
             set: { newVal in
+                if let route = maskRoute, let m = capturedModel {
+                    let ctrl = Controller(model: m)
+                    if route == "clip" {
+                        ctrl.setMaskClipOnSelection(newVal)
+                    } else {
+                        ctrl.setMaskInvertOnSelection(newVal)
+                    }
+                    return
+                }
                 if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
             }
         ))
             .toggleStyle(.checkbox)
+            .disabled(isDisabled)
     }
 
     // MARK: - Combo Box

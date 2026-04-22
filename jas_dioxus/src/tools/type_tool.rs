@@ -861,6 +861,8 @@ mod tests {
         let _ = LayerElem {
             name: String::new(),
             children: Vec::new(),
+            isolated_blending: false,
+            knockout_group: false,
             common: CommonProps::default(),
         };
         model.set_document(doc);

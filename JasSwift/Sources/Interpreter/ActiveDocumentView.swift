@@ -139,3 +139,44 @@ public func buildActiveDocumentView(
         "artboards_panel_selection_ids": artboardsPanelSelection,
     ]
 }
+
+/// Build the selection-level predicates referenced by yaml
+/// expressions (``selection_has_mask``, ``selection_mask_clip``,
+/// ``selection_mask_invert``, ``selection_mask_linked``) per
+/// OPACITY.md § States / § Document model. Mixed selections count
+/// as "no mask"; the mask fields are read from the first selected
+/// element's mask, driving "first-wins" bindings on
+/// CLIP_CHECKBOX / INVERT_MASK_CHECKBOX / LINK_INDICATOR. Mirrors
+/// ``build_selection_predicates`` in ``jas_dioxus``.
+public func buildSelectionPredicates(model: Model?) -> [String: Any] {
+    guard let m = model else {
+        return [
+            "selection_has_mask": false,
+            "selection_mask_clip": false,
+            "selection_mask_invert": false,
+            // Default `linked` to true so the LINK_INDICATOR shows
+            // the linked glyph when no mask exists — matches the
+            // "New masks are linked" spec default.
+            "selection_mask_linked": true,
+            "editing_target_is_mask": false,
+        ]
+    }
+    let doc = m.document
+    let hasMask = selectionHasMask(doc)
+    let first = firstMask(doc)
+    // OPACITY.md §Preview interactions: `editing_target_is_mask`
+    // reflects whether mask-editing mode is active, so
+    // OPACITY_PREVIEW / MASK_PREVIEW can show a persistent
+    // highlight on the current editing target.
+    let editingMask: Bool = {
+        if case .mask = m.editingTarget { return true }
+        return false
+    }()
+    return [
+        "selection_has_mask": hasMask,
+        "selection_mask_clip": first?.clip ?? false,
+        "selection_mask_invert": first?.invert ?? false,
+        "selection_mask_linked": first?.linked ?? true,
+        "editing_target_is_mask": editingMask,
+    ]
+}

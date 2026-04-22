@@ -98,6 +98,17 @@ let () =
     end else if key = GdkKeysyms._Escape
              || key = GdkKeysyms._Return || key = GdkKeysyms._KP_Enter then begin
       (match !active_canvas with Some c -> c#pen_finish | None -> ());
+      (* OPACITY.md section Preview interactions: Escape exits
+         mask-isolation first (if active); otherwise exits
+         mask-editing mode back to content-mode. *)
+      if key = GdkKeysyms._Escape then begin
+        let m = !active_model in
+        if m#mask_isolation_path <> None then
+          m#set_mask_isolation_path None
+        else match m#editing_target with
+          | Jas.Model.Mask _ -> m#set_editing_target Jas.Model.Content
+          | Jas.Model.Content -> ()
+      end;
       true
     end else if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
       let m = !active_model in

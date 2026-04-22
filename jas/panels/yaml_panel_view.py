@@ -31,13 +31,27 @@ class YamlPanelView(QWidget):
         self._spec = panel_spec
         self._store = store
         self._dispatch_fn = dispatch_fn
-        self._ctx = ctx or {}
+        self._ctx = dict(ctx or {})
         self._panel_id = panel_spec.get("id", "")
+        # Expose the current panel id so widget renderers can route
+        # bindings that depend on which panel is rendering
+        # (e.g. op_make_mask / selection_mask_* in opacity_panel).
+        self._ctx["_panel_id"] = self._panel_id
 
         # Initialize panel state
         defaults = panel_state_defaults(panel_spec)
         self._store.init_panel(self._panel_id, defaults)
         self._store.set_active_panel(self._panel_id)
+
+        # Opacity panel — stash the store handle in panel_menu so
+        # the hamburger-menu toggle commands
+        # (toggle_new_masks_clipping / toggle_new_masks_inverted /
+        # toggle_opacity_thumbnails / toggle_opacity_options) and
+        # the make_opacity_mask dispatch can reach it. Mirrors the
+        # OCaml opacity_store_ref pattern.
+        if self._panel_id == "opacity_panel_content":
+            from panels.panel_menu import set_opacity_store
+            set_opacity_store(self._store)
 
         # Run init expressions
         self._run_init()

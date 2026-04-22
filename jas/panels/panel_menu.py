@@ -51,7 +51,7 @@ ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
-    PanelKind.ALIGN, PanelKind.BOOLEAN,
+    PanelKind.ALIGN, PanelKind.BOOLEAN, PanelKind.OPACITY,
 ]
 
 # Color panel mode commands
@@ -64,6 +64,48 @@ COLOR_MODE_COMMANDS = {
 }
 
 COLOR_MODE_TO_CMD = {v: k for k, v in COLOR_MODE_COMMANDS.items()}
+
+
+# ---------------------------------------------------------------------------
+# Opacity panel state-store handle
+# ---------------------------------------------------------------------------
+#
+# The Opacity panel's hamburger-menu toggles and the make_opacity_mask
+# dispatch need access to the live ``new_masks_clipping`` /
+# ``new_masks_inverted`` / ``thumbnails_hidden`` / ``options_shown``
+# values, which live on the panel-local StateStore scope. Rather than
+# thread the store through every ``panel_dispatch`` / ``panel_is_checked``
+# call site (same argument the paragraph panel faced), the YamlPanelView
+# stashes the store handle here when the Opacity panel mounts.
+# ``None`` means the panel isn't currently rendered.
+_opacity_store = None  # type: ignore[assignment]
+
+
+def set_opacity_store(store) -> None:
+    """Register the live Opacity panel StateStore (called by
+    YamlPanelView when the panel mounts)."""
+    global _opacity_store
+    _opacity_store = store
+
+
+def _opacity_store_bool(key: str, default: bool) -> bool:
+    """Read a bool from the Opacity panel's state store, falling
+    back to ``default`` when the store isn't set or the key is
+    missing / non-bool."""
+    if _opacity_store is None:
+        return default
+    val = _opacity_store.get_panel("opacity_panel_content", key)
+    if isinstance(val, bool):
+        return val
+    return default
+
+
+def _opacity_store_set_bool(key: str, value: bool) -> None:
+    """Write a bool to the Opacity panel's state store. No-op when
+    the store isn't registered."""
+    if _opacity_store is None:
+        return
+    _opacity_store.set_panel("opacity_panel_content", key, value)
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +123,7 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.ARTBOARDS: "Artboards",
     PanelKind.ALIGN: "Align",
     PanelKind.BOOLEAN: "Boolean",
+    PanelKind.OPACITY: "Opacity",
 }
 
 
@@ -172,6 +215,29 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.action("Reset Panel", "reset_artboards_panel"),
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Artboards", "close_panel"),
+        ]
+    if kind == PanelKind.OPACITY:
+        # Ten spec items from OPACITY.md + Close Opacity. Phase-1
+        # toggles are functional via panel-local state; mask-lifecycle
+        # and page-level commands are inert (YAML gates them with
+        # enabled_when: "false"). Mirrors the OpacityPanel shape in
+        # jas_dioxus / JasSwift / jas_ocaml.
+        return [
+            PanelMenuItem.toggle("Hide Thumbnails", "toggle_opacity_thumbnails"),
+            PanelMenuItem.toggle("Show Options", "toggle_opacity_options"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Make Opacity Mask", "make_opacity_mask"),
+            PanelMenuItem.action("Release Opacity Mask", "release_opacity_mask"),
+            PanelMenuItem.action("Disable Opacity Mask", "disable_opacity_mask"),
+            PanelMenuItem.action("Unlink Opacity Mask", "unlink_opacity_mask"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.toggle("New Opacity Masks Are Clipping", "toggle_new_masks_clipping"),
+            PanelMenuItem.toggle("New Opacity Masks Are Inverted", "toggle_new_masks_inverted"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.toggle("Page Isolated Blending", "toggle_page_isolated_blending"),
+            PanelMenuItem.toggle("Page Knockout Group", "toggle_page_knockout_group"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Opacity", "close_panel"),
         ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 
@@ -560,12 +626,51 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
             apply_release_compound_shape(model)
         elif cmd == "expand_compound_shape":
             apply_expand_compound_shape(model)
+    elif kind == PanelKind.OPACITY:
+        # Opacity panel-local toggles flip the stored bool in the
+        # StateStore so subsequent make_opacity_mask dispatches and
+        # the menu's checked_when predicates see the live value.
+        _opacity_toggle_keys = {
+            "toggle_opacity_thumbnails": ("thumbnails_hidden", False),
+            "toggle_opacity_options": ("options_shown", False),
+            "toggle_new_masks_clipping": ("new_masks_clipping", True),
+            "toggle_new_masks_inverted": ("new_masks_inverted", False),
+        }
+        if cmd in _opacity_toggle_keys:
+            key, default = _opacity_toggle_keys[cmd]
+            cur = _opacity_store_bool(key, default)
+            _opacity_store_set_bool(key, not cur)
+        elif model is not None:
+            # Opacity mask-lifecycle commands route to the Controller.
+            # new_masks_clipping / new_masks_inverted now come from
+            # the panel's StateStore (seeded from yaml defaults;
+            # toggles above flip the stored values).
+            from document.controller import Controller
+            ctrl = Controller(model=model)
+            if cmd == "make_opacity_mask":
+                clip = _opacity_store_bool("new_masks_clipping", True)
+                invert = _opacity_store_bool("new_masks_inverted", False)
+                ctrl.make_mask_on_selection(clip=clip, invert=invert)
+            elif cmd == "release_opacity_mask":
+                ctrl.release_mask_on_selection()
+            elif cmd == "disable_opacity_mask":
+                ctrl.toggle_mask_disabled_on_selection()
+            elif cmd == "unlink_opacity_mask":
+                ctrl.toggle_mask_linked_on_selection()
 
 
 def panel_is_checked(kind: PanelKind, cmd: str, layout: WorkspaceLayout) -> bool:
     """Query whether a toggle/radio command is checked."""
     if cmd in COLOR_MODE_COMMANDS:
         return layout.color_panel_mode == COLOR_MODE_COMMANDS[cmd]
+    if cmd == "toggle_opacity_thumbnails":
+        return _opacity_store_bool("thumbnails_hidden", False)
+    if cmd == "toggle_opacity_options":
+        return _opacity_store_bool("options_shown", False)
+    if cmd == "toggle_new_masks_clipping":
+        return _opacity_store_bool("new_masks_clipping", True)
+    if cmd == "toggle_new_masks_inverted":
+        return _opacity_store_bool("new_masks_inverted", False)
     return False
 
 

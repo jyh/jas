@@ -285,44 +285,44 @@ let pack_path_command = function
   | ClosePath -> vlist [vint cmd_close_path]
 
 let rec pack_element = function
-  | Layer { name; children; opacity; transform; locked; visibility } ->
+  | Layer { name; children; opacity; transform; locked; visibility; _ } ->
     let ch = Array.to_list (Array.map pack_element children) in
     vlist [vint tag_layer; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform; vstr name; vlist ch]
-  | Group { children; opacity; transform; locked; visibility } ->
+  | Group { children; opacity; transform; locked; visibility; _ } ->
     let ch = Array.to_list (Array.map pack_element children) in
     vlist [vint tag_group; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform; vlist ch]
-  | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility } ->
+  | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility; _ } ->
     vlist [vint tag_line; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vf64 x1; vf64 y1; vf64 x2; vf64 y2; pack_stroke stroke;
            pack_width_points width_points]
-  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility } ->
+  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility; _ } ->
     vlist [vint tag_rect; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vf64 x; vf64 y; vf64 width; vf64 height; vf64 rx; vf64 ry;
            pack_fill fill; pack_stroke stroke]
-  | Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility } ->
+  | Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility; _ } ->
     vlist [vint tag_circle; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vf64 cx; vf64 cy; vf64 r; pack_fill fill; pack_stroke stroke]
-  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility } ->
+  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility; _ } ->
     vlist [vint tag_ellipse; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vf64 cx; vf64 cy; vf64 rx; vf64 ry;
            pack_fill fill; pack_stroke stroke]
-  | Polyline { points; fill; stroke; opacity; transform; locked; visibility } ->
+  | Polyline { points; fill; stroke; opacity; transform; locked; visibility; _ } ->
     let pts = List.map (fun (x, y) -> vlist [vf64 x; vf64 y]) points in
     vlist [vint tag_polyline; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vlist pts; pack_fill fill; pack_stroke stroke]
-  | Polygon { points; fill; stroke; opacity; transform; locked; visibility } ->
+  | Polygon { points; fill; stroke; opacity; transform; locked; visibility; _ } ->
     let pts = List.map (fun (x, y) -> vlist [vf64 x; vf64 y]) points in
     vlist [vint tag_polygon; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vlist pts; pack_fill fill; pack_stroke stroke]
-  | Path { d; fill; stroke; width_points; opacity; transform; locked; visibility } ->
+  | Path { d; fill; stroke; width_points; opacity; transform; locked; visibility; _ } ->
     let cmds = List.map pack_path_command d in
     vlist [vint tag_path; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
@@ -494,57 +494,61 @@ let rec unpack_element v =
   if tag = tag_layer then
     let name = as_str (List.nth arr 5) in
     let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 6))) in
-    Layer { name; children; opacity; transform; locked; visibility }
+    Layer { name; children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
+            mask = None;
+            isolated_blending = false; knockout_group = false }
   else if tag = tag_group then
     let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 5))) in
-    Group { children; opacity; transform; locked; visibility }
+    Group { children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
+            mask = None;
+            isolated_blending = false; knockout_group = false }
   else if tag = tag_line then
     let wp = if List.length arr > 10 then unpack_width_points (List.nth arr 10) else [] in
     Line { x1 = as_f64 (List.nth arr 5); y1 = as_f64 (List.nth arr 6);
            x2 = as_f64 (List.nth arr 7); y2 = as_f64 (List.nth arr 8);
            stroke = unpack_stroke (List.nth arr 9);
            width_points = wp;
-           opacity; transform; locked; visibility }
+           opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
   else if tag = tag_rect then
     Rect { x = as_f64 (List.nth arr 5); y = as_f64 (List.nth arr 6);
            width = as_f64 (List.nth arr 7); height = as_f64 (List.nth arr 8);
            rx = as_f64 (List.nth arr 9); ry = as_f64 (List.nth arr 10);
            fill = unpack_fill (List.nth arr 11);
            stroke = unpack_stroke (List.nth arr 12);
-           opacity; transform; locked; visibility }
+           opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
   else if tag = tag_circle then
     Circle { cx = as_f64 (List.nth arr 5); cy = as_f64 (List.nth arr 6);
              r = as_f64 (List.nth arr 7);
              fill = unpack_fill (List.nth arr 8);
              stroke = unpack_stroke (List.nth arr 9);
-             opacity; transform; locked; visibility }
+             opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
   else if tag = tag_ellipse then
     Ellipse { cx = as_f64 (List.nth arr 5); cy = as_f64 (List.nth arr 6);
               rx = as_f64 (List.nth arr 7); ry = as_f64 (List.nth arr 8);
               fill = unpack_fill (List.nth arr 9);
               stroke = unpack_stroke (List.nth arr 10);
-              opacity; transform; locked; visibility }
+              opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
   else if tag = tag_polyline then
     let points = List.map (fun p ->
       let a = as_list p in (as_f64 (List.nth a 0), as_f64 (List.nth a 1))
     ) (as_list (List.nth arr 5)) in
     Polyline { points; fill = unpack_fill (List.nth arr 6);
                stroke = unpack_stroke (List.nth arr 7);
-               opacity; transform; locked; visibility }
+               opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
   else if tag = tag_polygon then
     let points = List.map (fun p ->
       let a = as_list p in (as_f64 (List.nth a 0), as_f64 (List.nth a 1))
     ) (as_list (List.nth arr 5)) in
     Polygon { points; fill = unpack_fill (List.nth arr 6);
               stroke = unpack_stroke (List.nth arr 7);
-              opacity; transform; locked; visibility }
+              opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
   else if tag = tag_path then
     let cmds = List.map unpack_path_command (as_list (List.nth arr 5)) in
     let wp = if List.length arr > 8 then unpack_width_points (List.nth arr 8) else [] in
     Path { d = cmds; fill = unpack_fill (List.nth arr 6);
            stroke = unpack_stroke (List.nth arr 7);
            width_points = wp;
-           opacity; transform; locked; visibility }
+           opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None }
   else if tag = tag_text then
     let content = as_str (List.nth arr 7) in
     (* Prefer the trailing tspans field when present; otherwise fall
@@ -575,7 +579,7 @@ let rec unpack_element v =
            text_height = as_f64 (List.nth arr 14);
            fill = unpack_fill (List.nth arr 15);
            stroke = unpack_stroke (List.nth arr 16);
-           opacity; transform; locked; visibility; tspans }
+           opacity; transform; locked; visibility; tspans; blend_mode = Element.Normal; mask = None }
   else if tag = tag_text_path then
     let cmds = List.map unpack_path_command (as_list (List.nth arr 5)) in
     let content = as_str (List.nth arr 6) in
@@ -599,7 +603,7 @@ let rec unpack_element v =
                 vertical_scale = ""; kerning = "";
                 fill = unpack_fill (List.nth arr 13);
                 stroke = unpack_stroke (List.nth arr 14);
-                opacity; transform; locked; visibility; tspans }
+                opacity; transform; locked; visibility; tspans; blend_mode = Element.Normal; mask = None }
   else failwith (Printf.sprintf "unknown element tag: %d" tag)
 
 let unpack_selection v =

@@ -12,7 +12,7 @@ import math
 from document.controller import Controller
 from document.document import Document, ElementSelection
 from geometry.element import (
-    ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
+    ArcTo, BlendMode, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
     LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Text, TextPath,
     Color, Fill, LineCap, LineJoin, Stroke, StrokeAlign, Transform,
@@ -180,6 +180,36 @@ class BoundingBox:
 def _qcolor(c: Color) -> QColor:
     r, g, b, a = c.to_rgba()
     return QColor.fromRgbF(r, g, b, a)
+
+
+def _qt_composition_mode(m: BlendMode) -> QPainter.CompositionMode:
+    """Map a ``BlendMode`` to the QPainter composition mode.
+
+    Qt natively supports all 16 of the Opacity panel's blend modes.
+    ``NORMAL`` maps to ``CompositionMode_SourceOver`` (the Qt default).
+    """
+    cm = QPainter.CompositionMode
+    return {
+        BlendMode.NORMAL:      cm.CompositionMode_SourceOver,
+        BlendMode.DARKEN:      cm.CompositionMode_Darken,
+        BlendMode.MULTIPLY:    cm.CompositionMode_Multiply,
+        BlendMode.COLOR_BURN:  cm.CompositionMode_ColorBurn,
+        BlendMode.LIGHTEN:     cm.CompositionMode_Lighten,
+        BlendMode.SCREEN:      cm.CompositionMode_Screen,
+        BlendMode.COLOR_DODGE: cm.CompositionMode_ColorDodge,
+        BlendMode.OVERLAY:     cm.CompositionMode_Overlay,
+        BlendMode.SOFT_LIGHT:  cm.CompositionMode_SoftLight,
+        BlendMode.HARD_LIGHT:  cm.CompositionMode_HardLight,
+        BlendMode.DIFFERENCE:  cm.CompositionMode_Difference,
+        BlendMode.EXCLUSION:   cm.CompositionMode_Exclusion,
+        # Qt does not expose HSL blend operators by name; fall back to
+        # SourceOver for those four modes. The blend_mode field is still
+        # stored on the element and round-trips through SVG / test JSON.
+        BlendMode.HUE:         cm.CompositionMode_SourceOver,
+        BlendMode.SATURATION:  cm.CompositionMode_SourceOver,
+        BlendMode.COLOR:       cm.CompositionMode_SourceOver,
+        BlendMode.LUMINOSITY:  cm.CompositionMode_SourceOver,
+    }[m]
 
 
 def _apply_fill(painter: QPainter, fill: Fill | None) -> None:
@@ -634,8 +664,149 @@ def _apply_outline_style(painter: QPainter) -> None:
     painter.setPen(pen)
 
 
+import enum
+
+
+class MaskPlan(enum.Enum):
+    """How the mask subtree's rendered alpha is applied to the
+    element. Selected by ``_mask_plan`` from the mask's ``clip`` and
+    ``invert`` fields; consumed by ``_draw_element_with_mask``.
+    Mirrors the Rust / Swift / OCaml renderer's ``MaskPlan`` /
+    ``mask_plan`` types. OPACITY.md §Rendering.
+    """
+    # Element clipped to the mask shape. DestinationIn applied
+    # across the whole offscreen image. `clip: true, invert: false`.
+    CLIP_IN = "clip_in"
+    # Element clipped to the *inverse* of the mask shape.
+    # DestinationOut across the whole offscreen image. Covers both
+    # `clip: true, invert: true` and — for alpha-based masks —
+    # `clip: false, invert: true`, which collapse to the same output
+    # (E * (1 - M) everywhere) since the mask's outside-region alpha
+    # is zero either way.
+    CLIP_OUT = "clip_out"
+    # `clip: false, invert: false`: element stays at full alpha
+    # outside the mask subtree's bounding box; DestinationIn with
+    # the mask applies only inside the bbox via a clipped sub-painter.
+    REVEAL_OUTSIDE_BBOX = "reveal_outside_bbox"
+
+
+def _mask_plan(mask) -> MaskPlan | None:
+    """Pick a ``MaskPlan`` for the mask, or ``None`` when the mask
+    is inactive (``disabled=True``)."""
+    if mask.disabled:
+        return None
+    if mask.clip and not mask.invert:
+        return MaskPlan.CLIP_IN
+    if mask.clip and mask.invert:
+        return MaskPlan.CLIP_OUT
+    # Alpha-based masks can't distinguish `clip: false, invert: true`
+    # from `clip: true, invert: true` (both yield E * (1 - M) when
+    # the mask's outside-region alpha is 0), so route them through
+    # the same composite.
+    if not mask.clip and mask.invert:
+        return MaskPlan.CLIP_OUT
+    return MaskPlan.REVEAL_OUTSIDE_BBOX
+
+
+def _effective_mask_transform(mask, elem) -> "Transform | None":
+    """Return the transform that should be applied when rendering
+    the mask's subtree on top of the ancestor coord system. Track
+    C phase 3, OPACITY.md §Document model:
+
+    - ``linked=True``  — mask inherits ``elem.transform`` (mask
+      follows the element).
+    - ``linked=False`` — mask uses ``mask.unlink_transform`` (the
+      element's transform captured at unlink time, frozen so the
+      mask stays fixed under subsequent element edits).
+
+    Returns ``None`` when the picked transform is absent (identity
+    case) so the caller can skip the ``_apply_transform`` call.
+    """
+    if mask.linked:
+        return getattr(elem, 'transform', None)
+    return mask.unlink_transform
+
+
 def _draw_element(painter: QPainter, elem: Element,
                   ancestor_vis=None) -> None:
+    """Draw a single element, dispatching to the mask composite
+    path when the element carries an active mask."""
+    mask = getattr(elem, 'mask', None)
+    if mask is not None:
+        plan = _mask_plan(mask)
+        if plan is not None:
+            _draw_element_with_mask(painter, elem, mask, plan, ancestor_vis)
+            return
+    _draw_element_body(painter, elem, ancestor_vis)
+
+
+def _draw_element_with_mask(painter: QPainter, elem: Element,
+                            mask, plan: MaskPlan,
+                            ancestor_vis) -> None:
+    """Render ``elem`` with its opacity mask composited in per
+    ``plan``. The element body is drawn onto an offscreen
+    ``QImage`` with the main painter's current world transform;
+    the mask subtree is then composited. The offscreen image is
+    finally blitted onto the main painter at device coordinates.
+
+    OPACITY.md §Rendering.
+    """
+    from PySide6.QtGui import QImage
+    device = painter.device()
+    if device is None:
+        _draw_element_body(painter, elem, ancestor_vis)
+        return
+    w = int(device.width())
+    h = int(device.height())
+    if w <= 0 or h <= 0:
+        return
+    image = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)  # fully transparent
+    cm = QPainter.CompositionMode
+    sub = QPainter(image)
+    try:
+        sub.setRenderHint(
+            QPainter.RenderHint.Antialiasing,
+            bool(painter.renderHints() & QPainter.RenderHint.Antialiasing),
+        )
+        sub.setTransform(painter.transform())
+        _draw_element_body(sub, elem, ancestor_vis)
+        # Apply the mask's effective transform (per
+        # _effective_mask_transform), then composite the mask
+        # subtree against the element body. Track C phase 3.
+        sub.save()
+        _apply_transform(sub, _effective_mask_transform(mask, elem))
+        if plan == MaskPlan.CLIP_IN:
+            sub.setCompositionMode(cm.CompositionMode_DestinationIn)
+            _draw_element(sub, mask.subtree, ancestor_vis)
+        elif plan == MaskPlan.CLIP_OUT:
+            sub.setCompositionMode(cm.CompositionMode_DestinationOut)
+            _draw_element(sub, mask.subtree, ancestor_vis)
+        elif plan == MaskPlan.REVEAL_OUTSIDE_BBOX:
+            # `clip: false, invert: false`: keep the element body at
+            # full alpha outside the mask subtree's bounding box;
+            # apply DestinationIn only inside the bbox via a clipped
+            # sub-painter. OPACITY.md §Rendering.
+            bx, by, bw, bh = mask.subtree.bounds()
+            if bw > 0 and bh > 0:
+                sub.save()
+                sub.setClipRect(QRectF(bx, by, bw, bh))
+                sub.setCompositionMode(cm.CompositionMode_DestinationIn)
+                _draw_element(sub, mask.subtree, ancestor_vis)
+                sub.restore()
+            # Empty-bbox mask: body passes through unmodified
+            # (mask has nothing to composite against).
+        sub.restore()
+    finally:
+        sub.end()
+    painter.save()
+    painter.resetTransform()
+    painter.drawImage(0, 0, image)
+    painter.restore()
+
+
+def _draw_element_body(painter: QPainter, elem: Element,
+                       ancestor_vis=None) -> None:
     """Draw a single element using the QPainter.
 
     ``ancestor_vis`` is the capping visibility inherited from parent
@@ -661,6 +832,10 @@ def _draw_element(painter: QPainter, elem: Element,
     opacity = getattr(elem, 'opacity', 1.0)
     if opacity < 1.0:
         painter.setOpacity(painter.opacity() * opacity)
+
+    blend_mode = getattr(elem, 'blend_mode', None)
+    if blend_mode is not None:
+        painter.setCompositionMode(_qt_composition_mode(blend_mode))
 
     transform = getattr(elem, 'transform', None)
     _apply_transform(painter, transform)
@@ -1549,6 +1724,23 @@ class CanvasWidget(QWidget):
                 return
         if self._active_tool.on_key(self._tool_ctx, event.key()):
             return
+        # OPACITY.md §Preview interactions: Escape exits
+        # mask-isolation first (if active); otherwise exits
+        # mask-editing mode back to content-mode.
+        if event.key() == Qt.Key.Key_Escape:
+            from document.model import EditingTarget
+            if self._model.mask_isolation_path is not None:
+                self._model.mask_isolation_path = None
+                self.update()
+                return
+            if self._model.editing_target.is_mask:
+                self._model.editing_target = EditingTarget.content()
+                # Bump panel-state version so the Opacity panel
+                # re-renders with the highlight shifted back.
+                self._model.panel_state_version = getattr(
+                    self._model, "panel_state_version", 0) + 1
+                self.update()
+                return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
@@ -1611,9 +1803,22 @@ class CanvasWidget(QWidget):
         doc = self._model.document
         # Z-layer 2: per-artboard fills.
         _draw_artboard_fills(painter, doc)
-        # Z-layer 3: document elements.
-        for layer in doc.layers:
-            _draw_element(painter, layer)
+        # Z-layer 3: document elements. In mask-isolation mode
+        # (OPACITY.md §Preview interactions), render only the mask
+        # subtree of the isolated element — everything else on the
+        # canvas is hidden until the user exits isolation.
+        isolation_path = getattr(self._model, "mask_isolation_path", None)
+        if isolation_path is not None:
+            try:
+                elem = doc.get_element(tuple(isolation_path))
+                mask = getattr(elem, "mask", None)
+                if mask is not None:
+                    _draw_element(painter, mask.subtree)
+            except (IndexError, KeyError):
+                pass
+        else:
+            for layer in doc.layers:
+                _draw_element(painter, layer)
         # Z-layer 4: fade overlay (off-artboard dimming).
         _draw_fade_overlay(painter, doc, self.width(), self.height())
         # Z-layer 5-8: artboard chrome.
