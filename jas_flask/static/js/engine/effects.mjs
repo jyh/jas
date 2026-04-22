@@ -171,6 +171,27 @@ function runEffect(effect, scope, store, options) {
           model.mutate(deleteSelectedElements);
           return;
         }
+        case "doc.add_element": {
+          // Spec: { parent: <path expr>, element: <element-spec> }
+          // The element-spec is a dict with `type:` + geometry fields.
+          // Geometry fields may be expressions; they're evaluated
+          // against the scope before the element is appended.
+          const parentPath = extractPath(spec.parent, scope);
+          const elemSpec = spec.element;
+          if (!parentPath || !elemSpec) return;
+          const resolved = resolveElementSpec(elemSpec, scope);
+          model.mutate((d) => addElementAt(d, parentPath, resolved));
+          return;
+        }
+        case "doc.set_attr": {
+          // Spec: { path: <expr>, attr: <name>, value: <expr> }
+          const path = extractPath(spec.path, scope);
+          const attr = String(spec.attr || "");
+          if (!path || !attr) return;
+          const value = toJson(evaluate(String(spec.value ?? "null"), scope));
+          model.mutate((d) => setElementAttr(d, path, attr, value));
+          return;
+        }
         // Other doc.* effects land in subsequent phases.
       }
     }
@@ -195,15 +216,30 @@ function normalizeTarget(raw) {
 
 /**
  * Pull a single path array out of a doc.* effect spec. Accepts:
+ *   - A raw array of ints → treated as a path directly
  *   - A string that evaluates to a Path value → extract indices
+ *   - A string that evaluates to a List of Numbers → treat as path
  *   - A {path: expr} dict — evaluates `path` as an expression
- *   - A raw array of ints — treated as a path directly
  */
 function extractPath(spec, scope) {
   if (Array.isArray(spec)) return spec.slice();
   if (typeof spec === "string") {
     const v = evaluate(spec, scope);
-    if (v && v.kind === PATH) return v.value.slice();
+    if (!v) return null;
+    if (v.kind === PATH) return v.value.slice();
+    // A list literal like "[0, 1, 2]" evaluates to a List of Numbers;
+    // accept it as a path so YAML authors can write literal paths
+    // without wrapping them in a path() primitive.
+    if (v.kind === "list") {
+      const indices = [];
+      for (const item of v.value) {
+        if (!item || item.kind !== "number" || !Number.isInteger(item.value)) {
+          return null;
+        }
+        indices.push(item.value);
+      }
+      return indices;
+    }
     return null;
   }
   if (spec && typeof spec === "object" && "path" in spec) {
@@ -328,4 +364,70 @@ function deleteInElement(elem, subpath) {
   const children = elem.children.slice();
   children[head] = deleteInElement(children[head], rest);
   return { ...elem, children };
+}
+
+/**
+ * Evaluate any expression-valued fields in an element spec, producing
+ * a concrete element ready to append. Non-string fields and the `type`
+ * field pass through verbatim.
+ */
+function resolveElementSpec(spec, scope) {
+  if (!spec || typeof spec !== "object") return null;
+  const out = {};
+  for (const [k, v] of Object.entries(spec)) {
+    if (k === "type" || typeof v !== "string") {
+      out[k] = v;
+      continue;
+    }
+    out[k] = toJson(evaluate(v, scope));
+  }
+  return out;
+}
+
+/**
+ * Append an element to the container at `parentPath`. Path `[0]`
+ * targets the top layer; `[0, 2]` targets group-index-2 inside that
+ * layer. Returns a new Document; input is not mutated.
+ */
+function addElementAt(doc, parentPath, elem) {
+  if (!Array.isArray(parentPath) || !elem) return doc;
+  const layers = doc.layers.slice();
+  if (parentPath.length === 1) {
+    const li = parentPath[0];
+    if (li < 0 || li >= layers.length) return doc;
+    const layer = layers[li];
+    const children = (layer.children || []).slice();
+    children.push(elem);
+    layers[li] = { ...layer, children };
+    return { ...doc, layers };
+  }
+  const [li, ...rest] = parentPath;
+  if (li < 0 || li >= layers.length) return doc;
+  layers[li] = appendInElement(layers[li], rest, elem);
+  return { ...doc, layers };
+}
+
+function appendInElement(container, subpath, elem) {
+  if (!container || !Array.isArray(container.children)) return container;
+  if (subpath.length === 0) {
+    return { ...container, children: [...container.children, elem] };
+  }
+  const [head, ...rest] = subpath;
+  const children = container.children.slice();
+  if (head < 0 || head >= children.length) return container;
+  children[head] = appendInElement(children[head], rest, elem);
+  return { ...container, children };
+}
+
+/**
+ * Set an attribute on the element at `path`. Shallow — replaces the
+ * top-level field only (x, y, width, fill, etc.). Returns a new Doc.
+ */
+function setElementAttr(doc, path, attr, value) {
+  if (!Array.isArray(path) || path.length === 0) return doc;
+  const [li, ...rest] = path;
+  const layers = doc.layers.slice();
+  if (li < 0 || li >= layers.length) return doc;
+  layers[li] = replaceElementAt(layers[li], rest, (e) => ({ ...e, [attr]: value }));
+  return { ...doc, layers };
 }
