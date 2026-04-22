@@ -24,7 +24,10 @@ thread_local! {
 
 /// Evaluate an expression string against a JSON context.
 ///
-/// Returns `Value::Null` for empty or unparseable input.
+/// Returns `Value::Null` for empty or unparseable input. Parse failures
+/// are logged at WARN; non-empty sources that evaluate to Null are
+/// logged at DEBUG (legitimate for e.g. `$selection.fill` with nothing
+/// selected, but also flags typos when debug logging is enabled).
 pub fn eval(source: &str, ctx: &serde_json::Value) -> Value {
     if source.is_empty() {
         return Value::Null;
@@ -35,11 +38,20 @@ pub fn eval(source: &str, ctx: &serde_json::Value) -> Value {
             return cached.clone();
         }
         let ast = expr_parser::parse(source).map(Rc::new);
+        if ast.is_none() {
+            log::warn!("expr parse failed: {source:?}");
+        }
         cache.insert(source.to_string(), ast.clone());
         ast
     });
     match ast_opt {
-        Some(ast) => expr_eval::eval_node(&ast, ctx),
+        Some(ast) => {
+            let result = expr_eval::eval_node(&ast, ctx);
+            if matches!(result, Value::Null) {
+                log::debug!("expr null result: {source:?}");
+            }
+            result
+        }
         None => Value::Null,
     }
 }

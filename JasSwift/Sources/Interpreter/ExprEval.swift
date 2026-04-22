@@ -21,6 +21,13 @@ import Foundation
 /// a serial DispatchQueue.
 private var _astCache: [String: Expr?] = [:]
 
+/// Set JAS_DEBUG_EXPR=1 in the environment to log non-empty
+/// expressions that evaluate to `.null`. Parse failures are always
+/// logged to stderr (they indicate a real bug).
+private func _debugNullExpr() -> Bool {
+    ProcessInfo.processInfo.environment["JAS_DEBUG_EXPR"] == "1"
+}
+
 /// Evaluate an expression string against a context.
 /// Returns `.null` for empty or unparseable input.
 func evaluate(_ expr: String, context: [String: Any]) -> Value {
@@ -30,10 +37,19 @@ func evaluate(_ expr: String, context: [String: Any]) -> Value {
         ast = cached
     } else {
         ast = parseExpr(expr)
+        if ast == nil {
+            FileHandle.standardError.write(
+                Data("expr parse failed: \(expr)\n".utf8))
+        }
         _astCache[expr] = ast
     }
     guard let ast else { return .null }
-    return evalNode(ast, context)
+    let result = evalNode(ast, context)
+    if case .null = result, _debugNullExpr() {
+        FileHandle.standardError.write(
+            Data("expr null result: \(expr)\n".utf8))
+    }
+    return result
 }
 
 /// Evaluate a text string with embedded {{expr}} regions.
