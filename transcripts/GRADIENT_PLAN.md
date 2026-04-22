@@ -209,39 +209,40 @@ no store binding. The follow-up adds explicit
 transitions work both directions; menu actions produce the expected
 `stops[]` transformations.
 
-### Phase 6 — Linear gradient rendering (classic, within-element)
+### Phases 6 + 7 — Linear and radial gradient rendering
 
-First visual rendering phase. SVG `<linearGradient>` is natively
-supported in every backend.
+**Status:** Done across all four native apps. Phase 6 and Phase 7
+landed together since each backend's gradient API naturally
+supports both linear and radial via the same pattern.
 
-**Scope**
+- **Rust** (`jas_dioxus`): `apply_fill` in `src/canvas/render.rs`
+  takes `Option<&Gradient>` + bbox; `make_canvas_gradient` builds
+  a `web_sys::CanvasGradient` (linear or radial). Required enabling
+  the `CanvasGradient` web-sys feature.
+- **Swift** (`JasSwift`): `fillStrokeOrOutline` overload takes
+  `fillGradient` + bbox; `fillCurrentPathWithGradient` saves state,
+  clips to the current path, then `drawLinearGradient` /
+  `drawRadialGradient`, restores. Re-adds path for stroke.
+- **OCaml** (`jas_ocaml`): `fill_and_stroke_with_gradient` builds a
+  `Cairo.Pattern.create_linear` / `_radial`, applies stops via
+  `add_color_stop_rgba`, then `Cairo.fill_preserve` so the path
+  stays for stroking.
+- **Python** (`jas`): `_apply_fill` takes `fill_gradient` + bbox;
+  `_make_qgradient` builds a `QLinearGradient` or `QRadialGradient`.
 
-- Emit `<linearGradient>` in `<defs>` with synthesized ids on export.
-- Compute `x1` / `y1` / `x2` / `y2` from `angle` and `aspect_ratio`.
-- `<stop>` children per gradient stops.
-- Midpoints ≠ 50%: synthesize intermediate stops per §SVG attribute
-  mapping.
-- Canvas renders the gradient via native SVG / equivalent backend
-  paint.
+Shape variants covered per app: Rect, Circle, Ellipse, Polyline,
+Polygon, Path (Path through `elem.bounds`). Text / TextPath /
+CompoundShape and variable-width Path stroke still use solid-only
+paths.
 
-**Apps:** 4 native.
-
-**Deliverable:** panel edits show up live on the canvas for linear
-gradients; SVG export produces valid standard-compliant output.
-
-### Phase 7 — Radial gradient rendering (classic)
-
-**Scope**
-
-- `<radialGradient>` emit with `cx` / `cy` / `r`.
-- `gradientTransform` for `angle` (rotation) and `aspect_ratio ≠ 100%`
-  (elliptical).
-- Same stop and midpoint handling as Phase 6.
-
-**Apps:** 4 native.
-
-**Deliverable:** radial gradients render on all four native apps,
-including elliptical and rotated variants.
+**Deferred Phase 6/7 details:**
+- Midpoint synthesis (GRADIENT.md §SVG mapping) — currently stops
+  render at their raw locations; non-50% midpoints become plain
+  stops at the midpoint position. Proper midpoint-to-stop
+  synthesis is a follow-up.
+- SVG export / import round-trip — the renderer produces gradients
+  on screen, but the save-to-SVG / load-from-SVG round-trip with
+  `<defs>` + `url(#gN)` remains Phase 9 territory.
 
 ### Phase 8 — Stroke gradient (within-stroke sub-mode)
 
