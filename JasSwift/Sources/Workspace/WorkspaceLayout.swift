@@ -602,24 +602,6 @@ public struct WorkspaceLayout: Codable {
         bump()
     }
 
-    // MARK: - Labels
-
-    public static func panelLabel(_ kind: PanelKind) -> String {
-        switch kind {
-        case .layers: return "Layers"
-        case .color: return "Color"
-        case .swatches: return "Swatches"
-        case .stroke: return "Stroke"
-        case .properties: return "Properties"
-        case .character: return "Character"
-        case .paragraph: return "Paragraph"
-        case .artboards: return "Artboards"
-        case .align: return "Align"
-        case .boolean: return "Boolean"
-        case .opacity: return "Opacity"
-        }
-    }
-
     // MARK: - Close / Show Panels
 
     public mutating func closePanel(_ addr: PanelAddr) {

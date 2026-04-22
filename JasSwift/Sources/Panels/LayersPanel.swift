@@ -1,8 +1,6 @@
 /// Layers panel menu definition.
 
 public enum LayersPanel {
-    public static let label = "Layers"
-
     public static func menuItems() -> [PanelMenuItem] {
         [
             .action(label: "New Layer...", command: "new_layer"),

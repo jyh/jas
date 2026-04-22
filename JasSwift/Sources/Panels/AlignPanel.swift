@@ -8,8 +8,6 @@
 /// through dispatch tables.
 
 public enum AlignPanel {
-    public static let label = "Align"
-
     public static func menuItems() -> [PanelMenuItem] {
         [
             .toggle(label: "Use Preview Bounds", command: "toggle_use_preview_bounds"),

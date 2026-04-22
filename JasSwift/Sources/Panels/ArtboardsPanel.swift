@@ -8,8 +8,6 @@
 /// `dispatch` function here only handles `close_panel`.
 
 public enum ArtboardsPanel {
-    public static let label = "Artboards"
-
     /// Menu entries match `workspace/panels/artboards.yaml §menu` and
     /// `transcripts/ARTBOARDS.md §Menu` verbatim.
     public static func menuItems() -> [PanelMenuItem] {
