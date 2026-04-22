@@ -3536,6 +3536,105 @@
       "floating": []
     }
   },
+  "elements": {
+    "rect": {
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 1.0
+      }
+    },
+    "ellipse": {
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 1.0
+      }
+    },
+    "circle": {
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 1.0
+      }
+    },
+    "polygon": {
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 1.0
+      }
+    },
+    "polyline": {
+      "fill": null,
+      "stroke": {
+        "color": "#000000",
+        "width": 1.0
+      }
+    },
+    "line": {
+      "fill": null,
+      "stroke": {
+        "color": "#000000",
+        "width": 1.0
+      }
+    },
+    "path": {
+      "fill": null,
+      "stroke": {
+        "color": "#000000",
+        "width": 1.0
+      }
+    },
+    "text": {
+      "fill": "#000000",
+      "stroke": null,
+      "font": {
+        "family": "Helvetica",
+        "size": 12,
+        "weight": "normal",
+        "style": "normal"
+      }
+    },
+    "text_path": {
+      "fill": "#000000",
+      "stroke": null,
+      "font": {
+        "family": "Helvetica",
+        "size": 12,
+        "weight": "normal",
+        "style": "normal"
+      }
+    },
+    "group": {
+      "fill": null,
+      "stroke": null
+    },
+    "layer": {
+      "fill": null,
+      "stroke": null
+    }
+  },
+  "features": {
+    "server_storage": {
+      "available": false
+    },
+    "file_system_access_api": {
+      "available": false
+    },
+    "binary_format_roundtrip": {
+      "available": false
+    },
+    "clipboard_rich": {
+      "available": false
+    },
+    "os_notifications": {
+      "available": false
+    },
+    "collaboration": {
+      "available": false
+    }
+  },
   "icons": {
     "selection_arrow": {
       "viewbox": "0 0 28 28",
@@ -5462,6 +5561,31 @@
       ]
     }
   ],
+  "preferences": {
+    "autosave": {
+      "enabled": true,
+      "interval_seconds": 30
+    },
+    "units": {
+      "default": "px",
+      "show_in_panels": true
+    },
+    "smart_guides": {
+      "enabled": true,
+      "snap_threshold_px": 8
+    },
+    "grid": {
+      "visible": false,
+      "spacing_px": 10,
+      "subdivisions": 2
+    },
+    "viewport": {
+      "zoom_step": 1.2,
+      "min_zoom": 0.1,
+      "max_zoom": 64.0,
+      "fit_padding_px": 20
+    }
+  },
   "runtime_contexts": {
     "active_document": {
       "description": "Properties of the currently active document tab. When no tab is open (active_tab == -1), all properties resolve to their defaults.\n",

@@ -167,6 +167,20 @@ def validate_workspace(ws: dict) -> list[str]:
                 f"filename stem ({tool_id!r})"
             )
 
+    # Structural validation — other top-level sections authored in
+    # dedicated YAML files. Each schema validates only its own section
+    # of the merged workspace dict; absent sections skip silently.
+    section_schemas = (
+        ("elements", "elements.yaml"),
+        ("preferences", "preferences.yaml"),
+        ("features", "features.yaml"),
+    )
+    for section_key, where in section_schemas:
+        if section_key not in ws:
+            continue
+        section_doc = {section_key: ws[section_key]}
+        errors.extend(_validate_structural(section_key, section_doc, where))
+
     return errors
 
 

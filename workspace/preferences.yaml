@@ -1,0 +1,31 @@
+# User-settable preferences. Runtime state reads these as $preferences.*;
+# UI preference dialogs write them back. Defaults below are used when no
+# user override has been saved.
+#
+# Status: design-only until the runtime consumes this file
+# (FLASK_PARITY.md §15). Validated at compile time against
+# schema/preferences.schema.json.
+
+preferences:
+  autosave:
+    enabled: true
+    interval_seconds: 30
+
+  units:
+    default: "px"              # one of: px | mm | in | pt
+    show_in_panels: true
+
+  smart_guides:
+    enabled: true
+    snap_threshold_px: 8
+
+  grid:
+    visible: false
+    spacing_px: 10
+    subdivisions: 2
+
+  viewport:
+    zoom_step: 1.2             # multiplier per zoom in/out
+    min_zoom: 0.1
+    max_zoom: 64.0
+    fit_padding_px: 20

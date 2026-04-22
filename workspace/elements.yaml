@@ -1,0 +1,67 @@
+# Default fill / stroke / font attributes applied when creating a new
+# element of each type. Framework code consumes these when the active
+# tool creates a Rect / Text / Path / etc. and no explicit style is
+# specified by the tool's effect.
+#
+# Status: design-only until the canvas / tool dispatcher consumes
+# this file (FLASK_PARITY.md §15). Validated at compile time against
+# schema/elements.schema.json.
+
+elements:
+  rect:
+    fill: "#ffffff"
+    stroke:
+      color: "#000000"
+      width: 1.0
+  ellipse:
+    fill: "#ffffff"
+    stroke:
+      color: "#000000"
+      width: 1.0
+  circle:
+    fill: "#ffffff"
+    stroke:
+      color: "#000000"
+      width: 1.0
+  polygon:
+    fill: "#ffffff"
+    stroke:
+      color: "#000000"
+      width: 1.0
+  polyline:
+    fill: null
+    stroke:
+      color: "#000000"
+      width: 1.0
+  line:
+    fill: null
+    stroke:
+      color: "#000000"
+      width: 1.0
+  path:
+    fill: null
+    stroke:
+      color: "#000000"
+      width: 1.0
+  text:
+    fill: "#000000"
+    stroke: null
+    font:
+      family: "Helvetica"
+      size: 12
+      weight: "normal"
+      style: "normal"
+  text_path:
+    fill: "#000000"
+    stroke: null
+    font:
+      family: "Helvetica"
+      size: 12
+      weight: "normal"
+      style: "normal"
+  group:
+    fill: null
+    stroke: null
+  layer:
+    fill: null
+    stroke: null

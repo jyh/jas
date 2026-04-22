@@ -1,0 +1,44 @@
+# Runtime feature-capability declarations. Consumed by menu / panel
+# renderers via hide_if: expressions to hide or gray features when the
+# deployment doesn't support them.
+#
+# Each feature is an expression (string) or a literal bool. Renderers
+# read $features.<name>.available and filter menus accordingly.
+#
+# Status: design-only until the menu renderer consumes hide_if: against
+# $features (FLASK_PARITY.md §11, §13). Validated at compile time
+# against schema/features.schema.json.
+
+features:
+  # Server-backed file library. On Flask, true when the Flask server
+  # exposes /api/files endpoints. Always false in offline PWA mode and
+  # on native apps (which don't proxy through a server).
+  server_storage:
+    available: false
+
+  # File System Access API — Chromium-only. Enables silent-overwrite
+  # save. Framework JS sets this via runtime feature detection; native
+  # apps hardcode true (they have native file dialogs).
+  file_system_access_api:
+    available: false
+
+  # Binary-format roundtrip via Flask server /api/encode_binary and
+  # /api/decode_binary. Flask-only; native apps read/write binary
+  # directly. Offline PWA Flask has this unavailable.
+  binary_format_roundtrip:
+    available: false
+
+  # Clipboard API full — Chromium supports all MIME types; Firefox /
+  # Safari limit to a subset. Affects "Copy as SVG" fidelity.
+  clipboard_rich:
+    available: false
+
+  # OS-level notifications (Web Notifications API). Requires user
+  # permission grant. V2 feature.
+  os_notifications:
+    available: false
+
+  # Real-time collaboration (Tier 3 per FLASK_PARITY.md §13). Never
+  # true in V1; deferred indefinitely.
+  collaboration:
+    available: false

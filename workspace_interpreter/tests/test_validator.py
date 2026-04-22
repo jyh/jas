@@ -123,6 +123,58 @@ class TestSelectionTool:
             assert key in handlers, f"selection tool missing {key}"
 
 
+class TestElementsSchema:
+    def test_elements_valid(self):
+        doc = {
+            "elements": {
+                "rect": {"fill": "#ffffff", "stroke": {"color": "#000000", "width": 1.0}},
+                "path": {"fill": None, "stroke": {"color": "#000000", "width": 1.0}},
+                "text": {"fill": "#000000", "stroke": None, "font": {"family": "Helvetica", "size": 12}},
+            },
+        }
+        errs = _validate_structural("elements", doc, "elements.yaml")
+        assert errs == [], format_errors(errs)
+
+    def test_real_workspace_elements_valid(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        assert "elements" in ws
+        assert "rect" in ws["elements"]
+        assert ws["elements"]["rect"]["fill"] == "#ffffff"
+
+
+class TestPreferencesSchema:
+    def test_preferences_valid(self):
+        doc = {
+            "preferences": {
+                "autosave": {"enabled": True, "interval_seconds": 30},
+                "units": {"default": "px", "show_in_panels": True},
+            },
+        }
+        errs = _validate_structural("preferences", doc, "preferences.yaml")
+        assert errs == [], format_errors(errs)
+
+    def test_real_workspace_preferences_valid(self, workspace_path):
+        ws = load_workspace(workspace_path)
+        assert ws["preferences"]["autosave"]["enabled"] is True
+
+
+class TestFeaturesSchema:
+    def test_features_valid(self):
+        doc = {
+            "features": {
+                "server_storage": {"available": False},
+                "clipboard_rich": {"available": True},
+            },
+        }
+        errs = _validate_structural("features", doc, "features.yaml")
+        assert errs == [], format_errors(errs)
+
+    def test_features_expression_string_allowed(self):
+        doc = {"features": {"x": {"available": "$config.x_enabled"}}}
+        errs = _validate_structural("features", doc, "features.yaml")
+        assert errs == [], format_errors(errs)
+
+
 class TestValidationError:
     def test_error_accumulation(self):
         """validate_workspace returns a list rather than raising on
