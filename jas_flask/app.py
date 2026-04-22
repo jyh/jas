@@ -183,6 +183,18 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                                base_theme_json=base_theme_json,
                                metrics_json=metrics_json)
 
+    @app.route("/canvas")
+    def canvas_demo():
+        """Minimal demo of the JS engine — loads workspace.json, mounts the
+        selection tool, and shows a document with two rectangles. Uses the
+        engine modules under /static/js/engine/. See FLASK_PARITY.md §7."""
+        return render_template("canvas_demo.html")
+
+    @app.route("/api/workspace")
+    def workspace_json():
+        """Serve the compiled workspace.json for the JS engine to load."""
+        return jsonify(_get_ws())
+
     @app.route("/api/spec/<element_id>")
     def element_spec(element_id):
         """Return the full YAML spec for an element as JSON."""
