@@ -162,3 +162,28 @@ def demote_gradient_panel_selection(store, controller) -> None:
         controller.set_selection_fill_gradient(None)
     else:
         controller.set_selection_stroke_gradient(None)
+
+
+GRADIENT_RENDER_KEYS = {
+    "gradient_type", "gradient_angle", "gradient_aspect_ratio",
+    "gradient_method", "gradient_dither", "gradient_stroke_sub_mode",
+}
+
+
+def is_gradient_render_key(key: str) -> bool:
+    return key in GRADIENT_RENDER_KEYS
+
+
+def subscribe_gradient_panel(store, controller_getter) -> None:
+    """Phase 5 follow-up: subscribe to gradient_* key writes; each write
+    triggers apply_gradient_panel_to_selection so the selection sees
+    the edit immediately. Mirrors the OCaml subscribe_stroke_panel
+    pattern.
+
+    controller_getter is a zero-arg callable returning the current
+    Controller (lets the subscription reflect tab switches).
+    """
+    def on_write(key, _value):
+        if is_gradient_render_key(key):
+            apply_gradient_panel_to_selection(store, controller_getter())
+    store.subscribe(list(GRADIENT_RENDER_KEYS), on_write)
