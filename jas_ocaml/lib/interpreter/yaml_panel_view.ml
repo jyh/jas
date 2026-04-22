@@ -48,47 +48,11 @@ let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
      | _ -> ())
   | _ -> ()
 
-(** Module-level set of collapsed element paths in the layers panel. *)
-module PathKey = struct
-  type t = int list
-  let compare = compare
-end
-module PathSet2 = Set.Make(PathKey)
-let _layers_collapsed : PathSet2.t ref = ref PathSet2.empty
-
-(** Module-level set of panel-selected element paths. *)
-let _layers_panel_selection : PathSet2.t ref = ref PathSet2.empty
-
-(** Module-level path of the layer being renamed, or None. *)
-let _layers_renaming : int list option ref = ref None
-
-(** Module-level drag source and target paths for drag-and-drop. *)
-let _layers_drag_source : int list option ref = ref None
-let _layers_drag_target : int list option ref = ref None
-
-(** Search query for filtering the layers tree by name. *)
-let _layers_search_query : string ref = ref ""
-
-(** Isolation mode stack — descendants of the deepest entry are shown.
-    Lives in Layers_panel_state to avoid a dep cycle with panel_menu. *)
-
-(** Set of element type names (lowercase) currently hidden by the filter. *)
-module StrSet = Set.Make(String)
-let _layers_hidden_types : StrSet.t ref = ref StrSet.empty
-
-(** Saved direct-child lock states keyed by container path. *)
-module PathMap2 = Map.Make(PathKey)
-let _layers_saved_lock_states : bool list PathMap2.t ref = ref PathMap2.empty
-
-(** Solo/unsolo state: (soloed_path, map from sibling path to saved visibility). *)
-let _layers_solo_state : (int list * (int list * Element.visibility) list) option ref = ref None
-
-(** Callback to trigger re-render when UI state changes. *)
-let _rerender_layers : (unit -> unit) ref = ref (fun () -> ())
-
-(** Return the current layers panel selection as a list of paths. *)
-let get_layers_panel_selection () : int list list =
-  PathSet2.elements !_layers_panel_selection
+(** Layers-panel mutable state — collapsed rows, panel selection, rename
+    state, drag source/target, search filter, hidden type filter, saved
+    lock states for toggle-all, solo state, and the rerender callback —
+    lives in the Layers_panel_state module so both this renderer and
+    the panel-menu dispatcher can share it without a dep cycle. *)
 
 (** Safely access a nested JSON member path (e.g. "style" -> "gap").
     Returns `Null if any intermediate value is not an object. *)
@@ -631,12 +595,12 @@ and handle_eye_click path evt =
             List.init (Array.length kids) (fun i -> parent_prefix @ [i])
           | _ -> []
       in
-      let already_soloed = match !_layers_solo_state with
+      let already_soloed = match !Layers_panel_state.solo_state with
         | Some (sp, _) -> sp = path
         | None -> false
       in
       if already_soloed then begin
-        let saved = match !_layers_solo_state with
+        let saved = match !Layers_panel_state.solo_state with
           | Some (_, s) -> s
           | None -> []
         in
@@ -646,7 +610,7 @@ and handle_eye_click path evt =
           Document.replace_element acc sp (Element.set_visibility vis e)
         ) d saved in
         m#set_document new_doc;
-        _layers_solo_state := None
+        Layers_panel_state.solo_state := None
       end else begin
         let saved = List.filter_map (fun sp ->
           if sp = path then None
@@ -666,10 +630,10 @@ and handle_eye_click path evt =
             Document.replace_element acc sp (Element.set_visibility Element.Invisible e)
         ) d sibling_paths in
         m#set_document new_doc;
-        _layers_solo_state := Some (path, saved)
+        Layers_panel_state.solo_state := Some (path, saved)
       end
     end else begin
-      _layers_solo_state := None;
+      Layers_panel_state.solo_state := None;
       let e = Document.get_element d path in
       let new_vis = match Element.get_visibility e with
         | Element.Preview -> Element.Outline
@@ -687,7 +651,7 @@ and do_delete_panel_selection () =
   match !_get_model_ref () with
   | None -> ()
   | Some m ->
-    let paths = PathSet2.elements !_layers_panel_selection in
+    let paths = Layers_panel_state.PathSet.elements !Layers_panel_state.panel_selection in
     if paths = [] then ()
     else begin
       (* Guard against deleting the last layer at dispatch-boundary level —
@@ -700,7 +664,7 @@ and do_delete_panel_selection () =
         Panel_menu.dispatch_yaml_action
           ~panel_selection:paths
           ~on_selection_changed:(Some (fun _ ->
-            _layers_panel_selection := PathSet2.empty))
+            Layers_panel_state.panel_selection := Layers_panel_state.PathSet.empty))
           "delete_layer_selection" m
     end
 
@@ -709,7 +673,7 @@ and do_duplicate_panel_selection () =
   match !_get_model_ref () with
   | None -> ()
   | Some m ->
-    let paths = PathSet2.elements !_layers_panel_selection in
+    let paths = Layers_panel_state.PathSet.elements !Layers_panel_state.panel_selection in
     if paths = [] then ()
     else
       Panel_menu.dispatch_yaml_action
@@ -721,13 +685,13 @@ and do_flatten_artwork () =
   match !_get_model_ref () with
   | None -> ()
   | Some m ->
-    let paths = PathSet2.elements !_layers_panel_selection in
+    let paths = Layers_panel_state.PathSet.elements !Layers_panel_state.panel_selection in
     if paths = [] then ()
     else begin
       Panel_menu.dispatch_yaml_action
         ~panel_selection:paths
         ~on_selection_changed:(Some (fun _ ->
-          _layers_panel_selection := PathSet2.empty))
+          Layers_panel_state.panel_selection := Layers_panel_state.PathSet.empty))
         "flatten_artwork" m
     end
 
@@ -736,7 +700,7 @@ and do_collect_in_new_layer () =
   match !_get_model_ref () with
   | None -> ()
   | Some m ->
-    let paths = PathSet2.elements !_layers_panel_selection in
+    let paths = Layers_panel_state.PathSet.elements !Layers_panel_state.panel_selection in
     if paths = [] then ()
     else begin
       Panel_menu.dispatch_yaml_action
@@ -811,14 +775,14 @@ and render_layers_filter_dropdown ~packing el =
     ignore (btn#connect#clicked ~callback:(fun () ->
       let menu = GMenu.menu () in
       List.iter (fun (label, value) ->
-        let checked = not (StrSet.mem value !_layers_hidden_types) in
+        let checked = not (Layers_panel_state.StrSet.mem value !Layers_panel_state.hidden_types) in
         let item = GMenu.check_menu_item ~label ~packing:menu#append () in
         item#set_active checked;
         ignore (item#connect#toggled ~callback:(fun () ->
-          if StrSet.mem value !_layers_hidden_types
-          then _layers_hidden_types := StrSet.remove value !_layers_hidden_types
-          else _layers_hidden_types := StrSet.add value !_layers_hidden_types;
-          !_rerender_layers ()))
+          if Layers_panel_state.StrSet.mem value !Layers_panel_state.hidden_types
+          then Layers_panel_state.hidden_types := Layers_panel_state.StrSet.remove value !Layers_panel_state.hidden_types
+          else Layers_panel_state.hidden_types := Layers_panel_state.StrSet.add value !Layers_panel_state.hidden_types;
+          !Layers_panel_state.rerender ()))
       ) items;
       menu#misc#show_all ();
       menu#popup ~button:1 ~time:(Int32.of_int 0)))
@@ -867,18 +831,18 @@ and render_tree_view ~packing ~ctx:_ _el =
     let meta = List.mem `META modifiers || List.mem `CONTROL modifiers in
     if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
       do_delete_panel_selection ();
-      !_rerender_layers ();
+      !Layers_panel_state.rerender ();
       true
     end else if key = GdkKeysyms._a && meta then begin
       (match get_model () with
        | None -> ()
        | Some m ->
          let d = m#document in
-         let all = ref PathSet2.empty in
+         let all = ref Layers_panel_state.PathSet.empty in
          let rec collect elements prefix =
            Array.iteri (fun i e ->
              let p = prefix @ [i] in
-             all := PathSet2.add p !all;
+             all := Layers_panel_state.PathSet.add p !all;
              match e with
              | Element.Group _ | Element.Layer _ ->
                collect (Document.children_of e) p
@@ -886,17 +850,17 @@ and render_tree_view ~packing ~ctx:_ _el =
            ) elements
          in
          collect d.Document.layers [];
-         _layers_panel_selection := !all);
-      !_rerender_layers ();
+         Layers_panel_state.panel_selection := !all);
+      !Layers_panel_state.rerender ();
       true
     end else if key = GdkKeysyms._Escape then begin
-      if !_layers_renaming <> None then begin
-        _layers_renaming := None;
-        !_rerender_layers ();
+      if !Layers_panel_state.renaming <> None then begin
+        Layers_panel_state.renaming := None;
+        !Layers_panel_state.rerender ();
         true
       end else if Layers_panel_state.get_isolation_stack () <> [] then begin
         Layers_panel_state.pop_isolation_level ();
-        !_rerender_layers ();
+        !Layers_panel_state.rerender ();
         true
       end else false
     end else false));
@@ -915,7 +879,7 @@ and render_tree_view ~packing ~ctx:_ _el =
            | k, h :: t -> h :: take (k - 1) t
          in
          let ancestor = take i p in
-         _layers_collapsed := PathSet2.remove ancestor !_layers_collapsed
+         Layers_panel_state.collapsed := Layers_panel_state.PathSet.remove ancestor !Layers_panel_state.collapsed
        done
      ) selected);
   (* Render breadcrumb bar if in isolation mode *)
@@ -927,7 +891,7 @@ and render_tree_view ~packing ~ctx:_ _el =
     ignore (GMisc.label ~text:"\xe2\x8c\x82" ~packing:home_eb#add ());
     ignore (home_eb#event#connect#button_press ~callback:(fun _ ->
       Layers_panel_state.clear_isolation_stack ();
-      !_rerender_layers ();
+      !Layers_panel_state.rerender ();
       true));
     let stack = Layers_panel_state.get_isolation_stack () in
     List.iteri (fun idx p ->
@@ -949,14 +913,14 @@ and render_tree_view ~packing ~ctx:_ _el =
               | 0, _ | _, [] -> []
               | n, h :: t -> h :: take (n - 1) t
             in take target_idx (Layers_panel_state.get_isolation_stack ()));
-          !_rerender_layers ();
+          !Layers_panel_state.rerender ();
           true))
     ) stack
   end);
   (* Isolation logic is applied inline in the rendering loop. *)
   (* Helper: does element name contain the search query (case-insensitive) *)
   let matches_search name =
-    let q = String.lowercase_ascii !_layers_search_query in
+    let q = String.lowercase_ascii !Layers_panel_state.search_query in
     if q = "" then true
     else
       let n = String.lowercase_ascii name in
@@ -1019,13 +983,13 @@ and render_tree_view ~packing ~ctx:_ _el =
         in
         if not passes_iso then begin
           (* Still recurse, maybe a deeper descendant qualifies *)
-          (if is_container elem && not (PathSet2.mem path !_layers_collapsed) then
+          (if is_container elem && not (Layers_panel_state.PathSet.mem path !Layers_panel_state.collapsed) then
             let ch = Document.children_of elem in
             add_children ch (depth + 1) path layer_color)
         end else
         (* Apply search filter: skip if name doesn't match and no descendant does *)
         let passes_search =
-          let q = String.lowercase_ascii !_layers_search_query in
+          let q = String.lowercase_ascii !Layers_panel_state.search_query in
           if q = "" then true
           else
             let (name_here, _) = display_name elem in
@@ -1060,10 +1024,10 @@ and render_tree_view ~packing ~ctx:_ _el =
           | Element.Group _ -> "group" | Element.Layer _ -> "layer"
           | Element.Live _ -> "live"
         in
-        let passes_type = not (StrSet.mem type_v !_layers_hidden_types) in
+        let passes_type = not (Layers_panel_state.StrSet.mem type_v !Layers_panel_state.hidden_types) in
         if not (passes_search && passes_type) then begin
           (* Still recurse in case descendants pass *)
-          (if is_container elem && not (PathSet2.mem path !_layers_collapsed) then
+          (if is_container elem && not (Layers_panel_state.PathSet.mem path !Layers_panel_state.collapsed) then
             let ch = Document.children_of elem in
             add_children ch (depth + 1) path layer_color)
         end else
@@ -1077,9 +1041,9 @@ and render_tree_view ~packing ~ctx:_ _el =
         let (name, _is_named) = display_name elem in
         let vis = Element.get_visibility elem in
         let locked = Element.is_locked elem in
-        let is_panel_selected = PathSet2.mem path !_layers_panel_selection in
+        let is_panel_selected = Layers_panel_state.PathSet.mem path !Layers_panel_state.panel_selection in
         let is_drop_target =
-          match !_layers_drag_source, !_layers_drag_target with
+          match !Layers_panel_state.drag_source, !Layers_panel_state.drag_target with
           | Some src, Some tgt when src <> path && tgt = path -> true
           | _ -> false
         in
@@ -1100,9 +1064,9 @@ and render_tree_view ~packing ~ctx:_ _el =
           let button = GdkEvent.Button.button evt in
           if button = 3 then begin
             (* Right-click: show context menu *)
-            if not (PathSet2.mem row_path !_layers_panel_selection) then begin
-              _layers_panel_selection := PathSet2.singleton row_path;
-              !_rerender_layers ()
+            if not (Layers_panel_state.PathSet.mem row_path !Layers_panel_state.panel_selection) then begin
+              Layers_panel_state.panel_selection := Layers_panel_state.PathSet.singleton row_path;
+              !Layers_panel_state.rerender ()
             end;
             let menu = GMenu.menu () in
             let add_item ~label ?(sensitive=true) action =
@@ -1124,11 +1088,11 @@ and render_tree_view ~packing ~ctx:_ _el =
             if Layers_panel_state.get_isolation_stack () = [] then
               add_item ~label:"Enter Isolation Mode" ~sensitive:is_cont_path (fun () ->
                 Layers_panel_state.push_isolation_level row_path;
-                !_rerender_layers ())
+                !Layers_panel_state.rerender ())
             else
               add_item ~label:"Exit Isolation Mode" (fun () ->
                 Layers_panel_state.pop_isolation_level ();
-                !_rerender_layers ());
+                !Layers_panel_state.rerender ());
             ignore (GMenu.separator_item ~packing:menu#append ());
             add_item ~label:"Flatten Artwork" (fun () -> do_flatten_artwork ());
             add_item ~label:"Collect in New Layer" (fun () -> do_collect_in_new_layer ());
@@ -1139,42 +1103,42 @@ and render_tree_view ~packing ~ctx:_ _el =
             let modifiers = Gdk.Convert.modifier (GdkEvent.Button.state evt) in
             let meta = List.mem `META modifiers || List.mem `CONTROL modifiers in
             let shift = List.mem `SHIFT modifiers in
-            if shift && not (PathSet2.is_empty !_layers_panel_selection) then begin
+            if shift && not (Layers_panel_state.PathSet.is_empty !Layers_panel_state.panel_selection) then begin
               (* Range from last panel-selected to clicked, in visual order *)
-              let anchor = PathSet2.max_elt !_layers_panel_selection in
+              let anchor = Layers_panel_state.PathSet.max_elt !Layers_panel_state.panel_selection in
               let _ = anchor in
               (* For simplicity, just replace with range pairs [anchor; row_path] *)
-              _layers_panel_selection := PathSet2.add row_path (PathSet2.singleton anchor);
+              Layers_panel_state.panel_selection := Layers_panel_state.PathSet.add row_path (Layers_panel_state.PathSet.singleton anchor);
             end else if meta then begin
-              if PathSet2.mem row_path !_layers_panel_selection
-              then _layers_panel_selection := PathSet2.remove row_path !_layers_panel_selection
-              else _layers_panel_selection := PathSet2.add row_path !_layers_panel_selection
+              if Layers_panel_state.PathSet.mem row_path !Layers_panel_state.panel_selection
+              then Layers_panel_state.panel_selection := Layers_panel_state.PathSet.remove row_path !Layers_panel_state.panel_selection
+              else Layers_panel_state.panel_selection := Layers_panel_state.PathSet.add row_path !Layers_panel_state.panel_selection
             end else begin
-              _layers_panel_selection := PathSet2.singleton row_path
+              Layers_panel_state.panel_selection := Layers_panel_state.PathSet.singleton row_path
             end;
-            _layers_drag_source := Some row_path;
-            _layers_drag_target := None;
-            !_rerender_layers ();
+            Layers_panel_state.drag_source := Some row_path;
+            Layers_panel_state.drag_target := None;
+            !Layers_panel_state.rerender ();
             true
           end));
         ignore (row_eb#event#connect#enter_notify ~callback:(fun _ ->
-          (match !_layers_drag_source with
+          (match !Layers_panel_state.drag_source with
            | Some src when src <> row_path ->
-             _layers_drag_target := Some row_path;
-             !_rerender_layers ();
+             Layers_panel_state.drag_target := Some row_path;
+             !Layers_panel_state.rerender ();
              (* Auto-expand collapsed containers after 500ms hover during drag *)
              let is_cont = match elem with Element.Group _ | Element.Layer _ -> true | _ -> false in
-             if is_cont && PathSet2.mem row_path !_layers_collapsed then
+             if is_cont && Layers_panel_state.PathSet.mem row_path !Layers_panel_state.collapsed then
                ignore (GMain.Timeout.add ~ms:500 ~callback:(fun () ->
-                 (if !_layers_drag_source <> None && !_layers_drag_target = Some row_path then begin
-                    _layers_collapsed := PathSet2.remove row_path !_layers_collapsed;
-                    !_rerender_layers ()
+                 (if !Layers_panel_state.drag_source <> None && !Layers_panel_state.drag_target = Some row_path then begin
+                    Layers_panel_state.collapsed := Layers_panel_state.PathSet.remove row_path !Layers_panel_state.collapsed;
+                    !Layers_panel_state.rerender ()
                   end);
                  false))
            | _ -> ());
           false));
         ignore (row_eb#event#connect#button_release ~callback:(fun _ ->
-          (match !_layers_drag_source with
+          (match !Layers_panel_state.drag_source with
            | Some src when src <> row_path ->
              (match get_model () with
               | None -> ()
@@ -1225,9 +1189,9 @@ and render_tree_view ~packing ~ctx:_ _el =
                 m2#set_document (Document.insert_element_after d1 insert_path moved)
                 end)
            | _ -> ());
-          _layers_drag_source := None;
-          _layers_drag_target := None;
-          !_rerender_layers ();
+          Layers_panel_state.drag_source := None;
+          Layers_panel_state.drag_target := None;
+          !Layers_panel_state.rerender ();
           false));
         let hbox = GPack.hbox ~spacing:2 ~packing:row_eb#add () in
         if depth > 0 then begin
@@ -1240,7 +1204,7 @@ and render_tree_view ~packing ~ctx:_ _el =
         eye_eb#misc#set_size_request ~width:16 ();
         ignore (eye_eb#event#connect#button_press ~callback:(fun evt ->
           handle_eye_click path evt;
-          !_rerender_layers ();
+          !Layers_panel_state.rerender ();
           true));
         (* Lock button *)
         let lock_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
@@ -1259,7 +1223,7 @@ and render_tree_view ~packing ~ctx:_ _el =
              if is_cont_elem && was_unlocked then begin
                let children = Document.children_of e in
                let saved = Array.to_list (Array.map Element.is_locked children) in
-               _layers_saved_lock_states := PathMap2.add path saved !_layers_saved_lock_states
+               Layers_panel_state.saved_lock_states := Layers_panel_state.PathMap.add path saved !Layers_panel_state.saved_lock_states
              end;
              m2#snapshot;
              let new_e = Element.set_locked was_unlocked e in
@@ -1275,10 +1239,10 @@ and render_tree_view ~packing ~ctx:_ _el =
              end else d1 in
              (* When unlocking a container, restore direct children's saved states *)
              let d3 = if is_cont_elem && not was_unlocked then begin
-               match PathMap2.find_opt path !_layers_saved_lock_states with
+               match Layers_panel_state.PathMap.find_opt path !Layers_panel_state.saved_lock_states with
                | None -> d2
                | Some saved ->
-                 _layers_saved_lock_states := PathMap2.remove path !_layers_saved_lock_states;
+                 Layers_panel_state.saved_lock_states := Layers_panel_state.PathMap.remove path !Layers_panel_state.saved_lock_states;
                  List.fold_left (fun acc_doc (i, sl) ->
                    let child_path = path @ [i] in
                    let child = Document.get_element acc_doc child_path in
@@ -1288,7 +1252,7 @@ and render_tree_view ~packing ~ctx:_ _el =
              m2#set_document d3);
           true));
         (* Twirl or gap *)
-        let is_collapsed = PathSet2.mem path !_layers_collapsed in
+        let is_collapsed = Layers_panel_state.PathSet.mem path !Layers_panel_state.collapsed in
         if is_container then begin
           let twirl_text = if is_collapsed then "\xe2\x96\xb6" else "\xe2\x96\xbc" in
           let twirl_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
@@ -1296,10 +1260,10 @@ and render_tree_view ~packing ~ctx:_ _el =
           twirl_eb#misc#set_size_request ~width:16 ();
           let tp = path in
           ignore (twirl_eb#event#connect#button_press ~callback:(fun _ ->
-            if PathSet2.mem tp !_layers_collapsed
-            then _layers_collapsed := PathSet2.remove tp !_layers_collapsed
-            else _layers_collapsed := PathSet2.add tp !_layers_collapsed;
-            !_rerender_layers ();
+            if Layers_panel_state.PathSet.mem tp !Layers_panel_state.collapsed
+            then Layers_panel_state.collapsed := Layers_panel_state.PathSet.remove tp !Layers_panel_state.collapsed
+            else Layers_panel_state.collapsed := Layers_panel_state.PathSet.add tp !Layers_panel_state.collapsed;
+            !Layers_panel_state.rerender ();
             true))
         end else begin
           let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
@@ -1308,7 +1272,7 @@ and render_tree_view ~packing ~ctx:_ _el =
         (* Preview thumbnail — fitted SVG of the element *)
         make_element_thumbnail ~packing:(hbox#pack ~expand:false) elem 24;
         (* Name — inline GEntry when renaming, GMisc.label otherwise *)
-        (match !_layers_renaming with
+        (match !Layers_panel_state.renaming with
          | Some rp when rp = path ->
            let initial = match elem with
              | Element.Layer le -> le.name
@@ -1328,12 +1292,12 @@ and render_tree_view ~packing ~ctx:_ _el =
                    m2#snapshot;
                    m2#set_document (Document.replace_element d ep new_layer)
                  | _ -> ()));
-             _layers_renaming := None;
-             !_rerender_layers ()));
+             Layers_panel_state.renaming := None;
+             !Layers_panel_state.rerender ()));
            ignore (entry#event#connect#key_press ~callback:(fun key ->
              if GdkEvent.Key.keyval key = GdkKeysyms._Escape then begin
-               _layers_renaming := None;
-               !_rerender_layers ();
+               Layers_panel_state.renaming := None;
+               !Layers_panel_state.rerender ();
                true
              end else false))
          | _ ->
@@ -1343,8 +1307,8 @@ and render_tree_view ~packing ~ctx:_ _el =
            let is_layer_elem = is_layer elem in
            ignore (name_eb#event#connect#button_press ~callback:(fun ev ->
              if is_layer_elem && GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
-               _layers_renaming := Some np;
-               !_rerender_layers ();
+               Layers_panel_state.renaming := Some np;
+               !Layers_panel_state.rerender ();
                true
              end else false)));
         (* Select square *)
@@ -1379,9 +1343,9 @@ and render_tree_view ~packing ~ctx:_ _el =
       let (name, _is_named) = display_name elem in
       let vis = Element.get_visibility elem in
       let locked = Element.is_locked elem in
-      let is_panel_selected = PathSet2.mem path !_layers_panel_selection in
+      let is_panel_selected = Layers_panel_state.PathSet.mem path !Layers_panel_state.panel_selection in
       let is_drop_target =
-        match !_layers_drag_source, !_layers_drag_target with
+        match !Layers_panel_state.drag_source, !Layers_panel_state.drag_target with
         | Some src, Some tgt when src <> path && tgt = path -> true
         | _ -> false
       in
@@ -1392,28 +1356,28 @@ and render_tree_view ~packing ~ctx:_ _el =
         row_eb#misc#modify_bg [`NORMAL, `NAME "#3a7bd5"];
       let row_path = path in
       ignore (row_eb#event#connect#button_press ~callback:(fun _ ->
-        _layers_panel_selection := PathSet2.singleton row_path;
-        _layers_drag_source := Some row_path;
-        _layers_drag_target := None;
-        !_rerender_layers ();
+        Layers_panel_state.panel_selection := Layers_panel_state.PathSet.singleton row_path;
+        Layers_panel_state.drag_source := Some row_path;
+        Layers_panel_state.drag_target := None;
+        !Layers_panel_state.rerender ();
         true));
       ignore (row_eb#event#connect#enter_notify ~callback:(fun _ ->
-        (match !_layers_drag_source with
+        (match !Layers_panel_state.drag_source with
          | Some src when src <> row_path ->
-           _layers_drag_target := Some row_path;
-           !_rerender_layers ();
+           Layers_panel_state.drag_target := Some row_path;
+           !Layers_panel_state.rerender ();
            let is_cont = match elem with Element.Group _ | Element.Layer _ -> true | _ -> false in
-           if is_cont && PathSet2.mem row_path !_layers_collapsed then
+           if is_cont && Layers_panel_state.PathSet.mem row_path !Layers_panel_state.collapsed then
              ignore (GMain.Timeout.add ~ms:500 ~callback:(fun () ->
-               (if !_layers_drag_source <> None && !_layers_drag_target = Some row_path then begin
-                  _layers_collapsed := PathSet2.remove row_path !_layers_collapsed;
-                  !_rerender_layers ()
+               (if !Layers_panel_state.drag_source <> None && !Layers_panel_state.drag_target = Some row_path then begin
+                  Layers_panel_state.collapsed := Layers_panel_state.PathSet.remove row_path !Layers_panel_state.collapsed;
+                  !Layers_panel_state.rerender ()
                 end);
                false))
          | _ -> ());
         false));
       ignore (row_eb#event#connect#button_release ~callback:(fun _ ->
-        (match !_layers_drag_source with
+        (match !Layers_panel_state.drag_source with
          | Some src when src <> row_path ->
            (match get_model () with
             | None -> ()
@@ -1460,9 +1424,9 @@ and render_tree_view ~packing ~ctx:_ _el =
               m2#set_document (Document.insert_element_after d1 insert_path moved)
               end)
          | _ -> ());
-        _layers_drag_source := None;
-        _layers_drag_target := None;
-        !_rerender_layers ();
+        Layers_panel_state.drag_source := None;
+        Layers_panel_state.drag_target := None;
+        !Layers_panel_state.rerender ();
         false));
       let hbox = GPack.hbox ~spacing:2 ~packing:row_eb#add () in
       (* Eye *)
@@ -1471,7 +1435,7 @@ and render_tree_view ~packing ~ctx:_ _el =
       eye_eb#misc#set_size_request ~width:16 ();
       ignore (eye_eb#event#connect#button_press ~callback:(fun evt ->
         handle_eye_click path evt;
-        !_rerender_layers ();
+        !Layers_panel_state.rerender ();
         true));
       (* Lock *)
       let lock_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
@@ -1489,7 +1453,7 @@ and render_tree_view ~packing ~ctx:_ _el =
            if is_cont_elem && was_unlocked then begin
              let children = Document.children_of e in
              let saved = Array.to_list (Array.map Element.is_locked children) in
-             _layers_saved_lock_states := PathMap2.add path saved !_layers_saved_lock_states
+             Layers_panel_state.saved_lock_states := Layers_panel_state.PathMap.add path saved !Layers_panel_state.saved_lock_states
            end;
            m2#snapshot;
            let new_e = Element.set_locked was_unlocked e in
@@ -1503,10 +1467,10 @@ and render_tree_view ~packing ~ctx:_ _el =
              ) d1 (Array.init (Array.length children) (fun i -> i))
            end else d1 in
            let d3 = if is_cont_elem && not was_unlocked then begin
-             match PathMap2.find_opt path !_layers_saved_lock_states with
+             match Layers_panel_state.PathMap.find_opt path !Layers_panel_state.saved_lock_states with
              | None -> d2
              | Some saved ->
-               _layers_saved_lock_states := PathMap2.remove path !_layers_saved_lock_states;
+               Layers_panel_state.saved_lock_states := Layers_panel_state.PathMap.remove path !Layers_panel_state.saved_lock_states;
                List.fold_left (fun acc_doc (i, sl) ->
                  let child_path = path @ [i] in
                  let child = Document.get_element acc_doc child_path in
@@ -1516,7 +1480,7 @@ and render_tree_view ~packing ~ctx:_ _el =
            m2#set_document d3);
         true));
       (* Twirl or gap *)
-      let is_collapsed = PathSet2.mem path !_layers_collapsed in
+      let is_collapsed = Layers_panel_state.PathSet.mem path !Layers_panel_state.collapsed in
       if is_container then begin
         let twirl_text = if is_collapsed then "\xe2\x96\xb6" else "\xe2\x96\xbc" in
         let twirl_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
@@ -1524,10 +1488,10 @@ and render_tree_view ~packing ~ctx:_ _el =
         twirl_eb#misc#set_size_request ~width:16 ();
         let tp = path in
         ignore (twirl_eb#event#connect#button_press ~callback:(fun _ ->
-          if PathSet2.mem tp !_layers_collapsed
-          then _layers_collapsed := PathSet2.remove tp !_layers_collapsed
-          else _layers_collapsed := PathSet2.add tp !_layers_collapsed;
-          !_rerender_layers ();
+          if Layers_panel_state.PathSet.mem tp !Layers_panel_state.collapsed
+          then Layers_panel_state.collapsed := Layers_panel_state.PathSet.remove tp !Layers_panel_state.collapsed
+          else Layers_panel_state.collapsed := Layers_panel_state.PathSet.add tp !Layers_panel_state.collapsed;
+          !Layers_panel_state.rerender ();
           true))
       end else begin
         let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
@@ -1536,7 +1500,7 @@ and render_tree_view ~packing ~ctx:_ _el =
       (* Preview thumbnail — fitted SVG of the element *)
       make_element_thumbnail ~packing:(hbox#pack ~expand:false) elem 24;
       (* Name — inline GEntry when renaming, GMisc.label otherwise *)
-      (match !_layers_renaming with
+      (match !Layers_panel_state.renaming with
        | Some rp when rp = path ->
          let initial = match elem with
            | Element.Layer le -> le.name
@@ -1556,12 +1520,12 @@ and render_tree_view ~packing ~ctx:_ _el =
                  m2#snapshot;
                  m2#set_document (Document.replace_element d ep new_layer)
                | _ -> ()));
-           _layers_renaming := None;
-           !_rerender_layers ()));
+           Layers_panel_state.renaming := None;
+           !Layers_panel_state.rerender ()));
          ignore (entry#event#connect#key_press ~callback:(fun key ->
            if GdkEvent.Key.keyval key = GdkKeysyms._Escape then begin
-             _layers_renaming := None;
-             !_rerender_layers ();
+             Layers_panel_state.renaming := None;
+             !Layers_panel_state.rerender ();
              true
            end else false))
        | _ ->
@@ -1571,8 +1535,8 @@ and render_tree_view ~packing ~ctx:_ _el =
          let is_layer_elem = is_layer elem in
          ignore (name_eb#event#connect#button_press ~callback:(fun ev ->
            if is_layer_elem && GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
-             _layers_renaming := Some np;
-             !_rerender_layers ();
+             Layers_panel_state.renaming := Some np;
+             !Layers_panel_state.rerender ();
              true
            end else false)));
       (* Select square *)
@@ -1646,7 +1610,7 @@ and render_placeholder ~packing el =
           if Controller.selection_has_mask doc then begin
             let ctrl = new Controller.controller ~model:m () in
             ctrl#toggle_mask_disabled_on_selection;
-            !_rerender_layers ()
+            !Layers_panel_state.rerender ()
           end
         end else if is_mask_preview && alt then begin
           (* Alt-click: toggle mask isolation — the canvas hides
@@ -1660,7 +1624,7 @@ and render_placeholder ~packing el =
                match Document.PathMap.min_binding_opt doc.Document.selection with
                | Some (path, _) -> m#set_mask_isolation_path (Some path)
                | None -> ());
-          !_rerender_layers ()
+          !Layers_panel_state.rerender ()
         end else if is_mask_preview then begin
           let doc = m#document in
           if Controller.selection_has_mask doc then begin
@@ -1668,11 +1632,11 @@ and render_placeholder ~packing el =
               | Some (path, _) -> path
               | None -> [] in
             m#set_editing_target (Model.Mask first_path);
-            !_rerender_layers ()
+            !Layers_panel_state.rerender ()
           end
         end else begin
           m#set_editing_target Model.Content;
-          !_rerender_layers ()
+          !Layers_panel_state.rerender ()
         end;
         true))
   end else begin
