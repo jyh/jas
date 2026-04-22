@@ -335,6 +335,126 @@ public enum ArrowAlign: Equatable, Hashable {
     case centerAtEnd
 }
 
+/// Gradient type. See transcripts/GRADIENT.md §Gradient types.
+public enum GradientType: String, Codable, Equatable, Hashable {
+    case linear
+    case radial
+    case freeform
+}
+
+/// Gradient interpolation / topology method. classic / smooth apply to
+/// linear/radial; points / lines apply to freeform.
+public enum GradientMethod: String, Codable, Equatable, Hashable {
+    case classic
+    case smooth
+    case points
+    case lines
+}
+
+/// Stroke sub-mode — how a gradient on a stroke maps onto the path.
+public enum StrokeSubMode: String, Codable, Equatable, Hashable {
+    case within
+    case along
+    case across
+}
+
+/// A single color stop inside a linear/radial gradient.
+///
+/// `color` is stored as a hex string ("#rrggbb") for wire-format
+/// compatibility with the other apps. Codable handles this directly
+/// since String is Codable.
+public struct GradientStop: Codable, Equatable, Hashable {
+    public let color: String
+    /// Opacity 0–100 (percentage).
+    public let opacity: Double
+    /// Location 0–100 (percentage along the gradient strip).
+    public let location: Double
+    /// Midpoint between this stop and the next, stored as a
+    /// percentage-between value (0–100, where 50 = halfway).
+    /// Defaults to 50 when absent on parse.
+    public let midpointToNext: Double
+
+    public init(color: String, opacity: Double = 100, location: Double, midpointToNext: Double = 50) {
+        self.color = color
+        self.opacity = opacity
+        self.location = location
+        self.midpointToNext = midpointToNext
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case color
+        case opacity
+        case location
+        case midpointToNext = "midpoint_to_next"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        color = try c.decode(String.self, forKey: .color)
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 100
+        location = try c.decode(Double.self, forKey: .location)
+        midpointToNext = try c.decodeIfPresent(Double.self, forKey: .midpointToNext) ?? 50
+    }
+}
+
+/// A single node of a freeform gradient.
+public struct GradientNode: Codable, Equatable, Hashable {
+    public let x: Double
+    public let y: Double
+    public let color: String
+    public let opacity: Double
+    public let spread: Double
+
+    public init(x: Double, y: Double, color: String, opacity: Double = 100, spread: Double = 25) {
+        self.x = x; self.y = y; self.color = color
+        self.opacity = opacity; self.spread = spread
+    }
+}
+
+/// A gradient value usable as a fill or stroke. See GRADIENT.md §Document model.
+public struct Gradient: Codable, Equatable, Hashable {
+    public let type: GradientType
+    public let angle: Double
+    public let aspectRatio: Double
+    public let method: GradientMethod
+    public let dither: Bool
+    public let strokeSubMode: StrokeSubMode
+    public let stops: [GradientStop]
+    public let nodes: [GradientNode]
+
+    public init(type: GradientType = .linear, angle: Double = 0, aspectRatio: Double = 100,
+                method: GradientMethod = .classic, dither: Bool = false,
+                strokeSubMode: StrokeSubMode = .within,
+                stops: [GradientStop] = [], nodes: [GradientNode] = []) {
+        self.type = type; self.angle = angle; self.aspectRatio = aspectRatio
+        self.method = method; self.dither = dither; self.strokeSubMode = strokeSubMode
+        self.stops = stops; self.nodes = nodes
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case angle
+        case aspectRatio = "aspect_ratio"
+        case method
+        case dither
+        case strokeSubMode = "stroke_sub_mode"
+        case stops
+        case nodes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decodeIfPresent(GradientType.self, forKey: .type) ?? .linear
+        angle = try c.decodeIfPresent(Double.self, forKey: .angle) ?? 0
+        aspectRatio = try c.decodeIfPresent(Double.self, forKey: .aspectRatio) ?? 100
+        method = try c.decodeIfPresent(GradientMethod.self, forKey: .method) ?? .classic
+        dither = try c.decodeIfPresent(Bool.self, forKey: .dither) ?? false
+        strokeSubMode = try c.decodeIfPresent(StrokeSubMode.self, forKey: .strokeSubMode) ?? .within
+        stops = try c.decodeIfPresent([GradientStop].self, forKey: .stops) ?? []
+        nodes = try c.decodeIfPresent([GradientNode].self, forKey: .nodes) ?? []
+    }
+}
+
 /// SVG fill presentation attribute.
 public struct Fill: Equatable, Hashable {
     public let color: Color
