@@ -212,11 +212,68 @@ def _qt_composition_mode(m: BlendMode) -> QPainter.CompositionMode:
     }[m]
 
 
-def _apply_fill(painter: QPainter, fill: Fill | None) -> None:
+def _apply_fill(painter: QPainter, fill: Fill | None,
+                fill_gradient=None, bbox: tuple[float, float, float, float] | None = None) -> None:
+    """Set the brush on ``painter`` to either a solid color (from
+    ``fill.color``) or a QGradient built from ``fill_gradient`` over
+    ``bbox``. When ``fill_gradient`` is None or unrenderable
+    (freeform / under 2 stops), falls through to the solid path.
+    """
+    if fill_gradient is not None and bbox is not None:
+        g = _make_qgradient(fill_gradient, bbox)
+        if g is not None:
+            painter.setBrush(QBrush(g))
+            return
     if fill is not None:
         painter.setBrush(QBrush(_qcolor(fill.color)))
     else:
         painter.setBrush(QBrush())
+
+
+def _poly_bbox(points) -> tuple[float, float, float, float]:
+    if not points:
+        return (0.0, 0.0, 0.0, 0.0)
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    x_min, y_min = min(xs), min(ys)
+    return (x_min, y_min, max(xs) - x_min, max(ys) - y_min)
+
+
+def _make_qgradient(g, bbox: tuple[float, float, float, float]):
+    """Build a QLinearGradient or QRadialGradient from a Gradient value.
+    Returns None for freeform or under-2-stop gradients (Phase 6 scope
+    is linear / radial only)."""
+    from PySide6.QtGui import QLinearGradient, QRadialGradient
+    from math import cos, pi, sin, sqrt
+    if g is None or not g.stops or len(g.stops) < 2:
+        return None
+    type_name = g.type.value if hasattr(g.type, "value") else g.type
+    bx, by, bw, bh = bbox
+    if type_name == "freeform":
+        return None
+    if type_name == "radial":
+        cx, cy = bx + bw / 2, by + bh / 2
+        r = max(bw, bh) / 2 * (g.aspect_ratio / 100)
+        grad = QRadialGradient(cx, cy, r)
+    else:
+        cx, cy = bx + bw / 2, by + bh / 2
+        rad = g.angle * pi / 180
+        half_diag = sqrt(bw * bw + bh * bh) / 2
+        dx = cos(rad) * half_diag
+        dy = -sin(rad) * half_diag
+        grad = QLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy)
+    for stop in g.stops:
+        color_hex = stop.color.lstrip("#")
+        if len(color_hex) == 6:
+            r = int(color_hex[0:2], 16)
+            gg = int(color_hex[2:4], 16)
+            b = int(color_hex[4:6], 16)
+            alpha = int(stop.opacity / 100 * 255)
+            c = QColor(r, gg, b, alpha)
+        else:
+            c = QColor(0, 0, 0)
+        grad.setColorAt(stop.location / 100, c)
+    return grad
 
 
 _CAP_MAP : dict[LineCap, Qt.PenCapStyle] = {
@@ -886,7 +943,7 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), (x, y, w, h))
                 _apply_stroke(painter, stroke)
             if rx > 0 or ry > 0:
                 painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
@@ -897,7 +954,8 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
+                            (cx - r, cy - r, r * 2, r * 2))
                 _apply_stroke(painter, stroke)
             painter.drawEllipse(QPointF(cx, cy), r, r)
 
@@ -905,7 +963,8 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
+                            (cx - rx, cy - ry, rx * 2, ry * 2))
                 _apply_stroke(painter, stroke)
             painter.drawEllipse(QPointF(cx, cy), rx, ry)
 
@@ -913,7 +972,8 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
+                            _poly_bbox(points))
                 _apply_stroke(painter, stroke)
             if points:
                 qpoints = [QPointF(x, y) for x, y in points]
@@ -923,7 +983,8 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
             else:
-                _apply_fill(painter, fill)
+                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None),
+                            _poly_bbox(points))
                 _apply_stroke(painter, stroke)
             if points:
                 qpoints = [QPointF(x, y) for x, y in points]
@@ -956,8 +1017,9 @@ def _draw_element_body(painter: QPainter, elem: Element,
                                               wp, _qcolor(stroke.color),
                                               stroke.linecap)
                 else:
-                    # Normal fill+stroke
-                    _apply_fill(painter, fill)
+                    # Normal fill+stroke (gradient-aware).
+                    b = elem.bounds()
+                    _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), b)
                     stroke_opacity, stroke_align = _apply_stroke(painter, stroke)
                     if stroke_opacity < 1.0:
                         painter.setOpacity(painter.opacity() * stroke_opacity)
