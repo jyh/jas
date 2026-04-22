@@ -521,7 +521,87 @@ private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
     }
 }
 
+/// Return the CGBlendMode that applies a [Mask] to an element's
+/// pixels inside a transparency layer, or ``nil`` when the mask
+/// configuration isn't yet supported by the renderer. Track C
+/// phase 1 supports ``clip: true`` (both invert values);
+/// ``clip: false`` (element visible outside the mask shape) needs a
+/// two-pass composite and lands in a later phase. ``disabled: true``
+/// returns ``nil`` so the element renders normally per OPACITY.md
+/// §States.
+internal func maskCompositeBlendMode(_ mask: Mask) -> CGBlendMode? {
+    if mask.disabled { return nil }
+    if !mask.clip { return nil }
+    return mask.invert ? .destinationOut : .destinationIn
+}
+
+/// Opacity fetched from any Element case. (The Geometry module
+/// already exposes ``blendMode`` / ``mask``; a renderer-local
+/// ``elementOpacity`` keeps this ad-hoc without growing the
+/// cross-app API surface — only the mask composite path needs it.)
+private func elementOpacity(_ e: Element) -> Double {
+    switch e {
+    case .line(let v): return v.opacity
+    case .rect(let v): return v.opacity
+    case .circle(let v): return v.opacity
+    case .ellipse(let v): return v.opacity
+    case .polyline(let v): return v.opacity
+    case .polygon(let v): return v.opacity
+    case .path(let v): return v.opacity
+    case .text(let v): return v.opacity
+    case .textPath(let v): return v.opacity
+    case .group(let v): return v.opacity
+    case .layer(let v): return v.opacity
+    case .live(let v): return v.opacity
+    }
+}
+
+/// Render an element's opacity mask via a CoreGraphics transparency
+/// layer. The element body is drawn on a transparent layer; the
+/// mask subtree is then composited on top with
+/// ``destinationIn`` / ``destinationOut`` so only the element
+/// pixels that survive the mask remain. The layer is then merged
+/// back into the parent context with the element's own alpha and
+/// blend mode applied once at the composite-back step. OPACITY.md
+/// §Rendering, phase 1.
+private func drawElementWithMask(
+    _ ctx: CGContext,
+    _ elem: Element,
+    _ mask: Mask,
+    blendMode: CGBlendMode,
+    ancestorVis: Visibility
+) {
+    ctx.saveGState()
+    // Alpha + blend apply at layer-composite time.
+    ctx.setAlpha(CGFloat(elementOpacity(elem)))
+    ctx.setBlendMode(cgBlendMode(elem.blendMode))
+    ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+    // Inside the layer start from an identity compositing state so
+    // the element body / mask subtree don't double-apply the
+    // outer alpha / blend.
+    ctx.setAlpha(1.0)
+    ctx.setBlendMode(.normal)
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis)
+    ctx.setBlendMode(blendMode)
+    drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+    ctx.endTransparencyLayer()
+    ctx.restoreGState()
+}
+
 private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
+    // Opacity mask: when an element carries an active supported
+    // mask, redirect rendering through a transparency-layer
+    // composite. ``disabled`` / ``clip: false`` / ``linked: false``
+    // all fall through to the plain path for now. OPACITY.md
+    // §Rendering.
+    if let mask = elem.mask, let mode = maskCompositeBlendMode(mask) {
+        drawElementWithMask(ctx, elem, mask, blendMode: mode, ancestorVis: ancestorVis)
+        return
+    }
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis)
+}
+
+private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
     let effective = min(ancestorVis, elem.visibility)
     if effective == .invisible { return }
     let outline = effective == .outline
