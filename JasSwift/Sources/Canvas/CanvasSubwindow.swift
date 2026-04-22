@@ -1923,6 +1923,21 @@ class CanvasNSView: NSView {
                 model.snapshot()
                 model.document = model.document.deleteSelection()
             }
+        case "\u{1B}":  // Escape
+            // OPACITY.md §Preview interactions: Escape exits
+            // mask-isolation first (if active); otherwise exits
+            // mask-editing mode back to content-mode.
+            if let model = controller?.model {
+                if model.maskIsolationPath != nil {
+                    model.maskIsolationPath = nil
+                } else if case .mask = model.editingTarget {
+                    model.editingTarget = .content
+                } else {
+                    super.keyDown(with: event)
+                }
+            } else {
+                super.keyDown(with: event)
+            }
         default:
             switch chars {
             case "E": onToolChange?(.pathEraser)

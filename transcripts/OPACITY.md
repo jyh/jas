@@ -264,8 +264,8 @@ Additional shortcuts on `MASK_PREVIEW`:
 | Drag from `OPACITY_PREVIEW` to this cell | Replace the mask contents with a copy of the element's artwork |
 
 Escape returns to content-editing mode and exits mask-isolation if active.
-(Keyboard Escape is still pending; currently isolation is exited by
-Alt-clicking MASK_PREVIEW again.)
+Priority when both are active: Escape exits isolation first; a second Escape
+then leaves mask-editing mode.
 
 ## Deferred additions
 
