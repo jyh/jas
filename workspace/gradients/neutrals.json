@@ -1,0 +1,55 @@
+{
+  "name": "Neutrals",
+  "description": "Black-and-white and grayscale gradients",
+  "gradients": [
+    {
+      "name": "Black to White",
+      "type": "linear",
+      "angle": 0,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#000000", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#ffffff", "opacity": 100, "location": 100 }
+      ]
+    },
+    {
+      "name": "White to Black",
+      "type": "linear",
+      "angle": 0,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#ffffff", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#000000", "opacity": 100, "location": 100 }
+      ]
+    },
+    {
+      "name": "Soft Gray Wash",
+      "type": "linear",
+      "angle": 0,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#cccccc", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#888888", "opacity": 100, "location": 50,  "midpoint_to_next": 50 },
+        { "color": "#cccccc", "opacity": 100, "location": 100 }
+      ]
+    },
+    {
+      "name": "Black Fade",
+      "type": "linear",
+      "angle": 0,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#000000", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#000000", "opacity": 0,   "location": 100 }
+      ]
+    }
+  ]
+}

@@ -106,10 +106,12 @@ state:
       with selected_stop_index.
   active_library_id:
     type: string
-    default: ""
+    default: "neutrals"
     description: >
-      The currently-selected library id (filename stem). Empty until
-      Phase 3 wires library loading.
+      The currently-selected library id (filename stem). Defaults to
+      one of the bundled seed libraries so the tile strip is non-empty
+      when the panel opens. Phase 9 wires the dynamic list of all
+      discovered libraries.
   thumbnail_size:
     type: enum
     values: [small, medium, large]
@@ -169,17 +171,19 @@ content:
       children:
         - { type: text, content: "Presets:", col: 2 }
         - id: grad_library_dropdown
-          type: gradient_tile  # placeholder until DOCUMENT_LIBRARY_DROPDOWN
-                               # has its own native widget; Phase 3 swaps in
-                               # a real `select` over loaded libraries.
+          type: select
           col: 8
-          summary: "Document Library"
+          summary: "Active gradient library"
           description: >
-            Single-select pulldown. Phase 3 replaces this with a real
-            `select` populated from workspace/gradients/*.json plus the
-            per-document Document Library.
-          bind: { gradient: "panel.stops" }
-          size: small
+            Single-select. Phase 3 ships three seed libraries; Phase 9
+            wires a dynamic list discovered from
+            workspace/gradients/*.json plus the per-document Document
+            Library.
+          bind: { value: "panel.active_library_id" }
+          options:
+            - { value: neutrals,      label: "Neutrals" }
+            - { value: spectrums,     label: "Spectrums" }
+            - { value: simple_radial, label: "Simple Radial" }
         - id: grad_size_dropdown
           type: select
           col: 2
@@ -194,16 +198,19 @@ content:
             - { value: large_list,    label: "Large List View" }
 
     # ── Row 2: Tile strip ──
-    # Phase 3 wires a foreach over the loaded library; for Phase 2 a
-    # single placeholder tile renders the working gradient so the
-    # widget is exercised end-to-end.
-    - type: row
+    # foreach over the active library's gradients. Tile size is
+    # bound to panel.thumbnail_size; Phase 3 ships small/medium/large.
+    - type: container
       id: grad_tiles_row
-      children:
-        - id: grad_tile_placeholder
-          type: gradient_tile
-          bind: { gradient: "panel.stops" }
-          size: large
+      layout: wrap
+      style: { gap: 2 }
+      foreach:
+        source: "data.gradient_libraries[panel.active_library_id].gradients"
+        as: g
+      do:
+        type: gradient_tile
+        bind: { gradient: "g" }
+        size: "{{panel.thumbnail_size}}"
 
     # ── Row 3: Separator ──
     - { type: separator }

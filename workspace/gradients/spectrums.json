@@ -1,0 +1,63 @@
+{
+  "name": "Spectrums",
+  "description": "Rainbow and spectrum gradients spanning the visible color range",
+  "gradients": [
+    {
+      "name": "Rainbow",
+      "type": "linear",
+      "angle": 0,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#ff0000", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#ffff00", "opacity": 100, "location": 17,  "midpoint_to_next": 50 },
+        { "color": "#00ff00", "opacity": 100, "location": 33,  "midpoint_to_next": 50 },
+        { "color": "#00ffff", "opacity": 100, "location": 50,  "midpoint_to_next": 50 },
+        { "color": "#0000ff", "opacity": 100, "location": 67,  "midpoint_to_next": 50 },
+        { "color": "#ff00ff", "opacity": 100, "location": 83,  "midpoint_to_next": 50 },
+        { "color": "#ff0000", "opacity": 100, "location": 100 }
+      ]
+    },
+    {
+      "name": "Sunset",
+      "type": "linear",
+      "angle": 90,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#1a0033", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#cc3366", "opacity": 100, "location": 40,  "midpoint_to_next": 50 },
+        { "color": "#ff9933", "opacity": 100, "location": 70,  "midpoint_to_next": 50 },
+        { "color": "#ffff66", "opacity": 100, "location": 100 }
+      ]
+    },
+    {
+      "name": "Cool Sweep",
+      "type": "linear",
+      "angle": 0,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#003366", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#3399cc", "opacity": 100, "location": 50,  "midpoint_to_next": 50 },
+        { "color": "#99ffcc", "opacity": 100, "location": 100 }
+      ]
+    },
+    {
+      "name": "Warm Sweep",
+      "type": "linear",
+      "angle": 0,
+      "aspect_ratio": 100,
+      "method": "classic",
+      "dither": false,
+      "stops": [
+        { "color": "#660000", "opacity": 100, "location": 0,   "midpoint_to_next": 50 },
+        { "color": "#cc6600", "opacity": 100, "location": 50,  "midpoint_to_next": 50 },
+        { "color": "#ffcc00", "opacity": 100, "location": 100 }
+      ]
+    }
+  ]
+}

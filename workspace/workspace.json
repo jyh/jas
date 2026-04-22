@@ -15568,8 +15568,8 @@
         },
         "active_library_id": {
           "type": "string",
-          "default": "",
-          "description": "The currently-selected library id (filename stem). Empty until Phase 3 wires library loading.\n"
+          "default": "neutrals",
+          "description": "The currently-selected library id (filename stem). Defaults to one of the bundled seed libraries so the tile strip is non-empty when the panel opens. Phase 9 wires the dynamic list of all discovered libraries.\n"
         },
         "thumbnail_size": {
           "type": "enum",
@@ -15646,14 +15646,27 @@
               },
               {
                 "id": "grad_library_dropdown",
-                "type": "gradient_tile",
+                "type": "select",
                 "col": 8,
-                "summary": "Document Library",
-                "description": "Single-select pulldown. Phase 3 replaces this with a real `select` populated from workspace/gradients/*.json plus the per-document Document Library.\n",
+                "summary": "Active gradient library",
+                "description": "Single-select. Phase 3 ships three seed libraries; Phase 9 wires a dynamic list discovered from workspace/gradients/*.json plus the per-document Document Library.\n",
                 "bind": {
-                  "gradient": "panel.stops"
+                  "value": "panel.active_library_id"
                 },
-                "size": "small"
+                "options": [
+                  {
+                    "value": "neutrals",
+                    "label": "Neutrals"
+                  },
+                  {
+                    "value": "spectrums",
+                    "label": "Spectrums"
+                  },
+                  {
+                    "value": "simple_radial",
+                    "label": "Simple Radial"
+                  }
+                ]
               },
               {
                 "id": "grad_size_dropdown",
@@ -15690,18 +15703,23 @@
             ]
           },
           {
-            "type": "row",
+            "type": "container",
             "id": "grad_tiles_row",
-            "children": [
-              {
-                "id": "grad_tile_placeholder",
-                "type": "gradient_tile",
-                "bind": {
-                  "gradient": "panel.stops"
-                },
-                "size": "large"
-              }
-            ]
+            "layout": "wrap",
+            "style": {
+              "gap": 2
+            },
+            "foreach": {
+              "source": "data.gradient_libraries[panel.active_library_id].gradients",
+              "as": "g"
+            },
+            "do": {
+              "type": "gradient_tile",
+              "bind": {
+                "gradient": "g"
+              },
+              "size": "{{panel.thumbnail_size}}"
+            }
           },
           {
             "type": "separator"
@@ -21919,6 +21937,350 @@
           "color_mode": "web_safe_rgb",
           "color_type": "process",
           "global": false
+        }
+      ]
+    }
+  },
+  "gradient_libraries": {
+    "neutrals": {
+      "name": "Neutrals",
+      "description": "Black-and-white and grayscale gradients",
+      "gradients": [
+        {
+          "name": "Black to White",
+          "type": "linear",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ffffff",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "White to Black",
+          "type": "linear",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#ffffff",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Soft Gray Wash",
+          "type": "linear",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#cccccc",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#888888",
+              "opacity": 100,
+              "location": 50,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#cccccc",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Black Fade",
+          "type": "linear",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 0,
+              "location": 100
+            }
+          ]
+        }
+      ]
+    },
+    "simple_radial": {
+      "name": "Simple Radial",
+      "description": "Plain two-stop radial gradients useful for highlights, glows, and soft backgrounds",
+      "gradients": [
+        {
+          "name": "White Glow",
+          "type": "radial",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#ffffff",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ffffff",
+              "opacity": 0,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Black Vignette",
+          "type": "radial",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 0,
+              "location": 0,
+              "midpoint_to_next": 70
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Sunlit Sphere",
+          "type": "radial",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#ffff99",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ff9900",
+              "opacity": 100,
+              "location": 60,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#cc3300",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Iris",
+          "type": "radial",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#003366",
+              "opacity": 100,
+              "location": 50,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#3399cc",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        }
+      ]
+    },
+    "spectrums": {
+      "name": "Spectrums",
+      "description": "Rainbow and spectrum gradients spanning the visible color range",
+      "gradients": [
+        {
+          "name": "Rainbow",
+          "type": "linear",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#ff0000",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ffff00",
+              "opacity": 100,
+              "location": 17,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#00ff00",
+              "opacity": 100,
+              "location": 33,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#00ffff",
+              "opacity": 100,
+              "location": 50,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#0000ff",
+              "opacity": 100,
+              "location": 67,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ff00ff",
+              "opacity": 100,
+              "location": 83,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ff0000",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Sunset",
+          "type": "linear",
+          "angle": 90,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#1a0033",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#cc3366",
+              "opacity": 100,
+              "location": 40,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ff9933",
+              "opacity": 100,
+              "location": 70,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ffff66",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Cool Sweep",
+          "type": "linear",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#003366",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#3399cc",
+              "opacity": 100,
+              "location": 50,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#99ffcc",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
+        },
+        {
+          "name": "Warm Sweep",
+          "type": "linear",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "method": "classic",
+          "dither": false,
+          "stops": [
+            {
+              "color": "#660000",
+              "opacity": 100,
+              "location": 0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#cc6600",
+              "opacity": 100,
+              "location": 50,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#ffcc00",
+              "opacity": 100,
+              "location": 100
+            }
+          ]
         }
       ]
     }
