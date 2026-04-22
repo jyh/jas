@@ -210,15 +210,13 @@ fn draw_element(
     ancestor_vis: Visibility,
     precision: f64,
 ) {
-    // Opacity mask: when an element carries an active, supported mask,
-    // redirect rendering through [draw_element_with_mask] which
-    // composites the element against the mask's subtree on an
-    // offscreen canvas. OPACITY.md §Rendering. Track C phase 1
-    // supports ``clip: true`` (both invert values); ``clip: false``
-    // and ``linked: false`` fall through to the plain path.
+    // Opacity mask: when an element carries an active mask,
+    // redirect rendering through the mask composite path. The plan
+    // encodes which of the three supported composite strategies to
+    // use. OPACITY.md §Rendering.
     if let Some(mask) = elem.common().mask.as_deref() {
-        if let Some(op) = mask_composite_op(mask) {
-            draw_element_with_mask(ctx, elem, mask, op, ancestor_vis, precision);
+        if let Some(plan) = mask_plan(mask) {
+            draw_element_with_mask(ctx, elem, mask, plan, ancestor_vis, precision);
             return;
         }
     }
@@ -229,25 +227,46 @@ fn draw_element(
 // Opacity-mask compositing (OPACITY.md §Rendering)
 // ---------------------------------------------------------------------------
 
-/// Return the Canvas2D ``globalCompositeOperation`` string that
-/// applies the given [Mask] to an element's offscreen image, or
-/// ``None`` when the mask is inactive or its configuration isn't
-/// yet supported by the renderer. The caller falls back to the
-/// no-mask path when this returns ``None``.
-///
-/// Track C phase 1 supports ``clip: true`` only — the standard
-/// "clip to mask shape" interpretation. ``clip: false`` (element
-/// stays visible outside the mask shape) requires a more complex
-/// two-pass composite and lands in a later phase. ``disabled`` is
-/// treated as no-mask per the spec.
-fn mask_composite_op(mask: &Mask) -> Option<&'static str> {
+/// How the mask subtree's rendered alpha is applied to the element.
+/// Selected by [mask_plan] from the mask's ``clip`` and ``invert``
+/// fields; consumed by [draw_element_with_mask].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MaskPlan {
+    /// Element clipped to the mask shape. ``destination-in`` applied
+    /// on the full offscreen canvas. `clip: true, invert: false`.
+    ClipIn,
+    /// Element clipped to the *inverse* of the mask shape.
+    /// ``destination-out`` on the full offscreen canvas. Covers
+    /// both `clip: true, invert: true` and — for alpha-based masks
+    /// — `clip: false, invert: true`, which collapse to the same
+    /// output (`E * (1 - M)` everywhere) since the mask's
+    /// "outside" region contributes zero alpha either way.
+    ClipOut,
+    /// `clip: false, invert: false`: element stays at full alpha
+    /// outside the mask subtree's bounding box; ``destination-in``
+    /// with the mask applies only inside the bbox via a clip path.
+    /// OPACITY.md §Rendering.
+    RevealOutsideBbox,
+}
+
+/// Pick a [MaskPlan] for the mask, or ``None`` when the mask is
+/// inactive (``disabled: true``). The plan encodes how
+/// [draw_element_with_mask] should composite the mask subtree
+/// against the element body.
+fn mask_plan(mask: &Mask) -> Option<MaskPlan> {
     if mask.disabled {
         return None;
     }
-    if !mask.clip {
-        return None;
-    }
-    Some(if mask.invert { "destination-out" } else { "destination-in" })
+    Some(match (mask.clip, mask.invert) {
+        (true, false) => MaskPlan::ClipIn,
+        (true, true) => MaskPlan::ClipOut,
+        // Alpha-based masks can't distinguish `clip: false,
+        // invert: true` from `clip: true, invert: true` (both yield
+        // `E * (1 - M)` when the mask's outside-region alpha is 0),
+        // so route them through the same composite.
+        (false, true) => MaskPlan::ClipOut,
+        (false, false) => MaskPlan::RevealOutsideBbox,
+    })
 }
 
 thread_local! {
@@ -308,16 +327,14 @@ fn get_mask_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderin
 /// Render ``elem`` on the main ``ctx`` with its opacity mask
 /// composited in. The element body is drawn to a scratch
 /// offscreen canvas at the same world transform as the main ctx;
-/// the mask's subtree is drawn on top of it with the mask's
-/// composite op (``destination-in`` / ``destination-out`` per
-/// ``mask_composite_op``), leaving only the element pixels that
-/// survive the mask. The scratch canvas is then copied onto the
-/// main ctx at device coordinates.
+/// the mask's subtree is then composited according to ``plan``.
+/// The scratch canvas is finally copied onto the main ctx at
+/// device coordinates.
 fn draw_element_with_mask(
     ctx: &CanvasRenderingContext2d,
     elem: &Element,
     mask: &Mask,
-    composite_op: &str,
+    plan: MaskPlan,
     ancestor_vis: Visibility,
     precision: f64,
 ) {
@@ -361,12 +378,43 @@ fn draw_element_with_mask(
     // we don't recurse into ourselves) onto the offscreen canvas.
     draw_element_body(&off_ctx, elem, ancestor_vis, precision);
 
-    // Pass 2: composite the mask subtree against the element's
-    // pixels using ``destination-in`` (or ``destination-out`` when
-    // the mask is inverted). The subtree is drawn in the element's
-    // own coord system since ``linked: true`` is the phase-1 default.
-    off_ctx.set_global_composite_operation(composite_op).ok();
-    draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+    // Pass 2: composite the mask subtree against the element body.
+    match plan {
+        MaskPlan::ClipIn => {
+            // `destination-in` over the whole canvas — the element
+            // is clipped to the mask shape.
+            off_ctx.set_global_composite_operation("destination-in").ok();
+            draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+        }
+        MaskPlan::ClipOut => {
+            // `destination-out` over the whole canvas — the mask
+            // shape erases the element.
+            off_ctx.set_global_composite_operation("destination-out").ok();
+            draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+        }
+        MaskPlan::RevealOutsideBbox => {
+            // `clip: false, invert: false`: the element keeps full
+            // alpha outside the mask subtree's bounding box, and is
+            // clipped to the mask shape only inside it. Implement
+            // by clipping the Canvas2D state to the bbox rectangle
+            // before applying `destination-in`; outside the clip,
+            // the element remains untouched.
+            let (bx, by, bw, bh) = mask.subtree.bounds();
+            if bw > 0.0 && bh > 0.0 {
+                off_ctx.save();
+                off_ctx.begin_path();
+                off_ctx.rect(bx, by, bw, bh);
+                off_ctx.clip();
+                off_ctx.set_global_composite_operation("destination-in").ok();
+                draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+                off_ctx.set_global_composite_operation("source-over").ok();
+                off_ctx.restore();
+            }
+            // Empty-bbox mask: no clip region; the element
+            // body passes through unmodified (mask has nothing to
+            // composite against).
+        }
+    }
 
     // Copy the composited offscreen pixels onto the main ctx at
     // device coordinates (0, 0). The main ctx's alpha / blend_mode
@@ -1590,7 +1638,7 @@ mod tests {
         assert_eq!(blend_mode_css(BlendMode::HardLight), "hard-light");
     }
 
-    // ── mask_composite_op (Track C phase 1) ────────────────
+    // ── mask_plan (Track C) ────────────────────────────────
 
     fn test_mask(clip: bool, invert: bool, disabled: bool) -> Mask {
         Mask {
@@ -1604,33 +1652,48 @@ mod tests {
     }
 
     #[test]
-    fn mask_composite_op_clip_not_inverted_is_destination_in() {
+    fn mask_plan_clip_not_inverted_is_clip_in() {
         let m = test_mask(true, false, false);
-        assert_eq!(mask_composite_op(&m), Some("destination-in"));
+        assert_eq!(mask_plan(&m), Some(MaskPlan::ClipIn));
     }
 
     #[test]
-    fn mask_composite_op_clip_inverted_is_destination_out() {
+    fn mask_plan_clip_inverted_is_clip_out() {
         let m = test_mask(true, true, false);
-        assert_eq!(mask_composite_op(&m), Some("destination-out"));
+        assert_eq!(mask_plan(&m), Some(MaskPlan::ClipOut));
     }
 
     #[test]
-    fn mask_composite_op_disabled_is_none() {
+    fn mask_plan_disabled_is_none() {
         // disabled overrides both clip and invert: falls back to no
-        // mask rendering per OPACITY.md § States.
-        assert_eq!(mask_composite_op(&test_mask(true, false, true)), None);
-        assert_eq!(mask_composite_op(&test_mask(true, true, true)), None);
-        assert_eq!(mask_composite_op(&test_mask(false, false, true)), None);
+        // mask rendering per OPACITY.md §States.
+        assert_eq!(mask_plan(&test_mask(true, false, true)), None);
+        assert_eq!(mask_plan(&test_mask(true, true, true)), None);
+        assert_eq!(mask_plan(&test_mask(false, false, true)), None);
+        assert_eq!(mask_plan(&test_mask(false, true, true)), None);
     }
 
     #[test]
-    fn mask_composite_op_no_clip_is_none_phase1() {
-        // clip=false (element visible outside the mask shape) needs a
-        // two-pass composite; not yet supported — falls back to no
-        // mask. Phase 2 of Track C will handle this.
-        assert_eq!(mask_composite_op(&test_mask(false, false, false)), None);
-        assert_eq!(mask_composite_op(&test_mask(false, true, false)), None);
+    fn mask_plan_no_clip_no_invert_is_reveal_outside_bbox() {
+        // Phase 2: clip=false, invert=false keeps the element
+        // visible outside the mask subtree's bounding box and
+        // clips to the mask inside it.
+        assert_eq!(
+            mask_plan(&test_mask(false, false, false)),
+            Some(MaskPlan::RevealOutsideBbox)
+        );
+    }
+
+    #[test]
+    fn mask_plan_no_clip_inverted_collapses_to_clip_out() {
+        // Alpha-based mask: `clip: false, invert: true` gives the
+        // same output as `clip: true, invert: true` because the
+        // mask's outside-region alpha is zero either way. Phase 2
+        // routes them through the same `ClipOut` path.
+        assert_eq!(
+            mask_plan(&test_mask(false, true, false)),
+            Some(MaskPlan::ClipOut)
+        );
     }
 
     #[test]
