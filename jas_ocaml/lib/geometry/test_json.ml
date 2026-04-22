@@ -677,7 +677,9 @@ let rec parse_element j =
            y2 = j |> member "y2" |> to_num;
            stroke = parse_stroke (j |> member "stroke");
            width_points = [];
-           opacity; transform; locked; visibility; blend_mode = Normal; mask = None }
+           opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+             stroke_gradient = None;
+           }
   | "rect" ->
     Rect { x = j |> member "x" |> to_num;
            y = j |> member "y" |> to_num;
@@ -687,14 +689,20 @@ let rec parse_element j =
            ry = j |> member "ry" |> to_num;
            fill = parse_fill (j |> member "fill");
            stroke = parse_stroke (j |> member "stroke");
-           opacity; transform; locked; visibility; blend_mode = Normal; mask = None }
+           opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+             fill_gradient = None;
+             stroke_gradient = None;
+           }
   | "circle" ->
     Circle { cx = j |> member "cx" |> to_num;
              cy = j |> member "cy" |> to_num;
              r = j |> member "r" |> to_num;
              fill = parse_fill (j |> member "fill");
              stroke = parse_stroke (j |> member "stroke");
-             opacity; transform; locked; visibility; blend_mode = Normal; mask = None }
+             opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+               fill_gradient = None;
+               stroke_gradient = None;
+             }
   | "ellipse" ->
     Ellipse { cx = j |> member "cx" |> to_num;
               cy = j |> member "cy" |> to_num;
@@ -702,23 +710,35 @@ let rec parse_element j =
               ry = j |> member "ry" |> to_num;
               fill = parse_fill (j |> member "fill");
               stroke = parse_stroke (j |> member "stroke");
-              opacity; transform; locked; visibility; blend_mode = Normal; mask = None }
+              opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+                fill_gradient = None;
+                stroke_gradient = None;
+              }
   | "polyline" ->
     Polyline { points = parse_points (j |> member "points");
                fill = parse_fill (j |> member "fill");
                stroke = parse_stroke (j |> member "stroke");
-               opacity; transform; locked; visibility; blend_mode = Normal; mask = None }
+               opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+                 fill_gradient = None;
+                 stroke_gradient = None;
+               }
   | "polygon" ->
     Polygon { points = parse_points (j |> member "points");
               fill = parse_fill (j |> member "fill");
               stroke = parse_stroke (j |> member "stroke");
-              opacity; transform; locked; visibility; blend_mode = Normal; mask = None }
+              opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+                fill_gradient = None;
+                stroke_gradient = None;
+              }
   | "path" ->
     Path { d = j |> member "d" |> to_list |> List.map parse_path_command;
            fill = parse_fill (j |> member "fill");
            stroke = parse_stroke (j |> member "stroke");
            width_points = [];
-           opacity; transform; locked; visibility; blend_mode = Normal; mask = None }
+           opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+             fill_gradient = None;
+             stroke_gradient = None;
+           }
   | "text" ->
     let content = parse_content_or_tspans j in
     Text { x = j |> member "x" |> to_num;

@@ -821,6 +821,8 @@ fn run_align(vectors: &[Value]) -> Vec<Value> {
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 

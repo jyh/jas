@@ -1249,6 +1249,177 @@ def _render_brand_logo(el, theme, state):
     )
 
 
+_GRADIENT_TILE_SIZES = {"small": 16, "medium": 32, "large": 64}
+
+
+def _eval_bind_expr(expr, state):
+    """Evaluate a bind expression against state; return None on failure."""
+    if not isinstance(expr, str) or not expr:
+        return None
+    try:
+        from workspace_interpreter.expr import evaluate as _eval
+        result = _eval(expr, state if isinstance(state, dict) else {})
+        return result.value if hasattr(result, "value") else result
+    except Exception:
+        return None
+
+
+def _gradient_css_background(gradient):
+    """Convert a gradient dict into a CSS background value.
+
+    Returns None if the gradient is not renderable as CSS (e.g. freeform).
+    """
+    if not isinstance(gradient, dict):
+        return None
+    stops = gradient.get("stops") or []
+    if not isinstance(stops, list) or len(stops) < 2:
+        return None
+    stop_strs = []
+    for s in stops:
+        if not isinstance(s, dict):
+            continue
+        color = s.get("color", "#000000")
+        loc = s.get("location", 0)
+        opacity = s.get("opacity", 100)
+        if opacity != 100:
+            # Emit a semitransparent CSS color. Hex → rgba.
+            if isinstance(color, str) and color.startswith("#") and len(color) == 7:
+                r = int(color[1:3], 16)
+                g = int(color[3:5], 16)
+                b = int(color[5:7], 16)
+                color = f"rgba({r},{g},{b},{opacity / 100.0:.3f})"
+        stop_strs.append(f"{color} {loc}%")
+    if len(stop_strs) < 2:
+        return None
+    gtype = gradient.get("type", "linear")
+    if gtype == "radial":
+        return f"radial-gradient(circle, {', '.join(stop_strs)})"
+    # Linear (default) — use angle; CSS `to right` equals 90deg per spec.
+    angle = gradient.get("angle", 0)
+    # Our angle convention: 0 = horizontal (to-right). CSS linear-gradient angle:
+    # 0deg is bottom-to-top, 90deg is left-to-right. So CSS angle = 90 - angle.
+    css_angle = (90 - angle) % 360
+    return f"linear-gradient({css_angle}deg, {', '.join(stop_strs)})"
+
+
+def _render_gradient_tile(el, theme, state):
+    """Render a gradient preview tile that applies its gradient on click.
+
+    Input: `bind.gradient` — expression resolving to a gradient dict.
+    Size keyword: `small` (16 px), `medium` (32 px), `large` (64 px; default).
+    """
+    bind = el.get("bind", {})
+    if isinstance(bind, str):
+        bind = {"gradient": bind}
+    gradient_expr = bind.get("gradient", "")
+    size_key = el.get("size", "large")
+    sz = _GRADIENT_TILE_SIZES.get(size_key, _GRADIENT_TILE_SIZES["large"])
+
+    gradient = _eval_bind_expr(gradient_expr, state)
+    bg = _gradient_css_background(gradient) or "#888"
+
+    data_bind = f' data-bind-gradient="{escape(gradient_expr)}"' if gradient_expr else ""
+    return Markup(
+        f'<div{_id_attr(el)} class="app-gradient-tile"'
+        f' data-type="gradient-tile"{data_bind}'
+        f' style="width:{sz}px;height:{sz}px;background:{bg};'
+        f'border:1px solid var(--app-border,#555);box-sizing:border-box;cursor:pointer"'
+        f'{_data_attrs(el)}></div>'
+    )
+
+
+def _render_gradient_slider(el, theme, state):
+    """Render the 1-D color-stops editor.
+
+    Emits the bar + stop markers + midpoint markers with data-role hooks for
+    JS-driven interactivity (click-to-add, click-to-select, drag, drag-off,
+    double-click). Selected stop/midpoint gets the corresponding accent class.
+
+    Bind keys:
+      - `stops` — expression resolving to the list of stops.
+      - `selected_stop_index` — expression resolving to the selected stop's
+        index, or None.
+      - `selected_midpoint_index` — expression resolving to the selected
+        midpoint's index, or None. A midpoint `i` sits between stop `i` and
+        stop `i+1`.
+    """
+    bind = el.get("bind", {})
+    if isinstance(bind, str):
+        bind = {"stops": bind}
+    stops_expr = bind.get("stops", "")
+    sel_stop_expr = bind.get("selected_stop_index", "")
+    sel_mid_expr = bind.get("selected_midpoint_index", "")
+
+    stops = _eval_bind_expr(stops_expr, state) if stops_expr else None
+    sel_stop = _eval_bind_expr(sel_stop_expr, state) if sel_stop_expr else None
+    sel_mid = _eval_bind_expr(sel_mid_expr, state) if sel_mid_expr else None
+
+    data_attrs = f'{_data_attrs(el)}'
+    bind_attrs = ""
+    if stops_expr:
+        bind_attrs += f' data-bind-stops="{escape(stops_expr)}"'
+    if sel_stop_expr:
+        bind_attrs += f' data-bind-selected-stop-index="{escape(sel_stop_expr)}"'
+    if sel_mid_expr:
+        bind_attrs += f' data-bind-selected-midpoint-index="{escape(sel_mid_expr)}"'
+
+    # Build the bar background from the stops. Always linear for the slider
+    # preview — the slider is a 1-D view of stops regardless of the overall
+    # gradient type.
+    if isinstance(stops, list) and len(stops) >= 2:
+        preview = {"type": "linear", "angle": 0, "stops": stops}
+        bar_bg = _gradient_css_background(preview) or "#888"
+    else:
+        bar_bg = "#888"
+
+    parts = []
+    parts.append(
+        f'<div{_id_attr(el)} class="app-gradient-slider"'
+        f' data-type="gradient-slider" tabindex="0"{bind_attrs}{data_attrs}'
+        f' style="position:relative;width:100%;height:44px;box-sizing:border-box;outline:none">'
+    )
+    # The bar itself — clickable for add-stop on empty area.
+    parts.append(
+        f'<div class="app-gradient-slider-bar" data-role="bar"'
+        f' style="position:absolute;left:0;right:0;top:14px;height:16px;'
+        f'background:{bar_bg};border:1px solid var(--app-border,#555);'
+        f'box-sizing:border-box;cursor:crosshair"></div>'
+    )
+
+    if isinstance(stops, list):
+        # Midpoint markers (above bar). One between each pair: i in [0, len-2].
+        for i in range(len(stops) - 1):
+            left = stops[i].get("location", 0) if isinstance(stops[i], dict) else 0
+            right = stops[i + 1].get("location", 100) if isinstance(stops[i + 1], dict) else 100
+            pct = stops[i].get("midpoint_to_next", 50) if isinstance(stops[i], dict) else 50
+            mid_loc = left + (right - left) * (pct / 100.0)
+            sel_cls = " app-gradient-midpoint-selected" if sel_mid == i else ""
+            parts.append(
+                f'<div class="app-gradient-midpoint{sel_cls}" data-role="midpoint"'
+                f' data-midpoint-index="{i}"'
+                f' style="position:absolute;left:calc({mid_loc}% - 5px);top:2px;'
+                f'width:10px;height:10px;transform:rotate(45deg);'
+                f'background:#888;border:1px solid #333;box-sizing:border-box;cursor:grab"></div>'
+            )
+        # Stop markers (below bar).
+        for i, s in enumerate(stops):
+            if not isinstance(s, dict):
+                continue
+            loc = s.get("location", 0)
+            color = s.get("color", "#000000")
+            sel_cls = " app-gradient-stop-selected" if sel_stop == i else ""
+            parts.append(
+                f'<div class="app-gradient-stop{sel_cls}" data-role="stop"'
+                f' data-stop-index="{i}"'
+                f' style="position:absolute;left:calc({loc}% - 7px);top:30px;'
+                f'width:14px;height:14px;border-radius:50%;background:{color};'
+                f'border:1.5px solid #333;box-sizing:border-box;cursor:grab"></div>'
+            )
+
+    parts.append("</div>")
+    return Markup("".join(parts))
+
+
 _RENDERERS = {
     "pane_system": _render_pane_system,
     "pane": _render_pane,
@@ -1270,6 +1441,8 @@ _RENDERERS = {
     "text_input": _render_text_input,
     "number_input": _render_number_input,
     "color_swatch": _render_color_swatch,
+    "gradient_tile": _render_gradient_tile,
+    "gradient_slider": _render_gradient_slider,
     "slider": _render_slider,
     "select": _render_select,
     "canvas": _render_canvas,

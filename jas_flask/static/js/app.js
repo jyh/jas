@@ -2009,6 +2009,121 @@
       if (el) applyHuePoint(el, e.clientX, e.clientY);
     });
 
+    // --- Gradient slider: stop/midpoint gestures ---
+    //
+    // Dispatches custom events the panel wiring layer can listen for. No
+    // direct state mutation here — Phase 5 wires these events to the
+    // gradient action pipeline. Events bubble on the slider element with
+    // `detail` carrying the relevant indices / positions.
+    //
+    // Events:
+    //   gradient-slider-stop-click       { stopIndex }
+    //   gradient-slider-stop-dblclick    { stopIndex }
+    //   gradient-slider-midpoint-click   { midpointIndex }
+    //   gradient-slider-bar-click        { location }        — click on empty bar (add-stop)
+    //   gradient-slider-stop-drag-start  { stopIndex }
+    //   gradient-slider-stop-drag        { stopIndex, location, offBar }
+    //   gradient-slider-stop-drag-end    { stopIndex, location, offBar }
+    //   gradient-slider-midpoint-drag    { midpointIndex, location }
+    //   gradient-slider-midpoint-drag-end{ midpointIndex, location }
+    //   gradient-slider-key              { key, shift }      — arrow/delete keys
+    var gradSliderDrag = null; // { slider, role, index }
+    var GRAD_DRAG_OFF_BAR_PX = 20;
+
+    function _gradSliderRectLoc(slider, clientX) {
+      var bar = slider.querySelector("[data-role='bar']");
+      if (!bar) return 0;
+      var rect = bar.getBoundingClientRect();
+      if (rect.width <= 0) return 0;
+      var x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+      return (x / rect.width) * 100;
+    }
+    function _gradSliderBarCenterY(slider) {
+      var bar = slider.querySelector("[data-role='bar']");
+      if (!bar) return 0;
+      var rect = bar.getBoundingClientRect();
+      return rect.top + rect.height / 2;
+    }
+    function _gradDispatch(slider, name, detail) {
+      slider.dispatchEvent(new CustomEvent(name, { detail: detail, bubbles: true }));
+    }
+
+    document.addEventListener("pointerdown", function (e) {
+      var slider = e.target.closest("[data-type='gradient-slider']");
+      if (!slider) return;
+      var stop = e.target.closest("[data-role='stop']");
+      var mid = e.target.closest("[data-role='midpoint']");
+      if (stop) {
+        var si = Number(stop.getAttribute("data-stop-index"));
+        gradSliderDrag = { slider: slider, role: "stop", index: si, moved: false };
+        slider.setPointerCapture(e.pointerId);
+        _gradDispatch(slider, "gradient-slider-stop-click", { stopIndex: si });
+        _gradDispatch(slider, "gradient-slider-stop-drag-start", { stopIndex: si });
+        e.preventDefault();
+      } else if (mid) {
+        var mi = Number(mid.getAttribute("data-midpoint-index"));
+        gradSliderDrag = { slider: slider, role: "midpoint", index: mi, moved: false };
+        slider.setPointerCapture(e.pointerId);
+        _gradDispatch(slider, "gradient-slider-midpoint-click", { midpointIndex: mi });
+        e.preventDefault();
+      } else if (e.target.closest("[data-role='bar']")) {
+        var loc = _gradSliderRectLoc(slider, e.clientX);
+        _gradDispatch(slider, "gradient-slider-bar-click", { location: loc });
+        e.preventDefault();
+      }
+    });
+    document.addEventListener("pointermove", function (e) {
+      if (!gradSliderDrag) return;
+      var slider = gradSliderDrag.slider;
+      var loc = _gradSliderRectLoc(slider, e.clientX);
+      gradSliderDrag.moved = true;
+      if (gradSliderDrag.role === "stop") {
+        var barY = _gradSliderBarCenterY(slider);
+        var offBar = Math.abs(e.clientY - barY) > GRAD_DRAG_OFF_BAR_PX;
+        _gradDispatch(slider, "gradient-slider-stop-drag", {
+          stopIndex: gradSliderDrag.index, location: loc, offBar: offBar,
+        });
+      } else if (gradSliderDrag.role === "midpoint") {
+        _gradDispatch(slider, "gradient-slider-midpoint-drag", {
+          midpointIndex: gradSliderDrag.index, location: loc,
+        });
+      }
+    });
+    document.addEventListener("pointerup", function (e) {
+      if (!gradSliderDrag) return;
+      var slider = gradSliderDrag.slider;
+      var loc = _gradSliderRectLoc(slider, e.clientX);
+      if (gradSliderDrag.role === "stop") {
+        var barY = _gradSliderBarCenterY(slider);
+        var offBar = Math.abs(e.clientY - barY) > GRAD_DRAG_OFF_BAR_PX;
+        _gradDispatch(slider, "gradient-slider-stop-drag-end", {
+          stopIndex: gradSliderDrag.index, location: loc, offBar: offBar,
+        });
+      } else if (gradSliderDrag.role === "midpoint") {
+        _gradDispatch(slider, "gradient-slider-midpoint-drag-end", {
+          midpointIndex: gradSliderDrag.index, location: loc,
+        });
+      }
+      gradSliderDrag = null;
+    });
+    document.addEventListener("dblclick", function (e) {
+      var slider = e.target.closest("[data-type='gradient-slider']");
+      if (!slider) return;
+      var stop = e.target.closest("[data-role='stop']");
+      if (stop) {
+        var si = Number(stop.getAttribute("data-stop-index"));
+        _gradDispatch(slider, "gradient-slider-stop-dblclick", { stopIndex: si });
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      var slider = document.activeElement && document.activeElement.closest("[data-type='gradient-slider']");
+      if (!slider) return;
+      var handled = ["ArrowLeft", "ArrowRight", "Home", "End", "Delete", "Backspace"];
+      if (handled.indexOf(e.key) < 0) return;
+      _gradDispatch(slider, "gradient-slider-key", { key: e.key, shift: e.shiftKey });
+      e.preventDefault();
+    });
+
     // Initialize bindings
     for (var key in state) {
       if (state.hasOwnProperty(key)) {

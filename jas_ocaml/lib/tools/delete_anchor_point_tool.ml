@@ -148,7 +148,7 @@ class delete_anchor_point_tool = object (_self)
        | Some new_cmds ->
          let new_elem = match elem with
            | Element.Path { fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; _ } ->
-             Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None }
+             Element.Path { d = new_cmds; fill; stroke; width_points; opacity; transform; locked; visibility; blend_mode; mask = None; fill_gradient = None; stroke_gradient = None }
            | _ -> elem
          in
          let new_doc = Document.replace_element doc path new_elem in

@@ -499,6 +499,7 @@ mod tests {
             x1: -5.0, y1: 5.0, x2: 15.0, y2: 5.0,
             stroke: None,
             width_points: vec![],
+                    stroke_gradient: None,
         });
         assert!(element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
     }
@@ -510,6 +511,7 @@ mod tests {
             x1: 20.0, y1: 0.0, x2: 30.0, y2: 0.0,
             stroke: None,
             width_points: vec![],
+                    stroke_gradient: None,
         });
         assert!(!element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
     }
@@ -521,6 +523,8 @@ mod tests {
             x: 5.0, y: 5.0, width: 10.0, height: 10.0,
             rx: 0.0, ry: 0.0,
             fill: None, stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(element_intersects_rect(&rect, 0.0, 0.0, 10.0, 10.0));
     }
@@ -532,6 +536,8 @@ mod tests {
             x: 20.0, y: 20.0, width: 5.0, height: 5.0,
             rx: 0.0, ry: 0.0,
             fill: None, stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(!element_intersects_rect(&rect, 0.0, 0.0, 10.0, 10.0));
     }
@@ -597,6 +603,7 @@ mod tests {
             x1: -5.0, y1: 5.0, x2: 15.0, y2: 5.0,
             stroke: None,
             width_points: vec![],
+                    stroke_gradient: None,
         });
         let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(element_intersects_polygon(&line, &sq));
@@ -609,6 +616,7 @@ mod tests {
             x1: 20.0, y1: 0.0, x2: 30.0, y2: 0.0,
             stroke: None,
             width_points: vec![],
+                    stroke_gradient: None,
         });
         let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(!element_intersects_polygon(&line, &sq));
@@ -623,6 +631,8 @@ mod tests {
             rx: 0.0, ry: 0.0,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(element_intersects_polygon(&rect, &sq));
@@ -635,6 +645,8 @@ mod tests {
             x: 20.0, y: 20.0, width: 5.0, height: 5.0,
             rx: 0.0, ry: 0.0,
             fill: None, stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(!element_intersects_polygon(&rect, &sq));
@@ -653,6 +665,7 @@ mod tests {
             x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
             stroke: None,
             width_points: vec![],
+            stroke_gradient: None,
         });
         // Selection rect around the visual position should hit
         assert!(element_intersects_rect(&line, 95.0, 0.0, 20.0, 10.0));
@@ -673,6 +686,8 @@ mod tests {
             rx: 0.0, ry: 0.0,
             fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::BLACK)),
             stroke: None,
+            fill_gradient: None,
+            stroke_gradient: None,
         });
         // After 45° rotation, point (10,0) maps to about (7.07, 7.07).
         // A selection rect near (7, 7) should intersect the rotated rect.
@@ -692,6 +707,7 @@ mod tests {
             x1: 0.0, y1: 0.0, x2: 5.0, y2: 0.0,
             stroke: None,
             width_points: vec![],
+            stroke_gradient: None,
         });
         // A rect at x=8..12 should hit the scaled line (which reaches x=10)
         assert!(element_intersects_rect(&line, 8.0, -1.0, 4.0, 2.0));
@@ -711,6 +727,7 @@ mod tests {
             x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0,
             stroke: None,
             width_points: vec![],
+            stroke_gradient: None,
         });
         assert!(!element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
     }
@@ -723,6 +740,7 @@ mod tests {
             x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
             stroke: None,
             width_points: vec![],
+                    stroke_gradient: None,
         });
         assert!(element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
         assert!(!element_intersects_rect(&line, 20.0, 0.0, 10.0, 10.0));
@@ -738,6 +756,7 @@ mod tests {
             x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
             stroke: None,
             width_points: vec![],
+            stroke_gradient: None,
         });
         let sq = [(95.0, 0.0), (115.0, 0.0), (115.0, 10.0), (95.0, 10.0)];
         assert!(element_intersects_polygon(&line, &sq));
@@ -797,6 +816,8 @@ mod tests {
             cx: 5.0, cy: 5.0, r: 3.0,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(element_intersects_rect(&circle, 0.0, 0.0, 10.0, 10.0));
     }
@@ -808,6 +829,8 @@ mod tests {
             cx: 20.0, cy: 20.0, r: 3.0,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(!element_intersects_rect(&circle, 0.0, 0.0, 10.0, 10.0));
     }
@@ -819,6 +842,8 @@ mod tests {
             cx: 5.0, cy: 5.0, r: 100.0,
             fill: None,
             stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         // Rect fully inside the circle -- stroke-only ring not hit
         assert!(!element_intersects_rect(&circle, 4.0, 4.0, 2.0, 2.0));
@@ -831,6 +856,8 @@ mod tests {
             cx: 5.0, cy: 5.0, rx: 10.0, ry: 3.0,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(element_intersects_rect(&ellipse, 0.0, 0.0, 10.0, 10.0));
     }
@@ -842,6 +869,8 @@ mod tests {
             cx: 5.0, cy: 5.0, rx: 2.0, ry: 2.0,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(!element_intersects_rect(&ellipse, 20.0, 20.0, 5.0, 5.0));
     }

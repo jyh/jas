@@ -111,6 +111,8 @@ mod tests {
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),

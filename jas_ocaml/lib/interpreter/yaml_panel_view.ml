@@ -136,6 +136,8 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "toggle" | "checkbox" -> render_toggle ~packing ~ctx el
   | "combo_box" -> render_combo_box ~packing ~ctx el
   | "color_swatch" -> render_color_swatch ~packing ~ctx el
+  | "gradient_tile" -> render_gradient_tile ~packing ~ctx el
+  | "gradient_slider" -> render_gradient_slider ~packing ~ctx el
   | "separator" -> render_separator ~packing el
   | "spacer" -> render_spacer ~packing ()
   | "disclosure" -> render_disclosure ~packing ~ctx el
@@ -418,6 +420,162 @@ and render_color_swatch ~packing ~ctx el =
     provider#load_from_data css;
     btn#misc#style_context#add_provider provider 800
   end
+
+(* Gradient primitives.
+
+   The Rust and Swift ports evaluate a bind expression that resolves
+   to an object (the gradient value) by parsing a JSON string — the
+   expression language serialises object values to JSON strings. OCaml
+   does the same through [Expr_eval.evaluate]: object results come
+   back via a path that ultimately serialises to a [Str] variant, so
+   the renderers parse the string back via [Yojson.Safe.from_string].
+*)
+and eval_bind_object expr ctx : Yojson.Safe.t option =
+  match Expr_eval.evaluate expr ctx with
+  | Expr_eval.Str s ->
+    (try Some (Yojson.Safe.from_string s) with _ -> None)
+  | Expr_eval.List items ->
+    Some (`List items)
+  | _ -> None
+
+and gradient_css_background (gradient : Yojson.Safe.t) : string option =
+  let open Yojson.Safe.Util in
+  match member "stops" gradient |> to_option to_list with
+  | Some stops when List.length stops >= 2 ->
+    let stop_strs = List.map (fun s ->
+      let color = member "color" s |> to_string_option |> Option.value ~default:"#000000" in
+      let loc = member "location" s |> to_number_option |> Option.value ~default:0.0 in
+      let opacity = member "opacity" s |> to_number_option |> Option.value ~default:100.0 in
+      let color_css =
+        if opacity < 100.0 && String.length color = 7 && color.[0] = '#' then
+          let r = int_of_string ("0x" ^ String.sub color 1 2) in
+          let g = int_of_string ("0x" ^ String.sub color 3 2) in
+          let b = int_of_string ("0x" ^ String.sub color 5 2) in
+          Printf.sprintf "rgba(%d,%d,%d,%.3f)" r g b (opacity /. 100.0)
+        else
+          color
+      in
+      Printf.sprintf "%s %.1f%%" color_css loc
+    ) stops in
+    let gtype = member "type" gradient |> to_string_option |> Option.value ~default:"linear" in
+    if gtype = "radial" then
+      Some (Printf.sprintf "radial-gradient(circle, %s)" (String.concat ", " stop_strs))
+    else
+      let angle = member "angle" gradient |> to_number_option |> Option.value ~default:0.0 in
+      (* Angle convention: 0 = left-to-right. CSS linear-gradient:
+         0deg = bottom-to-top. So CSS angle = 90 - angle. *)
+      let css_angle = int_of_float (mod_float (90.0 -. angle +. 720.0) 360.0) in
+      Some (Printf.sprintf "linear-gradient(%ddeg, %s)" css_angle (String.concat ", " stop_strs))
+  | _ -> None
+
+and render_gradient_tile ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let size_key = member "size" el |> to_string_option |> Option.value ~default:"large" in
+  let sz = match size_key with "small" -> 16 | "medium" -> 32 | _ -> 64 in
+  let gradient_expr = member "bind" el |> safe_member "gradient" |> to_string_option in
+  let gradient = match gradient_expr with
+    | Some e -> eval_bind_object e ctx
+    | None -> None
+  in
+  let bg_css = match gradient with
+    | Some g -> gradient_css_background g |> Option.value ~default:"#888888"
+    | None -> "#888888"
+  in
+  let btn = GButton.button ~packing () in
+  btn#misc#set_size_request ~width:sz ~height:sz ();
+  let css = Printf.sprintf
+    "* { background-image: %s; border: 1px solid #666; min-width: %dpx; min-height: %dpx; padding: 0; }"
+    bg_css sz sz in
+  let provider = GObj.css_provider () in
+  provider#load_from_data css;
+  btn#misc#style_context#add_provider provider 800
+
+(* gradient_slider — 1-D stops editor.
+
+   Phase 0 scope: the visual tree (bar + stop + midpoint markers) via
+   a [GPack.fixed] layout. Click callbacks on each marker dispatch
+   through the behavior list on the element (Phase 5 wires actions).
+   Full drag state machine and keyboard handling deferred. *)
+and render_gradient_slider ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let stops_expr = member "bind" el |> safe_member "stops" |> to_string_option in
+  let sel_stop_expr = member "bind" el |> safe_member "selected_stop_index" |> to_string_option in
+  let sel_mid_expr = member "bind" el |> safe_member "selected_midpoint_index" |> to_string_option in
+
+  let stops : Yojson.Safe.t list = match stops_expr with
+    | Some e -> (match eval_bind_object e ctx with
+                 | Some (`List lst) -> lst
+                 | _ -> [])
+    | None -> []
+  in
+  let sel_stop = match sel_stop_expr with
+    | Some e -> (match Expr_eval.evaluate e ctx with
+                 | Expr_eval.Number n -> int_of_float n
+                 | _ -> -1)
+    | None -> -1
+  in
+  let sel_mid = match sel_mid_expr with
+    | Some e -> (match Expr_eval.evaluate e ctx with
+                 | Expr_eval.Number n -> int_of_float n
+                 | _ -> -1)
+    | None -> -1
+  in
+
+  let container_width = 240 in
+  let bar_height = 16 in
+  let container = GPack.fixed ~packing () in
+  container#misc#set_size_request ~width:container_width ~height:44 ();
+
+  (* Bar background *)
+  let bar_bg = if List.length stops >= 2 then
+    let preview = `Assoc [
+      "type", `String "linear";
+      "angle", `Float 0.0;
+      "stops", `List stops;
+    ] in
+    gradient_css_background preview |> Option.value ~default:"#888888"
+  else
+    "#888888"
+  in
+  let bar = GButton.button ~packing:(container#put ~x:0 ~y:14) () in
+  bar#misc#set_size_request ~width:container_width ~height:bar_height ();
+  let bar_css = Printf.sprintf
+    "* { background-image: %s; border: 1px solid #666; min-width: %dpx; min-height: %dpx; padding: 0; }"
+    bar_bg container_width bar_height in
+  let bar_provider = GObj.css_provider () in
+  bar_provider#load_from_data bar_css;
+  bar#misc#style_context#add_provider bar_provider 800;
+
+  (* Midpoint markers *)
+  let num_pairs = max (List.length stops - 1) 0 in
+  for i = 0 to num_pairs - 1 do
+    let left = List.nth stops i |> member "location" |> to_number_option |> Option.value ~default:0.0 in
+    let right = List.nth stops (i + 1) |> member "location" |> to_number_option |> Option.value ~default:100.0 in
+    let pct = List.nth stops i |> member "midpoint_to_next" |> to_number_option |> Option.value ~default:50.0 in
+    let mid_loc = left +. (right -. left) *. (pct /. 100.0) in
+    let x = int_of_float (mid_loc /. 100.0 *. float_of_int container_width) - 5 in
+    let mbtn = GButton.button ~packing:(container#put ~x ~y:2) () in
+    mbtn#misc#set_size_request ~width:10 ~height:10 ();
+    let sel = if i = sel_mid then "; border: 2px solid #0af" else "" in
+    let mcss = Printf.sprintf "* { background-color: #888; border: 1px solid #333%s; min-width: 10px; min-height: 10px; padding: 0; }" sel in
+    let mprov = GObj.css_provider () in
+    mprov#load_from_data mcss;
+    mbtn#misc#style_context#add_provider mprov 800
+  done;
+
+  (* Stop markers *)
+  List.iteri (fun i s ->
+    let loc = member "location" s |> to_number_option |> Option.value ~default:0.0 in
+    let color = member "color" s |> to_string_option |> Option.value ~default:"#000000" in
+    let x = int_of_float (loc /. 100.0 *. float_of_int container_width) - 7 in
+    let sbtn = GButton.button ~packing:(container#put ~x ~y:30) () in
+    sbtn#misc#set_size_request ~width:14 ~height:14 ();
+    let sel_border = if i = sel_stop then "2px solid #0af" else "1px solid #333" in
+    let scss = Printf.sprintf "* { background-color: %s; border: %s; border-radius: 50%%; min-width: 14px; min-height: 14px; padding: 0; }" color sel_border in
+    let sprov = GObj.css_provider () in
+    sprov#load_from_data scss;
+    sbtn#misc#style_context#add_provider sprov 800
+  ) stops
 
 and render_separator ~packing el =
   let open Yojson.Safe.Util in

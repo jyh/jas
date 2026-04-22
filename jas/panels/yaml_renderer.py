@@ -294,6 +294,210 @@ def _render_color_swatch(el, store, ctx, dispatch_fn):
     return btn
 
 
+_GRADIENT_TILE_SIZES = {"small": 16, "medium": 32, "large": 64}
+
+
+def _eval_bind_object(expr, store, ctx):
+    """Evaluate a bind expression that resolves to an object/list.
+
+    The expression language serializes objects to JSON strings;
+    parses them back here so the renderer can read fields.
+    """
+    if not isinstance(expr, str) or not expr:
+        return None
+    try:
+        result = evaluate(expr, store.eval_context(ctx))
+    except Exception:
+        return None
+    val = result.value if hasattr(result, "value") else result
+    if isinstance(val, str):
+        import json
+        try:
+            return json.loads(val)
+        except Exception:
+            return None
+    if isinstance(val, list):
+        return val
+    return None
+
+
+def _gradient_qss_background(gradient):
+    """Build a Qt stylesheet background value from a gradient dict.
+
+    Qt stylesheet supports qlineargradient / qradialgradient syntax.
+    Returns None if the gradient cannot be represented.
+    """
+    if not isinstance(gradient, dict):
+        return None
+    stops = gradient.get("stops")
+    if not isinstance(stops, list) or len(stops) < 2:
+        return None
+    stop_specs = []
+    for s in stops:
+        if not isinstance(s, dict):
+            continue
+        color = s.get("color", "#000000")
+        loc = s.get("location", 0) / 100.0
+        opacity = s.get("opacity", 100)
+        if opacity != 100 and isinstance(color, str) and color.startswith("#") and len(color) == 7:
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            color = f"rgba({r},{g},{b},{opacity / 100.0:.3f})"
+        stop_specs.append(f"stop:{loc:.3f} {color}")
+    if len(stop_specs) < 2:
+        return None
+    gtype = gradient.get("type", "linear")
+    if gtype == "radial":
+        return (
+            "qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, "
+            + ", ".join(stop_specs) + ")"
+        )
+    # Linear. Angle convention: 0 = left-to-right. Compute endpoints on
+    # the unit square accordingly.
+    import math
+    angle = gradient.get("angle", 0)
+    rad = math.radians(angle)
+    x1 = 0.5 - 0.5 * math.cos(rad)
+    y1 = 0.5 + 0.5 * math.sin(rad)
+    x2 = 0.5 + 0.5 * math.cos(rad)
+    y2 = 0.5 - 0.5 * math.sin(rad)
+    return (
+        f"qlineargradient(x1:{x1:.3f}, y1:{y1:.3f}, x2:{x2:.3f}, y2:{y2:.3f}, "
+        + ", ".join(stop_specs) + ")"
+    )
+
+
+def _render_gradient_tile(el, store, ctx, dispatch_fn):
+    """Click-to-apply gradient preview tile."""
+    size_key = el.get("size", "large")
+    sz = _GRADIENT_TILE_SIZES.get(size_key, _GRADIENT_TILE_SIZES["large"])
+    bind = el.get("bind") or {}
+    gradient_expr = bind.get("gradient") if isinstance(bind, dict) else None
+    gradient = _eval_bind_object(gradient_expr, store, ctx) if gradient_expr else None
+    bg = _gradient_qss_background(gradient) or "#888"
+
+    btn = QPushButton()
+    btn.setFixedSize(sz, sz)
+    btn.setFlat(True)
+    btn.setStyleSheet(
+        f"QPushButton {{ background: {bg}; border: 1px solid #666; }}"
+    )
+    # Click fires the behavior list (Phase 5 wires the action pipeline).
+    if dispatch_fn:
+        behaviors = el.get("behavior") or []
+        def on_click():
+            for b in behaviors:
+                if isinstance(b, dict) and b.get("event") == "click":
+                    action = b.get("action")
+                    params = b.get("params") or {}
+                    if action:
+                        dispatch_fn(action, params)
+        btn.clicked.connect(on_click)
+    return btn
+
+
+def _render_gradient_slider(el, store, ctx, dispatch_fn):
+    """1-D color-stops editor.
+
+    Phase 0 scope: visual tree + click-to-select gestures on stop and
+    midpoint markers (emits gradient_slider_stop_click /
+    gradient_slider_stop_dblclick / gradient_slider_midpoint_click
+    actions). Full pointer drag state and keyboard handling are
+    deferred to Phase 5.
+    """
+    bind = el.get("bind") or {}
+    stops_expr = bind.get("stops") if isinstance(bind, dict) else None
+    sel_stop_expr = bind.get("selected_stop_index") if isinstance(bind, dict) else None
+    sel_mid_expr = bind.get("selected_midpoint_index") if isinstance(bind, dict) else None
+
+    stops = _eval_bind_object(stops_expr, store, ctx) if stops_expr else None
+    stops = stops if isinstance(stops, list) else []
+
+    sel_stop = -1
+    if sel_stop_expr:
+        try:
+            result = evaluate(sel_stop_expr, store.eval_context(ctx))
+            val = result.value if hasattr(result, "value") else result
+            if isinstance(val, (int, float)):
+                sel_stop = int(val)
+        except Exception:
+            pass
+    sel_mid = -1
+    if sel_mid_expr:
+        try:
+            result = evaluate(sel_mid_expr, store.eval_context(ctx))
+            val = result.value if hasattr(result, "value") else result
+            if isinstance(val, (int, float)):
+                sel_mid = int(val)
+        except Exception:
+            pass
+
+    container_width = 240
+    container = QWidget()
+    container.setFixedSize(container_width, 44)
+
+    # Bar
+    if len(stops) >= 2:
+        preview = {"type": "linear", "angle": 0, "stops": stops}
+        bar_bg = _gradient_qss_background(preview) or "#888"
+    else:
+        bar_bg = "#888"
+    bar = QPushButton(container)
+    bar.setFixedSize(container_width, 16)
+    bar.move(0, 14)
+    bar.setFlat(True)
+    bar.setStyleSheet(
+        f"QPushButton {{ background: {bar_bg}; border: 1px solid #666; }}"
+    )
+
+    # Midpoint markers (diamonds approximated via square + stylesheet)
+    num_pairs = max(len(stops) - 1, 0)
+    for i in range(num_pairs):
+        left = stops[i].get("location", 0) if isinstance(stops[i], dict) else 0
+        right = stops[i + 1].get("location", 100) if isinstance(stops[i + 1], dict) else 100
+        pct = stops[i].get("midpoint_to_next", 50) if isinstance(stops[i], dict) else 50
+        mid_loc = left + (right - left) * (pct / 100.0)
+        x = int(mid_loc / 100.0 * container_width) - 5
+        m = QPushButton(container)
+        m.setFixedSize(10, 10)
+        m.move(x, 2)
+        m.setFlat(True)
+        sel_border = "2px solid #0af" if i == sel_mid else "1px solid #333"
+        m.setStyleSheet(
+            f"QPushButton {{ background: #888; border: {sel_border}; }}"
+        )
+        if dispatch_fn:
+            idx = i
+            m.clicked.connect(lambda _=False, j=idx: dispatch_fn(
+                "gradient_slider_midpoint_click", {"midpoint_index": j}
+            ))
+
+    # Stop markers (circles via border-radius)
+    for i, s in enumerate(stops):
+        if not isinstance(s, dict):
+            continue
+        loc = s.get("location", 0)
+        color = s.get("color", "#000000")
+        x = int(loc / 100.0 * container_width) - 7
+        sb = QPushButton(container)
+        sb.setFixedSize(14, 14)
+        sb.move(x, 30)
+        sb.setFlat(True)
+        sel_border = "2px solid #0af" if i == sel_stop else "1px solid #333"
+        sb.setStyleSheet(
+            f"QPushButton {{ background: {color}; border: {sel_border}; "
+            f"border-radius: 7px; }}"
+        )
+        if dispatch_fn:
+            idx = i
+            sb.clicked.connect(lambda _=False, j=idx: dispatch_fn(
+                "gradient_slider_stop_click", {"stop_index": j}
+            ))
+
+    return container
+
+
 def _render_separator(el, store, ctx, dispatch_fn):
     frame = QFrame()
     orientation = el.get("orientation", "horizontal")
@@ -1612,6 +1816,8 @@ _RENDERERS = {
     "select": _render_select,
     "combo_box": _render_combo_box,
     "color_swatch": _render_color_swatch,
+    "gradient_tile": _render_gradient_tile,
+    "gradient_slider": _render_gradient_slider,
     "separator": _render_separator,
     "spacer": _render_spacer,
     "disclosure": _render_disclosure,

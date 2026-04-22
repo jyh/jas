@@ -143,6 +143,8 @@ impl LiveElement for CompoundShape {
                     fill: self.fill.clone(),
                     stroke: self.stroke.clone(),
                     common: self.common.clone(),
+                                    fill_gradient: None,
+                    stroke_gradient: None,
                 }))
             })
             .collect()
@@ -384,6 +386,8 @@ mod tests {
         Rc::new(Element::Rect(RectElem {
             x, y, width: w, height: h, rx: 0.0, ry: 0.0,
             fill: None, stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         }))
     }
 
@@ -518,6 +522,8 @@ mod tests {
         let rect = Element::Rect(RectElem {
             x: 1.0, y: 2.0, width: 3.0, height: 4.0, rx: 0.0, ry: 0.0,
             fill: None, stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let ps = element_to_polygon_set(&rect, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 1);
@@ -597,6 +603,8 @@ mod tests {
             ],
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         }));
         let ps = element_to_polygon_set(&sq, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 1, "closed square path → 1 ring");
@@ -620,6 +628,8 @@ mod tests {
             ],
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         }));
         let cs = CompoundShape {
             operation: CompoundOperation::Union,
@@ -656,6 +666,8 @@ mod tests {
             ],
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         }));
         let ps = element_to_polygon_set(&p, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 2, "two disjoint subpaths → 2 rings");

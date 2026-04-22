@@ -7,7 +7,10 @@ module Live = Jas.Live
 let rect_at x y =
   Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = None; stroke = None; opacity = 1.0; transform = None;
-         locked = false; visibility = Preview; blend_mode = Normal; mask = None }
+         locked = false; visibility = Preview; blend_mode = Normal; mask = None;
+           fill_gradient = None;
+           stroke_gradient = None;
+         }
 
 let bbox_of_ring ring =
   let min_x = ref infinity in
@@ -126,6 +129,8 @@ let test_path_flattens_into_polygon_set () =
     opacity = 1.0; transform = None; locked = false; visibility = Preview;
     blend_mode = Normal;
     mask = None;
+    fill_gradient = None;
+    stroke_gradient = None;
   } in
   let ps = Live.element_to_polygon_set path Live.default_precision in
   Alcotest.(check int) "one ring" 1 (List.length ps)

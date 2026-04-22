@@ -163,6 +163,7 @@ mod tests {
             )),
             swatch_libraries: serde_json::json!({}),
             stroke_panel: crate::workspace::app_state::StrokePanelState::default(),
+            gradient_panel: crate::workspace::app_state::GradientPanelState::default(),
             character_panel: crate::workspace::app_state::CharacterPanelState::default(),
             paragraph_panel: crate::workspace::app_state::ParagraphPanelState::default(),
             align_panel: crate::workspace::app_state::AlignPanelState::default(),
@@ -297,6 +298,8 @@ mod tests {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: None, stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
             name: "L0".into(),

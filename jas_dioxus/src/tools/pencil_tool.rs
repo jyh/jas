@@ -58,6 +58,8 @@ impl PencilTool {
             stroke: model.default_stroke,
             width_points: vec![],
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         Controller::add_element(model, elem);
         self.points.clear();

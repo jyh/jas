@@ -52,6 +52,35 @@ val sync_stroke_panel_from_selection :
 (** Check whether a state key is a rendering-affecting stroke key. *)
 val is_stroke_render_key : string -> bool
 
+(** Sync the state store's [gradient_*] keys from the selection's
+    active attribute (fill or stroke per [state.fill_on_top]). See
+    GRADIENT.md §Multi-selection and §Fill-type coupling for the
+    branching rules. Phase 4: read direction only; Phase 5 wires the
+    writeback. *)
+val sync_gradient_panel_from_selection :
+  State_store.t -> Controller.controller -> unit
+
+(** Phase 5: build a Gradient from the [gradient_*] store keys and
+    write it to every selected element's fill_gradient or
+    stroke_gradient (per [state.fill_on_top]). Clears
+    [gradient_preview_state]. *)
+val apply_gradient_panel_to_selection :
+  State_store.t -> Controller.controller -> unit
+
+(** Phase 5: clear the gradient on the selection's active attribute,
+    leaving the underlying solid Fill / Stroke untouched. *)
+val demote_gradient_panel_selection :
+  State_store.t -> Controller.controller -> unit
+
+(** Phase 5 follow-up: subscribe to gradient_* key writes on the
+    global store, calling apply_gradient_panel_to_selection when any
+    render-affecting key changes. Mirrors [subscribe_stroke_panel]. *)
+val subscribe_gradient_panel :
+  State_store.t -> (unit -> Controller.controller) -> unit
+
+(** Check whether a state key is a render-affecting gradient key. *)
+val is_gradient_render_key : string -> bool
+
 (** Compute [text_selected] / [area_text_selected] from the current
     selection and write them to the [paragraph_panel_content] panel
     scope so PARAGRAPH.md §Text-kind gating disables JUSTIFY_*,

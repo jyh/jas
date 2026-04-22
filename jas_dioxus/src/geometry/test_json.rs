@@ -837,6 +837,7 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             stroke: parse_stroke(&v["stroke"]),
             width_points: vec![],
             common,
+                    stroke_gradient: None,
         }),
         "rect" => Element::Rect(RectElem {
             x: parse_f(&v["x"]), y: parse_f(&v["y"]),
@@ -844,33 +845,45 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             rx: parse_f(&v["rx"]), ry: parse_f(&v["ry"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         "circle" => Element::Circle(CircleElem {
             cx: parse_f(&v["cx"]), cy: parse_f(&v["cy"]), r: parse_f(&v["r"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         "ellipse" => Element::Ellipse(EllipseElem {
             cx: parse_f(&v["cx"]), cy: parse_f(&v["cy"]),
             rx: parse_f(&v["rx"]), ry: parse_f(&v["ry"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         "polyline" => Element::Polyline(PolylineElem {
             points: parse_points(&v["points"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         "polygon" => Element::Polygon(PolygonElem {
             points: parse_points(&v["points"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         "path" => Element::Path(PathElem {
             d: parse_path_commands(&v["d"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
             width_points: vec![],
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         "text" => Element::Text(TextElem {
             x: parse_f(&v["x"]),
@@ -1049,6 +1062,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    stroke_gradient: None,
         });
         let json = element_json(&line);
         assert!(json.contains("\"type\":\"line\""));
@@ -1070,6 +1084,8 @@ mod tests {
             fill: Some(Fill::new(Color::new(1.0, 0.0, 0.0, 1.0))),
             stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let json = element_json(&rect);
         assert!(json.contains("\"type\":\"rect\""));
@@ -1099,6 +1115,8 @@ mod tests {
             fill: None,
             stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let json = element_json(&rect);
         // Keys must be in alphabetical order.

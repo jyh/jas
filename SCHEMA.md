@@ -649,6 +649,8 @@ recommended for every element.
 | `text_input` | Text entry field | `placeholder`, `bind` |
 | `number_input` | Numeric entry | `min`, `max`, `step`, `bind` |
 | `color_swatch` | Color display square | `bind.color`, `hollow`: bool |
+| `gradient_tile` | Gradient preview tile (applies on click) | `bind.gradient`, `size`: `small`/`medium`/`large` |
+| `gradient_slider` | 1-D color-stops editor (drag stops, add on bar-click, drag-off to delete, double-click opens color picker) | `bind.stops`, `bind.selected_stop_index`, `bind.selected_midpoint_index` |
 | `slider` | Range slider | `min`, `max`, `step`, `bind` |
 | `select` | Dropdown | `options`, `bind` |
 | `canvas` | Freeform rendering surface | — |

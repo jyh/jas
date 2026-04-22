@@ -349,6 +349,125 @@ pub enum LineJoin {
     Bevel,
 }
 
+/// Gradient type: linear (along a vector), radial (from a center), or
+/// freeform (from 2-D scattered nodes). See `transcripts/GRADIENT.md`
+/// §Gradient types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GradientType {
+    #[default]
+    Linear,
+    Radial,
+    Freeform,
+}
+
+/// Gradient interpolation / topology method. Semantics depend on the
+/// gradient type — `classic` / `smooth` apply to linear/radial;
+/// `points` / `lines` apply to freeform. See GRADIENT.md §Method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GradientMethod {
+    #[default]
+    Classic,
+    Smooth,
+    Points,
+    Lines,
+}
+
+/// Stroke sub-mode — how a gradient on a stroke maps onto the path.
+/// See GRADIENT.md §Stroke sub-modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeSubMode {
+    #[default]
+    Within,
+    Along,
+    Across,
+}
+
+/// A single color stop inside a linear/radial gradient.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GradientStop {
+    pub color: Color,
+    /// Opacity 0–100 (percentage).
+    pub opacity: f64,
+    /// Location 0–100 (percentage along the gradient strip).
+    pub location: f64,
+    /// Midpoint between this stop and the next, stored as a
+    /// percentage-between value (0–100, where 50 = halfway).
+    /// Ignored on the last stop.
+    #[serde(default = "default_midpoint")]
+    pub midpoint_to_next: f64,
+}
+
+fn default_midpoint() -> f64 {
+    50.0
+}
+
+/// A single node of a freeform gradient.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GradientNode {
+    /// Position in the element's bounding box, normalized to [0, 1].
+    pub x: f64,
+    pub y: f64,
+    pub color: Color,
+    /// Opacity 0–100 (percentage).
+    pub opacity: f64,
+    /// Spread radius 0–100 (percentage of bounding-box diagonal).
+    pub spread: f64,
+}
+
+/// A gradient value that can be used as a fill or stroke.
+///
+/// Gradients are inline on the element — `Fill.gradient` / `Stroke.gradient`
+/// carry an `Option<Gradient>`. When present the element is painted with
+/// the gradient; when None the `color` field of Fill/Stroke is used.
+/// See GRADIENT.md §Document model.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Gradient {
+    #[serde(rename = "type", default)]
+    pub gtype: GradientType,
+    /// Angle in degrees, −180..+180. Linear/radial only. Default 0.
+    #[serde(default)]
+    pub angle: f64,
+    /// Aspect ratio as a percentage, 1–1000. Linear/radial only.
+    /// 100 = isotropic (circle for radial). Default 100.
+    #[serde(default = "default_aspect_ratio")]
+    pub aspect_ratio: f64,
+    #[serde(default)]
+    pub method: GradientMethod,
+    #[serde(default)]
+    pub dither: bool,
+    /// Stroke sub-mode. Applies when this gradient is on a stroke.
+    #[serde(default)]
+    pub stroke_sub_mode: StrokeSubMode,
+    /// Stops for linear/radial gradients. Empty for freeform.
+    #[serde(default)]
+    pub stops: Vec<GradientStop>,
+    /// Nodes for freeform gradients. Empty for linear/radial.
+    #[serde(default)]
+    pub nodes: Vec<GradientNode>,
+}
+
+fn default_aspect_ratio() -> f64 {
+    100.0
+}
+
+impl Default for Gradient {
+    fn default() -> Self {
+        Self {
+            gtype: GradientType::default(),
+            angle: 0.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::default(),
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::default(),
+            stops: Vec::new(),
+            nodes: Vec::new(),
+        }
+    }
+}
+
 /// SVG fill presentation attribute.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Fill {
@@ -709,6 +828,12 @@ pub struct LineElem {
     pub stroke: Option<Stroke>,
     pub width_points: Vec<StrokeWidthPoint>,
     pub common: CommonProps,
+    /// Optional gradient applied to the stroke (in lieu of `stroke.color`).
+    /// Phase 1b adds gradient paint per-element rather than nested in
+    /// Stroke to avoid removing Copy from Stroke. See GRADIENT.md
+    /// §Document model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_gradient: Option<Box<Gradient>>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -722,6 +847,10 @@ pub struct RectElem {
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_gradient: Option<Box<Gradient>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_gradient: Option<Box<Gradient>>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -732,6 +861,10 @@ pub struct CircleElem {
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_gradient: Option<Box<Gradient>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_gradient: Option<Box<Gradient>>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -743,6 +876,10 @@ pub struct EllipseElem {
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_gradient: Option<Box<Gradient>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_gradient: Option<Box<Gradient>>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -751,6 +888,10 @@ pub struct PolylineElem {
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_gradient: Option<Box<Gradient>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_gradient: Option<Box<Gradient>>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -759,6 +900,10 @@ pub struct PolygonElem {
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_gradient: Option<Box<Gradient>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_gradient: Option<Box<Gradient>>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -768,6 +913,10 @@ pub struct PathElem {
     pub stroke: Option<Stroke>,
     pub width_points: Vec<StrokeWidthPoint>,
     pub common: CommonProps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_gradient: Option<Box<Gradient>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_gradient: Option<Box<Gradient>>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1145,6 +1294,35 @@ impl Element {
             Element::Text(e) => e.stroke.as_ref(),
             Element::TextPath(e) => e.stroke.as_ref(),
             Element::Live(e) => super::live::LiveElement::stroke(e),
+            _ => None,
+        }
+    }
+
+    /// Return the optional gradient applied to the element's fill, if any.
+    /// Phase 1b: lives directly on each Element variant rather than nested
+    /// inside Fill — see GRADIENT.md §Document model.
+    pub fn fill_gradient(&self) -> Option<&Gradient> {
+        match self {
+            Element::Rect(e) => e.fill_gradient.as_deref(),
+            Element::Circle(e) => e.fill_gradient.as_deref(),
+            Element::Ellipse(e) => e.fill_gradient.as_deref(),
+            Element::Polyline(e) => e.fill_gradient.as_deref(),
+            Element::Polygon(e) => e.fill_gradient.as_deref(),
+            Element::Path(e) => e.fill_gradient.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Return the optional gradient applied to the element's stroke, if any.
+    pub fn stroke_gradient(&self) -> Option<&Gradient> {
+        match self {
+            Element::Line(e) => e.stroke_gradient.as_deref(),
+            Element::Rect(e) => e.stroke_gradient.as_deref(),
+            Element::Circle(e) => e.stroke_gradient.as_deref(),
+            Element::Ellipse(e) => e.stroke_gradient.as_deref(),
+            Element::Polyline(e) => e.stroke_gradient.as_deref(),
+            Element::Polygon(e) => e.stroke_gradient.as_deref(),
+            Element::Path(e) => e.stroke_gradient.as_deref(),
             _ => None,
         }
     }
@@ -1718,6 +1896,8 @@ pub fn move_control_points(
                     fill: e.fill,
                     stroke: e.stroke,
                     common: e.common.clone(),
+                                    fill_gradient: None,
+                    stroke_gradient: None,
                 })
             }
         }
@@ -2289,6 +2469,37 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
     }
 }
 
+/// Return a copy of the element with its `fill_gradient` replaced.
+/// Elements that do not support a fill gradient (Line, Text, TextPath,
+/// Group, Layer, Live) are returned unchanged.
+pub fn with_fill_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> Element {
+    match elem {
+        Element::Rect(e) => Element::Rect(RectElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Circle(e) => Element::Circle(CircleElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Ellipse(e) => Element::Ellipse(EllipseElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Polyline(e) => Element::Polyline(PolylineElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Polygon(e) => Element::Polygon(PolygonElem { fill_gradient: gradient, ..e.clone() }),
+        Element::Path(e) => Element::Path(PathElem { fill_gradient: gradient, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
+/// Return a copy of the element with its `stroke_gradient` replaced.
+/// Elements that do not support a stroke gradient (Text, TextPath,
+/// Group, Layer, Live) are returned unchanged.
+pub fn with_stroke_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> Element {
+    match elem {
+        Element::Line(e) => Element::Line(LineElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Rect(e) => Element::Rect(RectElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Circle(e) => Element::Circle(CircleElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Ellipse(e) => Element::Ellipse(EllipseElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Polyline(e) => Element::Polyline(PolylineElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Polygon(e) => Element::Polygon(PolygonElem { stroke_gradient: gradient, ..e.clone() }),
+        Element::Path(e) => Element::Path(PathElem { stroke_gradient: gradient, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
 /// Return a copy of the element with its fill replaced.
 /// Elements that do not support fill (Line, Group, Layer) are returned unchanged.
 pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
@@ -2351,11 +2562,165 @@ pub fn with_width_points(elem: &Element, width_points: Vec<StrokeWidthPoint>) ->
 mod tests {
     use super::*;
 
+    #[test]
+    fn gradient_json_roundtrip_linear() {
+        let g = Gradient {
+            gtype: GradientType::Linear,
+            angle: 45.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::Classic,
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop {
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+                },
+                GradientStop {
+                    color: Color::rgb(0.0, 0.0, 1.0),
+                    opacity: 100.0, location: 100.0, midpoint_to_next: 50.0,
+                },
+            ],
+            nodes: Vec::new(),
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        let parsed: Gradient = serde_json::from_str(&json).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn gradient_json_roundtrip_radial_with_midpoints_method_dither() {
+        let g = Gradient {
+            gtype: GradientType::Radial,
+            angle: 0.0,
+            aspect_ratio: 200.0,
+            method: GradientMethod::Smooth,
+            dither: true,
+            stroke_sub_mode: StrokeSubMode::Across,
+            stops: vec![
+                GradientStop { color: Color::rgb(1.0, 1.0, 0.0), opacity: 100.0, location: 0.0,  midpoint_to_next: 30.0 },
+                GradientStop { color: Color::rgb(0.5, 0.0, 0.5), opacity:  50.0, location: 50.0, midpoint_to_next: 70.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 0.0), opacity:   0.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        let parsed: Gradient = serde_json::from_str(&json).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn gradient_json_roundtrip_freeform() {
+        let g = Gradient {
+            gtype: GradientType::Freeform,
+            angle: 0.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::Points,
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: Vec::new(),
+            nodes: vec![
+                GradientNode { x: 0.25, y: 0.25, color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, spread: 30.0 },
+                GradientNode { x: 0.75, y: 0.75, color: Color::rgb(0.0, 0.0, 1.0), opacity: 100.0, spread: 25.0 },
+            ],
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        let parsed: Gradient = serde_json::from_str(&json).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn gradient_serde_field_names() {
+        // Verify wire format matches GRADIENT.md §Document model:
+        // type → "linear"/"radial"/"freeform"; method → "classic"/"smooth"/"points"/"lines";
+        // stroke_sub_mode → "within"/"along"/"across".
+        let g = Gradient::default();
+        let json = serde_json::to_string(&g).unwrap();
+        assert!(json.contains(r#""type":"linear""#), "json={json}");
+        assert!(json.contains(r#""method":"classic""#), "json={json}");
+        assert!(json.contains(r#""stroke_sub_mode":"within""#), "json={json}");
+    }
+
+    #[test]
+    fn rect_with_fill_gradient_roundtrips() {
+        let g = Gradient {
+            gtype: GradientType::Linear,
+            angle: 45.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::Classic,
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 0.0,   midpoint_to_next: 50.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let el = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: Some(Box::new(g.clone())),
+            stroke_gradient: None,
+        };
+        let json = serde_json::to_string(&el).unwrap();
+        // The gradient field is present in the JSON when set.
+        assert!(json.contains("fill_gradient"));
+        // stroke_gradient is omitted because it's None.
+        assert!(!json.contains("stroke_gradient"));
+        let parsed: RectElem = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.fill_gradient.as_deref(), Some(&g));
+        assert!(parsed.stroke_gradient.is_none());
+    }
+
+    #[test]
+    fn rect_without_gradient_omits_fields() {
+        let el = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        };
+        let json = serde_json::to_string(&el).unwrap();
+        assert!(!json.contains("fill_gradient"));
+        assert!(!json.contains("stroke_gradient"));
+        let parsed: RectElem = serde_json::from_str(&json).unwrap();
+        assert!(parsed.fill_gradient.is_none());
+        assert!(parsed.stroke_gradient.is_none());
+    }
+
+    #[test]
+    fn gradient_stop_default_midpoint() {
+        // midpoint_to_next defaults to 50 when absent on parse. Color uses
+        // the same on-disk encoding as elsewhere in the document model
+        // (see geometry::test_json::parse_color).
+        let g = Gradient {
+            stops: vec![GradientStop {
+                color: Color::rgb(1.0, 0.0, 0.0),
+                opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+            }],
+            ..Gradient::default()
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        // Round-trips cleanly:
+        let _: Gradient = serde_json::from_str(&json).unwrap();
+        // And midpoint defaults if missing — synthesise a JSON without it
+        // by string-replacing.
+        let no_mid = json.replace(r#","midpoint_to_next":50.0"#, "");
+        let parsed: Gradient = serde_json::from_str(&no_mid).unwrap();
+        assert_eq!(parsed.stops[0].midpoint_to_next, 50.0);
+    }
+
     fn rect(x: f64, y: f64, w: f64, h: f64) -> Element {
         Element::Rect(RectElem {
             x, y, width: w, height: h, rx: 0.0, ry: 0.0,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -2365,6 +2730,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    stroke_gradient: None,
         })
     }
 
@@ -2373,6 +2739,8 @@ mod tests {
             cx, cy, r,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -2381,6 +2749,8 @@ mod tests {
             cx, cy, rx, ry,
             fill: None, stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -2389,6 +2759,8 @@ mod tests {
             d, fill: None, stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -2413,6 +2785,7 @@ mod tests {
         let e = Element::Line(LineElem {
             x1: 0.0, y1: 0.0, x2: 50.0, y2: 50.0,
             stroke: None, width_points: Vec::new(), common: CommonProps::default(),
+                    stroke_gradient: None,
         });
         assert_eq!(e.bounds(), (0.0, 0.0, 50.0, 50.0));
     }
@@ -3060,6 +3433,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    stroke_gradient: None,
         });
         let red_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
         let line2 = with_fill(&line, red_fill);
@@ -3075,6 +3449,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let blue_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 2.0));
         let path2 = with_stroke(&path, blue_stroke);
@@ -3322,6 +3698,8 @@ mod tests {
                 visibility: Visibility::Preview,
                 mask: Some(Box::new(make_square_mask())),
             },
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3363,6 +3741,8 @@ mod tests {
                 visibility: Visibility::Preview,
                 mask: None,
             },
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
