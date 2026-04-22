@@ -238,6 +238,12 @@ subtree). Mask-editing mode switches the target to the mask subtree.
 Both previews show a persistent highlight indicating which one is the current
 editing target.
 
+The current implementation wires the editing-target state and highlight +
+click toggling, but drawing tools do not yet route new elements into the
+mask subtree — creating a shape while in mask-editing mode still adds to
+the selected layer. Threading the editing target through tool-dispatch is
+a follow-up.
+
 Primary clicks:
 
 - Click `OPACITY_PREVIEW` → make the element's content the editing target.

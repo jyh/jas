@@ -43,11 +43,32 @@ pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>
 
 // ---------------------------------------------------------------------------
 
+/// The target that drawing tools operate on. The default is the
+/// document's normal content; mask-editing mode switches the target
+/// to a specific element's mask subtree so new shapes land inside
+/// ``element.mask.subtree`` instead of the selected layer.
+/// OPACITY.md §Preview interactions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EditingTarget {
+    /// The document's normal content (default). Drawing tools add
+    /// to ``doc.layers[selected_layer].children``.
+    Content,
+    /// Mask-editing mode: the element at ``path`` has its mask
+    /// subtree as the drawing target. Entered by clicking
+    /// MASK_PREVIEW; exited by clicking OPACITY_PREVIEW.
+    Mask(Vec<usize>),
+}
+
 /// Per-tab state: each tab has its own document, tools, and clipboard.
 pub(crate) struct TabState {
     pub(crate) model: Model,
     pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
     pub(crate) clipboard: Vec<GeoElement>,
+    /// Mask-editing mode state. Defaults to ``Content``; flipped to
+    /// ``Mask(path)`` when the user clicks the Opacity panel's
+    /// MASK_PREVIEW and the selection has a mask. OPACITY.md
+    /// §Preview interactions.
+    pub(crate) editing_target: EditingTarget,
 }
 
 impl TabState {
@@ -75,7 +96,12 @@ impl TabState {
         tools.insert(ToolKind::Star, Box::new(StarTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));
         tools.insert(ToolKind::Lasso, Box::new(LassoTool::new()));
-        Self { model, tools, clipboard: Vec::new() }
+        Self {
+            model,
+            tools,
+            clipboard: Vec::new(),
+            editing_target: EditingTarget::Content,
+        }
     }
 }
 
@@ -2535,6 +2561,32 @@ mod opacity_panel_state_tests {
     fn default_new_masks_inverted_false() {
         let s = OpacityPanelState::default();
         assert!(!s.new_masks_inverted);
+    }
+}
+
+#[cfg(test)]
+mod editing_target_tests {
+    use super::*;
+
+    #[test]
+    fn tab_state_defaults_to_content_editing_target() {
+        // Default editing target is the document's normal content —
+        // mask-editing mode is entered explicitly via the
+        // MASK_PREVIEW click. OPACITY.md §Preview interactions.
+        let t = TabState::new();
+        assert_eq!(t.editing_target, EditingTarget::Content);
+    }
+
+    #[test]
+    fn editing_target_enter_and_exit_mask_mode() {
+        let mut t = TabState::new();
+        t.editing_target = EditingTarget::Mask(vec![0, 2, 1]);
+        match &t.editing_target {
+            EditingTarget::Mask(p) => assert_eq!(p, &vec![0, 2, 1]),
+            _ => panic!("expected Mask"),
+        }
+        t.editing_target = EditingTarget::Content;
+        assert_eq!(t.editing_target, EditingTarget::Content);
     }
 }
 

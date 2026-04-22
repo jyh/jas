@@ -16408,7 +16408,7 @@
                 "type": "placeholder",
                 "col": 3,
                 "summary": "Opacity preview",
-                "description": "Thumbnail of the selection. Phase-1 renders as a placeholder box in Flask; native apps render actual selection artwork.\n"
+                "description": "Thumbnail of the selection. Phase-1 renders as a placeholder box in Flask; native apps render actual selection artwork.\nClicking this preview sets the editing target to the element's main content (exits mask-editing mode) per OPACITY.md \u00a7Preview interactions. The native renderers draw a persistent highlight on this preview while it is the active editing target (i.e., while ``editing_target_is_mask`` is false).\n"
               },
               {
                 "id": "op_link_indicator",
@@ -16426,7 +16426,7 @@
                 "type": "placeholder",
                 "col": 3,
                 "summary": "Mask preview",
-                "description": "Thumbnail of the opacity mask (or an empty-mask glyph when no mask exists). Phase-1 renders as a placeholder box.\n"
+                "description": "Thumbnail of the opacity mask (or an empty-mask glyph when no mask exists). Phase-1 renders as a placeholder box.\nClicking this preview enters mask-editing mode per OPACITY.md \u00a7Preview interactions: the editing target switches to the first selected element's mask subtree, and subsequent tool drawing adds to ``element.mask.subtree`` instead of the active layer. Requires ``selection_has_mask``; a no-op otherwise. The native renderers draw a persistent highlight on this preview while mask-editing is active (``editing_target_is_mask`` is true).\n"
               },
               {
                 "type": "container",
