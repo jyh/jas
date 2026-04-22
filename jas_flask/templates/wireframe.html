@@ -14,12 +14,12 @@
 
 {% block scripts %}
 <script>
-  const JAS_STATE = {{ state_json | safe }};
-  const JAS_ACTIONS = {{ actions_json | safe }};
-  const JAS_SHORTCUTS = {{ shortcuts_json | safe }};
-  const JAS_PANE_CONFIGS = {{ positions_json | safe }};
-  const JAS_ICONS = {{ icons_json | safe }};
-  const JAS_THEME = {{ theme_json | safe }};
+  const APP_STATE = {{ state_json | safe }};
+  const APP_ACTIONS = {{ actions_json | safe }};
+  const APP_SHORTCUTS = {{ shortcuts_json | safe }};
+  const APP_PANE_CONFIGS = {{ positions_json | safe }};
+  const APP_ICONS = {{ icons_json | safe }};
+  const APP_THEME = {{ theme_json | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% endblock %}
