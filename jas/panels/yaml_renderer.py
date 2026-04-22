@@ -1230,6 +1230,63 @@ def _render_element_preview(el, store, ctx, dispatch_fn):
 
 def _render_placeholder(el, store, ctx, dispatch_fn):
     summary = el.get("summary", el.get("type", "?"))
+    # Opacity panel previews (OPACITY.md §Preview interactions):
+    # op_preview / op_mask_preview handle click to switch the
+    # editing target and render a persistent highlight on the
+    # active target. Mirrors the Rust / Swift / OCaml special-cases.
+    panel_id = ctx.get("_panel_id")
+    el_id = el.get("id", "")
+    is_opacity_preview = (
+        panel_id == "opacity_panel_content"
+        and el_id in ("op_preview", "op_mask_preview")
+    )
+    if is_opacity_preview:
+        eval_ctx = store.eval_context(ctx)
+        editing_mask = evaluate("editing_target_is_mask", eval_ctx).to_bool()
+        has_mask = evaluate("selection_has_mask", eval_ctx).to_bool()
+        is_mask_preview = el_id == "op_mask_preview"
+        # Highlight whichever preview matches the current editing
+        # target: op_preview in content-mode, op_mask_preview in
+        # mask-mode.
+        highlight = editing_mask == is_mask_preview
+        label = QLabel(f"[{summary}]")
+        label.setAlignment(Qt.AlignCenter)
+        label.setMinimumHeight(30)
+        if highlight:
+            label.setStyleSheet(
+                "QLabel { border: 2px solid #4a90d9; }"
+            )
+        else:
+            label.setStyleSheet(
+                "QLabel { border: 2px solid transparent; }"
+            )
+        # MASK_PREVIEW click requires the selection to have a mask;
+        # otherwise the click is a no-op.
+        click_enabled = (not is_mask_preview) or has_mask
+        get_model = ctx.get("_get_model")
+        def _on_click(_evt):
+            if not click_enabled:
+                return
+            model = get_model() if callable(get_model) else None
+            if model is None:
+                return
+            from document.model import EditingTarget
+            if is_mask_preview:
+                first = next(iter(sorted(
+                    (es.path for es in model.document.selection),
+                    key=lambda p: p,
+                )), None)
+                if first is None:
+                    return
+                model.editing_target = EditingTarget.mask(first)
+            else:
+                model.editing_target = EditingTarget.content()
+            # Bump the panel-state version so the panel re-renders
+            # with the new highlight.
+            model.panel_state_version = getattr(
+                model, "panel_state_version", 0) + 1
+        label.mousePressEvent = _on_click
+        return label
     label = QLabel(f"[{summary}]")
     label.setAlignment(Qt.AlignCenter)
     label.setMinimumHeight(30)

@@ -198,14 +198,14 @@ def sync_document_to_store(model, store) -> None:
 
 
 def build_selection_predicates(model) -> dict:
-    """Return the OPACITY.md §States / §Document model predicates
-    at top-level for the yaml eval context:
+    """Return the OPACITY.md §States / §Document model / §Preview
+    interactions predicates at top-level for the yaml eval context:
     ``selection_has_mask``, ``selection_mask_clip``,
-    ``selection_mask_invert``, ``selection_mask_linked``. Mixed
-    selections count as no-mask; the mask fields come from the
-    first selected element's mask and drive the "first-wins"
-    bindings on CLIP_CHECKBOX / INVERT_MASK_CHECKBOX /
-    LINK_INDICATOR.
+    ``selection_mask_invert``, ``selection_mask_linked``,
+    ``editing_target_is_mask``. Mixed selections count as no-mask;
+    the mask fields come from the first selected element's mask
+    and drive the "first-wins" bindings on CLIP_CHECKBOX /
+    INVERT_MASK_CHECKBOX / LINK_INDICATOR.
 
     Mirrors ``build_selection_predicates`` in ``jas_dioxus``.
     """
@@ -218,13 +218,17 @@ def build_selection_predicates(model) -> dict:
             # the linked glyph when no mask exists — matches the
             # "new masks are linked" spec default.
             "selection_mask_linked": True,
+            "editing_target_is_mask": False,
         }
     from document.controller import selection_has_mask, first_mask
     doc = model.document
     first = first_mask(doc)
+    editing_target = getattr(model, "editing_target", None)
+    editing_mask = bool(editing_target and editing_target.is_mask)
     return {
         "selection_has_mask": selection_has_mask(doc),
         "selection_mask_clip": first.clip if first else False,
         "selection_mask_invert": first.invert if first else False,
         "selection_mask_linked": first.linked if first else True,
+        "editing_target_is_mask": editing_mask,
     }
