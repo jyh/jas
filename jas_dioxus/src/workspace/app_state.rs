@@ -1058,6 +1058,88 @@ impl AppState {
         }
     }
 
+    /// Apply the current gradient panel state to the selected element(s).
+    ///
+    /// Builds a Gradient from the panel fields and writes it into either
+    /// `fill_gradient` or `stroke_gradient` on each selected element
+    /// (per `state.fill_on_top`). Phase 5 — the inverse of
+    /// `sync_gradient_panel_from_selection`.
+    ///
+    /// Fill-type coupling per GRADIENT.md §Fill-type coupling: when the
+    /// active attribute is solid/none and a panel edit triggers the
+    /// promotion path, the seed gradient (from preview state) is what
+    /// gets applied. The Fill / Stroke values themselves are left
+    /// alone — the gradient field overrides paint at render time, but
+    /// `fill.color` / `stroke.color` remain as the demote-target colour.
+    pub(crate) fn apply_gradient_panel_to_selection(&mut self) {
+        use crate::geometry::element::{
+            Gradient, GradientType, GradientMethod, StrokeSubMode,
+        };
+        let gp = &self.gradient_panel;
+        let gtype = match gp.gtype.as_str() {
+            "radial" => GradientType::Radial,
+            "freeform" => GradientType::Freeform,
+            _ => GradientType::Linear,
+        };
+        let gmethod = match gp.method.as_str() {
+            "smooth" => GradientMethod::Smooth,
+            "points" => GradientMethod::Points,
+            "lines" => GradientMethod::Lines,
+            _ => GradientMethod::Classic,
+        };
+        let gsub = match gp.stroke_sub_mode.as_str() {
+            "along" => StrokeSubMode::Along,
+            "across" => StrokeSubMode::Across,
+            _ => StrokeSubMode::Within,
+        };
+        let g = Gradient {
+            gtype,
+            angle: gp.angle,
+            aspect_ratio: gp.aspect_ratio,
+            method: gmethod,
+            dither: gp.dither,
+            stroke_sub_mode: gsub,
+            stops: gp.stops.clone(),
+            nodes: Vec::new(),
+        };
+        let fill_on_top = self.fill_on_top;
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if !tab.model.document().selection.is_empty() {
+                tab.model.snapshot();
+                let boxed = Some(Box::new(g));
+                if fill_on_top {
+                    Controller::set_selection_fill_gradient(&mut tab.model, boxed);
+                } else {
+                    Controller::set_selection_stroke_gradient(&mut tab.model, boxed);
+                }
+            }
+        }
+        // First-edit-after-promotion clears the preview-state flag so
+        // the panel UI removes its "not applied" indicator.
+        self.gradient_panel.preview_state = false;
+    }
+
+    /// Demote the selection's active-attribute gradient back to a solid
+    /// color. The new solid color is taken from the current
+    /// `fill.color` / `stroke.color` if present (see
+    /// GRADIENT.md §Fill-type coupling, demote-from-gradient rule —
+    /// "first stop's color" is the spec but the existing solid color
+    /// is functionally equivalent here since the seed-on-promote rule
+    /// kept the original solid as `fill.color`).
+    pub(crate) fn demote_gradient_panel_selection(&mut self) {
+        let fill_on_top = self.fill_on_top;
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if !tab.model.document().selection.is_empty() {
+                tab.model.snapshot();
+                if fill_on_top {
+                    Controller::set_selection_fill_gradient(&mut tab.model, None);
+                } else {
+                    Controller::set_selection_stroke_gradient(&mut tab.model, None);
+                }
+            }
+        }
+    }
+
     /// Sync gradient panel state from the selection's active attribute
     /// (fill or stroke per `fill_on_top`). When the selection is uniform
     /// on a single gradient, panel fields populate from it. When mixed,
