@@ -162,7 +162,38 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
     summary = el.get("summary", "")
     btn = QPushButton(summary)
     btn.setFlat(True)
+    # bind.icon: expression whose evaluated string names the icon
+    # glyph. Python's icon_button currently shows the summary as
+    # its label rather than the glyph; the resolved icon name is
+    # evaluated here so a future glyph-rendering pass can pick it
+    # up without another YAML change. Used by op_link_indicator to
+    # flip between ``link_linked`` / ``link_unlinked`` as
+    # mask.linked changes.
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    icon_expr = bind.get("icon") if isinstance(bind.get("icon"), str) else None
+    if icon_expr:
+        evaluate(icon_expr, store.eval_context(ctx))
+    _wire_opacity_link_indicator_click(btn, el, ctx)
     return btn
+
+
+def _wire_opacity_link_indicator_click(btn: QPushButton, el: dict, ctx: dict):
+    """Opacity panel: op_link_indicator click toggles mask.linked
+    on every selected mask via Controller. OPACITY.md §Document
+    model. Mirrors the Rust / Swift / OCaml special-cases.
+    """
+    if ctx.get("_panel_id") != "opacity_panel_content":
+        return
+    if el.get("id") != "op_link_indicator":
+        return
+    get_model = ctx.get("_get_model")
+    def _on_click():
+        model = get_model() if callable(get_model) else None
+        if model is None:
+            return
+        from document.controller import Controller
+        Controller(model=model).toggle_mask_linked_on_selection()
+    btn.clicked.connect(lambda _=None: _on_click())
 
 
 def _render_slider(el, store, ctx, dispatch_fn):
