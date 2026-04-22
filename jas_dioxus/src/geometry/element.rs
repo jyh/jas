@@ -349,6 +349,125 @@ pub enum LineJoin {
     Bevel,
 }
 
+/// Gradient type: linear (along a vector), radial (from a center), or
+/// freeform (from 2-D scattered nodes). See `transcripts/GRADIENT.md`
+/// §Gradient types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GradientType {
+    #[default]
+    Linear,
+    Radial,
+    Freeform,
+}
+
+/// Gradient interpolation / topology method. Semantics depend on the
+/// gradient type — `classic` / `smooth` apply to linear/radial;
+/// `points` / `lines` apply to freeform. See GRADIENT.md §Method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GradientMethod {
+    #[default]
+    Classic,
+    Smooth,
+    Points,
+    Lines,
+}
+
+/// Stroke sub-mode — how a gradient on a stroke maps onto the path.
+/// See GRADIENT.md §Stroke sub-modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeSubMode {
+    #[default]
+    Within,
+    Along,
+    Across,
+}
+
+/// A single color stop inside a linear/radial gradient.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GradientStop {
+    pub color: Color,
+    /// Opacity 0–100 (percentage).
+    pub opacity: f64,
+    /// Location 0–100 (percentage along the gradient strip).
+    pub location: f64,
+    /// Midpoint between this stop and the next, stored as a
+    /// percentage-between value (0–100, where 50 = halfway).
+    /// Ignored on the last stop.
+    #[serde(default = "default_midpoint")]
+    pub midpoint_to_next: f64,
+}
+
+fn default_midpoint() -> f64 {
+    50.0
+}
+
+/// A single node of a freeform gradient.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GradientNode {
+    /// Position in the element's bounding box, normalized to [0, 1].
+    pub x: f64,
+    pub y: f64,
+    pub color: Color,
+    /// Opacity 0–100 (percentage).
+    pub opacity: f64,
+    /// Spread radius 0–100 (percentage of bounding-box diagonal).
+    pub spread: f64,
+}
+
+/// A gradient value that can be used as a fill or stroke.
+///
+/// Gradients are inline on the element — `Fill.gradient` / `Stroke.gradient`
+/// carry an `Option<Gradient>`. When present the element is painted with
+/// the gradient; when None the `color` field of Fill/Stroke is used.
+/// See GRADIENT.md §Document model.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Gradient {
+    #[serde(rename = "type", default)]
+    pub gtype: GradientType,
+    /// Angle in degrees, −180..+180. Linear/radial only. Default 0.
+    #[serde(default)]
+    pub angle: f64,
+    /// Aspect ratio as a percentage, 1–1000. Linear/radial only.
+    /// 100 = isotropic (circle for radial). Default 100.
+    #[serde(default = "default_aspect_ratio")]
+    pub aspect_ratio: f64,
+    #[serde(default)]
+    pub method: GradientMethod,
+    #[serde(default)]
+    pub dither: bool,
+    /// Stroke sub-mode. Applies when this gradient is on a stroke.
+    #[serde(default)]
+    pub stroke_sub_mode: StrokeSubMode,
+    /// Stops for linear/radial gradients. Empty for freeform.
+    #[serde(default)]
+    pub stops: Vec<GradientStop>,
+    /// Nodes for freeform gradients. Empty for linear/radial.
+    #[serde(default)]
+    pub nodes: Vec<GradientNode>,
+}
+
+fn default_aspect_ratio() -> f64 {
+    100.0
+}
+
+impl Default for Gradient {
+    fn default() -> Self {
+        Self {
+            gtype: GradientType::default(),
+            angle: 0.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::default(),
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::default(),
+            stops: Vec::new(),
+            nodes: Vec::new(),
+        }
+    }
+}
+
 /// SVG fill presentation attribute.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Fill {
@@ -2350,6 +2469,107 @@ pub fn with_width_points(elem: &Element, width_points: Vec<StrokeWidthPoint>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gradient_json_roundtrip_linear() {
+        let g = Gradient {
+            gtype: GradientType::Linear,
+            angle: 45.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::Classic,
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop {
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+                },
+                GradientStop {
+                    color: Color::rgb(0.0, 0.0, 1.0),
+                    opacity: 100.0, location: 100.0, midpoint_to_next: 50.0,
+                },
+            ],
+            nodes: Vec::new(),
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        let parsed: Gradient = serde_json::from_str(&json).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn gradient_json_roundtrip_radial_with_midpoints_method_dither() {
+        let g = Gradient {
+            gtype: GradientType::Radial,
+            angle: 0.0,
+            aspect_ratio: 200.0,
+            method: GradientMethod::Smooth,
+            dither: true,
+            stroke_sub_mode: StrokeSubMode::Across,
+            stops: vec![
+                GradientStop { color: Color::rgb(1.0, 1.0, 0.0), opacity: 100.0, location: 0.0,  midpoint_to_next: 30.0 },
+                GradientStop { color: Color::rgb(0.5, 0.0, 0.5), opacity:  50.0, location: 50.0, midpoint_to_next: 70.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 0.0), opacity:   0.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        let parsed: Gradient = serde_json::from_str(&json).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn gradient_json_roundtrip_freeform() {
+        let g = Gradient {
+            gtype: GradientType::Freeform,
+            angle: 0.0,
+            aspect_ratio: 100.0,
+            method: GradientMethod::Points,
+            dither: false,
+            stroke_sub_mode: StrokeSubMode::Within,
+            stops: Vec::new(),
+            nodes: vec![
+                GradientNode { x: 0.25, y: 0.25, color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, spread: 30.0 },
+                GradientNode { x: 0.75, y: 0.75, color: Color::rgb(0.0, 0.0, 1.0), opacity: 100.0, spread: 25.0 },
+            ],
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        let parsed: Gradient = serde_json::from_str(&json).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn gradient_serde_field_names() {
+        // Verify wire format matches GRADIENT.md §Document model:
+        // type → "linear"/"radial"/"freeform"; method → "classic"/"smooth"/"points"/"lines";
+        // stroke_sub_mode → "within"/"along"/"across".
+        let g = Gradient::default();
+        let json = serde_json::to_string(&g).unwrap();
+        assert!(json.contains(r#""type":"linear""#), "json={json}");
+        assert!(json.contains(r#""method":"classic""#), "json={json}");
+        assert!(json.contains(r#""stroke_sub_mode":"within""#), "json={json}");
+    }
+
+    #[test]
+    fn gradient_stop_default_midpoint() {
+        // midpoint_to_next defaults to 50 when absent on parse. Color uses
+        // the same on-disk encoding as elsewhere in the document model
+        // (see geometry::test_json::parse_color).
+        let g = Gradient {
+            stops: vec![GradientStop {
+                color: Color::rgb(1.0, 0.0, 0.0),
+                opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+            }],
+            ..Gradient::default()
+        };
+        let json = serde_json::to_string(&g).unwrap();
+        // Round-trips cleanly:
+        let _: Gradient = serde_json::from_str(&json).unwrap();
+        // And midpoint defaults if missing — synthesise a JSON without it
+        // by string-replacing.
+        let no_mid = json.replace(r#","midpoint_to_next":50.0"#, "");
+        let parsed: Gradient = serde_json::from_str(&no_mid).unwrap();
+        assert_eq!(parsed.stops[0].midpoint_to_next, 50.0);
+    }
 
     fn rect(x: f64, y: f64, w: f64, h: f64) -> Element {
         Element::Rect(RectElem {
