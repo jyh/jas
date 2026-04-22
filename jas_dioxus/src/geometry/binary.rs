@@ -678,6 +678,7 @@ fn unpack_element(v: &Value) -> Element {
             stroke: unpack_stroke(&arr[9]),
             width_points: if arr.len() > 10 { unpack_width_points(&arr[10]) } else { vec![] },
             common,
+                    stroke_gradient: None,
         }),
         TAG_RECT => Element::Rect(RectElem {
             x: as_f64(&arr[5]), y: as_f64(&arr[6]),
@@ -685,17 +686,23 @@ fn unpack_element(v: &Value) -> Element {
             rx: as_f64(&arr[9]), ry: as_f64(&arr[10]),
             fill: unpack_fill(&arr[11]), stroke: unpack_stroke(&arr[12]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         TAG_CIRCLE => Element::Circle(CircleElem {
             cx: as_f64(&arr[5]), cy: as_f64(&arr[6]), r: as_f64(&arr[7]),
             fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         TAG_ELLIPSE => Element::Ellipse(EllipseElem {
             cx: as_f64(&arr[5]), cy: as_f64(&arr[6]),
             rx: as_f64(&arr[7]), ry: as_f64(&arr[8]),
             fill: unpack_fill(&arr[9]), stroke: unpack_stroke(&arr[10]),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         TAG_POLYLINE => {
             let points: Vec<(f64, f64)> = as_array(&arr[5]).iter()
@@ -704,6 +711,8 @@ fn unpack_element(v: &Value) -> Element {
                 points,
                 fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             })
         }
         TAG_POLYGON => {
@@ -713,6 +722,8 @@ fn unpack_element(v: &Value) -> Element {
                 points,
                 fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             })
         }
         TAG_PATH => {
@@ -723,6 +734,8 @@ fn unpack_element(v: &Value) -> Element {
                 fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
                 width_points: if arr.len() > 8 { unpack_width_points(&arr[8]) } else { vec![] },
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             })
         }
         TAG_TEXT => {

@@ -340,12 +340,15 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
             stroke,
             width_points: vec![],
             common,
+                    stroke_gradient: None,
         }),
         RecognizedShape::Triangle { pts } => Element::Polygon(PolygonElem {
             points: pts.to_vec(),
             fill,
             stroke,
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         RecognizedShape::Rectangle { x, y, w, h } => Element::Rect(RectElem {
             x,
@@ -357,6 +360,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
             fill,
             stroke,
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         RecognizedShape::RoundRect { x, y, w, h, r } => Element::Rect(RectElem {
             x,
@@ -368,6 +373,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
             fill,
             stroke,
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         RecognizedShape::Circle { cx, cy, r } => Element::Circle(CircleElem {
             cx,
@@ -376,6 +383,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
             fill,
             stroke,
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         RecognizedShape::Ellipse { cx, cy, rx, ry } => Element::Ellipse(EllipseElem {
             cx,
@@ -385,6 +394,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
             fill,
             stroke,
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         RecognizedShape::Arrow {
             tail,
@@ -416,6 +427,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
                 fill,
                 stroke,
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             })
         }
         RecognizedShape::Scribble { ref points } => Element::Polyline(PolylineElem {
@@ -423,6 +436,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
             fill: None,
             stroke,
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         }),
         RecognizedShape::Lemniscate { center, a, horizontal } => {
             // Sample the Gerono parametrization densely as a closed
@@ -454,6 +469,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
                 stroke,
                 width_points: vec![],
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             })
         }
     }
@@ -1809,6 +1826,8 @@ mod tests {
                 visibility: Visibility::Preview,
                 mask: None,
             },
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let shape = RecognizedShape::Rectangle {
             x: 10.0,
@@ -1838,6 +1857,8 @@ mod tests {
             stroke: None,
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let shape = RecognizedShape::RoundRect {
             x: 0.0,
@@ -1863,6 +1884,8 @@ mod tests {
             stroke: None,
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let shape = RecognizedShape::Arrow {
             tail: (0.0, 0.0),
@@ -1965,6 +1988,8 @@ mod tests {
             stroke: None,
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let shape = RecognizedShape::Scribble {
             points: vec![(0.0, 0.0), (10.0, 20.0), (20.0, 0.0), (30.0, 20.0), (40.0, 0.0)],
@@ -1986,6 +2011,7 @@ mod tests {
         let elem = Element::Line(LineElem {
             x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
             stroke: None, width_points: Vec::new(), common: CommonProps::default(),
+                    stroke_gradient: None,
         });
         assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
     }
@@ -1995,6 +2021,8 @@ mod tests {
         let elem = Element::Rect(RectElem {
             x: 0.0, y: 0.0, width: 100.0, height: 60.0, rx: 0.0, ry: 0.0,
             fill: None, stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
     }
@@ -2004,6 +2032,8 @@ mod tests {
         let elem = Element::Circle(CircleElem {
             cx: 50.0, cy: 50.0, r: 30.0,
             fill: None, stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
     }
@@ -2013,6 +2043,8 @@ mod tests {
         let elem = Element::Polygon(PolygonElem {
             points: vec![(0.0, 0.0), (100.0, 0.0), (50.0, 86.6)],
             fill: None, stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
     }
@@ -2027,6 +2059,8 @@ mod tests {
         }).collect();
         let elem = Element::Path(PathElem {
             d, fill: None, stroke: None, width_points: Vec::new(), common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Circle(_))) => {
@@ -2045,6 +2079,8 @@ mod tests {
         }).collect();
         let elem = Element::Path(PathElem {
             d, fill: None, stroke: None, width_points: Vec::new(), common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Rect(_))) => {

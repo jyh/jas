@@ -1320,6 +1320,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             stroke: parse_stroke(node),
             width_points: vec![],
             common,
+                    stroke_gradient: None,
         })),
         "rect" => Some(Element::Rect(RectElem {
             x: pt(get_f(node, "x", 0.0)),
@@ -1331,6 +1332,8 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             fill: parse_fill(node),
             stroke: parse_stroke(node),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         })),
         "circle" => Some(Element::Circle(CircleElem {
             cx: pt(get_f(node, "cx", 0.0)),
@@ -1339,6 +1342,8 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             fill: parse_fill(node),
             stroke: parse_stroke(node),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         })),
         "ellipse" => Some(Element::Ellipse(EllipseElem {
             cx: pt(get_f(node, "cx", 0.0)),
@@ -1348,6 +1353,8 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             fill: parse_fill(node),
             stroke: parse_stroke(node),
             common,
+                    fill_gradient: None,
+            stroke_gradient: None,
         })),
         "polyline" => {
             let pts = parse_points(get_s(node, "points", ""));
@@ -1356,6 +1363,8 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 fill: parse_fill(node),
                 stroke: parse_stroke(node),
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             }))
         }
         "polygon" => {
@@ -1365,6 +1374,8 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 fill: parse_fill(node),
                 stroke: parse_stroke(node),
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             }))
         }
         "path" => {
@@ -1375,6 +1386,8 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 stroke: parse_stroke(node),
                 width_points: vec![],
                 common,
+                            fill_gradient: None,
+                stroke_gradient: None,
             }))
         }
         "text" => {
@@ -1694,6 +1707,8 @@ mod tests {
             x, y, width: w, height: h, rx: 0.0, ry: 0.0,
             fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -1703,6 +1718,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    stroke_gradient: None,
         })
     }
 
@@ -1711,6 +1727,8 @@ mod tests {
             cx, cy, r,
             fill: Some(Fill::new(Color::rgb(0.0, 0.0, 1.0))),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -1766,6 +1784,8 @@ mod tests {
             fill: Some(Fill::new(Color::WHITE)),
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let svg = document_to_svg(&doc);
         assert!(svg.contains("rx=\""), "expected rx attribute in: {svg}");
@@ -1788,6 +1808,8 @@ mod tests {
             fill: Some(Fill::new(Color::WHITE)),
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let svg = document_to_svg(&doc);
         let doc2 = svg_to_document(&svg);
@@ -1989,6 +2011,8 @@ mod tests {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(Fill { color: Color::rgb(1.0, 0.0, 0.0), opacity: 0.5 }),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let svg = document_to_svg(&doc);
         assert!(svg.contains("fill-opacity=\"0.5\""), "svg={svg}");
@@ -2001,6 +2025,8 @@ mod tests {
             fill: None,
             stroke: Some(Stroke { opacity: 0.4, ..Stroke::new(Color::BLACK, 1.0) }),
             common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let svg = document_to_svg(&doc);
         assert!(svg.contains("stroke-opacity=\"0.4\""), "svg={svg}");
@@ -2025,6 +2051,8 @@ mod tests {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 1.0 }),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let doc2 = normalize_document(&doc);
         let children = doc2.layers[0].children().unwrap();
@@ -2044,6 +2072,8 @@ mod tests {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 0.8 }),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let doc2 = normalize_document(&doc);
         let children = doc2.layers[0].children().unwrap();
@@ -2064,6 +2094,7 @@ mod tests {
             stroke: Some(Stroke::new(Color::new(0.0, 0.0, 0.0, 0.25), 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    stroke_gradient: None,
         })]);
         let doc2 = normalize_document(&doc);
         let children = doc2.layers[0].children().unwrap();
@@ -2097,6 +2128,8 @@ mod tests {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 1.0 }),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(inner)],
@@ -2124,6 +2157,8 @@ mod tests {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 0.8 }),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let doc2 = normalize_document(&doc);
         let doc3 = normalize_document(&doc2);
@@ -2143,6 +2178,8 @@ mod tests {
             x: 10.0, y: 20.0, width: 30.0, height: 40.0, rx: 0.0, ry: 0.0,
             fill: Some(Fill { color: Color::rgb(1.0, 0.0, 0.0), opacity: 0.5 }),
             stroke: None, common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })]);
         let svg = document_to_svg(&doc);
         let doc2 = svg_to_document(&svg);

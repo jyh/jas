@@ -1961,6 +1961,8 @@ mod tests {
                 visibility: Visibility::Preview,
                 mask: None,
             },
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 

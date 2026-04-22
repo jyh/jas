@@ -244,6 +244,8 @@ impl SmoothTool {
                 stroke: path_elem.stroke,
                 width_points: path_elem.width_points.clone(),
                 common: path_elem.common.clone(),
+                            fill_gradient: None,
+                stroke_gradient: None,
             });
             new_doc = new_doc.replace_element(path, new_elem);
             changed = true;
@@ -434,6 +436,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -458,6 +462,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -792,6 +798,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
 
         let mut model = Model::default();
@@ -827,6 +835,8 @@ mod tests {
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         Controller::add_element(&mut model, rect);
         // Element is auto-selected by add_element.

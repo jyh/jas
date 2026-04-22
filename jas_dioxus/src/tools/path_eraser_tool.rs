@@ -130,6 +130,8 @@ impl PathEraserTool {
                                 stroke: path_elem.stroke,
                                 width_points: path_elem.width_points.clone(),
                                 common: CommonProps::default(),
+                                                            fill_gradient: None,
+                                stroke_gradient: None,
                             });
                             layer_children.insert(ci, Rc::new(new_path));
                         }
@@ -540,6 +542,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -555,6 +559,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -571,6 +577,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         })
     }
 
@@ -707,6 +715,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         crate::document::controller::Controller::add_element(&mut model, path);
 
@@ -747,6 +757,8 @@ mod tests {
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             width_points: Vec::new(),
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         crate::document::controller::Controller::add_element(&mut model, path);
 

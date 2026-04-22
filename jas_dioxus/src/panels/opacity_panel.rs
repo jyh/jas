@@ -297,6 +297,8 @@ mod tests {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: None, stroke: None,
             common: CommonProps::default(),
+                    fill_gradient: None,
+            stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
             name: "L0".into(),
