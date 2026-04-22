@@ -129,8 +129,26 @@ impl Default for BooleanOptions {
 pub struct Controller;
 
 impl Controller {
-    /// Add an element to the selected layer and select it as a whole.
+    /// Add an element to the current editing target and select the
+    /// new element. In content-mode (the default), the element is
+    /// appended to the selected layer. In mask-editing mode
+    /// (OPACITY.md §Preview interactions) the element is appended
+    /// to the masked element's mask subtree instead — mask-mode
+    /// falls back to the layer path when the mask subtree isn't a
+    /// Group (shouldn't happen with masks created via
+    /// [`Controller::make_mask_on_selection`], but protects against
+    /// externally-built masks).
     pub fn add_element(model: &mut Model, element: Element) {
+        // Fast-path the content case first so the common flow stays
+        // cheap.
+        if let crate::document::model::EditingTarget::Mask(path) = model.editing_target.clone() {
+            if Self::add_element_to_mask(model, element.clone(), &path) {
+                return;
+            }
+            // Mask subtree wasn't a container that accepts children
+            // (e.g. a raw shape). Fall through to layer-append so the
+            // user's stroke isn't lost.
+        }
         let doc = model.document().clone();
         let idx = doc.selected_layer;
         let _n = control_point_count(&element);
@@ -145,6 +163,45 @@ impl Controller {
         };
         new_doc.selection = vec![ElementSelection::all(vec![idx, child_idx])];
         model.set_document(new_doc);
+    }
+
+    /// Append ``element`` to the mask subtree of the element at
+    /// ``path`` and move the selection onto the new element inside
+    /// the subtree. Returns ``true`` when the append succeeded,
+    /// ``false`` when the target element has no mask or the mask
+    /// subtree root doesn't accept children — the caller then falls
+    /// back to layer-append. OPACITY.md §Preview interactions.
+    fn add_element_to_mask(model: &mut Model, element: Element, path: &[usize]) -> bool {
+        let doc = model.document().clone();
+        let Some(target) = doc.get_element(&path.to_vec()) else { return false };
+        if target.common().mask.is_none() {
+            return false;
+        }
+        let mut new_target = target.clone();
+        let child_idx = {
+            let Some(mask_box) = new_target.common_mut().mask.as_mut() else {
+                return false;
+            };
+            // Mask.subtree is a ``Box<Element>``; only container
+            // elements (Group / Layer / …) have [`children_mut`]. If
+            // the mask root is e.g. a bare Rect, we can't append —
+            // tell the caller to fall through.
+            let Some(children) = mask_box.subtree.children_mut() else {
+                return false;
+            };
+            let ci = children.len();
+            children.push(Rc::new(element));
+            ci
+        };
+        let mut new_doc = doc.replace_element(&path.to_vec(), new_target);
+        // Build the selection path for the newly-added element: it
+        // lives at ``<mask-target-path>/__mask/<child_idx>``. We
+        // don't have a canonical path encoding for "inside a mask",
+        // so for selection purposes we select the mask-target
+        // element itself — good enough for phase 1.
+        new_doc.selection = vec![ElementSelection::all(path.to_vec())];
+        model.set_document(new_doc);
+        true
     }
 
     /// Select all elements whose bounds intersect the given rectangle.
@@ -1756,6 +1813,69 @@ mod tests {
         let original_count = model.document().layers[0].children().unwrap().len();
         Controller::add_element(&mut model, make_rect(50.0, 50.0, 5.0, 5.0));
         assert_eq!(model.document().layers[0].children().unwrap().len(), original_count + 1);
+    }
+
+    // ── Mask editor routing (OPACITY.md §Preview interactions) ──
+
+    #[test]
+    fn add_element_mask_mode_routes_into_mask_subtree() {
+        // Build a model with one rect selected, create a mask on it,
+        // then flip into mask-edit mode and add a second element.
+        // The second element should land inside the mask subtree,
+        // not on the layer.
+        use crate::document::model::EditingTarget;
+        let mut model = setup_model();
+        Controller::select_rect(&mut model, -1.0, -1.0, 12.0, 12.0, false);
+        Controller::make_mask_on_selection(&mut model, true, false);
+        // Selection path of the masked element is [0, 0] (first
+        // child of the only layer).
+        let mask_path = vec![0, 0];
+        let layer_count_before = model.document().layers[0].children().unwrap().len();
+        model.editing_target = EditingTarget::Mask(mask_path.clone());
+
+        Controller::add_element(&mut model, make_rect(100.0, 100.0, 5.0, 5.0));
+
+        // Layer child count unchanged.
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            layer_count_before
+        );
+        // Mask subtree now has exactly one child: the rect we added.
+        let elem = model.document().get_element(&mask_path).unwrap();
+        let mask = elem.common().mask.as_ref().expect("mask exists");
+        let subtree_children = mask.subtree.children()
+            .expect("mask subtree is a Group with children");
+        assert_eq!(subtree_children.len(), 1);
+        assert!(matches!(&*subtree_children[0], Element::Rect(_)));
+    }
+
+    #[test]
+    fn add_element_mask_mode_falls_back_when_no_mask() {
+        // editing_target says Mask(path) but the element at path
+        // has no mask. Falls back to layer-append so the user's
+        // stroke isn't lost.
+        use crate::document::model::EditingTarget;
+        let mut model = setup_model();
+        let layer_count_before = model.document().layers[0].children().unwrap().len();
+        model.editing_target = EditingTarget::Mask(vec![0, 0]);
+        Controller::add_element(&mut model, make_rect(100.0, 100.0, 5.0, 5.0));
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            layer_count_before + 1
+        );
+    }
+
+    #[test]
+    fn add_element_content_mode_ignores_editing_target() {
+        // Sanity check that content-mode (the default) appends to
+        // the layer as before, regardless of mask presence.
+        let mut model = setup_model();
+        let layer_count_before = model.document().layers[0].children().unwrap().len();
+        Controller::add_element(&mut model, make_rect(10.0, 10.0, 1.0, 1.0));
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            layer_count_before + 1
+        );
     }
 
     #[test]

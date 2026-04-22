@@ -19,6 +19,18 @@ fn fresh_filename() -> String {
     format!("Untitled-{n}")
 }
 
+/// The target that drawing tools operate on. The default is the
+/// document's normal content; mask-editing mode switches the target
+/// to a specific element's mask subtree so new shapes land inside
+/// ``element.mask.subtree`` instead of the selected layer. Mirrors
+/// the Swift / OCaml / Python ``EditingTarget`` counterparts.
+/// OPACITY.md §Preview interactions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditingTarget {
+    Content,
+    Mask(Vec<usize>),
+}
+
 /// Holds an immutable Document with undo/redo support.
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -36,6 +48,17 @@ pub struct Model {
     /// Per-document list of recently committed colors (hex strings, no #),
     /// newest first. Max 10 entries.
     pub recent_colors: Vec<String>,
+    /// Mask-editing mode state. ``Content`` is the default; flipped
+    /// to ``Mask(path)`` when the user clicks the Opacity panel's
+    /// MASK_PREVIEW and the selection has a mask. Drives where
+    /// [`Controller::add_element`] places new tool-drawn shapes.
+    /// OPACITY.md §Preview interactions.
+    pub editing_target: EditingTarget,
+    /// Mask-isolation path. When ``Some(path)``, the canvas renders
+    /// only the mask subtree of the element at ``path``. Entered by
+    /// Alt/Option-clicking MASK_PREVIEW. OPACITY.md §Preview
+    /// interactions.
+    pub mask_isolation_path: Option<Vec<usize>>,
 }
 
 impl Default for Model {
@@ -52,6 +75,8 @@ impl Default for Model {
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
+            editing_target: EditingTarget::Content,
+            mask_isolation_path: None,
         }
     }
 }
@@ -73,6 +98,8 @@ impl Model {
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
+            editing_target: EditingTarget::Content,
+            mask_isolation_path: None,
         }
     }
 
