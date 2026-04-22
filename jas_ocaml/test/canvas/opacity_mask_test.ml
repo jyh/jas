@@ -1,4 +1,4 @@
-(* Track C phase 1 — opacity mask compositing unit tests.
+(* Track C — opacity mask compositing unit tests.
 
    Isolated from the GTK-dependent [canvas_test.ml] so the mask
    logic can be asserted without initialising a GTK display. *)
@@ -16,37 +16,45 @@ let test_mask ~clip ~invert ~disabled : Element.mask =
   }
 
 let tests = [
-  Alcotest.test_case "mask_composite_op_clip_not_inverted_is_DEST_IN" `Quick (fun () ->
+  Alcotest.test_case "mask_plan_clip_not_inverted_is_Clip_in" `Quick (fun () ->
     let m = test_mask ~clip:true ~invert:false ~disabled:false in
-    match Jas.Canvas_subwindow.mask_composite_op m with
-    | Some Cairo.DEST_IN -> ()
-    | _ -> Alcotest.fail "expected Some DEST_IN");
+    match Canvas_subwindow.mask_plan m with
+    | Some Canvas_subwindow.Clip_in -> ()
+    | _ -> Alcotest.fail "expected Some Clip_in");
 
-  Alcotest.test_case "mask_composite_op_clip_inverted_is_DEST_OUT" `Quick (fun () ->
+  Alcotest.test_case "mask_plan_clip_inverted_is_Clip_out" `Quick (fun () ->
     let m = test_mask ~clip:true ~invert:true ~disabled:false in
-    match Jas.Canvas_subwindow.mask_composite_op m with
-    | Some Cairo.DEST_OUT -> ()
-    | _ -> Alcotest.fail "expected Some DEST_OUT");
+    match Canvas_subwindow.mask_plan m with
+    | Some Canvas_subwindow.Clip_out -> ()
+    | _ -> Alcotest.fail "expected Some Clip_out");
 
-  Alcotest.test_case "mask_composite_op_disabled_is_None" `Quick (fun () ->
+  Alcotest.test_case "mask_plan_disabled_is_None" `Quick (fun () ->
     (* disabled overrides both clip and invert: falls back to no
        mask rendering per OPACITY.md section States. *)
     List.iter (fun (clip, invert) ->
       let m = test_mask ~clip ~invert ~disabled:true in
-      assert (Jas.Canvas_subwindow.mask_composite_op m = None)
+      assert (Canvas_subwindow.mask_plan m = None)
     ) [(true, false); (true, true); (false, false); (false, true)]);
 
-  Alcotest.test_case "mask_composite_op_no_clip_is_None_phase1" `Quick (fun () ->
-    (* clip=false (element visible outside the mask shape) needs a
-       two-pass composite; not yet supported, falls back to no
-       mask. Phase 2 of Track C will handle this. *)
-    let m1 = test_mask ~clip:false ~invert:false ~disabled:false in
-    let m2 = test_mask ~clip:false ~invert:true ~disabled:false in
-    assert (Jas.Canvas_subwindow.mask_composite_op m1 = None);
-    assert (Jas.Canvas_subwindow.mask_composite_op m2 = None));
+  Alcotest.test_case "mask_plan_no_clip_no_invert_is_Reveal_outside_bbox" `Quick (fun () ->
+    (* Phase 2: clip=false, invert=false keeps the element visible
+       outside the mask subtree's bounding box. *)
+    let m = test_mask ~clip:false ~invert:false ~disabled:false in
+    match Canvas_subwindow.mask_plan m with
+    | Some Canvas_subwindow.Reveal_outside_bbox -> ()
+    | _ -> Alcotest.fail "expected Some Reveal_outside_bbox");
+
+  Alcotest.test_case "mask_plan_no_clip_inverted_collapses_to_Clip_out" `Quick (fun () ->
+    (* Alpha-based mask: [clip: false, invert: true] gives the same
+       output as [clip: true, invert: true] because the mask's
+       outside-region alpha is zero either way. *)
+    let m = test_mask ~clip:false ~invert:true ~disabled:false in
+    match Canvas_subwindow.mask_plan m with
+    | Some Canvas_subwindow.Clip_out -> ()
+    | _ -> Alcotest.fail "expected Some Clip_out");
 ]
 
 let () =
   Alcotest.run "OpacityMask" [
-    "mask_composite_op", tests;
+    "mask_plan", tests;
   ]
