@@ -15233,6 +15233,130 @@
     }
   },
   "tools": {
+    "ellipse": {
+      "id": "ellipse",
+      "cursor": "crosshair",
+      "menu_label": "Ellipse Tool",
+      "shortcut": "L",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        },
+        "start_x": {
+          "default": 0
+        },
+        "start_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.ellipse.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.ellipse.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "set": {
+              "tool.ellipse.start_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.ellipse.start_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.ellipse.mode": "'drawing'"
+            }
+          },
+          {
+            "doc.add_element": {
+              "parent": "[0]",
+              "element": {
+                "type": "ellipse",
+                "cx": "event.x",
+                "cy": "event.y",
+                "rx": "0",
+                "ry": "0",
+                "fill": "'#d94ad9'"
+              }
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.ellipse.mode == 'drawing'",
+            "then": [
+              {
+                "doc.set_attr": {
+                  "path": "[0, layer_length([0]) - 1]",
+                  "attr": "cx",
+                  "value": "(tool.ellipse.start_x + event.x) / 2"
+                }
+              },
+              {
+                "doc.set_attr": {
+                  "path": "[0, layer_length([0]) - 1]",
+                  "attr": "cy",
+                  "value": "(tool.ellipse.start_y + event.y) / 2"
+                }
+              },
+              {
+                "doc.set_attr": {
+                  "path": "[0, layer_length([0]) - 1]",
+                  "attr": "rx",
+                  "value": "abs(event.x - tool.ellipse.start_x) / 2"
+                }
+              },
+              {
+                "doc.set_attr": {
+                  "path": "[0, layer_length([0]) - 1]",
+                  "attr": "ry",
+                  "value": "abs(event.y - tool.ellipse.start_y) / 2"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "set": {
+              "tool.ellipse.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.ellipse.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
     "rect": {
       "id": "rect",
       "cursor": "crosshair",
