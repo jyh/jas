@@ -51,3 +51,15 @@ type mask_plan =
 (** Pick a [mask_plan] for the mask, or [None] when the mask is
     inactive ([disabled: true]). *)
 val mask_plan : Element.mask -> mask_plan option
+
+(** Return the transform that should be applied when rendering
+    the mask's subtree on top of the ancestor coord system.
+    Track C phase 3, OPACITY.md \167Document model:
+
+    - [linked: true]  — mask inherits [Element.get_transform elem].
+    - [linked: false] — mask uses [mask.unlink_transform]
+      (captured at unlink time, frozen).
+
+    Returns [None] when the picked transform is absent. *)
+val effective_mask_transform
+  : Element.mask -> Element.element -> Element.transform option

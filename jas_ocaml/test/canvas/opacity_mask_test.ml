@@ -52,6 +52,57 @@ let tests = [
     match Canvas_subwindow.mask_plan m with
     | Some Canvas_subwindow.Clip_out -> ()
     | _ -> Alcotest.fail "expected Some Clip_out");
+
+  (* ── effective_mask_transform (Track C phase 3) ───────── *)
+
+  Alcotest.test_case "effective_mask_transform_linked_returns_element_transform" `Quick (fun () ->
+    (* linked=true: mask follows the element, so the renderer
+       should apply [Element.get_transform elem]. *)
+    let mask = { (test_mask ~clip:true ~invert:false ~disabled:false)
+                 with Element.linked = true } in
+    let t_elem : Element.transform =
+      { a = 1.0; b = 0.0; c = 0.0; d = 1.0; e = 5.0; f = 7.0 } in
+    let elem = Element.make_rect ~transform:(Some t_elem) 0.0 0.0 10.0 10.0 in
+    match Canvas_subwindow.effective_mask_transform mask elem with
+    | Some t ->
+      assert (t.Element.e = 5.0);
+      assert (t.Element.f = 7.0)
+    | None -> Alcotest.fail "expected Some element transform");
+
+  Alcotest.test_case "effective_mask_transform_linked_None_when_element_has_no_transform" `Quick (fun () ->
+    (* linked=true with no element transform: None — the
+       compositing path skips the apply_transform call. *)
+    let mask = { (test_mask ~clip:true ~invert:false ~disabled:false)
+                 with Element.linked = true } in
+    let elem = Element.make_rect 0.0 0.0 10.0 10.0 in
+    assert (Canvas_subwindow.effective_mask_transform mask elem = None));
+
+  Alcotest.test_case "effective_mask_transform_unlinked_returns_captured" `Quick (fun () ->
+    (* linked=false: mask stays frozen under the unlink-time
+       transform, regardless of the element's current transform. *)
+    let unlink : Element.transform =
+      { a = 1.0; b = 0.0; c = 0.0; d = 1.0; e = 3.0; f = 4.0 } in
+    let mask = { (test_mask ~clip:true ~invert:false ~disabled:false)
+                 with Element.linked = false;
+                      unlink_transform = Some unlink } in
+    let t_elem : Element.transform =
+      { a = 1.0; b = 0.0; c = 0.0; d = 1.0; e = 100.0; f = 100.0 } in
+    let elem = Element.make_rect ~transform:(Some t_elem) 0.0 0.0 10.0 10.0 in
+    match Canvas_subwindow.effective_mask_transform mask elem with
+    | Some t ->
+      assert (t.Element.e = 3.0);
+      assert (t.Element.f = 4.0)
+    | None -> Alcotest.fail "expected Some unlink transform");
+
+  Alcotest.test_case "effective_mask_transform_unlinked_None_when_unlink_missing" `Quick (fun () ->
+    (* linked=false with no captured transform: None. *)
+    let mask = { (test_mask ~clip:true ~invert:false ~disabled:false)
+                 with Element.linked = false;
+                      unlink_transform = None } in
+    let t_elem : Element.transform =
+      { a = 1.0; b = 0.0; c = 0.0; d = 1.0; e = 7.0; f = 8.0 } in
+    let elem = Element.make_rect ~transform:(Some t_elem) 0.0 0.0 10.0 10.0 in
+    assert (Canvas_subwindow.effective_mask_transform mask elem = None));
 ]
 
 let () =

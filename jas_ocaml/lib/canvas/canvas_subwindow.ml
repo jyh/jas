@@ -226,6 +226,23 @@ and mask_plan (mask : Element.mask) : mask_plan option =
     | false, true -> Some Clip_out
     | false, false -> Some Reveal_outside_bbox
 
+(** Return the transform that should be applied when rendering the
+    mask's subtree on top of the ancestor coord system. Track C
+    phase 3, OPACITY.md \167Document model:
+
+    - [linked: true]  — mask inherits [Element.get_transform elem]
+      (mask follows the element).
+    - [linked: false] — mask uses [mask.unlink_transform] (the
+      element's transform captured at unlink time, frozen so the
+      mask stays fixed under subsequent element edits).
+
+    Returns [None] when the picked transform is absent (identity
+    case) so the caller can skip the [apply_transform] call. *)
+and effective_mask_transform (mask : Element.mask) (elem : Element.element)
+    : Element.transform option =
+  if mask.Element.linked then Element.get_transform elem
+  else mask.Element.unlink_transform
+
 (** Render [elem] on [cr] with its opacity mask composited in per
     [plan]. The element body is drawn into a fresh Cairo group; the
     mask subtree is then painted on top of the group; the group is
@@ -234,6 +251,11 @@ and draw_element_with_mask cr (elem : Element.element)
     (mask : Element.mask) (plan : mask_plan) ancestor_vis =
   Cairo.Group.push cr;
   draw_element_body ~ancestor_vis cr elem;
+  (* Apply the mask's effective transform (per
+     [effective_mask_transform]), then composite the mask subtree
+     against the element body. Track C phase 3. *)
+  Cairo.save cr;
+  apply_transform cr (effective_mask_transform mask elem);
   (match plan with
    | Clip_in ->
      Cairo.set_operator cr Cairo.DEST_IN;
@@ -261,6 +283,7 @@ and draw_element_with_mask cr (elem : Element.element)
      end
      (* Empty-bbox mask: body passes through unmodified. *)
   );
+  Cairo.restore cr;
   Cairo.Group.pop_to_source cr;
   Cairo.paint cr
 
