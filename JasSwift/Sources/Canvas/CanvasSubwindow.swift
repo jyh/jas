@@ -60,6 +60,82 @@ private func setFill(_ ctx: CGContext, _ fill: Fill?) {
     }
 }
 
+/// Parse a hex string (#rrggbb) into a CGColor, with optional alpha 0-1.
+private func cgColorFromHex(_ hex: String, alpha: Double = 1.0) -> CGColor {
+    var s = hex
+    if s.hasPrefix("#") { s.removeFirst() }
+    guard s.count == 6 else { return CGColor(red: 0, green: 0, blue: 0, alpha: CGFloat(alpha)) }
+    let r = Int(s.prefix(2), radix: 16) ?? 0
+    let g = Int(s.dropFirst(2).prefix(2), radix: 16) ?? 0
+    let b = Int(s.dropFirst(4).prefix(2), radix: 16) ?? 0
+    return CGColor(
+        red: CGFloat(r) / 255, green: CGFloat(g) / 255,
+        blue: CGFloat(b) / 255, alpha: CGFloat(alpha)
+    )
+}
+
+private func polyBBox(_ pts: [(Double, Double)]) -> CGRect {
+    if pts.isEmpty { return .zero }
+    var (minX, minY) = pts[0]
+    var (maxX, maxY) = pts[0]
+    for (x, y) in pts.dropFirst() {
+        if x < minX { minX = x }
+        if x > maxX { maxX = x }
+        if y < minY { minY = y }
+        if y > maxY { maxY = y }
+    }
+    return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+}
+
+/// Build a CGGradient from a Gradient value, or nil if not renderable
+/// (freeform, or fewer than 2 stops).
+private func makeCGGradient(_ g: Gradient) -> CGGradient? {
+    if g.type == .freeform || g.stops.count < 2 { return nil }
+    var colors: [CGColor] = []
+    var locs: [CGFloat] = []
+    for stop in g.stops {
+        colors.append(cgColorFromHex(stop.color, alpha: stop.opacity / 100.0))
+        locs.append(CGFloat(stop.location / 100.0))
+    }
+    let cs = CGColorSpaceCreateDeviceRGB()
+    return CGGradient(colorsSpace: cs, colors: colors as CFArray, locations: locs)
+}
+
+/// Fill the current path with a Gradient. Saves and restores ctx state.
+/// The path is clipped (consumed) by this call — the caller must
+/// re-add the path if a subsequent stroke is needed.
+private func fillCurrentPathWithGradient(_ ctx: CGContext, _ g: Gradient, _ bbox: CGRect) {
+    guard let cgGradient = makeCGGradient(g) else { return }
+    ctx.saveGState()
+    ctx.clip()
+    switch g.type {
+    case .linear:
+        let rad = g.angle * .pi / 180
+        let halfDiag = sqrt(bbox.width * bbox.width + bbox.height * bbox.height) / 2
+        let cx = bbox.midX, cy = bbox.midY
+        let dx = cos(rad) * halfDiag
+        let dy = -sin(rad) * halfDiag  // canvas y is down
+        ctx.drawLinearGradient(
+            cgGradient,
+            start: CGPoint(x: cx - dx, y: cy - dy),
+            end: CGPoint(x: cx + dx, y: cy + dy),
+            options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
+        )
+    case .radial:
+        let cx = bbox.midX, cy = bbox.midY
+        let r = max(bbox.width, bbox.height) / 2 * (g.aspectRatio / 100.0)
+        ctx.drawRadialGradient(
+            cgGradient,
+            startCenter: CGPoint(x: cx, y: cy), startRadius: 0,
+            endCenter: CGPoint(x: cx, y: cy), endRadius: r,
+            options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
+        )
+    case .freeform:
+        break
+    }
+    ctx.restoreGState()
+}
+
 /// Apply stroke properties to the context. Returns (opacity, align).
 private func setStroke(_ ctx: CGContext, _ stroke: Stroke?) -> (Double, StrokeAlign) {
     guard let stroke = stroke else { return (1.0, .center) }
@@ -350,9 +426,35 @@ private func applyOutlineStyle(_ ctx: CGContext) {
 /// when `outline == true`. Text and TextPath are not invoked through
 /// this helper — they always render in preview style.
 private func fillStrokeOrOutline(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?, outline: Bool) {
+    fillStrokeOrOutline(ctx, fill, stroke, fillGradient: nil, bbox: .zero, outline: outline)
+}
+
+/// Phase 6: gradient-aware fill + stroke. When `fillGradient` is set,
+/// renders the gradient over the current path (instead of solid fill);
+/// the path is then re-added so the stroke can be drawn over the
+/// gradient. Falls back to the existing solid path when the gradient
+/// is nil or unrenderable (freeform / fewer than 2 stops).
+private func fillStrokeOrOutline(
+    _ ctx: CGContext,
+    _ fill: Fill?,
+    _ stroke: Stroke?,
+    fillGradient: Gradient?,
+    bbox: CGRect,
+    outline: Bool
+) {
     if outline {
         applyOutlineStyle(ctx)
         ctx.strokePath()
+        return
+    }
+    if let g = fillGradient, makeCGGradient(g) != nil {
+        let savedPath = ctx.path
+        fillCurrentPathWithGradient(ctx, g, bbox)
+        if let stroke = stroke {
+            if let p = savedPath { ctx.addPath(p) }
+            let (_, align) = setStroke(ctx, stroke)
+            strokeAligned(ctx, align)
+        }
     } else {
         fillAndStroke(ctx, fill, stroke)
     }
@@ -728,21 +830,21 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         } else {
             ctx.addRect(rect)
         }
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, bbox: rect, outline: outline)
 
     case .circle(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2)
         ctx.addEllipse(in: rect)
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, bbox: rect, outline: outline)
 
     case .ellipse(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2)
         ctx.addEllipse(in: rect)
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, bbox: rect, outline: outline)
 
     case .polyline(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -752,7 +854,8 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         for i in 1..<v.points.count {
             ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1))
         }
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
+        let pbbox = polyBBox(v.points)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, bbox: pbbox, outline: outline)
 
     case .polygon(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -763,7 +866,8 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
             ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1))
         }
         ctx.closePath()
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
+        let pbbox = polyBBox(v.points)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, bbox: pbbox, outline: outline)
 
     case .path(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -794,9 +898,14 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                                        widthPoints: v.widthPoints,
                                        strokeColor: cgColor(s.color), linecap: s.linecap)
             } else {
-                // Normal fill+stroke
+                // Normal fill+stroke (gradient-aware via fillStrokeOrOutline).
                 buildPath(ctx, strokeCmds)
-                fillAndStroke(ctx, v.fill, v.stroke)
+                let b = elem.bounds
+                let pbbox = CGRect(x: b.x, y: b.y, width: b.width, height: b.height)
+                fillStrokeOrOutline(
+                    ctx, v.fill, v.stroke,
+                    fillGradient: v.fillGradient, bbox: pbbox, outline: false
+                )
             }
             // Arrowheads
             if let s = v.stroke {
