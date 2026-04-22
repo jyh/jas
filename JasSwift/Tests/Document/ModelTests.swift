@@ -115,3 +115,18 @@ import Testing
     model.editingTarget = .content
     #expect(model.editingTarget == .content)
 }
+
+@Test func modelDefaultsToNoMaskIsolation() {
+    // Mask-isolation is entered explicitly via Alt-click on
+    // MASK_PREVIEW. OPACITY.md §Preview interactions.
+    let model = Model()
+    #expect(model.maskIsolationPath == nil)
+}
+
+@Test func modelMaskIsolationRoundTrips() {
+    let model = Model()
+    model.maskIsolationPath = [0, 3]
+    #expect(model.maskIsolationPath == [0, 3])
+    model.maskIsolationPath = nil
+    #expect(model.maskIsolationPath == nil)
+}

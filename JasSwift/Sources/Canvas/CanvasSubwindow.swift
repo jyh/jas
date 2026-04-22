@@ -1749,9 +1749,18 @@ class CanvasNSView: NSView {
         ctx.fill(bounds)
         // Layer 2: artboard fills (list order, later wins overlaps).
         drawArtboardFills(ctx, document)
-        // Layer 3: document element tree.
-        for layer in document.layers {
-            drawElement(ctx, .layer(layer))
+        // Layer 3: document element tree. In mask-isolation mode
+        // (OPACITY.md §Preview interactions), render only the mask
+        // subtree of the isolated element — everything else on the
+        // canvas is hidden until the user exits isolation.
+        let isolationPath = controller?.model.maskIsolationPath
+        if let path = isolationPath,
+           let mask = document.getElement(path).mask {
+            drawElement(ctx, mask.subtreeElement)
+        } else {
+            for layer in document.layers {
+                drawElement(ctx, .layer(layer))
+            }
         }
         // Layer 4: fade overlay (dims regions outside any artboard).
         drawFadeOverlay(ctx, document, bounds: bounds)
