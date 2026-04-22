@@ -1775,6 +1775,10 @@ public struct Line: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    /// Optional gradient applied to the stroke (in lieu of `stroke.color`).
+    /// Phase 1b adds gradient paint per-element. See GRADIENT.md
+    /// §Document model.
+    public let strokeGradient: Gradient?
 
     public init(x1: Double, y1: Double, x2: Double, y2: Double,
                 stroke: Stroke? = nil, widthPoints: [StrokeWidthPoint] = [],
@@ -1782,7 +1786,8 @@ public struct Line: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                strokeGradient: Gradient? = nil) {
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
         self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -1790,6 +1795,7 @@ public struct Line: Equatable {
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {
@@ -1810,6 +1816,8 @@ public struct Rect: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(x: Double, y: Double, width: Double, height: Double,
                 rx: Double = 0, ry: Double = 0,
@@ -1818,7 +1826,9 @@ public struct Rect: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.x = x; self.y = y; self.width = width; self.height = height
         self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
@@ -1826,6 +1836,8 @@ public struct Rect: Equatable {
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox { inflateBounds((x, y, width, height), stroke) }
@@ -1842,6 +1854,8 @@ public struct Circle: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(cx: Double, cy: Double, r: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1849,13 +1863,17 @@ public struct Circle: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.cx = cx; self.cy = cy; self.r = r
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox { inflateBounds((cx - r, cy - r, r * 2, r * 2), stroke) }
@@ -1872,6 +1890,8 @@ public struct Ellipse: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(cx: Double, cy: Double, rx: Double, ry: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1879,13 +1899,17 @@ public struct Ellipse: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox { inflateBounds((cx - rx, cy - ry, rx * 2, ry * 2), stroke) }
@@ -1902,6 +1926,8 @@ public struct Polyline: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1909,13 +1935,17 @@ public struct Polyline: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {
@@ -1945,6 +1975,8 @@ public struct Polygon: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -1952,13 +1984,17 @@ public struct Polygon: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {
@@ -2073,6 +2109,8 @@ public struct Path: Equatable {
     public let visibility: Visibility
     public let blendMode: BlendMode
     public let mask: Mask?
+    public let fillGradient: Gradient?
+    public let strokeGradient: Gradient?
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -2081,7 +2119,9 @@ public struct Path: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                fillGradient: Gradient? = nil,
+                strokeGradient: Gradient? = nil) {
         self.d = d
         self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -2089,6 +2129,8 @@ public struct Path: Equatable {
         self.visibility = visibility
         self.blendMode = blendMode
         self.mask = mask
+        self.fillGradient = fillGradient
+        self.strokeGradient = strokeGradient
     }
 
     public var bounds: BBox {
