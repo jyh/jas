@@ -69,6 +69,13 @@ pub(crate) struct TabState {
     /// MASK_PREVIEW and the selection has a mask. OPACITY.md
     /// §Preview interactions.
     pub(crate) editing_target: EditingTarget,
+    /// Mask-isolation state. When ``Some(path)``, the canvas
+    /// renders only the mask subtree of the element at ``path``,
+    /// hiding everything else. Entered by Alt/Option-clicking
+    /// MASK_PREVIEW; exited by Escape (future) or by clicking
+    /// MASK_PREVIEW / OPACITY_PREVIEW. OPACITY.md §Preview
+    /// interactions.
+    pub(crate) mask_isolation_path: Option<Vec<usize>>,
 }
 
 impl TabState {
@@ -101,6 +108,7 @@ impl TabState {
             tools,
             clipboard: Vec::new(),
             editing_target: EditingTarget::Content,
+            mask_isolation_path: None,
         }
     }
 }
@@ -1068,6 +1076,7 @@ impl AppState {
             tab.model.document(),
             self.boolean_panel.precision,
             &self.artboards_panel_selection,
+            tab.mask_isolation_path.as_deref(),
         );
 
         // Draw tool overlay
@@ -2587,6 +2596,24 @@ mod editing_target_tests {
         }
         t.editing_target = EditingTarget::Content;
         assert_eq!(t.editing_target, EditingTarget::Content);
+    }
+
+    #[test]
+    fn tab_state_defaults_to_no_mask_isolation() {
+        // Mask-isolation is entered explicitly via
+        // Alt/Option-clicking MASK_PREVIEW. OPACITY.md §Preview
+        // interactions.
+        let t = TabState::new();
+        assert!(t.mask_isolation_path.is_none());
+    }
+
+    #[test]
+    fn mask_isolation_round_trips() {
+        let mut t = TabState::new();
+        t.mask_isolation_path = Some(vec![0, 3]);
+        assert_eq!(t.mask_isolation_path, Some(vec![0, 3]));
+        t.mask_isolation_path = None;
+        assert!(t.mask_isolation_path.is_none());
     }
 }
 

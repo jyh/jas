@@ -263,9 +263,8 @@ Additional shortcuts on `MASK_PREVIEW`:
 | Drag from `OPACITY_PREVIEW` to this cell | Replace the mask contents with a copy of the element's artwork |
 
 Escape returns to content-editing mode and exits mask-isolation if active.
-
-Shift-click depends on `disable_mask` from the panel menu, which is
-`status: pending_model`; until `disable_mask` lands, Shift-click is a no-op.
+(Keyboard Escape is still pending; currently isolation is exited by
+Alt-clicking MASK_PREVIEW again.)
 
 ## Deferred additions
 

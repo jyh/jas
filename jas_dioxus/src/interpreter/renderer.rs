@@ -5898,25 +5898,55 @@ fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         let app = rctx.app.clone();
         let mut revision = rctx.revision;
         let target_is_mask = is_mask_preview;
-        let on_click = EventHandler::new(move |_evt: Event<MouseData>| {
+        // MASK_PREVIEW supports modifier-clicks per OPACITY.md
+        // §Preview interactions:
+        //   * plain click → enter mask-editing mode (routed above)
+        //   * Alt/Option-click → toggle mask isolation (render only
+        //     the mask subtree on the canvas)
+        //   * Shift-click → toggle mask.disabled
+        let on_click = EventHandler::new(move |evt: Event<MouseData>| {
             if !click_enabled {
                 return;
             }
+            let mods = evt.data().modifiers();
+            let alt = mods.alt();
+            let shift = mods.shift();
             let app = app.clone();
             spawn(async move {
                 use crate::workspace::app_state::EditingTarget;
                 let mut st = app.borrow_mut();
-                if let Some(tab) = st.tab_mut() {
-                    tab.editing_target = if target_is_mask {
-                        // Enter mask-editing on the first selected
-                        // element's path. Guaranteed Some by the
-                        // has_mask check above.
-                        tab.model.document().selection.first()
-                            .map(|es| EditingTarget::Mask(es.path.clone()))
-                            .unwrap_or(EditingTarget::Content)
-                    } else {
-                        EditingTarget::Content
-                    };
+                if target_is_mask && shift {
+                    // Shift-click: toggle mask.disabled on every
+                    // selected mask via the existing Controller.
+                    if let Some(tab) = st.tab_mut() {
+                        crate::document::controller::Controller::toggle_mask_disabled_on_selection(&mut tab.model);
+                    }
+                } else if target_is_mask && alt {
+                    // Alt-click: toggle mask isolation on the first
+                    // selected element's mask. Enters isolation if
+                    // off; exits otherwise.
+                    if let Some(tab) = st.tab_mut() {
+                        let first_path = tab.model.document().selection.first()
+                            .map(|es| es.path.clone());
+                        tab.mask_isolation_path = match (&tab.mask_isolation_path, first_path) {
+                            (Some(_), _) => None,
+                            (None, Some(p)) => Some(p),
+                            (None, None) => None,
+                        };
+                    }
+                } else {
+                    // Plain click: flip editing target between
+                    // content and the first selected element's mask
+                    // subtree.
+                    if let Some(tab) = st.tab_mut() {
+                        tab.editing_target = if target_is_mask {
+                            tab.model.document().selection.first()
+                                .map(|es| EditingTarget::Mask(es.path.clone()))
+                                .unwrap_or(EditingTarget::Content)
+                        } else {
+                            EditingTarget::Content
+                        };
+                    }
                 }
                 revision += 1;
             });
