@@ -468,8 +468,15 @@ fn apply_set_effects(
     }
 
     // Apply all successful writes as a batch
+    let mut any_gradient_key = false;
     for (key, val) in pending {
+        if key.starts_with("gradient_") { any_gradient_key = true; }
         set_app_state_field(key.as_str(), &val, st);
+    }
+    // Phase 5 follow-up: after any gradient_* write, apply the
+    // updated panel state to the selected element(s).
+    if any_gradient_key {
+        st.apply_gradient_panel_to_selection();
     }
 }
 
@@ -550,6 +557,14 @@ fn set_app_state_field(
         "stroke_arrow_align" => { if let Some(s) = val.as_str() { st.stroke_panel.arrow_align = s.into(); } }
         "stroke_profile" => { if let Some(s) = val.as_str() { st.stroke_panel.profile = s.into(); } }
         "stroke_profile_flipped" => { if let Some(b) = val.as_bool() { st.stroke_panel.profile_flipped = b; } }
+        // Gradient panel fields (Phase 5 follow-up). Each write
+        // also triggers apply_gradient_panel_to_selection below.
+        "gradient_type" => { if let Some(s) = val.as_str() { st.gradient_panel.gtype = s.into(); } }
+        "gradient_angle" => { if let Some(n) = val.as_f64() { st.gradient_panel.angle = n; } }
+        "gradient_aspect_ratio" => { if let Some(n) = val.as_f64() { st.gradient_panel.aspect_ratio = n; } }
+        "gradient_method" => { if let Some(s) = val.as_str() { st.gradient_panel.method = s.into(); } }
+        "gradient_dither" => { if let Some(b) = val.as_bool() { st.gradient_panel.dither = b; } }
+        "gradient_stroke_sub_mode" => { if let Some(s) = val.as_str() { st.gradient_panel.stroke_sub_mode = s.into(); } }
         // Align panel fields — mirrors of AlignPanelState per
         // ALIGN.md Panel state.
         "align_to" => {

@@ -74,6 +74,9 @@ const STROKE_ARROW_ALIGN_VALUES: &[&str] = &["tip_at_end", "center_at_end"];
 const STROKE_PROFILE_VALUES: &[&str] = &[
     "uniform", "taper_both", "taper_start", "taper_end", "bulge", "pinch",
 ];
+const GRADIENT_TYPE_VALUES: &[&str] = &["linear", "radial", "freeform"];
+const GRADIENT_METHOD_VALUES: &[&str] = &["classic", "smooth", "points", "lines"];
+const GRADIENT_STROKE_SUB_MODE_VALUES: &[&str] = &["within", "along", "across"];
 
 /// Look up the schema entry for a global `state:` field by name.
 ///
@@ -104,6 +107,13 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "stroke_arrow_align" => Some(SchemaEntry::new(Enum(STROKE_ARROW_ALIGN_VALUES), false, true)),
         "stroke_profile" => Some(SchemaEntry::new(Enum(STROKE_PROFILE_VALUES), false, true)),
         "stroke_profile_flipped" => Some(SchemaEntry::new(Bool, false, true)),
+        // Gradient panel state keys (Phase 5 follow-up).
+        "gradient_type" => Some(SchemaEntry::new(Enum(GRADIENT_TYPE_VALUES), false, true)),
+        "gradient_angle" => Some(SchemaEntry::new(Number, false, true)),
+        "gradient_aspect_ratio" => Some(SchemaEntry::new(Number, false, true)),
+        "gradient_method" => Some(SchemaEntry::new(Enum(GRADIENT_METHOD_VALUES), false, true)),
+        "gradient_dither" => Some(SchemaEntry::new(Bool, false, true)),
+        "gradient_stroke_sub_mode" => Some(SchemaEntry::new(Enum(GRADIENT_STROKE_SUB_MODE_VALUES), false, true)),
         "fill_on_top" => Some(SchemaEntry::new(Bool, false, true)),
         "toolbar_visible" => Some(SchemaEntry::new(Bool, false, true)),
         "canvas_visible" => Some(SchemaEntry::new(Bool, false, true)),
