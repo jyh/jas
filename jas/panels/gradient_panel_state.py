@@ -33,7 +33,8 @@ write pipeline lands in Phase 5.
 from __future__ import annotations
 
 from geometry.element import (
-    Circle, Ellipse, Line, Path, Polygon, Polyline, Rect,
+    Circle, Ellipse, Gradient, GradientMethod, GradientType, Line, Path,
+    Polygon, Polyline, Rect, StrokeSubMode,
 )
 
 
@@ -121,3 +122,43 @@ def sync_gradient_panel_from_selection(store, model) -> None:
     store.set("gradient_stroke_sub_mode", "within")
     store.set("gradient_seed_first_color", seed_hex)
     store.set("gradient_preview_state", True)
+
+
+def apply_gradient_panel_to_selection(store, controller) -> None:
+    """Phase 5: build a Gradient from the gradient_* store keys and
+    write it to every selected element's fill_gradient or
+    stroke_gradient (per state.fill_on_top). Clears
+    gradient_preview_state.
+
+    Stops are panel-local working state; the foundation pass leaves
+    the stops list empty in the constructed Gradient — a follow-up
+    binds panel.stops <-> store.gradient_stops explicitly.
+    """
+    type_str = store.get("gradient_type") or "linear"
+    method_str = store.get("gradient_method") or "classic"
+    sub_str = store.get("gradient_stroke_sub_mode") or "within"
+    g = Gradient(
+        type=GradientType(type_str),
+        angle=store.get("gradient_angle") or 0.0,
+        aspect_ratio=store.get("gradient_aspect_ratio") or 100.0,
+        method=GradientMethod(method_str),
+        dither=bool(store.get("gradient_dither")),
+        stroke_sub_mode=StrokeSubMode(sub_str),
+    )
+    fill_on_top_val = store.get("fill_on_top")
+    fill_on_top = True if fill_on_top_val is None else bool(fill_on_top_val)
+    if fill_on_top:
+        controller.set_selection_fill_gradient(g)
+    else:
+        controller.set_selection_stroke_gradient(g)
+    store.set("gradient_preview_state", False)
+
+
+def demote_gradient_panel_selection(store, controller) -> None:
+    """Phase 5: clear the gradient on the selection's active attribute."""
+    fill_on_top_val = store.get("fill_on_top")
+    fill_on_top = True if fill_on_top_val is None else bool(fill_on_top_val)
+    if fill_on_top:
+        controller.set_selection_fill_gradient(None)
+    else:
+        controller.set_selection_stroke_gradient(None)
