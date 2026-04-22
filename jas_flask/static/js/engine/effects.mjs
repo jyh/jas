@@ -20,7 +20,10 @@
 
 import { evaluate } from "./expr.mjs";
 import { Scope } from "./scope.mjs";
-import { toBool, toJson } from "./value.mjs";
+import { toBool, toJson, PATH } from "./value.mjs";
+import {
+  setSelection, addToSelection, toggleSelection, clearSelection,
+} from "./document.mjs";
 
 /**
  * Run a list of effects. Each effect is a YAML-derived dict with a
@@ -101,13 +104,44 @@ function runEffect(effect, scope, store, options) {
     return;
   }
 
-  // ── Doc-mutation placeholders ────────────────────────
-  // V1 recognizes the doc.* effect names so tool YAMLs that use them
-  // don't fail; the actual mutations land in Phase 7+. Each is a
-  // no-op that optionally calls options.onDocEffect for test harnesses.
+  // ── Document mutations ───────────────────────────────
+  // Routes through options.model (a Model from model.mjs) when
+  // supplied; falls back to options.onDocEffect for test harnesses
+  // that don't want to wire a model. Unimplemented doc.* effects stay
+  // as observer-only placeholders — the set grows as phases land.
   const docEffectKey = Object.keys(effect).find((k) => k.startsWith("doc."));
   if (docEffectKey) {
-    if (options.onDocEffect) options.onDocEffect(docEffectKey, effect[docEffectKey], scope);
+    const model = options.model;
+    const spec = effect[docEffectKey];
+
+    if (model) {
+      switch (docEffectKey) {
+        case "doc.snapshot":
+          model.snapshot();
+          return;
+        case "doc.clear_selection":
+          model.mutate(clearSelection);
+          return;
+        case "doc.set_selection": {
+          const paths = extractPathList(spec, scope);
+          model.mutate((d) => setSelection(d, paths));
+          return;
+        }
+        case "doc.add_to_selection": {
+          const path = extractPath(spec, scope);
+          if (path) model.mutate((d) => addToSelection(d, path));
+          return;
+        }
+        case "doc.toggle_selection": {
+          const path = extractPath(spec, scope);
+          if (path) model.mutate((d) => toggleSelection(d, path));
+          return;
+        }
+        // Other doc.* effects land in subsequent phases.
+      }
+    }
+
+    if (options.onDocEffect) options.onDocEffect(docEffectKey, spec, scope);
     return;
   }
 
@@ -123,4 +157,50 @@ function runEffect(effect, scope, store, options) {
 function normalizeTarget(raw) {
   const s = String(raw);
   return s.startsWith("$") ? s.slice(1) : s;
+}
+
+/**
+ * Pull a single path array out of a doc.* effect spec. Accepts:
+ *   - A string that evaluates to a Path value → extract indices
+ *   - A {path: expr} dict — evaluates `path` as an expression
+ *   - A raw array of ints — treated as a path directly
+ */
+function extractPath(spec, scope) {
+  if (Array.isArray(spec)) return spec.slice();
+  if (typeof spec === "string") {
+    const v = evaluate(spec, scope);
+    if (v && v.kind === PATH) return v.value.slice();
+    return null;
+  }
+  if (spec && typeof spec === "object" && "path" in spec) {
+    return extractPath(spec.path, scope);
+  }
+  return null;
+}
+
+/**
+ * Pull a list of path arrays out of a doc.* effect spec. Accepts:
+ *   - {paths: [...]} where items are evaluated individually
+ *   - A string that evaluates to a List of Paths
+ */
+function extractPathList(spec, scope) {
+  if (spec && typeof spec === "object" && Array.isArray(spec.paths)) {
+    const out = [];
+    for (const item of spec.paths) {
+      const p = extractPath(item, scope);
+      if (p) out.push(p);
+    }
+    return out;
+  }
+  if (typeof spec === "string") {
+    const v = evaluate(spec, scope);
+    if (v && v.kind === "list") {
+      const out = [];
+      for (const item of v.value) {
+        if (item && item.kind === PATH) out.push(item.value.slice());
+      }
+      return out;
+    }
+  }
+  return [];
 }
