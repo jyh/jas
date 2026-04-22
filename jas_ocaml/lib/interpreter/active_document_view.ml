@@ -104,24 +104,31 @@ let build
 
 (** Build the selection-level predicates referenced by yaml
     expressions (``selection_has_mask``, ``selection_mask_clip``,
-    ``selection_mask_invert``) per OPACITY.md §States. Mixed
-    selections count as "no mask"; clip/invert come from the first
-    selected element's mask and drive the "first-wins" bindings on
-    CLIP_CHECKBOX / INVERT_MASK_CHECKBOX. Mirrors
+    ``selection_mask_invert``, ``selection_mask_linked``) per
+    OPACITY.md \167States / \167Document model. Mixed selections count as
+    "no mask"; the mask fields come from the first selected
+    element's mask and drive the "first-wins" bindings on
+    CLIP_CHECKBOX / INVERT_MASK_CHECKBOX / LINK_INDICATOR. Mirrors
     ``build_selection_predicates`` in ``jas_dioxus``. *)
 let build_selection_predicates (model : Model.model option) : (string * Yojson.Safe.t) list =
   match model with
   | None ->
     [ ("selection_has_mask", `Bool false);
       ("selection_mask_clip", `Bool false);
-      ("selection_mask_invert", `Bool false) ]
+      ("selection_mask_invert", `Bool false);
+      (* Default [linked] to true so the LINK_INDICATOR shows the
+         linked glyph when no mask exists — matches the "new masks
+         are linked" spec default. *)
+      ("selection_mask_linked", `Bool true) ]
   | Some m ->
     let doc = m#document in
     let has_mask = Controller.selection_has_mask doc in
-    let (clip, invert) = match Controller.first_mask doc with
-      | Some mask -> (mask.Element.clip, mask.Element.invert)
-      | None -> (false, false)
+    let (clip, invert, linked) = match Controller.first_mask doc with
+      | Some mask ->
+        (mask.Element.clip, mask.Element.invert, mask.Element.linked)
+      | None -> (false, false, true)
     in
     [ ("selection_has_mask", `Bool has_mask);
       ("selection_mask_clip", `Bool clip);
-      ("selection_mask_invert", `Bool invert) ]
+      ("selection_mask_invert", `Bool invert);
+      ("selection_mask_linked", `Bool linked) ]
