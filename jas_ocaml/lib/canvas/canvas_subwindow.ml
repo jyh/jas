@@ -364,7 +364,7 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; _ } ->
+  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; fill_gradient; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     if rx > 0.0 || ry > 0.0 then
@@ -374,22 +374,25 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
     if outline then begin
       apply_outline_style cr;
       Cairo.stroke cr
-    end else fill_and_stroke cr fill stroke;
+    end else
+      fill_and_stroke_with_gradient cr fill stroke fill_gradient (x, y, width, height);
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Circle { cx; cy; r; fill; stroke; opacity; transform; _ } ->
+  | Circle { cx; cy; r; fill; stroke; opacity; transform; fill_gradient; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
     if outline then begin
       apply_outline_style cr;
       Cairo.stroke cr
-    end else fill_and_stroke cr fill stroke;
+    end else
+      fill_and_stroke_with_gradient cr fill stroke fill_gradient
+        (cx -. r, cy -. r, r *. 2.0, r *. 2.0);
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; _ } ->
+  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; fill_gradient; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     Cairo.save cr;
@@ -400,29 +403,33 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
     if outline then begin
       apply_outline_style cr;
       Cairo.stroke cr
-    end else fill_and_stroke cr fill stroke;
+    end else
+      fill_and_stroke_with_gradient cr fill stroke fill_gradient
+        (cx -. rx, cy -. ry, rx *. 2.0, ry *. 2.0);
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Polyline { points; fill; stroke; opacity; transform; _ } ->
+  | Polyline { points; fill; stroke; opacity; transform; fill_gradient; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     draw_points cr points false;
     if outline then begin
       apply_outline_style cr;
       Cairo.stroke cr
-    end else fill_and_stroke cr fill stroke;
+    end else
+      fill_and_stroke_with_gradient cr fill stroke fill_gradient (poly_bbox points);
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Polygon { points; fill; stroke; opacity; transform; _ } ->
+  | Polygon { points; fill; stroke; opacity; transform; fill_gradient; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     draw_points cr points true;
     if outline then begin
       apply_outline_style cr;
       Cairo.stroke cr
-    end else fill_and_stroke cr fill stroke;
+    end else
+      fill_and_stroke_with_gradient cr fill stroke fill_gradient (poly_bbox points);
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -877,9 +884,72 @@ and stroke_aligned cr align =
     Cairo.restore cr
 
 and fill_and_stroke cr fill stroke =
+  fill_and_stroke_with_gradient cr fill stroke None (0.0, 0.0, 0.0, 0.0)
+
+(** Phase 6: gradient-aware fill+stroke. When [fill_gradient] is [Some],
+    builds a Cairo pattern (linear or radial) and uses it as the
+    source for [Cairo.fill_preserve]; the path remains, so the stroke
+    can run on the same path. Falls through to the solid-color path
+    when the gradient is [None] or unrenderable. *)
+and fill_and_stroke_with_gradient cr fill stroke fill_gradient bbox =
   let has_fill = fill <> None in
   let has_stroke = stroke <> None in
-  if has_fill && has_stroke then begin
+  let has_gradient = match fill_gradient with
+    | Some g -> g.Element.gtype <> Element.Gradient_freeform
+                && List.length g.Element.gstops >= 2
+    | None -> false in
+  let parse_hex_to_rgba s =
+    let s = if String.length s > 0 && s.[0] = '#'
+            then String.sub s 1 (String.length s - 1) else s in
+    if String.length s <> 6 then (0.0, 0.0, 0.0, 1.0)
+    else
+      try
+        let r = float_of_int (int_of_string ("0x" ^ String.sub s 0 2)) /. 255.0 in
+        let g = float_of_int (int_of_string ("0x" ^ String.sub s 2 2)) /. 255.0 in
+        let b = float_of_int (int_of_string ("0x" ^ String.sub s 4 2)) /. 255.0 in
+        (r, g, b, 1.0)
+      with _ -> (0.0, 0.0, 0.0, 1.0) in
+  let apply_stops pat stops =
+    List.iter (fun (s : Element.gradient_stop) ->
+      let (r, g, b, _) = parse_hex_to_rgba s.stop_color in
+      let a = s.stop_opacity /. 100.0 in
+      Cairo.Pattern.add_color_stop_rgba pat ~ofs:(s.stop_location /. 100.0) r g b a
+    ) stops
+  in
+  let set_gradient_source (g : Element.gradient) =
+    let (bx, by, bw, bh) = bbox in
+    match g.gtype with
+    | Element.Gradient_linear ->
+      let cx = bx +. bw /. 2.0 in
+      let cy = by +. bh /. 2.0 in
+      let rad = g.gangle *. Float.pi /. 180.0 in
+      let half_diag = sqrt (bw *. bw +. bh *. bh) /. 2.0 in
+      let dx = cos rad *. half_diag in
+      let dy = -. (sin rad) *. half_diag in
+      let pat = Cairo.Pattern.create_linear ~x0:(cx -. dx) ~y0:(cy -. dy)
+                                             ~x1:(cx +. dx) ~y1:(cy +. dy) in
+      apply_stops pat g.gstops;
+      Cairo.set_source cr pat
+    | Element.Gradient_radial ->
+      let cx = bx +. bw /. 2.0 in
+      let cy = by +. bh /. 2.0 in
+      let r = (max bw bh) /. 2.0 *. (g.gaspect_ratio /. 100.0) in
+      let pat = Cairo.Pattern.create_radial ~x0:cx ~y0:cy ~r0:0.0
+                                             ~x1:cx ~y1:cy ~r1:r in
+      apply_stops pat g.gstops;
+      Cairo.set_source cr pat
+    | Element.Gradient_freeform -> ()
+  in
+  if has_gradient then begin
+    let g = match fill_gradient with Some g -> g | None -> assert false in
+    set_gradient_source g;
+    if has_stroke then begin
+      Cairo.fill_preserve cr;
+      let (_, align) = apply_stroke cr stroke in
+      stroke_aligned cr align
+    end else
+      Cairo.fill cr
+  end else if has_fill && has_stroke then begin
     (match fill with
      | Some (f : Element.fill) ->
        let (r, g, b, a) = Element.color_to_rgba f.fill_color in
@@ -899,6 +969,17 @@ and fill_and_stroke cr fill stroke =
     let (_, align) = apply_stroke cr stroke in
     stroke_aligned cr align
   end
+
+and poly_bbox points =
+  match points with
+  | [] -> (0.0, 0.0, 0.0, 0.0)
+  | (x0, y0) :: rest ->
+    let (x_min, y_min, x_max, y_max) =
+      List.fold_left (fun (xmn, ymn, xmx, ymx) (x, y) ->
+        (min xmn x, min ymn y, max xmx x, max ymx y)
+      ) (x0, y0, x0, y0) rest
+    in
+    (x_min, y_min, x_max -. x_min, y_max -. y_min)
 
 and draw_points cr points close =
   match points with
