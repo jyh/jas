@@ -725,5 +725,61 @@ let () =
           check_all ctrl (fun m ->
             assert m.Jas.Element.linked;
             assert (m.Jas.Element.unlink_transform = None)));
+
+        (* ── Mask editor routing (OPACITY.md section Preview
+           interactions) ──────────────────────────────────── *)
+
+        Alcotest.test_case "add_element_mask_mode_routes_into_mask_subtree" `Quick (fun () ->
+          let ctrl = setup () in
+          (* Mask the selection; pick the first selected element as
+             the mask-edit target. *)
+          ctrl#make_mask_on_selection ~clip:true ~invert:false;
+          let doc = ctrl#model#document in
+          let path = match Jas.Document.PathMap.min_binding_opt doc.Jas.Document.selection with
+            | Some (p, _) -> p | None -> [] in
+          let layer_count_before = match doc.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children
+            | _ -> 0 in
+          ctrl#model#set_editing_target (Jas.Model.Mask path);
+          ctrl#add_element (Jas.Element.make_rect 100.0 100.0 5.0 5.0);
+          (* Layer child count unchanged. *)
+          let doc2 = ctrl#model#document in
+          let layer_count_after = match doc2.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children
+            | _ -> 0 in
+          assert (layer_count_after = layer_count_before);
+          (* Mask subtree gained one child. *)
+          let target = Jas.Document.get_element doc2 path in
+          (match Jas.Element.get_mask target with
+           | Some mask ->
+             (match mask.Jas.Element.subtree with
+              | Jas.Element.Group g -> assert (Array.length g.children = 1)
+              | _ -> Alcotest.fail "mask subtree not a Group")
+           | None -> Alcotest.fail "mask was dropped"));
+
+        Alcotest.test_case "add_element_mask_mode_falls_back_when_no_mask" `Quick (fun () ->
+          (* editing_target says Mask(path) but the element at path
+             has no mask — falls back to layer-append. *)
+          let ctrl = setup () in
+          let doc = ctrl#model#document in
+          let path = match Jas.Document.PathMap.min_binding_opt doc.Jas.Document.selection with
+            | Some (p, _) -> p | None -> [0; 0] in
+          let before = match doc.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          ctrl#model#set_editing_target (Jas.Model.Mask path);
+          ctrl#add_element (Jas.Element.make_rect 100.0 100.0 5.0 5.0);
+          let after = match ctrl#model#document.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          assert (after = before + 1));
+
+        Alcotest.test_case "add_element_content_mode_ignores_editing_target" `Quick (fun () ->
+          (* Sanity: content-mode (default) appends to layer as before. *)
+          let ctrl = setup () in
+          let before = match ctrl#model#document.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          ctrl#add_element (Jas.Element.make_rect 100.0 100.0 5.0 5.0);
+          let after = match ctrl#model#document.Jas.Document.layers.(0) with
+            | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
+          assert (after = before + 1));
       ]);
   ]
