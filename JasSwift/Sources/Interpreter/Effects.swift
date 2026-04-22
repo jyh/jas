@@ -200,6 +200,14 @@ private func runOne(
            let hook = platformEffects["notify_panel_state_changed"] {
             _ = hook(panelId, ctx, store)
         }
+        // Phase 5 follow-up: gradient_* writes trigger the apply
+        // pipeline. Host provides "apply_gradient_panel" in its
+        // platformEffects map pointing at applyGradientPanelToSelection.
+        let wroteGradient = pairs.keys.contains { isGradientRenderKey($0) }
+        if wroteGradient,
+           let hook = platformEffects["apply_gradient_panel"] {
+            _ = hook("", ctx, store)
+        }
         return
     }
 
@@ -564,6 +572,17 @@ func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
 /// Check if a state key is a rendering-affecting stroke key.
 func isStrokeRenderKey(_ key: String) -> Bool {
     strokeRenderKeys.contains(key)
+}
+
+// MARK: - Gradient panel render-key predicate (Phase 5 follow-up)
+
+public let gradientRenderKeys: Set<String> = [
+    "gradient_type", "gradient_angle", "gradient_aspect_ratio",
+    "gradient_method", "gradient_dither", "gradient_stroke_sub_mode",
+]
+
+public func isGradientRenderKey(_ key: String) -> Bool {
+    gradientRenderKeys.contains(key)
 }
 
 // MARK: - Gradient panel writeback (Phase 5)
