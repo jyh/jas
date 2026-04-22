@@ -12,6 +12,8 @@ let make_rect ?(x=0.0) ?(y=0.0) ?(width=10.0) ?(height=10.0) () : Jas.Element.el
     opacity = 1.0; transform = None; locked = false; visibility = Preview;
     blend_mode = Jas.Element.Normal;
     mask = None;
+    fill_gradient = None;
+    stroke_gradient = None;
   }
 
 let () =
