@@ -299,9 +299,26 @@ function reduceNumeric(args, fn) {
 function evalFuncCall(node, scope) {
   const args = node.args.map((a) => evalNode(a, scope));
   const fn = PRIMITIVES[node.name];
-  if (fn) return fn(args);
+  if (fn) return fn(args, scope);
   // Unknown primitive: return null rather than throwing — matches the
   // other interpreters' lenient mode. Callers can opt into strict mode
   // for unit tests.
   return mkNull();
+}
+
+/**
+ * Register an additional primitive. Used by the tool dispatcher to
+ * expose Document-aware functions (hit_test, bounds, etc.) whose
+ * implementation needs access to runtime state the pure evaluator
+ * doesn't own.
+ *
+ * Returns an unregister function for symmetric cleanup.
+ */
+export function registerPrimitive(name, fn) {
+  const prior = PRIMITIVES[name];
+  PRIMITIVES[name] = fn;
+  return () => {
+    if (prior === undefined) delete PRIMITIVES[name];
+    else PRIMITIVES[name] = prior;
+  };
 }

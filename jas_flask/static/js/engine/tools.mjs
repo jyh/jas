@@ -11,6 +11,9 @@
 
 import { runEffects } from "./effects.mjs";
 import { Scope } from "./scope.mjs";
+import { registerPrimitive } from "./evaluator.mjs";
+import { hitTest as hitTestImpl } from "./geometry.mjs";
+import { mkNull, NUMBER } from "./value.mjs";
 
 // Tool id → tool spec (as loaded from workspace.json).
 const _tools = new Map();
@@ -82,7 +85,45 @@ export function dispatchEvent(toolId, event, store, options = {}) {
     param: options.param || {},
   });
 
-  runEffects(handler, scope, store, options);
+  // Register document-aware expression primitives for the duration
+  // of this handler. The pure evaluator doesn't see the Model; these
+  // closures bridge the gap.
+  const teardown = options.model
+    ? registerDocumentPrimitives(options.model)
+    : () => {};
+  try {
+    runEffects(handler, scope, store, options);
+  } finally {
+    teardown();
+  }
+}
+
+function registerDocumentPrimitives(model) {
+  const offs = [];
+  offs.push(registerPrimitive("hit_test", (args) => {
+    if (args.length < 2 || args[0].kind !== NUMBER || args[1].kind !== NUMBER) {
+      return mkNull();
+    }
+    const path = hitTestImpl(model.document, args[0].value, args[1].value);
+    if (!path) return mkNull();
+    return { kind: "path", value: path };
+  }));
+  offs.push(registerPrimitive("selection_contains", (args) => {
+    if (args.length < 1 || args[0].kind !== "path") return { kind: "bool", value: false };
+    const target = args[0].value;
+    const found = model.selection.some((p) => arrayEq(p, target));
+    return { kind: "bool", value: found };
+  }));
+  offs.push(registerPrimitive("selection_empty", () => ({
+    kind: "bool", value: model.selection.length === 0,
+  })));
+  return () => { for (const off of offs) off(); };
+}
+
+function arrayEq(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /**
