@@ -1724,6 +1724,23 @@ class CanvasWidget(QWidget):
                 return
         if self._active_tool.on_key(self._tool_ctx, event.key()):
             return
+        # OPACITY.md §Preview interactions: Escape exits
+        # mask-isolation first (if active); otherwise exits
+        # mask-editing mode back to content-mode.
+        if event.key() == Qt.Key.Key_Escape:
+            from document.model import EditingTarget
+            if self._model.mask_isolation_path is not None:
+                self._model.mask_isolation_path = None
+                self.update()
+                return
+            if self._model.editing_target.is_mask:
+                self._model.editing_target = EditingTarget.content()
+                # Bump panel-state version so the Opacity panel
+                # re-renders with the highlight shifted back.
+                self._model.panel_state_version = getattr(
+                    self._model, "panel_state_version", 0) + 1
+                self.update()
+                return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
