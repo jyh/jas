@@ -69,24 +69,60 @@ class controller ?(model = Model.create ()) () =
       model#set_document { doc with Document.layers = layers }
 
     method add_element (elem : Element.element) =
+      (* OPACITY.md \167Preview interactions: in mask-editing mode,
+         route the new element into the masked element's mask
+         subtree instead of the selected layer. On any "can't route
+         here" failure, fall through to the content path so the
+         user's stroke isn't lost. *)
+      (match model#editing_target with
+       | Model.Mask path when self#try_add_to_mask elem path -> ()
+       | _ ->
+         let doc = model#document in
+         let idx = doc.Document.selected_layer in
+         let child_idx = match doc.Document.layers.(idx) with
+           | Element.Layer layer -> Array.length layer.children
+           | _ -> 0 in
+         let new_layers = Array.mapi (fun i l ->
+           if i = idx then
+             match l with
+             | Element.Layer layer ->
+               Element.Layer { layer with children = Array.append layer.children [| elem |] }
+             | _ -> l
+           else l
+         ) doc.Document.layers in
+         let path = [idx; child_idx] in
+         let es = Document.element_selection_all path in
+         let sel = Document.PathMap.singleton path es in
+         model#set_document { doc with Document.layers = new_layers;
+                                       Document.selection = sel })
+
+    (** Append [elem] to the mask subtree of the element at [path].
+        Returns [true] on success, [false] when the target has no
+        mask or the subtree root isn't a [Group] — the caller then
+        falls back to layer-append. OPACITY.md \167Preview
+        interactions. *)
+    method private try_add_to_mask (elem : Element.element) (path : int list) : bool =
       let doc = model#document in
-      let idx = doc.Document.selected_layer in
-      let child_idx = match doc.Document.layers.(idx) with
-        | Element.Layer layer -> Array.length layer.children
-        | _ -> 0 in
-      let new_layers = Array.mapi (fun i l ->
-        if i = idx then
-          match l with
-          | Element.Layer layer ->
-            Element.Layer { layer with children = Array.append layer.children [| elem |] }
-          | _ -> l
-        else l
-      ) doc.Document.layers in
-      let path = [idx; child_idx] in
-      let es = Document.element_selection_all path in
-      let sel = Document.PathMap.singleton path es in
-      model#set_document { doc with Document.layers = new_layers;
-                                    Document.selection = sel }
+      try
+        let target = Document.get_element doc path in
+        match Element.get_mask target with
+        | None -> false
+        | Some mask ->
+          (match mask.Element.subtree with
+           | Element.Group g ->
+             let new_group =
+               Element.Group { g with children = Array.append g.children [| elem |] } in
+             let new_mask = { mask with Element.subtree = new_group } in
+             let new_target = Element.with_mask target (Some new_mask) in
+             let new_doc = Document.replace_element doc path new_target in
+             (* No canonical "inside a mask" path — select the
+                mask-target element itself after the add. *)
+             let es = Document.element_selection_all path in
+             let sel = Document.PathMap.singleton path es in
+             model#set_document { new_doc with Document.selection = sel };
+             true
+           | _ -> false)
+      with _ -> false
 
     method private toggle_selection current new_sel =
       (* XOR per element.
