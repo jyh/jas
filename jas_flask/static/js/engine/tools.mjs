@@ -117,7 +117,29 @@ function registerDocumentPrimitives(model) {
   offs.push(registerPrimitive("selection_empty", () => ({
     kind: "bool", value: model.selection.length === 0,
   })));
+  // layer_length([0]) returns the number of children in the layer at
+  // the given path. Handy for indexing the "last appended" element
+  // after a doc.add_element.
+  offs.push(registerPrimitive("layer_length", (args) => {
+    if (args.length < 1 || args[0].kind !== "list") return { kind: "number", value: 0 };
+    // Treat the first arg as a path (list of indices).
+    const path = args[0].value.map((v) => v.kind === NUMBER ? v.value : 0);
+    const elem = walkPath(model.document, path);
+    const n = (elem && Array.isArray(elem.children)) ? elem.children.length : 0;
+    return { kind: "number", value: n };
+  }));
   return () => { for (const off of offs) off(); };
+}
+
+function walkPath(doc, path) {
+  if (!doc || !Array.isArray(doc.layers)) return null;
+  if (path.length === 0) return null;
+  let cur = doc.layers[path[0]];
+  for (let i = 1; i < path.length; i++) {
+    if (!cur || !Array.isArray(cur.children)) return null;
+    cur = cur.children[path[i]];
+  }
+  return cur;
 }
 
 function arrayEq(a, b) {
