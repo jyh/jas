@@ -221,6 +221,200 @@ let string_of_arrowhead = function
   | Open_diamond -> "open_diamond"
   | Arrow_slash -> "slash"
 
+(** Gradient type. See transcripts/GRADIENT.md §Gradient types. *)
+type gradient_type =
+  | Gradient_linear
+  | Gradient_radial
+  | Gradient_freeform
+
+(** Gradient interpolation / topology method. classic / smooth apply
+    to linear/radial; points / lines apply to freeform. *)
+type gradient_method =
+  | Method_classic
+  | Method_smooth
+  | Method_points
+  | Method_lines
+
+(** Stroke sub-mode: how a gradient on a stroke maps onto the path. *)
+type stroke_sub_mode =
+  | Sub_mode_within
+  | Sub_mode_along
+  | Sub_mode_across
+
+(** A single color stop inside a linear/radial gradient. The color is
+    stored as a hex string (e.g. "#rrggbb") to match the wire format
+    in GRADIENT.md and the Rust/Swift ports. *)
+type gradient_stop = {
+  stop_color : string;
+  stop_opacity : float;       (* 0-100 percentage *)
+  stop_location : float;      (* 0-100 percentage along the strip *)
+  stop_midpoint_to_next : float; (* 0-100 percentage-between; default 50 *)
+}
+
+(** A single freeform-gradient node. *)
+type gradient_node = {
+  node_x : float;             (* 0-1 normalised in element bbox *)
+  node_y : float;
+  node_color : string;        (* hex string *)
+  node_opacity : float;       (* 0-100 *)
+  node_spread : float;        (* 0-100 *)
+}
+
+(** A gradient value usable as a fill or stroke. See GRADIENT.md
+    §Document model. *)
+type gradient = {
+  gtype : gradient_type;
+  gangle : float;             (* -180..+180 *)
+  gaspect_ratio : float;      (* 1-1000 percentage; 100 = isotropic *)
+  gmethod : gradient_method;
+  gdither : bool;
+  gstroke_sub_mode : stroke_sub_mode;
+  gstops : gradient_stop list;
+  gnodes : gradient_node list;
+}
+
+let default_gradient : gradient = {
+  gtype = Gradient_linear;
+  gangle = 0.0;
+  gaspect_ratio = 100.0;
+  gmethod = Method_classic;
+  gdither = false;
+  gstroke_sub_mode = Sub_mode_within;
+  gstops = [];
+  gnodes = [];
+}
+
+(** JSON wire-format helpers — string aliases per GRADIENT.md.
+
+    These functions live here so all four apps share the same wire
+    format. The Rust port uses serde rename, Swift uses CodingKeys,
+    OCaml does this with explicit string conversions. *)
+
+let gradient_type_to_string = function
+  | Gradient_linear -> "linear"
+  | Gradient_radial -> "radial"
+  | Gradient_freeform -> "freeform"
+
+let gradient_type_of_string = function
+  | "linear" -> Gradient_linear
+  | "radial" -> Gradient_radial
+  | "freeform" -> Gradient_freeform
+  | s -> failwith ("unknown gradient type: " ^ s)
+
+let gradient_method_to_string = function
+  | Method_classic -> "classic"
+  | Method_smooth -> "smooth"
+  | Method_points -> "points"
+  | Method_lines -> "lines"
+
+let gradient_method_of_string = function
+  | "classic" -> Method_classic
+  | "smooth" -> Method_smooth
+  | "points" -> Method_points
+  | "lines" -> Method_lines
+  | s -> failwith ("unknown gradient method: " ^ s)
+
+let stroke_sub_mode_to_string = function
+  | Sub_mode_within -> "within"
+  | Sub_mode_along -> "along"
+  | Sub_mode_across -> "across"
+
+let stroke_sub_mode_of_string = function
+  | "within" -> Sub_mode_within
+  | "along" -> Sub_mode_along
+  | "across" -> Sub_mode_across
+  | s -> failwith ("unknown stroke sub-mode: " ^ s)
+
+(** JSON conversion. Uses Yojson.Safe and follows GRADIENT.md
+    §Document model field names. *)
+
+let stop_to_json (s : gradient_stop) : Yojson.Safe.t =
+  let base = [
+    "color", `String s.stop_color;
+    "opacity", `Float s.stop_opacity;
+    "location", `Float s.stop_location;
+  ] in
+  (* Identity-value rule: omit midpoint when default 50. *)
+  let with_mid =
+    if s.stop_midpoint_to_next <> 50.0
+    then base @ ["midpoint_to_next", `Float s.stop_midpoint_to_next]
+    else base
+  in
+  `Assoc with_mid
+
+let stop_of_json (j : Yojson.Safe.t) : gradient_stop =
+  let open Yojson.Safe.Util in
+  {
+    stop_color = j |> member "color" |> to_string;
+    stop_opacity = (match j |> member "opacity" with
+      | `Null -> 100.0
+      | v -> to_number v);
+    stop_location = j |> member "location" |> to_number;
+    stop_midpoint_to_next = (match j |> member "midpoint_to_next" with
+      | `Null -> 50.0
+      | v -> to_number v);
+  }
+
+let node_to_json (n : gradient_node) : Yojson.Safe.t =
+  `Assoc [
+    "x", `Float n.node_x;
+    "y", `Float n.node_y;
+    "color", `String n.node_color;
+    "opacity", `Float n.node_opacity;
+    "spread", `Float n.node_spread;
+  ]
+
+let node_of_json (j : Yojson.Safe.t) : gradient_node =
+  let open Yojson.Safe.Util in
+  {
+    node_x = j |> member "x" |> to_number;
+    node_y = j |> member "y" |> to_number;
+    node_color = j |> member "color" |> to_string;
+    node_opacity = (match j |> member "opacity" with
+      | `Null -> 100.0 | v -> to_number v);
+    node_spread = (match j |> member "spread" with
+      | `Null -> 25.0 | v -> to_number v);
+  }
+
+let gradient_to_json (g : gradient) : Yojson.Safe.t =
+  `Assoc [
+    "type", `String (gradient_type_to_string g.gtype);
+    "angle", `Float g.gangle;
+    "aspect_ratio", `Float g.gaspect_ratio;
+    "method", `String (gradient_method_to_string g.gmethod);
+    "dither", `Bool g.gdither;
+    "stroke_sub_mode", `String (stroke_sub_mode_to_string g.gstroke_sub_mode);
+    "stops", `List (List.map stop_to_json g.gstops);
+    "nodes", `List (List.map node_to_json g.gnodes);
+  ]
+
+let gradient_of_json (j : Yojson.Safe.t) : gradient =
+  let open Yojson.Safe.Util in
+  let opt f default = match f with `Null -> default | v -> v in
+  {
+    gtype = (match j |> member "type" with
+      | `Null -> Gradient_linear
+      | v -> v |> to_string |> gradient_type_of_string);
+    gangle = (j |> member "angle" |> opt) (`Float 0.0) |> to_number;
+    gaspect_ratio = (j |> member "aspect_ratio" |> opt) (`Float 100.0) |> to_number;
+    gmethod = (match j |> member "method" with
+      | `Null -> Method_classic
+      | v -> v |> to_string |> gradient_method_of_string);
+    gdither = (match j |> member "dither" with
+      | `Null -> false | v -> to_bool v);
+    gstroke_sub_mode = (match j |> member "stroke_sub_mode" with
+      | `Null -> Sub_mode_within
+      | v -> v |> to_string |> stroke_sub_mode_of_string);
+    gstops = (match j |> member "stops" with
+      | `Null -> []
+      | `List l -> List.map stop_of_json l
+      | _ -> []);
+    gnodes = (match j |> member "nodes" with
+      | `Null -> []
+      | `List l -> List.map node_of_json l
+      | _ -> []);
+  }
+
 (** SVG fill presentation attribute. *)
 type fill = {
   fill_color : color;

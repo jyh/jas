@@ -571,5 +571,95 @@ let () =
         assert (blend_mode_of_string "not_a_mode" = None);
         assert (blend_mode_of_string "" = None);
         assert (blend_mode_of_string "ColorBurn" = None));
+
+      (* Phase 1: gradient JSON round-trip. *)
+      Alcotest.test_case "gradient round-trip linear" `Quick (fun () ->
+        let g = {
+          gtype = Gradient_linear;
+          gangle = 45.0;
+          gaspect_ratio = 100.0;
+          gmethod = Method_classic;
+          gdither = false;
+          gstroke_sub_mode = Sub_mode_within;
+          gstops = [
+            { stop_color = "#ff0000"; stop_opacity = 100.0;
+              stop_location = 0.0; stop_midpoint_to_next = 50.0 };
+            { stop_color = "#0000ff"; stop_opacity = 100.0;
+              stop_location = 100.0; stop_midpoint_to_next = 50.0 };
+          ];
+          gnodes = [];
+        } in
+        let json = gradient_to_json g in
+        let parsed = gradient_of_json json in
+        assert (parsed = g));
+
+      Alcotest.test_case "gradient round-trip radial midpoints method dither" `Quick (fun () ->
+        let g = {
+          gtype = Gradient_radial;
+          gangle = 0.0;
+          gaspect_ratio = 200.0;
+          gmethod = Method_smooth;
+          gdither = true;
+          gstroke_sub_mode = Sub_mode_across;
+          gstops = [
+            { stop_color = "#ffff00"; stop_opacity = 100.0;
+              stop_location = 0.0;   stop_midpoint_to_next = 30.0 };
+            { stop_color = "#800080"; stop_opacity = 50.0;
+              stop_location = 50.0;  stop_midpoint_to_next = 70.0 };
+            { stop_color = "#000000"; stop_opacity = 0.0;
+              stop_location = 100.0; stop_midpoint_to_next = 50.0 };
+          ];
+          gnodes = [];
+        } in
+        let json = gradient_to_json g in
+        let parsed = gradient_of_json json in
+        assert (parsed = g));
+
+      Alcotest.test_case "gradient round-trip freeform" `Quick (fun () ->
+        let g = {
+          default_gradient with
+          gtype = Gradient_freeform;
+          gmethod = Method_points;
+          gnodes = [
+            { node_x = 0.25; node_y = 0.25; node_color = "#ff0000";
+              node_opacity = 100.0; node_spread = 30.0 };
+            { node_x = 0.75; node_y = 0.75; node_color = "#0000ff";
+              node_opacity = 100.0; node_spread = 25.0 };
+          ];
+        } in
+        let json = gradient_to_json g in
+        let parsed = gradient_of_json json in
+        assert (parsed = g));
+
+      Alcotest.test_case "gradient wire format strings" `Quick (fun () ->
+        assert (gradient_type_to_string Gradient_linear = "linear");
+        assert (gradient_type_to_string Gradient_radial = "radial");
+        assert (gradient_type_to_string Gradient_freeform = "freeform");
+        assert (gradient_method_to_string Method_classic = "classic");
+        assert (gradient_method_to_string Method_smooth = "smooth");
+        assert (gradient_method_to_string Method_points = "points");
+        assert (gradient_method_to_string Method_lines = "lines");
+        assert (stroke_sub_mode_to_string Sub_mode_within = "within");
+        assert (stroke_sub_mode_to_string Sub_mode_along = "along");
+        assert (stroke_sub_mode_to_string Sub_mode_across = "across"));
+
+      Alcotest.test_case "gradient_stop default midpoint" `Quick (fun () ->
+        (* midpoint_to_next defaults to 50 when absent on parse. *)
+        let json = `Assoc [
+          "color", `String "#ff0000";
+          "opacity", `Float 100.0;
+          "location", `Float 25.0;
+        ] in
+        let parsed = (gradient_of_json (`Assoc [
+          "type", `String "linear";
+          "angle", `Float 0.0;
+          "aspect_ratio", `Float 100.0;
+          "method", `String "classic";
+          "dither", `Bool false;
+          "stroke_sub_mode", `String "within";
+          "stops", `List [json];
+          "nodes", `List [];
+        ])).gstops |> List.hd in
+        assert (parsed.stop_midpoint_to_next = 50.0));
     ];
   ]

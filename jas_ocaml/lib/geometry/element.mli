@@ -99,6 +99,51 @@ val arrowhead_of_string : string -> arrowhead
 (** Convert an arrowhead enum to its name string. *)
 val string_of_arrowhead : arrowhead -> string
 
+(** Gradient type. See transcripts/GRADIENT.md §Gradient types. *)
+type gradient_type = Gradient_linear | Gradient_radial | Gradient_freeform
+
+type gradient_method = Method_classic | Method_smooth | Method_points | Method_lines
+
+type stroke_sub_mode = Sub_mode_within | Sub_mode_along | Sub_mode_across
+
+type gradient_stop = {
+  stop_color : string;
+  stop_opacity : float;
+  stop_location : float;
+  stop_midpoint_to_next : float;
+}
+
+type gradient_node = {
+  node_x : float;
+  node_y : float;
+  node_color : string;
+  node_opacity : float;
+  node_spread : float;
+}
+
+type gradient = {
+  gtype : gradient_type;
+  gangle : float;
+  gaspect_ratio : float;
+  gmethod : gradient_method;
+  gdither : bool;
+  gstroke_sub_mode : stroke_sub_mode;
+  gstops : gradient_stop list;
+  gnodes : gradient_node list;
+}
+
+val default_gradient : gradient
+
+val gradient_type_to_string : gradient_type -> string
+val gradient_type_of_string : string -> gradient_type
+val gradient_method_to_string : gradient_method -> string
+val gradient_method_of_string : string -> gradient_method
+val stroke_sub_mode_to_string : stroke_sub_mode -> string
+val stroke_sub_mode_of_string : string -> stroke_sub_mode
+
+val gradient_to_json : gradient -> Yojson.Safe.t
+val gradient_of_json : Yojson.Safe.t -> gradient
+
 (** SVG fill presentation attribute. *)
 type fill = { fill_color : color; fill_opacity : float }
 
