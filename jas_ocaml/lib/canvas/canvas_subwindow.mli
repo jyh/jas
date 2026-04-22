@@ -38,3 +38,9 @@ val create :
   ?on_save:(unit -> unit) ->
   ?bbox:bounding_box ->
   GPack.notebook -> canvas_subwindow
+
+(** Return the Cairo operator that composites a [mask] onto the
+    masked element's pixels during rendering. OPACITY.md \167Rendering,
+    phase 1. Returns [None] when the mask is disabled or the
+    config isn't yet supported ([clip: false]). *)
+val mask_composite_op : Element.mask -> Cairo.operator option

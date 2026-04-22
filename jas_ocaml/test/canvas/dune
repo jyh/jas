@@ -5,3 +5,7 @@
 (test
  (name pane_rendering_test)
  (libraries jas alcotest))
+
+(test
+ (name opacity_mask_test)
+ (libraries jas alcotest))
