@@ -708,6 +708,25 @@ def _mask_plan(mask) -> MaskPlan | None:
     return MaskPlan.REVEAL_OUTSIDE_BBOX
 
 
+def _effective_mask_transform(mask, elem) -> "Transform | None":
+    """Return the transform that should be applied when rendering
+    the mask's subtree on top of the ancestor coord system. Track
+    C phase 3, OPACITY.md §Document model:
+
+    - ``linked=True``  — mask inherits ``elem.transform`` (mask
+      follows the element).
+    - ``linked=False`` — mask uses ``mask.unlink_transform`` (the
+      element's transform captured at unlink time, frozen so the
+      mask stays fixed under subsequent element edits).
+
+    Returns ``None`` when the picked transform is absent (identity
+    case) so the caller can skip the ``_apply_transform`` call.
+    """
+    if mask.linked:
+        return getattr(elem, 'transform', None)
+    return mask.unlink_transform
+
+
 def _draw_element(painter: QPainter, elem: Element,
                   ancestor_vis=None) -> None:
     """Draw a single element, dispatching to the mask composite
@@ -752,6 +771,11 @@ def _draw_element_with_mask(painter: QPainter, elem: Element,
         )
         sub.setTransform(painter.transform())
         _draw_element_body(sub, elem, ancestor_vis)
+        # Apply the mask's effective transform (per
+        # _effective_mask_transform), then composite the mask
+        # subtree against the element body. Track C phase 3.
+        sub.save()
+        _apply_transform(sub, _effective_mask_transform(mask, elem))
         if plan == MaskPlan.CLIP_IN:
             sub.setCompositionMode(cm.CompositionMode_DestinationIn)
             _draw_element(sub, mask.subtree, ancestor_vis)
@@ -772,6 +796,7 @@ def _draw_element_with_mask(painter: QPainter, elem: Element,
                 sub.restore()
             # Empty-bbox mask: body passes through unmodified
             # (mask has nothing to composite against).
+        sub.restore()
     finally:
         sub.end()
     painter.save()

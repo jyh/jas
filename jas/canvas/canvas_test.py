@@ -405,6 +405,63 @@ class MaskPlanTest(absltest.TestCase):
         )
 
 
+class EffectiveMaskTransformTest(absltest.TestCase):
+    """Test the _effective_mask_transform helper — Track C phase 3,
+    OPACITY.md §Document model."""
+
+    def _mask(self, linked, unlink):
+        from geometry.element import Mask, Group
+        return Mask(
+            subtree=Group(children=()),
+            clip=True, invert=False, disabled=False,
+            linked=linked, unlink_transform=unlink,
+        )
+
+    def _xform(self, e, f):
+        # Pure translation by (e, f) for easy identification.
+        from geometry.element import Transform
+        return Transform(a=1.0, b=0.0, c=0.0, d=1.0, e=e, f=f)
+
+    def _rect(self, transform):
+        return Rect(x=0, y=0, width=10, height=10, transform=transform)
+
+    def test_linked_returns_element_transform(self):
+        # linked=True: mask follows the element, so the renderer
+        # should apply elem.transform.
+        from canvas.canvas import _effective_mask_transform
+        mask = self._mask(linked=True, unlink=None)
+        elem = self._rect(self._xform(5, 7))
+        t = _effective_mask_transform(mask, elem)
+        self.assertIsNotNone(t)
+        self.assertEqual(t.e, 5)
+        self.assertEqual(t.f, 7)
+
+    def test_linked_none_when_element_has_no_transform(self):
+        # linked=True with no element transform: None.
+        from canvas.canvas import _effective_mask_transform
+        mask = self._mask(linked=True, unlink=None)
+        elem = self._rect(None)
+        self.assertIsNone(_effective_mask_transform(mask, elem))
+
+    def test_unlinked_returns_captured_unlink_transform(self):
+        # linked=False: mask stays frozen under unlink-time transform,
+        # regardless of the element's current transform.
+        from canvas.canvas import _effective_mask_transform
+        mask = self._mask(linked=False, unlink=self._xform(3, 4))
+        elem = self._rect(self._xform(100, 100))
+        t = _effective_mask_transform(mask, elem)
+        self.assertIsNotNone(t)
+        self.assertEqual(t.e, 3)
+        self.assertEqual(t.f, 4)
+
+    def test_unlinked_none_when_unlink_missing(self):
+        # linked=False with no captured transform: None.
+        from canvas.canvas import _effective_mask_transform
+        mask = self._mask(linked=False, unlink=None)
+        elem = self._rect(self._xform(7, 8))
+        self.assertIsNone(_effective_mask_transform(mask, elem))
+
+
 class ArcToBeziersTest(absltest.TestCase):
     """Tests for _arc_to_beziers arc-to-cubic conversion."""
 
