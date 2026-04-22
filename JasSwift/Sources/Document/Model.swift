@@ -1,6 +1,20 @@
 import Foundation
 import Combine
 
+/// The target that drawing tools operate on. The default is the
+/// document's normal content; mask-editing mode switches the
+/// target to a specific element's mask subtree so new shapes land
+/// inside ``element.mask.subtree`` instead of the selected layer.
+/// Mirrors ``EditingTarget`` in ``jas_dioxus``. OPACITY.md
+/// §Preview interactions.
+public enum EditingTarget: Equatable {
+    /// The document's normal content (default).
+    case content
+    /// Mask-editing mode: the element at ``path`` has its mask
+    /// subtree as the drawing target.
+    case mask([Int])
+}
+
 private var nextUntitled = 1
 
 private func freshFilename() -> String {
@@ -34,6 +48,12 @@ public class Model: ObservableObject {
     /// is a top-level path [Int]. Written by enter/exit_isolation_mode
     /// actions via YAML dispatch (see LayersPanel.dispatchYamlAction).
     @Published public var layersIsolationStack: [[Int]] = []
+    /// Mask-editing mode state. ``.content`` is the default (drawing
+    /// tools add to the selected layer); ``.mask(path)`` switches
+    /// the editing target to ``element.mask.subtree`` at ``path``.
+    /// Flipped by clicking the Opacity panel's OPACITY_PREVIEW or
+    /// MASK_PREVIEW. OPACITY.md §Preview interactions.
+    @Published public var editingTarget: EditingTarget = .content
     /// Live reference to the active in-place text-editing session, if
     /// any. TypeTool and TypeOnPathTool publish their session here
     /// while editing so the Character-panel write pipeline can route

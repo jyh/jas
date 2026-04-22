@@ -158,15 +158,25 @@ public func buildSelectionPredicates(model: Model?) -> [String: Any] {
             // the linked glyph when no mask exists — matches the
             // "New masks are linked" spec default.
             "selection_mask_linked": true,
+            "editing_target_is_mask": false,
         ]
     }
     let doc = m.document
     let hasMask = selectionHasMask(doc)
     let first = firstMask(doc)
+    // OPACITY.md §Preview interactions: `editing_target_is_mask`
+    // reflects whether mask-editing mode is active, so
+    // OPACITY_PREVIEW / MASK_PREVIEW can show a persistent
+    // highlight on the current editing target.
+    let editingMask: Bool = {
+        if case .mask = m.editingTarget { return true }
+        return false
+    }()
     return [
         "selection_has_mask": hasMask,
         "selection_mask_clip": first?.clip ?? false,
         "selection_mask_invert": first?.invert ?? false,
         "selection_mask_linked": first?.linked ?? true,
+        "editing_target_is_mask": editingMask,
     ]
 }

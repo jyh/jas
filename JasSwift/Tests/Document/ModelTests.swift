@@ -97,3 +97,21 @@ import Testing
     model.redo()
     #expect(model.document.layers.count == 1)
 }
+
+// MARK: - EditingTarget (Mask editor UI — OPACITY.md §Preview interactions)
+
+@Test func modelDefaultsToContentEditingTarget() {
+    // Default editing target is the document's normal content —
+    // mask-editing mode is entered explicitly via the MASK_PREVIEW
+    // click. OPACITY.md §Preview interactions.
+    let model = Model()
+    #expect(model.editingTarget == .content)
+}
+
+@Test func modelEditingTargetRoundTripsThroughMaskMode() {
+    let model = Model()
+    model.editingTarget = .mask([0, 2, 1])
+    #expect(model.editingTarget == .mask([0, 2, 1]))
+    model.editingTarget = .content
+    #expect(model.editingTarget == .content)
+}

@@ -628,9 +628,46 @@ struct YamlElementView: View {
         let summary = element["summary"] as? String
             ?? element["type"] as? String
             ?? "?"
-        SwiftUI.Text("[\(summary)]")
-            .foregroundColor(.gray)
-            .frame(minHeight: 30)
+        // Opacity panel previews (OPACITY.md §Preview interactions):
+        // op_preview / op_mask_preview handle click to switch the
+        // editing target and render a persistent highlight on the
+        // active target. Mirrors the Rust special-case in
+        // ``render_placeholder``.
+        let id = element["id"] as? String
+        if panelId == "opacity_panel_content",
+           let id, id == "op_preview" || id == "op_mask_preview" {
+            let editingMask = evaluate("editing_target_is_mask", context: context).toBool()
+            let hasMask = evaluate("selection_has_mask", context: context).toBool()
+            let isMaskPreview = id == "op_mask_preview"
+            // Highlight the preview that matches the current editing
+            // target: op_preview when content-mode, op_mask_preview
+            // when mask-mode.
+            let highlight = editingMask == isMaskPreview
+            // MASK_PREVIEW click requires the selection to have a
+            // mask; otherwise the click is a no-op.
+            let clickEnabled = !isMaskPreview || hasMask
+            SwiftUI.Text("[\(summary)]")
+                .foregroundColor(.gray)
+                .frame(minHeight: 30)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(highlight
+                                ? SwiftUI.Color(red: 74 / 255, green: 144 / 255, blue: 217 / 255)
+                                : SwiftUI.Color.clear,
+                                lineWidth: 2)
+                )
+                .contentShape(SwiftUI.Rectangle())
+                .onTapGesture {
+                    guard clickEnabled, let m = model else { return }
+                    m.editingTarget = isMaskPreview
+                        ? .mask(m.document.selection.first?.path ?? [])
+                        : .content
+                }
+        } else {
+            SwiftUI.Text("[\(summary)]")
+                .foregroundColor(.gray)
+                .frame(minHeight: 30)
+        }
     }
 
     // MARK: - Select
