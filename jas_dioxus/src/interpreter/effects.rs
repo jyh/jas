@@ -15,8 +15,9 @@ use crate::document::controller::Controller;
 use crate::document::document::ElementPath;
 use crate::document::model::Model;
 use crate::geometry::element::{
-    Color, CommonProps, Element, Fill, LineElem, RectElem, Stroke,
+    Color, CommonProps, Element, Fill, LineElem, PolygonElem, RectElem, Stroke,
 };
+use crate::geometry::regular_shapes::{regular_polygon_points, star_points};
 
 /// Execute a list of effects.
 ///
@@ -672,6 +673,52 @@ fn build_element(
                 stroke_gradient: None,
             }))
         }
+        "polygon" => {
+            // Regular N-gon with the first edge from (x1, y1) to (x2, y2).
+            // `sides` defaults to 5, matching native POLYGON_SIDES.
+            let x1 = eval_number(spec.get("x1"), store, ctx);
+            let y1 = eval_number(spec.get("y1"), store, ctx);
+            let x2 = eval_number(spec.get("x2"), store, ctx);
+            let y2 = eval_number(spec.get("y2"), store, ctx);
+            let sides = eval_number(spec.get("sides"), store, ctx) as usize;
+            let sides = if sides == 0 { 5 } else { sides };
+            let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            let points = regular_polygon_points(x1, y1, x2, y2, sides);
+            Some(Element::Polygon(PolygonElem {
+                points,
+                fill,
+                stroke,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))
+        }
+
+        "star" => {
+            // Star inscribed in the axis-aligned bounding box between
+            // (x1, y1) and (x2, y2). `points` defaults to 5.
+            let x1 = eval_number(spec.get("x1"), store, ctx);
+            let y1 = eval_number(spec.get("y1"), store, ctx);
+            let x2 = eval_number(spec.get("x2"), store, ctx);
+            let y2 = eval_number(spec.get("y2"), store, ctx);
+            let points_n = eval_number(spec.get("points"), store, ctx) as usize;
+            let points_n = if points_n == 0 { 5 } else { points_n };
+            let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            let pts = star_points(x1, y1, x2, y2, points_n);
+            Some(Element::Polygon(PolygonElem {
+                points: pts,
+                fill,
+                stroke,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))
+        }
+
         "line" => {
             let x1 = eval_number(spec.get("x1"), store, ctx);
             let y1 = eval_number(spec.get("y1"), store, ctx);

@@ -3,6 +3,7 @@ pub mod element;
 pub mod live;
 pub mod measure;
 pub mod normalize;
+pub mod regular_shapes;
 pub mod svg;
 pub mod test_json;
 pub mod tspan;

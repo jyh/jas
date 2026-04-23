@@ -11,8 +11,6 @@ pub mod anchor_point_tool;
 pub mod pencil_tool;
 pub mod path_eraser_tool;
 pub mod smooth_tool;
-pub mod polygon_tool;
-pub mod star_tool;
 pub mod type_tool;
 pub mod type_on_path_tool;
 pub mod lasso_tool;

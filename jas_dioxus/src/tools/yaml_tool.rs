@@ -333,6 +333,8 @@ impl CanvasTool for YamlTool {
         match render_type {
             "rect" => draw_rect_overlay(ctx, render, &eval_ctx),
             "line" => draw_line_overlay(ctx, render, &eval_ctx),
+            "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
+            "star" => draw_star_overlay(ctx, render, &eval_ctx),
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -510,6 +512,98 @@ fn draw_line_overlay(
     ctx.stroke();
     if style.stroke_dasharray.is_some() {
         let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+}
+
+/// Draw a regular-N-gon overlay inscribed by a first-edge vector.
+/// Fields: x1/y1/x2/y2 (the edge endpoints), sides (default 5),
+/// style.
+fn draw_regular_polygon_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let sides = eval_number_field(eval_ctx, render.get("sides")) as usize;
+    let sides = if sides == 0 { 5 } else { sides };
+    let pts = crate::geometry::regular_shapes::regular_polygon_points(
+        x1, y1, x2, y2, sides,
+    );
+    draw_closed_polygon_from_points(ctx, &pts, render);
+}
+
+/// Draw a star overlay inscribed in a bounding box. Fields:
+/// x1/y1/x2/y2 (box corners), points (default 5 outer vertices),
+/// style.
+fn draw_star_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let points_n = eval_number_field(eval_ctx, render.get("points")) as usize;
+    let points_n = if points_n == 0 { 5 } else { points_n };
+    let pts = crate::geometry::regular_shapes::star_points(
+        x1, y1, x2, y2, points_n,
+    );
+    draw_closed_polygon_from_points(ctx, &pts, render);
+}
+
+/// Shared closed-polygon drawing: build a path from `points`, apply
+/// fill/stroke style, and reset dash state if we set one. Shared by
+/// the polygon and star overlay types — they differ only in how
+/// points are computed.
+fn draw_closed_polygon_from_points(
+    ctx: &CanvasRenderingContext2d,
+    points: &[(f64, f64)],
+    render: &serde_json::Value,
+) {
+    if points.is_empty() {
+        return;
+    }
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+
+    let build_path = || {
+        ctx.begin_path();
+        ctx.move_to(points[0].0, points[0].1);
+        for p in &points[1..] {
+            ctx.line_to(p.0, p.1);
+        }
+        ctx.close_path();
+    };
+
+    if let Some(fill) = &style.fill {
+        ctx.set_fill_style_str(fill);
+        build_path();
+        ctx.fill();
+    }
+    if let Some(stroke) = &style.stroke {
+        ctx.set_stroke_style_str(stroke);
+        if let Some(w) = style.stroke_width {
+            ctx.set_line_width(w);
+        }
+        if let Some(dash) = &style.stroke_dasharray {
+            let arr = js_sys::Array::new();
+            for d in dash {
+                arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+            }
+            let _ = ctx.set_line_dash(&arr);
+        }
+        build_path();
+        ctx.stroke();
+        if style.stroke_dasharray.is_some() {
+            let _ = ctx.set_line_dash(&js_sys::Array::new());
+        }
     }
 }
 
@@ -1370,6 +1464,127 @@ mod tests {
             assert_eq!(r.height, 60.0);
         } else {
             panic!("expected Rect");
+        }
+    }
+
+    // ── Polygon tool behavioral tests ──────────────────────────────
+
+    fn polygon_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("polygon")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn polygon_parity_draw_polygon() {
+        let Some(mut tool) = polygon_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_move(&mut model, 100.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 50.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Polygon(p) = &*children[0] {
+            assert_eq!(p.points.len(), 5);
+        } else {
+            panic!("expected Polygon element");
+        }
+    }
+
+    #[test]
+    fn polygon_parity_short_drag_no_polygon() {
+        let Some(mut tool) = polygon_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    // ── Star tool behavioral tests ─────────────────────────────────
+
+    fn star_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("star")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn star_parity_draw_star() {
+        let Some(mut tool) = star_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 110.0, 120.0, false, false, true);
+        tool.on_release(&mut model, 110.0, 120.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Polygon(p) = &*children[0] {
+            // 5 outer points × 2 (alternating inner/outer) = 10 vertices.
+            assert_eq!(p.points.len(), 10);
+        } else {
+            panic!("expected Polygon element");
+        }
+    }
+
+    #[test]
+    fn star_parity_zero_size_not_created() {
+        let Some(mut tool) = star_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn star_parity_negative_drag_normalizes() {
+        let Some(mut tool) = star_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_move(&mut model, 0.0, 0.0, false, false, true);
+        tool.on_release(&mut model, 0.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Polygon(p) = &*children[0] {
+            assert_eq!(p.points.len(), 10);
+            // First outer point at top-center of the (normalized)
+            // bounding box — center.x = 50, top.y = 0.
+            assert!((p.points[0].0 - 50.0).abs() < 1e-9);
+            assert!((p.points[0].1 - 0.0).abs() < 1e-9);
+        } else {
+            panic!("expected Polygon element");
         }
     }
 
