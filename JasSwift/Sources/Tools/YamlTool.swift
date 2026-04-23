@@ -232,12 +232,256 @@ final class YamlTool: CanvasTool {
     }
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
-        // Phase 5a: overlay rendering is stubbed. OverlaySpec is
-        // parsed and the guard expression can be evaluated, but the
-        // actual rect / line / pen / partial-selection renderers
-        // land in Phase 5b (they mirror the Rust draw_*_overlay
-        // functions in yaml_tool.rs).
-        _ = cgCtx
-        _ = ctx
+        guard let overlay = spec.overlay else { return }
+        let _reg = registerDocument(ctx.model.document)
+        let evalCtx = store.evalContext()
+        // Guard evaluates in the same scope the handler used.
+        if let guardExpr = overlay.guardExpr {
+            if !evaluate(guardExpr, context: evalCtx).toBool() { return }
+        }
+        let render = overlay.render
+        let type = render["type"] as? String ?? ""
+        switch type {
+        case "rect": drawRectOverlay(cgCtx, render, evalCtx)
+        case "line": drawLineOverlay(cgCtx, render, evalCtx)
+        case "polygon": drawPolygonOverlay(cgCtx, render, evalCtx)
+        case "star": drawStarOverlay(cgCtx, render, evalCtx)
+        default: break
+        }
+        _ = _reg
     }
+}
+
+// MARK: - Overlay rendering
+
+/// Subset of SVG style properties the overlay renderer understands.
+/// Internal (not private) so tests can observe parsed output.
+struct OverlayStyle: Equatable {
+    var fill: CGColor? = nil
+    var stroke: CGColor? = nil
+    var strokeWidth: CGFloat = 1
+    var dash: [CGFloat] = []
+
+    static func == (lhs: OverlayStyle, rhs: OverlayStyle) -> Bool {
+        lhs.strokeWidth == rhs.strokeWidth
+            && lhs.dash == rhs.dash
+            && cgColorEquals(lhs.fill, rhs.fill)
+            && cgColorEquals(lhs.stroke, rhs.stroke)
+    }
+}
+
+private func cgColorEquals(_ a: CGColor?, _ b: CGColor?) -> Bool {
+    switch (a, b) {
+    case (nil, nil): return true
+    case (.some(let x), .some(let y)): return x == y
+    default: return false
+    }
+}
+
+/// Parse a CSS-like "key: value; key: value" string into OverlayStyle.
+/// Internal so tests can inspect the result.
+func parseOverlayStyle(_ s: String) -> OverlayStyle {
+    var style = OverlayStyle()
+    for rule in s.split(separator: ";") {
+        let trimmed = rule.trimmingCharacters(in: .whitespaces)
+        guard let colon = trimmed.firstIndex(of: ":") else { continue }
+        let key = String(trimmed[..<colon]).trimmingCharacters(in: .whitespaces)
+        let value = String(trimmed[trimmed.index(after: colon)...])
+            .trimmingCharacters(in: .whitespaces)
+        switch key {
+        case "fill": style.fill = parseOverlayColor(value)
+        case "stroke": style.stroke = parseOverlayColor(value)
+        case "stroke-width":
+            if let n = Double(value) { style.strokeWidth = CGFloat(n) }
+        case "stroke-dasharray":
+            let parts = value.split(whereSeparator: { $0 == " " || $0 == "," })
+            style.dash = parts.compactMap { Double($0).map { CGFloat($0) } }
+        default: break
+        }
+    }
+    return style
+}
+
+/// Parse `#rgb`, `#rrggbb`, `rgba(r,g,b,a)`, `rgb(r,g,b)`, `none`.
+/// Internal so overlay tests can inspect parsing.
+func parseOverlayColor(_ s: String) -> CGColor? {
+    let t = s.trimmingCharacters(in: .whitespaces)
+    if t == "none" { return nil }
+    if t.hasPrefix("#") {
+        // Expand 3-char hex (#rgb) to 6-char so Color.fromHex accepts it.
+        var expanded = t
+        let body = String(t.dropFirst())
+        if body.count == 3, body.allSatisfy({ $0.isHexDigit }) {
+            expanded = "#" + body.map { "\($0)\($0)" }.joined()
+        }
+        if let c = Color.fromHex(expanded) {
+            let (r, g, b, a) = c.toRgba()
+            return CGColor(red: r, green: g, blue: b, alpha: a)
+        }
+        return nil
+    }
+    if t.hasPrefix("rgba(") || t.hasPrefix("rgb(") {
+        let open = t.firstIndex(of: "(")!
+        let close = t.firstIndex(of: ")") ?? t.endIndex
+        let inner = String(t[t.index(after: open)..<close])
+        let parts = inner.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        guard parts.count >= 3,
+              let r = Double(parts[0]), let g = Double(parts[1]),
+              let b = Double(parts[2]) else { return nil }
+        let a: Double = parts.count >= 4 ? (Double(parts[3]) ?? 1) : 1
+        return CGColor(red: r / 255, green: g / 255, blue: b / 255, alpha: a)
+    }
+    return nil
+}
+
+/// Evaluate a render field that may be a number literal or a string
+/// expression. Missing → 0.
+private func evalOverlayNumber(_ field: Any?, _ ctx: [String: Any]) -> Double {
+    if let n = field as? NSNumber { return n.doubleValue }
+    if let d = field as? Double { return d }
+    if let i = field as? Int { return Double(i) }
+    if let s = field as? String {
+        if case .number(let n) = evaluate(s, context: ctx) { return n }
+    }
+    return 0
+}
+
+/// Apply stroke + fill + dash from `style` to `cgCtx` and stroke/fill
+/// the current path.
+private func applyOverlayStyle(_ cgCtx: CGContext, _ style: OverlayStyle) {
+    if let fill = style.fill {
+        cgCtx.setFillColor(fill)
+        cgCtx.fillPath()
+    }
+    if let stroke = style.stroke {
+        cgCtx.setStrokeColor(stroke)
+        cgCtx.setLineWidth(style.strokeWidth)
+        if !style.dash.isEmpty {
+            cgCtx.setLineDash(phase: 0, lengths: style.dash)
+        }
+        cgCtx.strokePath()
+        cgCtx.setLineDash(phase: 0, lengths: [])
+    }
+}
+
+private func drawRectOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    let x = evalOverlayNumber(spec["x"], ctx)
+    let y = evalOverlayNumber(spec["y"], ctx)
+    let w = evalOverlayNumber(spec["width"], ctx)
+    let h = evalOverlayNumber(spec["height"], ctx)
+    let rx = evalOverlayNumber(spec["rx"], ctx)
+    let ry = evalOverlayNumber(spec["ry"], ctx)
+    let style = parseOverlayStyle((spec["style"] as? String) ?? "")
+    let rect = CGRect(x: x, y: y, width: w, height: h)
+    if rx > 0 || ry > 0 {
+        // Fill + stroke both need a fresh path — draw fill first, then
+        // re-add for stroke.
+        if let fill = style.fill {
+            let p = CGPath(roundedRect: rect,
+                           cornerWidth: rx, cornerHeight: ry,
+                           transform: nil)
+            cgCtx.addPath(p)
+            cgCtx.setFillColor(fill)
+            cgCtx.fillPath()
+        }
+        if let stroke = style.stroke {
+            let p = CGPath(roundedRect: rect,
+                           cornerWidth: rx, cornerHeight: ry,
+                           transform: nil)
+            cgCtx.addPath(p)
+            cgCtx.setStrokeColor(stroke)
+            cgCtx.setLineWidth(style.strokeWidth)
+            if !style.dash.isEmpty {
+                cgCtx.setLineDash(phase: 0, lengths: style.dash)
+            }
+            cgCtx.strokePath()
+            cgCtx.setLineDash(phase: 0, lengths: [])
+        }
+    } else {
+        cgCtx.addRect(rect)
+        if style.fill != nil && style.stroke != nil {
+            // One path per draw op; duplicate.
+            let fill = style.fill!
+            cgCtx.setFillColor(fill)
+            cgCtx.fillPath()
+            cgCtx.addRect(rect)
+        }
+        applyOverlayStyle(cgCtx, style)
+    }
+}
+
+private func drawLineOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    let x1 = evalOverlayNumber(spec["x1"], ctx)
+    let y1 = evalOverlayNumber(spec["y1"], ctx)
+    let x2 = evalOverlayNumber(spec["x2"], ctx)
+    let y2 = evalOverlayNumber(spec["y2"], ctx)
+    let style = parseOverlayStyle((spec["style"] as? String) ?? "")
+    cgCtx.move(to: CGPoint(x: x1, y: y1))
+    cgCtx.addLine(to: CGPoint(x: x2, y: y2))
+    applyOverlayStyle(cgCtx, style)
+}
+
+/// Shared polygon-path helper for polygon and star overlays.
+private func strokePolygonOverlay(
+    _ cgCtx: CGContext, _ pts: [(Double, Double)], _ style: OverlayStyle
+) {
+    guard let first = pts.first else { return }
+    cgCtx.move(to: CGPoint(x: first.0, y: first.1))
+    for p in pts.dropFirst() {
+        cgCtx.addLine(to: CGPoint(x: p.0, y: p.1))
+    }
+    cgCtx.closePath()
+    if let fill = style.fill {
+        cgCtx.setFillColor(fill)
+        cgCtx.fillPath()
+        // Re-add for stroke.
+        cgCtx.move(to: CGPoint(x: first.0, y: first.1))
+        for p in pts.dropFirst() {
+            cgCtx.addLine(to: CGPoint(x: p.0, y: p.1))
+        }
+        cgCtx.closePath()
+    }
+    if let stroke = style.stroke {
+        cgCtx.setStrokeColor(stroke)
+        cgCtx.setLineWidth(style.strokeWidth)
+        if !style.dash.isEmpty {
+            cgCtx.setLineDash(phase: 0, lengths: style.dash)
+        }
+        cgCtx.strokePath()
+        cgCtx.setLineDash(phase: 0, lengths: [])
+    }
+}
+
+private func drawPolygonOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    let x1 = evalOverlayNumber(spec["x1"], ctx)
+    let y1 = evalOverlayNumber(spec["y1"], ctx)
+    let x2 = evalOverlayNumber(spec["x2"], ctx)
+    let y2 = evalOverlayNumber(spec["y2"], ctx)
+    let sidesRaw = Int(evalOverlayNumber(spec["sides"], ctx))
+    let sides = sidesRaw <= 0 ? 5 : sidesRaw
+    let pts = regularPolygonPoints(x1, y1, x2, y2, sides)
+    let style = parseOverlayStyle((spec["style"] as? String) ?? "")
+    strokePolygonOverlay(cgCtx, pts, style)
+}
+
+private func drawStarOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    let x1 = evalOverlayNumber(spec["x1"], ctx)
+    let y1 = evalOverlayNumber(spec["y1"], ctx)
+    let x2 = evalOverlayNumber(spec["x2"], ctx)
+    let y2 = evalOverlayNumber(spec["y2"], ctx)
+    let raw = Int(evalOverlayNumber(spec["points"], ctx))
+    let n = raw <= 0 ? 5 : raw
+    let pts = starPoints(x1, y1, x2, y2, n)
+    let style = parseOverlayStyle((spec["style"] as? String) ?? "")
+    strokePolygonOverlay(cgCtx, pts, style)
 }
