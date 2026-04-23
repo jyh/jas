@@ -54,8 +54,18 @@ private func layerChildren(_ model: Model) -> [Element] {
 
 // MARK: - Rect tool tests
 
+/// Per Phase 7 of SWIFT_TOOL_RUNTIME.md the Rect tool is now
+/// YAML-driven. These tests run against createTools() so they
+/// exercise the live wiring, matching the Rust rect_parity_* set.
+
+private func rectTool() -> CanvasTool {
+    // The registry handles YAML→native fallback; tests just ask for
+    // the wired-in tool.
+    createTools()[.rect]!
+}
+
 @Test func rectToolDrawRect() {
-    let tool = RectTool()
+    let tool = rectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)
@@ -71,23 +81,19 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-@Test func rectToolZeroSizeRectStillCreated() {
-    let tool = RectTool()
+@Test func rectToolZeroSizeNotCreated() {
+    // YAML behavior: a plain click (release at press) is suppressed
+    // so no invisible shape is deposited. Prior native behavior
+    // was to create a zero-size rect; the YAML policy supersedes.
+    let tool = rectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 1)
-    if case .rect(let r) = children[0] {
-        #expect(r.width == 0)
-        #expect(r.height == 0)
-    } else {
-        Issue.record("Expected Rect element")
-    }
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func rectToolNegativeDragNormalizes() {
-    let tool = RectTool()
+    let tool = rectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 100, y: 80, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
@@ -981,7 +987,7 @@ private func makeClosedPath() -> Element {
     let m = Model()
     m.defaultFill = Fill(color: Color(r: 1, g: 0, b: 0))
     m.defaultStroke = Stroke(color: Color(r: 0, g: 0, b: 1), width: 3.0)
-    let tool = RectTool()
+    let tool = rectTool()
     let (ctx, _, _) = makeCtx(model: m)
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)

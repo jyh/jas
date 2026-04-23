@@ -114,9 +114,28 @@ func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (
 
 // MARK: - Tool registry
 
+/// Load a YamlTool by id from the compiled workspace.json. Returns
+/// nil when the workspace can't be loaded or the tool spec is
+/// missing — callers fall back to the native implementation in that
+/// case so tests stay green when the workspace file is unavailable.
+func loadYamlTool(_ id: String) -> YamlTool? {
+    guard let ws = WorkspaceData.load(),
+          let tools = ws.data["tools"] as? [String: Any],
+          let spec = tools[id] as? [String: Any] else {
+        return nil
+    }
+    return YamlTool.fromWorkspaceTool(spec)
+}
+
 /// Create one instance of each tool, keyed by Tool enum.
 func createTools() -> [Tool: CanvasTool] {
-    [
+    // Tools migrated to YAML per SWIFT_TOOL_RUNTIME.md Phase 7.
+    // Require the workspace to load — a missing workspace.json means
+    // the whole app is non-functional anyway.
+    guard let rectTool = loadYamlTool("rect") else {
+        fatalError("workspace/workspace.json missing or malformed — cannot load YAML tools")
+    }
+    return [
         .selection: SelectionTool(),
         .partialSelection: PartialSelectionTool(),
         .interiorSelection: InteriorSelectionTool(),
@@ -130,7 +149,7 @@ func createTools() -> [Tool: CanvasTool] {
         .typeTool: TypeTool(),
         .typeOnPath: TypeOnPathTool(),
         .line: LineTool(),
-        .rect: RectTool(),
+        .rect: rectTool,
         .roundedRect: RoundedRectTool(),
         .polygon: PolygonTool(),
         .star: StarTool(),
