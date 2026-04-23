@@ -27,6 +27,14 @@ machine, and known gaps.
 - **[Pencil](PENCIL_TOOL.md)** — freehand drag with curve-fit
   smoothing on release.
 
+## Brush-based drawing
+
+- **[Paintbrush](PAINTBRUSH_TOOL.md)** — freehand path drawn with
+  the active brush from the Brushes panel. Falls back to plain
+  freehand when no brush is active.
+- **[Blob Brush](BLOB_BRUSH_TOOL.md)** — paints filled regions by
+  unioning brush-swept strokes; produces closed filled paths.
+
 ## Path editing
 
 - **[Add / Delete / Anchor Point (Convert)](ANCHOR_POINT_TOOLS.md)**
@@ -54,6 +62,8 @@ machine, and known gaps.
   `workspace/tools/*.yaml` — handler YAML specifies mouse /
   keyboard behavior, state-machine transitions, and the
   overlay shape. All 4 native apps share the same YAML.
+  Paintbrush and Blob Brush, when implemented, raise this to
+  16; both are designed to fit the YamlTool runtime.
 - The tool runtime (`YamlTool` class in each app) lives in
   each app's `tools/` directory. See `RUST_TOOL_RUNTIME.md` /
   `SWIFT_TOOL_RUNTIME.md` / `OCAML_TOOL_RUNTIME.md` /
