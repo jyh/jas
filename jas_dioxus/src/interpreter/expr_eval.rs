@@ -838,6 +838,42 @@ fn eval_func(
             Value::Bool(false)
         }
 
+        // ── Math primitives ───────────────────────────────────
+        // min/max over any number of numeric args; abs over one.
+        // Mirror jas_flask/static/js/engine/evaluator.mjs's PRIMITIVES.
+        // Non-numeric args collapse the call to Null — the lenient-mode
+        // behavior every interpreter in this repo follows.
+        "min" | "max" => {
+            if args.is_empty() {
+                return Value::Null;
+            }
+            let fold: fn(f64, f64) -> f64 = if name == "min" {
+                |a, b| a.min(b)
+            } else {
+                |a, b| a.max(b)
+            };
+            let mut acc: Option<f64> = None;
+            for a in args {
+                match eval_inner(a, ctx, scope, store_cb) {
+                    Value::Number(n) => {
+                        acc = Some(acc.map(|prev| fold(prev, n)).unwrap_or(n));
+                    }
+                    _ => return Value::Null,
+                }
+            }
+            Value::Number(acc.unwrap_or(0.0))
+        }
+
+        "abs" => {
+            if args.len() != 1 {
+                return Value::Null;
+            }
+            match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => Value::Number(n.abs()),
+                _ => Value::Null,
+            }
+        }
+
         // ── Document-aware primitives ─────────────────────────
         //
         // Available only during a tool dispatch that has registered a

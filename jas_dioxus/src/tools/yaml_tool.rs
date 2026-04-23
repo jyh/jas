@@ -743,4 +743,138 @@ mod tests {
             Some(&serde_json::json!("idle")),
         );
     }
+
+    // ── Phase 4: parity with native SelectionTool ──────────────────
+    //
+    // Behavior-for-behavior ports of the six cases in
+    // jas_dioxus/src/tools/selection_tool.rs::tests, run against a
+    // YamlTool constructed from the actual selection.yaml. Each
+    // assertion is the same — same pre-state, same sequence of events,
+    // same final document state.
+    //
+    // Two test-shape differences from the native cases:
+    //
+    // 1. Marquee tests insert an on_move(end_x, end_y) between
+    //    on_press and on_release. The native tool uses the release
+    //    x/y directly to compute the marquee rect, while the YAML
+    //    spec reads tool.selection.marquee_end_{x,y} which is only
+    //    updated in on_mousemove. In real UI the browser always
+    //    delivers mousemove between mousedown and mouseup; tests
+    //    must simulate it.
+    //
+    // 2. move_selection matches native exactly — press, two moves,
+    //    release. The YAML spec transitions mode to drag_move on
+    //    any press that hits an element (no DRAG_THRESHOLD), so
+    //    even the first move applies a translation. The test
+    //    expectations land on the same end position because the
+    //    delta accumulation works out identically for the moves
+    //    the test performs.
+
+    fn selection_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("selection")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn selection_parity_model() -> Model {
+        // Same shape as SelectionTool's `make_model_with_rect`: a
+        // single 20×20 rect at (50, 50) inside a one-layer document.
+        model_with_rect_at(50.0, 50.0, 20.0, 20.0)
+    }
+
+    #[test]
+    fn selection_parity_marquee_select() {
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        // Marquee covering the rect: (45,45) → (75,75).
+        tool.on_press(&mut model, 45.0, 45.0, false, false);
+        tool.on_move(&mut model, 75.0, 75.0, false, false, true);
+        tool.on_release(&mut model, 75.0, 75.0, false, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn selection_parity_marquee_miss() {
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        // Marquee away from rect: (0,0) → (10,10).
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 10.0, 10.0, false, false, true);
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn selection_parity_click_selects_element() {
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        // Click inside the rect's bounds: (55,55).
+        tool.on_press(&mut model, 55.0, 55.0, false, false);
+        tool.on_release(&mut model, 55.0, 55.0, false, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn selection_parity_click_on_empty_canvas_clears_selection() {
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.document().selection.is_empty());
+        // Click on empty canvas, no shift → selection cleared.
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+        assert!(
+            model.document().selection.is_empty(),
+            "selection should be cleared after click on empty canvas",
+        );
+    }
+
+    #[test]
+    fn selection_parity_shift_click_on_empty_canvas_keeps_selection() {
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        // Shift+click on empty canvas — selection preserved.
+        tool.on_press(&mut model, 5.0, 5.0, true, false);
+        tool.on_release(&mut model, 5.0, 5.0, true, false);
+        assert!(
+            !model.document().selection.is_empty(),
+            "shift-click on empty canvas should not clear the selection",
+        );
+    }
+
+    #[test]
+    fn selection_parity_move_selection() {
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        // Pre-select the rect.
+        Controller::select_element(&mut model, &vec![0, 0]);
+        // Press on it, then two moves, then release. Final position
+        // should match the native tool's (60, 60) end state.
+        tool.on_press(&mut model, 60.0, 60.0, false, false);
+        tool.on_move(&mut model, 65.0, 65.0, false, false, true);
+        tool.on_move(&mut model, 70.0, 70.0, false, false, true);
+        tool.on_release(&mut model, 70.0, 70.0, false, false);
+        let elem = &model.document().layers[0].children().unwrap()[0];
+        if let Element::Rect(r) = &**elem {
+            assert_eq!(r.x, 60.0);
+            assert_eq!(r.y, 60.0);
+        } else {
+            panic!("expected Rect element");
+        }
+    }
 }
