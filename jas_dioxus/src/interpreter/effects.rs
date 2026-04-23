@@ -795,6 +795,23 @@ fn run_doc_effect(
                 path_commit_anchor_edit(model, store, origin_x, origin_y, target_x, target_y);
             }
         }
+        "doc.path.insert_anchor_on_segment_near" => {
+            // Mirrors the native AddAnchorPointTool's click-to-insert
+            // case. Walks all unlocked Path elements in the document,
+            // finds the closest (segment, t) to the cursor, and inserts
+            // a new anchor there if within hit_radius of any segment.
+            //
+            // MVP scope: just click-to-insert. Native also supported
+            // Alt+click-to-toggle-smooth/corner (covered by the
+            // AnchorPoint tool now) and Space+drag reposition (dropped).
+            if let serde_json::Value::Object(args) = spec {
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                let hit_radius = eval_number(args.get("hit_radius"), store, ctx);
+                let radius = if hit_radius == 0.0 { 8.0 } else { hit_radius };
+                path_insert_anchor_on_segment_near(model, x, y, radius);
+            }
+        }
         "doc.path.delete_anchor_near" => {
             // Find the anchor under (x, y) within hit_radius on any
             // unlocked Path in the document (searches layers +
@@ -1396,6 +1413,118 @@ fn path_commit_anchor_edit(
         }
         _ => {}
     }
+}
+
+/// Implementation of doc.path.insert_anchor_on_segment_near.
+///
+/// For each unlocked Path in the document, computes the best
+/// (segment, t) projection and tracks the one with the smallest
+/// distance across all paths. If that minimum is within `radius`,
+/// snapshots and inserts the anchor there.
+fn path_insert_anchor_on_segment_near(
+    model: &mut Model, x: f64, y: f64, radius: f64,
+) {
+    use crate::geometry::path_ops::{closest_segment_and_t, insert_point_in_path};
+    use crate::geometry::element::PathElem;
+
+    // Scan all paths, keep the best (element-path, seg_idx, t, distance).
+    let mut best: Option<(ElementPath, usize, f64, f64)> = None;
+    fn try_path(
+        best: &mut Option<(ElementPath, usize, f64, f64)>,
+        pe: &PathElem,
+        doc_path: &[usize],
+        x: f64, y: f64,
+    ) {
+        if let Some((seg_idx, t)) = closest_segment_and_t(&pe.d, x, y) {
+            // Reproject to compute the actual distance for comparison.
+            // closest_segment_and_t returned the best, but we need the
+            // distance value to compare across paths — re-eval once.
+            let mut cx = 0.0_f64;
+            let mut cy = 0.0_f64;
+            let mut dist = f64::INFINITY;
+            for (i, cmd) in pe.d.iter().enumerate() {
+                use crate::geometry::element::PathCommand;
+                match cmd {
+                    PathCommand::MoveTo { x: mx, y: my } => { cx = *mx; cy = *my; }
+                    PathCommand::LineTo { x: lx, y: ly } => {
+                        if i == seg_idx {
+                            let (d, _) =
+                                crate::geometry::path_ops::closest_on_line(
+                                    cx, cy, *lx, *ly, x, y);
+                            dist = d;
+                        }
+                        cx = *lx; cy = *ly;
+                    }
+                    PathCommand::CurveTo {
+                        x1, y1, x2, y2, x: cxe, y: cye,
+                    } => {
+                        if i == seg_idx {
+                            let (d, _) =
+                                crate::geometry::path_ops::closest_on_cubic(
+                                    cx, cy, *x1, *y1, *x2, *y2, *cxe, *cye,
+                                    x, y);
+                            dist = d;
+                        }
+                        cx = *cxe; cy = *cye;
+                    }
+                    _ => {}
+                }
+            }
+            match best {
+                Some((_, _, _, best_dist)) if *best_dist <= dist => {}
+                _ => {
+                    *best = Some((doc_path.to_vec(), seg_idx, t, dist));
+                }
+            }
+        }
+    }
+
+    {
+        let doc = model.document();
+        for (li, layer) in doc.layers.iter().enumerate() {
+            if let Some(children) = layer.children() {
+                for (ci, child) in children.iter().enumerate() {
+                    if let Element::Path(pe) = &**child {
+                        try_path(&mut best, pe, &[li, ci], x, y);
+                    }
+                    if let Element::Group(g) = &**child {
+                        if child.common().locked { continue; }
+                        for (gi, gc) in g.children.iter().enumerate() {
+                            if let Element::Path(pe) = &**gc {
+                                try_path(&mut best, pe, &[li, ci, gi], x, y);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let (path, seg_idx, t, dist) = match best {
+        Some(b) => b,
+        None => return,
+    };
+    if dist > radius {
+        return;
+    }
+    let pe = match model.document().get_element(&path) {
+        Some(Element::Path(pe)) => pe.clone(),
+        _ => return,
+    };
+    model.snapshot();
+    let ins = insert_point_in_path(&pe.d, seg_idx, t);
+    let new_pe = crate::geometry::element::PathElem {
+        d: ins.commands,
+        fill: pe.fill,
+        stroke: pe.stroke,
+        width_points: pe.width_points.clone(),
+        common: pe.common.clone(),
+        fill_gradient: pe.fill_gradient.clone(),
+        stroke_gradient: pe.stroke_gradient.clone(),
+    };
+    let doc = model.document().replace_element(
+        &path, Element::Path(new_pe));
+    model.set_document(doc);
 }
 
 /// Implementation of doc.path.delete_anchor_near.
