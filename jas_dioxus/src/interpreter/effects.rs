@@ -92,11 +92,20 @@ fn run_one(
     }
 
     // set: { key: expr, ... }
+    //
+    // YAML authors target state scopes via dotted paths with optional
+    // `$` prefix: `$tool.selection.mode`, `$state.fill_color`,
+    // `$panel.mode`. We strip the `$`, then dispatch on the first
+    // segment so writes land in the matching store section. Unscoped
+    // keys (no leading `state.`/`panel.`/`tool.`) continue to write
+    // to the global state map — preserves existing call-site
+    // behavior from before the tool-state scope was introduced.
     if let Some(serde_json::Value::Object(pairs)) = effect.get("set") {
         for (key, expr) in pairs {
             let expr_str = expr.as_str().unwrap_or("");
             let value = eval_expr(expr_str, store, ctx);
-            store.set(key, value_to_json(&value));
+            let json = value_to_json(&value);
+            set_by_scoped_target(store, key, json);
         }
         return;
     }
@@ -320,6 +329,46 @@ fn run_one(
     // log: message (debug only)
     if effect.contains_key("log") {
         return;
+    }
+}
+
+/// Route a `set:` target to the right scope in the StateStore.
+///
+/// Target shapes (leading `$` stripped):
+///   `tool.<id>.<key>[.<more>]` → `store.set_tool(id, combined_key, value)`
+///   `panel.<key>`              → active panel's scope
+///   `state.<key>`              → global state (explicit scope)
+///   `<key>`                    → global state (implicit scope, legacy)
+///
+/// Deeper dotted paths under tool/panel are joined back with `.` and
+/// stored as a flat key in the tool/panel scope, matching the existing
+/// flat-map behavior there. Full nested-object writes can land in a
+/// later phase if YAML authors need them.
+fn set_by_scoped_target(
+    store: &mut StateStore,
+    raw_target: &str,
+    value: serde_json::Value,
+) {
+    let target = raw_target.strip_prefix('$').unwrap_or(raw_target);
+    let segs: Vec<&str> = target.splitn(2, '.').collect();
+    match segs.as_slice() {
+        ["tool", rest] => {
+            let inner: Vec<&str> = rest.splitn(2, '.').collect();
+            match inner.as_slice() {
+                [tool_id, key] => store.set_tool(tool_id, key, value),
+                // Too shallow: `tool.<id>` with no key. Silently skip —
+                // same lenience other effects use for malformed input.
+                _ => {}
+            }
+        }
+        ["panel", key] => {
+            if let Some(active) = store.active_panel_id().map(|s| s.to_string()) {
+                store.set_panel(&active, key, value);
+            }
+        }
+        ["state", key] => store.set(key, value),
+        [key] => store.set(key, value),
+        _ => {}
     }
 }
 
@@ -1068,5 +1117,136 @@ mod tests {
             &effects, &serde_json::json!({}), &mut store,
             Some(&mut model), None, None);
         assert_eq!(model.document().selection.len(), 0);
+    }
+
+    // ── Scope-routed `set:` targets ────────────────────────────────
+
+    #[test]
+    fn set_routes_tool_scoped_target() {
+        // set: { "tool.selection.mode": "marquee" }
+        //   → store.set_tool("selection", "mode", "marquee")
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": { "tool.selection.mode": "\"marquee\"" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(
+            store.get_tool("selection", "mode"),
+            &serde_json::json!("marquee"),
+        );
+    }
+
+    #[test]
+    fn set_strips_leading_dollar_from_target() {
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": { "$tool.selection.mode": "\"idle\"" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(
+            store.get_tool("selection", "mode"),
+            &serde_json::json!("idle"),
+        );
+    }
+
+    #[test]
+    fn set_routes_state_scoped_target() {
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": { "state.fill_color": "\"#ff0000\"" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(store.get("fill_color"), &serde_json::json!("#ff0000"));
+    }
+
+    #[test]
+    fn set_bare_key_stays_global_state() {
+        // Backward compat: existing callers pass bare keys like "x"
+        // and expect them in global state, not in a tool scope.
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": { "x": "42" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(store.get("x"), &serde_json::json!(42));
+        // And the tool scope stays empty.
+        assert!(store.tool_scopes().is_empty());
+    }
+
+    #[test]
+    fn set_panel_scoped_target_writes_to_active_panel() {
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("mode".to_string(), serde_json::json!("hsb"));
+        store.init_panel("color", defaults);
+        store.set_active_panel(Some("color"));
+        let effects = vec![serde_json::json!({
+            "set": { "panel.mode": "\"rgb\"" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(store.get_panel("color", "mode"), &serde_json::json!("rgb"));
+    }
+
+    #[test]
+    fn eval_context_reads_tool_scope() {
+        // After a `set: { "tool.sel.mode": ... }`, the evaluator should
+        // resolve `tool.sel.mode` through the scope built by
+        // eval_context().
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": { "tool.sel.mode": "\"drag\"" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        let ctx = store.eval_context();
+        assert_eq!(ctx["tool"]["sel"]["mode"], serde_json::json!("drag"));
+    }
+
+    #[test]
+    fn tool_write_then_expression_read() {
+        // End-to-end: handler writes $tool.sel.mode, a later expression
+        // reads it. Uses the evaluator directly (not through a YAML
+        // dispatch, that lands in Phase 3c).
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": { "tool.sel.mode": "\"marquee\"" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        let v = super::super::expr::eval(
+            "tool.sel.mode == \"marquee\"",
+            &store.eval_context(),
+        );
+        assert_eq!(v, Value::Bool(true));
+    }
+
+    #[test]
+    fn set_routes_multiple_scopes_in_one_effect() {
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": {
+                "tool.sel.mode": "\"idle\"",
+                "state.fill_color": "\"#000000\"",
+                "recent_count": "5"
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(store.get_tool("sel", "mode"), &serde_json::json!("idle"));
+        assert_eq!(store.get("fill_color"), &serde_json::json!("#000000"));
+        assert_eq!(store.get("recent_count"), &serde_json::json!(5));
     }
 }
