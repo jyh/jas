@@ -22,3 +22,8 @@
  (name live_test)
  (modules live_test)
  (libraries jas alcotest))
+
+(test
+ (name path_ops_test)
+ (modules path_ops_test)
+ (libraries jas alcotest))
