@@ -66,7 +66,12 @@ PATTERNS = {
         "tool_files": {
             "kind": "files",
             "glob": "JasSwift/Sources/Tools/*Tool.swift",
-            "exclude_pattern": r"/(DrawingTool|Toolbar)\.swift$",
+            # YamlTool.swift is the generic YAML-driven tool runtime —
+            # infrastructure, not per-tool code. Excluding keeps the
+            # counter honest in the same way yaml_tool.rs is excluded
+            # from the Rust count. Toolbar.swift is a panel, not a
+            # canvas tool.
+            "exclude_pattern": r"/(Toolbar|YamlTool)\.swift$",
         },
         "panel_menu_items": {
             "kind": "regex_count",
