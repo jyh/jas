@@ -25,7 +25,6 @@ use crate::tools::path_eraser_tool::PathEraserTool;
 use crate::tools::smooth_tool::SmoothTool;
 use crate::tools::polygon_tool::PolygonTool;
 use crate::tools::star_tool::StarTool;
-use crate::tools::rect_tool::RectTool;
 use crate::tools::rounded_rect_tool::RoundedRectTool;
 use crate::tools::lasso_tool::LassoTool;
 use crate::tools::type_tool::TypeTool;
@@ -33,26 +32,27 @@ use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
 use crate::tools::yaml_tool::YamlTool;
 
-/// Build the canvas Selection tool from `workspace/tools/selection.yaml`.
+/// Build a YAML-driven canvas tool from the embedded workspace's
+/// `tools.<id>` spec. Shared by every migrated tool — each one is a
+/// one-line `yaml_tool("rect")`-style construction in `with_model`.
 ///
-/// Per RUST_TOOL_RUNTIME.md, Selection is the validation target for
-/// the YAML tool runtime — the native selection_tool.rs was deleted
-/// in the same branch. workspace.json is embedded at build time via
-/// `include_str!`, so all three of these expect() failures would
-/// indicate a build-time invariant violation (workspace.json missing,
-/// corrupted, or schema-drifted from selection.yaml).
-fn selection_tool() -> Box<dyn CanvasTool> {
+/// All three expect() failures would indicate a build-time invariant
+/// violation (workspace.json missing, corrupted, or schema-drifted
+/// from the corresponding YAML source). workspace.json is embedded
+/// via `include_str!`, so these paths don't cover runtime-file-IO
+/// failures.
+fn yaml_tool(id: &str) -> Box<dyn CanvasTool> {
     use crate::interpreter::workspace::Workspace;
     let ws = Workspace::load()
         .expect("embedded workspace.json must parse");
     let spec = ws
         .data()
         .get("tools")
-        .and_then(|t| t.get("selection"))
-        .expect("workspace.json must declare a selection tool");
-    let yaml_tool = YamlTool::from_workspace_tool(spec)
-        .expect("selection tool spec must parse into ToolSpec");
-    Box::new(yaml_tool)
+        .and_then(|t| t.get(id))
+        .unwrap_or_else(|| panic!("workspace.json must declare a '{id}' tool"));
+    let tool = YamlTool::from_workspace_tool(spec)
+        .unwrap_or_else(|| panic!("tool '{id}' spec must parse into ToolSpec"));
+    Box::new(tool)
 }
 
 /// Shared application state handle, available via `use_context::<AppHandle>()`.
@@ -87,7 +87,7 @@ impl TabState {
 
     pub(crate) fn with_model(model: Model) -> Self {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
-        tools.insert(ToolKind::Selection, selection_tool());
+        tools.insert(ToolKind::Selection, yaml_tool("selection"));
         tools.insert(ToolKind::PartialSelection, Box::new(PartialSelectionTool::new()));
         tools.insert(ToolKind::InteriorSelection, Box::new(InteriorSelectionTool::new()));
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
@@ -99,7 +99,7 @@ impl TabState {
         tools.insert(ToolKind::Smooth, Box::new(SmoothTool::new()));
         tools.insert(ToolKind::Type, Box::new(TypeTool::new()));
         tools.insert(ToolKind::TypeOnPath, Box::new(TypeOnPathTool::new()));
-        tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
+        tools.insert(ToolKind::Rect, yaml_tool("rect"));
         tools.insert(ToolKind::RoundedRect, Box::new(RoundedRectTool::new()));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
         tools.insert(ToolKind::Star, Box::new(StarTool::new()));

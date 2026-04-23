@@ -14,6 +14,9 @@ use super::state_store::StateStore;
 use crate::document::controller::Controller;
 use crate::document::document::ElementPath;
 use crate::document::model::Model;
+use crate::geometry::element::{
+    Color, CommonProps, Element, Fill, RectElem, Stroke,
+};
 
 /// Execute a list of effects.
 ///
@@ -507,6 +510,30 @@ fn run_doc_effect(
                 Controller::copy_selection(model, dx, dy);
             }
         }
+        "doc.add_element" => {
+            // Shape: { element: { type: rect, x: ..., y: ..., width: ...,
+            //                     height: ..., fill?: ..., stroke?: ... } }
+            //
+            // `parent` is accepted for compatibility with Flask's tool
+            // handlers but not enforced — Controller::add_element adds
+            // to the selected layer (or mask subtree) per the app's
+            // normal semantics. An explicit parent would require a
+            // path-based add path through Controller that doesn't
+            // exist yet.
+            if let serde_json::Value::Object(args) = spec {
+                if let Some(serde_json::Value::Object(elem_spec)) = args.get("element") {
+                    // Capture defaults by value before &mut borrow — Fill/Stroke
+                    // derive Copy so this is cheap.
+                    let default_fill = model.default_fill;
+                    let default_stroke = model.default_stroke;
+                    if let Some(element) = build_element(
+                        elem_spec, store, ctx, default_fill, default_stroke,
+                    ) {
+                        Controller::add_element(model, element);
+                    }
+                }
+            }
+        }
         "doc.select_in_rect" => {
             if let serde_json::Value::Object(args) = spec {
                 let x1 = eval_number(args.get("x1"), store, ctx);
@@ -597,6 +624,115 @@ fn extract_path(
             map.get("path").and_then(|v| extract_path(v, store, ctx))
         }
         _ => None,
+    }
+}
+
+/// Build an Element from a YAML element spec dict. Dispatches on
+/// `type:` and interprets the remaining fields as expressions.
+///
+/// `default_fill` / `default_stroke` are the Model's defaults —
+/// fall-through values when the spec omits `fill:` or `stroke:`
+/// entirely. This matches native tool behavior where a newly-drawn
+/// Rect uses `model.default_fill` / `model.default_stroke` from the
+/// color panel.
+///
+/// Spec fields that are present but null-valued still override the
+/// defaults to None — authors can explicitly strip fill/stroke via
+/// `fill: "null"`.
+fn build_element(
+    spec: &serde_json::Map<String, serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    default_fill: Option<Fill>,
+    default_stroke: Option<Stroke>,
+) -> Option<Element> {
+    let elem_type = spec.get("type").and_then(|v| v.as_str())?;
+    match elem_type {
+        "rect" => {
+            let x = eval_number(spec.get("x"), store, ctx);
+            let y = eval_number(spec.get("y"), store, ctx);
+            let width = eval_number(spec.get("width"), store, ctx);
+            let height = eval_number(spec.get("height"), store, ctx);
+            let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            Some(Element::Rect(RectElem {
+                x,
+                y,
+                width,
+                height,
+                rx: 0.0,
+                ry: 0.0,
+                fill,
+                stroke,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))
+        }
+        // Other element types (ellipse, line, path, …) land alongside
+        // their tool ports.
+        _ => None,
+    }
+}
+
+/// Resolve an optional `fill:` field to `Option<Fill>`.
+/// - Field absent → `default`
+/// - Field evaluates to `Value::Null` → `None`
+/// - Field evaluates to `Value::Color` / `Value::Str(hex)` →
+///   `Some(Fill::new(color))`; opacity stays at Fill::new's 1.0
+fn resolve_fill_field(
+    field: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    default: Option<Fill>,
+) -> Option<Fill> {
+    let Some(field) = field else {
+        return default;
+    };
+    let v = evaluate_field_value(field, store, ctx);
+    match v {
+        Value::Null => None,
+        Value::Color(c) => Color::from_hex(&c).map(Fill::new),
+        Value::Str(s) => Color::from_hex(&s).map(Fill::new),
+        _ => default,
+    }
+}
+
+/// Resolve an optional `stroke:` field. Current shape accepts a color
+/// (string / Value::Color) and uses `Stroke::new(color, 1.0)` —
+/// width/caps/joins stay at Stroke::new's defaults. Tools needing
+/// richer stroke spec (arrowheads, dashes, per-field overrides) will
+/// extend this when they port.
+fn resolve_stroke_field(
+    field: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    default: Option<Stroke>,
+) -> Option<Stroke> {
+    let Some(field) = field else {
+        return default;
+    };
+    let v = evaluate_field_value(field, store, ctx);
+    match v {
+        Value::Null => None,
+        Value::Color(c) => Color::from_hex(&c).map(|col| Stroke::new(col, 1.0)),
+        Value::Str(s) => Color::from_hex(&s).map(|col| Stroke::new(col, 1.0)),
+        _ => default,
+    }
+}
+
+/// Evaluate a field that may be a scalar literal or a string expression.
+/// Shared by resolve_fill_field / resolve_stroke_field.
+fn evaluate_field_value(
+    field: &serde_json::Value,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> Value {
+    match field {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::String(s) => eval_expr(s, store, ctx),
+        _ => Value::from_json(field),
     }
 }
 
@@ -1378,6 +1514,178 @@ mod tests {
         drop(_g);
         assert_eq!(model.document().selection.len(), 1);
         assert_eq!(model.document().selection[0].path, vec![0, 0]);
+    }
+
+    // ── doc.add_element ──────────────────────────────────────────
+
+    #[test]
+    fn doc_add_element_creates_rect_with_literal_fields() {
+        let mut store = StateStore::new();
+        // Start with a doc that has one empty layer so add_element has
+        // somewhere to land.
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_element": {
+                "element": {
+                    "type": "rect",
+                    "x": 10, "y": 20,
+                    "width": 100, "height": 50,
+                }
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 100.0);
+            assert_eq!(r.height, 50.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn doc_add_element_evaluates_string_expressions() {
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        let ctx = serde_json::json!({
+            "event": { "x": 15, "y": 25 }
+        });
+        let effects = vec![serde_json::json!({
+            "doc.add_element": {
+                "element": {
+                    "type": "rect",
+                    "x": "event.x",
+                    "y": "event.y",
+                    "width": "50",
+                    "height": "60",
+                }
+            }
+        })];
+        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None);
+        if let Element::Rect(r) = &*model.document().layers[0].children().unwrap()[0] {
+            assert_eq!(r.x, 15.0);
+            assert_eq!(r.y, 25.0);
+            assert_eq!(r.width, 50.0);
+            assert_eq!(r.height, 60.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn doc_add_element_uses_model_defaults_when_fill_omitted() {
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        model.default_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        model.default_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0));
+        let effects = vec![serde_json::json!({
+            "doc.add_element": {
+                "element": {
+                    "type": "rect",
+                    "x": 0, "y": 0, "width": 10, "height": 10,
+                }
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let r = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Rect(r) => r.clone(),
+            _ => panic!("expected Rect"),
+        };
+        assert_eq!(r.fill, Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))));
+        // default_stroke is width 3, not Stroke::new's width 1 — the
+        // Model default wins exactly, without resolve_stroke_field's
+        // "width 1" fallback for explicit-color-string specs.
+        assert_eq!(r.stroke, Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0)));
+    }
+
+    #[test]
+    fn doc_add_element_explicit_fill_overrides_defaults() {
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        model.default_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        let effects = vec![serde_json::json!({
+            "doc.add_element": {
+                "element": {
+                    "type": "rect",
+                    "x": 0, "y": 0, "width": 10, "height": 10,
+                    "fill": "'#00ff00'",
+                }
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let r = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Rect(r) => r.clone(),
+            _ => panic!("expected Rect"),
+        };
+        assert_eq!(r.fill, Some(Fill::new(Color::rgb(0.0, 1.0, 0.0))));
+    }
+
+    #[test]
+    fn doc_add_element_explicit_null_fill_strips_fill() {
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        model.default_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        let effects = vec![serde_json::json!({
+            "doc.add_element": {
+                "element": {
+                    "type": "rect",
+                    "x": 0, "y": 0, "width": 10, "height": 10,
+                    "fill": null,
+                }
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let r = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Rect(r) => r.clone(),
+            _ => panic!("expected Rect"),
+        };
+        assert_eq!(r.fill, None, "explicit null fill should strip fill");
+    }
+
+    #[test]
+    fn doc_add_element_unknown_type_is_noop() {
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_element": {
+                "element": { "type": "not_a_real_element_type" }
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    fn make_model_with_empty_layer() -> Model {
+        let layer = Element::Layer(crate::geometry::element::LayerElem {
+            name: "L".to_string(),
+            children: vec![],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = crate::document::document::Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..crate::document::document::Document::default()
+        };
+        Model::new(doc, None)
     }
 
     #[test]
