@@ -417,15 +417,32 @@ fn draw_rect_overlay(
     let y = eval_number_field(eval_ctx, render.get("y"));
     let width = eval_number_field(eval_ctx, render.get("width"));
     let height = eval_number_field(eval_ctx, render.get("height"));
+    // rx/ry give rounded corners — SVG-style. When either is > 0 the
+    // fill/stroke path must walk corner arcs instead of using the
+    // straight-corner fill_rect / stroke_rect fast path.
+    let rx = eval_number_field(eval_ctx, render.get("rx"));
+    let ry = eval_number_field(eval_ctx, render.get("ry"));
     let style_str = render
         .get("style")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let style = parse_style(style_str);
 
+    let rounded = rx > 0.0 || ry > 0.0;
+    let build_path = || {
+        if rounded {
+            build_rounded_rect_path(ctx, x, y, width, height, rx, ry);
+        }
+    };
+
     if let Some(fill) = &style.fill {
         ctx.set_fill_style_str(fill);
-        ctx.fill_rect(x, y, width, height);
+        if rounded {
+            build_path();
+            ctx.fill();
+        } else {
+            ctx.fill_rect(x, y, width, height);
+        }
     }
     if let Some(stroke) = &style.stroke {
         ctx.set_stroke_style_str(stroke);
@@ -439,7 +456,12 @@ fn draw_rect_overlay(
             }
             let _ = ctx.set_line_dash(&arr);
         }
-        ctx.stroke_rect(x, y, width, height);
+        if rounded {
+            build_path();
+            ctx.stroke();
+        } else {
+            ctx.stroke_rect(x, y, width, height);
+        }
         // Reset dash if we set one, so subsequent native strokes aren't
         // unexpectedly dashed. CanvasRenderingContext2d is stateful, so
         // reset with an empty array.
@@ -447,6 +469,34 @@ fn draw_rect_overlay(
             let _ = ctx.set_line_dash(&js_sys::Array::new());
         }
     }
+}
+
+/// Begin + trace a rounded-rectangle path in the canvas context.
+/// Matches native RoundedRectTool::draw_overlay: max-radius is clamped
+/// to half the shorter side so the arcs don't overlap on small rects.
+fn build_rounded_rect_path(
+    ctx: &CanvasRenderingContext2d,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    rx: f64,
+    ry: f64,
+) {
+    // SVG allows distinct rx / ry; native only uses one radius. Use
+    // the stronger constraint of both for overlap-safe clamping.
+    let r = rx.max(ry).min(w / 2.0).min(h / 2.0).max(0.0);
+    ctx.begin_path();
+    ctx.move_to(x + r, y);
+    ctx.line_to(x + w - r, y);
+    ctx.quadratic_curve_to(x + w, y, x + w, y + r);
+    ctx.line_to(x + w, y + h - r);
+    ctx.quadratic_curve_to(x + w, y + h, x + w - r, y + h);
+    ctx.line_to(x + r, y + h);
+    ctx.quadratic_curve_to(x, y + h, x, y + h - r);
+    ctx.line_to(x, y + r);
+    ctx.quadratic_curve_to(x, y, x + r, y);
+    ctx.close_path();
 }
 
 #[cfg(test)]
@@ -1276,6 +1326,81 @@ mod tests {
             assert_eq!(r.y, 20.0);
             assert_eq!(r.width, 90.0);
             assert_eq!(r.height, 60.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    // ── RoundedRect tool behavioral tests ──────────────────────────
+
+    fn rounded_rect_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("rounded_rect")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn rounded_rect_parity_draw_with_radius() {
+        let Some(mut tool) = rounded_rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 110.0, 70.0, false, false, true);
+        tool.on_release(&mut model, 110.0, 70.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 100.0);
+            assert_eq!(r.height, 50.0);
+            assert_eq!(r.rx, 10.0);
+            assert_eq!(r.ry, 10.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn rounded_rect_parity_zero_size_not_created() {
+        let Some(mut tool) = rounded_rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn rounded_rect_parity_negative_drag_normalizes() {
+        let Some(mut tool) = rounded_rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 100.0, 80.0, false, false);
+        tool.on_move(&mut model, 10.0, 20.0, false, false, true);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 90.0);
+            assert_eq!(r.height, 60.0);
+            assert_eq!(r.rx, 10.0);
         } else {
             panic!("expected Rect");
         }

@@ -653,6 +653,8 @@ fn build_element(
             let y = eval_number(spec.get("y"), store, ctx);
             let width = eval_number(spec.get("width"), store, ctx);
             let height = eval_number(spec.get("height"), store, ctx);
+            let rx = eval_number(spec.get("rx"), store, ctx);
+            let ry = eval_number(spec.get("ry"), store, ctx);
             let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
             let stroke =
                 resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
@@ -661,8 +663,8 @@ fn build_element(
                 y,
                 width,
                 height,
-                rx: 0.0,
-                ry: 0.0,
+                rx,
+                ry,
                 fill,
                 stroke,
                 common: CommonProps::default(),
