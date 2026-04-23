@@ -1026,6 +1026,132 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* Partial-selection probe — handle on selected path, else CP
+     hit anywhere, else marquee. *)
+  let doc_path_probe_partial_hit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let raw_r = eval_number (lookup "hit_radius") store ctx in
+       let radius = if raw_r = 0.0 then 8.0 else raw_r in
+       let shift = eval_bool (lookup "shift") store ctx in
+
+       (* 1. Handle hit on a selected Path. *)
+       let doc = ctrl#document in
+       let handle_hit = ref None in
+       (try
+         Document.PathMap.iter (fun path _ ->
+           let elem = Document.get_element doc path in
+           match elem with
+           | Element.Path { d; _ } ->
+             let total = Element.control_point_count elem in
+             for ai = 0 to total - 1 do
+               let (h_in, h_out) = Element.path_handle_positions d ai in
+               (match h_in with
+                | Some (hx, hy) ->
+                  if Float.hypot (x -. hx) (y -. hy) < radius then begin
+                    handle_hit := Some (path, ai, "in");
+                    raise Exit
+                  end
+                | None -> ());
+               (match h_out with
+                | Some (hx, hy) ->
+                  if Float.hypot (x -. hx) (y -. hy) < radius then begin
+                    handle_hit := Some (path, ai, "out");
+                    raise Exit
+                  end
+                | None -> ())
+             done
+           | _ -> ()
+         ) doc.selection
+       with Exit -> ());
+
+       (match !handle_hit with
+        | Some (path, ai, ht) ->
+          State_store.set_tool store "partial_selection" "mode"
+            (`String "handle");
+          State_store.set_tool store "partial_selection" "handle_anchor_idx"
+            (`Int ai);
+          State_store.set_tool store "partial_selection" "handle_type"
+            (`String ht);
+          State_store.set_tool store "partial_selection" "handle_path"
+            (encode_path path)
+        | None ->
+          (* 2. CP hit on any unlocked element (recurse into groups). *)
+          let cp_hit = ref None in
+          let rec recurse elem path =
+            if Element.is_locked elem then ()
+            else
+              match elem with
+              | Element.Group { children; _ }
+              | Element.Layer { children; _ } ->
+                let n = Array.length children in
+                for i = n - 1 downto 0 do
+                  if !cp_hit = None then
+                    recurse children.(i) (path @ [i])
+                done
+              | _ ->
+                let cps = Element.control_points elem in
+                List.iteri (fun i (px, py) ->
+                  match !cp_hit with
+                  | Some _ -> ()
+                  | None ->
+                    if Float.hypot (x -. px) (y -. py) < radius then
+                      cp_hit := Some (path, i)
+                ) cps
+          in
+          let layer_count = Array.length doc.layers in
+          for li = layer_count - 1 downto 0 do
+            if !cp_hit = None then
+              recurse doc.layers.(li) [li]
+          done;
+          (match !cp_hit with
+           | Some (path, cp_idx) ->
+             let already_selected =
+               match Document.PathMap.find_opt path doc.selection with
+               | Some es -> Document.selection_kind_contains es.es_kind cp_idx
+               | None -> false
+             in
+             if not already_selected || shift then begin
+               ctrl#model#snapshot;
+               if shift then begin
+                 let sel = doc.selection in
+                 match Document.PathMap.find_opt path sel with
+                 | Some es ->
+                   let elem = Document.get_element doc path in
+                   let total = Element.control_point_count elem in
+                   let cps =
+                     Document.selection_kind_to_sorted es.es_kind ~total in
+                   let new_cps =
+                     if List.mem cp_idx cps
+                     then List.filter (fun i -> i <> cp_idx) cps
+                     else cp_idx :: cps
+                   in
+                   let new_es =
+                     Document.element_selection_partial path new_cps in
+                   let new_sel = Document.PathMap.add path new_es sel in
+                   ctrl#set_selection new_sel
+                 | None ->
+                   let new_es =
+                     Document.element_selection_partial path [cp_idx] in
+                   let new_sel = Document.PathMap.add path new_es doc.selection in
+                   ctrl#set_selection new_sel
+               end
+               else
+                 ctrl#select_control_point path cp_idx
+             end;
+             State_store.set_tool store "partial_selection" "mode"
+               (`String "moving_pending")
+           | None ->
+             (* 3. No hit — marquee. *)
+             State_store.set_tool store "partial_selection" "mode"
+               (`String "marquee")))
+     | _ -> ());
+    `Null
+  in
+
   let doc_path_commit_partial_marquee spec ctx store =
     (match spec with
      | `Assoc args ->
@@ -1104,5 +1230,6 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.path.probe_anchor_hit", doc_path_probe_anchor_hit);
     ("doc.path.commit_anchor_edit", doc_path_commit_anchor_edit);
     ("doc.move_path_handle", doc_move_path_handle);
+    ("doc.path.probe_partial_hit", doc_path_probe_partial_hit);
     ("doc.path.commit_partial_marquee", doc_path_commit_partial_marquee);
   ]
