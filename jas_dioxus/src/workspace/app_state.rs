@@ -21,7 +21,6 @@ use crate::tools::anchor_point_tool::AnchorPointTool;
 use crate::tools::pencil_tool::PencilTool;
 use crate::tools::path_eraser_tool::PathEraserTool;
 use crate::tools::smooth_tool::SmoothTool;
-use crate::tools::lasso_tool::LassoTool;
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
@@ -99,7 +98,7 @@ impl TabState {
         tools.insert(ToolKind::Polygon, yaml_tool("polygon"));
         tools.insert(ToolKind::Star, yaml_tool("star"));
         tools.insert(ToolKind::Line, yaml_tool("line"));
-        tools.insert(ToolKind::Lasso, Box::new(LassoTool::new()));
+        tools.insert(ToolKind::Lasso, yaml_tool("lasso"));
         Self {
             model,
             tools,
