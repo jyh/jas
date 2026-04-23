@@ -650,6 +650,147 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* ── Eraser + smoothing ──────────────────────────────── *)
+
+  let doc_path_erase_at_rect spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let last_x = eval_number (lookup "last_x") store ctx in
+       let last_y = eval_number (lookup "last_y") store ctx in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let raw = eval_number (lookup "eraser_size") store ctx in
+       let eraser_size = if raw = 0.0 then 2.0 else raw in
+       let min_x = Float.min last_x x -. eraser_size in
+       let min_y = Float.min last_y y -. eraser_size in
+       let max_x = Float.max last_x x +. eraser_size in
+       let max_y = Float.max last_y y +. eraser_size in
+       let doc = ctrl#document in
+       let layers = Array.copy doc.Document.layers in
+       let changed = ref false in
+       Array.iteri (fun li layer ->
+         match layer with
+         | Element.Layer layer_rec ->
+           let new_children = ref [] in
+           let layer_changed = ref false in
+           Array.iter (fun child ->
+             match child with
+             | Element.Path { d; _ } when not (Element.is_locked child) ->
+               let flat = Element.flatten_path_commands d in
+               if List.length flat < 2 then
+                 new_children := child :: !new_children
+               else begin
+                 match Path_ops.find_eraser_hit flat min_x min_y max_x max_y with
+                 | None -> new_children := child :: !new_children
+                 | Some hit ->
+                   let (_bx, _by, bw, bh) = Element.bounds child in
+                   if bw <= eraser_size *. 2.0 && bh <= eraser_size *. 2.0 then
+                     layer_changed := true  (* drop entirely *)
+                   else begin
+                     let is_closed = List.exists (fun c ->
+                       c = Element.ClosePath) d in
+                     let results = Path_ops.split_path_at_eraser d hit is_closed in
+                     List.iter (fun cmds ->
+                       if List.length cmds >= 2 then begin
+                         let open_cmds = List.filter (fun c ->
+                           c <> Element.ClosePath) cmds in
+                         let new_elem = path_with_commands child open_cmds in
+                         new_children := new_elem :: !new_children
+                       end
+                     ) results;
+                     layer_changed := true
+                   end
+               end
+             | _ -> new_children := child :: !new_children
+           ) layer_rec.children;
+           if !layer_changed then begin
+             changed := true;
+             layers.(li) <- Element.Layer {
+               layer_rec with children = Array.of_list (List.rev !new_children)
+             }
+           end
+         | _ -> ()
+       ) doc.layers;
+       if !changed then
+         ctrl#set_document {
+           doc with layers; selection = Document.PathMap.empty
+         }
+     | _ -> ());
+    `Null
+  in
+
+  let doc_path_smooth_at_cursor spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let raw_r = eval_number (lookup "radius") store ctx in
+       let radius = if raw_r = 0.0 then 100.0 else raw_r in
+       let raw_e = eval_number (lookup "fit_error") store ctx in
+       let fit_error = if raw_e = 0.0 then 8.0 else raw_e in
+       let radius_sq = radius *. radius in
+       let doc = ref ctrl#document in
+       let changed = ref false in
+       Document.PathMap.iter (fun path _ ->
+         let elem = Document.get_element !doc path in
+         match elem with
+         | Element.Path { d; _ } when not (Element.is_locked elem)
+                                    && List.length d >= 2 ->
+           let (flat, cmd_map) = Path_ops.flatten_with_cmd_map d in
+           if List.length flat >= 2 then begin
+             let first_hit = ref None in
+             let last_hit = ref None in
+             List.iteri (fun i (px, py) ->
+               let dx = px -. x and dy = py -. y in
+               if dx *. dx +. dy *. dy <= radius_sq then begin
+                 if !first_hit = None then first_hit := Some i;
+                 last_hit := Some i
+               end
+             ) flat;
+             match !first_hit, !last_hit with
+             | Some fh, Some lh ->
+               let first_cmd = List.nth cmd_map fh in
+               let last_cmd = List.nth cmd_map lh in
+               if first_cmd < last_cmd then begin
+                 let range_flat =
+                   List.mapi (fun i p -> (i, p)) flat
+                   |> List.filter (fun (i, _) ->
+                     let ci = List.nth cmd_map i in
+                     ci >= first_cmd && ci <= last_cmd)
+                   |> List.map snd
+                 in
+                 let start_pt = Path_ops.cmd_start_point d first_cmd in
+                 let points_to_fit = start_pt :: range_flat in
+                 if List.length points_to_fit >= 2 then begin
+                   let segments = Fit_curve.fit_curve points_to_fit fit_error in
+                   if segments <> [] then begin
+                     let prefix = List.filteri (fun i _ -> i < first_cmd) d in
+                     let suffix = List.filteri (fun i _ -> i > last_cmd) d in
+                     let new_curves = List.map (fun (seg : Fit_curve.segment) ->
+                       Element.CurveTo (seg.c1x, seg.c1y,
+                                        seg.c2x, seg.c2y,
+                                        seg.p2x, seg.p2y)
+                     ) segments in
+                     let new_cmds = prefix @ new_curves @ suffix in
+                     if List.length new_cmds < List.length d then begin
+                       let new_elem = path_with_commands elem new_cmds in
+                       doc := Document.replace_element !doc path new_elem;
+                       changed := true
+                     end
+                   end
+                 end
+               end
+             | _ -> ()
+           end
+         | _ -> ()
+       ) !doc.Document.selection;
+       if !changed then ctrl#set_document !doc
+     | _ -> ());
+    `Null
+  in
+
   let doc_add_path_from_anchor_buffer spec ctx store =
     (match spec with
      | `Assoc args ->
@@ -709,4 +850,6 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.path.delete_anchor_near", doc_path_delete_anchor_near);
     ("doc.path.insert_anchor_on_segment_near",
      doc_path_insert_anchor_on_segment_near);
+    ("doc.path.erase_at_rect", doc_path_erase_at_rect);
+    ("doc.path.smooth_at_cursor", doc_path_smooth_at_cursor);
   ]
