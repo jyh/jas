@@ -110,21 +110,7 @@ func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (
     return (sx + dist * cos(snapped), sy + dist * sin(snapped))
 }
 
-func regularPolygonPoints(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, _ n: Int) -> [(Double, Double)] {
-    let ex = x2 - x1, ey = y2 - y1
-    let s = hypot(ex, ey)
-    guard s > 0 else { return Array(repeating: (x1, y1), count: n) }
-    let mx = (x1 + x2) / 2, my = (y1 + y2) / 2
-    let px = -ey / s, py = ex / s
-    let d = s / (2 * tan(.pi / Double(n)))
-    let cx = mx + d * px, cy = my + d * py
-    let r = s / (2 * sin(.pi / Double(n)))
-    let theta0 = atan2(y1 - cy, x1 - cx)
-    return (0..<n).map { k in
-        let angle = theta0 + 2 * .pi * Double(k) / Double(n)
-        return (cx + r * cos(angle), cy + r * sin(angle))
-    }
-}
+// regularPolygonPoints lives in Geometry/RegularShapes.swift.
 
 // MARK: - Tool registry
 

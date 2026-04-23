@@ -162,7 +162,7 @@ private func layerChildren(_ model: Model) -> [Element] {
     let children = layerChildren(model)
     #expect(children.count == 1)
     if case .polygon(let p) = children[0] {
-        #expect(p.points.count == 2 * starPoints)
+        #expect(p.points.count == 2 * defaultStarPoints)
     } else {
         Issue.record("Expected Polygon element")
     }
@@ -191,7 +191,7 @@ private func layerChildren(_ model: Model) -> [Element] {
 }
 
 @Test func starToolDefaultPointsIsFive() {
-    #expect(starPoints == 5)
+    #expect(defaultStarPoints == 5)
 }
 
 // MARK: - Polygon tool tests

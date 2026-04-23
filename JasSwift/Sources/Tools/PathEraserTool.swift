@@ -208,70 +208,7 @@ private func findEraserHit(_ flat: [(Double, Double)],
                      exitTSeg: exitTSeg, exitPt: exitPt)
 }
 
-private func liangBarskyTMin(_ x1: Double, _ y1: Double,
-                              _ x2: Double, _ y2: Double,
-                              _ minX: Double, _ minY: Double,
-                              _ maxX: Double, _ maxY: Double) -> Double {
-    let dx = x2 - x1, dy = y2 - y1
-    var tMin = 0.0
-    let edges: [(Double, Double)] = [
-        (-dx, x1 - minX), (dx, maxX - x1),
-        (-dy, y1 - minY), (dy, maxY - y1),
-    ]
-    for (p, q) in edges {
-        if abs(p) >= 1e-12 && p < 0.0 {
-            tMin = max(tMin, q / p)
-        }
-    }
-    return max(0.0, min(1.0, tMin))
-}
-
-private func liangBarskyTMax(_ x1: Double, _ y1: Double,
-                              _ x2: Double, _ y2: Double,
-                              _ minX: Double, _ minY: Double,
-                              _ maxX: Double, _ maxY: Double) -> Double {
-    let dx = x2 - x1, dy = y2 - y1
-    var tMax = 1.0
-    let edges: [(Double, Double)] = [
-        (-dx, x1 - minX), (dx, maxX - x1),
-        (-dy, y1 - minY), (dy, maxY - y1),
-    ]
-    for (p, q) in edges {
-        if abs(p) >= 1e-12 && p > 0.0 {
-            tMax = min(tMax, q / p)
-        }
-    }
-    return max(0.0, min(1.0, tMax))
-}
-
-private func lineSegmentIntersectsRect(_ x1: Double, _ y1: Double,
-                                        _ x2: Double, _ y2: Double,
-                                        _ minX: Double, _ minY: Double,
-                                        _ maxX: Double, _ maxY: Double) -> Bool {
-    if x1 >= minX && x1 <= maxX && y1 >= minY && y1 <= maxY { return true }
-    if x2 >= minX && x2 <= maxX && y2 >= minY && y2 <= maxY { return true }
-
-    var tMin = 0.0, tMax = 1.0
-    let dx = x2 - x1, dy = y2 - y1
-    let edges: [(Double, Double)] = [
-        (-dx, x1 - minX), (dx, maxX - x1),
-        (-dy, y1 - minY), (dy, maxY - y1),
-    ]
-    for (p, q) in edges {
-        if abs(p) < 1e-12 {
-            if q < 0 { return false }
-        } else {
-            let t = q / p
-            if p < 0 {
-                tMin = max(tMin, t)
-            } else {
-                tMax = min(tMax, t)
-            }
-            if tMin > tMax { return false }
-        }
-    }
-    return true
-}
+// Liang-Barsky helpers live in Geometry/PathOps.swift.
 
 // MARK: - Flat index to command mapping
 
@@ -343,23 +280,7 @@ private func splitQuadAt(_ p0: (Double, Double),
     return (first, second)
 }
 
-/// Get the endpoint of a path command.
-private func cmdEndpoint(_ cmd: PathCommand) -> (Double, Double)? {
-    return cmd.endpoint
-}
-
-/// Build the command start points array (the current point before each command).
-private func cmdStartPoints(_ cmds: [PathCommand]) -> [(Double, Double)] {
-    var starts = Array(repeating: (0.0, 0.0), count: cmds.count)
-    var cur = (0.0, 0.0)
-    for i in 0..<cmds.count {
-        starts[i] = cur
-        if let pt = cmdEndpoint(cmds[i]) {
-            cur = pt
-        }
-    }
-    return starts
-}
+// cmdEndpoint / cmdStartPoints live in Geometry/PathOps.swift.
 
 /// Generate the first-half command ending at the entry point, preserving curves.
 private func makeEntryCmd(_ cmd: PathCommand, _ start: (Double, Double), _ t: Double) -> PathCommand {
