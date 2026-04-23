@@ -23,4 +23,9 @@
  (modules yaml_tool_effects_test)
  (libraries jas alcotest))
 
+(test
+ (name yaml_tool_test)
+ (modules yaml_tool_test)
+ (libraries jas lablgtk3 alcotest))
+
 ; color_picker_test removed — color picker now uses YAML dialog system
