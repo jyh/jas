@@ -238,10 +238,14 @@ private func polygonTool() -> CanvasTool {
     }
 }
 
-// MARK: - Selection tool tests
+// MARK: - Selection tool tests (YAML-driven per Phase 7.6)
+
+private func selectionTool() -> CanvasTool {
+    createTools()[.selection]!
+}
 
 @Test func selectionToolMarqueeSelect() {
-    let tool = SelectionTool()
+    let tool = selectionTool()
     let rect: Element = .rect(Rect(x: 50, y: 50, width: 20, height: 20,
                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
     let layer = Layer(name: "L", children: [rect])
@@ -249,12 +253,13 @@ private func polygonTool() -> CanvasTool {
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
     tool.onPress(ctx, x: 45, y: 45, shift: false, alt: false)
+    tool.onMove(ctx, x: 75, y: 75, shift: false, dragging: true)
     tool.onRelease(ctx, x: 75, y: 75, shift: false, alt: false)
     #expect(!model.document.selection.isEmpty)
 }
 
 @Test func selectionToolMarqueeMiss() {
-    let tool = SelectionTool()
+    let tool = selectionTool()
     let rect: Element = .rect(Rect(x: 50, y: 50, width: 20, height: 20,
                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
     let layer = Layer(name: "L", children: [rect])
@@ -262,30 +267,20 @@ private func polygonTool() -> CanvasTool {
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
+    tool.onMove(ctx, x: 10, y: 10, shift: false, dragging: true)
     tool.onRelease(ctx, x: 10, y: 10, shift: false, alt: false)
     #expect(model.document.selection.isEmpty)
 }
 
 @Test func selectionToolMoveSelection() {
-    let tool = SelectionTool()
+    let tool = selectionTool()
     let rect: Element = .rect(Rect(x: 50, y: 50, width: 20, height: 20,
                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
     let layer = Layer(name: "L", children: [rect])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
-    let ctrl = Controller(model: model)
-    ctrl.selectRect(x: 45, y: 45, width: 30, height: 30, extend: false)
-    #expect(!model.document.selection.isEmpty)
-    let ctx = ToolContext(
-        model: model,
-        controller: ctrl,
-        hitTestSelection: { _ in true },
-        hitTestHandle: { _ in nil },
-        hitTestText: { _ in nil },
-        hitTestPathCurve: { _, _ in nil },
-        requestUpdate: {},
-        drawElementOverlay: { _, _, _ in }
-    )
+    let (ctx, _, _) = makeCtx(model: model)
+    // Click on the rect to select it, then drag to move.
     tool.onPress(ctx, x: 60, y: 60, shift: false, alt: false)
     tool.onMove(ctx, x: 70, y: 70, shift: false, dragging: true)
     tool.onRelease(ctx, x: 70, y: 70, shift: false, alt: false)
