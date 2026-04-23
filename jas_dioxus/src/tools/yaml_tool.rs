@@ -1467,6 +1467,97 @@ mod tests {
         }
     }
 
+    // ── Interior Selection tool behavioral tests ──────────────────
+    //
+    // The native tool had no unit tests; these check the basic shape
+    // of interior selection — recursing into groups on click, and
+    // partial-style selection on marquee.
+
+    fn interior_selection_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("interior_selection")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_rect_inside_group() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::{GroupElem, LayerElem};
+        let rect = Element::Rect(RectElem {
+            x: 50.0, y: 50.0, width: 20.0, height: 20.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn interior_selection_parity_click_enters_group() {
+        let Some(mut tool) = interior_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_inside_group();
+        // Click inside the rect (which lives at layer[0]/group[0]/rect[0]).
+        tool.on_press(&mut model, 55.0, 55.0, false, false);
+        tool.on_release(&mut model, 55.0, 55.0, false, false);
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 1);
+        assert_eq!(
+            sel[0].path,
+            vec![0, 0, 0],
+            "interior selection should pick the leaf inside the group",
+        );
+    }
+
+    #[test]
+    fn interior_selection_parity_marquee_selects_partial() {
+        let Some(mut tool) = interior_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_inside_group();
+        tool.on_press(&mut model, 40.0, 40.0, false, false);
+        tool.on_move(&mut model, 80.0, 80.0, false, false, true);
+        tool.on_release(&mut model, 80.0, 80.0, false, false);
+        // partial_select_in_rect produced a selection; entries are
+        // SelectionKind::Partial so even whole-box coverage lists the
+        // element with partial control points.
+        assert!(!model.document().selection.is_empty());
+    }
+
     // ── Polygon tool behavioral tests ──────────────────────────────
 
     fn polygon_yaml_tool() -> Option<YamlTool> {
