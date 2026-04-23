@@ -204,6 +204,79 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.path.probe_anchor_hit — { x, y, hit_radius? }. Hit-tests in
+    // priority order (handle → smooth → corner) and stashes the result
+    // on the anchor_point tool scope (`mode`, `handle_type`,
+    // `hit_anchor_idx`, `hit_path` as a {__path__: [ints]} dict).
+    effects["doc.path.probe_anchor_hit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let rawR = evalNumber(args["hit_radius"], store: store, ctx: ctx)
+        let radius = rawR == 0 ? 8.0 : rawR
+        pathProbeAnchorHit(model: model, store: store,
+                           x: x, y: y, radius: radius)
+        return nil
+    }
+
+    // doc.path.commit_anchor_edit — { target_x, target_y, origin_x,
+    // origin_y }. Reads the latched anchor_point state and applies the
+    // corresponding mutation: smooth→corner, corner→smooth-at-target,
+    // handle→move-by-delta.
+    effects["doc.path.commit_anchor_edit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let tx = evalNumber(args["target_x"], store: store, ctx: ctx)
+        let ty = evalNumber(args["target_y"], store: store, ctx: ctx)
+        let ox = evalNumber(args["origin_x"], store: store, ctx: ctx)
+        let oy = evalNumber(args["origin_y"], store: store, ctx: ctx)
+        pathCommitAnchorEdit(model: model, store: store,
+                             originX: ox, originY: oy,
+                             targetX: tx, targetY: ty)
+        return nil
+    }
+
+    // doc.path.probe_partial_hit — { x, y, hit_radius?, shift }. Hit
+    // priority: handle on selected Path (→ "handle"), any unlocked CP
+    // (→ "moving_pending" plus selection update), else "marquee".
+    effects["doc.path.probe_partial_hit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let rawR = evalNumber(args["hit_radius"], store: store, ctx: ctx)
+        let radius = rawR == 0 ? 8.0 : rawR
+        let shift = evalBool(args["shift"], store: store, ctx: ctx)
+        pathProbePartialHit(model: model, store: store,
+                            x: x, y: y, radius: radius, shift: shift)
+        return nil
+    }
+
+    // doc.move_path_handle — { dx, dy }. Reads the latched
+    // partial_selection handle state and applies a handle move by
+    // (dx, dy). No-op if nothing's latched.
+    effects["doc.move_path_handle"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let dx = evalNumber(args["dx"], store: store, ctx: ctx)
+        let dy = evalNumber(args["dy"], store: store, ctx: ctx)
+        pathMoveLatchedHandle(model: model, store: store, dx: dx, dy: dy)
+        return nil
+    }
+
+    // doc.path.commit_partial_marquee — { x1, y1, x2, y2, additive }.
+    // Called on mouseup in Partial Selection's marquee mode; empty-ish
+    // rects without shift clear the selection.
+    effects["doc.path.commit_partial_marquee"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let (rx, ry, rw, rh, additive) = normalizeRectArgs(args, store: store, ctx: ctx)
+        if rw > 1.0 || rh > 1.0 {
+            model.snapshot()
+            Controller(model: model).directSelectRect(
+                x: rx, y: ry, width: rw, height: rh, extend: additive)
+        } else if !additive {
+            Controller(model: model).setSelection([])
+        }
+        return nil
+    }
+
     // ── Buffer effects (Phase 3) ─────────────────────────────────
 
     // buffer.push: { buffer, x, y } — append to named point buffer.
@@ -611,6 +684,288 @@ private func pathEraseAtRect(
             artboardOptions: doc.artboardOptions
         )
     }
+}
+
+// MARK: - Anchor / handle probe helpers
+
+/// Serialize an ElementPath into the `{"__path__": [Int]}` dict
+/// representation used by tool-scope state.
+private func encodePath(_ path: ElementPath) -> [String: Any] {
+    return ["__path__": path as [Any]]
+}
+
+/// Decode a path from tool-scope state. Returns nil on malformed input.
+private func decodePath(_ v: Any?) -> ElementPath? {
+    guard let obj = v as? [String: Any], let arr = obj["__path__"] as? [Any] else {
+        return nil
+    }
+    var out: ElementPath = []
+    for item in arr {
+        if let n = item as? NSNumber { out.append(n.intValue) }
+        else if let i = item as? Int { out.append(i) }
+        else { return nil }
+    }
+    return out
+}
+
+/// Find a path-handle hit: (element path, anchor index, "in"|"out").
+private func findPathHandleNear(
+    _ doc: Document, x: Double, y: Double, radius: Double
+) -> (ElementPath, Int, String)? {
+    func check(_ pe: Path, at path: ElementPath)
+        -> (ElementPath, Int, String)?
+    {
+        let anchors = Element.path(pe).controlPointPositions
+        for ai in anchors.indices {
+            let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            if let h = hIn {
+                let dx = x - h.0, dy = y - h.1
+                if (dx * dx + dy * dy).squareRoot() < radius {
+                    return (path, ai, "in")
+                }
+            }
+            if let h = hOut {
+                let dx = x - h.0, dy = y - h.1
+                if (dx * dx + dy * dy).squareRoot() < radius {
+                    return (path, ai, "out")
+                }
+            }
+        }
+        return nil
+    }
+    for (li, layer) in doc.layers.enumerated() {
+        for (ci, child) in layer.children.enumerated() {
+            if case .path(let pe) = child, !pe.locked,
+               let r = check(pe, at: [li, ci]) { return r }
+            if case .group(let g) = child, !g.locked {
+                for (gi, gc) in g.children.enumerated() {
+                    if case .path(let pe) = gc, !pe.locked,
+                       let r = check(pe, at: [li, ci, gi]) { return r }
+                }
+            }
+        }
+    }
+    return nil
+}
+
+/// Find a path-anchor hit using the control-point enumeration.
+/// Returns (element path, anchor index within controlPointPositions).
+private func findPathAnchorByCp(
+    _ doc: Document, x: Double, y: Double, radius: Double
+) -> (ElementPath, Int)? {
+    func check(_ pe: Path, at path: ElementPath) -> (ElementPath, Int)? {
+        let anchors = Element.path(pe).controlPointPositions
+        for (i, pt) in anchors.enumerated() {
+            let dx = x - pt.0, dy = y - pt.1
+            if (dx * dx + dy * dy).squareRoot() < radius {
+                return (path, i)
+            }
+        }
+        return nil
+    }
+    for (li, layer) in doc.layers.enumerated() {
+        for (ci, child) in layer.children.enumerated() {
+            if case .path(let pe) = child, !pe.locked,
+               let r = check(pe, at: [li, ci]) { return r }
+            if case .group(let g) = child, !g.locked {
+                for (gi, gc) in g.children.enumerated() {
+                    if case .path(let pe) = gc, !pe.locked,
+                       let r = check(pe, at: [li, ci, gi]) { return r }
+                }
+            }
+        }
+    }
+    return nil
+}
+
+/// Implementation of doc.path.probe_anchor_hit. Writes state into the
+/// `anchor_point` tool scope.
+private func pathProbeAnchorHit(
+    model: Model, store: StateStore,
+    x: Double, y: Double, radius: Double
+) {
+    if let (path, anchorIdx, handleType) = findPathHandleNear(
+        model.document, x: x, y: y, radius: radius
+    ) {
+        store.setTool("anchor_point", "mode", "pressed_handle")
+        store.setTool("anchor_point", "handle_type", handleType)
+        store.setTool("anchor_point", "hit_anchor_idx", anchorIdx)
+        store.setTool("anchor_point", "hit_path", encodePath(path))
+        return
+    }
+    if let (path, anchorIdx) = findPathAnchorByCp(
+        model.document, x: x, y: y, radius: radius
+    ) {
+        guard case .path(let pe) = model.document.getElement(path) else { return }
+        let mode = isSmoothPoint(pe.d, anchorIdx: anchorIdx)
+            ? "pressed_smooth" : "pressed_corner"
+        store.setTool("anchor_point", "mode", mode)
+        store.setTool("anchor_point", "hit_anchor_idx", anchorIdx)
+        store.setTool("anchor_point", "hit_path", encodePath(path))
+        return
+    }
+    store.setTool("anchor_point", "mode", "idle")
+}
+
+/// Implementation of doc.path.commit_anchor_edit.
+private func pathCommitAnchorEdit(
+    model: Model, store: StateStore,
+    originX: Double, originY: Double,
+    targetX: Double, targetY: Double
+) {
+    let mode = (store.getTool("anchor_point", "mode") as? String) ?? "idle"
+    if mode == "idle" { return }
+    guard let path = decodePath(store.getTool("anchor_point", "hit_path")) else {
+        return
+    }
+    let anchorIdx: Int = {
+        if let n = store.getTool("anchor_point", "hit_anchor_idx") as? Int { return n }
+        if let n = store.getTool("anchor_point", "hit_anchor_idx") as? NSNumber { return n.intValue }
+        return 0
+    }()
+    guard case .path(let pe) = model.document.getElement(path) else { return }
+    switch mode {
+    case "pressed_smooth":
+        model.snapshot()
+        let newCmds = convertSmoothToCorner(pe.d, anchorIdx: anchorIdx)
+        model.document = model.document.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds)))
+    case "pressed_corner":
+        let moved = hypot(targetX - originX, targetY - originY)
+        if moved <= 1.0 { return }
+        model.snapshot()
+        let newCmds = convertCornerToSmooth(
+            pe.d, anchorIdx: anchorIdx, hx: targetX, hy: targetY)
+        model.document = model.document.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds)))
+    case "pressed_handle":
+        let handleType = (store.getTool("anchor_point", "handle_type") as? String) ?? ""
+        let dx = targetX - originX, dy = targetY - originY
+        if abs(dx) <= 0.5 && abs(dy) <= 0.5 { return }
+        model.snapshot()
+        let newCmds = movePathHandleIndependent(
+            pe.d, anchorIdx: anchorIdx,
+            handleType: handleType, dx: dx, dy: dy)
+        model.document = model.document.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds)))
+    default: break
+    }
+}
+
+/// Implementation of doc.path.probe_partial_hit.
+private func pathProbePartialHit(
+    model: Model, store: StateStore,
+    x: Double, y: Double, radius: Double, shift: Bool
+) {
+    // 1. Handle hit on a selected Path.
+    for es in model.document.selection {
+        guard case .path(let pe) = model.document.getElement(es.path) else { continue }
+        let anchors = Element.path(pe).controlPointPositions
+        for ai in anchors.indices {
+            let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            func matches(_ h: (Double, Double)?) -> Bool {
+                guard let h = h else { return false }
+                return hypot(x - h.0, y - h.1) < radius
+            }
+            if matches(hIn) {
+                store.setTool("partial_selection", "mode", "handle")
+                store.setTool("partial_selection", "handle_anchor_idx", ai)
+                store.setTool("partial_selection", "handle_type", "in")
+                store.setTool("partial_selection", "handle_path", encodePath(es.path))
+                return
+            }
+            if matches(hOut) {
+                store.setTool("partial_selection", "mode", "handle")
+                store.setTool("partial_selection", "handle_anchor_idx", ai)
+                store.setTool("partial_selection", "handle_type", "out")
+                store.setTool("partial_selection", "handle_path", encodePath(es.path))
+                return
+            }
+        }
+    }
+    // 2. Control-point hit on any unlocked element (recurses into groups).
+    if let (path, cpIdx) = findElementCpNear(
+        model.document, x: x, y: y, radius: radius
+    ) {
+        let alreadySelected = model.document.selection.contains { es in
+            es.path == path && es.kind.contains(cpIdx)
+        }
+        if !alreadySelected || shift {
+            model.snapshot()
+            if shift {
+                var sel = Array(model.document.selection)
+                if let pos = sel.firstIndex(where: { $0.path == path }) {
+                    let elem = model.document.getElement(path)
+                    let total = elem.controlPointCount
+                    var cps = sel[pos].kind.toSorted(total: total).toArray()
+                    if let p = cps.firstIndex(of: cpIdx) {
+                        cps.remove(at: p)
+                    } else {
+                        cps.append(cpIdx)
+                    }
+                    sel[pos] = ElementSelection.partial(path, cps)
+                } else {
+                    sel.append(ElementSelection.partial(path, [cpIdx]))
+                }
+                Controller(model: model).setSelection(Set(sel))
+            } else {
+                Controller(model: model).selectControlPoint(path: path, index: cpIdx)
+            }
+        }
+        store.setTool("partial_selection", "mode", "moving_pending")
+        return
+    }
+    store.setTool("partial_selection", "mode", "marquee")
+}
+
+/// Recurse through layer / group children looking for a control-point
+/// hit on an unlocked, visible element.
+private func findElementCpNear(
+    _ doc: Document, x: Double, y: Double, radius: Double
+) -> (ElementPath, Int)? {
+    func recurse(_ elem: Element, _ path: ElementPath) -> (ElementPath, Int)? {
+        if elem.visibility == .invisible { return nil }
+        if case .group(let g) = elem {
+            for (i, child) in g.children.enumerated().reversed() {
+                if child.isLocked { continue }
+                if let r = recurse(child, path + [i]) { return r }
+            }
+            return nil
+        }
+        let cps = elem.controlPointPositions
+        for (i, pt) in cps.enumerated() {
+            if hypot(x - pt.0, y - pt.1) < radius {
+                return (path, i)
+            }
+        }
+        return nil
+    }
+    for (li, layer) in doc.layers.enumerated() {
+        if layer.visibility == .invisible { continue }
+        for (ci, child) in layer.children.enumerated().reversed() {
+            if child.isLocked { continue }
+            if child.visibility == .invisible { continue }
+            if let r = recurse(child, [li, ci]) { return r }
+        }
+    }
+    return nil
+}
+
+/// Implementation of doc.move_path_handle.
+private func pathMoveLatchedHandle(
+    model: Model, store: StateStore, dx: Double, dy: Double
+) {
+    guard let path = decodePath(store.getTool("partial_selection", "handle_path")) else {
+        return
+    }
+    let anchorIdx: Int = {
+        if let n = store.getTool("partial_selection", "handle_anchor_idx") as? Int { return n }
+        if let n = store.getTool("partial_selection", "handle_anchor_idx") as? NSNumber { return n.intValue }
+        return 0
+    }()
+    let handleType = (store.getTool("partial_selection", "handle_type") as? String) ?? ""
+    Controller(model: model).movePathHandle(
+        path, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
 }
 
 /// Implementation of doc.path.smooth_at_cursor.
