@@ -6,8 +6,6 @@
 /// button grid and its action dispatch land in phase 9b+.
 
 public enum BooleanPanel {
-    public static let label = "Boolean"
-
     public static func menuItems() -> [PanelMenuItem] {
         [
             .action(label: "Repeat Boolean Operation", command: "repeat_boolean_operation"),

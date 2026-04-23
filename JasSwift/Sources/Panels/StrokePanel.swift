@@ -1,8 +1,6 @@
 /// Stroke panel menu definition.
 
 public enum StrokePanel {
-    public static let label = "Stroke"
-
     public static func menuItems() -> [PanelMenuItem] {
         [.action(label: "Close Stroke", command: "close_panel")]
     }

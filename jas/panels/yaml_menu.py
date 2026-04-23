@@ -7,12 +7,6 @@ and enabled_when conditions.
 
 from __future__ import annotations
 
-import os
-import sys
-
-# Add project root for workspace_interpreter imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
 from workspace_interpreter.loader import load_workspace
 from workspace_interpreter.expr import evaluate
 

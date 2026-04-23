@@ -5,12 +5,18 @@ re-evaluating the same expression (e.g. a [bind:] clause inside a
 216-iteration foreach) skips the tokenize+parse step entirely. The
 cache is unbounded — fine for workspace YAML, where the set of
 distinct expression strings is finite and bounded by the spec.
+
+Diagnostics: parse failures are logged at WARNING; non-empty
+expressions that evaluate to null are logged at DEBUG (legit for
+e.g. $selection.fill with nothing selected, but also flags typos
+during development when debug logging is enabled).
 """
 
 from __future__ import annotations
+import logging
 import re
 
-from workspace_interpreter.expr_types import Value
+from workspace_interpreter.expr_types import Value, ValueType
 from workspace_interpreter.expr_parser import parse, ParseError
 from workspace_interpreter.expr_eval import eval_node
 
@@ -20,6 +26,8 @@ _INTERP_RE = re.compile(r"\{\{(.+?)\}\}")
 # Cache of parsed ASTs keyed by source string. ``None`` cached for
 # unparseable input so we don't reparse known-bad strings.
 _AST_CACHE: dict = {}
+
+_log = logging.getLogger(__name__)
 
 
 def evaluate(expr_str: str, ctx: dict) -> Value:
@@ -35,15 +43,20 @@ def evaluate(expr_str: str, ctx: dict) -> Value:
     else:
         try:
             ast = parse(source)
-        except (ParseError, Exception):
+        except (ParseError, Exception) as e:
+            _log.warning("parse failed: %r: %s", source, e)
             ast = None
         _AST_CACHE[source] = ast
     if ast is None:
         return Value.null()
     try:
-        return eval_node(ast, ctx)
-    except Exception:
+        result = eval_node(ast, ctx)
+    except Exception as e:
+        _log.warning("eval raised: %r: %s", source, e)
         return Value.null()
+    if result.type == ValueType.NULL:
+        _log.debug("null result: %r", source)
+    return result
 
 
 def evaluate_text(text: str, ctx: dict) -> str:

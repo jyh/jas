@@ -957,14 +957,19 @@ and fill_stroke_gradient_full cr fill stroke fill_gradient stroke_gradient bbox 
        | None -> ());
     stroke_aligned cr align
   in
+  (* has_gradient is computed from fill_gradient above (line 899),
+     so Some is the only reachable case here. If the invariant ever
+     breaks, skip the gradient fill instead of crashing the paint. *)
   if has_gradient then begin
-    let g = match fill_gradient with Some g -> g | None -> assert false in
-    set_gradient_source g;
-    if has_stroke then begin
-      Cairo.fill_preserve cr;
-      stroke_with_source ()
-    end else
-      Cairo.fill cr
+    (match fill_gradient with
+     | None -> ()
+     | Some g ->
+       set_gradient_source g;
+       if has_stroke then begin
+         Cairo.fill_preserve cr;
+         stroke_with_source ()
+       end else
+         Cairo.fill cr)
   end else if has_fill && has_stroke then begin
     (match fill with
      | Some (f : Element.fill) ->

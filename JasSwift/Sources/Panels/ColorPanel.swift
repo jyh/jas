@@ -1,8 +1,6 @@
 /// Color panel menu definition.
 
 public enum ColorPanel {
-    public static let label = "Color"
-
     public static func menuItems() -> [PanelMenuItem] {
         [
             .radio(label: "Grayscale", command: "mode_grayscale", group: "color_mode"),

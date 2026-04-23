@@ -47,7 +47,6 @@ public struct OpacityPanelState: Equatable {
 }
 
 public enum OpacityPanel {
-    public static let label = "Opacity"
 
     /// Menu items for the Opacity panel. Ten spec items (from OPACITY.md)
     /// plus a trailing "Close Opacity" action. Three separators divide

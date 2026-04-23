@@ -1,11 +1,7 @@
 """Tests for YAML-driven panel menus."""
 
 import os
-import sys
 import pytest
-
-# Add project root for workspace_interpreter imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from panels.yaml_menu import (
     load_panel_specs, build_menu_items, is_checked, is_enabled,

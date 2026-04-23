@@ -1250,6 +1250,12 @@ and eval_logical ?(local_env : env = []) ?(store_cb : store_cb option)
    workspace YAML has a finite set of distinct expression strings. *)
 let _ast_cache : (string, ast option) Hashtbl.t = Hashtbl.create 128
 
+(* Set JAS_DEBUG_EXPR=1 in the environment to log non-empty
+   expressions that evaluate to Null. Parse/eval failures are
+   always logged to stderr (they indicate a real bug). *)
+let _debug_null () =
+  match Sys.getenv_opt "JAS_DEBUG_EXPR" with Some "1" -> true | _ -> false
+
 let evaluate ?(local_env : env = []) ?(store_cb : store_cb option)
     (expr_str : string) (ctx : Yojson.Safe.t) : value =
   if String.length expr_str = 0 then Null
@@ -1258,15 +1264,31 @@ let evaluate ?(local_env : env = []) ?(store_cb : store_cb option)
     let ast_opt = match Hashtbl.find_opt _ast_cache key with
       | Some cached -> cached
       | None ->
-        let ast = try parse key with _ -> None in
+        let ast =
+          try parse key
+          with e ->
+            Printf.eprintf "expr parse failed: %S: %s\n"
+              key (Printexc.to_string e);
+            None
+        in
         Hashtbl.add _ast_cache key ast;
         ast
     in
     match ast_opt with
     | None -> Null
     | Some ast ->
-      try eval_node ~local_env ?store_cb ast ctx
-      with _ -> Null
+      let result =
+        try eval_node ~local_env ?store_cb ast ctx
+        with e ->
+          Printf.eprintf "expr eval raised: %S: %s\n"
+            key (Printexc.to_string e);
+          Null
+      in
+      (match result with
+       | Null when _debug_null () ->
+         Printf.eprintf "expr null result: %S\n" key
+       | _ -> ());
+      result
 
 (** Resolve a dot-separated path through a JSON context, returning raw JSON.
     Unlike resolve_path, this preserves Assoc/List structure. *)

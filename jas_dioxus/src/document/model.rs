@@ -35,7 +35,6 @@ pub enum EditingTarget {
 #[derive(Debug, Clone)]
 pub struct Model {
     document: Document,
-    saved_document: Document,
     pub filename: String,
     undo_stack: Vec<Document>,
     redo_stack: Vec<Document>,
@@ -63,10 +62,8 @@ pub struct Model {
 
 impl Default for Model {
     fn default() -> Self {
-        let doc = Document::default();
         Self {
-            saved_document: doc.clone(),
-            document: doc,
+            document: Document::default(),
             filename: fresh_filename(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -88,7 +85,6 @@ impl Model {
     /// `false` until something edits it.
     pub fn new(document: Document, filename: Option<String>) -> Self {
         Self {
-            saved_document: document.clone(),
             document,
             filename: filename.unwrap_or_else(fresh_filename),
             undo_stack: Vec::new(),
@@ -186,7 +182,6 @@ impl Model {
     /// which [`is_modified`] will return `false` until the next edit.
     /// Call this after a successful save.
     pub fn mark_saved(&mut self) {
-        self.saved_document = self.document.clone();
         self.saved_generation = self.generation;
     }
 }

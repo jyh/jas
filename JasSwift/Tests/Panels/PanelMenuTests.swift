@@ -6,7 +6,7 @@ import Testing
     #expect(panelLabel(.color) == "Color")
     #expect(panelLabel(.swatches) == "Swatches")
     #expect(panelLabel(.stroke) == "Stroke")
-    #expect(panelLabel(.properties) == "Properties")
+    #expect(panelLabel(.properties) == "Object properties")
 }
 
 @Test func panelKindAllCount() {

@@ -1,6 +1,14 @@
 import os
 import sys
 
+# Add repo root to sys.path so `workspace_interpreter` (which lives at
+# the repo root, not inside jas/) is importable. Must run before any
+# `from panels.*` / `from workspace.*` import below, since those
+# transitively import workspace_interpreter at module load time.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut, QMouseEvent, QPainter, QColor, QCursor
 from PySide6.QtWidgets import (
@@ -258,7 +266,12 @@ class MainWindow(QMainWindow):
             ws_path = os.path.join(os.path.dirname(__file__), "..", "workspace")
             ws = load_workspace(ws_path)
             self._yaml_state = StateStore(state_defaults(ws.get("state", {})))
-        except Exception:
+        except (OSError, ValueError) as e:
+            import logging
+            logging.warning(
+                "Failed to load workspace from %s; using empty state. Error: %s",
+                ws_path, e,
+            )
             self._yaml_state = StateStore()
         register_color_bar()
 

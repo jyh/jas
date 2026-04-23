@@ -1,6 +1,6 @@
 /**
  * Generic effects engine for WORKSPACE.yaml-driven UI.
- * All action logic is interpreted from the effects lists in JAS_ACTIONS.
+ * All action logic is interpreted from the effects lists in APP_ACTIONS.
  * No app-specific hardcoding — the engine is purely data-driven.
  */
 
@@ -9,14 +9,14 @@
 
   // ── State store ────────────────────────────────────────────
 
-  const state = Object.assign({}, typeof JAS_STATE !== "undefined" ? JAS_STATE : {});
-  const actions = typeof JAS_ACTIONS !== "undefined" ? JAS_ACTIONS : {};
-  const shortcuts = typeof JAS_SHORTCUTS !== "undefined" ? JAS_SHORTCUTS : [];
+  const state = Object.assign({}, typeof APP_STATE !== "undefined" ? APP_STATE : {});
+  const actions = typeof APP_ACTIONS !== "undefined" ? APP_ACTIONS : {};
+  const shortcuts = typeof APP_SHORTCUTS !== "undefined" ? APP_SHORTCUTS : [];
   const timers = {};  // named timers for long-press etc.
   var STORAGE_KEY = "workspace_layouts";  // localStorage key for saved layouts
   var APPEARANCE_STORAGE_KEY = "app_appearances";  // localStorage key for user appearances
   var activeWorkspaceName = null;         // currently active workspace name
-  var activeAppearanceName = typeof JAS_ACTIVE_APPEARANCE !== "undefined" ? JAS_ACTIVE_APPEARANCE : "dark_gray";
+  var activeAppearanceName = typeof APP_ACTIVE_APPEARANCE !== "undefined" ? APP_ACTIVE_APPEARANCE : "dark_gray";
 
   // ── Runtime contexts ──────────────────────────────────────
   // active_document.* — properties of the active tab's document
@@ -29,7 +29,7 @@
   var workspaceCtx = { has_saved_layout: false, active_layout_name: "" };
   // Initialize from runtime_contexts defaults if provided
   (function () {
-    var rc = typeof JAS_RUNTIME_CONTEXTS !== "undefined" ? JAS_RUNTIME_CONTEXTS : {};
+    var rc = typeof APP_RUNTIME_CONTEXTS !== "undefined" ? APP_RUNTIME_CONTEXTS : {};
     if (rc.active_document && rc.active_document.defaults) {
       Object.assign(activeDocumentCtx, rc.active_document.defaults);
     }
@@ -374,7 +374,7 @@
     if (parts[0] === "active_document" || parts[0] === "document") return activeDocumentCtx[parts[1]];
     if (parts[0] === "workspace") return workspaceCtx[parts[1]];
     if (parts[0] === "theme") {
-      var themeData = typeof JAS_THEME !== "undefined" ? JAS_THEME : {};
+      var themeData = typeof APP_THEME !== "undefined" ? APP_THEME : {};
       var obj = themeData;
       for (var ti = 1; ti < parts.length; ti++) {
         if (obj && typeof obj === "object" && parts[ti] in obj) {
@@ -525,7 +525,7 @@
       if (ternary) {
         var cond = evalCondition(ternary[1], {});
         var iconName = cond ? ternary[2] : ternary[3];
-        var iconDef = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS[iconName] : null;
+        var iconDef = (typeof APP_ICONS !== "undefined") ? APP_ICONS[iconName] : null;
         if (iconDef) {
           var svg = el.querySelector("svg");
           if (svg) {
@@ -662,7 +662,7 @@
 
     // reset: [keys]
     if (effect.reset) {
-      var defaults = typeof JAS_STATE !== "undefined" ? JAS_STATE : {};
+      var defaults = typeof APP_STATE !== "undefined" ? APP_STATE : {};
       effect.reset.forEach(function (rk) {
         setState(rk, defaults[rk]);
       });
@@ -856,7 +856,7 @@
     //   4. Flex panes split remaining space equally (respecting min_width)
     //   5. Position left-to-right, full viewport height
     if (effect.tile) {
-      var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+      var configs = typeof APP_PANE_CONFIGS !== "undefined" ? APP_PANE_CONFIGS : {};
       var container = document.getElementById(resolve(effect.tile.container, ctx));
       if (!container) return;
 
@@ -930,7 +930,7 @@
     // reset_layout: { container }
     if (effect.reset_layout) {
       // Reset pane positions to defaults
-      var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+      var configs = typeof APP_PANE_CONFIGS !== "undefined" ? APP_PANE_CONFIGS : {};
       for (var paneId in configs) {
         if (configs.hasOwnProperty(paneId)) {
           var pos = configs[paneId].default_position;
@@ -946,14 +946,14 @@
         }
       }
       // Reset all state variables to their declared defaults
-      var defaults = typeof JAS_STATE !== "undefined" ? JAS_STATE : {};
+      var defaults = typeof APP_STATE !== "undefined" ? APP_STATE : {};
       for (var dk in defaults) {
         if (defaults.hasOwnProperty(dk)) {
           setState(dk, defaults[dk]);
         }
       }
       // Reset appearance to YAML default
-      applyAppearance(typeof JAS_ACTIVE_APPEARANCE !== "undefined" ? JAS_ACTIVE_APPEARANCE : "dark_gray");
+      applyAppearance(typeof APP_ACTIVE_APPEARANCE !== "undefined" ? APP_ACTIVE_APPEARANCE : "dark_gray");
       activeWorkspaceName = null;
       workspaceCtx.has_saved_layout = false;
       workspaceCtx.active_layout_name = "";
@@ -975,7 +975,7 @@
       }
       dialogParams = dlgParams;
       // Initialize dialog-local state if the dialog defines a state section
-      var dlgDef = typeof JAS_ACTIONS !== "undefined" ? null : null;
+      var dlgDef = typeof APP_ACTIONS !== "undefined" ? null : null;
       // Look up dialog definition in the rendered page's data
       var modalEl = document.getElementById("dialog-" + dlgId);
       if (modalEl) {
@@ -1156,7 +1156,7 @@
       if (container && nameInput) {
         var name = nameInput.value.trim();
         if (!name) { console.warn("[save_layout] empty name"); return; }
-        var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+        var configs = typeof APP_PANE_CONFIGS !== "undefined" ? APP_PANE_CONFIGS : {};
         var layoutData = { panes: {}, state: {}, dock: {}, floating: [], appearance: activeAppearanceName };
         container.querySelectorAll(".app-pane").forEach(function (p) {
           if (p.id) {
@@ -1324,9 +1324,9 @@
         var saved = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
         saved[name] = {
           label: name,
-          colors: JAS_THEME.colors || {},
-          fonts: JAS_THEME.fonts || {},
-          sizes: JAS_THEME.sizes || {}
+          colors: APP_THEME.colors || {},
+          fonts: APP_THEME.fonts || {},
+          sizes: APP_THEME.sizes || {}
         };
         localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(saved));
         activeAppearanceName = name;
@@ -1414,7 +1414,7 @@
                    "display:flex", "align-items:center", "justify-content:center");
       el.style.cssText = styles.join(";");
       var iconName = spec.icon ? resolve(spec.icon, ctx) : "";
-      var iconDef = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS[iconName] : null;
+      var iconDef = (typeof APP_ICONS !== "undefined") ? APP_ICONS[iconName] : null;
       if (iconDef) {
         var iconSz = Math.floor(ibSz * 0.75);
         el.innerHTML = '<svg viewBox="' + (iconDef.viewbox || "0 0 16 16") + '" width="' + iconSz +
@@ -1558,7 +1558,7 @@
   function rebuildWorkspaceMenu() {
     var menu = document.querySelector("#menu_workspace + .dropdown-menu");
     if (!menu) return;
-    var defaults = typeof JAS_DEFAULT_LAYOUTS !== "undefined" ? JAS_DEFAULT_LAYOUTS : {};
+    var defaults = typeof APP_DEFAULT_LAYOUTS !== "undefined" ? APP_DEFAULT_LAYOUTS : {};
     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
     // Combine default + user layouts, defaults first
     var defaultNames = Object.keys(defaults).sort();
@@ -1618,15 +1618,15 @@
   function getLayoutData(name) {
     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
     if (saved[name]) return saved[name];
-    var defaults = typeof JAS_DEFAULT_LAYOUTS !== "undefined" ? JAS_DEFAULT_LAYOUTS : {};
+    var defaults = typeof APP_DEFAULT_LAYOUTS !== "undefined" ? APP_DEFAULT_LAYOUTS : {};
     return defaults[name] || null;
   }
 
   // ── Appearance switching ─────────────────────────────────────
 
   function applyAppearance(name) {
-    var base = typeof JAS_BASE_THEME !== "undefined" ? JAS_BASE_THEME : {};
-    var allApps = typeof JAS_ALL_APPEARANCES !== "undefined" ? JAS_ALL_APPEARANCES : {};
+    var base = typeof APP_BASE_THEME !== "undefined" ? APP_BASE_THEME : {};
+    var allApps = typeof APP_ALL_APPEARANCES !== "undefined" ? APP_ALL_APPEARANCES : {};
     // Also check user-saved appearances in localStorage
     var userApps = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
     var overrides = allApps[name] || userApps[name] || {};
@@ -1673,8 +1673,8 @@
     var lum = hexLuminance(bg);
     root.setAttribute("data-bs-theme", lum > 0.5 ? "light" : "dark");
 
-    // Update JAS_THEME for interpolation resolution
-    JAS_THEME = resolved;
+    // Update APP_THEME for interpolation resolution
+    APP_THEME = resolved;
     activeAppearanceName = name;
     rebuildAppearanceMenu();
   }
@@ -1692,7 +1692,7 @@
   function rebuildAppearanceMenu() {
     var menu = document.querySelector("#menu_appearance + .dropdown-menu");
     if (!menu) return;
-    var appearances = typeof JAS_APPEARANCES !== "undefined" ? JAS_APPEARANCES : [];
+    var appearances = typeof APP_APPEARANCES !== "undefined" ? APP_APPEARANCES : [];
     var userApps = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
     // Remove previously injected items
     menu.querySelectorAll(".app-appearance-item").forEach(function (el) { el.remove(); });
@@ -2313,7 +2313,7 @@
   var resizeState = null;
 
   function isFixedWidth(pane) {
-    var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+    var configs = typeof APP_PANE_CONFIGS !== "undefined" ? APP_PANE_CONFIGS : {};
     var cfg = configs[pane.id];
     return cfg && cfg.fixed_width;
   }
@@ -2465,7 +2465,7 @@
           btn.setAttribute("data-dock", container.id);
           btn.setAttribute("data-group", gi);
           btn.setAttribute("data-panel", pi);
-          var iconDef = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS["panel_" + panelName] : null;
+          var iconDef = (typeof APP_ICONS !== "undefined") ? APP_ICONS["panel_" + panelName] : null;
           if (iconDef) {
             btn.innerHTML = '<svg viewBox="' + (iconDef.viewbox || "0 0 28 28") + '" width="20" height="20" fill="currentColor">' + (iconDef.svg || "") + '</svg>';
           } else {
@@ -3095,7 +3095,7 @@
   // Icon SVG lookup helper
   function iconSvg(name, size) {
     size = size || 16;
-    var def = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS[name] : null;
+    var def = (typeof APP_ICONS !== "undefined") ? APP_ICONS[name] : null;
     if (!def) return '<span style="width:' + size + 'px;height:' + size + 'px;display:inline-block"></span>';
     var vb = def.viewbox || "0 0 16 16";
     return '<svg viewBox="' + vb + '" width="' + size + '" height="' + size + '" style="display:block">' +
