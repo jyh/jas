@@ -15233,6 +15233,23 @@
     }
   },
   "tools": {
+    "delete_anchor_point": {
+      "id": "delete_anchor_point",
+      "cursor": "crosshair",
+      "menu_label": "Delete Anchor Point Tool",
+      "shortcut": "-",
+      "handlers": {
+        "on_mousedown": [
+          {
+            "doc.path.delete_anchor_near": {
+              "x": "event.x",
+              "y": "event.y",
+              "hit_radius": "8"
+            }
+          }
+        ]
+      }
+    },
     "ellipse": {
       "id": "ellipse",
       "cursor": "crosshair",

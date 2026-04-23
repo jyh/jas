@@ -15,7 +15,6 @@ use crate::document::model::Model;
 use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign, Element as GeoElement};
 use crate::tools::partial_selection_tool::PartialSelectionTool;
 use crate::tools::add_anchor_point_tool::AddAnchorPointTool;
-use crate::tools::delete_anchor_point_tool::DeleteAnchorPointTool;
 use crate::tools::anchor_point_tool::AnchorPointTool;
 use crate::tools::path_eraser_tool::PathEraserTool;
 use crate::tools::smooth_tool::SmoothTool;
@@ -84,7 +83,7 @@ impl TabState {
         tools.insert(ToolKind::InteriorSelection, yaml_tool("interior_selection"));
         tools.insert(ToolKind::Pen, yaml_tool("pen"));
         tools.insert(ToolKind::AddAnchorPoint, Box::new(AddAnchorPointTool::new()));
-        tools.insert(ToolKind::DeleteAnchorPoint, Box::new(DeleteAnchorPointTool::new()));
+        tools.insert(ToolKind::DeleteAnchorPoint, yaml_tool("delete_anchor_point"));
         tools.insert(ToolKind::AnchorPoint, Box::new(AnchorPointTool::new()));
         tools.insert(ToolKind::Pencil, yaml_tool("pencil"));
         tools.insert(ToolKind::PathEraser, Box::new(PathEraserTool::new()));

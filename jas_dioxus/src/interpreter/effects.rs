@@ -760,6 +760,23 @@ fn run_doc_effect(
                 Controller::add_element(model, elem);
             }
         }
+        "doc.path.delete_anchor_near" => {
+            // Find the anchor under (x, y) within hit_radius on any
+            // unlocked Path in the document (searches layers +
+            // one level of Group nesting). If found, snapshot the
+            // document, delete the anchor via
+            // geometry::path_ops::delete_anchor_from_path, and
+            // either replace the path element or (if the resulting
+            // path has < 2 anchors) delete it entirely. Mirrors the
+            // native DeleteAnchorPointTool.
+            if let serde_json::Value::Object(args) = spec {
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                let hit_radius = eval_number(args.get("hit_radius"), store, ctx);
+                let radius = if hit_radius == 0.0 { 8.0 } else { hit_radius };
+                path_delete_anchor_near(model, x, y, radius);
+            }
+        }
         "doc.select_polygon_from_buffer" => {
             // Uses the named point buffer as a free-form polygon and
             // selects every element whose bounds intersect it. Mirrors
@@ -1051,6 +1068,102 @@ fn evaluate_field_value(
         serde_json::Value::Null => Value::Null,
         serde_json::Value::String(s) => eval_expr(s, store, ctx),
         _ => Value::from_json(field),
+    }
+}
+
+/// Walk the document layer by layer (including one level of Group
+/// nesting) looking for a Path whose command list has an anchor
+/// within `radius` of `(x, y)`. Returns (element path, command index).
+fn find_path_anchor_near(
+    doc: &crate::document::document::Document,
+    x: f64, y: f64, radius: f64,
+) -> Option<(ElementPath, usize)> {
+    for (li, layer) in doc.layers.iter().enumerate() {
+        if let Some(children) = layer.children() {
+            for (ci, child) in children.iter().enumerate() {
+                if let Element::Path(pe) = &**child {
+                    if let Some(idx) = anchor_index_near(pe, x, y, radius) {
+                        return Some((vec![li, ci], idx));
+                    }
+                }
+                if let Element::Group(g) = &**child {
+                    if child.common().locked {
+                        continue;
+                    }
+                    for (gi, gc) in g.children.iter().enumerate() {
+                        if let Element::Path(pe) = &**gc {
+                            if let Some(idx) = anchor_index_near(pe, x, y, radius) {
+                                return Some((vec![li, ci, gi], idx));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Find the command-index of the anchor on `pe` closest to `(x, y)`
+/// within `radius`. Only MoveTo/LineTo/CurveTo count as anchors.
+fn anchor_index_near(
+    pe: &crate::geometry::element::PathElem,
+    x: f64, y: f64, radius: f64,
+) -> Option<usize> {
+    use crate::geometry::element::PathCommand;
+    for (i, cmd) in pe.d.iter().enumerate() {
+        let (ax, ay) = match cmd {
+            PathCommand::MoveTo { x, y } => (*x, *y),
+            PathCommand::LineTo { x, y } => (*x, *y),
+            PathCommand::CurveTo { x, y, .. } => (*x, *y),
+            _ => continue,
+        };
+        if (x - ax).hypot(y - ay) <= radius {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Implementation of doc.path.delete_anchor_near.
+fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
+    use crate::geometry::path_ops::delete_anchor_from_path;
+    let (path, anchor_idx) = match find_path_anchor_near(model.document(), x, y, radius) {
+        Some(hit) => hit,
+        None => return,
+    };
+    // Capture the existing PathElem for its non-command fields (fill,
+    // stroke, width_points, common).
+    let pe = match model.document().get_element(&path) {
+        Some(Element::Path(pe)) => pe.clone(),
+        _ => return,
+    };
+    model.snapshot();
+    match delete_anchor_from_path(&pe.d, anchor_idx) {
+        Some(new_cmds) => {
+            let new_pe = crate::geometry::element::PathElem {
+                d: new_cmds,
+                fill: pe.fill,
+                stroke: pe.stroke,
+                width_points: pe.width_points.clone(),
+                common: pe.common.clone(),
+                fill_gradient: pe.fill_gradient.clone(),
+                stroke_gradient: pe.stroke_gradient.clone(),
+            };
+            let new_elem = Element::Path(new_pe);
+            let mut doc = model.document().replace_element(&path, new_elem);
+            // Reselect: matching Delete-anchor behavior native had.
+            doc.selection.retain(|es| es.path != path);
+            doc.selection.push(
+                crate::document::document::ElementSelection::all(path.clone()),
+            );
+            model.set_document(doc);
+        }
+        None => {
+            // Path too small — remove the element entirely.
+            let doc = model.document().delete_element(&path);
+            model.set_document(doc);
+        }
     }
 }
 
