@@ -20,6 +20,7 @@ from document.document import (
     ElementSelection,
     Selection,
 )
+from workspace_interpreter import anchor_buffers, point_buffers
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.expr_types import Value, ValueType
 from workspace_interpreter.state_store import StateStore
@@ -233,6 +234,77 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.partial_select_rect(rx, ry, rw, rh, extend=additive)
         return None
 
+    # ── Buffer effects (Phase 3) ─────────────────────────────
+
+    def buffer_push(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if not isinstance(name, str):
+            return None
+        x = eval_number(spec.get("x"), store, ctx)
+        y = eval_number(spec.get("y"), store, ctx)
+        point_buffers.push(name, x, y)
+        return None
+
+    def buffer_clear(spec, _ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if isinstance(name, str):
+            point_buffers.clear(name)
+        return None
+
+    def anchor_push(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if not isinstance(name, str):
+            return None
+        x = eval_number(spec.get("x"), store, ctx)
+        y = eval_number(spec.get("y"), store, ctx)
+        anchor_buffers.push(name, x, y)
+        return None
+
+    def anchor_set_last_out(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if not isinstance(name, str):
+            return None
+        hx = eval_number(spec.get("hx"), store, ctx)
+        hy = eval_number(spec.get("hy"), store, ctx)
+        anchor_buffers.set_last_out_handle(name, hx, hy)
+        return None
+
+    def anchor_pop(spec, _ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if isinstance(name, str):
+            anchor_buffers.pop(name)
+        return None
+
+    def anchor_clear(spec, _ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if isinstance(name, str):
+            anchor_buffers.clear(name)
+        return None
+
+    def doc_select_polygon_from_buffer(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if not isinstance(name, str):
+            return None
+        additive = eval_bool(spec.get("additive"), store, ctx)
+        pts = point_buffers.points(name)
+        if len(pts) >= 3:
+            controller.select_polygon(pts, extend=additive)
+        return None
+
     effects["doc.snapshot"] = doc_snapshot
     effects["doc.clear_selection"] = doc_clear_selection
     effects["doc.set_selection"] = doc_set_selection
@@ -242,4 +314,11 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.copy_selection"] = doc_copy_selection
     effects["doc.select_in_rect"] = doc_select_in_rect
     effects["doc.partial_select_in_rect"] = doc_partial_select_in_rect
+    effects["buffer.push"] = buffer_push
+    effects["buffer.clear"] = buffer_clear
+    effects["anchor.push"] = anchor_push
+    effects["anchor.set_last_out"] = anchor_set_last_out
+    effects["anchor.pop"] = anchor_pop
+    effects["anchor.clear"] = anchor_clear
+    effects["doc.select_polygon_from_buffer"] = doc_select_polygon_from_buffer
     return effects
