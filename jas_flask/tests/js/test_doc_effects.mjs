@@ -218,6 +218,103 @@ describe("doc.set_attr_on_selection", () => {
   });
 });
 
+describe("buffer.* and doc.add_path_from_buffer", () => {
+  it("buffer.push then doc.add_path_from_buffer creates a Path on layer 0", async () => {
+    // Import point_buffers module to clear state between tests.
+    const pointBuffers = await import("../../static/js/engine/point_buffers.mjs");
+    pointBuffers.clear("test_buf");
+
+    const model = new Model();
+    const store = new StateStore();
+    runEffects(
+      [
+        { "buffer.clear": { buffer: "test_buf" } },
+        { "buffer.push": { buffer: "test_buf", x: "0", y: "0" } },
+        { "buffer.push": { buffer: "test_buf", x: "5", y: "0" } },
+        { "buffer.push": { buffer: "test_buf", x: "10", y: "0" } },
+        { "doc.add_path_from_buffer": { buffer: "test_buf", fit_error: "1" } },
+      ],
+      store.asContext(),
+      store,
+      { model },
+    );
+
+    const layer = model.document.layers[0];
+    assert.equal(layer.children.length, 1);
+    const elem = layer.children[0];
+    assert.equal(elem.type, "path");
+    // First command is MoveTo to (0, 0) — the buffer's first point.
+    assert.equal(elem.d[0].type, "M");
+    assert.equal(elem.d[0].x, 0);
+    assert.equal(elem.d[0].y, 0);
+    // Subsequent commands are CurveTos.
+    for (let i = 1; i < elem.d.length; i++) {
+      assert.equal(elem.d[i].type, "C");
+    }
+  });
+
+  it("doc.add_path_from_buffer with stroke_brush passes through", async () => {
+    const pointBuffers = await import("../../static/js/engine/point_buffers.mjs");
+    pointBuffers.clear("test_buf");
+
+    const model = new Model();
+    const store = new StateStore();
+    // Seed state.stroke_brush so the YAML-style passthrough works.
+    store.set("state.stroke_brush", "default_brushes/oval_5pt");
+
+    runEffects(
+      [
+        { "buffer.clear": { buffer: "test_buf" } },
+        { "buffer.push": { buffer: "test_buf", x: "0", y: "0" } },
+        { "buffer.push": { buffer: "test_buf", x: "10", y: "10" } },
+        {
+          "doc.add_path_from_buffer": {
+            buffer: "test_buf",
+            stroke_brush: "state.stroke_brush",
+          },
+        },
+      ],
+      store.asContext(),
+      store,
+      { model },
+    );
+
+    const elem = model.document.layers[0].children[0];
+    assert.equal(elem.stroke_brush, "default_brushes/oval_5pt");
+  });
+
+  it("doc.add_path_from_buffer with empty buffer is a no-op", async () => {
+    const pointBuffers = await import("../../static/js/engine/point_buffers.mjs");
+    pointBuffers.clear("empty_buf");
+
+    const model = new Model();
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.add_path_from_buffer": { buffer: "empty_buf" } }],
+      store.asContext(),
+      store,
+      { model },
+    );
+
+    assert.equal(model.document.layers[0].children.length, 0);
+  });
+
+  it("buffer.clear empties the buffer", async () => {
+    const pointBuffers = await import("../../static/js/engine/point_buffers.mjs");
+    pointBuffers.push("clr_buf", 1, 2);
+    pointBuffers.push("clr_buf", 3, 4);
+    assert.equal(pointBuffers.length("clr_buf"), 2);
+
+    const store = new StateStore();
+    runEffects(
+      [{ "buffer.clear": { buffer: "clr_buf" } }],
+      store.asContext(),
+      store,
+    );
+    assert.equal(pointBuffers.length("clr_buf"), 0);
+  });
+});
+
 describe("without model — onDocEffect observer", () => {
   it("fires for unrecognized doc.* effects", () => {
     const store = new StateStore();
