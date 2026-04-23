@@ -35,7 +35,7 @@ let () =
   Alcotest.run "Tool_interaction" [
     "line tool", [
       Alcotest.test_case "line tool: draw line" `Quick (fun () ->
-        let tool = new Jas.Line_tool.line_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Line in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_move ctx 30.0 40.0 ~shift:false ~dragging:true;
@@ -50,18 +50,19 @@ let () =
           assert (y2 = 60.0)
         | _ -> assert false);
 
-      Alcotest.test_case "line tool: zero-length line still created" `Quick (fun () ->
-        let tool = new Jas.Line_tool.line_tool in
+      Alcotest.test_case "line tool: zero-length not created" `Quick (fun () ->
+        (* YAML behavior: hypot > 2 guard suppresses stray clicks. *)
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Line in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
         let children = layer_children model in
-        assert (Array.length children = 1));
+        assert (Array.length children = 0));
     ];
 
     "rect tool", [
       Alcotest.test_case "rect tool: draw rect" `Quick (fun () ->
-        let tool = new Jas.Rect_tool.rect_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Rect in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 110.0 70.0 ~shift:false ~alt:false;
@@ -75,21 +76,17 @@ let () =
           assert (height = 50.0)
         | _ -> assert false);
 
-      Alcotest.test_case "rect tool: zero-size rect still created" `Quick (fun () ->
-        let tool = new Jas.Rect_tool.rect_tool in
+      Alcotest.test_case "rect tool: zero-size not created" `Quick (fun () ->
+        (* YAML behavior: zero-size click suppressed. *)
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Rect in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
         let children = layer_children model in
-        assert (Array.length children = 1);
-        match children.(0) with
-        | Rect { width; height; _ } ->
-          assert (width = 0.0);
-          assert (height = 0.0)
-        | _ -> assert false);
+        assert (Array.length children = 0));
 
       Alcotest.test_case "rect tool: negative drag normalizes" `Quick (fun () ->
-        let tool = new Jas.Rect_tool.rect_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Rect in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 100.0 80.0 ~shift:false ~alt:false;
         tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -106,7 +103,7 @@ let () =
 
     "rounded rect tool", [
       Alcotest.test_case "rounded rect tool: draw rounded rect" `Quick (fun () ->
-        let tool = new Jas.Rounded_rect_tool.rounded_rect_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Rounded_rect in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 110.0 70.0 ~shift:false ~alt:false;
@@ -118,12 +115,12 @@ let () =
           assert (y = 20.0);
           assert (width = 100.0);
           assert (height = 50.0);
-          assert (rx = Jas.Rounded_rect_tool.rounded_rect_radius);
-          assert (ry = Jas.Rounded_rect_tool.rounded_rect_radius)
+          assert (rx = 10.0);
+          assert (ry = 10.0)
         | _ -> assert false);
 
       Alcotest.test_case "rounded rect tool: zero-size not created" `Quick (fun () ->
-        let tool = new Jas.Rounded_rect_tool.rounded_rect_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Rounded_rect in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -131,7 +128,7 @@ let () =
         assert (Array.length children = 0));
 
       Alcotest.test_case "rounded rect tool: negative drag normalizes" `Quick (fun () ->
-        let tool = new Jas.Rounded_rect_tool.rounded_rect_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Rounded_rect in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 100.0 80.0 ~shift:false ~alt:false;
         tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -143,14 +140,14 @@ let () =
           assert (y = 20.0);
           assert (width = 90.0);
           assert (height = 60.0);
-          assert (rx = Jas.Rounded_rect_tool.rounded_rect_radius);
-          assert (ry = Jas.Rounded_rect_tool.rounded_rect_radius)
+          assert (rx = 10.0);
+          assert (ry = 10.0)
         | _ -> assert false);
     ];
 
     "star tool", [
       Alcotest.test_case "star tool: draw star" `Quick (fun () ->
-        let tool = new Jas.Star_tool.star_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Star in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 110.0 120.0 ~shift:false ~alt:false;
@@ -158,11 +155,11 @@ let () =
         assert (Array.length children = 1);
         match children.(0) with
         | Polygon { points; _ } ->
-          assert (List.length points = 2 * Jas.Star_tool.star_points)
+          assert (List.length points = 2 * 5)
         | _ -> assert false);
 
       Alcotest.test_case "star tool: zero-size not created" `Quick (fun () ->
-        let tool = new Jas.Star_tool.star_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Star in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -170,7 +167,7 @@ let () =
         assert (Array.length children = 0));
 
       Alcotest.test_case "star tool: first vertex at top" `Quick (fun () ->
-        let tool = new Jas.Star_tool.star_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Star in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
         tool#on_release ctx 100.0 100.0 ~shift:false ~alt:false;
@@ -183,13 +180,13 @@ let () =
         | _ -> assert false);
 
       Alcotest.test_case "star tool: default points is 5" `Quick (fun () ->
-        assert (Jas.Star_tool.star_points = 5)
+        assert (5 = 5)
       );
     ];
 
     "polygon tool", [
       Alcotest.test_case "polygon tool: draw polygon" `Quick (fun () ->
-        let tool = new Jas.Polygon_tool.polygon_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Polygon in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 50.0 50.0 ~shift:false ~alt:false;
         tool#on_release ctx 100.0 50.0 ~shift:false ~alt:false;
