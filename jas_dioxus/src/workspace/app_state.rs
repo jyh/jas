@@ -25,7 +25,6 @@ use crate::tools::path_eraser_tool::PathEraserTool;
 use crate::tools::smooth_tool::SmoothTool;
 use crate::tools::polygon_tool::PolygonTool;
 use crate::tools::star_tool::StarTool;
-use crate::tools::rounded_rect_tool::RoundedRectTool;
 use crate::tools::lasso_tool::LassoTool;
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
@@ -100,7 +99,7 @@ impl TabState {
         tools.insert(ToolKind::Type, Box::new(TypeTool::new()));
         tools.insert(ToolKind::TypeOnPath, Box::new(TypeOnPathTool::new()));
         tools.insert(ToolKind::Rect, yaml_tool("rect"));
-        tools.insert(ToolKind::RoundedRect, Box::new(RoundedRectTool::new()));
+        tools.insert(ToolKind::RoundedRect, yaml_tool("rounded_rect"));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
         tools.insert(ToolKind::Star, Box::new(StarTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));

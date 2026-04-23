@@ -1,0 +1,81 @@
+# Rounded Rectangle tool.
+#
+# Press-drag-release drawing, same as the Rectangle tool but the
+# committed element has non-zero corner radii. The overlay preview
+# draws rounded corners (type: rect with rx/ry in the overlay
+# dispatches the rounded path through build_rounded_rect_path).
+#
+# Default corner radius is 10 — matches native
+# tools::rounded_rect_tool::ROUNDED_RECT_RADIUS. Authors can override
+# by editing the constants below if a different default is desired.
+#
+# Validated against schema/tool.schema.json.
+
+id: rounded_rect
+cursor: crosshair
+menu_label: "Rounded Rectangle Tool"
+shortcut: "E"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+  start_x: { default: 0 }
+  start_y: { default: 0 }
+  cur_x: { default: 0 }
+  cur_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.rounded_rect.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.rounded_rect.mode: "'idle'" }
+
+  on_mousedown:
+    - set: { tool.rounded_rect.mode: "'drawing'" }
+    - set: { tool.rounded_rect.start_x: "event.x" }
+    - set: { tool.rounded_rect.start_y: "event.y" }
+    - set: { tool.rounded_rect.cur_x: "event.x" }
+    - set: { tool.rounded_rect.cur_y: "event.y" }
+
+  on_mousemove:
+    - if: "tool.rounded_rect.mode == 'drawing'"
+      then:
+        - set: { tool.rounded_rect.cur_x: "event.x" }
+        - set: { tool.rounded_rect.cur_y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.rounded_rect.mode == 'drawing'"
+      then:
+        - if: "abs(event.x - tool.rounded_rect.start_x) > 1 and abs(event.y - tool.rounded_rect.start_y) > 1"
+          then:
+            - "doc.snapshot": {}
+            - "doc.add_element":
+                element:
+                  type: rect
+                  x: "min(tool.rounded_rect.start_x, event.x)"
+                  y: "min(tool.rounded_rect.start_y, event.y)"
+                  width: "abs(event.x - tool.rounded_rect.start_x)"
+                  height: "abs(event.y - tool.rounded_rect.start_y)"
+                  rx: "10"
+                  ry: "10"
+    - set: { tool.rounded_rect.mode: "'idle'" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.rounded_rect.mode: "'idle'" }
+
+overlay:
+  if: "tool.rounded_rect.mode == 'drawing'"
+  render:
+    type: rect
+    x: "min(tool.rounded_rect.start_x, tool.rounded_rect.cur_x)"
+    y: "min(tool.rounded_rect.start_y, tool.rounded_rect.cur_y)"
+    width: "abs(tool.rounded_rect.cur_x - tool.rounded_rect.start_x)"
+    height: "abs(tool.rounded_rect.cur_y - tool.rounded_rect.start_y)"
+    rx: "10"
+    ry: "10"
+    style: "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
