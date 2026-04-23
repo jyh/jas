@@ -96,6 +96,29 @@ class TestLoadSubdirectories:
         for stop_key in ("color", "opacity", "location"):
             assert stop_key in first["stops"][0]
 
+    def test_load_brush_libraries(self, workspace_path):
+        import os
+        brushes_dir = os.path.join(workspace_path, "brushes")
+        if not os.path.isdir(brushes_dir):
+            pytest.skip("brushes/ directory not present on this branch")
+        data = load_workspace(workspace_path)
+        assert "brush_libraries" in data
+        libs = data["brush_libraries"]
+        # Phase 0 ships one seed library: default_brushes.
+        assert "default_brushes" in libs
+        # Each library carries a name + description + non-empty brushes list.
+        for slug, lib in libs.items():
+            assert "name" in lib, slug
+            assert "description" in lib, slug
+            assert "brushes" in lib, slug
+            assert len(lib["brushes"]) > 0, slug
+        # Spot-check the seed brush shape per BRUSHES.md §Brush libraries.
+        first = libs["default_brushes"]["brushes"][0]
+        for key in ("name", "slug", "type"):
+            assert key in first
+        # The Phase 0 seed is a Calligraphic brush.
+        assert first["type"] == "calligraphic"
+
 
 class TestResolveIncludes:
     def test_no_include_keys_remain(self, workspace_path):

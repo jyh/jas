@@ -117,6 +117,25 @@ def load_workspace(path: str) -> dict:
                 if isinstance(lib_data, dict):
                     gradient_libraries[lib_name] = lib_data
             data["gradient_libraries"] = gradient_libraries
+        # Load brush libraries from brushes/ directory.
+        # Each library is a directory containing a library.json manifest;
+        # artwork SVGs (for Art / Scatter / Pattern types) sit alongside.
+        # Library slug = subdirectory name. See BRUSHES.md §Brush libraries.
+        brushes_dir = os.path.join(path, "brushes")
+        if os.path.isdir(brushes_dir):
+            brush_libraries = data.get("brush_libraries", {})
+            for entry in sorted(os.listdir(brushes_dir)):
+                lib_dir = os.path.join(brushes_dir, entry)
+                if not os.path.isdir(lib_dir):
+                    continue
+                manifest = os.path.join(lib_dir, "library.json")
+                if not os.path.isfile(manifest):
+                    continue
+                with open(manifest, "r") as f:
+                    lib_data = json.load(f)
+                if isinstance(lib_data, dict):
+                    brush_libraries[entry] = lib_data
+            data["brush_libraries"] = brush_libraries
     else:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
