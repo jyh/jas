@@ -249,6 +249,9 @@ final class YamlTool: CanvasTool {
         case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
         case "buffer_polyline": drawBufferPolylineOverlay(cgCtx, render)
         case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx)
+        case "partial_selection_overlay":
+            drawPartialSelectionOverlay(cgCtx, render, evalCtx,
+                                         model: ctx.model)
         default: break
         }
         _ = _reg
@@ -570,6 +573,67 @@ private func drawPenOverlay(
                 x: first.x - closeR, y: first.y - closeR,
                 width: closeR * 2, height: closeR * 2))
         }
+    }
+}
+
+/// Render the Partial Selection tool's combined overlay:
+/// - per-selected-path: every anchor as a small square plus the in/out
+///   bezier handle bars
+/// - when mode == "marquee": a dashed rubber-band rectangle
+private func drawPartialSelectionOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any],
+    model: Model
+) {
+    let stroke = CGColor(red: 0, green: 0.47, blue: 1, alpha: 1)
+    cgCtx.setStrokeColor(stroke)
+    cgCtx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    cgCtx.setLineWidth(1)
+
+    // Anchor + handle markers on every selected Path.
+    for es in model.document.selection {
+        guard case .path(let pe) = model.document.getElement(es.path) else { continue }
+        let anchors = Element.path(pe).controlPointPositions
+        for (ai, pt) in anchors.enumerated() {
+            let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            if let h = hIn {
+                cgCtx.move(to: CGPoint(x: pt.0, y: pt.1))
+                cgCtx.addLine(to: CGPoint(x: h.0, y: h.1))
+                cgCtx.strokePath()
+                cgCtx.fillEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                                              width: 4, height: 4))
+                cgCtx.strokeEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                                                width: 4, height: 4))
+            }
+            if let h = hOut {
+                cgCtx.move(to: CGPoint(x: pt.0, y: pt.1))
+                cgCtx.addLine(to: CGPoint(x: h.0, y: h.1))
+                cgCtx.strokePath()
+                cgCtx.fillEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                                              width: 4, height: 4))
+                cgCtx.strokeEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                                                width: 4, height: 4))
+            }
+            // Anchor square.
+            cgCtx.fill(CGRect(x: pt.0 - 2.5, y: pt.1 - 2.5,
+                              width: 5, height: 5))
+            cgCtx.stroke(CGRect(x: pt.0 - 2.5, y: pt.1 - 2.5,
+                                width: 5, height: 5))
+        }
+    }
+
+    // Marquee rubber-band.
+    if let mode = spec["mode"] as? String,
+       evaluate(mode, context: ctx).toStringCoerce() == "marquee" {
+        let x1 = evalOverlayNumber(spec["marquee_start_x"], ctx)
+        let y1 = evalOverlayNumber(spec["marquee_start_y"], ctx)
+        let x2 = evalOverlayNumber(spec["marquee_cur_x"], ctx)
+        let y2 = evalOverlayNumber(spec["marquee_cur_y"], ctx)
+        let rect = CGRect(x: min(x1, x2), y: min(y1, y2),
+                          width: abs(x2 - x1), height: abs(y2 - y1))
+        cgCtx.setStrokeColor(stroke)
+        cgCtx.setLineDash(phase: 0, lengths: [4, 4])
+        cgCtx.stroke(rect)
+        cgCtx.setLineDash(phase: 0, lengths: [])
     }
 }
 
