@@ -133,7 +133,10 @@ func createTools() -> [Tool: CanvasTool] {
     // Require the workspace to load — a missing workspace.json means
     // the whole app is non-functional anyway.
     guard let rectTool = loadYamlTool("rect"),
-          let roundedRectTool = loadYamlTool("rounded_rect") else {
+          let roundedRectTool = loadYamlTool("rounded_rect"),
+          let lineTool = loadYamlTool("line"),
+          let polygonTool = loadYamlTool("polygon"),
+          let starTool = loadYamlTool("star") else {
         fatalError("workspace/workspace.json missing or malformed — cannot load YAML tools")
     }
     return [
@@ -149,11 +152,11 @@ func createTools() -> [Tool: CanvasTool] {
         .smooth: SmoothTool(),
         .typeTool: TypeTool(),
         .typeOnPath: TypeOnPathTool(),
-        .line: LineTool(),
+        .line: lineTool,
         .rect: rectTool,
         .roundedRect: roundedRectTool,
-        .polygon: PolygonTool(),
-        .star: StarTool(),
+        .polygon: polygonTool,
+        .star: starTool,
         .lasso: LassoTool(),
     ]
 }

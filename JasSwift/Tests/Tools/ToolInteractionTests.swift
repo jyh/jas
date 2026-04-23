@@ -23,10 +23,14 @@ private func layerChildren(_ model: Model) -> [Element] {
     model.document.layers[0].children
 }
 
-// MARK: - Line tool tests
+// MARK: - Line tool tests (YAML-driven per Phase 7.3)
+
+private func lineTool() -> CanvasTool {
+    createTools()[.line]!
+}
 
 @Test func lineToolDrawLine() {
-    let tool = LineTool()
+    let tool = lineTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onMove(ctx, x: 30, y: 40, shift: false, dragging: true)
@@ -43,13 +47,14 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-@Test func lineToolZeroLengthLineStillCreated() {
-    let tool = LineTool()
+@Test func lineToolZeroLengthNotCreated() {
+    // YAML uses hypot > 2 to suppress stray clicks, matching native's
+    // behavior (native DrawingToolBase also guarded on length).
+    let tool = lineTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 1)
+    #expect(layerChildren(model).isEmpty)
 }
 
 // MARK: - Rect tool tests
@@ -164,10 +169,18 @@ private let roundedRectYamlRadius: Double = 10
     }
 }
 
-// MARK: - Star tool tests
+// MARK: - Star tool tests (YAML-driven per Phase 7.5)
+
+private func starTool() -> CanvasTool {
+    createTools()[.star]!
+}
+
+/// Default outer-vertex count the star YAML commits on mouseup.
+/// Kept local because the constant lives in the YAML spec now.
+private let defaultStarPoints = 5
 
 @Test func starToolDrawStar() {
-    let tool = StarTool()
+    let tool = starTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 120, shift: false, alt: false)
@@ -181,16 +194,15 @@ private let roundedRectYamlRadius: Double = 10
 }
 
 @Test func starToolZeroSizeNotCreated() {
-    let tool = StarTool()
+    let tool = starTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func starToolFirstVertexAtTop() {
-    let tool = StarTool()
+    let tool = starTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     tool.onRelease(ctx, x: 100, y: 100, shift: false, alt: false)
@@ -206,10 +218,14 @@ private let roundedRectYamlRadius: Double = 10
     #expect(defaultStarPoints == 5)
 }
 
-// MARK: - Polygon tool tests
+// MARK: - Polygon tool tests (YAML-driven per Phase 7.4)
+
+private func polygonTool() -> CanvasTool {
+    createTools()[.polygon]!
+}
 
 @Test func polygonToolDrawPolygon() {
-    let tool = PolygonTool()
+    let tool = polygonTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 50, y: 50, shift: false, alt: false)
     tool.onRelease(ctx, x: 100, y: 50, shift: false, alt: false)
