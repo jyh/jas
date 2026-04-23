@@ -1,0 +1,355 @@
+id: brushes_panel_content
+type: panel
+summary: "Brushes"
+description: >
+  Brush library panel for managing named brushes organised into
+  libraries. The panel displays a scrollable area of collapsible
+  library sections (each rendering its brushes as tiles) above a
+  bottom toolbar with five icon buttons.
+
+  Phase 1 ships Calligraphic brushes only. Scatter, Art, Pattern,
+  and Bristle types follow as their data models and renderers
+  land. See transcripts/BRUSHES.md.
+
+  Layout (top to bottom):
+
+  Row 1 — Brush tiles area. Scrollable container rendering one
+  collapsible disclosure section per entry in panel.open_libraries.
+  Each section header shows the library name; expanded sections
+  render the library's brushes as tiles (1:3 aspect at small size,
+  matching BRUSHES.md §Controls).
+
+  Row 2 — Bottom toolbar (left to right): Brush Libraries menu,
+  Remove Brush Stroke, Brush Options for Selection, New Brush,
+  Delete Brush.
+
+  Single-click a tile to select it AND set state.stroke_brush
+  AND apply jas:stroke-brush to the canvas selection. Selection
+  uses the generic select effect with mode=auto: plain click,
+  Shift+click for ranges, Cmd/Ctrl+click to toggle. Selection is
+  per-library; the selected_brushes panel state tracks slugs (not
+  indices) within selected_library.
+
+  Double-click a tile to open the Brush Options dialog in
+  library_edit mode for the master brush.
+
+state:
+  selected_library:
+    type: string
+    default: "default_brushes"
+    description: "Library slug owning the current panel selection."
+  selected_brushes:
+    type: list
+    item_type: string
+    default: []
+    description: >
+      Brush slugs selected within selected_library. Slug-keyed
+      so library reordering or duplication does not scramble
+      the selection.
+  open_libraries:
+    type: list
+    item_type: object
+    default:
+      - { id: "default_brushes", collapsed: false }
+    description: >
+      List of open libraries with their collapsed state. Each
+      entry has an "id" (library slug) and "collapsed" (bool).
+  view_mode:
+    type: enum
+    values: [thumbnail, list]
+    default: thumbnail
+    description: "Tile rendering mode."
+  thumbnail_size:
+    type: enum
+    values: [small, medium, large]
+    default: small
+    description: >
+      Thumbnail tile size when view_mode == thumbnail.
+      small=48x16, medium=72x24, large=96x32.
+  category_filter:
+    type: list
+    item_type: string
+    default: [calligraphic, scatter, art, pattern, bristle]
+    description: >
+      Brush types currently visible. Toggled per-type from the
+      panel menu's "Show X Brushes" checkboxes.
+
+init:
+  selected_library: "state.brushes_selected_library"
+  selected_brushes: "state.brushes_selected_brushes"
+  open_libraries: "state.brushes_open_libraries"
+  view_mode: "state.brushes_view_mode"
+  thumbnail_size: "state.brushes_thumbnail_size"
+  category_filter: "state.brushes_category_filter"
+
+menu:
+  - label: "New Brush"
+    action: open_brush_options
+    params: { mode: create }
+    enabled_when: "canvas_selection_non_empty"
+    description: >
+      Open the Brush Options dialog in create mode with the
+      canvas selection's geometry pre-filled as the new brush's
+      artwork. OK appends a new brush to the selected library.
+  - label: "Duplicate Brush"
+    action: duplicate_brush
+    enabled_when: "panel.selected_brushes.length > 0"
+    description: >
+      Create a copy of each currently selected brush in the
+      selected library. The copies are inserted immediately
+      after their originals with " copy" appended to the name
+      and a fresh slug. The copies become the new selection.
+  - label: "Delete Brush"
+    action: delete_brush
+    enabled_when: "panel.selected_brushes.length > 0"
+    description: >
+      Remove the currently selected brushes from the selected
+      library. Any element with jas:stroke-brush referencing a
+      deleted brush re-renders as a plain stroke (null-on-missing
+      fallback). Undoable.
+  - label: "Brush Options..."
+    action: open_brush_options
+    params: { mode: library_edit }
+    enabled_when: "panel.selected_brushes.length > 0"
+    description: >
+      Open the Brush Options dialog in library_edit mode for the
+      first selected brush. OK prompts the Apply to Strokes
+      confirm dialog.
+  - separator
+  - label: "Select All Unused"
+    action: select_all_unused_brushes
+    description: >
+      Replace selected_brushes with every brush in the panel
+      whose slug does not appear as jas:stroke-brush on any
+      element in the document.
+  - separator
+  - label: "Sort by Name"
+    action: sort_brushes_by_name
+    enabled_when: "panel.selected_library != null"
+    description: >
+      Permanently reorder the selected library's brushes
+      alphabetically (case-sensitive, lexicographic). Slugs
+      unchanged; selection preserved.
+  - separator
+  - label: "Thumbnail View"
+    action: set_brush_view_mode
+    params: { view_mode: thumbnail }
+    checked_when: 'panel.view_mode == "thumbnail"'
+    description: "Render each tile as a stroke preview thumbnail."
+  - label: "List View"
+    action: set_brush_view_mode
+    params: { view_mode: list }
+    checked_when: 'panel.view_mode == "list"'
+    description: "Render each tile as an icon + name row."
+  - separator
+  - label: "Small Thumbnail View"
+    action: set_brush_thumbnail_size
+    params: { size: small }
+    checked_when: 'panel.thumbnail_size == "small"'
+    enabled_when: 'panel.view_mode == "thumbnail"'
+    description: "Display brush thumbnails at 48x16 pixels."
+  - label: "Medium Thumbnail View"
+    action: set_brush_thumbnail_size
+    params: { size: medium }
+    checked_when: 'panel.thumbnail_size == "medium"'
+    enabled_when: 'panel.view_mode == "thumbnail"'
+    description: "Display brush thumbnails at 72x24 pixels."
+  - label: "Large Thumbnail View"
+    action: set_brush_thumbnail_size
+    params: { size: large }
+    checked_when: 'panel.thumbnail_size == "large"'
+    enabled_when: 'panel.view_mode == "thumbnail"'
+    description: "Display brush thumbnails at 96x32 pixels."
+  - separator
+  - label: "Show Calligraphic Brushes"
+    action: toggle_brush_category
+    params: { type: calligraphic }
+    checked_when: 'panel.category_filter contains "calligraphic"'
+    description: "Toggle visibility of Calligraphic brushes in the panel body."
+  - label: "Show Scatter Brushes"
+    action: toggle_brush_category
+    params: { type: scatter }
+    checked_when: 'panel.category_filter contains "scatter"'
+    description: "Toggle visibility of Scatter brushes."
+  - label: "Show Art Brushes"
+    action: toggle_brush_category
+    params: { type: art }
+    checked_when: 'panel.category_filter contains "art"'
+    description: "Toggle visibility of Art brushes."
+  - label: "Show Pattern Brushes"
+    action: toggle_brush_category
+    params: { type: pattern }
+    checked_when: 'panel.category_filter contains "pattern"'
+    description: "Toggle visibility of Pattern brushes."
+  - label: "Show Bristle Brushes"
+    action: toggle_brush_category
+    params: { type: bristle }
+    checked_when: 'panel.category_filter contains "bristle"'
+    description: "Toggle visibility of Bristle brushes."
+  - separator
+  - label: "Make Persistent"
+    action: toggle_brush_library_persistent
+    checked_when: 'preferences.brushes.persistent_libraries contains panel.selected_library'
+    description: >
+      Toggle the selected library's presence in the user's
+      persistent_libraries preference. Persistent libraries
+      auto-open on app launch.
+  - label: "Open Brush Library"
+    type: submenu
+    dynamic: true
+    description: >
+      Submenu listing all brush libraries discovered under
+      workspace/brushes/<slug>/library.json. Selecting a library
+      opens or closes it (toggle via checkmark).
+  - label: "Save Brush Library"
+    action: save_brush_library
+    enabled_when: "panel.selected_library != null"
+    description: >
+      Open the Save Brush Library dialog. The selected library's
+      manifest and artwork files are written to
+      workspace/brushes/<new_slug>/.
+
+content:
+  type: container
+  id: bp_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # -- Row 1: Brush tiles area --
+    - id: bp_brush_tiles
+      type: container
+      layout: column
+      summary: "Brush libraries"
+      description: >
+        Scrollable area of collapsible library sections. Each section
+        is a disclosure (triangle + name); expanding renders the
+        library's brushes as tiles. Tile size and view mode are
+        controlled by panel.thumbnail_size / panel.view_mode.
+
+        Single-click a tile to select it, set state.stroke_brush, and
+        apply jas:stroke-brush to the canvas selection. Double-click
+        opens Brush Options in library_edit mode.
+      style: { flex: 1, overflow_y: auto }
+      foreach:
+        source: "panel.open_libraries"
+        as: lib
+      do:
+        type: disclosure
+        label: "{{data.brush_libraries[lib.id].name}}"
+        bind:
+          collapsed: "lib.collapsed"
+        children:
+          - type: container
+            layout: wrap
+            style: { gap: 2, padding: 2 }
+            foreach:
+              source: "data.brush_libraries[lib.id].brushes"
+              as: brush
+            do:
+              type: container
+              id: "bp_tile_{{lib.id}}_{{brush.slug}}"
+              summary: "{{brush.name}}"
+              style: { width: 48, height: 16, border: "1px solid var(--app-border,#555)" }
+              bind:
+                selected_in: "panel.selected_brushes"
+              behavior:
+                - event: click
+                  effects:
+                    - select:
+                        target: "brush.slug"
+                        list: selected_brushes
+                        scope: selected_library
+                        scope_value: "lib.id"
+                        mode: auto
+                    - set: { stroke_brush: '"{{lib.id}}/{{brush.slug}}"' }
+                    - set: { stroke_brush_overrides: null }
+                  action: apply_brush_to_selection
+                  params:
+                    library: "lib.id"
+                    brush_slug: "brush.slug"
+                - event: double_click
+                  action: open_brush_options
+                  params:
+                    mode: library_edit
+                    library: "lib.id"
+                    brush_slug: "brush.slug"
+
+    # -- Row 2: Bottom toolbar --
+    - id: bp_toolbar
+      type: container
+      layout: row
+      style: { gap: 4, alignment: center, padding: 2 }
+      children:
+        - id: bp_libraries_menu_btn
+          type: icon_button
+          summary: "Brush Libraries Menu"
+          description: >
+            Opens the Open Brush Library dynamic submenu listing all
+            available libraries.
+          icon: brush_libraries_menu
+          style: { size: 18 }
+          behavior:
+            - event: click
+              action: open_brush_libraries_menu
+
+        - id: bp_remove_brush_stroke_btn
+          type: icon_button
+          summary: "Remove Brush Stroke"
+          description: >
+            Strip jas:stroke-brush and jas:stroke-brush-overrides
+            from every selected element; null state.stroke_brush.
+          icon: remove_brush_stroke
+          style: { size: 18 }
+          bind:
+            disabled: "not canvas_selection_has_brushed_stroke"
+          behavior:
+            - event: click
+              effects:
+                - set: { stroke_brush: null }
+                - set: { stroke_brush_overrides: null }
+              action: remove_brush_from_selection
+
+        - id: bp_options_for_selection_btn
+          type: icon_button
+          summary: "Brush Options for Selection"
+          description: >
+            Open the Brush Options dialog in instance_edit mode for
+            the selected stroke. Edits the per-instance overrides.
+          icon: brush_options_for_selection
+          style: { size: 18 }
+          bind:
+            disabled: "not canvas_selection_is_single_brushed_stroke"
+          behavior:
+            - event: click
+              action: open_brush_options
+              params: { mode: instance_edit }
+
+        - id: bp_new_brush_btn
+          type: icon_button
+          summary: "New Brush"
+          description: >
+            Open the Brush Options dialog in create mode with the
+            canvas selection pre-filled as the new brush's artwork.
+          icon: new_brush
+          style: { size: 18 }
+          bind:
+            disabled: "not canvas_selection_non_empty"
+          behavior:
+            - event: click
+              action: open_brush_options
+              params: { mode: create }
+
+        - id: bp_delete_brush_btn
+          type: icon_button
+          summary: "Delete Brush"
+          description: >
+            Permanently remove every brush in selected_brushes from
+            the selected library. Undoable.
+          icon: delete_brush
+          style: { size: 18 }
+          bind:
+            disabled: "panel.selected_brushes.length == 0"
+          behavior:
+            - event: click
+              action: delete_brush

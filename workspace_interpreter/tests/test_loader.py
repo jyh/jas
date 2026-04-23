@@ -52,6 +52,28 @@ class TestLoadSubdirectories:
         assert "color_panel_content" in data["panels"]
         assert "stroke_panel_content" in data["panels"]
         assert "properties_panel_content" in data["panels"]
+        assert "brushes_panel_content" in data["panels"]
+
+    def test_brushes_panel_state_defaults(self, workspace_path):
+        data = load_workspace(workspace_path)
+        panel = data["panels"]["brushes_panel_content"]
+        # Check the state surface declared in the panel matches BRUSHES.md
+        # §Panel state.
+        state_keys = panel["state"]
+        for key in (
+            "selected_library", "selected_brushes", "open_libraries",
+            "view_mode", "thumbnail_size", "category_filter",
+        ):
+            assert key in state_keys, key
+        # Defaults
+        assert state_keys["selected_library"]["default"] == "default_brushes"
+        assert state_keys["selected_brushes"]["default"] == []
+        assert state_keys["view_mode"]["default"] == "thumbnail"
+        assert state_keys["thumbnail_size"]["default"] == "small"
+        # All five brush types in the default category filter.
+        assert sorted(state_keys["category_filter"]["default"]) == [
+            "art", "bristle", "calligraphic", "pattern", "scatter",
+        ]
 
     def test_load_includes_default_layouts(self, workspace_path):
         data = load_workspace(workspace_path)
