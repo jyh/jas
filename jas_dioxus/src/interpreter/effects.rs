@@ -155,6 +155,33 @@ fn run_one(
         return;
     }
 
+    // let: { name: expr, ... }  in: [ ...effects ]
+    //
+    // Extends the expression ctx with new bindings (keyed at top level —
+    // handler references them as bare identifiers). Mirrors
+    // jas_flask/static/js/engine/effects.mjs's let/in form.
+    if let Some(serde_json::Value::Object(bindings_spec)) = effect.get("let") {
+        let mut extended_ctx = ctx.clone();
+        if let serde_json::Value::Object(extended_map) = &mut extended_ctx {
+            for (name, expr_val) in bindings_spec {
+                let expr_str = expr_val.as_str().unwrap_or("");
+                let value = eval_expr(expr_str, store, ctx);
+                extended_map.insert(name.clone(), value_to_json(&value));
+            }
+        }
+        if let Some(serde_json::Value::Array(in_effects)) = effect.get("in") {
+            run_effects(
+                in_effects,
+                &extended_ctx,
+                store,
+                model.as_deref_mut(),
+                actions,
+                dialogs,
+            );
+        }
+        return;
+    }
+
     // if: { condition, then, else }
     if let Some(serde_json::Value::Object(cond)) = effect.get("if") {
         let condition = cond.get("condition")
@@ -1230,6 +1257,77 @@ mod tests {
             &store.eval_context(),
         );
         assert_eq!(v, Value::Bool(true));
+    }
+
+    // ── let / in ──────────────────────────────────────────────────
+
+    #[test]
+    fn let_binds_scope_for_in_block() {
+        // Bind a value once; downstream effects read it as a bare name.
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "let": { "x": "7 + 3" },
+            "in": [
+                { "set": { "result": "x * 2" } }
+            ]
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(store.get("result"), &serde_json::json!(20));
+    }
+
+    #[test]
+    fn let_bindings_do_not_escape_in_block() {
+        // After the let/in scope ends, the binding is gone.
+        let mut store = StateStore::new();
+        let effects = vec![
+            serde_json::json!({
+                "let": { "x": "5" },
+                "in": [
+                    { "set": { "captured": "x" } }
+                ]
+            }),
+            // Outside the in-block, `x` resolves to the literal 0 fallback
+            // (missing identifiers in this evaluator yield null, which
+            // coerces through set's eval to null → Value::Null in store).
+            serde_json::json!({ "set": { "after": "x" } }),
+        ];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        assert_eq!(store.get("captured"), &serde_json::json!(5));
+        assert_eq!(store.get("after"), &serde_json::Value::Null);
+    }
+
+    #[test]
+    fn let_with_doc_primitive_binds_path_value() {
+        // let: { hit: "hit_test(...)" } — the classic selection-tool
+        // pattern. The bound Path value must flow into in-block effects.
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let effects = vec![serde_json::json!({
+            "let": { "hit": "hit_test(event.x, event.y)" },
+            "in": [
+                { "if": {
+                    "condition": "hit != null",
+                    "then": [
+                        { "doc.add_to_selection": "hit" }
+                    ],
+                    "else": []
+                }}
+            ]
+        })];
+        // Register the document so hit_test works.
+        let _g = super::super::doc_primitives::register_document(
+            model.document().clone());
+        let ctx = serde_json::json!({
+            "event": { "x": 5.0, "y": 5.0 }  // inside rect0 at (0,0,10,10)
+        });
+        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None);
+        drop(_g);
+        assert_eq!(model.document().selection.len(), 1);
+        assert_eq!(model.document().selection[0].path, vec![0, 0]);
     }
 
     #[test]

@@ -6,11 +6,19 @@
 //! handlers declared in the spec. Mirrors the tool dispatcher in
 //! `jas_flask/static/js/engine/tools.mjs`.
 //!
-//! Phase 3b of the Rust YAML tool runtime (see RUST_TOOL_RUNTIME.md):
-//! this file currently provides the parsed spec shape only. Phase 3c
-//! adds the `CanvasTool` impl; Phase 3d adds overlay rendering.
+//! Phase 3c of the Rust YAML tool runtime (see RUST_TOOL_RUNTIME.md):
+//! event dispatch through [`CanvasTool`] is wired; overlay rendering
+//! remains a Phase 3d stub.
 
 use std::collections::HashMap;
+
+use web_sys::CanvasRenderingContext2d;
+
+use crate::document::model::Model;
+use crate::interpreter::doc_primitives;
+use crate::interpreter::effects::run_effects;
+use crate::interpreter::state_store::StateStore;
+use crate::tools::tool::CanvasTool;
 
 /// Parsed shape of a tool YAML spec.
 ///
@@ -136,6 +144,172 @@ fn parse_overlay(val: Option<&serde_json::Value>) -> Option<OverlaySpec> {
         .map(String::from);
     let render = obj.get("render")?.clone();
     Some(OverlaySpec { guard, render })
+}
+
+/// YAML-driven tool. Holds a parsed [`ToolSpec`] and a private
+/// [`StateStore`] seeded with the tool's state defaults. Each
+/// [`CanvasTool`] method builds the corresponding `$event` scope,
+/// registers the current document for doc-aware primitives, and
+/// dispatches the matching handler list through `run_effects`.
+///
+/// The store is self-contained — state mutations persist between
+/// calls on this tool's own store only, not on a global app store.
+/// Phase 5 (or a pre-Phase-5 integration) will decide whether to
+/// share a store with AppState; for now the self-contained layout
+/// matches the Phase 4 test plan (run Selection tests directly
+/// against `YamlTool::from_spec`).
+pub struct YamlTool {
+    spec: ToolSpec,
+    store: StateStore,
+}
+
+impl YamlTool {
+    /// Build a YamlTool from a parsed spec. Seeds the internal store
+    /// with the spec's state defaults under `tool.<id>.*`.
+    pub fn new(spec: ToolSpec) -> Self {
+        let mut store = StateStore::new();
+        store.init_tool(&spec.id, spec.state_defaults.clone());
+        Self { spec, store }
+    }
+
+    /// Build directly from raw workspace spec JSON. Returns `None` when
+    /// the spec fails to parse (missing id).
+    pub fn from_workspace_tool(spec_json: &serde_json::Value) -> Option<Self> {
+        ToolSpec::from_workspace_tool(spec_json).map(Self::new)
+    }
+
+    pub fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+
+    /// Read a tool-local state value. Primary use: tests that want to
+    /// observe what a handler wrote to `$tool.<id>.<key>`.
+    pub fn tool_state(&self, key: &str) -> &serde_json::Value {
+        self.store.get_tool(&self.spec.id, key)
+    }
+
+    /// Build the `$event` scope dict for a pointer event.
+    fn pointer_event_payload(
+        event_type: &str,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "type": event_type,
+            "x": x,
+            "y": y,
+            "modifiers": {
+                "shift": shift,
+                "alt": alt,
+                "ctrl": false,
+                "meta": false,
+            }
+        })
+    }
+
+    /// Dispatch the handler for `event_name` (e.g. `"on_mousedown"`).
+    /// Registers the Model's document for doc-aware primitives, runs
+    /// the handler's effects, then drops the registration. No-op when
+    /// the event is not declared on the spec.
+    fn dispatch(
+        &mut self,
+        event_name: &str,
+        event_payload: serde_json::Value,
+        model: &mut Model,
+    ) {
+        let handler = self.spec.handler(event_name);
+        if handler.is_empty() {
+            return;
+        }
+        let ctx = serde_json::json!({ "event": event_payload });
+        // Registration tears down on guard drop — handler panics still
+        // leave the doc-primitive thread-local in a clean state.
+        let _guard = doc_primitives::register_document(model.document().clone());
+        // Clone handler to drop the borrow on self.spec; run_effects
+        // wants &mut self.store.
+        let effects = handler.to_vec();
+        run_effects(
+            &effects,
+            &ctx,
+            &mut self.store,
+            Some(model),
+            None,
+            None,
+        );
+    }
+}
+
+impl CanvasTool for YamlTool {
+    fn on_press(
+        &mut self,
+        model: &mut Model,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+    ) {
+        let payload = Self::pointer_event_payload("mousedown", x, y, shift, alt);
+        self.dispatch("on_mousedown", payload, model);
+    }
+
+    fn on_move(
+        &mut self,
+        model: &mut Model,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+        dragging: bool,
+    ) {
+        let mut payload = Self::pointer_event_payload("mousemove", x, y, shift, alt);
+        // `dragging` is Rust-specific (Flask doesn't emit it), kept as
+        // an extra scope field so YAML authors can opt into it.
+        if let serde_json::Value::Object(ref mut map) = payload {
+            map.insert(
+                "dragging".to_string(),
+                serde_json::Value::Bool(dragging),
+            );
+        }
+        self.dispatch("on_mousemove", payload, model);
+    }
+
+    fn on_release(
+        &mut self,
+        model: &mut Model,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+    ) {
+        let payload = Self::pointer_event_payload("mouseup", x, y, shift, alt);
+        self.dispatch("on_mouseup", payload, model);
+    }
+
+    fn activate(&mut self, model: &mut Model) {
+        // Reset tool-local state to declared defaults, then fire on_enter.
+        self.store
+            .init_tool(&self.spec.id, self.spec.state_defaults.clone());
+        let payload = serde_json::json!({ "type": "enter" });
+        self.dispatch("on_enter", payload, model);
+    }
+
+    fn deactivate(&mut self, model: &mut Model) {
+        let payload = serde_json::json!({ "type": "leave" });
+        self.dispatch("on_leave", payload, model);
+    }
+
+    fn cursor_css_override(&self) -> Option<String> {
+        self.spec.cursor.clone()
+    }
+
+    fn draw_overlay(&self, _model: &Model, _ctx: &CanvasRenderingContext2d) {
+        // Phase 3d will evaluate self.spec.overlay.guard + render here.
+        // For Phase 3c the overlay is a no-op — Selection tool tests
+        // focus on state/doc mutations; overlay rendering is covered
+        // separately in Phase 3d.
+    }
 }
 
 #[cfg(test)]
@@ -278,6 +452,251 @@ mod tests {
         });
         let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
         assert!(spec.overlay.is_none());
+    }
+
+    // ── YamlTool dispatch tests (Phase 3c) ─────────────────────────
+
+    use crate::document::controller::Controller;
+    use crate::document::document::Document;
+    use crate::document::model::Model;
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, LayerElem, RectElem,
+    };
+
+    fn model_with_rect_at(x: f64, y: f64, w: f64, h: f64) -> Model {
+        let rect = Element::Rect(RectElem {
+            x, y, width: w, height: h,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    fn spec_with_mousedown_set() -> serde_json::Value {
+        // Simplest tool: on_mousedown writes event.x to tool state.
+        serde_json::json!({
+            "id": "probe",
+            "state": { "last_x": { "default": 0 } },
+            "handlers": {
+                "on_mousedown": [
+                    { "set": { "tool.probe.last_x": "event.x" } }
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn new_seeds_tool_state_from_defaults() {
+        let spec = ToolSpec::from_workspace_tool(&spec_with_mousedown_set()).unwrap();
+        let tool = YamlTool::new(spec);
+        assert_eq!(tool.tool_state("last_x"), &serde_json::json!(0));
+    }
+
+    #[test]
+    fn on_press_writes_tool_state_from_event_scope() {
+        let spec = ToolSpec::from_workspace_tool(&spec_with_mousedown_set()).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        tool.on_press(&mut model, 17.0, 42.0, false, false);
+        assert_eq!(tool.tool_state("last_x"), &serde_json::json!(17));
+    }
+
+    #[test]
+    fn on_press_with_no_handler_is_noop() {
+        // Spec declares no on_mousedown handler.
+        let raw = serde_json::json!({
+            "id": "empty",
+            "state": { "x": { "default": 0 } }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        // State stays at default — no handler ran.
+        assert_eq!(tool.tool_state("x"), &serde_json::json!(0));
+    }
+
+    #[test]
+    fn activate_resets_state_and_fires_on_enter() {
+        let raw = serde_json::json!({
+            "id": "t",
+            "state": {
+                "mode": { "default": "idle" },
+                "counter": { "default": 0 }
+            },
+            "handlers": {
+                "on_enter": [
+                    { "set": { "tool.t.mode": "'ready'" } }
+                ]
+            }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        // Mutate state so activate's reset is observable.
+        tool.store
+            .set_tool("t", "counter", serde_json::json!(99));
+        let mut model = Model::default();
+        tool.activate(&mut model);
+        // counter was reset to default, mode was written by on_enter.
+        assert_eq!(tool.tool_state("counter"), &serde_json::json!(0));
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("ready"));
+    }
+
+    #[test]
+    fn deactivate_fires_on_leave() {
+        let raw = serde_json::json!({
+            "id": "t",
+            "state": { "mode": { "default": "active" } },
+            "handlers": {
+                "on_leave": [
+                    { "set": { "tool.t.mode": "'gone'" } }
+                ]
+            }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        tool.deactivate(&mut model);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("gone"));
+    }
+
+    #[test]
+    fn cursor_override_reads_spec() {
+        let raw = serde_json::json!({
+            "id": "t",
+            "cursor": "crosshair"
+        });
+        let tool = YamlTool::new(ToolSpec::from_workspace_tool(&raw).unwrap());
+        assert_eq!(tool.cursor_css_override(), Some("crosshair".to_string()));
+    }
+
+    #[test]
+    fn on_press_dispatches_doc_effects_against_real_model() {
+        // Handler: doc.snapshot, then doc.clear_selection. Verify both
+        // landed on the model.
+        let raw = serde_json::json!({
+            "id": "clearer",
+            "handlers": {
+                "on_mousedown": [
+                    { "doc.snapshot": {} },
+                    { "doc.clear_selection": {} }
+                ]
+            }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = model_with_rect_at(10.0, 10.0, 20.0, 20.0);
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.document().selection.is_empty());
+        assert!(!model.can_undo());
+
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+
+        assert!(model.can_undo(), "doc.snapshot should push undo");
+        assert!(
+            model.document().selection.is_empty(),
+            "doc.clear_selection should empty selection",
+        );
+    }
+
+    #[test]
+    fn on_press_hit_test_finds_element_under_point() {
+        // hit_test is a doc-aware primitive that needs the Model's
+        // document registered. YamlTool::dispatch does this.
+        let raw = serde_json::json!({
+            "id": "probe",
+            "state": { "hit_path": { "default": [] } },
+            "handlers": {
+                "on_mousedown": [
+                    {
+                        "let": { "hit": "hit_test(event.x, event.y)" },
+                        "in": [
+                            // If we hit something, record non-null marker;
+                            // otherwise stays as the default empty list.
+                            { "if": {
+                                "condition": "hit != null",
+                                "then": [
+                                    { "set": { "tool.probe.hit_path": "hit" } }
+                                ],
+                                "else": []
+                            }}
+                        ]
+                    }
+                ]
+            }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = model_with_rect_at(10.0, 10.0, 20.0, 20.0);
+        // Hit inside the rect (bounds 10..30 × 10..30).
+        tool.on_press(&mut model, 15.0, 15.0, false, false);
+        let hit = tool.tool_state("hit_path");
+        // hit_path was written from a Path value, which serializes as
+        // {"__path__": [0, 0]}.
+        assert_eq!(
+            hit,
+            &serde_json::json!({"__path__": [0, 0]}),
+            "hit_test on a rect under the cursor should yield its path",
+        );
+    }
+
+    #[test]
+    fn on_move_receives_dragging_flag_in_scope() {
+        // Handler reads `event.dragging` and sets a tool flag.
+        let raw = serde_json::json!({
+            "id": "t",
+            "state": { "was_dragging": { "default": false } },
+            "handlers": {
+                "on_mousemove": [
+                    { "set": { "tool.t.was_dragging": "event.dragging" } }
+                ]
+            }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        tool.on_move(&mut model, 1.0, 2.0, false, false, true);
+        assert_eq!(
+            tool.tool_state("was_dragging"),
+            &serde_json::json!(true),
+        );
+    }
+
+    #[test]
+    fn on_release_dispatches_mouseup_handler() {
+        let raw = serde_json::json!({
+            "id": "t",
+            "state": { "released_at": { "default": 0 } },
+            "handlers": {
+                "on_mouseup": [
+                    { "set": { "tool.t.released_at": "event.x" } }
+                ]
+            }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        tool.on_release(&mut model, 33.0, 44.0, false, false);
+        assert_eq!(tool.tool_state("released_at"), &serde_json::json!(33));
     }
 
     #[test]
