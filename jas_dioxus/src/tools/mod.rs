@@ -4,7 +4,6 @@ pub mod text_measure;
 pub mod yaml_tool;
 pub mod partial_selection_tool;
 pub mod interior_selection_tool;
-pub mod rect_tool;
 pub mod rounded_rect_tool;
 pub mod line_tool;
 pub mod pen_tool;

@@ -1,9 +1,16 @@
 # Rectangle tool.
 #
-# Mouse-down starts a rect at the click point; mouse-move stretches it
-# (live preview via overlay); mouse-up commits. Uses `doc.replace_at`
-# on each mousemove frame to update the last-added rect's dimensions
-# in place — undo sees a single rect-creation step, not 60.
+# Press-drag-release drawing: mousedown captures the starting corner,
+# mousemove tracks the current corner (drives the overlay preview),
+# and mouseup commits a new rect to the document if the final
+# rectangle is at least 1 pixel in each dimension. Zero-size
+# rectangles are suppressed so a stray click doesn't deposit an
+# invisible shape.
+#
+# Fill and stroke are intentionally omitted from the add_element
+# spec — doc.add_element falls through to model.default_fill and
+# model.default_stroke (driven by the app's color panel). Native
+# RectTool used the same defaults.
 #
 # Validated against schema/tool.schema.json.
 
@@ -19,6 +26,10 @@ state:
     enum: [idle, drawing]
   start_x: { default: 0 }
   start_y: { default: 0 }
+  # Current mouse position during the drag — updated on every
+  # mousemove so the overlay preview stays glued to the cursor.
+  cur_x: { default: 0 }
+  cur_y: { default: 0 }
 
 handlers:
 
@@ -29,41 +40,34 @@ handlers:
     - set: { tool.rect.mode: "'idle'" }
 
   on_mousedown:
-    - "doc.snapshot": {}
+    - set: { tool.rect.mode: "'drawing'" }
     - set: { tool.rect.start_x: "event.x" }
     - set: { tool.rect.start_y: "event.y" }
-    - set: { tool.rect.mode: "'drawing'" }
-    - "doc.add_element":
-        parent: "[0]"
-        element:
-          type: rect
-          x: "event.x"
-          y: "event.y"
-          width: "0"
-          height: "0"
-          fill: "'#4a90d9'"
+    - set: { tool.rect.cur_x: "event.x" }
+    - set: { tool.rect.cur_y: "event.y" }
 
   on_mousemove:
     - if: "tool.rect.mode == 'drawing'"
       then:
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "x"
-            value: "min(tool.rect.start_x, event.x)"
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "y"
-            value: "min(tool.rect.start_y, event.y)"
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "width"
-            value: "abs(event.x - tool.rect.start_x)"
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "height"
-            value: "abs(event.y - tool.rect.start_y)"
+        - set: { tool.rect.cur_x: "event.x" }
+        - set: { tool.rect.cur_y: "event.y" }
 
   on_mouseup:
+    - if: "tool.rect.mode == 'drawing'"
+      then:
+        # Zero-size suppression matches native behavior: a plain click
+        # (release at the same point as press) should not create a
+        # shape. 1-pixel threshold on both dimensions.
+        - if: "abs(event.x - tool.rect.start_x) > 1 and abs(event.y - tool.rect.start_y) > 1"
+          then:
+            - "doc.snapshot": {}
+            - "doc.add_element":
+                element:
+                  type: rect
+                  x: "min(tool.rect.start_x, event.x)"
+                  y: "min(tool.rect.start_y, event.y)"
+                  width: "abs(event.x - tool.rect.start_x)"
+                  height: "abs(event.y - tool.rect.start_y)"
     - set: { tool.rect.mode: "'idle'" }
 
   on_keydown:
@@ -71,5 +75,15 @@ handlers:
       then:
         - set: { tool.rect.mode: "'idle'" }
 
-# Nothing to draw as an overlay — the rectangle itself is being drawn
-# into the document in real-time via doc.set_attr in on_mousemove.
+# Dashed preview rectangle tracking the current drag. Matches native
+# RectTool::draw_overlay: 1-px black stroke at 50% opacity, 4/4 dash,
+# no fill. Renders only while drawing is in progress.
+overlay:
+  if: "tool.rect.mode == 'drawing'"
+  render:
+    type: rect
+    x: "min(tool.rect.start_x, tool.rect.cur_x)"
+    y: "min(tool.rect.start_y, tool.rect.cur_y)"
+    width: "abs(tool.rect.cur_x - tool.rect.start_x)"
+    height: "abs(tool.rect.cur_y - tool.rect.start_y)"
+    style: "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
