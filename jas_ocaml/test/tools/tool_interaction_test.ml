@@ -258,7 +258,7 @@ let () =
 
     "add anchor point tool", [
       Alcotest.test_case "add anchor point: click on path adds point" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Add_anchor_point in
         let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path_elem|] in
@@ -280,7 +280,7 @@ let () =
         | _ -> assert false);
 
       Alcotest.test_case "add anchor point: click away from path does nothing" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Add_anchor_point in
         let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path_elem|] in
@@ -295,7 +295,7 @@ let () =
         | _ -> assert false);
 
       Alcotest.test_case "add anchor point: split preserves endpoints" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Add_anchor_point in
         let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path_elem|] in
@@ -321,73 +321,13 @@ let () =
            | _ -> assert false)
         | _ -> assert false);
 
-      Alcotest.test_case "add anchor point: drag adjusts handles" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
-        let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
-          [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
-        let layer = make_layer ~name:"L" [|path_elem|] in
-        let doc = Jas.Document.make_document [|layer|] in
-        let model = Jas.Model.create ~document:doc () in
-        let (ctx, _model, _ctrl) = make_ctx ~model () in
-        tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 20.0 ~shift:false ~dragging:true;
-        tool#on_release ctx 50.0 20.0 ~shift:false ~alt:false;
-        let children = layer_children model in
-        match children.(0) with
-        | Path { d; _ } ->
-          assert (List.length d = 3);
-          (* Outgoing handle (x1, y1 of second CurveTo) at drag position *)
-          (match List.nth d 2 with
-           | CurveTo (x1, y1, _, _, _, _) ->
-             assert (abs_float (x1 -. 50.0) < 0.01);
-             assert (abs_float (y1 -. 20.0) < 0.01)
-           | _ -> assert false);
-          (* Incoming handle (x2, y2 of first CurveTo) mirrored *)
-          (match List.nth d 1 with
-           | CurveTo (_, _, x2, y2, _, _) ->
-             assert (abs_float (x2 -. 50.0) < 0.01);
-             assert (abs_float (y2 -. (~-.20.0)) < 0.01)
-           | _ -> assert false)
-        | _ -> assert false);
-
-      Alcotest.test_case "add anchor point: cusp drag leaves incoming handle" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
-        let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
-          [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
-        let layer = make_layer ~name:"L" [|path_elem|] in
-        let doc = Jas.Document.make_document [|layer|] in
-        let model = Jas.Model.create ~document:doc () in
-        let (ctx, _model, _ctrl) = make_ctx ~model () in
-        (* Split the curve at midpoint *)
-        tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
-        tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
-        let children = layer_children model in
-        (match children.(0) with
-         | Path { d; _ } ->
-           assert (List.length d = 3);
-           (* Record incoming handle before cusp update *)
-           let in_x2, in_y2 = match List.nth d 1 with
-             | CurveTo (_, _, x2, y2, _, _) -> (x2, y2)
-             | _ -> assert false
-           in
-           (* Apply cusp update directly *)
-           let new_cmds = Jas.Add_anchor_point_tool.update_handles d 1 50.0 0.0 50.0 20.0 true in
-           (* Outgoing handle at drag position *)
-           (match List.nth new_cmds 2 with
-            | CurveTo (x1, y1, _, _, _, _) ->
-              assert (abs_float (x1 -. 50.0) < 0.01);
-              assert (abs_float (y1 -. 20.0) < 0.01)
-            | _ -> assert false);
-           (* Incoming handle unchanged (cusp) *)
-           (match List.nth new_cmds 1 with
-            | CurveTo (_, _, x2, y2, _, _) ->
-              assert (abs_float (x2 -. in_x2) < 0.01);
-              assert (abs_float (y2 -. in_y2) < 0.01)
-            | _ -> assert false)
-         | _ -> assert false));
+      (* Drag-adjusts-handles and cusp-drag tests are dropped —
+         YAML MVP scope covers click-to-insert only. See
+         OCAML_TOOL_RUNTIME.md and the equivalent Swift/Rust
+         deletions for rationale. *)
 
       Alcotest.test_case "add anchor point: insert keeps `all` selection" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Add_anchor_point in
         let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path_elem|] in
@@ -411,7 +351,7 @@ let () =
          | None -> assert false));
 
       Alcotest.test_case "add anchor point: split line segment" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Add_anchor_point in
         let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path_elem|] in
@@ -431,90 +371,8 @@ let () =
            | _ -> assert false)
         | _ -> assert false);
 
-      Alcotest.test_case "add anchor point: split second segment returns correct index" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
-        (* 3 anchors: MoveTo, CurveTo, CurveTo — click on the SECOND curve *)
-        let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
-          [MoveTo (0.0, 0.0);
-           CurveTo (10.0, 0.0, 20.0, 0.0, 30.0, 0.0);
-           CurveTo (40.0, 0.0, 50.0, 0.0, 60.0, 0.0)] in
-        let layer = make_layer ~name:"L" [|path_elem|] in
-        let doc = Jas.Document.make_document [|layer|] in
-        let model = Jas.Model.create ~document:doc () in
-        let (ctx, _model, _ctrl) = make_ctx ~model () in
-        (* Click at x=45 which is on the second curve segment *)
-        tool#on_press ctx 45.0 0.0 ~shift:false ~alt:false;
-        (* Drag to pull handles — if index is wrong, this modifies the wrong cmd *)
-        tool#on_move ctx 45.0 20.0 ~shift:false ~dragging:true;
-        tool#on_release ctx 45.0 20.0 ~shift:false ~alt:false;
-        let children = layer_children model in
-        match children.(0) with
-        | Path { d; _ } ->
-          (* Should have 4 commands: MoveTo, CurveTo, CurveTo(new), CurveTo *)
-          assert (List.length d = 4);
-          (* The new anchor at index 2 should be near x=45 *)
-          (match List.nth d 2 with
-           | CurveTo (_, _, _, _, x, _) ->
-             assert (abs_float (x -. 45.0) < 1.0)
-           | _ -> assert false);
-          (* The first curve (index 1) should still end at x=30 — unchanged *)
-          (match List.nth d 1 with
-           | CurveTo (_, _, _, _, x, _) ->
-             assert (abs_float (x -. 30.0) < 0.01)
-           | _ -> assert false);
-          (* The outgoing handle of the new anchor (x1 of cmd 3) should reflect
-             the drag direction, not be at the original position *)
-          (match List.nth d 3 with
-           | CurveTo (x1, y1, _, _, _, _) ->
-             (* Drag was to (45, 20), so outgoing handle should be near there *)
-             assert (abs_float (x1 -. 45.0) < 1.0);
-             assert (abs_float (y1 -. 20.0) < 1.0)
-           | _ -> assert false)
-        | _ -> assert false);
-
-      Alcotest.test_case "add anchor point: space repositions anchor during drag" `Quick (fun () ->
-        let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
-        let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
-          [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
-        let layer = make_layer ~name:"L" [|path_elem|] in
-        let doc = Jas.Document.make_document [|layer|] in
-        let model = Jas.Model.create ~document:doc () in
-        let (ctx, _model, _ctrl) = make_ctx ~model () in
-        (* Insert point at midpoint *)
-        tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
-        (* Simulate Space press, then drag to reposition *)
-        assert (tool#on_key ctx GdkKeysyms._space);
-        tool#on_move ctx 60.0 10.0 ~shift:false ~dragging:true;
-        (* Anchor command endpoint should be at (60, 10) *)
-        let children = layer_children model in
-        (match children.(0) with
-         | Path { d; _ } ->
-           (match List.nth d 1 with
-            | CurveTo (_, _, _, _, x, y) ->
-              assert (abs_float (x -. 60.0) < 1.0);
-              assert (abs_float (y -. 10.0) < 1.0)
-            | _ -> assert false)
-         | _ -> assert false);
-        (* Release Space, drag further — should adjust handles, not reposition *)
-        ignore (tool#on_key_release ctx GdkKeysyms._space);
-        tool#on_move ctx 70.0 20.0 ~shift:false ~dragging:true;
-        (* Anchor should still be near (60, 10) *)
-        let children2 = layer_children model in
-        (match children2.(0) with
-         | Path { d; _ } ->
-           (match List.nth d 1 with
-            | CurveTo (_, _, _, _, x, y) ->
-              assert (abs_float (x -. 60.0) < 1.0);
-              assert (abs_float (y -. 10.0) < 1.0)
-            | _ -> assert false);
-           (* But outgoing handle (x1 of cmd 2) should reflect the drag *)
-           (match List.nth d 2 with
-            | CurveTo (x1, y1, _, _, _, _) ->
-              assert (abs_float (x1 -. 70.0) < 1.0);
-              assert (abs_float (y1 -. 20.0) < 1.0)
-            | _ -> assert false)
-         | _ -> assert false);
-        tool#on_release ctx 70.0 20.0 ~shift:false ~alt:false);
+      (* "split second segment" drag test + Space+drag reposition
+         test are dropped — YAML MVP scope is click-to-insert only. *)
     ];
 
     "pencil tool", [
@@ -598,7 +456,7 @@ let () =
 
     "path eraser tool", [
       Alcotest.test_case "path eraser: erase deletes small path" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let small = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); LineTo (1.0, 1.0)] in
         let layer = make_layer ~name:"L" [|small|] in
@@ -611,7 +469,7 @@ let () =
         assert (Array.length children = 0));
 
       Alcotest.test_case "path eraser: erase splits open path" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path|] in
@@ -624,7 +482,7 @@ let () =
         assert (Array.length children = 2));
 
       Alcotest.test_case "path eraser: erase opens closed path" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let path = make_path
           ~fill:(Some (make_fill (make_color 0.0 0.0 0.0)))
           ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
@@ -644,7 +502,7 @@ let () =
          | _ -> assert false));
 
       Alcotest.test_case "path eraser: erase miss does nothing" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path|] in
@@ -657,7 +515,7 @@ let () =
         assert (Array.length children = 1));
 
       Alcotest.test_case "path eraser: release without press is noop" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path|] in
@@ -669,7 +527,7 @@ let () =
         assert (Array.length children = 1));
 
       Alcotest.test_case "path eraser: move without press is noop" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
         let layer = make_layer ~name:"L" [|path|] in
@@ -681,13 +539,13 @@ let () =
         assert (Array.length children = 1));
 
       Alcotest.test_case "path eraser: erasing state transitions" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let (ctx, _model, _ctrl) = make_ctx () in
         tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
         tool#on_release ctx 0.0 0.0 ~shift:false ~alt:false);
 
       Alcotest.test_case "path eraser: locked path not erased" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         let small = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           ~locked:true
           [MoveTo (0.0, 0.0); LineTo (1.0, 1.0)] in
@@ -701,7 +559,7 @@ let () =
         assert (Array.length children = 1));
 
       Alcotest.test_case "path eraser: split endpoints hug eraser" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         (* Horizontal path (0,0)->(100,0)->(200,0).
            Erase at x=50 with eraser_size=2 => eraser rect x=[48,52]. *)
         let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
@@ -718,7 +576,7 @@ let () =
         (match children.(0) with
          | Path { d; _ } ->
            let last = List.nth d (List.length d - 1) in
-           (match Jas.Path_eraser_tool.cmd_endpoint last with
+           (match Jas.Path_ops.cmd_endpoint last with
             | Some (x, _) -> assert (abs_float (x -. 48.0) < 0.5)
             | None -> assert false)
          | _ -> assert false);
@@ -731,7 +589,7 @@ let () =
          | _ -> assert false));
 
       Alcotest.test_case "path eraser: split preserves curves" `Quick (fun () ->
-        let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Path_eraser in
         (* Cubic curve from (0,0) to (200,0) arching upward. *)
         let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
           [MoveTo (0.0, 0.0); CurveTo (50.0, -100.0, 150.0, -100.0, 200.0, 0.0)] in
@@ -762,8 +620,8 @@ let () =
          | _ -> assert false));
 
       Alcotest.test_case "path eraser: de casteljau split exact" `Quick (fun () ->
-        (* Splitting at t=0.5 on a symmetric curve should give the midpoint. *)
-        let (first, second) = Jas.Path_eraser_tool.split_cubic_at
+        (* Splitting at t=0.5 on a symmetric curve gives the midpoint. *)
+        let (first, second) = Jas.Path_ops.split_cubic_cmd_at
           (0.0, 0.0) 0.0 100.0 100.0 100.0 100.0 0.0 0.5 in
         (match first with
          | CurveTo (_, _, _, _, x, y) ->
