@@ -15895,6 +15895,219 @@
         }
       }
     },
+    "pen": {
+      "id": "pen",
+      "cursor": "crosshair",
+      "menu_label": "Pen Tool",
+      "shortcut": "P",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "placing",
+            "dragging"
+          ]
+        },
+        "mouse_x": {
+          "default": 0
+        },
+        "mouse_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.pen.mode": "'idle'"
+            }
+          },
+          {
+            "anchor.clear": {
+              "buffer": "pen"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "if": "anchor_buffer_length('pen') >= 2",
+            "then": [
+              {
+                "doc.snapshot": {}
+              },
+              {
+                "doc.add_path_from_anchor_buffer": {
+                  "buffer": "pen",
+                  "closed": "false"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.pen.mode": "'idle'"
+            }
+          },
+          {
+            "anchor.clear": {
+              "buffer": "pen"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "if": "anchor_buffer_close_hit('pen', event.x, event.y, 8)",
+            "then": [
+              {
+                "doc.snapshot": {}
+              },
+              {
+                "doc.add_path_from_anchor_buffer": {
+                  "buffer": "pen",
+                  "closed": "true"
+                }
+              },
+              {
+                "anchor.clear": {
+                  "buffer": "pen"
+                }
+              },
+              {
+                "set": {
+                  "tool.pen.mode": "'idle'"
+                }
+              }
+            ],
+            "else": [
+              {
+                "if": "anchor_buffer_length('pen') == 0",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  }
+                ]
+              },
+              {
+                "anchor.push": {
+                  "buffer": "pen",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.pen.mode": "'dragging'"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mousemove": [
+          {
+            "set": {
+              "tool.pen.mouse_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.pen.mouse_y": "event.y"
+            }
+          },
+          {
+            "if": "tool.pen.mode == 'dragging'",
+            "then": [
+              {
+                "anchor.set_last_out": {
+                  "buffer": "pen",
+                  "hx": "event.x",
+                  "hy": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.pen.mode == 'dragging'",
+            "then": [
+              {
+                "set": {
+                  "tool.pen.mode": "'placing'"
+                }
+              }
+            ]
+          }
+        ],
+        "on_dblclick": [
+          {
+            "anchor.pop": {
+              "buffer": "pen"
+            }
+          },
+          {
+            "if": "anchor_buffer_length('pen') >= 2",
+            "then": [
+              {
+                "doc.add_path_from_anchor_buffer": {
+                  "buffer": "pen",
+                  "closed": "false"
+                }
+              }
+            ]
+          },
+          {
+            "anchor.clear": {
+              "buffer": "pen"
+            }
+          },
+          {
+            "set": {
+              "tool.pen.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape' or event.key == 'Enter'",
+            "then": [
+              {
+                "if": "anchor_buffer_length('pen') >= 2",
+                "then": [
+                  {
+                    "doc.add_path_from_anchor_buffer": {
+                      "buffer": "pen",
+                      "closed": "false"
+                    }
+                  }
+                ]
+              },
+              {
+                "anchor.clear": {
+                  "buffer": "pen"
+                }
+              },
+              {
+                "set": {
+                  "tool.pen.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "anchor_buffer_length('pen') > 0",
+        "render": {
+          "type": "pen_overlay",
+          "buffer": "pen",
+          "mouse_x": "tool.pen.mouse_x",
+          "mouse_y": "tool.pen.mouse_y",
+          "close_radius": "8",
+          "placing": "tool.pen.mode == 'placing'"
+        }
+      }
+    },
     "pencil": {
       "id": "pencil",
       "cursor": "crosshair",
