@@ -171,8 +171,9 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 return None, result
 
     # let: { name: expr, ... } — PHASE3 §5.1
-    # Evaluates each expression against current ctx (earlier names visible
-    # to later ones in the same block), returns an extended ctx.
+    # Two shapes: sibling-threading (no `in:`) and scoped (`let: {...}
+    # in: [...]` runs the nested list with bindings, then drops them).
+    # Tool YAMLs (e.g. selection) use the scoped form.
     if "let" in effect:
         from workspace_interpreter.expr_types import ValueType
         bindings = effect["let"]
@@ -186,6 +187,13 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 new_ctx[name] = result
             else:
                 new_ctx[name] = result.value
+        if "in" in effect and isinstance(effect["in"], list):
+            run_effects(
+                effect["in"], new_ctx, store,
+                actions, platform_effects, dialogs,
+                schema, diagnostics,
+            )
+            return None
         return new_ctx
 
     # snapshot — PHASE3 §5.2 — push undo checkpoint on active document
@@ -680,18 +688,31 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         # Would need access to original defaults — skip for now
         return
 
-    # if: { condition, then, else }
+    # if: two supported shapes
+    #   Flat (tool-YAML authoring):  if: "<expr>"  then: [...]  else: [...]
+    #   Nested (legacy actions):      if: { condition: <expr>, then: [...], else: [...] }
     if "if" in effect:
-        cond = effect["if"]
-        cond_expr = cond.get("condition", "false")
+        cond_val = effect["if"]
+        if isinstance(cond_val, str):
+            cond_expr = cond_val
+            then_list = effect.get("then", [])
+            else_list = effect.get("else", [])
+        elif isinstance(cond_val, dict):
+            cond_expr = cond_val.get("condition", "false")
+            then_list = cond_val.get("then", [])
+            else_list = cond_val.get("else", [])
+        else:
+            return
         eval_ctx = store.eval_context(ctx)
         result = evaluate(str(cond_expr), eval_ctx)
         if result.to_bool():
-            run_effects(cond.get("then", []), ctx, store, actions, platform_effects, dialogs,
-                        schema, diagnostics)
-        elif "else" in cond:
-            run_effects(cond["else"], ctx, store, actions, platform_effects, dialogs,
-                        schema, diagnostics)
+            if isinstance(then_list, list) and then_list:
+                run_effects(then_list, ctx, store, actions, platform_effects,
+                            dialogs, schema, diagnostics)
+        else:
+            if isinstance(else_list, list) and else_list:
+                run_effects(else_list, ctx, store, actions, platform_effects,
+                            dialogs, schema, diagnostics)
         return
 
     # set_panel_state: { key, value, panel? }
