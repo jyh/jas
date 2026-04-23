@@ -1739,6 +1739,105 @@ mod tests {
         }
     }
 
+    // ── Delete Anchor Point tool behavioral tests ────────────────
+
+    use crate::geometry::element::{PathCommand, PathElem};
+
+    fn delete_anchor_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("delete_anchor_point")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_four_anchor_path() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::LayerElem;
+        let pe = PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::CurveTo {
+                    x1: 10.0, y1: 0.0, x2: 20.0, y2: 0.0,
+                    x: 30.0, y: 0.0,
+                },
+                PathCommand::CurveTo {
+                    x1: 40.0, y1: 0.0, x2: 50.0, y2: 0.0,
+                    x: 60.0, y: 0.0,
+                },
+                PathCommand::CurveTo {
+                    x1: 70.0, y1: 0.0, x2: 80.0, y2: 0.0,
+                    x: 90.0, y: 0.0,
+                },
+            ],
+            fill: None,
+            stroke: None,
+            width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn delete_anchor_parity_click_on_interior_removes_anchor() {
+        let Some(mut tool) = delete_anchor_yaml_tool() else { return };
+        let mut model = model_with_four_anchor_path();
+        // Click on the anchor at (60, 0) — command index 2.
+        tool.on_press(&mut model, 60.0, 0.0, false, false);
+        tool.on_release(&mut model, 60.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "path should still exist");
+        if let Element::Path(pe) = &*children[0] {
+            // Should go from 4 anchors to 3.
+            assert_eq!(pe.d.len(), 3);
+        } else {
+            panic!("expected Path");
+        }
+        assert!(model.can_undo(), "delete should be undoable");
+    }
+
+    #[test]
+    fn delete_anchor_parity_click_empty_is_noop() {
+        let Some(mut tool) = delete_anchor_yaml_tool() else { return };
+        let mut model = model_with_four_anchor_path();
+        tool.on_press(&mut model, 500.0, 500.0, false, false);
+        tool.on_release(&mut model, 500.0, 500.0, false, false);
+        // Path unchanged, no undo snapshot.
+        if let Element::Path(pe) = &*model.document().layers[0].children().unwrap()[0] {
+            assert_eq!(pe.d.len(), 4);
+        }
+        assert!(!model.can_undo());
+    }
+
     // ── Pen tool behavioral tests ──────────────────────────────────
     //
     // Native PenTool had no unit tests. These cover the externally-
