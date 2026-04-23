@@ -127,6 +127,33 @@ describe("cloneDocument / JSON round-trip", () => {
     const d2 = docFromJson(j);
     assert.deepEqual(d, d2);
   });
+
+  it("brush attributes round-trip through clone and JSON", () => {
+    // Document model is structurally open: stroke_brush /
+    // stroke_brush_overrides ride along on path elements without any
+    // explicit field declaration in mkPath. Verify they survive both
+    // cloneDocument and JSON round-trip.
+    const p = mkPath({
+      d: [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 10 }],
+      stroke_brush: "default_brushes/oval_5pt",
+      stroke_brush_overrides: '{"size": 8}',
+    });
+    assert.equal(p.stroke_brush, "default_brushes/oval_5pt");
+    assert.equal(p.stroke_brush_overrides, '{"size": 8}');
+
+    const d = {
+      layers: [mkLayer({ children: [p] })],
+      selection: [], artboards: [],
+    };
+    const cloned = cloneDocument(d);
+    assert.equal(cloned.layers[0].children[0].stroke_brush,
+                 "default_brushes/oval_5pt");
+    assert.equal(cloned.layers[0].children[0].stroke_brush_overrides,
+                 '{"size": 8}');
+
+    const round = docFromJson(docToJson(d));
+    assert.deepEqual(round, d);
+  });
 });
 
 describe("selection mutations", () => {
