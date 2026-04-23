@@ -29,3 +29,7 @@ preferences:
     min_zoom: 0.1
     max_zoom: 64.0
     fit_padding_px: 20
+
+  brushes:
+    persistent_libraries:      # list of library slugs auto-opened on launch
+      - default_brushes
