@@ -16016,6 +16016,400 @@
         }
       }
     },
+    "partial_selection": {
+      "id": "partial_selection",
+      "cursor": "arrow",
+      "menu_label": "Partial Selection Tool",
+      "shortcut": "A",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "marquee",
+            "moving_pending",
+            "moving",
+            "handle"
+          ]
+        },
+        "marquee_start_x": {
+          "default": 0
+        },
+        "marquee_start_y": {
+          "default": 0
+        },
+        "marquee_cur_x": {
+          "default": 0
+        },
+        "marquee_cur_y": {
+          "default": 0
+        },
+        "drag_start_x": {
+          "default": 0
+        },
+        "drag_start_y": {
+          "default": 0
+        },
+        "drag_last_x": {
+          "default": 0
+        },
+        "drag_last_y": {
+          "default": 0
+        },
+        "snapshotted": {
+          "default": false
+        },
+        "copied": {
+          "default": false
+        },
+        "alt_held": {
+          "default": false
+        },
+        "handle_path": {
+          "default": null
+        },
+        "handle_anchor_idx": {
+          "default": 0
+        },
+        "handle_type": {
+          "default": ""
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.partial_selection.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.partial_selection.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.path.probe_partial_hit": {
+              "x": "event.x",
+              "y": "event.y",
+              "hit_radius": "8",
+              "shift": "event.modifiers.shift"
+            }
+          },
+          {
+            "if": "tool.partial_selection.mode == 'marquee'",
+            "then": [
+              {
+                "set": {
+                  "tool.partial_selection.marquee_start_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.marquee_start_y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.marquee_cur_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.marquee_cur_y": "event.y"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.partial_selection.mode == 'moving_pending' or tool.partial_selection.mode == 'handle'",
+            "then": [
+              {
+                "set": {
+                  "tool.partial_selection.drag_start_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.drag_start_y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.drag_last_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.drag_last_y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.snapshotted": "false"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.copied": "false"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.alt_held": "event.modifiers.alt"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.partial_selection.mode == 'marquee'",
+            "then": [
+              {
+                "set": {
+                  "tool.partial_selection.marquee_cur_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.marquee_cur_y": "event.y"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.partial_selection.mode == 'moving_pending' or tool.partial_selection.mode == 'moving'",
+            "then": [
+              {
+                "if": "not tool.partial_selection.snapshotted and hypot(event.x - tool.partial_selection.drag_start_x, event.y - tool.partial_selection.drag_start_y) > 4",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "set": {
+                      "tool.partial_selection.snapshotted": "true"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.partial_selection.mode": "'moving'"
+                    }
+                  }
+                ]
+              },
+              {
+                "if": "tool.partial_selection.mode == 'moving'",
+                "then": [
+                  {
+                    "if": "tool.partial_selection.alt_held and not tool.partial_selection.copied",
+                    "then": [
+                      {
+                        "doc.copy_selection": {
+                          "dx": "event.x - tool.partial_selection.drag_last_x",
+                          "dy": "event.y - tool.partial_selection.drag_last_y"
+                        }
+                      },
+                      {
+                        "set": {
+                          "tool.partial_selection.copied": "true"
+                        }
+                      }
+                    ],
+                    "else": [
+                      {
+                        "doc.translate_selection": {
+                          "dx": "event.x - tool.partial_selection.drag_last_x",
+                          "dy": "event.y - tool.partial_selection.drag_last_y"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "set": {
+                      "tool.partial_selection.drag_last_x": "event.x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.partial_selection.drag_last_y": "event.y"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "if": "tool.partial_selection.mode == 'handle'",
+            "then": [
+              {
+                "if": "not tool.partial_selection.snapshotted and hypot(event.x - tool.partial_selection.drag_start_x, event.y - tool.partial_selection.drag_start_y) > 0.5",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "set": {
+                      "tool.partial_selection.snapshotted": "true"
+                    }
+                  }
+                ]
+              },
+              {
+                "if": "tool.partial_selection.snapshotted",
+                "then": [
+                  {
+                    "doc.move_path_handle": {
+                      "dx": "event.x - tool.partial_selection.drag_last_x",
+                      "dy": "event.y - tool.partial_selection.drag_last_y"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.partial_selection.drag_last_x": "event.x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.partial_selection.drag_last_y": "event.y"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.partial_selection.mode == 'marquee'",
+            "then": [
+              {
+                "doc.path.commit_partial_marquee": {
+                  "x1": "tool.partial_selection.marquee_start_x",
+                  "y1": "tool.partial_selection.marquee_start_y",
+                  "x2": "tool.partial_selection.marquee_cur_x",
+                  "y2": "tool.partial_selection.marquee_cur_y",
+                  "additive": "event.modifiers.shift"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.partial_selection.mode": "'idle'"
+            }
+          }
+        ]
+      },
+      "overlay": {
+        "if": "true",
+        "render": {
+          "type": "partial_selection_overlay",
+          "mode": "tool.partial_selection.mode",
+          "marquee_start_x": "tool.partial_selection.marquee_start_x",
+          "marquee_start_y": "tool.partial_selection.marquee_start_y",
+          "marquee_cur_x": "tool.partial_selection.marquee_cur_x",
+          "marquee_cur_y": "tool.partial_selection.marquee_cur_y"
+        }
+      }
+    },
+    "path_eraser": {
+      "id": "path_eraser",
+      "cursor": "crosshair",
+      "menu_label": "Path Eraser Tool",
+      "shortcut": "E",
+      "state": {
+        "erasing": {
+          "default": false
+        },
+        "last_x": {
+          "default": 0
+        },
+        "last_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.path_eraser.erasing": false
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.path_eraser.erasing": false
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "doc.path.erase_at_rect": {
+              "last_x": "event.x",
+              "last_y": "event.y",
+              "x": "event.x",
+              "y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.path_eraser.erasing": true
+            }
+          },
+          {
+            "set": {
+              "tool.path_eraser.last_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.path_eraser.last_y": "event.y"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.path_eraser.erasing",
+            "then": [
+              {
+                "doc.path.erase_at_rect": {
+                  "last_x": "tool.path_eraser.last_x",
+                  "last_y": "tool.path_eraser.last_y",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.path_eraser.last_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.path_eraser.last_y": "event.y"
+            }
+          }
+        ],
+        "on_mouseup": [
+          {
+            "set": {
+              "tool.path_eraser.erasing": false
+            }
+          }
+        ]
+      }
+    },
     "pen": {
       "id": "pen",
       "cursor": "crosshair",
@@ -17037,6 +17431,68 @@
           "height": "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)",
           "style": "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
         }
+      }
+    },
+    "smooth": {
+      "id": "smooth",
+      "cursor": "crosshair",
+      "menu_label": "Smooth Tool",
+      "state": {
+        "smoothing": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.smooth.smoothing": false
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.smooth.smoothing": false
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "doc.path.smooth_at_cursor": {
+              "x": "event.x",
+              "y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.smooth.smoothing": true
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.smooth.smoothing",
+            "then": [
+              {
+                "doc.path.smooth_at_cursor": {
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "set": {
+              "tool.smooth.smoothing": false
+            }
+          }
+        ]
       }
     },
     "star": {

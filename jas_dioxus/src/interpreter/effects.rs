@@ -795,6 +795,97 @@ fn run_doc_effect(
                 path_commit_anchor_edit(model, store, origin_x, origin_y, target_x, target_y);
             }
         }
+        "doc.path.probe_partial_hit" => {
+            // Partial Selection tool's press-time dispatcher. Hit-test
+            // priority:
+            //   1. Bezier handle on a selected Path → mode = "handle",
+            //      writes tool.partial_selection.{handle_path,
+            //      handle_anchor_idx, handle_type}
+            //   2. Control point on any unlocked element → mode =
+            //      "moving_pending". Also updates selection: shift-
+            //      toggles if the CP isn't already selected, plain
+            //      click selects just that CP (unless already
+            //      selected — keeps the existing selection so a drag
+            //      moves the group).
+            //   3. No hit → mode = "marquee".
+            if let serde_json::Value::Object(args) = spec {
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                let hit_radius = eval_number(args.get("hit_radius"), store, ctx);
+                let radius = if hit_radius == 0.0 { 8.0 } else { hit_radius };
+                let shift = eval_bool(args.get("shift"), store, ctx);
+                path_probe_partial_hit(model, store, x, y, radius, shift);
+            }
+        }
+        "doc.move_path_handle" => {
+            // Reads tool.partial_selection.{handle_path,
+            // handle_anchor_idx, handle_type} and applies a handle
+            // move by (dx, dy). No-op if no handle is latched.
+            if let serde_json::Value::Object(args) = spec {
+                let dx = eval_number(args.get("dx"), store, ctx);
+                let dy = eval_number(args.get("dy"), store, ctx);
+                path_move_latched_handle(model, store, dx, dy);
+            }
+        }
+        "doc.path.commit_partial_marquee" => {
+            // Called on mouseup when the Partial Selection tool was in
+            // marquee mode. Converts the marquee rect into a
+            // partial_select_rect call; empty-ish rects without shift
+            // clear the selection (click-in-empty-space semantics).
+            if let serde_json::Value::Object(args) = spec {
+                let x1 = eval_number(args.get("x1"), store, ctx);
+                let y1 = eval_number(args.get("y1"), store, ctx);
+                let x2 = eval_number(args.get("x2"), store, ctx);
+                let y2 = eval_number(args.get("y2"), store, ctx);
+                let additive = eval_bool(args.get("additive"), store, ctx);
+                let rx = x1.min(x2);
+                let ry = y1.min(y2);
+                let rw = (x2 - x1).abs();
+                let rh = (y2 - y1).abs();
+                if rw > 1.0 || rh > 1.0 {
+                    model.snapshot();
+                    Controller::partial_select_rect(model, rx, ry, rw, rh, additive);
+                } else if !additive {
+                    Controller::set_selection(model, Vec::new());
+                }
+            }
+        }
+        "doc.path.erase_at_rect" => {
+            // Sweeps a rectangular eraser from (last_x, last_y) to
+            // (x, y) expanded by eraser_size (half-extent), intersecting
+            // every unlocked Path in every layer. Paths whose bounding
+            // box fits inside the eraser are deleted entirely; intersected
+            // paths are split via De Casteljau-preserving geometry. The
+            // YAML handler is responsible for calling doc.snapshot once
+            // at mousedown — this effect mutates the document directly
+            // on every call. Mirrors the deleted PathEraserTool::erase_at.
+            if let serde_json::Value::Object(args) = spec {
+                let last_x = eval_number(args.get("last_x"), store, ctx);
+                let last_y = eval_number(args.get("last_y"), store, ctx);
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                let er_sz = eval_number(args.get("eraser_size"), store, ctx);
+                let eraser_size = if er_sz == 0.0 { 2.0 } else { er_sz };
+                path_erase_at_rect(model, last_x, last_y, x, y, eraser_size);
+            }
+        }
+        "doc.path.smooth_at_cursor" => {
+            // Iterates *selected* unlocked Path elements, finds the
+            // contiguous flat-polyline range within `radius` of (x, y),
+            // and re-fits that range via algorithms::fit_curve with the
+            // given error tolerance (defaults to 8.0 — native
+            // SMOOTH_ERROR). The YAML handler is responsible for
+            // doc.snapshot on mousedown. Mirrors SmoothTool::smooth_at.
+            if let serde_json::Value::Object(args) = spec {
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                let radius = eval_number(args.get("radius"), store, ctx);
+                let r = if radius == 0.0 { 100.0 } else { radius };
+                let fit_error = eval_number(args.get("fit_error"), store, ctx);
+                let e = if fit_error == 0.0 { 8.0 } else { fit_error };
+                path_smooth_at_cursor(model, x, y, r, e);
+            }
+        }
         "doc.path.insert_anchor_on_segment_near" => {
             // Mirrors the native AddAnchorPointTool's click-to-insert
             // case. Walks all unlocked Path elements in the document,
@@ -1412,6 +1503,373 @@ fn path_commit_anchor_edit(
             model.set_document(doc);
         }
         _ => {}
+    }
+}
+
+/// Implementation of doc.path.probe_partial_hit.
+fn path_probe_partial_hit(
+    model: &mut Model,
+    store: &mut StateStore,
+    x: f64, y: f64, radius: f64,
+    shift: bool,
+) {
+    use crate::geometry::element::{
+        control_point_count, control_points, path_handle_positions,
+        PathElem, Visibility,
+    };
+    // 1. Handle hit on a selected Path element.
+    {
+        let doc = model.document().clone();
+        for es in &doc.selection {
+            if let Some(Element::Path(pe)) = doc.get_element(&es.path) {
+                let pe: &PathElem = &pe;
+                let anchors = control_points(&Element::Path(pe.clone()));
+                for (ai, _) in anchors.iter().enumerate() {
+                    let (h_in, h_out) = path_handle_positions(&pe.d, ai);
+                    if let Some((hx, hy)) = h_in {
+                        if (x - hx).hypot(y - hy) < radius {
+                            store.set_tool("partial_selection", "mode",
+                                serde_json::json!("handle"));
+                            store.set_tool("partial_selection", "handle_anchor_idx",
+                                serde_json::json!(ai));
+                            store.set_tool("partial_selection", "handle_type",
+                                serde_json::json!("in"));
+                            let ids: Vec<serde_json::Value> = es.path.iter()
+                                .map(|&i| serde_json::json!(i as u64))
+                                .collect();
+                            store.set_tool("partial_selection", "handle_path",
+                                serde_json::json!({"__path__": ids}));
+                            return;
+                        }
+                    }
+                    if let Some((hx, hy)) = h_out {
+                        if (x - hx).hypot(y - hy) < radius {
+                            store.set_tool("partial_selection", "mode",
+                                serde_json::json!("handle"));
+                            store.set_tool("partial_selection", "handle_anchor_idx",
+                                serde_json::json!(ai));
+                            store.set_tool("partial_selection", "handle_type",
+                                serde_json::json!("out"));
+                            let ids: Vec<serde_json::Value> = es.path.iter()
+                                .map(|&i| serde_json::json!(i as u64))
+                                .collect();
+                            store.set_tool("partial_selection", "handle_path",
+                                serde_json::json!({"__path__": ids}));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Control-point hit on any unlocked element (recurses into groups).
+    fn cp_recursive(
+        elem: &Element, path: &[usize], ancestor_vis: Visibility,
+        x: f64, y: f64, radius: f64,
+    ) -> Option<(Vec<usize>, usize)> {
+        let eff = std::cmp::min(ancestor_vis, elem.visibility());
+        if eff == Visibility::Invisible { return None; }
+        if elem.is_group_or_layer() {
+            if let Some(children) = elem.children() {
+                for (i, child) in children.iter().enumerate().rev() {
+                    if child.locked() { continue; }
+                    let mut child_path = path.to_vec();
+                    child_path.push(i);
+                    if let Some(r) = cp_recursive(child, &child_path, eff, x, y, radius) {
+                        return Some(r);
+                    }
+                }
+            }
+            return None;
+        }
+        let cps = control_points(elem);
+        for (i, &(px, py)) in cps.iter().enumerate() {
+            if (x - px).hypot(y - py) < radius {
+                return Some((path.to_vec(), i));
+            }
+        }
+        None
+    }
+    let cp_hit = {
+        let doc = model.document();
+        let mut hit: Option<(Vec<usize>, usize)> = None;
+        'outer: for (li, layer) in doc.layers.iter().enumerate() {
+            let layer_vis = layer.visibility();
+            if layer_vis == Visibility::Invisible { continue; }
+            if let Some(children) = layer.children() {
+                for (ci, child) in children.iter().enumerate().rev() {
+                    if child.locked() { continue; }
+                    let child_vis = std::cmp::min(layer_vis, child.visibility());
+                    if child_vis == Visibility::Invisible { continue; }
+                    if let Some(r) = cp_recursive(child, &[li, ci], child_vis, x, y, radius) {
+                        hit = Some(r);
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        hit
+    };
+
+    if let Some((path, cp_idx)) = cp_hit {
+        let already_selected = model.document().selection.iter()
+            .any(|es| es.path == path && es.kind.contains(cp_idx));
+        if !already_selected || shift {
+            model.snapshot();
+            if shift {
+                use crate::document::document::{SelectionKind, SortedCps, ElementSelection};
+                let doc = model.document();
+                let mut sel = doc.selection.clone();
+                if let Some(pos) = sel.iter().position(|es| es.path == path) {
+                    let es = &sel[pos];
+                    let total = model.document().get_element(&path)
+                        .map(control_point_count).unwrap_or(0);
+                    let mut cps: Vec<usize> = es.kind.to_sorted(total).iter().collect();
+                    if let Some(p) = cps.iter().position(|&i| i == cp_idx) {
+                        cps.remove(p);
+                    } else {
+                        cps.push(cp_idx);
+                    }
+                    sel[pos] = ElementSelection {
+                        path: path.clone(),
+                        kind: SelectionKind::Partial(SortedCps::from_iter(cps)),
+                    };
+                } else {
+                    sel.push(ElementSelection::partial(path.clone(), [cp_idx]));
+                }
+                Controller::set_selection(model, sel);
+            } else {
+                Controller::select_control_point(model, &path, cp_idx);
+            }
+        }
+        store.set_tool("partial_selection", "mode",
+            serde_json::json!("moving_pending"));
+        return;
+    }
+
+    // 3. No hit — marquee.
+    store.set_tool("partial_selection", "mode", serde_json::json!("marquee"));
+}
+
+/// Implementation of doc.move_path_handle.
+fn path_move_latched_handle(
+    model: &mut Model,
+    store: &StateStore,
+    dx: f64, dy: f64,
+) {
+    let handle_path_val = store.get_tool("partial_selection", "handle_path");
+    let path: Vec<usize> = match handle_path_val.as_object()
+        .and_then(|o| o.get("__path__"))
+        .and_then(|v| v.as_array())
+    {
+        Some(arr) => arr.iter()
+            .filter_map(|v| v.as_u64().map(|u| u as usize))
+            .collect(),
+        None => return,
+    };
+    if path.is_empty() { return; }
+    let anchor_idx = store
+        .get_tool("partial_selection", "handle_anchor_idx")
+        .as_u64().unwrap_or(0) as usize;
+    let handle_type = store
+        .get_tool("partial_selection", "handle_type")
+        .as_str().unwrap_or("").to_string();
+    Controller::move_path_handle(model, &path, anchor_idx, &handle_type, dx, dy);
+}
+
+/// Implementation of doc.path.erase_at_rect.
+fn path_erase_at_rect(
+    model: &mut Model,
+    last_x: f64, last_y: f64,
+    x: f64, y: f64,
+    eraser_size: f64,
+) {
+    use std::rc::Rc;
+    use crate::geometry::element::{flatten_path_commands, PathCommand, PathElem};
+    use crate::geometry::path_ops::{find_eraser_hit, split_path_at_eraser};
+
+    let doc = model.document().clone();
+    let mut new_doc = doc.clone();
+    let half = eraser_size;
+    let min_x = last_x.min(x) - half;
+    let min_y = last_y.min(y) - half;
+    let max_x = last_x.max(x) + half;
+    let max_y = last_y.max(y) + half;
+
+    let mut changed = false;
+    for (li, layer) in doc.layers.iter().enumerate() {
+        let children = match layer.children() {
+            Some(c) => c,
+            None => continue,
+        };
+        for ci in (0..children.len()).rev() {
+            let child = &children[ci];
+            let path_elem = match child.as_ref() {
+                Element::Path(pe) => pe,
+                _ => continue,
+            };
+            if child.locked() {
+                continue;
+            }
+            let flat = flatten_path_commands(&path_elem.d);
+            if flat.len() < 2 {
+                continue;
+            }
+            let hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
+                Some(h) => h,
+                None => continue,
+            };
+            let bounds = child.bounds();
+            if bounds.2 <= eraser_size * 2.0 && bounds.3 <= eraser_size * 2.0 {
+                if let Some(layer_children) =
+                    new_doc.layers[li].children_mut()
+                {
+                    layer_children.remove(ci);
+                    changed = true;
+                }
+                continue;
+            }
+            let is_closed = path_elem
+                .d
+                .iter()
+                .any(|c| matches!(c, PathCommand::ClosePath));
+            let results = split_path_at_eraser(&path_elem.d, &hit, is_closed);
+            if let Some(layer_children) = new_doc.layers[li].children_mut() {
+                layer_children.remove(ci);
+                for cmds in results.into_iter().rev() {
+                    if cmds.len() >= 2 {
+                        let new_path = Element::Path(PathElem {
+                            d: cmds,
+                            fill: path_elem.fill,
+                            stroke: path_elem.stroke,
+                            width_points: path_elem.width_points.clone(),
+                            common: crate::geometry::element::CommonProps::default(),
+                            fill_gradient: None,
+                            stroke_gradient: None,
+                        });
+                        layer_children.insert(ci, Rc::new(new_path));
+                    }
+                }
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        new_doc.selection.clear();
+        model.set_document(new_doc);
+    }
+}
+
+/// Implementation of doc.path.smooth_at_cursor.
+fn path_smooth_at_cursor(
+    model: &mut Model,
+    x: f64, y: f64,
+    radius: f64,
+    fit_error: f64,
+) {
+    use crate::algorithms::fit_curve::fit_curve;
+    use crate::geometry::element::{Element, PathCommand, PathElem};
+    use crate::geometry::path_ops::{
+        cmd_start_point, flatten_with_cmd_map,
+    };
+
+    let doc = model.document().clone();
+    let mut new_doc = doc.clone();
+    let radius_sq = radius * radius;
+    let mut changed = false;
+
+    for es in &doc.selection {
+        let path = &es.path;
+        let elem = match doc.get_element(path) {
+            Some(e) => e,
+            None => continue,
+        };
+        let path_elem = match elem {
+            Element::Path(pe) => pe,
+            _ => continue,
+        };
+        if elem.locked() {
+            continue;
+        }
+        if path_elem.d.len() < 2 {
+            continue;
+        }
+        let (flat, cmd_map) = flatten_with_cmd_map(&path_elem.d);
+        if flat.len() < 2 {
+            continue;
+        }
+        let mut first_hit: Option<usize> = None;
+        let mut last_hit: Option<usize> = None;
+        for (i, &(px, py)) in flat.iter().enumerate() {
+            let dx = px - x;
+            let dy = py - y;
+            if dx * dx + dy * dy <= radius_sq {
+                if first_hit.is_none() {
+                    first_hit = Some(i);
+                }
+                last_hit = Some(i);
+            }
+        }
+        let (first_flat, last_flat) = match (first_hit, last_hit) {
+            (Some(f), Some(l)) => (f, l),
+            _ => continue,
+        };
+        let first_cmd = cmd_map[first_flat];
+        let last_cmd = cmd_map[last_flat];
+        if first_cmd >= last_cmd {
+            continue;
+        }
+        let range_flat: Vec<(f64, f64)> = flat
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                let ci = cmd_map[*i];
+                ci >= first_cmd && ci <= last_cmd
+            })
+            .map(|(_, &p)| p)
+            .collect();
+        let start_point = cmd_start_point(&path_elem.d, first_cmd);
+        let mut points_to_fit = vec![start_point];
+        points_to_fit.extend_from_slice(&range_flat);
+        if points_to_fit.len() < 2 {
+            continue;
+        }
+        let segments = fit_curve(&points_to_fit, fit_error);
+        if segments.is_empty() {
+            continue;
+        }
+        let mut new_cmds: Vec<PathCommand> = Vec::new();
+        for cmd in &path_elem.d[..first_cmd] {
+            new_cmds.push(*cmd);
+        }
+        for seg in &segments {
+            new_cmds.push(PathCommand::CurveTo {
+                x1: seg.2, y1: seg.3,
+                x2: seg.4, y2: seg.5,
+                x: seg.6, y: seg.7,
+            });
+        }
+        for cmd in &path_elem.d[last_cmd + 1..] {
+            new_cmds.push(*cmd);
+        }
+        if new_cmds.len() >= path_elem.d.len() {
+            continue;
+        }
+        let new_elem = Element::Path(PathElem {
+            d: new_cmds,
+            fill: path_elem.fill,
+            stroke: path_elem.stroke,
+            width_points: path_elem.width_points.clone(),
+            common: path_elem.common.clone(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        new_doc = new_doc.replace_element(path, new_elem);
+        changed = true;
+    }
+    if changed {
+        model.set_document(new_doc);
     }
 }
 

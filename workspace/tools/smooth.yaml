@@ -1,0 +1,44 @@
+# Smooth tool.
+#
+# Drag across selected paths to smooth points within the 100-px
+# influence circle. Re-fits the affected range using the Schneider
+# curve-fit kernel (algorithms::fit_curve) with error tolerance 8.0
+# — the same native SMOOTH_ERROR / SMOOTH_SIZE constants.
+#
+# doc.path.smooth_at_cursor wraps flatten + range-select + fit +
+# splice. Only paths in the current selection are candidates; the
+# tool does nothing if nothing is selected.
+#
+# Validated against schema/tool.schema.json.
+
+id: smooth
+cursor: crosshair
+menu_label: "Smooth Tool"
+
+state:
+  smoothing: { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.smooth.smoothing: false }
+
+  on_leave:
+    - set: { tool.smooth.smoothing: false }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - "doc.path.smooth_at_cursor":
+        x: "event.x"
+        y: "event.y"
+    - set: { tool.smooth.smoothing: true }
+
+  on_mousemove:
+    - if: "tool.smooth.smoothing"
+      then:
+        - "doc.path.smooth_at_cursor":
+            x: "event.x"
+            y: "event.y"
+
+  on_mouseup:
+    - set: { tool.smooth.smoothing: false }
