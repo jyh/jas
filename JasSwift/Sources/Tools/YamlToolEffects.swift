@@ -125,6 +125,85 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.add_element — { element: { type: rect|line|polygon|star, ... } }.
+    // Builds an Element from the spec and appends it to the document via
+    // Controller.addElement (which targets the selected layer, matching
+    // the native drawing-tool semantics). Unknown types no-op.
+    effects["doc.add_element"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let elemSpec = args["element"] as? [String: Any] else {
+            return nil
+        }
+        guard let element = buildElement(
+            elemSpec, model: model, store: store, ctx: ctx
+        ) else { return nil }
+        Controller(model: model).addElement(element)
+        return nil
+    }
+
+    // doc.path.delete_anchor_near — { x, y, hit_radius? }.
+    // Finds the anchor under the cursor and deletes it via
+    // deleteAnchorFromPath. If the path would drop below 2 anchors, the
+    // whole element is removed. Snapshots once on commit.
+    effects["doc.path.delete_anchor_near"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let rawR = evalNumber(args["hit_radius"], store: store, ctx: ctx)
+        let radius = rawR == 0 ? 8.0 : rawR
+        pathDeleteAnchorNear(model: model, x: x, y: y, radius: radius)
+        return nil
+    }
+
+    // doc.path.insert_anchor_on_segment_near — { x, y, hit_radius? }.
+    // Walks all unlocked Paths in the document, finds the segment
+    // closest to (x, y), and inserts a new anchor at that t. Snapshots
+    // once on commit.
+    effects["doc.path.insert_anchor_on_segment_near"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let rawR = evalNumber(args["hit_radius"], store: store, ctx: ctx)
+        let radius = rawR == 0 ? 8.0 : rawR
+        pathInsertAnchorOnSegmentNear(model: model, x: x, y: y, radius: radius)
+        return nil
+    }
+
+    // doc.path.erase_at_rect — { last_x, last_y, x, y, eraser_size? }.
+    // Sweeps a rectangle from (last_x, last_y) to (x, y) expanded by
+    // eraser_size. Paths whose bbox fits inside get deleted; hit paths
+    // are split via De Casteljau-preserving geometry. Snapshot is the
+    // YAML handler's responsibility (typically on mousedown).
+    effects["doc.path.erase_at_rect"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let lastX = evalNumber(args["last_x"], store: store, ctx: ctx)
+        let lastY = evalNumber(args["last_y"], store: store, ctx: ctx)
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let raw = evalNumber(args["eraser_size"], store: store, ctx: ctx)
+        let eraserSize = raw == 0 ? 2.0 : raw
+        pathEraseAtRect(model: model, lastX: lastX, lastY: lastY,
+                        x: x, y: y, eraserSize: eraserSize)
+        return nil
+    }
+
+    // doc.path.smooth_at_cursor — { x, y, radius?, fit_error? }.
+    // Iterates selected unlocked Paths, finds the contiguous flat
+    // range within `radius` of (x, y), re-fits it via fitCurve with
+    // the given error tolerance (defaults radius=100, fit_error=8).
+    effects["doc.path.smooth_at_cursor"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let rawR = evalNumber(args["radius"], store: store, ctx: ctx)
+        let radius = rawR == 0 ? 100.0 : rawR
+        let rawE = evalNumber(args["fit_error"], store: store, ctx: ctx)
+        let fitError = rawE == 0 ? 8.0 : rawE
+        pathSmoothAtCursor(model: model, x: x, y: y,
+                           radius: radius, fitError: fitError)
+        return nil
+    }
+
     // ── Buffer effects (Phase 3) ─────────────────────────────────
 
     // buffer.push: { buffer, x, y } — append to named point buffer.
@@ -273,35 +352,373 @@ private func makePathFromCommands(
     store: StateStore,
     ctx: [String: Any]
 ) -> Path {
-    // Resolve fill: absent → model default, null → strip, explicit → parse.
-    let fill: Fill? = {
-        if !spec.keys.contains("fill") { return model.defaultFill }
-        let v = evalExprAsValue(spec["fill"], store: store, ctx: ctx)
-        switch v {
-        case .null: return nil
-        case .color(let c): return Fill(color: Color.fromHex(c) ?? .black)
-        case .string(let s):
-            if let c = Color.fromHex(s) { return Fill(color: c) }
-            return model.defaultFill
-        default: return model.defaultFill
-        }
-    }()
-    let stroke: Stroke? = {
-        if !spec.keys.contains("stroke") { return model.defaultStroke }
-        let v = evalExprAsValue(spec["stroke"], store: store, ctx: ctx)
-        switch v {
-        case .null: return nil
-        case .color(let c):
-            return Color.fromHex(c).map { Stroke(color: $0, width: 1.0) }
-        case .string(let s):
-            if let c = Color.fromHex(s) {
-                return Stroke(color: c, width: 1.0)
-            }
-            return model.defaultStroke
-        default: return model.defaultStroke
-        }
-    }()
+    let fill = resolveFillField(spec["fill"], hasKey: spec.keys.contains("fill"),
+                                 default: model.defaultFill,
+                                 store: store, ctx: ctx)
+    let stroke = resolveStrokeField(spec["stroke"], hasKey: spec.keys.contains("stroke"),
+                                     default: model.defaultStroke,
+                                     store: store, ctx: ctx)
     return Path(d: cmds, fill: fill, stroke: stroke)
+}
+
+/// Resolve an optional `fill:` field. Absent → default; null → nil;
+/// explicit color (Value or hex string) → Fill with that color.
+private func resolveFillField(
+    _ arg: Any?, hasKey: Bool, default defVal: Fill?,
+    store: StateStore, ctx: [String: Any]
+) -> Fill? {
+    guard hasKey else { return defVal }
+    let v = evalExprAsValue(arg, store: store, ctx: ctx)
+    switch v {
+    case .null: return nil
+    case .color(let c): return Color.fromHex(c).map { Fill(color: $0) } ?? defVal
+    case .string(let s): return Color.fromHex(s).map { Fill(color: $0) } ?? defVal
+    default: return defVal
+    }
+}
+
+/// Resolve an optional `stroke:` field — same semantics as
+/// resolveFillField, building a 1pt-wide Stroke with default caps/joins.
+private func resolveStrokeField(
+    _ arg: Any?, hasKey: Bool, default defVal: Stroke?,
+    store: StateStore, ctx: [String: Any]
+) -> Stroke? {
+    guard hasKey else { return defVal }
+    let v = evalExprAsValue(arg, store: store, ctx: ctx)
+    switch v {
+    case .null: return nil
+    case .color(let c):
+        return Color.fromHex(c).map { Stroke(color: $0, width: 1.0) } ?? defVal
+    case .string(let s):
+        return Color.fromHex(s).map { Stroke(color: $0, width: 1.0) } ?? defVal
+    default: return defVal
+    }
+}
+
+// MARK: - Path-editing helpers (doc.path.* effects)
+
+/// Walk layers (one level of group nesting) looking for a Path whose
+/// command list has an anchor within `radius` of (x, y). Returns
+/// `(element path, command index)`.
+private func findPathAnchorNear(
+    _ doc: Document, x: Double, y: Double, radius: Double
+) -> (ElementPath, Int)? {
+    for (li, layer) in doc.layers.enumerated() {
+        for (ci, child) in layer.children.enumerated() {
+            if case .path(let pe) = child, !pe.locked,
+               let idx = anchorIndexNear(pe.d, x: x, y: y, radius: radius) {
+                return ([li, ci], idx)
+            }
+            if case .group(let g) = child, !g.locked {
+                for (gi, gc) in g.children.enumerated() {
+                    if case .path(let pe) = gc, !pe.locked,
+                       let idx = anchorIndexNear(pe.d, x: x, y: y, radius: radius) {
+                        return ([li, ci, gi], idx)
+                    }
+                }
+            }
+        }
+    }
+    return nil
+}
+
+/// Return the command index of the anchor on `d` closest to (x, y)
+/// within `radius`. Only MoveTo / LineTo / CurveTo count as anchors.
+private func anchorIndexNear(
+    _ d: [PathCommand], x: Double, y: Double, radius: Double
+) -> Int? {
+    for (i, cmd) in d.enumerated() {
+        let pt: (Double, Double)
+        switch cmd {
+        case .moveTo(let px, let py): pt = (px, py)
+        case .lineTo(let px, let py): pt = (px, py)
+        case .curveTo(_, _, _, _, let px, let py): pt = (px, py)
+        default: continue
+        }
+        let dx = x - pt.0, dy = y - pt.1
+        if (dx * dx + dy * dy).squareRoot() <= radius {
+            return i
+        }
+    }
+    return nil
+}
+
+/// Reconstruct a Path element with replaced command list, carrying
+/// over fill/stroke/opacity/transform/lock state. Shared by all
+/// doc.path.* effects that rewrite a path's d.
+private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand]) -> Path {
+    return Path(d: cmds, fill: pe.fill, stroke: pe.stroke,
+                opacity: pe.opacity, transform: pe.transform,
+                locked: pe.locked,
+                visibility: pe.visibility,
+                blendMode: pe.blendMode,
+                mask: pe.mask,
+                fillGradient: pe.fillGradient,
+                strokeGradient: pe.strokeGradient)
+}
+
+/// Implementation of doc.path.delete_anchor_near.
+private func pathDeleteAnchorNear(
+    model: Model, x: Double, y: Double, radius: Double
+) {
+    guard let (path, anchorIdx) = findPathAnchorNear(
+        model.document, x: x, y: y, radius: radius
+    ) else { return }
+    guard case .path(let pe) = model.document.getElement(path) else { return }
+    model.snapshot()
+    if let newCmds = deleteAnchorFromPath(pe.d, anchorIdx) {
+        let newPe = pathWithCommands(pe, newCmds)
+        var doc = model.document.replaceElement(path, with: .path(newPe))
+        // Keep the path in the selection (matches native Delete-anchor).
+        var sel = doc.selection
+        sel = sel.filter { $0.path != path }
+        sel.insert(ElementSelection.all(path))
+        doc = Document(layers: doc.layers, selectedLayer: doc.selectedLayer,
+                       selection: sel,
+                       artboards: doc.artboards,
+                       artboardOptions: doc.artboardOptions)
+        model.document = doc
+    } else {
+        // Path too small — remove the element entirely.
+        model.document = model.document.deleteElement(path)
+    }
+}
+
+/// Implementation of doc.path.insert_anchor_on_segment_near.
+private func pathInsertAnchorOnSegmentNear(
+    model: Model, x: Double, y: Double, radius: Double
+) {
+    var best: (ElementPath, Int, Double, Double)? = nil
+    func tryPath(_ pe: Path, at path: ElementPath) {
+        guard let (segIdx, t) = closestSegmentAndT(pe.d, x, y) else { return }
+        let dist = projectionDistance(pe.d, segIdx: segIdx, x: x, y: y)
+        if let cur = best, cur.3 <= dist { return }
+        best = (path, segIdx, t, dist)
+    }
+    for (li, layer) in model.document.layers.enumerated() {
+        for (ci, child) in layer.children.enumerated() {
+            if case .path(let pe) = child, !pe.locked {
+                tryPath(pe, at: [li, ci])
+            }
+            if case .group(let g) = child, !g.locked {
+                for (gi, gc) in g.children.enumerated() {
+                    if case .path(let pe) = gc, !pe.locked {
+                        tryPath(pe, at: [li, ci, gi])
+                    }
+                }
+            }
+        }
+    }
+    guard let hit = best, hit.3 <= radius else { return }
+    guard case .path(let pe) = model.document.getElement(hit.0) else { return }
+    model.snapshot()
+    let ins = insertPointInPath(pe.d, hit.1, hit.2)
+    let newPe = pathWithCommands(pe, ins.commands)
+    model.document = model.document.replaceElement(hit.0, with: .path(newPe))
+}
+
+/// Re-project (x, y) onto the segment at `segIdx` to recover the
+/// distance value (closestSegmentAndT returns (idx, t) only).
+private func projectionDistance(
+    _ d: [PathCommand], segIdx: Int, x: Double, y: Double
+) -> Double {
+    var cx: Double = 0, cy: Double = 0
+    for (i, cmd) in d.enumerated() {
+        switch cmd {
+        case .moveTo(let mx, let my): cx = mx; cy = my
+        case .lineTo(let lx, let ly):
+            if i == segIdx {
+                let (dist, _) = closestOnLine(cx, cy, lx, ly, x, y)
+                return dist
+            }
+            cx = lx; cy = ly
+        case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey):
+            if i == segIdx {
+                let (dist, _) = closestOnCubic(cx, cy, x1, y1, x2, y2, ex, ey, x, y)
+                return dist
+            }
+            cx = ex; cy = ey
+        default: break
+        }
+    }
+    return .infinity
+}
+
+/// Implementation of doc.path.erase_at_rect.
+private func pathEraseAtRect(
+    model: Model, lastX: Double, lastY: Double,
+    x: Double, y: Double, eraserSize: Double
+) {
+    let minX = min(lastX, x) - eraserSize
+    let minY = min(lastY, y) - eraserSize
+    let maxX = max(lastX, x) + eraserSize
+    let maxY = max(lastY, y) + eraserSize
+
+    var newLayers = model.document.layers
+    var changed = false
+    for li in 0..<newLayers.count {
+        let layer = newLayers[li]
+        var newChildren: [Element] = []
+        var layerChanged = false
+        for child in layer.children {
+            guard case .path(let pe) = child, !pe.locked else {
+                newChildren.append(child)
+                continue
+            }
+            let flat = flattenPathCommands(pe.d)
+            guard flat.count >= 2 else {
+                newChildren.append(child)
+                continue
+            }
+            guard let hit = findEraserHit(
+                flat, minX, minY, maxX, maxY
+            ) else {
+                newChildren.append(child)
+                continue
+            }
+            let bounds = pe.bounds
+            if bounds.width <= eraserSize * 2 && bounds.height <= eraserSize * 2 {
+                // bbox fits inside the eraser — drop entirely.
+                layerChanged = true
+                continue
+            }
+            let isClosed = pe.d.contains { if case .closePath = $0 { return true }; return false }
+            let results = splitPathAtEraser(pe.d, hit, isClosed)
+            for cmds in results where cmds.count >= 2 {
+                let open = cmds.filter { if case .closePath = $0 { return false }; return true }
+                newChildren.append(.path(pathWithCommands(pe, open)))
+            }
+            layerChanged = true
+        }
+        if layerChanged {
+            newLayers[li] = Layer(name: layer.name, children: newChildren,
+                                   opacity: layer.opacity, transform: layer.transform,
+                                   locked: layer.locked,
+                                   visibility: layer.visibility,
+                                   blendMode: layer.blendMode,
+                                   isolatedBlending: layer.isolatedBlending,
+                                   knockoutGroup: layer.knockoutGroup,
+                                   mask: layer.mask)
+            changed = true
+        }
+    }
+    if changed {
+        let doc = model.document
+        model.document = Document(
+            layers: newLayers, selectedLayer: doc.selectedLayer,
+            selection: [],
+            artboards: doc.artboards,
+            artboardOptions: doc.artboardOptions
+        )
+    }
+}
+
+/// Implementation of doc.path.smooth_at_cursor.
+private func pathSmoothAtCursor(
+    model: Model, x: Double, y: Double, radius: Double, fitError: Double
+) {
+    let radiusSq = radius * radius
+    var newDoc = model.document
+    var changed = false
+    for es in model.document.selection {
+        let path = es.path
+        guard case .path(let pe) = model.document.getElement(path),
+              !pe.locked, pe.d.count >= 2 else { continue }
+        let (flat, cmdMap) = flattenWithCmdMap(pe.d)
+        guard flat.count >= 2 else { continue }
+        var firstHit: Int? = nil
+        var lastHit: Int? = nil
+        for (i, pt) in flat.enumerated() {
+            let dx = pt.0 - x, dy = pt.1 - y
+            if dx * dx + dy * dy <= radiusSq {
+                if firstHit == nil { firstHit = i }
+                lastHit = i
+            }
+        }
+        guard let fh = firstHit, let lh = lastHit else { continue }
+        let firstCmd = cmdMap[fh], lastCmd = cmdMap[lh]
+        guard firstCmd < lastCmd else { continue }
+        let rangeFlat: [(Double, Double)] = flat.enumerated()
+            .filter { (i, _) in cmdMap[i] >= firstCmd && cmdMap[i] <= lastCmd }
+            .map { $0.1 }
+        let startPt = cmdStartPoint(pe.d, firstCmd)
+        var pointsToFit = [startPt]
+        pointsToFit.append(contentsOf: rangeFlat)
+        guard pointsToFit.count >= 2 else { continue }
+        let segments = fitCurve(points: pointsToFit, error: fitError)
+        guard !segments.isEmpty else { continue }
+        var newCmds: [PathCommand] = []
+        newCmds.append(contentsOf: pe.d[..<firstCmd])
+        for seg in segments {
+            newCmds.append(.curveTo(
+                x1: seg.c1x, y1: seg.c1y,
+                x2: seg.c2x, y2: seg.c2y,
+                x: seg.p2x, y: seg.p2y))
+        }
+        newCmds.append(contentsOf: pe.d[(lastCmd + 1)...])
+        guard newCmds.count < pe.d.count else { continue }
+        newDoc = newDoc.replaceElement(path, with: .path(pathWithCommands(pe, newCmds)))
+        changed = true
+    }
+    if changed {
+        model.document = newDoc
+    }
+}
+
+/// Build an Element from a `{ type, ...params }` spec. Supports rect
+/// (incl. rx/ry), line, polygon (regular N-gon from first-edge spec),
+/// and star (inscribed in an axis-aligned bounding box). Unknown types
+/// return nil.
+private func buildElement(
+    _ spec: [String: Any], model: Model,
+    store: StateStore, ctx: [String: Any]
+) -> Element? {
+    guard let type = spec["type"] as? String else { return nil }
+    let hasFill = spec.keys.contains("fill")
+    let hasStroke = spec.keys.contains("stroke")
+    let fill = resolveFillField(spec["fill"], hasKey: hasFill,
+                                 default: model.defaultFill,
+                                 store: store, ctx: ctx)
+    let stroke = resolveStrokeField(spec["stroke"], hasKey: hasStroke,
+                                     default: model.defaultStroke,
+                                     store: store, ctx: ctx)
+    switch type {
+    case "rect":
+        let x = evalNumber(spec["x"], store: store, ctx: ctx)
+        let y = evalNumber(spec["y"], store: store, ctx: ctx)
+        let w = evalNumber(spec["width"], store: store, ctx: ctx)
+        let h = evalNumber(spec["height"], store: store, ctx: ctx)
+        let rx = evalNumber(spec["rx"], store: store, ctx: ctx)
+        let ry = evalNumber(spec["ry"], store: store, ctx: ctx)
+        return .rect(Rect(x: x, y: y, width: w, height: h,
+                          rx: rx, ry: ry, fill: fill, stroke: stroke))
+    case "line":
+        let x1 = evalNumber(spec["x1"], store: store, ctx: ctx)
+        let y1 = evalNumber(spec["y1"], store: store, ctx: ctx)
+        let x2 = evalNumber(spec["x2"], store: store, ctx: ctx)
+        let y2 = evalNumber(spec["y2"], store: store, ctx: ctx)
+        return .line(Line(x1: x1, y1: y1, x2: x2, y2: y2, stroke: stroke))
+    case "polygon":
+        let x1 = evalNumber(spec["x1"], store: store, ctx: ctx)
+        let y1 = evalNumber(spec["y1"], store: store, ctx: ctx)
+        let x2 = evalNumber(spec["x2"], store: store, ctx: ctx)
+        let y2 = evalNumber(spec["y2"], store: store, ctx: ctx)
+        let sidesRaw = Int(evalNumber(spec["sides"], store: store, ctx: ctx))
+        let sides = sidesRaw <= 0 ? 5 : sidesRaw
+        let pts = regularPolygonPoints(x1, y1, x2, y2, sides)
+        return .polygon(Polygon(points: pts, fill: fill, stroke: stroke))
+    case "star":
+        let x1 = evalNumber(spec["x1"], store: store, ctx: ctx)
+        let y1 = evalNumber(spec["y1"], store: store, ctx: ctx)
+        let x2 = evalNumber(spec["x2"], store: store, ctx: ctx)
+        let y2 = evalNumber(spec["y2"], store: store, ctx: ctx)
+        let raw = Int(evalNumber(spec["points"], store: store, ctx: ctx))
+        let n = raw <= 0 ? 5 : raw
+        let pts = starPoints(x1, y1, x2, y2, n)
+        return .polygon(Polygon(points: pts, fill: fill, stroke: stroke))
+    default:
+        return nil
+    }
 }
 
 /// Evaluate a Value-returning arg, handling nil / number-literal /
