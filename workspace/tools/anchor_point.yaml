@@ -1,0 +1,69 @@
+# Anchor Point (Convert Anchor Point) tool.
+#
+# Three interactions, all committed on mouseup:
+#   - Click on a smooth anchor → convert to corner (collapse handles).
+#   - Drag on a corner anchor → convert to smooth with handles at
+#     the release position.
+#   - Drag on a bezier control handle → move that handle
+#     independently (cusp).
+#
+# on_mousedown latches what was hit into tool state via
+# doc.path.probe_anchor_hit. on_mouseup reads the latched mode
+# and commits the corresponding mutation. No live preview in the
+# port — native had a per-frame preview; the final document state
+# matches regardless, the user just doesn't see the handles while
+# dragging. Adding live preview is a follow-up if the UX warrants.
+#
+# Validated against schema/tool.schema.json.
+
+id: anchor_point
+cursor: crosshair
+menu_label: "Anchor Point Tool"
+shortcut: "C"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, pressed_smooth, pressed_corner, pressed_handle]
+  # doc.path.probe_anchor_hit writes these when it hits something.
+  # Types:
+  #   hit_path        Path value (serialized __path__ dict)
+  #   hit_anchor_idx  number (index into control_points())
+  #   handle_type     "in" | "out" (only when mode == "pressed_handle")
+  hit_path: { default: null }
+  hit_anchor_idx: { default: 0 }
+  handle_type: { default: "" }
+  # Press position — commit uses it as the origin when computing
+  # deltas (handle-move case) or the drag-from anchor position
+  # (corner-to-smooth case uses press_x/y for origin comparison only).
+  press_x: { default: 0 }
+  press_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.anchor_point.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.anchor_point.mode: "'idle'" }
+
+  on_mousedown:
+    - "doc.path.probe_anchor_hit":
+        x: "event.x"
+        y: "event.y"
+        hit_radius: "8"
+    - set: { tool.anchor_point.press_x: "event.x" }
+    - set: { tool.anchor_point.press_y: "event.y" }
+
+  # No on_mousemove: live-preview is a follow-up. The final result
+  # lands in on_mouseup using the release position as the target.
+
+  on_mouseup:
+    - if: "tool.anchor_point.mode != 'idle'"
+      then:
+        - "doc.path.commit_anchor_edit":
+            origin_x: "tool.anchor_point.press_x"
+            origin_y: "tool.anchor_point.press_y"
+            target_x: "event.x"
+            target_y: "event.y"
+    - set: { tool.anchor_point.mode: "'idle'" }
