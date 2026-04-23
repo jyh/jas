@@ -28,33 +28,31 @@ use crate::tools::star_tool::StarTool;
 use crate::tools::rect_tool::RectTool;
 use crate::tools::rounded_rect_tool::RoundedRectTool;
 use crate::tools::lasso_tool::LassoTool;
-use crate::tools::selection_tool::SelectionTool;
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
 use crate::tools::yaml_tool::YamlTool;
 
-/// Build the canvas Selection tool. Tries the YAML runtime first
-/// (reads `workspace/tools/selection.yaml` via the bundled
-/// `workspace.json`); falls back to the native [`SelectionTool`] if
-/// the YAML spec is missing or malformed.
+/// Build the canvas Selection tool from `workspace/tools/selection.yaml`.
 ///
 /// Per RUST_TOOL_RUNTIME.md, Selection is the validation target for
-/// the YAML tool runtime: behavior-for-behavior parity is proven by
-/// the `selection_parity_*` tests in `tools/yaml_tool.rs`, so the
-/// YAML path is the primary choice here. The native fallback is a
-/// safety rail for environments where workspace.json is unexpectedly
-/// unavailable at build time.
+/// the YAML tool runtime — the native selection_tool.rs was deleted
+/// in the same branch. workspace.json is embedded at build time via
+/// `include_str!`, so all three of these expect() failures would
+/// indicate a build-time invariant violation (workspace.json missing,
+/// corrupted, or schema-drifted from selection.yaml).
 fn selection_tool() -> Box<dyn CanvasTool> {
     use crate::interpreter::workspace::Workspace;
-    if let Some(ws) = Workspace::load() {
-        if let Some(spec) = ws.data().get("tools").and_then(|t| t.get("selection")) {
-            if let Some(yaml_tool) = YamlTool::from_workspace_tool(spec) {
-                return Box::new(yaml_tool);
-            }
-        }
-    }
-    Box::new(SelectionTool::new())
+    let ws = Workspace::load()
+        .expect("embedded workspace.json must parse");
+    let spec = ws
+        .data()
+        .get("tools")
+        .and_then(|t| t.get("selection"))
+        .expect("workspace.json must declare a selection tool");
+    let yaml_tool = YamlTool::from_workspace_tool(spec)
+        .expect("selection tool spec must parse into ToolSpec");
+    Box::new(yaml_tool)
 }
 
 /// Shared application state handle, available via `use_context::<AppHandle>()`.
