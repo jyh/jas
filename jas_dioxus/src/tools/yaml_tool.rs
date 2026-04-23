@@ -18,7 +18,7 @@ use crate::document::model::Model;
 use crate::interpreter::doc_primitives;
 use crate::interpreter::effects::run_effects;
 use crate::interpreter::state_store::StateStore;
-use crate::tools::tool::CanvasTool;
+use crate::tools::tool::{CanvasTool, KeyMods};
 
 /// Parsed shape of a tool YAML spec.
 ///
@@ -306,6 +306,45 @@ impl CanvasTool for YamlTool {
         self.spec.cursor.clone()
     }
 
+    fn on_double_click(&mut self, model: &mut Model, x: f64, y: f64) {
+        // YAML handler key is `on_dblclick` to match the tool schema
+        // (schema/tool.schema.json) — DOM / native frameworks also
+        // use the shorter spelling.
+        let payload = serde_json::json!({
+            "type": "dblclick",
+            "x": x,
+            "y": y,
+        });
+        self.dispatch("on_dblclick", payload, model);
+    }
+
+    fn on_key_event(
+        &mut self,
+        model: &mut Model,
+        key: &str,
+        mods: KeyMods,
+    ) -> bool {
+        // Dispatch to on_keydown if the spec declares one. Return
+        // true to signal consumption when we did dispatch — false
+        // otherwise so the host keeps bubbling the event (e.g. to
+        // menu accelerators) when the tool's YAML doesn't handle it.
+        if self.spec.handler("on_keydown").is_empty() {
+            return false;
+        }
+        let payload = serde_json::json!({
+            "type": "keydown",
+            "key": key,
+            "modifiers": {
+                "shift": mods.shift,
+                "alt":   mods.alt,
+                "ctrl":  mods.ctrl,
+                "meta":  mods.meta,
+            },
+        });
+        self.dispatch("on_keydown", payload, model);
+        true
+    }
+
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
         let Some(overlay) = self.spec.overlay.as_ref() else {
             return;
@@ -337,6 +376,7 @@ impl CanvasTool for YamlTool {
             "star" => draw_star_overlay(ctx, render, &eval_ctx),
             "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
             "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render),
+            "pen_overlay" => draw_pen_overlay(ctx, render, &eval_ctx),
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -583,6 +623,158 @@ fn draw_buffer_polyline_overlay(
     ctx.stroke();
     if style.stroke_dasharray.is_some() {
         let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+}
+
+/// Draw the Pen tool's in-progress overlay. Fields:
+///   buffer: <anchor-buffer name>
+///   mouse_x, mouse_y: current cursor (for the preview curve)
+///   close_radius: px within which the cursor shows the close
+///                 indicator (also decides the close-hit test)
+///   placing: bool — true when not currently dragging a handle,
+///            which is when the preview curve is drawn
+///
+/// Mirrors the inlined overlay logic from the deleted PenTool::draw_overlay.
+fn draw_pen_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let name = render
+        .get("buffer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if name.is_empty() {
+        return;
+    }
+    let anchors: Vec<crate::interpreter::anchor_buffers::Anchor> =
+        crate::interpreter::anchor_buffers::with_anchors(name, |a| a.to_vec());
+    if anchors.is_empty() {
+        return;
+    }
+    let mouse_x = eval_number_field(eval_ctx, render.get("mouse_x"));
+    let mouse_y = eval_number_field(eval_ctx, render.get("mouse_y"));
+    let close_radius =
+        eval_number_field(eval_ctx, render.get("close_radius")).max(1.0);
+    let placing = match render.get("placing") {
+        Some(serde_json::Value::String(s)) => {
+            matches!(
+                crate::interpreter::expr::eval(s, eval_ctx),
+                crate::interpreter::expr_types::Value::Bool(true),
+            )
+        }
+        Some(serde_json::Value::Bool(b)) => *b,
+        _ => false,
+    };
+
+    // 1. Committed curves between consecutive anchors.
+    if anchors.len() >= 2 {
+        ctx.set_stroke_style_str("black");
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.move_to(anchors[0].x, anchors[0].y);
+        for i in 1..anchors.len() {
+            let prev = &anchors[i - 1];
+            let curr = &anchors[i];
+            ctx.bezier_curve_to(
+                prev.hx_out, prev.hy_out,
+                curr.hx_in,  curr.hy_in,
+                curr.x, curr.y,
+            );
+        }
+        ctx.stroke();
+    }
+
+    // 2. Preview curve from last anchor to mouse. Only when we're
+    //    not dragging the last anchor's handle — during drag, the
+    //    live-updating last anchor's handles already show the shape.
+    if placing {
+        let last = anchors.last().unwrap();
+        let first = &anchors[0];
+        let near_start = anchors.len() >= 2
+            && (mouse_x - first.x).hypot(mouse_y - first.y) <= close_radius;
+
+        ctx.set_stroke_style_str("rgb(100,100,100)");
+        ctx.set_line_width(1.0);
+        let dash = js_sys::Array::of2(&4.0.into(), &4.0.into());
+        let _ = ctx.set_line_dash(&dash);
+
+        ctx.begin_path();
+        ctx.move_to(last.x, last.y);
+        if near_start {
+            ctx.bezier_curve_to(
+                last.hx_out, last.hy_out,
+                first.hx_in, first.hy_in,
+                first.x, first.y,
+            );
+        } else {
+            ctx.bezier_curve_to(
+                last.hx_out, last.hy_out,
+                mouse_x, mouse_y,
+                mouse_x, mouse_y,
+            );
+        }
+        ctx.stroke();
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+
+    // 3. Handle lines + 4. Anchor squares.
+    let sel_color = "rgb(0,120,255)";
+    let handle_r = 3.0;
+    let anchor_half = 5.0; // HANDLE_DRAW_SIZE / 2
+    for a in &anchors {
+        if a.smooth {
+            ctx.set_stroke_style_str(sel_color);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            ctx.move_to(a.hx_in, a.hy_in);
+            ctx.line_to(a.hx_out, a.hy_out);
+            ctx.stroke();
+
+            ctx.set_fill_style_str("white");
+            ctx.set_stroke_style_str(sel_color);
+            ctx.begin_path();
+            let _ = ctx.arc(
+                a.hx_in, a.hy_in, handle_r,
+                0.0, std::f64::consts::TAU,
+            );
+            ctx.fill();
+            ctx.stroke();
+            ctx.begin_path();
+            let _ = ctx.arc(
+                a.hx_out, a.hy_out, handle_r,
+                0.0, std::f64::consts::TAU,
+            );
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        ctx.set_fill_style_str(sel_color);
+        ctx.set_stroke_style_str(sel_color);
+        ctx.fill_rect(
+            a.x - anchor_half, a.y - anchor_half,
+            anchor_half * 2.0, anchor_half * 2.0,
+        );
+        ctx.stroke_rect(
+            a.x - anchor_half, a.y - anchor_half,
+            anchor_half * 2.0, anchor_half * 2.0,
+        );
+    }
+
+    // 5. Close indicator: green circle around the first anchor when
+    //    the cursor is within close_radius of it.
+    if anchors.len() >= 2 {
+        let first = &anchors[0];
+        if (mouse_x - first.x).hypot(mouse_y - first.y) <= close_radius {
+            ctx.set_stroke_style_str("rgb(0,200,0)");
+            ctx.set_line_width(2.0);
+            ctx.begin_path();
+            let _ = ctx.arc(
+                first.x, first.y, anchor_half + 2.0,
+                0.0, std::f64::consts::TAU,
+            );
+            ctx.stroke();
+        }
     }
 }
 
@@ -1536,6 +1728,147 @@ mod tests {
         } else {
             panic!("expected Rect");
         }
+    }
+
+    // ── Pen tool behavioral tests ──────────────────────────────────
+    //
+    // Native PenTool had no unit tests. These cover the externally-
+    // observable outcomes: click-click-click creates a polyline,
+    // click-drag creates a smooth curve, click-near-first closes,
+    // double-click and Escape commit open.
+
+    use crate::tools::tool::KeyMods;
+
+    fn pen_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("pen")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn pen_parity_three_clicks_then_double_click_creates_polyline() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pen_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Click, click, click — each mouseup lands mode=placing and
+        // leaves the anchor in the buffer. Handles stay at anchor
+        // position (corner anchors).
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        tool.on_press(&mut model, 50.0, 10.0, false, false);
+        tool.on_release(&mut model, 50.0, 10.0, false, false);
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        // Double-click (the second press pushed a fourth anchor; the
+        // dblclick handler pops it, leaving 3 anchors).
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        tool.on_double_click(&mut model, 50.0, 50.0);
+
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Path(pe) = &*children[0] {
+            // MoveTo + 2 CurveTos (3 anchors -> 2 segments). No
+            // ClosePath because dblclick commits open.
+            assert_eq!(pe.d.len(), 3);
+            assert!(matches!(pe.d[0], PathCommand::MoveTo { x: 10.0, y: 10.0 }));
+            assert!(matches!(pe.d[1], PathCommand::CurveTo { .. }));
+            assert!(matches!(pe.d[2], PathCommand::CurveTo { .. }));
+            assert!(!matches!(pe.d.last().unwrap(), PathCommand::ClosePath));
+        } else {
+            panic!("expected Path");
+        }
+    }
+
+    #[test]
+    fn pen_parity_click_drag_sets_out_handle() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pen_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // First anchor: click + drag out to (60, 10). on_mousemove
+        // sets the handle; first anchor's out = (60, 10), in mirrors
+        // to (-40, 10).
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        tool.on_move(&mut model, 60.0, 10.0, false, false, true);
+        tool.on_release(&mut model, 60.0, 10.0, false, false);
+        // Second anchor: plain click at (50, 50).
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        // Escape commits open — testing the on_keydown path too.
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Path(pe) = &*children[0] {
+            // d[0] = MoveTo(10,10); d[1] = CurveTo(prev_out=(60,10),
+            // curr_in=(50,50), curr=(50,50)) because second anchor
+            // is a corner.
+            assert_eq!(pe.d.len(), 2);
+            if let PathCommand::CurveTo { x1, y1, x, y, .. } = pe.d[1] {
+                assert_eq!(x1, 60.0, "prev anchor out-handle x");
+                assert_eq!(y1, 10.0, "prev anchor out-handle y");
+                assert_eq!(x, 50.0);
+                assert_eq!(y, 50.0);
+            } else {
+                panic!("expected CurveTo");
+            }
+        }
+    }
+
+    #[test]
+    fn pen_parity_click_near_first_closes() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pen_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Three corner anchors.
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        tool.on_press(&mut model, 50.0, 10.0, false, false);
+        tool.on_release(&mut model, 50.0, 10.0, false, false);
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        // Fourth click within 8 px of the first anchor (10, 10).
+        tool.on_press(&mut model, 11.0, 11.0, false, false);
+        tool.on_release(&mut model, 11.0, 11.0, false, false);
+
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "should commit on close-click");
+        if let Element::Path(pe) = &*children[0] {
+            // Should end with ClosePath.
+            assert!(matches!(
+                pe.d.last().unwrap(),
+                PathCommand::ClosePath,
+            ));
+        }
+    }
+
+    #[test]
+    fn pen_parity_escape_without_enough_anchors_discards() {
+        let Some(mut tool) = pen_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // One anchor — not enough to make a path.
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "single anchor should not produce a path",
+        );
     }
 
     // ── Pencil tool behavioral tests ───────────────────────────────
