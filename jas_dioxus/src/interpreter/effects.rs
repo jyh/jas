@@ -760,6 +760,41 @@ fn run_doc_effect(
                 Controller::add_element(model, elem);
             }
         }
+        "doc.path.probe_anchor_hit" => {
+            // AnchorPoint's dispatch layer. Hit-test in order:
+            //   1. bezier control handle  -> tool.anchor_point.mode = "pressed_handle"
+            //   2. smooth anchor point    -> tool.anchor_point.mode = "pressed_smooth"
+            //   3. corner anchor point    -> tool.anchor_point.mode = "pressed_corner"
+            //   4. nothing                -> tool.anchor_point.mode = "idle"
+            // On hit, also stashes tool.anchor_point.hit_path (as a
+            // serialized Path value) and hit_anchor_idx. For handle
+            // hits, additionally writes handle_type ("in" or "out").
+            // The YAML commit handler branches on mode to apply the
+            // right mutation on mouseup.
+            if let serde_json::Value::Object(args) = spec {
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                let hit_radius = eval_number(args.get("hit_radius"), store, ctx);
+                let radius = if hit_radius == 0.0 { 8.0 } else { hit_radius };
+                path_probe_anchor_hit(model, store, x, y, radius);
+            }
+        }
+        "doc.path.commit_anchor_edit" => {
+            // Reads the latched hit (tool.anchor_point.hit_path +
+            // hit_anchor_idx + optional handle_type) and applies the
+            // mutation corresponding to tool.anchor_point.mode:
+            //   pressed_smooth → convert_smooth_to_corner
+            //   pressed_corner → convert_corner_to_smooth at (target_x, target_y)
+            //   pressed_handle → move_path_handle_independent by delta
+            // Snapshots once on commit. No-op when mode is "idle".
+            if let serde_json::Value::Object(args) = spec {
+                let target_x = eval_number(args.get("target_x"), store, ctx);
+                let target_y = eval_number(args.get("target_y"), store, ctx);
+                let origin_x = eval_number(args.get("origin_x"), store, ctx);
+                let origin_y = eval_number(args.get("origin_y"), store, ctx);
+                path_commit_anchor_edit(model, store, origin_x, origin_y, target_x, target_y);
+            }
+        }
         "doc.path.delete_anchor_near" => {
             // Find the anchor under (x, y) within hit_radius on any
             // unlocked Path in the document (searches layers +
@@ -1123,6 +1158,244 @@ fn anchor_index_near(
         }
     }
     None
+}
+
+/// Hit-test a bezier control handle on any Path element in the
+/// document. Returns (element path, PathElem clone, anchor index,
+/// "in" | "out").
+fn find_path_handle_near(
+    doc: &crate::document::document::Document,
+    x: f64, y: f64, radius: f64,
+) -> Option<(ElementPath, crate::geometry::element::PathElem, usize, &'static str)> {
+    use crate::geometry::element::{path_handle_positions, control_points};
+    fn check(
+        pe: &crate::geometry::element::PathElem,
+        path: &[usize],
+        x: f64, y: f64, radius: f64,
+    ) -> Option<(ElementPath, crate::geometry::element::PathElem, usize, &'static str)> {
+        let anchors = control_points(&Element::Path(pe.clone()));
+        for (ai, _) in anchors.iter().enumerate() {
+            let (h_in, h_out) = path_handle_positions(&pe.d, ai);
+            if let Some((hx, hy)) = h_in {
+                if (x - hx).hypot(y - hy) < radius {
+                    return Some((path.to_vec(), pe.clone(), ai, "in"));
+                }
+            }
+            if let Some((hx, hy)) = h_out {
+                if (x - hx).hypot(y - hy) < radius {
+                    return Some((path.to_vec(), pe.clone(), ai, "out"));
+                }
+            }
+        }
+        None
+    }
+    for (li, layer) in doc.layers.iter().enumerate() {
+        if let Some(children) = layer.children() {
+            for (ci, child) in children.iter().enumerate() {
+                if let Element::Path(pe) = &**child {
+                    if let Some(r) = check(pe, &[li, ci], x, y, radius) {
+                        return Some(r);
+                    }
+                }
+                if let Element::Group(g) = &**child {
+                    if child.common().locked { continue; }
+                    for (gi, gc) in g.children.iter().enumerate() {
+                        if let Element::Path(pe) = &**gc {
+                            if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
+                                return Some(r);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Hit-test a path anchor using the control_points() enumeration.
+/// Returns (element path, PathElem clone, anchor index).
+fn find_path_anchor_by_cp_index(
+    doc: &crate::document::document::Document,
+    x: f64, y: f64, radius: f64,
+) -> Option<(ElementPath, crate::geometry::element::PathElem, usize)> {
+    use crate::geometry::element::control_points;
+    fn check(
+        pe: &crate::geometry::element::PathElem,
+        path: &[usize],
+        x: f64, y: f64, radius: f64,
+    ) -> Option<(ElementPath, crate::geometry::element::PathElem, usize)> {
+        let anchors = control_points(&Element::Path(pe.clone()));
+        for (i, &(ax, ay)) in anchors.iter().enumerate() {
+            if (x - ax).hypot(y - ay) < radius {
+                return Some((path.to_vec(), pe.clone(), i));
+            }
+        }
+        None
+    }
+    for (li, layer) in doc.layers.iter().enumerate() {
+        if let Some(children) = layer.children() {
+            for (ci, child) in children.iter().enumerate() {
+                if let Element::Path(pe) = &**child {
+                    if let Some(r) = check(pe, &[li, ci], x, y, radius) {
+                        return Some(r);
+                    }
+                }
+                if let Element::Group(g) = &**child {
+                    if child.common().locked { continue; }
+                    for (gi, gc) in g.children.iter().enumerate() {
+                        if let Element::Path(pe) = &**gc {
+                            if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
+                                return Some(r);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Write a serialized Path into a tool-scope field under the
+/// anchor_point tool id.
+fn set_tool_anchor_point_path(
+    store: &mut StateStore,
+    key: &str,
+    path: &ElementPath,
+) {
+    let ids: Vec<serde_json::Value> = path
+        .iter()
+        .map(|&i| serde_json::json!(i as u64))
+        .collect();
+    store.set_tool(
+        "anchor_point", key,
+        serde_json::json!({"__path__": ids}),
+    );
+}
+
+/// Read a serialized Path from the anchor_point tool scope. Returns
+/// None when the field is missing or malformed.
+fn get_tool_anchor_point_path(
+    store: &StateStore, key: &str,
+) -> Option<ElementPath> {
+    let v = store.get_tool("anchor_point", key);
+    let arr = v.as_object()?.get("__path__")?.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for n in arr {
+        out.push(n.as_u64()? as usize);
+    }
+    Some(out)
+}
+
+/// Implementation of doc.path.probe_anchor_hit.
+fn path_probe_anchor_hit(
+    model: &Model,
+    store: &mut StateStore,
+    x: f64, y: f64, radius: f64,
+) {
+    use crate::geometry::element::is_smooth_point;
+    // 1. handle hit
+    if let Some((path, _pe, anchor_idx, handle_type)) =
+        find_path_handle_near(model.document(), x, y, radius)
+    {
+        store.set_tool("anchor_point", "mode",
+            serde_json::json!("pressed_handle"));
+        store.set_tool("anchor_point", "handle_type",
+            serde_json::json!(handle_type));
+        store.set_tool("anchor_point", "hit_anchor_idx",
+            serde_json::json!(anchor_idx));
+        set_tool_anchor_point_path(store, "hit_path", &path);
+        return;
+    }
+    // 2. anchor hit — branch on smooth vs corner
+    if let Some((path, pe, anchor_idx)) =
+        find_path_anchor_by_cp_index(model.document(), x, y, radius)
+    {
+        let mode = if is_smooth_point(&pe.d, anchor_idx) {
+            "pressed_smooth"
+        } else {
+            "pressed_corner"
+        };
+        store.set_tool("anchor_point", "mode",
+            serde_json::json!(mode));
+        store.set_tool("anchor_point", "hit_anchor_idx",
+            serde_json::json!(anchor_idx));
+        set_tool_anchor_point_path(store, "hit_path", &path);
+        return;
+    }
+    store.set_tool("anchor_point", "mode", serde_json::json!("idle"));
+}
+
+/// Implementation of doc.path.commit_anchor_edit.
+fn path_commit_anchor_edit(
+    model: &mut Model,
+    store: &StateStore,
+    origin_x: f64, origin_y: f64,
+    target_x: f64, target_y: f64,
+) {
+    use crate::geometry::element::{
+        convert_corner_to_smooth, convert_smooth_to_corner,
+        move_path_handle_independent, PathElem,
+    };
+    let mode = store.get_tool("anchor_point", "mode")
+        .as_str().unwrap_or("idle").to_string();
+    if mode == "idle" {
+        return;
+    }
+    let path = match get_tool_anchor_point_path(store, "hit_path") {
+        Some(p) => p,
+        None => return,
+    };
+    let anchor_idx = store
+        .get_tool("anchor_point", "hit_anchor_idx")
+        .as_u64()
+        .unwrap_or(0) as usize;
+    let pe: PathElem = match model.document().get_element(&path) {
+        Some(Element::Path(pe)) => pe.clone(),
+        _ => return,
+    };
+    match mode.as_str() {
+        "pressed_smooth" => {
+            model.snapshot();
+            let new_pe = convert_smooth_to_corner(&pe, anchor_idx);
+            let doc = model.document().replace_element(
+                &path, Element::Path(new_pe));
+            model.set_document(doc);
+        }
+        "pressed_corner" => {
+            // Only commit when the drag moved past a tiny threshold
+            // (matches native's > 1 px guard). A plain click on a
+            // corner anchor was historically a no-op.
+            let moved = (target_x - origin_x).hypot(target_y - origin_y);
+            if moved <= 1.0 {
+                return;
+            }
+            model.snapshot();
+            let new_pe = convert_corner_to_smooth(
+                &pe, anchor_idx, target_x, target_y);
+            let doc = model.document().replace_element(
+                &path, Element::Path(new_pe));
+            model.set_document(doc);
+        }
+        "pressed_handle" => {
+            let handle_type = store
+                .get_tool("anchor_point", "handle_type")
+                .as_str().unwrap_or("").to_string();
+            let dx = target_x - origin_x;
+            let dy = target_y - origin_y;
+            if dx.abs() <= 0.5 && dy.abs() <= 0.5 {
+                return;
+            }
+            model.snapshot();
+            let new_pe = move_path_handle_independent(
+                &pe, anchor_idx, &handle_type, dx, dy);
+            let doc = model.document().replace_element(
+                &path, Element::Path(new_pe));
+            model.set_document(doc);
+        }
+        _ => {}
+    }
 }
 
 /// Implementation of doc.path.delete_anchor_near.
