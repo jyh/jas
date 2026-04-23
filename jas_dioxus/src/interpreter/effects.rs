@@ -15,7 +15,7 @@ use crate::document::controller::Controller;
 use crate::document::document::ElementPath;
 use crate::document::model::Model;
 use crate::geometry::element::{
-    Color, CommonProps, Element, Fill, RectElem, Stroke,
+    Color, CommonProps, Element, Fill, LineElem, RectElem, Stroke,
 };
 
 /// Execute a list of effects.
@@ -672,8 +672,27 @@ fn build_element(
                 stroke_gradient: None,
             }))
         }
-        // Other element types (ellipse, line, path, …) land alongside
-        // their tool ports.
+        "line" => {
+            let x1 = eval_number(spec.get("x1"), store, ctx);
+            let y1 = eval_number(spec.get("y1"), store, ctx);
+            let x2 = eval_number(spec.get("x2"), store, ctx);
+            let y2 = eval_number(spec.get("y2"), store, ctx);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            Some(Element::Line(LineElem {
+                x1,
+                y1,
+                x2,
+                y2,
+                stroke,
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+                stroke_gradient: None,
+            }))
+        }
+
+        // Other element types (ellipse, polygon, path, …) land
+        // alongside their tool ports.
         _ => None,
     }
 }

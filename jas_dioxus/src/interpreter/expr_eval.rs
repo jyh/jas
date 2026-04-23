@@ -874,6 +874,35 @@ fn eval_func(
             }
         }
 
+        // sqrt(x) -> Number | Null
+        "sqrt" => {
+            if args.len() != 1 {
+                return Value::Null;
+            }
+            match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) if n >= 0.0 => Value::Number(n.sqrt()),
+                _ => Value::Null,
+            }
+        }
+
+        // hypot(dx, dy) -> sqrt(dx*dx + dy*dy). Used by tools that
+        // test a 2D distance threshold (Line's "ignore too-short
+        // drags", Pen's click-vs-drag disambiguation).
+        "hypot" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let dx = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let dy = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            Value::Number(dx.hypot(dy))
+        }
+
         // ── Document-aware primitives ─────────────────────────
         //
         // Available only during a tool dispatch that has registered a

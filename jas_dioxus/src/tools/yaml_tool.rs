@@ -332,6 +332,7 @@ impl CanvasTool for YamlTool {
             .unwrap_or("");
         match render_type {
             "rect" => draw_rect_overlay(ctx, render, &eval_ctx),
+            "line" => draw_line_overlay(ctx, render, &eval_ctx),
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -468,6 +469,47 @@ fn draw_rect_overlay(
         if style.stroke_dasharray.is_some() {
             let _ = ctx.set_line_dash(&js_sys::Array::new());
         }
+    }
+}
+
+/// Draw a straight-line overlay. Fields: x1/y1/x2/y2 (numbers or
+/// string expressions), style (CSS subset). Stroke only — line
+/// overlays don't have a fillable interior.
+fn draw_line_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+
+    let Some(stroke) = &style.stroke else {
+        return;
+    };
+    ctx.set_stroke_style_str(stroke);
+    if let Some(w) = style.stroke_width {
+        ctx.set_line_width(w);
+    }
+    if let Some(dash) = &style.stroke_dasharray {
+        let arr = js_sys::Array::new();
+        for d in dash {
+            arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+        }
+        let _ = ctx.set_line_dash(&arr);
+    }
+    ctx.begin_path();
+    ctx.move_to(x1, y1);
+    ctx.line_to(x2, y2);
+    ctx.stroke();
+    if style.stroke_dasharray.is_some() {
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
     }
 }
 
@@ -1329,6 +1371,82 @@ mod tests {
         } else {
             panic!("expected Rect");
         }
+    }
+
+    // ── Line tool behavioral tests ─────────────────────────────────
+
+    fn line_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("line")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn line_parity_draw_line() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 30.0, 40.0, false, false, true);
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Line(line) = &*children[0] {
+            assert_eq!(line.x1, 10.0);
+            assert_eq!(line.y1, 20.0);
+            assert_eq!(line.x2, 50.0);
+            assert_eq!(line.y2, 60.0);
+        } else {
+            panic!("expected Line element");
+        }
+    }
+
+    #[test]
+    fn line_parity_short_line_not_created() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press and release at same point — hypot distance = 0.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn line_parity_idle_after_release() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("drawing"));
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+    }
+
+    #[test]
+    fn line_parity_move_without_press_is_noop() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // on_mousemove's handler is guarded by `mode == "drawing"`;
+        // without a prior on_mousedown, mode stays "idle" and nothing
+        // happens.
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
     }
 
     // ── RoundedRect tool behavioral tests ──────────────────────────
