@@ -15,7 +15,6 @@ use crate::document::model::Model;
 use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign, Element as GeoElement};
 use crate::tools::partial_selection_tool::PartialSelectionTool;
 use crate::tools::interior_selection_tool::InteriorSelectionTool;
-use crate::tools::line_tool::LineTool;
 use crate::tools::pen_tool::PenTool;
 use crate::tools::add_anchor_point_tool::AddAnchorPointTool;
 use crate::tools::delete_anchor_point_tool::DeleteAnchorPointTool;
@@ -102,7 +101,7 @@ impl TabState {
         tools.insert(ToolKind::RoundedRect, yaml_tool("rounded_rect"));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
         tools.insert(ToolKind::Star, Box::new(StarTool::new()));
-        tools.insert(ToolKind::Line, Box::new(LineTool::new()));
+        tools.insert(ToolKind::Line, yaml_tool("line"));
         tools.insert(ToolKind::Lasso, Box::new(LassoTool::new()));
         Self {
             model,

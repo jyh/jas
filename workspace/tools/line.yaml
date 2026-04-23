@@ -1,0 +1,77 @@
+# Line tool.
+#
+# Press-drag-release creates a single line segment from the mousedown
+# point to the mouseup point. Drags shorter than 2 pixels (hypot-
+# distance) are rejected so stray clicks don't leave tiny lines in
+# the document. Mirrors native tools::line_tool::LineTool.
+#
+# Validated against schema/tool.schema.json.
+
+id: line
+cursor: crosshair
+menu_label: "Line Tool"
+shortcut: "\\"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+  start_x: { default: 0 }
+  start_y: { default: 0 }
+  cur_x: { default: 0 }
+  cur_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.line.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.line.mode: "'idle'" }
+
+  on_mousedown:
+    - set: { tool.line.mode: "'drawing'" }
+    - set: { tool.line.start_x: "event.x" }
+    - set: { tool.line.start_y: "event.y" }
+    - set: { tool.line.cur_x: "event.x" }
+    - set: { tool.line.cur_y: "event.y" }
+
+  on_mousemove:
+    - if: "tool.line.mode == 'drawing'"
+      then:
+        - set: { tool.line.cur_x: "event.x" }
+        - set: { tool.line.cur_y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.line.mode == 'drawing'"
+      then:
+        # hypot-based distance check: match native's
+        # sqrt(dx*dx + dy*dy) > 2.0 guard so diagonal short drags
+        # behave the same as axis-aligned ones.
+        - if: "hypot(event.x - tool.line.start_x, event.y - tool.line.start_y) > 2"
+          then:
+            - "doc.snapshot": {}
+            - "doc.add_element":
+                element:
+                  type: line
+                  x1: "tool.line.start_x"
+                  y1: "tool.line.start_y"
+                  x2: "event.x"
+                  y2: "event.y"
+    - set: { tool.line.mode: "'idle'" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.line.mode: "'idle'" }
+
+# Dashed-black preview following the cursor during the drag.
+overlay:
+  if: "tool.line.mode == 'drawing'"
+  render:
+    type: line
+    x1: "tool.line.start_x"
+    y1: "tool.line.start_y"
+    x2: "tool.line.cur_x"
+    y2: "tool.line.cur_y"
+    style: "stroke: rgba(0,0,0,0.5); stroke-width: 1;"
