@@ -54,6 +54,32 @@ class TestLoadSubdirectories:
         assert "properties_panel_content" in data["panels"]
         assert "brushes_panel_content" in data["panels"]
 
+    def test_load_includes_paintbrush_tool(self, workspace_path):
+        data = load_workspace(workspace_path)
+        assert "tools" in data
+        assert "paintbrush" in data["tools"]
+        paintbrush = data["tools"]["paintbrush"]
+        assert paintbrush.get("shortcut") == "B"
+        assert "on_mousedown" in paintbrush.get("handlers", {})
+        # The on_mouseup handler threads state.stroke_brush into the
+        # committed path (matches BRUSHES.md §Canvas tools).
+        on_mouseup = paintbrush["handlers"]["on_mouseup"]
+        # Find the doc.add_path_from_buffer effect anywhere in the
+        # handler tree (it's nested under an `if` clause).
+        def find_add_path(effects):
+            for eff in effects or []:
+                if isinstance(eff, dict):
+                    if "doc.add_path_from_buffer" in eff:
+                        return eff["doc.add_path_from_buffer"]
+                    if "then" in eff:
+                        found = find_add_path(eff["then"])
+                        if found:
+                            return found
+            return None
+        spec = find_add_path(on_mouseup)
+        assert spec is not None, "expected doc.add_path_from_buffer in on_mouseup"
+        assert spec.get("stroke_brush") == "state.stroke_brush"
+
     def test_brushes_panel_state_defaults(self, workspace_path):
         data = load_workspace(workspace_path)
         panel = data["panels"]["brushes_panel_content"]
