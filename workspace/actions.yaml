@@ -2468,7 +2468,29 @@ actions:
       library: { type: string, optional: True }
       brush_slug: { type: string, optional: True }
     effects:
-      - log: "open_brush_options (mode={{param.mode}})"
+      - open_dialog:
+          id: brush_options
+          params:
+            mode: "param.mode"
+            library: "param.library"
+            brush_slug: "param.brush_slug"
+
+  brush_options_confirm:
+    description: >
+      Confirm the Brush Options dialog. In create mode, appends a new
+      brush to the selected library. In library_edit mode, updates the
+      master brush in place and (if any element references it) prompts
+      the Apply to Strokes confirm sub-dialog. In instance_edit mode,
+      writes stroke_brush_overrides on the selected element. Closes
+      the dialog.
+    category: brushes
+    params:
+      mode: { type: string }
+      library: { type: string, optional: True }
+      brush_slug: { type: string, optional: True }
+    effects:
+      - log: "brush_options_confirm (mode={{param.mode}})"
+      - close_dialog: None
 
   duplicate_brush:
     description: >
