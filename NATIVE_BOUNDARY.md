@@ -148,6 +148,52 @@ generally, not specific to jas.
 
 ---
 
+### 6. Interactive text-editing tools
+
+The **Type** tool and **Type on a Path** tool are permanent-native
+in every app. Named here because the tool-as-YAML migration
+(RUST_TOOL_RUNTIME.md, 13-of-18 Rust tools YAML-driven as of
+2026-04-23) intentionally stopped before them.
+
+| Tool | File (jas_dioxus) |
+|---|---|
+| **Type** | `src/tools/type_tool.rs` |
+| **Type on a Path** | `src/tools/type_on_path_tool.rs` |
+
+**Why native**: these tools are thin UX wrappers around three
+native-only pieces this document already names — §1 keyboard IME
+composition, §2 text-layout kernels, and the `TextEditSession`
+state machine exposed through `CanvasTool::edit_session_mut()` so
+the Character panel can write formatting overrides into the
+next-typed-character. A YAML port would need to either:
+
+1. Duplicate `TextEditSession`'s 20+ methods as `text.*` effects
+   driven by per-keystroke handlers — ~3600 lines of native
+   machinery mirrored by an equal-surface YAML shim, without
+   removing any of the native machinery underneath; or
+2. Invent a YAML syntax for declaring text-editor state machines
+   (caret affinity, BiDi-aware selection, IME composition) that
+   doesn't exist in any of the 5 runtimes.
+
+Neither option removes native code — both add a YAML layer on top
+of it. The *tool dispatch* that YamlTool normally replaces is
+small compared to the session machinery these two tools wrap, so
+the genericity-policy payoff doesn't justify the migration cost.
+
+**Rule**: Type and Type-on-a-Path stay native in all apps. New
+text-tool variants that want the same session infrastructure should
+reuse `TextEditSession` rather than porting to YAML. Adding more
+variants does not grow the legitimate-native surface any further
+than "one new `_tool.rs` file per variant reusing existing
+session machinery."
+
+The `scripts/genericity_check.py` `rust.tool_files` baseline counts
+these two files; reductions in that count should only come from
+porting PartialSelection, PathEraser, or Smooth (the three non-text
+native tools still on the migration backlog).
+
+---
+
 ## Extending this document
 
 When a PR needs to add native code that doesn't fit any category
