@@ -293,15 +293,25 @@ private func selectionTool() -> CanvasTool {
     }
 }
 
-// MARK: - Add Anchor Point tool tests
+// MARK: - Add Anchor Point tool tests (YAML-driven per Phase 7.11-13)
+//
+// Drag-adjusts-handles, cusp-drag, and Space+drag reposition from the
+// native tool are dropped per the YAML MVP scope — insertion of an
+// anchor on a segment is all that remains. The Anchor Point tool
+// covers corner/smooth toggling for previously-placed anchors.
+
+private func addAnchorPointTool() -> CanvasTool {
+    createTools()[.addAnchorPoint]!
+}
+
+private let aapCurvePathElem: Element = .path(Path(
+    d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+))
 
 @Test func addAnchorPointClickOnPathAddsPoint() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
@@ -321,12 +331,8 @@ private func selectionTool() -> CanvasTool {
 }
 
 @Test func addAnchorPointClickAwayDoesNothing() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
@@ -340,12 +346,8 @@ private func selectionTool() -> CanvasTool {
 }
 
 @Test func addAnchorPointSplitPreservesEndpoints() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
@@ -367,154 +369,27 @@ private func selectionTool() -> CanvasTool {
     }
 }
 
-@Test func addAnchorPointDragAdjustsHandles() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    let doc = Document(layers: [layer])
-    let model = Model(document: doc)
-    let (ctx, _, _) = makeCtx(model: model)
-    // Press at midpoint to split, then drag upward
-    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
-    tool.onMove(ctx, x: 50, y: 20, shift: false, dragging: true)
-    tool.onRelease(ctx, x: 50, y: 20, shift: false, alt: false)
-    if case .path(let p) = layerChildren(model)[0] {
-        #expect(p.d.count == 3)
-        // Outgoing handle (x1, y1 of second CurveTo) at drag position
-        if case .curveTo(let x1, let y1, _, _, _, _) = p.d[2] {
-            #expect(abs(x1 - 50.0) < 0.01)
-            #expect(abs(y1 - 20.0) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-        // Incoming handle (x2, y2 of first CurveTo) mirrored
-        if case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] {
-            #expect(abs(x2 - 50.0) < 0.01)
-            #expect(abs(y2 - (-20.0)) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-    } else {
-        Issue.record("Expected Path element")
-    }
-}
-
-@Test func addAnchorPointCuspDragLeavesIncomingHandle() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    let doc = Document(layers: [layer])
-    let model = Model(document: doc)
-    let (ctx, _, _) = makeCtx(model: model)
-    // Split the curve at midpoint
-    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
-    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
-    if case .path(let p) = layerChildren(model)[0] {
-        #expect(p.d.count == 3)
-        // Record incoming handle before cusp update
-        var inX2 = 0.0, inY2 = 0.0
-        if case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] {
-            inX2 = x2; inY2 = y2
-        }
-        // Apply cusp update directly
-        var cmds = p.d
-        AddAnchorPointTool.updateHandles(&cmds, firstCmdIdx: 1,
-                                          anchorX: 50, anchorY: 0,
-                                          dragX: 50, dragY: 20, cusp: true)
-        // Outgoing handle at drag position
-        if case .curveTo(let x1, let y1, _, _, _, _) = cmds[2] {
-            #expect(abs(x1 - 50.0) < 0.01)
-            #expect(abs(y1 - 20.0) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-        // Incoming handle unchanged (cusp)
-        if case .curveTo(_, _, let x2, let y2, _, _) = cmds[1] {
-            #expect(abs(x2 - inX2) < 0.01)
-            #expect(abs(y2 - inY2) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-    } else {
-        Issue.record("Expected Path element")
-    }
-}
-
-@Test func addAnchorPointInsertUpdatesSelectionIndices() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    // Select the path as a whole.
+@Test func addAnchorPointInsertPreservesSelection() {
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let sel: Selection = [ElementSelection.all([0, 0])]
     let doc = Document(layers: [layer], selection: sel)
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
-    // Insert at midpoint
     tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
     tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
-    // Path now has 3 anchors
     if case .path(let p) = layerChildren(model)[0] {
         #expect(p.d.count == 3)
     } else {
         Issue.record("Expected Path element")
     }
-    // Selection was `.all` and should remain so — the new anchor is
-    // implicitly included.
     let es = model.document.getElementSelection([0, 0])
     #expect(es != nil)
     #expect(es!.kind == .all)
 }
 
-@Test func addAnchorPointSpaceRepositionsAnchor() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    let doc = Document(layers: [layer])
-    let model = Model(document: doc)
-    let (ctx, _, _) = makeCtx(model: model)
-
-    // Insert point at midpoint
-    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
-
-    // Simulate Space press (keyCode 49), then drag to reposition
-    let spaceKey: UInt16 = 49
-    #expect(tool.onKey(ctx, keyCode: spaceKey) == true)
-    tool.onMove(ctx, x: 60, y: 10, shift: false, dragging: true)
-
-    // Anchor command endpoint should be at (60, 10)
-    if case .path(let p) = layerChildren(model)[0] {
-        if case .curveTo(_, _, _, _, let x, let y) = p.d[1] {
-            #expect(abs(x - 60.0) < 1.0)
-            #expect(abs(y - 10.0) < 1.0)
-        } else { Issue.record("Expected CurveTo") }
-    } else { Issue.record("Expected Path") }
-
-    // Release Space, drag further — should adjust handles, not reposition
-    _ = tool.onKeyUp(ctx, keyCode: spaceKey)
-    tool.onMove(ctx, x: 70, y: 20, shift: false, dragging: true)
-
-    // Anchor should still be near (60, 10)
-    if case .path(let p) = layerChildren(model)[0] {
-        if case .curveTo(_, _, _, _, let x, let y) = p.d[1] {
-            #expect(abs(x - 60.0) < 1.0)
-            #expect(abs(y - 10.0) < 1.0)
-        } else { Issue.record("Expected CurveTo") }
-        // Outgoing handle should reflect the drag
-        if case .curveTo(let x1, let y1, _, _, _, _) = p.d[2] {
-            #expect(abs(x1 - 70.0) < 1.0)
-            #expect(abs(y1 - 20.0) < 1.0)
-        } else { Issue.record("Expected CurveTo") }
-    } else { Issue.record("Expected Path") }
-
-    tool.onRelease(ctx, x: 70, y: 20, shift: false, alt: false)
-}
-
 @Test func addAnchorPointSplitLineSegment() {
-    let tool = AddAnchorPointTool()
+    let tool = addAnchorPointTool()
     let pathElem: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(100, 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
