@@ -292,6 +292,42 @@ impl Controller {
         model.set_document(doc);
     }
 
+    /// Clear the document selection. Shorthand for `set_selection(model, vec![])`.
+    pub fn clear_selection(model: &mut Model) {
+        Self::set_selection(model, Vec::new());
+    }
+
+    /// Add a path to the selection as an All-kind entry. No-op if the
+    /// path is already selected (matches the YAML `doc.add_to_selection`
+    /// effect's idempotent semantics).
+    pub fn add_to_selection(model: &mut Model, path: &ElementPath) {
+        let doc = model.document().clone();
+        if doc.selection.iter().any(|es| es.path == *path) {
+            return;
+        }
+        let mut sel = doc.selection.clone();
+        sel.push(ElementSelection::all(path.clone()));
+        let mut new_doc = doc;
+        new_doc.selection = sel;
+        model.set_document(new_doc);
+    }
+
+    /// Toggle a path in or out of the selection. If present, removes the
+    /// matching entry; otherwise appends an All-kind entry. Matches the
+    /// YAML `doc.toggle_selection` effect's semantics used by shift-click.
+    pub fn toggle_selection(model: &mut Model, path: &ElementPath) {
+        let doc = model.document().clone();
+        let mut sel = doc.selection.clone();
+        if let Some(pos) = sel.iter().position(|es| es.path == *path) {
+            sel.remove(pos);
+        } else {
+            sel.push(ElementSelection::all(path.clone()));
+        }
+        let mut new_doc = doc;
+        new_doc.selection = sel;
+        model.set_document(new_doc);
+    }
+
     /// Select an element by path.
     pub fn select_element(model: &mut Model, path: &ElementPath) {
         use crate::geometry::element::Visibility;
