@@ -248,6 +248,7 @@ final class YamlTool: CanvasTool {
         case "star": drawStarOverlay(cgCtx, render, evalCtx)
         case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
         case "buffer_polyline": drawBufferPolylineOverlay(cgCtx, render)
+        case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx)
         default: break
         }
         _ = _reg
@@ -498,6 +499,88 @@ private func drawBufferPolygonOverlay(
     guard pts.count >= 2 else { return }
     let style = parseOverlayStyle((spec["style"] as? String) ?? "")
     strokePolygonOverlay(cgCtx, pts, style)
+}
+
+/// Render the Pen tool's in-progress path: the committed curve
+/// through placed anchors, handle markers on the last anchor, and
+/// a dashed preview curve from the last anchor to the current
+/// cursor (only when not actively dragging).
+private func drawPenOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    guard let name = spec["buffer"] as? String else { return }
+    let anchors = anchorBuffersAnchors(name)
+    guard !anchors.isEmpty else { return }
+    let mouseX = evalOverlayNumber(spec["mouse_x"], ctx)
+    let mouseY = evalOverlayNumber(spec["mouse_y"], ctx)
+    let closeR = max(1.0, evalOverlayNumber(spec["close_radius"], ctx))
+    let placing = evaluateOverlayBool(spec["placing"], ctx)
+
+    let stroke = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1)
+    cgCtx.setStrokeColor(stroke)
+    cgCtx.setLineWidth(1)
+
+    // Committed curve: MoveTo(first) + CurveTo(...) through pairs.
+    if anchors.count >= 2 {
+        cgCtx.move(to: CGPoint(x: anchors[0].x, y: anchors[0].y))
+        for i in 1..<anchors.count {
+            let prev = anchors[i - 1]
+            let curr = anchors[i]
+            cgCtx.addCurve(
+                to: CGPoint(x: curr.x, y: curr.y),
+                control1: CGPoint(x: prev.hxOut, y: prev.hyOut),
+                control2: CGPoint(x: curr.hxIn, y: curr.hyIn)
+            )
+        }
+        cgCtx.strokePath()
+    }
+
+    // Anchor dots.
+    cgCtx.setFillColor(stroke)
+    for a in anchors {
+        cgCtx.fillEllipse(in: CGRect(x: a.x - 3, y: a.y - 3,
+                                      width: 6, height: 6))
+    }
+
+    // Handle bar for the last anchor (when smooth).
+    if let last = anchors.last, last.smooth {
+        cgCtx.move(to: CGPoint(x: last.hxIn, y: last.hyIn))
+        cgCtx.addLine(to: CGPoint(x: last.hxOut, y: last.hyOut))
+        cgCtx.strokePath()
+        cgCtx.fillEllipse(in: CGRect(x: last.hxOut - 2, y: last.hyOut - 2,
+                                      width: 4, height: 4))
+    }
+
+    // Preview curve: dashed segment from last anchor to cursor when
+    // placing the next anchor (not during an active handle drag).
+    if placing, let last = anchors.last {
+        cgCtx.setLineDash(phase: 0, lengths: [3, 3])
+        cgCtx.move(to: CGPoint(x: last.x, y: last.y))
+        cgCtx.addLine(to: CGPoint(x: mouseX, y: mouseY))
+        cgCtx.strokePath()
+        cgCtx.setLineDash(phase: 0, lengths: [])
+    }
+
+    // Close-hit circle on the first anchor when within reach.
+    if anchors.count >= 2, placing, let first = anchors.first {
+        let dx = mouseX - first.x, dy = mouseY - first.y
+        if (dx * dx + dy * dy).squareRoot() < closeR {
+            cgCtx.setStrokeColor(CGColor(red: 1, green: 0.47, blue: 0, alpha: 1))
+            cgCtx.strokeEllipse(in: CGRect(
+                x: first.x - closeR, y: first.y - closeR,
+                width: closeR * 2, height: closeR * 2))
+        }
+    }
+}
+
+/// Evaluate an overlay guard-style boolean (string expression or
+/// JSON bool). Missing / unparseable → false.
+private func evaluateOverlayBool(_ field: Any?, _ ctx: [String: Any]) -> Bool {
+    if let b = field as? Bool { return b }
+    if let s = field as? String {
+        return evaluate(s, context: ctx).toBool()
+    }
+    return false
 }
 
 /// Stroke an open polyline made of the named point buffer's points.

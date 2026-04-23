@@ -140,14 +140,15 @@ func createTools() -> [Tool: CanvasTool] {
           let selectionTool = loadYamlTool("selection"),
           let interiorSelectionTool = loadYamlTool("interior_selection"),
           let lassoTool = loadYamlTool("lasso"),
-          let pencilTool = loadYamlTool("pencil") else {
+          let pencilTool = loadYamlTool("pencil"),
+          let penTool = loadYamlTool("pen") else {
         fatalError("workspace/workspace.json missing or malformed — cannot load YAML tools")
     }
     return [
         .selection: selectionTool,
         .partialSelection: PartialSelectionTool(),
         .interiorSelection: interiorSelectionTool,
-        .pen: PenTool(),
+        .pen: penTool,
         .addAnchorPoint: AddAnchorPointTool(),
         .deleteAnchorPoint: DeleteAnchorPointTool(),
         .anchorPoint: AnchorPointTool(),
