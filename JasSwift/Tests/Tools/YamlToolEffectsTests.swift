@@ -543,6 +543,178 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     } else { Issue.record("expected path") }
 }
 
+// MARK: - doc.path.probe_anchor_hit + commit_anchor_edit
+
+@Test func docPathProbeAnchorHitMissIsIdle() {
+    let cmds: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
+    let model = modelWithPath(cmds)
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.probe_anchor_hit": ["x": 500, "y": 500]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(store.getTool("anchor_point", "mode") as? String == "idle")
+}
+
+@Test func docPathProbeAnchorHitCornerAnchor() {
+    let cmds: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
+    let model = modelWithPath(cmds)
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.probe_anchor_hit": ["x": 0, "y": 0]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(store.getTool("anchor_point", "mode") as? String == "pressed_corner")
+    if let idx = store.getTool("anchor_point", "hit_anchor_idx") as? Int {
+        #expect(idx == 0)
+    } else { Issue.record("expected hit_anchor_idx") }
+}
+
+@Test func docPathCommitAnchorEditCornerToSmoothDrag() {
+    let cmds: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
+    let model = modelWithPath(cmds)
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Probe to latch the corner anchor.
+    runEffects(
+        [["doc.path.probe_anchor_hit": ["x": 100, "y": 0]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    // Commit drag from (100,0) to (100,-20) → pulls a smooth handle.
+    runEffects(
+        [["doc.path.commit_anchor_edit": [
+            "origin_x": 100, "origin_y": 0,
+            "target_x": 100, "target_y": -20,
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    // Last command should now be a CurveTo (smooth).
+    if case .path(let p) = model.document.layers[0].children[0] {
+        if case .curveTo = p.d.last! {} else {
+            Issue.record("expected curveTo after corner→smooth")
+        }
+    } else { Issue.record("expected path") }
+}
+
+@Test func docPathCommitAnchorEditCornerTinyMoveIsNoop() {
+    let cmds: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
+    let model = modelWithPath(cmds)
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.probe_anchor_hit": ["x": 100, "y": 0]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    // Move <= 1 px → no commit.
+    runEffects(
+        [["doc.path.commit_anchor_edit": [
+            "origin_x": 100, "origin_y": 0,
+            "target_x": 100.5, "target_y": 0,
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    if case .path(let p) = model.document.layers[0].children[0] {
+        #expect(p.d == cmds)
+    } else { Issue.record("expected path") }
+}
+
+@Test func docPathCommitAnchorEditIdleIsNoop() {
+    let cmds: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
+    let model = modelWithPath(cmds)
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Probe misses → mode=idle, commit should be a no-op.
+    runEffects(
+        [["doc.path.probe_anchor_hit": ["x": 500, "y": 500]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    runEffects(
+        [["doc.path.commit_anchor_edit": [
+            "origin_x": 0, "origin_y": 0,
+            "target_x": 50, "target_y": 50,
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    if case .path(let p) = model.document.layers[0].children[0] {
+        #expect(p.d == cmds)
+    } else { Issue.record("expected path") }
+}
+
+// MARK: - doc.path.probe_partial_hit + commit_partial_marquee + move_path_handle
+
+@Test func docPathProbePartialHitMarqueeOnMiss() {
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.probe_partial_hit": ["x": 500, "y": 500, "hit_radius": 8]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(store.getTool("partial_selection", "mode") as? String == "marquee")
+}
+
+@Test func docPathProbePartialHitMovingPendingOnCpHit() {
+    // Click the (0, 0) corner of the first rect.
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.probe_partial_hit": ["x": 0, "y": 0, "hit_radius": 8]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(store.getTool("partial_selection", "mode") as? String == "moving_pending")
+    // The CP should now be in the selection.
+    #expect(model.document.selection.contains { $0.path == [0, 0] })
+}
+
+@Test func docPathCommitPartialMarqueeRectSelects() {
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.commit_partial_marquee": [
+            "x1": -1, "y1": -1, "x2": 11, "y2": 11,
+            "additive": false,
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(model.document.selection.contains { $0.path == [0, 0] })
+}
+
+@Test func docPathCommitPartialMarqueeTinyRectClearsOnNonAdditive() {
+    let model = twoRectModel()
+    Controller(model: model).selectElement([0, 0])
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.commit_partial_marquee": [
+            "x1": 50, "y1": 50, "x2": 50, "y2": 50,
+            "additive": false,
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(model.document.selection.isEmpty)
+}
+
+@Test func docMovePathHandleWithoutLatchIsNoop() {
+    let cmds: [PathCommand] = [
+        .moveTo(0, 0),
+        .curveTo(x1: 0, y1: 50, x2: 50, y2: 50, x: 50, y: 0),
+    ]
+    let model = modelWithPath(cmds)
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.move_path_handle": ["dx": 10, "dy": 0]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    if case .path(let p) = model.document.layers[0].children[0] {
+        #expect(p.d == cmds)
+    } else { Issue.record("expected path") }
+}
+
 // MARK: - Path-spec extraction
 
 @Test func docAddToSelectionAcceptsPathValueFromContext() {
