@@ -39,6 +39,32 @@ class TestLoadWorkspace:
 
 
 class TestLoadSubdirectories:
+    def test_brush_options_dialog_loaded(self, workspace_path):
+        data = load_workspace(workspace_path)
+        assert "dialogs" in data
+        dialogs = data["dialogs"]
+        assert "brush_options" in dialogs
+        dlg = dialogs["brush_options"]
+        # Modal dialog per BRUSH_OPTIONS_DIALOG.md §Layout.
+        assert dlg.get("modal") is True
+        # Three modes per §Modes.
+        params = dlg.get("params", {})
+        assert "mode" in params
+        assert sorted(params["mode"]["values"]) == [
+            "create", "instance_edit", "library_edit",
+        ]
+        # State surface includes the Calligraphic Phase-1 fields.
+        state = dlg.get("state", {})
+        for key in (
+            "brush_name", "brush_type",
+            "angle", "angle_variation",
+            "roundness", "roundness_variation",
+            "size", "size_variation",
+        ):
+            assert key in state, key
+        # Default brush type is calligraphic per spec.
+        assert state["brush_type"]["default"] == "calligraphic"
+
     def test_load_includes_dialogs(self, workspace_path):
         data = load_workspace(workspace_path)
         assert "dialogs" in data

@@ -1,0 +1,261 @@
+brush_options:
+  summary: "Brush Options"
+  description: >
+    Modal dialog for creating, editing, or per-instance overriding a
+    brush. Three modes selected by param.mode:
+
+    create — opened by NEW_BRUSH_BUTTON or the New Brush menu item.
+    BRUSH_TYPE_RADIO is enabled; the user picks a type and configures
+    the per-type body. OK appends a new brush to the selected library
+    in panel.selected_library.
+
+    library_edit — opened by double-click on a brush tile or the
+    Brush Options... menu item. BRUSH_TYPE_RADIO is disabled; the
+    body shows the selected brush's parameters seeded from
+    data.brush_libraries[param.library].brushes[param.index]. OK
+    mutates the master brush in place and prompts the Apply to
+    Strokes confirm sub-dialog.
+
+    instance_edit — opened by BRUSH_OPTIONS_FOR_SELECTION_BUTTON.
+    BRUSH_TYPE_RADIO is disabled; the body is seeded from the
+    selected element's stroke_brush_overrides layered over the
+    master brush. OK writes stroke_brush_overrides on the selected
+    element. No Apply to Strokes prompt.
+
+    Phase 1 ships the Calligraphic body only. Scatter, Art, Pattern,
+    and Bristle bodies follow as their data models and renderers
+    land. See transcripts/BRUSH_OPTIONS_DIALOG.md.
+
+  modal: true
+  width: 360
+  params:
+    mode:        { type: enum, values: [create, library_edit, instance_edit] }
+    library:     { type: string, optional: True }
+    brush_slug:  { type: string, optional: True }
+
+  state:
+    brush_name:
+      type: string
+      default: ""
+      description: "User-editable brush name."
+    brush_type:
+      type: enum
+      values: [calligraphic, scatter, art, pattern, bristle]
+      default: calligraphic
+      description: >
+        Brush type. Editable only when mode == create; disabled in
+        library_edit and instance_edit (conversion between types is
+        not supported).
+
+    # Calligraphic parameters (Phase 1 body)
+    angle:
+      type: number
+      default: 0
+      description: "Tip orientation in degrees, screen-fixed."
+    angle_variation:
+      type: object
+      default: { mode: fixed }
+      description: "Variation mode + min/max for angle."
+    roundness:
+      type: number
+      default: 100
+      description: "Tip roundness as percent. 100 = circular."
+    roundness_variation:
+      type: object
+      default: { mode: fixed }
+    size:
+      type: number
+      default: 5
+      description: "Major-axis length in points."
+    size_variation:
+      type: object
+      default: { mode: fixed }
+
+  init:
+    # Defaults are loaded from the master brush when in library_edit
+    # or instance_edit. The interpreter resolves these expressions
+    # against the dialog scope; missing param paths fall through to
+    # the state defaults declared above.
+    brush_name: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].name : ""'
+    brush_type: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].type : "calligraphic"'
+    angle: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle : 0'
+    angle_variation: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle_variation : { mode: "fixed" }'
+    roundness: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness : 100'
+    roundness_variation: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness_variation : { mode: "fixed" }'
+    size: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size : 5'
+    size_variation: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size_variation : { mode: "fixed" }'
+
+  content:
+    type: container
+    layout: column
+    style: { gap: 10, padding: 16 }
+    children:
+
+      # ── Type picker (5 icon-toggle radio buttons) ─────────
+      # Disabled in library_edit / instance_edit modes per spec.
+      - id: bo_type_radio
+        type: container
+        layout: row
+        style: { gap: 4, alignment: center }
+        bind:
+          disabled: 'param.mode != "create"'
+        children:
+          - id: bo_type_calligraphic
+            type: icon_button
+            summary: "Calligraphic"
+            icon: brush_type_calligraphic
+            style: { size: 24 }
+            bind:
+              checked: 'dialog.brush_type == "calligraphic"'
+            behavior:
+              - event: click
+                effects:
+                  - set: { dialog.brush_type: '"calligraphic"' }
+          - id: bo_type_scatter
+            type: icon_button
+            summary: "Scatter"
+            icon: brush_type_scatter
+            style: { size: 24 }
+            bind:
+              checked: 'dialog.brush_type == "scatter"'
+              # Phase 1: Scatter body not yet implemented; show but do
+              # not allow selection.
+              disabled: "true"
+            behavior:
+              - event: click
+                effects:
+                  - set: { dialog.brush_type: '"scatter"' }
+          - id: bo_type_art
+            type: icon_button
+            summary: "Art"
+            icon: brush_type_art
+            style: { size: 24 }
+            bind:
+              checked: 'dialog.brush_type == "art"'
+              disabled: "true"
+            behavior:
+              - event: click
+                effects:
+                  - set: { dialog.brush_type: '"art"' }
+          - id: bo_type_pattern
+            type: icon_button
+            summary: "Pattern"
+            icon: brush_type_pattern
+            style: { size: 24 }
+            bind:
+              checked: 'dialog.brush_type == "pattern"'
+              disabled: "true"
+            behavior:
+              - event: click
+                effects:
+                  - set: { dialog.brush_type: '"pattern"' }
+          - id: bo_type_bristle
+            type: icon_button
+            summary: "Bristle"
+            icon: brush_type_bristle
+            style: { size: 24 }
+            bind:
+              checked: 'dialog.brush_type == "bristle"'
+              disabled: "true"
+            behavior:
+              - event: click
+                effects:
+                  - set: { dialog.brush_type: '"bristle"' }
+
+      # ── Name ──────────────────────────────────────────────
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Name:", style: { font_size: 11 } }
+          - type: col
+            col: 9
+            children:
+              - id: bo_name_input
+                type: text_input
+                placeholder: "Brush Name"
+                bind:
+                  value: "dialog.brush_name"
+
+      # ── Per-type body: Calligraphic (Phase 1) ─────────────
+      # Other type bodies will be added as their data models and
+      # renderers land. Visibility is conditional on dialog.brush_type.
+      - id: bo_body_calligraphic
+        type: container
+        layout: column
+        style: { gap: 6 }
+        bind:
+          visible: 'dialog.brush_type == "calligraphic"'
+        children:
+          - template: variation_widget
+            params:
+              id_prefix: bo_cal_angle
+              label: "Angle"
+              base_path: "dialog.angle"
+              mode_path: "dialog.angle_variation.mode"
+              min_path: "dialog.angle_variation.min"
+              max_path: "dialog.angle_variation.max"
+              base_min: -180
+              base_max: 180
+              base_step: 1
+              base_unit: "°"
+          - template: variation_widget
+            params:
+              id_prefix: bo_cal_roundness
+              label: "Roundness"
+              base_path: "dialog.roundness"
+              mode_path: "dialog.roundness_variation.mode"
+              min_path: "dialog.roundness_variation.min"
+              max_path: "dialog.roundness_variation.max"
+              base_min: 0
+              base_max: 100
+              base_step: 1
+              base_unit: "%"
+          - template: variation_widget
+            params:
+              id_prefix: bo_cal_size
+              label: "Size"
+              base_path: "dialog.size"
+              mode_path: "dialog.size_variation.mode"
+              min_path: "dialog.size_variation.min"
+              max_path: "dialog.size_variation.max"
+              base_min: 0
+              base_max: 1000
+              base_step: 0.5
+              base_unit: "pt"
+
+      # ── Other-type body placeholder ───────────────────────
+      # When a non-Calligraphic type is chosen, show a hint label
+      # rather than an empty form.
+      - id: bo_body_other
+        type: container
+        layout: column
+        style: { gap: 6, padding: 10 }
+        bind:
+          visible: 'dialog.brush_type != "calligraphic"'
+        children:
+          - type: text
+            content: "Body for this brush type is not yet available."
+            style: { font_size: 11, color: "var(--app-text-dim, #888)", text_align: center }
+
+      # ── Bottom row: OK / Cancel ───────────────────────────
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: end }
+        children:
+          - type: spacer
+            style: { flex: 1 }
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - id: bo_ok_btn
+            type: button
+            label: "OK"
+            variant: primary
+            bind:
+              # Disabled when name is empty.
+              disabled: 'dialog.brush_name == ""'
+            action: brush_options_confirm
+            params:
+              mode: "param.mode"
+              library: "param.library"
+              brush_slug: "param.brush_slug"
