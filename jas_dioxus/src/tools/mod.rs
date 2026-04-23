@@ -1,7 +1,7 @@
 pub mod tool;
 pub mod text_edit;
 pub mod text_measure;
-pub mod selection_tool;
+pub mod yaml_tool;
 pub mod partial_selection_tool;
 pub mod interior_selection_tool;
 pub mod rect_tool;

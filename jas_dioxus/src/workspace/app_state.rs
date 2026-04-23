@@ -28,10 +28,32 @@ use crate::tools::star_tool::StarTool;
 use crate::tools::rect_tool::RectTool;
 use crate::tools::rounded_rect_tool::RoundedRectTool;
 use crate::tools::lasso_tool::LassoTool;
-use crate::tools::selection_tool::SelectionTool;
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
+use crate::tools::yaml_tool::YamlTool;
+
+/// Build the canvas Selection tool from `workspace/tools/selection.yaml`.
+///
+/// Per RUST_TOOL_RUNTIME.md, Selection is the validation target for
+/// the YAML tool runtime — the native selection_tool.rs was deleted
+/// in the same branch. workspace.json is embedded at build time via
+/// `include_str!`, so all three of these expect() failures would
+/// indicate a build-time invariant violation (workspace.json missing,
+/// corrupted, or schema-drifted from selection.yaml).
+fn selection_tool() -> Box<dyn CanvasTool> {
+    use crate::interpreter::workspace::Workspace;
+    let ws = Workspace::load()
+        .expect("embedded workspace.json must parse");
+    let spec = ws
+        .data()
+        .get("tools")
+        .and_then(|t| t.get("selection"))
+        .expect("workspace.json must declare a selection tool");
+    let yaml_tool = YamlTool::from_workspace_tool(spec)
+        .expect("selection tool spec must parse into ToolSpec");
+    Box::new(yaml_tool)
+}
 
 /// Shared application state handle, available via `use_context::<AppHandle>()`.
 pub(crate) type AppHandle = Rc<RefCell<AppState>>;
@@ -65,7 +87,7 @@ impl TabState {
 
     pub(crate) fn with_model(model: Model) -> Self {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
-        tools.insert(ToolKind::Selection, Box::new(SelectionTool::new()));
+        tools.insert(ToolKind::Selection, selection_tool());
         tools.insert(ToolKind::PartialSelection, Box::new(PartialSelectionTool::new()));
         tools.insert(ToolKind::InteriorSelection, Box::new(InteriorSelectionTool::new()));
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
