@@ -926,6 +926,24 @@ fn eval_func(
             super::doc_primitives::hit_test(x, y)
         }
 
+        // hit_test_deep(x, y) -> Path | null
+        // Like hit_test but recurses into groups. Used by the
+        // Interior Selection tool to pick inside-group leaves.
+        "hit_test_deep" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let x = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let y = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            super::doc_primitives::hit_test_deep(x, y)
+        }
+
         // selection_contains(path) -> bool
         "selection_contains" => {
             if args.is_empty() {

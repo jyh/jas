@@ -549,6 +549,25 @@ fn run_doc_effect(
                 Controller::select_rect(model, rx, ry, rw, rh, additive);
             }
         }
+        "doc.partial_select_in_rect" => {
+            // Same shape as doc.select_in_rect but routes through
+            // Controller::partial_select_rect so selection entries
+            // are SelectionKind::Partial (individual control points)
+            // instead of SelectionKind::All (whole-element). Used by
+            // the Partial Selection and Interior Selection tools.
+            if let serde_json::Value::Object(args) = spec {
+                let x1 = eval_number(args.get("x1"), store, ctx);
+                let y1 = eval_number(args.get("y1"), store, ctx);
+                let x2 = eval_number(args.get("x2"), store, ctx);
+                let y2 = eval_number(args.get("y2"), store, ctx);
+                let additive = eval_bool(args.get("additive"), store, ctx);
+                let rx = x1.min(x2);
+                let ry = y1.min(y2);
+                let rw = (x2 - x1).abs();
+                let rh = (y2 - y1).abs();
+                Controller::partial_select_rect(model, rx, ry, rw, rh, additive);
+            }
+        }
         _ => {
             // Effects not implemented in this phase fall through silently.
             // doc.delete_selection, doc.add_element, doc.set_attr land in

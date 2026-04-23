@@ -14,7 +14,6 @@ use crate::document::controller::Controller;
 use crate::document::model::Model;
 use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign, Element as GeoElement};
 use crate::tools::partial_selection_tool::PartialSelectionTool;
-use crate::tools::interior_selection_tool::InteriorSelectionTool;
 use crate::tools::pen_tool::PenTool;
 use crate::tools::add_anchor_point_tool::AddAnchorPointTool;
 use crate::tools::delete_anchor_point_tool::DeleteAnchorPointTool;
@@ -85,7 +84,7 @@ impl TabState {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
         tools.insert(ToolKind::Selection, yaml_tool("selection"));
         tools.insert(ToolKind::PartialSelection, Box::new(PartialSelectionTool::new()));
-        tools.insert(ToolKind::InteriorSelection, Box::new(InteriorSelectionTool::new()));
+        tools.insert(ToolKind::InteriorSelection, yaml_tool("interior_selection"));
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
         tools.insert(ToolKind::AddAnchorPoint, Box::new(AddAnchorPointTool::new()));
         tools.insert(ToolKind::DeleteAnchorPoint, Box::new(DeleteAnchorPointTool::new()));
