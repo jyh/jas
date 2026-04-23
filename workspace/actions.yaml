@@ -2501,17 +2501,17 @@ actions:
       Undoable.
     category: brushes
     effects:
-      - log: "duplicate_brush"
+      - "brush.duplicate_selected": {}
 
   delete_brush:
     description: >
       Permanently remove every brush in panel.selected_brushes
       from panel.selected_library. Any element with
-      jas:stroke-brush referencing a deleted brush re-renders as
-      a plain stroke. Undoable.
+      stroke_brush referencing a deleted brush re-renders as a
+      plain stroke. Undoable.
     category: brushes
     effects:
-      - log: "delete_brush"
+      - "brush.delete_selected": {}
 
   select_all_unused_brushes:
     description: >
@@ -2530,7 +2530,9 @@ actions:
       save_brush_library.
     category: brushes
     effects:
-      - log: "sort_brushes_by_name"
+      - "data.list_sort":
+          path: "data.brush_libraries.${panel.selected_library}.brushes"
+          key: "item.name"
 
   set_brush_view_mode:
     description: >
