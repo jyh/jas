@@ -1,0 +1,143 @@
+# Partial Selection tool — select individual control points and drag
+# Bezier handles.
+#
+# State machine:
+#   idle             — waiting for input
+#   marquee          — rubber-band selection rectangle
+#   moving_pending   — pressed on a CP; waiting for drag_threshold before
+#                      committing to a move
+#   moving           — actively translating selected CPs by frame deltas
+#   handle           — dragging a Bezier handle (in or out) on a selected
+#                      Path
+#
+# on_mousedown dispatches to doc.path.probe_partial_hit which sets the
+# initial mode and latches handle info when applicable. Subsequent
+# mousemove applies live deltas via doc.translate_selection (moving)
+# or doc.move_path_handle (handle); mouseup commits the marquee rect
+# via doc.path.commit_partial_marquee.
+#
+# Validated against schema/tool.schema.json.
+
+id: partial_selection
+cursor: arrow
+menu_label: "Partial Selection Tool"
+shortcut: "A"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, marquee, moving_pending, moving, handle]
+  marquee_start_x: { default: 0 }
+  marquee_start_y: { default: 0 }
+  marquee_cur_x: { default: 0 }
+  marquee_cur_y: { default: 0 }
+  drag_start_x: { default: 0 }
+  drag_start_y: { default: 0 }
+  drag_last_x: { default: 0 }
+  drag_last_y: { default: 0 }
+  snapshotted: { default: false }
+  copied: { default: false }
+  alt_held: { default: false }
+  # Latched by probe_partial_hit when a handle is hit.
+  handle_path: { default: null }
+  handle_anchor_idx: { default: 0 }
+  handle_type: { default: "" }
+
+handlers:
+
+  on_enter:
+    - set: { tool.partial_selection.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.partial_selection.mode: "'idle'" }
+
+  on_mousedown:
+    - "doc.path.probe_partial_hit":
+        x: "event.x"
+        y: "event.y"
+        hit_radius: "8"
+        shift: "event.modifiers.shift"
+    # Seed coordinates the subsequent handlers read.
+    - if: "tool.partial_selection.mode == 'marquee'"
+      then:
+        - set: { tool.partial_selection.marquee_start_x: "event.x" }
+        - set: { tool.partial_selection.marquee_start_y: "event.y" }
+        - set: { tool.partial_selection.marquee_cur_x: "event.x" }
+        - set: { tool.partial_selection.marquee_cur_y: "event.y" }
+    - if: "tool.partial_selection.mode == 'moving_pending' or tool.partial_selection.mode == 'handle'"
+      then:
+        - set: { tool.partial_selection.drag_start_x: "event.x" }
+        - set: { tool.partial_selection.drag_start_y: "event.y" }
+        - set: { tool.partial_selection.drag_last_x: "event.x" }
+        - set: { tool.partial_selection.drag_last_y: "event.y" }
+        - set: { tool.partial_selection.snapshotted: "false" }
+        - set: { tool.partial_selection.copied: "false" }
+        - set: { tool.partial_selection.alt_held: "event.modifiers.alt" }
+
+  on_mousemove:
+    - if: "tool.partial_selection.mode == 'marquee'"
+      then:
+        - set: { tool.partial_selection.marquee_cur_x: "event.x" }
+        - set: { tool.partial_selection.marquee_cur_y: "event.y" }
+
+    - if: "tool.partial_selection.mode == 'moving_pending' or tool.partial_selection.mode == 'moving'"
+      then:
+        # First move past DRAG_THRESHOLD (4 px) snapshots + transitions.
+        - if: "not tool.partial_selection.snapshotted and hypot(event.x - tool.partial_selection.drag_start_x, event.y - tool.partial_selection.drag_start_y) > 4"
+          then:
+            - "doc.snapshot": {}
+            - set: { tool.partial_selection.snapshotted: "true" }
+            - set: { tool.partial_selection.mode: "'moving'" }
+        - if: "tool.partial_selection.mode == 'moving'"
+          then:
+            - if: "tool.partial_selection.alt_held and not tool.partial_selection.copied"
+              then:
+                - "doc.copy_selection":
+                    dx: "event.x - tool.partial_selection.drag_last_x"
+                    dy: "event.y - tool.partial_selection.drag_last_y"
+                - set: { tool.partial_selection.copied: "true" }
+              else:
+                - "doc.translate_selection":
+                    dx: "event.x - tool.partial_selection.drag_last_x"
+                    dy: "event.y - tool.partial_selection.drag_last_y"
+            - set: { tool.partial_selection.drag_last_x: "event.x" }
+            - set: { tool.partial_selection.drag_last_y: "event.y" }
+
+    - if: "tool.partial_selection.mode == 'handle'"
+      then:
+        # Handle-drag threshold is much smaller (native 0.5).
+        - if: "not tool.partial_selection.snapshotted and hypot(event.x - tool.partial_selection.drag_start_x, event.y - tool.partial_selection.drag_start_y) > 0.5"
+          then:
+            - "doc.snapshot": {}
+            - set: { tool.partial_selection.snapshotted: "true" }
+        - if: "tool.partial_selection.snapshotted"
+          then:
+            - "doc.move_path_handle":
+                dx: "event.x - tool.partial_selection.drag_last_x"
+                dy: "event.y - tool.partial_selection.drag_last_y"
+            - set: { tool.partial_selection.drag_last_x: "event.x" }
+            - set: { tool.partial_selection.drag_last_y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.partial_selection.mode == 'marquee'"
+      then:
+        - "doc.path.commit_partial_marquee":
+            x1: "tool.partial_selection.marquee_start_x"
+            y1: "tool.partial_selection.marquee_start_y"
+            x2: "tool.partial_selection.marquee_cur_x"
+            y2: "tool.partial_selection.marquee_cur_y"
+            additive: "event.modifiers.shift"
+    - set: { tool.partial_selection.mode: "'idle'" }
+
+overlay:
+  # Always render — draws selected-path handles regardless of mode,
+  # plus the marquee rect when mode == "marquee". The render fn
+  # takes care of both.
+  if: "true"
+  render:
+    type: partial_selection_overlay
+    mode: "tool.partial_selection.mode"
+    marquee_start_x: "tool.partial_selection.marquee_start_x"
+    marquee_start_y: "tool.partial_selection.marquee_start_y"
+    marquee_cur_x: "tool.partial_selection.marquee_cur_x"
+    marquee_cur_y: "tool.partial_selection.marquee_cur_y"
