@@ -56,14 +56,42 @@ func runEffects(
             continue
         }
         // let: { name: expr, ... } — PHASE3 §5.1
+        //
+        // Two supported shapes:
+        //   Sibling-threading: `let: { x: expr }` without `in:` extends
+        //       the context for all later sibling effects in the same list.
+        //   Scoped: `let: { x: expr } in: [...]` runs the nested effects
+        //       with x bound, then drops the binding. Matches the form
+        //       used in workspace/tools/*.yaml (e.g. selection's
+        //       `let: { hit: hit_test(...) } in: [...]`).
         if let bindings = effect["let"] as? [String: Any] {
+            // Store `.null` bindings as NSNull so the key survives the
+            // dict round-trip — `dict[key] = nil` removes the entry,
+            // which would make `x == null` fail to resolve downstream.
+            func bind(_ extended: inout [String: Any], _ name: String, _ val: Value) {
+                if case .closure = val {
+                    extended[name] = val
+                } else if case .null = val {
+                    extended[name] = NSNull()
+                } else {
+                    extended[name] = valueToAny(val)
+                }
+            }
+            if let inEffects = effect["in"] as? [Any] {
+                var extended = threadedCtx
+                for (name, exprV) in bindings {
+                    let val = evalExpr(exprV, store: store, ctx: extended)
+                    bind(&extended, name, val)
+                }
+                runEffects(inEffects, ctx: extended, store: store,
+                           actions: actions, dialogs: dialogs,
+                           platformEffects: platformEffects,
+                           schema: schema, diagnostics: &diagnostics)
+                continue
+            }
             for (name, exprV) in bindings {
                 let val = evalExpr(exprV, store: store, ctx: threadedCtx)
-                if case .closure = val {
-                    threadedCtx[name] = val
-                } else {
-                    threadedCtx[name] = valueToAny(val)
-                }
+                bind(&threadedCtx, name, val)
             }
             continue
         }
@@ -123,6 +151,45 @@ func runEffects(
 
 // MARK: - Internal
 
+/// Route a `set:` target to the right scope in the StateStore.
+///
+/// Target shapes (leading `$` stripped):
+///   `tool.<id>.<key>[.<more>]` → `store.setTool(id, combined_key, value)`
+///   `panel.<key>`              → active panel's scope
+///   `state.<key>`              → global state (explicit scope)
+///   `<key>`                    → global state (implicit scope, legacy)
+///
+/// Mirrors `set_by_scoped_target` in
+/// `jas_dioxus/src/interpreter/effects.rs`.
+private func setByScopedTarget(store: StateStore, rawTarget: String, value: Any?) {
+    let target: String = rawTarget.hasPrefix("$")
+        ? String(rawTarget.dropFirst())
+        : rawTarget
+    let segs = target.split(separator: ".", maxSplits: 1,
+                            omittingEmptySubsequences: false)
+        .map(String.init)
+    guard let first = segs.first else { return }
+    switch first {
+    case "tool":
+        guard segs.count == 2 else { return }
+        let inner = segs[1].split(separator: ".", maxSplits: 1,
+                                  omittingEmptySubsequences: false)
+            .map(String.init)
+        guard inner.count == 2 else { return }
+        store.setTool(inner[0], inner[1], value)
+    case "panel":
+        guard segs.count == 2 else { return }
+        if let panelId = store.getActivePanelId() {
+            store.setPanel(panelId, segs[1], value)
+        }
+    case "state":
+        guard segs.count == 2 else { return }
+        store.set(segs[1], value)
+    default:
+        store.set(target, value)
+    }
+}
+
 private func evalExpr(_ expr: Any?, store: StateStore, ctx: [String: Any]) -> Value {
     let exprStr: String
     if let s = expr as? String {
@@ -175,6 +242,15 @@ private func runOne(
     diagnostics: inout [Diagnostic]
 ) {
     // set: { key: expr, ... }
+    //
+    // YAML authors target state scopes via dotted paths with optional
+    // `$` prefix: `$tool.selection.mode`, `$state.fill_color`,
+    // `$panel.mode`. The non-schema branch strips `$`, then dispatches
+    // on the first segment so writes land in the matching store
+    // section. Unscoped keys (no leading `state.`/`panel.`/`tool.`)
+    // continue to write to the global state map — preserves
+    // call-site behavior from before the tool-state scope was
+    // introduced.
     if let pairs = effect["set"] as? [String: Any] {
         if schema {
             // Schema-driven: evaluate expressions first, then coerce+validate
@@ -187,7 +263,7 @@ private func runOne(
         } else {
             for (key, expr) in pairs {
                 let value = evalExpr(expr, store: store, ctx: ctx)
-                store.set(key, valueToAny(value))
+                setByScopedTarget(store: store, rawTarget: key, value: valueToAny(value))
             }
         }
         // Fire the panel-write hook if any `panel.X` key was touched.
@@ -264,19 +340,47 @@ private func runOne(
         return
     }
 
-    // if: { condition, then, else }
-    if let cond = effect["if"] as? [String: Any] {
-        let condExpr = cond["condition"] as? String ?? "false"
+    // if: two supported shapes
+    //
+    //   Flat (tool-YAML authoring convention):
+    //     if: "<expr>"
+    //     then: [...]
+    //     else: [...]
+    //
+    //   Nested (legacy actions.yaml):
+    //     if:
+    //       condition: "<expr>"
+    //       then: [...]
+    //       else: [...]
+    //
+    // Both accepted so selection.yaml + action fixtures coexist.
+    if let ifVal = effect["if"] {
+        let condExpr: String
+        let thenEffects: [Any]
+        let elseEffects: [Any]
+        if let s = ifVal as? String {
+            condExpr = s
+            thenEffects = (effect["then"] as? [Any]) ?? []
+            elseEffects = (effect["else"] as? [Any]) ?? []
+        } else if let cond = ifVal as? [String: Any] {
+            condExpr = cond["condition"] as? String ?? "false"
+            thenEffects = (cond["then"] as? [Any]) ?? []
+            elseEffects = (cond["else"] as? [Any]) ?? []
+        } else {
+            return
+        }
         let evalCtx = store.evalContext(extra: ctx)
         let result = evaluate(condExpr, context: evalCtx)
         if result.toBool() {
-            if let thenEffects = cond["then"] as? [Any] {
-                runEffects(thenEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+            if !thenEffects.isEmpty {
+                runEffects(thenEffects, ctx: ctx, store: store,
+                           actions: actions, dialogs: dialogs,
                            platformEffects: platformEffects,
                            schema: schema, diagnostics: &diagnostics)
             }
-        } else if let elseEffects = cond["else"] as? [Any] {
-            runEffects(elseEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+        } else if !elseEffects.isEmpty {
+            runEffects(elseEffects, ctx: ctx, store: store,
+                       actions: actions, dialogs: dialogs,
                        platformEffects: platformEffects,
                        schema: schema, diagnostics: &diagnostics)
         }

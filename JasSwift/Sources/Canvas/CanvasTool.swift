@@ -110,44 +110,64 @@ func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (
     return (sx + dist * cos(snapped), sy + dist * sin(snapped))
 }
 
-func regularPolygonPoints(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, _ n: Int) -> [(Double, Double)] {
-    let ex = x2 - x1, ey = y2 - y1
-    let s = hypot(ex, ey)
-    guard s > 0 else { return Array(repeating: (x1, y1), count: n) }
-    let mx = (x1 + x2) / 2, my = (y1 + y2) / 2
-    let px = -ey / s, py = ex / s
-    let d = s / (2 * tan(.pi / Double(n)))
-    let cx = mx + d * px, cy = my + d * py
-    let r = s / (2 * sin(.pi / Double(n)))
-    let theta0 = atan2(y1 - cy, x1 - cx)
-    return (0..<n).map { k in
-        let angle = theta0 + 2 * .pi * Double(k) / Double(n)
-        return (cx + r * cos(angle), cy + r * sin(angle))
-    }
-}
+// regularPolygonPoints lives in Geometry/RegularShapes.swift.
 
 // MARK: - Tool registry
 
+/// Load a YamlTool by id from the compiled workspace.json. Returns
+/// nil when the workspace can't be loaded or the tool spec is
+/// missing — callers fall back to the native implementation in that
+/// case so tests stay green when the workspace file is unavailable.
+func loadYamlTool(_ id: String) -> YamlTool? {
+    guard let ws = WorkspaceData.load(),
+          let tools = ws.data["tools"] as? [String: Any],
+          let spec = tools[id] as? [String: Any] else {
+        return nil
+    }
+    return YamlTool.fromWorkspaceTool(spec)
+}
+
 /// Create one instance of each tool, keyed by Tool enum.
 func createTools() -> [Tool: CanvasTool] {
-    [
-        .selection: SelectionTool(),
-        .partialSelection: PartialSelectionTool(),
-        .interiorSelection: InteriorSelectionTool(),
-        .pen: PenTool(),
-        .addAnchorPoint: AddAnchorPointTool(),
-        .deleteAnchorPoint: DeleteAnchorPointTool(),
-        .anchorPoint: AnchorPointTool(),
-        .pencil: PencilTool(),
-        .pathEraser: PathEraserTool(),
-        .smooth: SmoothTool(),
+    // Tools migrated to YAML per SWIFT_TOOL_RUNTIME.md Phase 7.
+    // Require the workspace to load — a missing workspace.json means
+    // the whole app is non-functional anyway.
+    guard let rectTool = loadYamlTool("rect"),
+          let roundedRectTool = loadYamlTool("rounded_rect"),
+          let lineTool = loadYamlTool("line"),
+          let polygonTool = loadYamlTool("polygon"),
+          let starTool = loadYamlTool("star"),
+          let selectionTool = loadYamlTool("selection"),
+          let interiorSelectionTool = loadYamlTool("interior_selection"),
+          let lassoTool = loadYamlTool("lasso"),
+          let pencilTool = loadYamlTool("pencil"),
+          let penTool = loadYamlTool("pen"),
+          let addAnchorPointTool = loadYamlTool("add_anchor_point"),
+          let deleteAnchorPointTool = loadYamlTool("delete_anchor_point"),
+          let anchorPointTool = loadYamlTool("anchor_point"),
+          let partialSelectionTool = loadYamlTool("partial_selection"),
+          let pathEraserTool = loadYamlTool("path_eraser"),
+          let smoothTool = loadYamlTool("smooth") else {
+        fatalError("workspace/workspace.json missing or malformed — cannot load YAML tools")
+    }
+    return [
+        .selection: selectionTool,
+        .partialSelection: partialSelectionTool,
+        .interiorSelection: interiorSelectionTool,
+        .pen: penTool,
+        .addAnchorPoint: addAnchorPointTool,
+        .deleteAnchorPoint: deleteAnchorPointTool,
+        .anchorPoint: anchorPointTool,
+        .pencil: pencilTool,
+        .pathEraser: pathEraserTool,
+        .smooth: smoothTool,
         .typeTool: TypeTool(),
         .typeOnPath: TypeOnPathTool(),
-        .line: LineTool(),
-        .rect: RectTool(),
-        .roundedRect: RoundedRectTool(),
-        .polygon: PolygonTool(),
-        .star: StarTool(),
-        .lasso: LassoTool(),
+        .line: lineTool,
+        .rect: rectTool,
+        .roundedRect: roundedRectTool,
+        .polygon: polygonTool,
+        .star: starTool,
+        .lasso: lassoTool,
     ]
 }

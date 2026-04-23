@@ -373,3 +373,126 @@ import Testing
     )
     #expect(store.getPanel("character_panel", "font_family") as? String == "Arial")
 }
+
+// MARK: - Scope-routed set targets (Phase 1 of Swift YAML tool runtime)
+
+@Test func setRoutesToolScopedTarget() {
+    let store = StateStore()
+    runEffects(
+        [["set": ["tool.selection.mode": "\"marquee\""]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getTool("selection", "mode") as? String == "marquee")
+}
+
+@Test func setStripsLeadingDollarFromTarget() {
+    let store = StateStore()
+    runEffects(
+        [["set": ["$tool.selection.mode": "\"idle\""]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getTool("selection", "mode") as? String == "idle")
+}
+
+@Test func setRoutesStateScopedTarget() {
+    let store = StateStore()
+    runEffects(
+        [["set": ["state.fill_color": "\"#ff0000\""]]],
+        ctx: [:], store: store
+    )
+    #expect(store.get("fill_color") as? String == "#ff0000")
+}
+
+@Test func setBareKeyStaysGlobalState() {
+    // Backward compat: existing callers pass bare keys like "x"
+    // and expect them in global state, not in a tool scope.
+    let store = StateStore()
+    runEffects(
+        [["set": ["x": "42"]]],
+        ctx: [:], store: store
+    )
+    #expect(store.get("x") as? Int == 42)
+    #expect(store.getToolScopes().isEmpty)
+}
+
+@Test func setPanelScopedTargetWritesToActivePanel() {
+    let store = StateStore()
+    store.initPanel("color", defaults: ["mode": "hsb"])
+    store.setActivePanel("color")
+    runEffects(
+        [["set": ["panel.mode": "\"rgb\""]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getPanel("color", "mode") as? String == "rgb")
+}
+
+@Test func evalContextReadsToolScope() {
+    // After writing to tool.sel.mode, the evaluator should resolve
+    // `tool.sel.mode` through the scope built by evalContext().
+    let store = StateStore()
+    runEffects(
+        [["set": ["tool.sel.mode": "\"drag\""]]],
+        ctx: [:], store: store
+    )
+    let ctx = store.evalContext()
+    let toolDict = ctx["tool"] as? [String: [String: Any]]
+    #expect(toolDict?["sel"]?["mode"] as? String == "drag")
+}
+
+@Test func toolWriteThenExpressionRead() {
+    // End-to-end: handler writes $tool.sel.mode, a later expression
+    // reads it.
+    let store = StateStore()
+    runEffects(
+        [["set": ["tool.sel.mode": "\"marquee\""]]],
+        ctx: [:], store: store
+    )
+    let v = evaluate("tool.sel.mode == \"marquee\"", context: store.evalContext())
+    if case .bool(let b) = v {
+        #expect(b == true)
+    } else {
+        Issue.record("expected Value.bool, got \(v)")
+    }
+}
+
+@Test func setRoutesMultipleScopesInOneEffect() {
+    let store = StateStore()
+    runEffects(
+        [[
+            "set": [
+                "tool.sel.mode": "\"idle\"",
+                "state.fill_color": "\"#000000\"",
+                "recent_count": "5",
+            ]
+        ]],
+        ctx: [:], store: store
+    )
+    #expect(store.getTool("sel", "mode") as? String == "idle")
+    #expect(store.get("fill_color") as? String == "#000000")
+    #expect(store.get("recent_count") as? Int == 5)
+}
+
+// MARK: - StateStore tool-scope API
+
+@Test func initToolSeedsDefaults() {
+    let store = StateStore()
+    store.initTool("pen", defaults: ["mode": "idle", "count": 0])
+    #expect(store.getTool("pen", "mode") as? String == "idle")
+    #expect(store.getTool("pen", "count") as? Int == 0)
+}
+
+@Test func setToolAutoCreatesNamespace() {
+    // Callers that haven't run initTool still get their write
+    // accepted — matches Rust's set_tool behavior.
+    let store = StateStore()
+    store.setTool("fresh_tool", "value", 42)
+    #expect(store.getTool("fresh_tool", "value") as? Int == 42)
+}
+
+@Test func destroyToolRemovesScope() {
+    let store = StateStore()
+    store.setTool("pen", "x", 1)
+    store.destroyTool("pen")
+    #expect(store.getTool("pen", "x") == nil)
+    #expect(store.hasTool("pen") == false)
+}
