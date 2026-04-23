@@ -23,9 +23,11 @@ import { Scope } from "./scope.mjs";
 import { toBool, toJson, PATH } from "./value.mjs";
 import {
   setSelection, addToSelection, toggleSelection, clearSelection,
-  getElement,
+  getElement, mkPath,
 } from "./document.mjs";
 import { hitTestRect, translateElement } from "./geometry.mjs";
+import * as pointBuffers from "./point_buffers.mjs";
+import { fitCurve } from "./fit_curve.mjs";
 
 /**
  * Run a list of effects. Each effect is a YAML-derived dict with a
@@ -103,6 +105,26 @@ function runEffect(effect, scope, store, options) {
   if ("log" in effect) {
     if (options.onLog) options.onLog(String(effect.log));
     else if (typeof console !== "undefined") console.log("[effect log]", effect.log);
+    return;
+  }
+
+  // ── Buffer mutations (for accumulator tools) ────────
+  if ("buffer.push" in effect) {
+    const spec = effect["buffer.push"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      const x = Number(toJson(evaluate(String(spec.x ?? "0"), scope))) || 0;
+      const y = Number(toJson(evaluate(String(spec.y ?? "0"), scope))) || 0;
+      if (name) pointBuffers.push(name, x, y);
+    }
+    return;
+  }
+  if ("buffer.clear" in effect) {
+    const spec = effect["buffer.clear"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      if (name) pointBuffers.clear(name);
+    }
     return;
   }
 
@@ -208,6 +230,58 @@ function runEffect(effect, scope, store, options) {
             }
             return next;
           });
+          return;
+        }
+        case "doc.add_path_from_buffer": {
+          // Spec: { buffer: <name>, fit_error?: <expr>,
+          //         stroke_brush?: <expr>, stroke?: <expr>,
+          //         fill?: <expr> }
+          // Read the named point buffer, fit a Bezier spline,
+          // build a Path element, and append it to layer 0
+          // (matches Pencil/Paintbrush semantics). Optional
+          // stroke_brush / stroke / fill ride along on the new
+          // element so a brushed stroke is rendered through the
+          // brush pipeline at next paint.
+          const name = String(spec.buffer || "");
+          if (!name) return;
+          const fitError = "fit_error" in spec
+            ? Number(toJson(evaluate(String(spec.fit_error), scope))) || 4.0
+            : 4.0;
+          const pts = pointBuffers.points(name);
+          if (pts.length < 2) return;
+          const segments = fitCurve(pts, fitError);
+          if (segments.length === 0) return;
+
+          // Build path commands: MoveTo(first), then a CurveTo per
+          // segment. fit_curve emits (p1x, p1y, c1x, c1y, c2x, c2y,
+          // p2x, p2y) tuples; we use the first segment's p1 as the
+          // initial MoveTo target.
+          const cmds = [{ type: "M", x: segments[0][0], y: segments[0][1] }];
+          for (const s of segments) {
+            cmds.push({
+              type: "C",
+              x1: s[2], y1: s[3],
+              x2: s[4], y2: s[5],
+              x: s[6], y: s[7],
+            });
+          }
+
+          // Optional attribute passthrough. Each is evaluated
+          // against the current scope so authors can write
+          // 'state.stroke_brush' (or 'null') in YAML.
+          const extra = {};
+          if ("stroke_brush" in spec) {
+            extra.stroke_brush = toJson(evaluate(String(spec.stroke_brush), scope));
+          }
+          if ("stroke" in spec) {
+            extra.stroke = toJson(evaluate(String(spec.stroke), scope));
+          }
+          if ("fill" in spec) {
+            extra.fill = toJson(evaluate(String(spec.fill), scope));
+          }
+
+          const elem = mkPath({ d: cmds, ...extra });
+          model.mutate((d) => addElementAt(d, [0], elem));
           return;
         }
         // Other doc.* effects land in subsequent phases.
