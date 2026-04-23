@@ -182,18 +182,68 @@ fn run_one(
         return;
     }
 
-    // if: { condition, then, else }
-    if let Some(serde_json::Value::Object(cond)) = effect.get("if") {
-        let condition = cond.get("condition")
-            .and_then(|v| v.as_str())
-            .unwrap_or("false");
-        let result = eval_expr(condition, store, ctx);
-        if result.to_bool() {
-            if let Some(serde_json::Value::Array(then_effects)) = cond.get("then") {
-                run_effects(then_effects, ctx, store, model.as_deref_mut(), actions, dialogs);
+    // if: two supported shapes
+    //
+    //   Flat (Flask / tool handlers):
+    //     if: "<expr>"
+    //     then: [...]
+    //     else: [...]
+    //
+    //   Nested (actions.yaml legacy):
+    //     if:
+    //       condition: "<expr>"
+    //       then: [...]
+    //       else: [...]
+    //
+    // The flat form is the authoring convention in workspace/tools/*.yaml
+    // (matches jas_flask/static/js/engine/effects.mjs). The nested form
+    // predates the tool runtime and is still used in workspace actions.
+    // Both are accepted here so selection.yaml and action fixtures
+    // continue to work.
+    if let Some(if_val) = effect.get("if") {
+        let (condition_expr, then_effects, else_effects) = match if_val {
+            serde_json::Value::String(s) => {
+                let then_eff = effect
+                    .get("then")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let else_eff = effect
+                    .get("else")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                (s.clone(), then_eff, else_eff)
             }
-        } else if let Some(serde_json::Value::Array(else_effects)) = cond.get("else") {
-            run_effects(else_effects, ctx, store, model.as_deref_mut(), actions, dialogs);
+            serde_json::Value::Object(cond_obj) => {
+                let cond = cond_obj
+                    .get("condition")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("false")
+                    .to_string();
+                let then_eff = cond_obj
+                    .get("then")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let else_eff = cond_obj
+                    .get("else")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                (cond, then_eff, else_eff)
+            }
+            _ => return,
+        };
+        let result = eval_expr(&condition_expr, store, ctx);
+        if result.to_bool() {
+            run_effects(
+                &then_effects, ctx, store,
+                model.as_deref_mut(), actions, dialogs);
+        } else {
+            run_effects(
+                &else_effects, ctx, store,
+                model.as_deref_mut(), actions, dialogs);
         }
         return;
     }
