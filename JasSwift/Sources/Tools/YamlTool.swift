@@ -246,6 +246,8 @@ final class YamlTool: CanvasTool {
         case "line": drawLineOverlay(cgCtx, render, evalCtx)
         case "polygon": drawPolygonOverlay(cgCtx, render, evalCtx)
         case "star": drawStarOverlay(cgCtx, render, evalCtx)
+        case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
+        case "buffer_polyline": drawBufferPolylineOverlay(cgCtx, render)
         default: break
         }
         _ = _reg
@@ -484,4 +486,41 @@ private func drawStarOverlay(
     let pts = starPoints(x1, y1, x2, y2, n)
     let style = parseOverlayStyle((spec["style"] as? String) ?? "")
     strokePolygonOverlay(cgCtx, pts, style)
+}
+
+/// Stroke/fill a closed polygon made of the named point buffer's
+/// points. Used by the Lasso tool's overlay.
+private func drawBufferPolygonOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any]
+) {
+    guard let name = spec["buffer"] as? String else { return }
+    let pts = pointBuffersPoints(name)
+    guard pts.count >= 2 else { return }
+    let style = parseOverlayStyle((spec["style"] as? String) ?? "")
+    strokePolygonOverlay(cgCtx, pts, style)
+}
+
+/// Stroke an open polyline made of the named point buffer's points.
+/// Used by the Pencil tool's overlay.
+private func drawBufferPolylineOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any]
+) {
+    guard let name = spec["buffer"] as? String else { return }
+    let pts = pointBuffersPoints(name)
+    guard let first = pts.first, pts.count >= 2 else { return }
+    let style = parseOverlayStyle((spec["style"] as? String) ?? "")
+    cgCtx.move(to: CGPoint(x: first.0, y: first.1))
+    for p in pts.dropFirst() {
+        cgCtx.addLine(to: CGPoint(x: p.0, y: p.1))
+    }
+    // Open path — only stroke, no fill/close.
+    if let stroke = style.stroke {
+        cgCtx.setStrokeColor(stroke)
+        cgCtx.setLineWidth(style.strokeWidth)
+        if !style.dash.isEmpty {
+            cgCtx.setLineDash(phase: 0, lengths: style.dash)
+        }
+        cgCtx.strokePath()
+        cgCtx.setLineDash(phase: 0, lengths: [])
+    }
 }
