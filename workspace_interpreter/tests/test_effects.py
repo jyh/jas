@@ -32,6 +32,43 @@ class TestSetEffect:
         run_effects([{"set": {"x": "null"}}], {}, store)
         assert store.get("x") is None
 
+    # Phase 1 — scope-routed set targets.
+
+    def test_set_routes_tool_scope(self):
+        store = StateStore()
+        store.init_tool("selection", {"mode": "idle"})
+        run_effects([{"set": {"tool.selection.mode": "'marquee'"}}], {}, store)
+        assert store.get_tool("selection", "mode") == "marquee"
+
+    def test_set_strips_leading_dollar(self):
+        store = StateStore()
+        store.init_tool("rect", {})
+        run_effects([{"set": {"$tool.rect.mode": "'drawing'"}}], {}, store)
+        assert store.get_tool("rect", "mode") == "drawing"
+
+    def test_set_routes_state_scope(self):
+        store = StateStore({"foo": 0})
+        run_effects([{"set": {"state.foo": "7"}}], {}, store)
+        assert store.get("foo") == 7
+
+    def test_bare_key_writes_global(self):
+        store = StateStore({"bar": 0})
+        run_effects([{"set": {"bar": "9"}}], {}, store)
+        assert store.get("bar") == 9
+
+    def test_set_routes_panel_scope(self):
+        store = StateStore()
+        store.init_panel("color", {"mode": "hsb"})
+        store.set_active_panel("color")
+        run_effects([{"set": {"panel.mode": "'rgb'"}}], {}, store)
+        assert store.get_panel("color", "mode") == "rgb"
+
+    def test_set_tool_auto_creates_namespace_via_effect(self):
+        store = StateStore()
+        run_effects([{"set": {"tool.new_tool.flag": "true"}}], {}, store)
+        assert store.has_tool("new_tool")
+        assert store.get_tool("new_tool", "flag") is True
+
 
 class TestToggleEffect:
     def test_toggle_true_to_false(self):

@@ -94,6 +94,12 @@ class StateStore:
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
+        # Tool-scoped state parallels _panels but is keyed by tool id.
+        # YAML tool handlers read/write via $tool.<id>.<key>; the `set`
+        # effect routes those targets here via the scope-routed set in
+        # effects.py. Populated by YamlTool when a tool registers with
+        # its declared state defaults.
+        self._tools: dict[str, dict] = {}
         self._dialog: dict = {}
         self._dialog_id: str | None = None
         self._dialog_params: dict | None = None
@@ -180,6 +186,42 @@ class StateStore:
         self._panel_subscribers.pop(panel_id, None)
         if self._active_panel == panel_id:
             self._active_panel = None
+
+    # ── Tool state ─────────────────────────────────────────────
+
+    def init_tool(self, tool_id: str, defaults: dict):
+        """Seed a tool's state with its declared defaults. Called by
+        YamlTool when the tool is constructed or reactivated."""
+        self._tools[tool_id] = dict(defaults)
+
+    def has_tool(self, tool_id: str) -> bool:
+        return tool_id in self._tools
+
+    def get_tool(self, tool_id: str, key: str):
+        scope = self._tools.get(tool_id)
+        if scope is None:
+            return None
+        return scope.get(key)
+
+    def set_tool(self, tool_id: str, key: str, value):
+        """Write into a tool's scope. Auto-creates the namespace on
+        first write — matches Rust/Swift set_tool behavior so callers
+        that didn't explicitly init_tool still work."""
+        scope = self._tools.get(tool_id)
+        if scope is None:
+            scope = {}
+            self._tools[tool_id] = scope
+        scope[key] = value
+
+    def get_tool_state(self, tool_id: str) -> dict:
+        return dict(self._tools.get(tool_id, {}))
+
+    def destroy_tool(self, tool_id: str):
+        self._tools.pop(tool_id, None)
+
+    def get_tool_scopes(self) -> dict:
+        """Return the whole tool scope (for tests / inspection)."""
+        return {tid: dict(scope) for tid, scope in self._tools.items()}
 
     # ── Dialog state ───────────────────────────────────────────
 
@@ -665,6 +707,9 @@ class StateStore:
             ctx["panel"] = dict(self._panels[self._active_panel])
         else:
             ctx["panel"] = {}
+        # Tool scope — one nested dict per registered tool. Expressions
+        # read as tool.<id>.<key>. Populated by YamlTool.
+        ctx["tool"] = {tid: dict(scope) for tid, scope in self._tools.items()}
         if self._dialog_id is not None:
             ctx["dialog"] = dict(self._dialog)
             if self._dialog_params is not None:

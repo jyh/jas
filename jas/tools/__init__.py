@@ -1,47 +1,83 @@
 """Canvas tool implementations."""
 
+from __future__ import annotations
+
+import json
+import os
+
 from tools.tool import CanvasTool
 from tools.toolbar import Tool
-
-from tools.selection_tool import SelectionTool
-from tools.partial_selection_tool import PartialSelectionTool
-from tools.interior_selection_tool import InteriorSelectionTool
-from tools.line_tool import LineTool
-from tools.rect_tool import RectTool
-from tools.rounded_rect_tool import RoundedRectTool
-from tools.polygon_tool import PolygonTool
-from tools.star_tool import StarTool
-from tools.pen_tool import PenTool
-from tools.add_anchor_point_tool import AddAnchorPointTool
-from tools.delete_anchor_point_tool import DeleteAnchorPointTool
-from tools.anchor_point_tool import AnchorPointTool
-from tools.pencil_tool import PencilTool
-from tools.path_eraser_tool import PathEraserTool
-from tools.smooth_tool import SmoothTool
+from tools.yaml_tool import YamlTool
 from tools.type_tool import TypeTool
 from tools.type_on_path_tool import TypeOnPathTool
-from tools.lasso_tool import LassoTool
+
+
+_WS: dict | None = None
+
+
+def _load_workspace() -> dict:
+    """Load the compiled workspace.json once per import."""
+    here = os.path.abspath(os.path.dirname(__file__))
+    # jas/tools/__init__.py is inside the `jas/` package — repo root
+    # is two directories up.
+    repo_root = os.path.abspath(os.path.join(here, "..", "..", ".."))
+    ws_path = os.path.join(repo_root, "workspace", "workspace.json")
+    # Fallback when the tool is imported from a different CWD.
+    if not os.path.exists(ws_path):
+        alt = os.path.abspath(
+            os.path.join(here, "..", "..", "workspace", "workspace.json")
+        )
+        if os.path.exists(alt):
+            ws_path = alt
+    with open(ws_path, "r") as f:
+        return json.load(f)
+
+
+def _yaml_tool(tool_id: str) -> YamlTool:
+    """Load a YamlTool by id from the compiled workspace.json.
+    Raises if the workspace or spec is missing — a non-functional
+    app is better than a partially-wired one."""
+    global _WS
+    if _WS is None:
+        _WS = _load_workspace()
+    tools = _WS.get("tools") or {}
+    spec = tools.get(tool_id)
+    if spec is None:
+        raise RuntimeError(
+            f"workspace.json is missing tools.{tool_id} — "
+            f"cannot load YAML tool"
+        )
+    tool = YamlTool.from_workspace_tool(spec)
+    if tool is None:
+        raise RuntimeError(
+            f"workspace.json tools.{tool_id} is malformed — cannot parse"
+        )
+    return tool
 
 
 def create_tools() -> dict[Tool, CanvasTool]:
-    """Create one instance of each tool, keyed by Tool enum."""
+    """Create one instance of each tool, keyed by Tool enum.
+
+    14 tools are YAML-driven per PYTHON_TOOL_RUNTIME.md Phase 7.
+    Type + TypeOnPath stay native per NATIVE_BOUNDARY.md §6.
+    """
     return {
-        Tool.SELECTION: SelectionTool(),
-        Tool.PARTIAL_SELECTION: PartialSelectionTool(),
-        Tool.INTERIOR_SELECTION: InteriorSelectionTool(),
-        Tool.PEN: PenTool(),
-        Tool.ADD_ANCHOR_POINT: AddAnchorPointTool(),
-        Tool.DELETE_ANCHOR_POINT: DeleteAnchorPointTool(),
-        Tool.ANCHOR_POINT: AnchorPointTool(),
-        Tool.PENCIL: PencilTool(),
-        Tool.PATH_ERASER: PathEraserTool(),
-        Tool.SMOOTH: SmoothTool(),
+        Tool.SELECTION: _yaml_tool("selection"),
+        Tool.PARTIAL_SELECTION: _yaml_tool("partial_selection"),
+        Tool.INTERIOR_SELECTION: _yaml_tool("interior_selection"),
+        Tool.PEN: _yaml_tool("pen"),
+        Tool.ADD_ANCHOR_POINT: _yaml_tool("add_anchor_point"),
+        Tool.DELETE_ANCHOR_POINT: _yaml_tool("delete_anchor_point"),
+        Tool.ANCHOR_POINT: _yaml_tool("anchor_point"),
+        Tool.PENCIL: _yaml_tool("pencil"),
+        Tool.PATH_ERASER: _yaml_tool("path_eraser"),
+        Tool.SMOOTH: _yaml_tool("smooth"),
         Tool.TYPE: TypeTool(),
         Tool.TYPE_ON_PATH: TypeOnPathTool(),
-        Tool.LINE: LineTool(),
-        Tool.RECT: RectTool(),
-        Tool.ROUNDED_RECT: RoundedRectTool(),
-        Tool.POLYGON: PolygonTool(),
-        Tool.STAR: StarTool(),
-        Tool.LASSO: LassoTool(),
+        Tool.LINE: _yaml_tool("line"),
+        Tool.RECT: _yaml_tool("rect"),
+        Tool.ROUNDED_RECT: _yaml_tool("rounded_rect"),
+        Tool.POLYGON: _yaml_tool("polygon"),
+        Tool.STAR: _yaml_tool("star"),
+        Tool.LASSO: _yaml_tool("lasso"),
     }
