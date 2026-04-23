@@ -1176,6 +1176,130 @@ mod tests {
         assert_eq!(sel[0].path, vec![0, 1]);
     }
 
+    // ── Rect tool behavioral tests ─────────────────────────────────
+    //
+    // Ports of the 4 cases in the deleted jas_dioxus/src/tools/rect_tool.rs
+    // tests, run against a YamlTool constructed from workspace/tools/rect.yaml.
+    // Native RectTool only committed the new rect on mouseup (with a
+    // zero-size check) and used model.default_fill / default_stroke.
+    // rect.yaml matches that flow — doc.add_element's fill/stroke
+    // fallthrough pulls from the Model.
+
+    fn rect_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("rect")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn empty_layer_model() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::LayerElem;
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn rect_parity_draw_rect() {
+        let Some(mut tool) = rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press at (10, 20), drag to (110, 70), release: 100x50 rect
+        // with top-left at (10, 20).
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 110.0, 70.0, false, false, true);
+        tool.on_release(&mut model, 110.0, 70.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 100.0);
+            assert_eq!(r.height, 50.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn rect_parity_zero_size_rect_not_created() {
+        let Some(mut tool) = rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press and release at the same point — no movement, no rect.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn rect_parity_negative_drag_normalizes() {
+        let Some(mut tool) = rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press at (100, 80), drag back to (10, 20). End rect should
+        // be normalized to (10, 20, 90, 60).
+        tool.on_press(&mut model, 100.0, 80.0, false, false);
+        tool.on_move(&mut model, 10.0, 20.0, false, false, true);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 90.0);
+            assert_eq!(r.height, 60.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn rect_parity_uses_model_defaults() {
+        use crate::geometry::element::{Color, Fill, Stroke};
+        let Some(mut tool) = rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        model.default_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        model.default_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0));
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 110.0, 70.0, false, false, true);
+        tool.on_release(&mut model, 110.0, 70.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.fill, Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))));
+            assert_eq!(r.stroke, Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0)));
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
     #[test]
     fn selection_parity_alt_captured_at_press_not_move() {
         // If Alt is released between press and first move, the copy
