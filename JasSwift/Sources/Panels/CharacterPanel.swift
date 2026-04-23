@@ -18,8 +18,6 @@
 ///   `applyCharacterPanelToSelection`.
 
 public enum CharacterPanel {
-    public static let label = "Character"
-
     public static func menuItems() -> [PanelMenuItem] {
         [
             .toggle(label: "Show Snap to Glyph Options", command: "toggle_snap_to_glyph_visible"),

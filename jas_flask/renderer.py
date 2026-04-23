@@ -1055,14 +1055,11 @@ def _render_menu_items(items: list, actions: dict) -> str:
 
 # ── dock_view renderer ────────────────────────────────────────
 
-# Panel name -> display label
-_PANEL_LABELS = {
-    "layers": "Layers", "color": "Color",
-    "stroke": "Stroke", "properties": "Properties",
-    "swatches": "Swatches",
-    "character": "Character", "paragraph": "Paragraph",
-    "artboards": "Artboards",
-}
+def _panel_label(panel_name: str) -> str:
+    """Human-readable label for a panel, read from its YAML `summary:` field
+    with a fallback to a title-cased form of the panel name."""
+    spec = _panels.get(f"{panel_name}_panel_content", {})
+    return spec.get("summary") or panel_name.title()
 
 
 def _render_dock_view(el, theme, state):
@@ -1089,7 +1086,7 @@ def _render_dock_view(el, theme, state):
                 html += (
                     f'<button class="btn btn-sm app-dock-icon p-0" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:var(--app-button-checked,#505050);border:none;color:var(--app-text-dim,#999)"'
                     f' data-dock="{escape(eid)}" data-group="{gi}" data-panel="{pi}"'
-                    f' title="{escape(_PANEL_LABELS.get(panel_name, panel_name))}">'
+                    f' title="{escape(_panel_label(panel_name))}">'
                     f'<svg viewBox="{viewbox}" width="20" height="20" fill="currentColor">{svg}</svg></button>'
                 )
             if gi < len(groups) - 1:
@@ -1112,7 +1109,7 @@ def _render_dock_view(el, theme, state):
 
             # Tab buttons
             for pi, panel_name in enumerate(panels):
-                label = _PANEL_LABELS.get(panel_name, panel_name.title())
+                label = _panel_label(panel_name)
                 active_cls = " active" if pi == active else ""
                 tab_bg = "var(--app-tab-active,#4a4a4a)" if pi == active else "var(--app-tab-inactive,#353535)"
                 html += (
@@ -1162,7 +1159,7 @@ def _render_dock_view(el, theme, state):
                     html += '<li><hr class="dropdown-divider"></li>'
                 # Close panel items
                 for panel_name in panels:
-                    label = _PANEL_LABELS.get(panel_name, panel_name.title())
+                    label = _panel_label(panel_name)
                     html += f'<li><a class="dropdown-item" href="#" data-action="close_panel" data-action-params=\'{{"panel":"{escape(panel_name)}"}}\'>{escape("Close " + label)}</a></li>'
                 html += '</ul></div>'
 
@@ -1216,7 +1213,7 @@ def _render_dock_view(el, theme, state):
                         content_html = render_element(content_el, theme, panel_scope.to_dict(), mode="normal") if isinstance(content_el, dict) else ""
                         html += f'<div class="app-dock-panel-body{hidden_cls}"{body_attrs}>{content_html}</div>'
                     else:
-                        label = _PANEL_LABELS.get(panel_name, panel_name.title())
+                        label = _panel_label(panel_name)
                         html += f'<div class="app-dock-panel-body{hidden_cls}" style="padding:12px;color:var(--app-text-body,#aaa);font-size:18px" data-panel-name="{escape(panel_name)}">{escape(label)}</div>'
                 html += '</div>'
 

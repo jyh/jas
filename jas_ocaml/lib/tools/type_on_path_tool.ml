@@ -491,11 +491,12 @@ class type_on_path_tool = object (_self)
         | _ -> ()
       with _ -> ()
     ) doc.Document.selection;
-    (* Editing overlay: caret + selection *)
-    (match _self#build_layout ctx with
-     | None -> ()
-     | Some (pr, lay) ->
-       let s = match session with Some s -> s | None -> assert false in
+    (* Editing overlay: caret + selection. Only draws when there is
+       both a rendered layout and an active editing session; absent
+       either, this frame has no overlay to paint. *)
+    (match _self#build_layout ctx, session with
+     | None, _ | _, None -> ()
+     | Some (pr, lay), Some s ->
        (* Selection: highlight glyphs in [lo, hi) *)
        if Text_edit.has_selection s then begin
          let (lo, hi) = Text_edit.selection_range s in

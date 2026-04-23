@@ -148,7 +148,7 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
                   | Panel_menu.Action { label; command; _ } ->
                     let mi = GMenu.menu_item ~label ~packing:menu#append () in
                     mi#connect#activate ~callback:(fun () ->
-                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Yaml_panel_view.get_layers_panel_selection ();
+                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
                       rebuild ()
                     ) |> ignore
                   | Panel_menu.Toggle { label; command } ->
@@ -156,7 +156,7 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
                     let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
                     mi#set_active checked;
                     mi#connect#activate ~callback:(fun () ->
-                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Yaml_panel_view.get_layers_panel_selection ();
+                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
                       rebuild ()
                     ) |> ignore
                   | Panel_menu.Radio { label; command; _ } ->
@@ -164,7 +164,7 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
                     let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
                     mi#set_active selected;
                     mi#connect#activate ~callback:(fun () ->
-                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Yaml_panel_view.get_layers_panel_selection ();
+                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
                       rebuild ()
                     ) |> ignore
                   | Panel_menu.Separator ->

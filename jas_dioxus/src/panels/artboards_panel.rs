@@ -15,9 +15,6 @@ use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
-/// Human-readable label for this panel.
-pub const LABEL: &str = "Artboards";
-
 /// Menu items for the Artboards panel.
 ///
 /// Order and labels match `workspace/panels/artboards.yaml §menu`

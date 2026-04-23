@@ -1,8 +1,6 @@
 /// Swatches panel menu definition.
 
 public enum SwatchesPanel {
-    public static let label = "Swatches"
-
     public static func menuItems() -> [PanelMenuItem] {
         [.action(label: "Close Swatches", command: "close_panel")]
     }

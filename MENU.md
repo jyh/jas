@@ -44,8 +44,8 @@ module, updates the model's filename, and replaces the document. The undo
 stack is cleared.
 
 **Save / Save As** exports the document to SVG using the SVG export module
-and writes it to disk. After saving, `model.saved_document` is updated so
-that `is_modified` reflects the saved state.
+and writes it to disk. After saving, the model records the saved state so
+that `is_modified` returns false until the next mutation.
 
 **Revert** re-reads the file at the current filename and replaces the
 document. The undo stack is cleared.

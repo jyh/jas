@@ -4,14 +4,11 @@ use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
-/// Human-readable label for this panel.
-pub const LABEL: &str = "Properties";
-
 /// Menu items for the Properties panel.
 pub fn menu_items() -> Vec<PanelMenuItem> {
     vec![
         PanelMenuItem::Action {
-            label: "Close Properties",
+            label: "Close Object properties",
             command: "close_panel",
             shortcut: "",
         },

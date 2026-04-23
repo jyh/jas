@@ -69,6 +69,7 @@ class ToolButton(QToolButton):
     """A toolbar button that draws a tool icon."""
 
     ICON_SIZE = 28
+    ARTWORK_SIZE = 28
     BUTTON_SIZE = 32
 
     def __init__(self, tool, parent=None, has_alternates=False):
@@ -162,8 +163,8 @@ class ToolButton(QToolButton):
     def _draw_line_tool(self, painter):
         # Line icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -179,8 +180,8 @@ class ToolButton(QToolButton):
         # Rounded Rectangle icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
         from PySide6.QtCore import QRectF
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -192,8 +193,8 @@ class ToolButton(QToolButton):
     def _draw_pen_tool(self, painter):
         # Pen icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0  # 0.109375
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -236,8 +237,8 @@ class ToolButton(QToolButton):
     def _draw_add_anchor_point_tool(self, painter):
         # Add Anchor Point icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -297,8 +298,8 @@ class ToolButton(QToolButton):
     def _draw_delete_anchor_point_tool(self, painter):
         # Delete Anchor Point icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -366,8 +367,8 @@ class ToolButton(QToolButton):
     def _draw_pencil_tool(self, painter):
         # Pencil icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -451,8 +452,8 @@ class ToolButton(QToolButton):
     def _draw_path_eraser_tool(self, painter):
         # Path eraser icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -543,8 +544,8 @@ class ToolButton(QToolButton):
         # Smooth icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
         # Pencil body + "S" lettering from the smooth tool SVG.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -648,8 +649,8 @@ class ToolButton(QToolButton):
     def _draw_type_tool(self, painter):
         # Type icon from assets/icons/type.svg (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -681,8 +682,8 @@ class ToolButton(QToolButton):
         # Type on a Path icon from assets/icons/type on a path.svg
         # (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
@@ -748,8 +749,8 @@ class ToolButton(QToolButton):
         # Star icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
         from PySide6.QtCore import QPointF
         s = 28.0 / 256.0
-        ox = (self.ICON_SIZE - 28) / 2.0
-        oy = (self.ICON_SIZE - 28) / 2.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)

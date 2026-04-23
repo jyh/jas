@@ -1,10 +1,8 @@
 /// Properties panel menu definition.
 
 public enum PropertiesPanel {
-    public static let label = "Properties"
-
     public static func menuItems() -> [PanelMenuItem] {
-        [.action(label: "Close Properties", command: "close_panel")]
+        [.action(label: "Close Object properties", command: "close_panel")]
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout) {
