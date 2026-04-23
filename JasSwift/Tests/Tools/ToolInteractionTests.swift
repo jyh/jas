@@ -519,8 +519,12 @@ private func makeClosedPath() -> Element {
                stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
 }
 
+private func pathEraserTool() -> CanvasTool {
+    createTools()[.pathEraser]!
+}
+
 @Test func pathEraserDeletesSmallPath() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let small = makeLinePath(0, 0, 1, 1)
     let layer = Layer(name: "L", children: [small])
     let doc = Document(layers: [layer])
@@ -532,7 +536,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserSplitsOpenPath() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -544,7 +548,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserOpensClosedPath() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeClosedPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -563,7 +567,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserMissDoesNothing() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -575,7 +579,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserReleaseWithoutPressIsNoop() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -586,7 +590,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserMoveWithoutPressIsNoop() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -597,14 +601,14 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserStateTransitions() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let (ctx, _, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     tool.onRelease(ctx, x: 0, y: 0, shift: false, alt: false)
 }
 
 @Test func pathEraserLockedPathNotErased() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let small: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(1, 1)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1),
@@ -622,7 +626,7 @@ private func makeClosedPath() -> Element {
 @Test func pathEraserSplitEndpointsHugEraser() {
     // Horizontal path (0,0)→(100,0)→(200,0).
     // Erase at x=50 with eraserSize=2 => eraser rect x=[48,52].
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(200, 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
@@ -652,7 +656,7 @@ private func makeClosedPath() -> Element {
 
 @Test func pathEraserSplitPreservesCurves() {
     // Cubic curve from (0,0) to (200,0) arching upward.
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path: Element = .path(Path(
         d: [.moveTo(0, 0), .curveTo(x1: 50, y1: -100, x2: 150, y2: -100, x: 200, y: 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
