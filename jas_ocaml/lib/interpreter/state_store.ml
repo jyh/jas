@@ -18,6 +18,12 @@ type t = {
   mutable state : (string * Yojson.Safe.t) list;
   mutable panels : (string * (string * Yojson.Safe.t) list) list;
   mutable active_panel : string option;
+  (** Tool-scoped state parallels [panels] but is keyed by tool id.
+      YAML tool handlers read/write via [$tool.<id>.<key>]; the
+      [set] effect routes those targets here via the scope-routed
+      set in [Effects]. Populated by [Yaml_tool] when a tool
+      registers with its declared state defaults. *)
+  mutable tools : (string * (string * Yojson.Safe.t) list) list;
   mutable dialog : (string * Yojson.Safe.t) list;
   mutable dialog_id : string option;
   mutable dialog_params : (string * Yojson.Safe.t) list option;
@@ -35,6 +41,7 @@ let create ?(defaults = []) () : t =
   { state = defaults;
     panels = [];
     active_panel = None;
+    tools = [];
     dialog = [];
     dialog_id = None;
     dialog_params = None;
@@ -108,6 +115,41 @@ let get_active_panel_state (store : t) : (string * Yojson.Safe.t) list =
 let destroy_panel (store : t) (panel_id : string) : unit =
   store.panels <- List.filter (fun (k, _) -> k <> panel_id) store.panels;
   if store.active_panel = Some panel_id then store.active_panel <- None
+
+(* ── Tool state ───────────────────────────────────────── *)
+
+let init_tool (store : t) (tool_id : string)
+    (defaults : (string * Yojson.Safe.t) list) : unit =
+  store.tools <- (tool_id, defaults) :: List.filter (fun (k, _) -> k <> tool_id) store.tools
+
+let has_tool (store : t) (tool_id : string) : bool =
+  List.mem_assoc tool_id store.tools
+
+let get_tool (store : t) (tool_id : string) (key : string) : Yojson.Safe.t =
+  match List.assoc_opt tool_id store.tools with
+  | Some scope -> (match List.assoc_opt key scope with Some v -> v | None -> `Null)
+  | None -> `Null
+
+let set_tool (store : t) (tool_id : string) (key : string) (value : Yojson.Safe.t) : unit =
+  (* Create the tool namespace on first write — matches Rust/Swift
+     set_tool behavior so callers that didn't explicitly init_tool
+     still work. *)
+  let scope = match List.assoc_opt tool_id store.tools with
+    | Some s -> s
+    | None -> []
+  in
+  let new_scope = (key, value) :: List.filter (fun (k, _) -> k <> key) scope in
+  store.tools <- (tool_id, new_scope) :: List.filter (fun (k, _) -> k <> tool_id) store.tools
+
+let get_tool_state (store : t) (tool_id : string) : (string * Yojson.Safe.t) list =
+  match List.assoc_opt tool_id store.tools with Some s -> s | None -> []
+
+let destroy_tool (store : t) (tool_id : string) : unit =
+  store.tools <- List.filter (fun (k, _) -> k <> tool_id) store.tools
+
+(** Return all tool scopes (for tests / inspection). *)
+let get_tool_scopes (store : t) : (string * (string * Yojson.Safe.t) list) list =
+  store.tools
 
 (* ── Dialog state ─────────────────────────────────────── *)
 
@@ -209,7 +251,13 @@ let eval_context ?(extra = []) (store : t) : Yojson.Safe.t =
        | None -> `Assoc [])
     | None -> `Assoc []
   in
-  let base = [("state", state_obj); ("panel", panel_obj)] in
+  (* Tool scope — one nested dict per registered tool. Expressions
+     read as [tool.<id>.<key>]. Populated by [Yaml_tool]. *)
+  let tool_obj =
+    `Assoc (List.map (fun (id, scope) -> (id, `Assoc scope)) store.tools)
+  in
+  let base = [("state", state_obj); ("panel", panel_obj);
+              ("tool", tool_obj)] in
   let with_dialog =
     match store.dialog_id with
     | Some _ ->

@@ -29,6 +29,39 @@ let value_to_json (v : Expr_eval.value) : Yojson.Safe.t =
     `Assoc [("__path__", `List (List.map (fun i -> `Int i) indices))]
   | Closure _ -> `Null
 
+(** Route a scope-qualified [set:] target to the right [State_store]
+    section. Target shapes (leading [$] stripped):
+      [tool.<id>.<key>[.<more>]]  -> [State_store.set_tool]
+      [panel.<key>]               -> active panel's scope
+      [state.<key>]               -> global state (explicit)
+      [anything_else]             -> global state (bare) *)
+let set_by_scoped_target (store : State_store.t) (raw_target : string)
+    (value : Yojson.Safe.t) : unit =
+  let target =
+    if String.length raw_target > 0 && raw_target.[0] = '$'
+    then String.sub raw_target 1 (String.length raw_target - 1)
+    else raw_target
+  in
+  match String.index_opt target '.' with
+  | None -> State_store.set store target value
+  | Some i ->
+    let head = String.sub target 0 i in
+    let rest = String.sub target (i + 1) (String.length target - i - 1) in
+    match head with
+    | "tool" ->
+      (match String.index_opt rest '.' with
+       | None -> ()  (* tool.<id> without field — malformed, drop *)
+       | Some j ->
+         let tool_id = String.sub rest 0 j in
+         let key = String.sub rest (j + 1) (String.length rest - j - 1) in
+         State_store.set_tool store tool_id key value)
+    | "panel" ->
+      (match State_store.get_active_panel_id store with
+       | Some pid -> State_store.set_panel store pid rest value
+       | None -> ())
+    | "state" -> State_store.set store rest value
+    | _ -> State_store.set store target value
+
 (** Extract default values from a dialog state definition. *)
 let state_defaults (state_defs : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
   match state_defs with
@@ -143,7 +176,14 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     (diagnostics : Schema.diagnostic list ref) : unit =
   let mem key = Workspace_loader.json_member key eff in
 
-  (* set: { key: expr, ... } *)
+  (* set: { key: expr, ... }
+     YAML authors target state scopes via dotted paths with optional
+     [$] prefix: [$tool.selection.mode], [$state.fill_color],
+     [$panel.mode]. The non-schema branch strips [$], then dispatches
+     on the first segment so writes land in the matching store
+     section. Unscoped keys (no leading [state.]/[panel.]/[tool.])
+     continue to write to the global state map — preserves call-site
+     behavior from before the tool-state scope was introduced. *)
   (match mem "set" with
    | Some (`Assoc pairs) ->
      if schema then begin
@@ -156,7 +196,7 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
      end else
        List.iter (fun (key, expr) ->
          let value = eval_expr expr store ctx in
-         State_store.set store key (value_to_json value)
+         set_by_scoped_target store key (value_to_json value)
        ) pairs
    | _ ->
 
