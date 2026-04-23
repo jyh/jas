@@ -135,6 +135,89 @@ describe("doc.toggle_selection", () => {
   });
 });
 
+describe("doc.set_attr_on_selection", () => {
+  it("sets attribute on every selected element", () => {
+    const model = makeModelWithElements();
+    model.setDocument(setSelection(model.document, [[0, 0], [0, 1]]));
+    const store = new StateStore();
+    runEffects(
+      [{
+        "doc.set_attr_on_selection": {
+          attr: "stroke_brush",
+          value: '"default_brushes/oval_5pt"',
+        },
+      }],
+      store.asContext(),
+      store,
+      { model },
+    );
+    const children = model.document.layers[0].children;
+    assert.equal(children[0].stroke_brush, "default_brushes/oval_5pt");
+    assert.equal(children[1].stroke_brush, "default_brushes/oval_5pt");
+  });
+
+  it("leaves unselected elements untouched", () => {
+    const model = makeModelWithElements();
+    // Only the rect is selected.
+    model.setDocument(setSelection(model.document, [[0, 0]]));
+    const store = new StateStore();
+    runEffects(
+      [{
+        "doc.set_attr_on_selection": {
+          attr: "stroke_brush",
+          value: '"default_brushes/oval_5pt"',
+        },
+      }],
+      store.asContext(),
+      store,
+      { model },
+    );
+    const children = model.document.layers[0].children;
+    assert.equal(children[0].stroke_brush, "default_brushes/oval_5pt");
+    assert.equal(children[1].stroke_brush, undefined);
+  });
+
+  it("empty selection is a no-op", () => {
+    const model = makeModelWithElements();
+    const before = model.document;
+    const store = new StateStore();
+    runEffects(
+      [{
+        "doc.set_attr_on_selection": {
+          attr: "stroke_brush",
+          value: '"x/y"',
+        },
+      }],
+      store.asContext(),
+      store,
+      { model },
+    );
+    // Document unchanged (deep equal).
+    assert.deepEqual(model.document, before);
+  });
+
+  it("null value clears the attribute", () => {
+    const model = makeModelWithElements();
+    // Pre-set an attribute on the rect.
+    const layer0 = model.document.layers[0];
+    const r = { ...layer0.children[0], stroke_brush: "foo/bar" };
+    const newLayer = { ...layer0, children: [r, layer0.children[1]] };
+    model.setDocument({ ...model.document, layers: [newLayer] });
+    model.setDocument(setSelection(model.document, [[0, 0]]));
+
+    const store = new StateStore();
+    runEffects(
+      [{
+        "doc.set_attr_on_selection": { attr: "stroke_brush", value: "null" },
+      }],
+      store.asContext(),
+      store,
+      { model },
+    );
+    assert.equal(model.document.layers[0].children[0].stroke_brush, null);
+  });
+});
+
 describe("without model — onDocEffect observer", () => {
   it("fires for unrecognized doc.* effects", () => {
     const store = new StateStore();
