@@ -10,7 +10,461 @@
 //! The `interpreter::effects::doc.path.*` effects call into this
 //! module.
 
-use crate::geometry::element::PathCommand;
+use crate::geometry::element::{PathCommand, FLATTEN_STEPS};
+
+/// Return the endpoint of a path command. For `ClosePath` the endpoint
+/// is the subpath's start (MoveTo), which this helper doesn't track —
+/// returns `None` and lets callers decide (Eraser treats it as "no
+/// more pen motion"; Smooth treats it as origin via unwrap_or).
+pub fn cmd_endpoint(cmd: &PathCommand) -> Option<(f64, f64)> {
+    match cmd {
+        PathCommand::MoveTo { x, y }
+        | PathCommand::LineTo { x, y }
+        | PathCommand::SmoothQuadTo { x, y } => Some((*x, *y)),
+        PathCommand::CurveTo { x, y, .. }
+        | PathCommand::SmoothCurveTo { x, y, .. }
+        | PathCommand::QuadTo { x, y, .. }
+        | PathCommand::ArcTo { x, y, .. } => Some((*x, *y)),
+        PathCommand::ClosePath => None,
+    }
+}
+
+/// Build a parallel array of "pen position before each command" —
+/// useful when a kernel needs the start point of any command without
+/// re-walking the prefix.
+pub fn cmd_start_points(cmds: &[PathCommand]) -> Vec<(f64, f64)> {
+    let mut starts = vec![(0.0, 0.0); cmds.len()];
+    let mut cur = (0.0, 0.0);
+    for (i, cmd) in cmds.iter().enumerate() {
+        starts[i] = cur;
+        if let Some(pt) = cmd_endpoint(cmd) {
+            cur = pt;
+        }
+    }
+    starts
+}
+
+/// Start point of the single command at `cmd_idx` — pen position
+/// where that command begins. `(0, 0)` when `cmd_idx == 0` or the
+/// prior command has no endpoint (ClosePath).
+pub fn cmd_start_point(cmds: &[PathCommand], cmd_idx: usize) -> (f64, f64) {
+    if cmd_idx == 0 {
+        return (0.0, 0.0);
+    }
+    cmd_endpoint(&cmds[cmd_idx - 1]).unwrap_or((0.0, 0.0))
+}
+
+/// Flatten path commands into a polyline with a parallel command-
+/// index map. Mirrors the deleted smooth_tool's `flatten_with_cmd_map`:
+///   - MoveTo / LineTo / (SmoothQuadTo / SmoothCurveTo / ArcTo
+///     treated as LineTo) → one sample at the endpoint
+///   - CurveTo / QuadTo → [FLATTEN_STEPS] samples via the Bezier formula
+///   - ClosePath → no sample
+pub fn flatten_with_cmd_map(
+    cmds: &[PathCommand],
+) -> (Vec<(f64, f64)>, Vec<usize>) {
+    let mut pts = Vec::new();
+    let mut map = Vec::new();
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+    let steps = FLATTEN_STEPS;
+    for (cmd_idx, cmd) in cmds.iter().enumerate() {
+        match cmd {
+            PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => {
+                pts.push((*x, *y));
+                map.push(cmd_idx);
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                for i in 1..=steps {
+                    let t = i as f64 / steps as f64;
+                    let mt = 1.0 - t;
+                    let px = mt.powi(3) * cx
+                        + 3.0 * mt.powi(2) * t * x1
+                        + 3.0 * mt * t.powi(2) * x2
+                        + t.powi(3) * x;
+                    let py = mt.powi(3) * cy
+                        + 3.0 * mt.powi(2) * t * y1
+                        + 3.0 * mt * t.powi(2) * y2
+                        + t.powi(3) * y;
+                    pts.push((px, py));
+                    map.push(cmd_idx);
+                }
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::QuadTo { x1, y1, x, y } => {
+                for i in 1..=steps {
+                    let t = i as f64 / steps as f64;
+                    let mt = 1.0 - t;
+                    let px = mt.powi(2) * cx + 2.0 * mt * t * x1 + t.powi(2) * x;
+                    let py = mt.powi(2) * cy + 2.0 * mt * t * y1 + t.powi(2) * y;
+                    pts.push((px, py));
+                    map.push(cmd_idx);
+                }
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::ClosePath => {}
+            _ => {
+                let (ex, ey) = cmd_endpoint(cmd).unwrap_or((cx, cy));
+                pts.push((ex, ey));
+                map.push(cmd_idx);
+                cx = ex;
+                cy = ey;
+            }
+        }
+    }
+    (pts, map)
+}
+
+/// Liang-Barsky entry parameter (t_min) for line segment vs
+/// axis-aligned rect.
+pub fn liang_barsky_t_min(
+    x1: f64, y1: f64, x2: f64, y2: f64,
+    min_x: f64, min_y: f64, max_x: f64, max_y: f64,
+) -> f64 {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let mut t_min = 0.0_f64;
+    for &(p, q) in &[
+        (-dx, x1 - min_x), (dx, max_x - x1),
+        (-dy, y1 - min_y), (dy, max_y - y1),
+    ] {
+        if p.abs() >= 1e-12 && p < 0.0 {
+            t_min = t_min.max(q / p);
+        }
+    }
+    t_min.clamp(0.0, 1.0)
+}
+
+/// Liang-Barsky exit parameter (t_max) for line segment vs rect.
+pub fn liang_barsky_t_max(
+    x1: f64, y1: f64, x2: f64, y2: f64,
+    min_x: f64, min_y: f64, max_x: f64, max_y: f64,
+) -> f64 {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let mut t_max = 1.0_f64;
+    for &(p, q) in &[
+        (-dx, x1 - min_x), (dx, max_x - x1),
+        (-dy, y1 - min_y), (dy, max_y - y1),
+    ] {
+        if p.abs() >= 1e-12 && p > 0.0 {
+            t_max = t_max.min(q / p);
+        }
+    }
+    t_max.clamp(0.0, 1.0)
+}
+
+/// True iff the line segment from (x1, y1) to (x2, y2) intersects
+/// the axis-aligned rect `[min_x, max_x] × [min_y, max_y]`. Both
+/// endpoints inside-the-rect count as intersecting.
+pub fn line_segment_intersects_rect(
+    x1: f64, y1: f64, x2: f64, y2: f64,
+    min_x: f64, min_y: f64, max_x: f64, max_y: f64,
+) -> bool {
+    if x1 >= min_x && x1 <= max_x && y1 >= min_y && y1 <= max_y {
+        return true;
+    }
+    if x2 >= min_x && x2 <= max_x && y2 >= min_y && y2 <= max_y {
+        return true;
+    }
+    let mut t_min = 0.0_f64;
+    let mut t_max = 1.0_f64;
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    for &(p, q) in &[
+        (-dx, x1 - min_x), (dx, max_x - x1),
+        (-dy, y1 - min_y), (dy, max_y - y1),
+    ] {
+        if p.abs() < 1e-12 {
+            if q < 0.0 {
+                return false;
+            }
+        } else {
+            let t = q / p;
+            if p < 0.0 {
+                t_min = t_min.max(t);
+            } else {
+                t_max = t_max.min(t);
+            }
+            if t_min > t_max {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Map a flat-segment index (from flatten_with_cmd_map / equivalent)
+/// plus a t-within-that-segment to (command index, t-within-that-command).
+/// Used by the Eraser kernel to convert flat hits back to path-level
+/// t-values for De Casteljau splitting.
+pub fn flat_index_to_cmd_and_t(
+    cmds: &[PathCommand], flat_idx: usize, t_on_seg: f64,
+) -> (usize, f64) {
+    let mut flat_count = 0usize;
+    for (cmd_idx, cmd) in cmds.iter().enumerate() {
+        let segs = match cmd {
+            PathCommand::MoveTo { .. } => 0,
+            PathCommand::LineTo { .. } => 1,
+            PathCommand::CurveTo { .. } | PathCommand::QuadTo { .. } => {
+                FLATTEN_STEPS
+            }
+            PathCommand::ClosePath => 1,
+            _ => 1,
+        };
+        if segs > 0 && flat_idx < flat_count + segs {
+            let local = flat_idx - flat_count;
+            let t = (local as f64 + t_on_seg) / segs as f64;
+            return (cmd_idx, t.clamp(0.0, 1.0));
+        }
+        flat_count += segs;
+    }
+    (cmds.len().saturating_sub(1), 1.0)
+}
+
+/// Split a cubic Bezier at parameter `t`, producing the two half
+/// curves as `PathCommand::CurveTo`. Distinguished from [`split_cubic`]
+/// (which returns tuples of plain f64s for different use cases).
+pub fn split_cubic_cmd_at(
+    p0: (f64, f64),
+    x1: f64, y1: f64, x2: f64, y2: f64, x: f64, y: f64,
+    t: f64,
+) -> (PathCommand, PathCommand) {
+    let l = |a: f64, b: f64| a + t * (b - a);
+    let ax = l(p0.0, x1); let ay = l(p0.1, y1);
+    let bx = l(x1, x2);   let by = l(y1, y2);
+    let cx = l(x2, x);    let cy = l(y2, y);
+    let dx = l(ax, bx);   let dy = l(ay, by);
+    let ex = l(bx, cx);   let ey = l(by, cy);
+    let fx = l(dx, ex);   let fy = l(dy, ey);
+    (
+        PathCommand::CurveTo {
+            x1: ax, y1: ay, x2: dx, y2: dy, x: fx, y: fy,
+        },
+        PathCommand::CurveTo {
+            x1: ex, y1: ey, x2: cx, y2: cy, x, y,
+        },
+    )
+}
+
+/// Split a quadratic Bezier at parameter `t`. Same shape as
+/// [`split_cubic_cmd_at`] but for `QuadTo`.
+pub fn split_quad_cmd_at(
+    p0: (f64, f64),
+    qx1: f64, qy1: f64, x: f64, y: f64,
+    t: f64,
+) -> (PathCommand, PathCommand) {
+    let l = |a: f64, b: f64| a + t * (b - a);
+    let ax = l(p0.0, qx1); let ay = l(p0.1, qy1);
+    let bx = l(qx1, x);    let by = l(qy1, y);
+    let cx = l(ax, bx);    let cy = l(ay, by);
+    (
+        PathCommand::QuadTo { x1: ax, y1: ay, x: cx, y: cy },
+        PathCommand::QuadTo { x1: bx, y1: by, x, y },
+    )
+}
+
+/// "First half" of a command truncated at t — used when erasing the
+/// tail of a segment.
+pub fn entry_cmd(cmd: &PathCommand, start: (f64, f64), t: f64) -> PathCommand {
+    match cmd {
+        PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+            split_cubic_cmd_at(start, *x1, *y1, *x2, *y2, *x, *y, t).0
+        }
+        PathCommand::QuadTo { x1, y1, x, y } => {
+            split_quad_cmd_at(start, *x1, *y1, *x, *y, t).0
+        }
+        _ => {
+            let end = cmd_endpoint(cmd).unwrap_or(start);
+            PathCommand::LineTo {
+                x: start.0 + t * (end.0 - start.0),
+                y: start.1 + t * (end.1 - start.1),
+            }
+        }
+    }
+}
+
+/// "Second half" of a command starting at t — used when resuming
+/// path tracing after an erase.
+pub fn exit_cmd(cmd: &PathCommand, start: (f64, f64), t: f64) -> PathCommand {
+    match cmd {
+        PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+            split_cubic_cmd_at(start, *x1, *y1, *x2, *y2, *x, *y, t).1
+        }
+        PathCommand::QuadTo { x1, y1, x, y } => {
+            split_quad_cmd_at(start, *x1, *y1, *x, *y, t).1
+        }
+        _ => {
+            let end = cmd_endpoint(cmd).unwrap_or(start);
+            PathCommand::LineTo { x: end.0, y: end.1 }
+        }
+    }
+}
+
+/// Result of probing a path against an eraser rectangle.
+pub struct EraserHit {
+    pub first_flat_idx: usize,
+    pub last_flat_idx: usize,
+    pub entry_t_seg: f64,
+    pub entry: (f64, f64),
+    pub exit_t_seg: f64,
+    pub exit: (f64, f64),
+}
+
+/// Find the contiguous range of flattened segments on `flat` that
+/// intersect the eraser rect, plus precise entry/exit points via
+/// Liang-Barsky. Returns `None` if the path doesn't cross the rect.
+pub fn find_eraser_hit(
+    flat: &[(f64, f64)],
+    min_x: f64, min_y: f64, max_x: f64, max_y: f64,
+) -> Option<EraserHit> {
+    let mut first_hit: Option<usize> = None;
+    let mut last_hit: Option<usize> = None;
+    for i in 0..flat.len().saturating_sub(1) {
+        let (x1, y1) = flat[i];
+        let (x2, y2) = flat[i + 1];
+        if line_segment_intersects_rect(
+            x1, y1, x2, y2, min_x, min_y, max_x, max_y,
+        ) {
+            if first_hit.is_none() {
+                first_hit = Some(i);
+            }
+            last_hit = Some(i);
+        } else if first_hit.is_some() {
+            break;
+        }
+    }
+    let first = first_hit?;
+    let last = last_hit.unwrap();
+    let (x1, y1) = flat[first];
+    let (x2, y2) = flat[first + 1];
+    let entry_t_seg =
+        if x1 >= min_x && x1 <= max_x && y1 >= min_y && y1 <= max_y {
+            0.0
+        } else {
+            liang_barsky_t_min(x1, y1, x2, y2, min_x, min_y, max_x, max_y)
+        };
+    let entry = (x1 + entry_t_seg * (x2 - x1), y1 + entry_t_seg * (y2 - y1));
+    let (x1, y1) = flat[last];
+    let (x2, y2) = flat[last + 1];
+    let exit_t_seg =
+        if x2 >= min_x && x2 <= max_x && y2 >= min_y && y2 <= max_y {
+            1.0
+        } else {
+            liang_barsky_t_max(x1, y1, x2, y2, min_x, min_y, max_x, max_y)
+        };
+    let exit = (x1 + exit_t_seg * (x2 - x1), y1 + exit_t_seg * (y2 - y1));
+    Some(EraserHit {
+        first_flat_idx: first,
+        last_flat_idx: last,
+        entry_t_seg,
+        entry,
+        exit_t_seg,
+        exit,
+    })
+}
+
+/// Split a path at the eraser hit, producing one or more sub-paths
+/// whose endpoints hug the eraser boundary (curves preserved via
+/// De Casteljau). Closed paths are "unwrapped" into a single open
+/// path that runs from the exit point around the non-erased
+/// portion back to the entry point.
+pub fn split_path_at_eraser(
+    cmds: &[PathCommand],
+    hit: &EraserHit,
+    is_closed: bool,
+) -> Vec<Vec<PathCommand>> {
+    let (entry_cmd_idx, entry_t) = flat_index_to_cmd_and_t(
+        cmds, hit.first_flat_idx, hit.entry_t_seg);
+    let (exit_cmd_idx, exit_t) = flat_index_to_cmd_and_t(
+        cmds, hit.last_flat_idx, hit.exit_t_seg);
+    let starts = cmd_start_points(cmds);
+
+    if is_closed {
+        let drawing_cmds: Vec<(usize, &PathCommand)> = cmds
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !matches!(c, PathCommand::ClosePath))
+            .collect();
+        if drawing_cmds.is_empty() {
+            return vec![];
+        }
+        let mut open_cmds: Vec<PathCommand> = Vec::new();
+        open_cmds.push(PathCommand::MoveTo { x: hit.exit.0, y: hit.exit.1 });
+        if exit_t < 1.0 - 1e-9 {
+            let (orig_idx, cmd) = drawing_cmds
+                .iter()
+                .find(|(i, _)| *i == exit_cmd_idx)
+                .unwrap();
+            open_cmds.push(exit_cmd(cmd, starts[*orig_idx], exit_t));
+        }
+        let resume_from = exit_cmd_idx + 1;
+        for (orig_idx, cmd) in &drawing_cmds {
+            if *orig_idx >= resume_from && *orig_idx < cmds.len() {
+                open_cmds.push(**cmd);
+            }
+        }
+        if let Some((_, PathCommand::MoveTo { x, y })) = drawing_cmds.first() {
+            open_cmds.push(PathCommand::LineTo { x: *x, y: *y });
+        }
+        for (orig_idx, cmd) in &drawing_cmds {
+            if *orig_idx >= 1 && *orig_idx < entry_cmd_idx {
+                open_cmds.push(**cmd);
+            }
+        }
+        if entry_t > 1e-9 {
+            open_cmds.push(
+                entry_cmd(&cmds[entry_cmd_idx], starts[entry_cmd_idx], entry_t));
+        } else {
+            open_cmds.push(PathCommand::LineTo {
+                x: hit.entry.0, y: hit.entry.1,
+            });
+        }
+        if open_cmds.len() >= 2 {
+            vec![open_cmds]
+        } else {
+            vec![]
+        }
+    } else {
+        let mut part1: Vec<PathCommand> = Vec::new();
+        let mut part2: Vec<PathCommand> = Vec::new();
+        for cmd in &cmds[..entry_cmd_idx] {
+            part1.push(*cmd);
+        }
+        if entry_t > 1e-9 {
+            part1.push(
+                entry_cmd(&cmds[entry_cmd_idx], starts[entry_cmd_idx], entry_t));
+        } else {
+            part1.push(PathCommand::LineTo {
+                x: hit.entry.0, y: hit.entry.1,
+            });
+        }
+        part2.push(PathCommand::MoveTo { x: hit.exit.0, y: hit.exit.1 });
+        if exit_t < 1.0 - 1e-9 {
+            part2.push(
+                exit_cmd(&cmds[exit_cmd_idx], starts[exit_cmd_idx], exit_t));
+        }
+        for cmd in &cmds[exit_cmd_idx + 1..] {
+            if !matches!(cmd, PathCommand::ClosePath) {
+                part2.push(*cmd);
+            }
+        }
+        let mut result = Vec::new();
+        if part1.len() >= 2
+            && part1.iter().any(|c| !matches!(c, PathCommand::MoveTo { .. }))
+        {
+            result.push(part1);
+        }
+        if part2.len() >= 2 {
+            result.push(part2);
+        }
+        result
+    }
+}
 
 /// Linear interpolation — helper used by split_cubic /
 /// insert_point_in_path.
