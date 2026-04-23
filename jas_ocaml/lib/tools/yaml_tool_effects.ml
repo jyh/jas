@@ -203,6 +203,87 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      | _ -> ());
     `Null
   in
+  (* ── Buffer effects (Phase 3) ─────────────────────────── *)
+  let buffer_push spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) ->
+          let lookup k = List.assoc_opt k args in
+          let x = eval_number (lookup "x") store ctx in
+          let y = eval_number (lookup "y") store ctx in
+          Point_buffers.push name x y
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+  let buffer_clear spec _ _ =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) -> Point_buffers.clear name
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+  let anchor_push spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) ->
+          let lookup k = List.assoc_opt k args in
+          let x = eval_number (lookup "x") store ctx in
+          let y = eval_number (lookup "y") store ctx in
+          Anchor_buffers.push name x y
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+  let anchor_set_last_out spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) ->
+          let lookup k = List.assoc_opt k args in
+          let hx = eval_number (lookup "hx") store ctx in
+          let hy = eval_number (lookup "hy") store ctx in
+          Anchor_buffers.set_last_out_handle name hx hy
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+  let anchor_pop spec _ _ =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) -> Anchor_buffers.pop name
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+  let anchor_clear spec _ _ =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) -> Anchor_buffers.clear name
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+  let doc_select_polygon_from_buffer spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) ->
+          let additive = eval_bool (List.assoc_opt "additive" args) store ctx in
+          let pts = Point_buffers.points name in
+          if List.length pts >= 3 then
+            let arr = Array.of_list pts in
+            ctrl#select_polygon ~extend:additive arr
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
   [ ("doc.snapshot", doc_snapshot);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
@@ -212,4 +293,12 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.copy_selection", doc_copy_selection);
     ("doc.select_in_rect", doc_select_in_rect);
     ("doc.partial_select_in_rect", doc_partial_select_in_rect);
+    (* Phase 3 buffer effects *)
+    ("buffer.push", buffer_push);
+    ("buffer.clear", buffer_clear);
+    ("anchor.push", anchor_push);
+    ("anchor.set_last_out", anchor_set_last_out);
+    ("anchor.pop", anchor_pop);
+    ("anchor.clear", anchor_clear);
+    ("doc.select_polygon_from_buffer", doc_select_polygon_from_buffer);
   ]
