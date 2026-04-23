@@ -1,0 +1,25 @@
+{
+  "flask": {
+    "jas_prefixed_globals": 0,
+    "panel_name_dicts": 0,
+    "swatch_library_reachin": 3
+  },
+  "ocaml": {
+    "panel_menu_items": 63,
+    "tool_files": 19
+  },
+  "python": {
+    "panel_menu_items": 56,
+    "tool_files": 19
+  },
+  "rust": {
+    "hardcoded_panel_labels": 0,
+    "panel_menu_items": 72,
+    "tool_files": 18
+  },
+  "swift": {
+    "hardcoded_panel_labels": 0,
+    "panel_menu_items": 63,
+    "tool_files": 18
+  }
+}

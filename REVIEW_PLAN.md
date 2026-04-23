@@ -8,7 +8,8 @@ Output of the 2026-04-22 codebase review, organized by priority and scope.
 2. **Rust Tier 1** — 11 `pub const LABEL` deleted across `src/panels/*_panel.rs`, `panels/mod.rs panel_label()` reads YAML. Properties panel now correctly shows "Object properties" (was hardcoded "Properties"). 137 panel tests pass.
 3. **Swift Tier 1** — 11 `static let label` deleted across `Sources/Panels/*Panel.swift`, duplicate `WorkspaceLayout.panelLabel()` removed (15 lines of dead code). 1351 tests pass.
 4. **5 memories saved**: Swift ownership-review caveat, OCaml `.mli` backlog, arc extrema cross-language gap, Flask genericity leaks, panel menu YAML migration backlog.
-5. **2 CLAUDE.md rules added**: OCaml `.mli` on new/edited files; Rust per-item `#[allow(dead_code)]` preferred over module-wide.
+5. **2 CLAUDE.md rules added**: OCaml `.mli` on new/edited files; Rust per-item `#[allow(dead_code)]` preferred over module-wide. Subsequently migrated into the tracked `POLICY.md` (§7) so the rules live in the repo rather than a per-developer gitignored config.
+6. **Genericity policy enforcement** — `POLICY.md` (tracked authoritative policy) and `NATIVE_BOUNDARY.md` (legitimate-native exceptions catalog) committed. `scripts/genericity_check.py` + `scripts/genericity_baseline.json` form a no-regression CI lint that counts native-code signatures per app (tool files, panel menu items, hardcoded panel labels, Flask leak tripwires). Wired into `.github/workflows/test.yml` as the `Genericity policy` job; fails any PR that grows a category relative to baseline, directs contributors to `NATIVE_BOUNDARY.md` for legitimate exceptions.
 
 ## Tier 1 — ship soon, each is <1 session
 
@@ -79,3 +80,27 @@ Ordered by value × inverse effort.
 | Swift  | ✅ YAML      | ❌ native (Tier 3 #11) | ✅ fixed              |
 | OCaml  | ✅ YAML      | ❌ native (Tier 3 #11) | ✅ YAML               |
 | Python | ✅ YAML      | ❌ native (Tier 3 #11) | ✅ YAML               |
+
+Per-app baselines (as of 2026-04-22, recorded in `scripts/genericity_baseline.json`):
+
+| App    | Tool files | Panel menu items | Hardcoded labels |
+|--------|-----------:|-----------------:|-----------------:|
+| Rust   | 18         | 72               | 0                |
+| Swift  | 18         | 63               | 0                |
+| OCaml  | 19         | 63               | —                |
+| Python | 19         | 56               | —                |
+| Flask  | —          | —                | 3 (`swatch_libraries` reach-in tripwire) |
+
+The lint will fail any PR that grows these counts. Tier 3 #11 (panel
+menus → YAML) will drive `panel_menu_items` to zero across all 4
+native apps; each such reduction should be accompanied by
+`python scripts/genericity_check.py --update-baseline` in the same
+commit.
+
+## Related documents
+
+- `POLICY.md` — authoritative project policies (§2 genericity, §6 review process)
+- `NATIVE_BOUNDARY.md` — legitimate-native code categories, cited by the CI lint
+- `FLASK_PARITY.md` — L1/L2/L3 architectural tiering + Flask feature-parity roadmap
+- `scripts/genericity_check.py` — CI lint implementation
+- `scripts/genericity_baseline.json` — current count baseline
