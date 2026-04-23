@@ -881,13 +881,14 @@ mod tests {
         );
     }
 
-    // ── Phase 4: parity with native SelectionTool ──────────────────
+    // ── Selection tool behavioral tests ────────────────────────────
     //
-    // Behavior-for-behavior ports of the six cases in
-    // jas_dioxus/src/tools/selection_tool.rs::tests, run against a
-    // YamlTool constructed from the actual selection.yaml. Each
-    // assertion is the same — same pre-state, same sequence of events,
-    // same final document state.
+    // These started as Phase-4 parity ports of the six cases in
+    // jas_dioxus/src/tools/selection_tool.rs::tests (since deleted in
+    // Phase 5), plus Alt+drag cases added once that path lived in
+    // selection.yaml. Run against a YamlTool constructed from the
+    // actual selection.yaml — the only selection tool now. They
+    // guard the canvas Selection UX against future YAML edits.
     //
     // Two test-shape differences from the native cases:
     //
@@ -928,8 +929,8 @@ mod tests {
     }
 
     fn selection_parity_model() -> Model {
-        // Same shape as SelectionTool's `make_model_with_rect`: a
-        // single 20×20 rect at (50, 50) inside a one-layer document.
+        // One-layer document with a single 20x20 rect at (50, 50).
+        // Matches the fixture the deleted selection_tool.rs tests used.
         model_with_rect_at(50.0, 50.0, 20.0, 20.0)
     }
 
@@ -1125,9 +1126,9 @@ mod tests {
     fn selection_parity_alt_drag_copies_element() {
         // Alt+drag: first move produces a copy at the drag offset and
         // re-selects the copy; subsequent moves translate the copy
-        // further. The original stays where it was. Mirrors the
-        // self.alt_held + copied flag dance in
-        // selection_tool.rs::on_move.
+        // further. The original stays where it was. The alt_held +
+        // copied flag dance lives in selection.yaml's on_mousemove
+        // handler (the deleted selection_tool.rs had it inline).
         let Some(mut tool) = selection_yaml_tool() else { return };
         let mut model = selection_parity_model();
         Controller::select_element(&mut model, &vec![0, 0]);

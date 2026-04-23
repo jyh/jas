@@ -43,6 +43,13 @@ PATTERNS = {
         "tool_files": {
             "kind": "files",
             "glob": "jas_dioxus/src/tools/*_tool.rs",
+            # yaml_tool.rs is the generic YAML-driven tool runtime —
+            # infrastructure, not per-tool code. Excluding it keeps the
+            # counter honest as individual tools migrate from native
+            # impls into workspace/tools/*.yaml: each migrated tool
+            # deletes its _tool.rs and drops the count by 1, regardless
+            # of whether yaml_tool.rs itself exists.
+            "exclude_pattern": r"/yaml_tool\.rs$",
         },
         "panel_menu_items": {
             "kind": "regex_count",
