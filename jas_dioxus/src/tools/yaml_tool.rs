@@ -178,12 +178,14 @@ impl YamlTool {
         ToolSpec::from_workspace_tool(spec_json).map(Self::new)
     }
 
+    #[allow(dead_code)] // public API for future spec inspection; used in tests
     pub fn spec(&self) -> &ToolSpec {
         &self.spec
     }
 
     /// Read a tool-local state value. Primary use: tests that want to
     /// observe what a handler wrote to `$tool.<id>.<key>`.
+    #[allow(dead_code)] // used in tests; public for future introspection tooling
     pub fn tool_state(&self, key: &str) -> &serde_json::Value {
         self.store.get_tool(&self.spec.id, key)
     }
@@ -304,11 +306,146 @@ impl CanvasTool for YamlTool {
         self.spec.cursor.clone()
     }
 
-    fn draw_overlay(&self, _model: &Model, _ctx: &CanvasRenderingContext2d) {
-        // Phase 3d will evaluate self.spec.overlay.guard + render here.
-        // For Phase 3c the overlay is a no-op — Selection tool tests
-        // focus on state/doc mutations; overlay rendering is covered
-        // separately in Phase 3d.
+    fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
+        let Some(overlay) = self.spec.overlay.as_ref() else {
+            return;
+        };
+        // Document registration lets overlay expressions call
+        // hit_test / selection_contains — same pattern as dispatch().
+        let _guard = doc_primitives::register_document(model.document().clone());
+        let eval_ctx = self.store.eval_context();
+
+        // Guard: if present, must evaluate truthy for the overlay to draw.
+        if let Some(guard_expr) = &overlay.guard {
+            let result = crate::interpreter::expr::eval(guard_expr, &eval_ctx);
+            if !result.to_bool() {
+                return;
+            }
+        }
+
+        // Dispatch on `render.type` — Phase 3d handles `rect` (Selection
+        // tool's marquee). Other shapes extend here as their tools port.
+        let render = &overlay.render;
+        let render_type = render
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        match render_type {
+            "rect" => draw_rect_overlay(ctx, render, &eval_ctx),
+            _ => {
+                // Unrecognized type — skip silently, matching the
+                // lenient-mode convention used elsewhere.
+            }
+        }
+    }
+}
+
+/// Evaluate an overlay geometry field — accepts a string expression
+/// or a JSON number literal. Missing / unparseable → 0.0.
+fn eval_number_field(
+    ctx: &serde_json::Value,
+    field: Option<&serde_json::Value>,
+) -> f64 {
+    match field {
+        None | Some(serde_json::Value::Null) => 0.0,
+        Some(serde_json::Value::Number(n)) => n.as_f64().unwrap_or(0.0),
+        Some(serde_json::Value::String(s)) => {
+            match crate::interpreter::expr::eval(s, ctx) {
+                crate::interpreter::expr_types::Value::Number(n) => n,
+                _ => 0.0,
+            }
+        }
+        _ => 0.0,
+    }
+}
+
+/// Parse a CSS-like style string into the subset of properties the
+/// overlay renderer understands.
+///
+/// Input example: `"stroke: #4a90d9; stroke-width: 1; fill: rgba(74,144,217,0.08);"`
+///
+/// Unknown properties and malformed rules are ignored — a lenient
+/// parser keeps the overlay surface from growing brittle as authors
+/// experiment with style variations.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct OverlayStyle {
+    pub(crate) fill: Option<String>,
+    pub(crate) stroke: Option<String>,
+    pub(crate) stroke_width: Option<f64>,
+    pub(crate) stroke_dasharray: Option<Vec<f64>>,
+}
+
+pub(crate) fn parse_style(s: &str) -> OverlayStyle {
+    let mut style = OverlayStyle::default();
+    for rule in s.split(';') {
+        let rule = rule.trim();
+        if rule.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = rule.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "fill" => style.fill = Some(value.to_string()),
+            "stroke" => style.stroke = Some(value.to_string()),
+            "stroke-width" => style.stroke_width = value.parse().ok(),
+            "stroke-dasharray" => {
+                // Accept space- or comma-separated lengths, SVG style.
+                let parts: Vec<f64> = value
+                    .split(|c: char| c.is_whitespace() || c == ',')
+                    .filter(|p| !p.is_empty())
+                    .filter_map(|p| p.parse().ok())
+                    .collect();
+                if !parts.is_empty() {
+                    style.stroke_dasharray = Some(parts);
+                }
+            }
+            _ => {}
+        }
+    }
+    style
+}
+
+fn draw_rect_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x = eval_number_field(eval_ctx, render.get("x"));
+    let y = eval_number_field(eval_ctx, render.get("y"));
+    let width = eval_number_field(eval_ctx, render.get("width"));
+    let height = eval_number_field(eval_ctx, render.get("height"));
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+
+    if let Some(fill) = &style.fill {
+        ctx.set_fill_style_str(fill);
+        ctx.fill_rect(x, y, width, height);
+    }
+    if let Some(stroke) = &style.stroke {
+        ctx.set_stroke_style_str(stroke);
+        if let Some(w) = style.stroke_width {
+            ctx.set_line_width(w);
+        }
+        if let Some(dash) = &style.stroke_dasharray {
+            let arr = js_sys::Array::new();
+            for d in dash {
+                arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+            }
+            let _ = ctx.set_line_dash(&arr);
+        }
+        ctx.stroke_rect(x, y, width, height);
+        // Reset dash if we set one, so subsequent native strokes aren't
+        // unexpectedly dashed. CanvasRenderingContext2d is stateful, so
+        // reset with an empty array.
+        if style.stroke_dasharray.is_some() {
+            let _ = ctx.set_line_dash(&js_sys::Array::new());
+        }
     }
 }
 
@@ -854,6 +991,112 @@ mod tests {
         assert!(
             !model.document().selection.is_empty(),
             "shift-click on empty canvas should not clear the selection",
+        );
+    }
+
+    // ── parse_style (Phase 3d) ─────────────────────────────────────
+
+    #[test]
+    fn parse_style_empty_string() {
+        let s = parse_style("");
+        assert_eq!(s, OverlayStyle::default());
+    }
+
+    #[test]
+    fn parse_style_extracts_stroke_and_fill() {
+        let s = parse_style("stroke: #4a90d9; fill: rgba(74,144,217,0.08);");
+        assert_eq!(s.stroke.as_deref(), Some("#4a90d9"));
+        assert_eq!(s.fill.as_deref(), Some("rgba(74,144,217,0.08)"));
+    }
+
+    #[test]
+    fn parse_style_extracts_stroke_width() {
+        let s = parse_style("stroke: black; stroke-width: 1.5;");
+        assert_eq!(s.stroke_width, Some(1.5));
+    }
+
+    #[test]
+    fn parse_style_dasharray_space_separated() {
+        let s = parse_style("stroke-dasharray: 4 4");
+        assert_eq!(s.stroke_dasharray, Some(vec![4.0, 4.0]));
+    }
+
+    #[test]
+    fn parse_style_dasharray_comma_separated() {
+        let s = parse_style("stroke-dasharray: 2, 4, 6");
+        assert_eq!(s.stroke_dasharray, Some(vec![2.0, 4.0, 6.0]));
+    }
+
+    #[test]
+    fn parse_style_ignores_unknown_properties() {
+        let s = parse_style("fill: red; some-unknown: value; stroke: blue;");
+        assert_eq!(s.fill.as_deref(), Some("red"));
+        assert_eq!(s.stroke.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    fn parse_style_ignores_malformed_rules() {
+        // Missing colons, random whitespace — should not crash.
+        let s = parse_style("fill: red; garbage-without-colon; stroke: blue; ;");
+        assert_eq!(s.fill.as_deref(), Some("red"));
+        assert_eq!(s.stroke.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    fn parse_style_selection_marquee_full() {
+        // The real style string from selection.yaml.
+        let s = parse_style(
+            "stroke: #4a90d9; stroke-width: 1; \
+             stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);",
+        );
+        assert_eq!(s.stroke.as_deref(), Some("#4a90d9"));
+        assert_eq!(s.stroke_width, Some(1.0));
+        assert_eq!(s.stroke_dasharray, Some(vec![4.0, 4.0]));
+        assert_eq!(s.fill.as_deref(), Some("rgba(74,144,217,0.08)"));
+    }
+
+    #[test]
+    fn parse_style_trims_whitespace_around_values() {
+        let s = parse_style("stroke :   #000 ; fill :#fff;");
+        assert_eq!(s.stroke.as_deref(), Some("#000"));
+        assert_eq!(s.fill.as_deref(), Some("#fff"));
+    }
+
+    // ── eval_number_field for overlay geometry fields ──────────────
+
+    #[test]
+    fn eval_number_field_json_number() {
+        let ctx = serde_json::json!({});
+        assert_eq!(
+            eval_number_field(&ctx, Some(&serde_json::json!(42))),
+            42.0,
+        );
+    }
+
+    #[test]
+    fn eval_number_field_string_expr() {
+        let ctx = serde_json::json!({ "tool": { "t": { "x": 17 } } });
+        assert_eq!(
+            eval_number_field(
+                &ctx,
+                Some(&serde_json::json!("tool.t.x")),
+            ),
+            17.0,
+        );
+    }
+
+    #[test]
+    fn eval_number_field_missing_is_zero() {
+        let ctx = serde_json::json!({});
+        assert_eq!(eval_number_field(&ctx, None), 0.0);
+    }
+
+    #[test]
+    fn eval_number_field_non_number_result_is_zero() {
+        let ctx = serde_json::json!({});
+        assert_eq!(
+            eval_number_field(&ctx, Some(&serde_json::json!("\"abc\""))),
+            0.0,
         );
     }
 
