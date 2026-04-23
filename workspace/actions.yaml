@@ -2448,3 +2448,152 @@ actions:
     enabled_when: "false"
     effects:
       - log: "rearrange_artboards (deferred)"
+
+  # ─── Brushes panel ───────────────────────────────────────
+  # Action stubs for the Brushes panel and its menu. Phase 1
+  # ships the panel YAML and minimal click semantics; most
+  # actions log only until renderer / dialog / element-model
+  # work lands in subsequent sub-phases.
+
+  open_brush_options:
+    description: >
+      Open the Brush Options dialog. Mode is one of create,
+      library_edit, instance_edit (see BRUSH_OPTIONS_DIALOG.md
+      §Modes). Library + brush_slug parameters select the master
+      brush; instance_edit reads the brush from the canvas
+      selection's jas:stroke-brush attribute.
+    category: brushes
+    params:
+      mode: { type: string }
+      library: { type: string, optional: True }
+      brush_slug: { type: string, optional: True }
+    effects:
+      - log: "open_brush_options (mode={{param.mode}})"
+
+  duplicate_brush:
+    description: >
+      Duplicate every brush in panel.selected_brushes within
+      panel.selected_library. Copies are inserted immediately
+      after their originals with " copy" appended to the name and
+      a fresh slug. The copies become the new selection.
+      Undoable.
+    category: brushes
+    effects:
+      - log: "duplicate_brush"
+
+  delete_brush:
+    description: >
+      Permanently remove every brush in panel.selected_brushes
+      from panel.selected_library. Any element with
+      jas:stroke-brush referencing a deleted brush re-renders as
+      a plain stroke. Undoable.
+    category: brushes
+    effects:
+      - log: "delete_brush"
+
+  select_all_unused_brushes:
+    description: >
+      Replace panel.selected_brushes with every brush in the
+      panel whose slug does not appear as jas:stroke-brush on any
+      element in the document.
+    category: brushes
+    effects:
+      - log: "select_all_unused_brushes"
+
+  sort_brushes_by_name:
+    description: >
+      Permanently reorder panel.selected_library's brushes
+      alphabetically (case-sensitive, lexicographic). Slugs
+      unchanged; selection preserved. Persisted on next
+      save_brush_library.
+    category: brushes
+    effects:
+      - log: "sort_brushes_by_name"
+
+  set_brush_view_mode:
+    description: >
+      Set panel.view_mode (thumbnail / list).
+    category: brushes
+    params:
+      view_mode: { type: string }
+    effects:
+      - set_panel_state:
+          panel: brushes
+          key: view_mode
+          value: "param.view_mode"
+      - set: { brushes_view_mode: "param.view_mode" }
+
+  set_brush_thumbnail_size:
+    description: >
+      Set panel.thumbnail_size (small / medium / large).
+      Disabled when view_mode == list.
+    category: brushes
+    params:
+      size: { type: string }
+    effects:
+      - set_panel_state:
+          panel: brushes
+          key: thumbnail_size
+          value: "param.size"
+      - set: { brushes_thumbnail_size: "param.size" }
+
+  toggle_brush_category:
+    description: >
+      Toggle a brush type's membership in panel.category_filter.
+      Unchecking all five hides every tile.
+    category: brushes
+    params:
+      type: { type: string }
+    effects:
+      - log: "toggle_brush_category (type={{param.type}})"
+
+  toggle_brush_library_persistent:
+    description: >
+      Toggle panel.selected_library's slug in the user's
+      preferences.brushes.persistent_libraries list. Persistent
+      libraries auto-open on app launch.
+    category: brushes
+    effects:
+      - log: "toggle_brush_library_persistent"
+
+  save_brush_library:
+    description: >
+      Open the Save Brush Library dialog, prompting for a name.
+      The selected library's manifest and artwork files are
+      written to workspace/brushes/<new_slug>/.
+    category: brushes
+    effects:
+      - log: "save_brush_library"
+
+  open_brush_libraries_menu:
+    description: >
+      Show the dynamic Open Brush Library submenu listing all
+      libraries discovered under workspace/brushes/. Selecting an
+      unopened library appends to panel.open_libraries; selecting
+      an already-open library closes it.
+    category: brushes
+    effects:
+      - log: "open_brush_libraries_menu"
+
+  apply_brush_to_selection:
+    description: >
+      Apply a brush to every path in the canvas selection.
+      Sets jas:stroke-brush to "<library>/<brush_slug>" on each
+      element; clears any per-element jas:stroke-brush-overrides.
+      Single-click on a panel tile fires this action plus the
+      state.stroke_brush write in one transaction.
+    category: brushes
+    params:
+      library: { type: string }
+      brush_slug: { type: string }
+    effects:
+      - log: "apply_brush_to_selection (library={{param.library}}, brush={{param.brush_slug}})"
+
+  remove_brush_from_selection:
+    description: >
+      Strip jas:stroke-brush and jas:stroke-brush-overrides from
+      every selected element. The element re-renders with the
+      native stroke pipeline.
+    category: brushes
+    effects:
+      - log: "remove_brush_from_selection"

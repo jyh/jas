@@ -349,6 +349,44 @@ class TestValidateActionRefs:
                 f"Shortcut action '{shortcut['action']}' not in actions"
             )
 
+    def test_all_brushes_panel_actions_exist(self, workspace_path):
+        """Every action referenced by the brushes panel YAML (menu items,
+        click behaviors, toolbar buttons) must be registered in
+        actions.yaml so the interpreter can dispatch them."""
+        data = load_workspace(workspace_path)
+        actions = data["actions"]
+        panel = data["panels"]["brushes_panel_content"]
+
+        # Collect action names from the menu list.
+        for item in panel.get("menu", []):
+            if isinstance(item, str):
+                continue
+            if "action" in item:
+                assert item["action"] in actions, (
+                    f"Brushes panel menu action '{item['action']}' not in actions"
+                )
+
+        # Walk the content tree collecting action references from
+        # behaviors. Brushes uses both top-level 'action' (on icon
+        # buttons) and behaviors with effect lists.
+        def walk(node):
+            if not isinstance(node, dict):
+                return
+            for behavior in node.get("behavior", []):
+                if "action" in behavior:
+                    assert behavior["action"] in actions, (
+                        f"Brushes panel behavior action "
+                        f"'{behavior['action']}' not in actions"
+                    )
+            for child in node.get("children", []):
+                walk(child)
+            for key in ("content", "do"):
+                inner = node.get(key)
+                if isinstance(inner, dict):
+                    walk(inner)
+
+        walk(panel.get("content", {}))
+
     def test_all_menu_actions_exist(self, workspace_path):
         data = load_workspace(workspace_path)
         actions = data["actions"]
