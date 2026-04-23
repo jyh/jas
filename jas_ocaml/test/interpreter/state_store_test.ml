@@ -274,10 +274,57 @@ let preview_snapshot_tests = [
      | None -> assert false));
 ]
 
+(* ── Tool state tests ──────────────────────────────────── *)
+
+let tool_tests = [
+  Alcotest.test_case "init_tool_seeds_defaults" `Quick (fun () ->
+    let s = create () in
+    init_tool s "selection" [("mode", `String "idle"); ("count", `Int 0)];
+    assert (get_tool s "selection" "mode" = `String "idle");
+    assert (get_tool s "selection" "count" = `Int 0));
+
+  Alcotest.test_case "set_tool_auto_creates_namespace" `Quick (fun () ->
+    let s = create () in
+    set_tool s "pen" "mode" (`String "drawing");
+    assert (has_tool s "pen");
+    assert (get_tool s "pen" "mode" = `String "drawing"));
+
+  Alcotest.test_case "tool_scoping" `Quick (fun () ->
+    let s = create () in
+    init_tool s "rect" [("mode", `String "idle")];
+    init_tool s "line" [("mode", `String "drawing")];
+    assert (get_tool s "rect" "mode" = `String "idle");
+    assert (get_tool s "line" "mode" = `String "drawing"));
+
+  Alcotest.test_case "destroy_tool_removes_scope" `Quick (fun () ->
+    let s = create () in
+    init_tool s "pen" [("mode", `String "idle")];
+    assert (has_tool s "pen");
+    destroy_tool s "pen";
+    assert (not (has_tool s "pen"));
+    assert (get_tool s "pen" "mode" = `Null));
+
+  Alcotest.test_case "eval_context_includes_tool_scope" `Quick (fun () ->
+    let s = create () in
+    init_tool s "selection" [("mode", `String "marquee")];
+    let ctx = eval_context s in
+    match ctx with
+    | `Assoc pairs ->
+      (match List.assoc_opt "tool" pairs with
+       | Some (`Assoc tools) ->
+         (match List.assoc_opt "selection" tools with
+          | Some (`Assoc scope) ->
+            assert (List.assoc "mode" scope = `String "marquee")
+          | _ -> assert false)
+       | _ -> assert false)
+    | _ -> assert false);
+]
+
 let () =
   Alcotest.run "State store" [
     "Global", global_tests;
     "Panel", panel_tests;
+    "Tool", tool_tests;
     "Dialog", dialog_tests;
     "Context", ctx_tests;
     "Subscriptions", subscription_tests;

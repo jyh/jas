@@ -11,6 +11,48 @@ let set_tests = [
     let s = create ~defaults:[("a", `Int 10); ("b", `Int 0)] () in
     run_effects [`Assoc [("set", `Assoc [("b", `String "state.a")])]] [] s;
     assert (get s "b" = `Int 10));
+
+  (* Phase 1: scope-routed targets *)
+  Alcotest.test_case "set_routes_tool_scope" `Quick (fun () ->
+    let s = create () in
+    init_tool s "selection" [("mode", `String "idle")];
+    run_effects [`Assoc [("set",
+      `Assoc [("tool.selection.mode", `String "'marquee'")])]] [] s;
+    assert (get_tool s "selection" "mode" = `String "marquee"));
+
+  Alcotest.test_case "set_strips_leading_dollar" `Quick (fun () ->
+    let s = create () in
+    init_tool s "rect" [];
+    run_effects [`Assoc [("set",
+      `Assoc [("$tool.rect.mode", `String "'drawing'")])]] [] s;
+    assert (get_tool s "rect" "mode" = `String "drawing"));
+
+  Alcotest.test_case "set_routes_state_scope" `Quick (fun () ->
+    let s = create ~defaults:[("foo", `Int 0)] () in
+    run_effects [`Assoc [("set",
+      `Assoc [("state.foo", `String "7")])]] [] s;
+    assert (get s "foo" = `Int 7));
+
+  Alcotest.test_case "bare_key_writes_global" `Quick (fun () ->
+    let s = create ~defaults:[("bar", `Int 0)] () in
+    run_effects [`Assoc [("set",
+      `Assoc [("bar", `String "9")])]] [] s;
+    assert (get s "bar" = `Int 9));
+
+  Alcotest.test_case "set_routes_panel_scope" `Quick (fun () ->
+    let s = create () in
+    init_panel s "color" [("mode", `String "hsb")];
+    set_active_panel s (Some "color");
+    run_effects [`Assoc [("set",
+      `Assoc [("panel.mode", `String "'rgb'")])]] [] s;
+    assert (get_panel s "color" "mode" = `String "rgb"));
+
+  Alcotest.test_case "set_tool_auto_creates_namespace_via_effect" `Quick (fun () ->
+    let s = create () in
+    run_effects [`Assoc [("set",
+      `Assoc [("tool.new_tool.flag", `String "true")])]] [] s;
+    assert (has_tool s "new_tool");
+    assert (get_tool s "new_tool" "flag" = `Bool true));
 ]
 
 let toggle_tests = [
