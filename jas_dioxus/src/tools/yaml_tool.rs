@@ -386,6 +386,9 @@ impl CanvasTool for YamlTool {
             "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
             "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render),
             "pen_overlay" => draw_pen_overlay(ctx, render, &eval_ctx),
+            "partial_selection_overlay" => {
+                draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
+            }
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -632,6 +635,76 @@ fn draw_buffer_polyline_overlay(
     ctx.stroke();
     if style.stroke_dasharray.is_some() {
         let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+}
+
+/// Draw the Partial Selection tool's overlay:
+///   - Blue 3px handle circles + connecting lines for every Bezier
+///     handle on every selected Path in the document (this is what
+///     the user clicks on to drag a handle).
+///   - Blue rubber-band rectangle when `mode == "marquee"`.
+///
+/// Fields:
+///   mode: string — current tool mode
+///   marquee_start_x/y, marquee_cur_x/y: marquee rect bounds
+fn draw_partial_selection_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    model: &crate::document::model::Model,
+) {
+    use crate::geometry::element::{
+        control_points, path_handle_positions, Element,
+    };
+    let sel_color = "rgb(0,120,255)";
+    let doc = model.document();
+    for es in &doc.selection {
+        if let Some(Element::Path(pe)) = doc.get_element(&es.path) {
+            let anchors = control_points(&Element::Path(pe.clone()));
+            for (ai, &(ax, ay)) in anchors.iter().enumerate() {
+                let (h_in, h_out) = path_handle_positions(&pe.d, ai);
+                for h in [h_in, h_out].iter().flatten() {
+                    ctx.set_stroke_style_str(sel_color);
+                    ctx.set_line_width(1.0);
+                    ctx.begin_path();
+                    ctx.move_to(ax, ay);
+                    ctx.line_to(h.0, h.1);
+                    ctx.stroke();
+
+                    ctx.set_fill_style_str("white");
+                    ctx.set_stroke_style_str(sel_color);
+                    ctx.begin_path();
+                    let _ = ctx.arc(h.0, h.1, 3.0, 0.0, std::f64::consts::TAU);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+
+    let mode = match render.get("mode") {
+        Some(serde_json::Value::String(s)) => {
+            match crate::interpreter::expr::eval(s, eval_ctx) {
+                crate::interpreter::expr_types::Value::Str(v) => v,
+                _ => String::new(),
+            }
+        }
+        _ => String::new(),
+    };
+    if mode == "marquee" {
+        let sx = eval_number_field(eval_ctx, render.get("marquee_start_x"));
+        let sy = eval_number_field(eval_ctx, render.get("marquee_start_y"));
+        let cx = eval_number_field(eval_ctx, render.get("marquee_cur_x"));
+        let cy = eval_number_field(eval_ctx, render.get("marquee_cur_y"));
+        let rx = sx.min(cx);
+        let ry = sy.min(cy);
+        let rw = (cx - sx).abs();
+        let rh = (cy - sy).abs();
+        ctx.set_stroke_style_str("rgba(0, 120, 215, 0.8)");
+        ctx.set_fill_style_str("rgba(0, 120, 215, 0.1)");
+        ctx.set_line_width(1.0);
+        ctx.fill_rect(rx, ry, rw, rh);
+        ctx.stroke_rect(rx, ry, rw, rh);
     }
 }
 
@@ -1737,6 +1810,84 @@ mod tests {
         } else {
             panic!("expected Rect");
         }
+    }
+
+    // ── Partial Selection tool behavioral tests ──────────────────
+
+    fn partial_selection_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("partial_selection")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_rect_element() -> Model {
+        // Rect at (0, 0) 10x10 — control points:
+        //   0 = (0, 0)   top-left
+        //   1 = (10, 0)  top-right
+        //   2 = (10, 10) bottom-right
+        //   3 = (0, 10)  bottom-left
+        model_with_rect_at(0.0, 0.0, 10.0, 10.0)
+    }
+
+    #[test]
+    fn partial_selection_parity_click_on_cp_selects_it() {
+        let Some(mut tool) = partial_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_element();
+        // Click on CP 0 at (0, 0).
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_release(&mut model, 0.0, 0.0, false, false);
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0].path, vec![0, 0]);
+        // The selection kind should include cp 0.
+        assert!(sel[0].kind.contains(0));
+        assert!(model.can_undo());
+    }
+
+    #[test]
+    fn partial_selection_parity_click_empty_starts_marquee() {
+        let Some(mut tool) = partial_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_element();
+        // Click far from any CP.
+        tool.on_press(&mut model, 500.0, 500.0, false, false);
+        // Mode should be "marquee".
+        assert_eq!(
+            tool.tool_state("mode"),
+            &serde_json::json!("marquee"),
+        );
+        // Release at a far position to commit the marquee.
+        tool.on_release(&mut model, 600.0, 600.0, false, false);
+        // No hits → no selection.
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn partial_selection_parity_marquee_picks_control_points() {
+        let Some(mut tool) = partial_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_element();
+        // Marquee covering the rect's CPs (all at 0 or 10 in x and y).
+        tool.on_press(&mut model, -5.0, -5.0, false, false);
+        tool.on_move(&mut model, 15.0, 15.0, false, false, true);
+        tool.on_release(&mut model, 15.0, 15.0, false, false);
+        // All 4 CPs of the rect should be selected (partial_select_rect
+        // with extend=false replaces selection).
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0].path, vec![0, 0]);
     }
 
     // ── Path Eraser tool behavioral tests ─────────────────────────
