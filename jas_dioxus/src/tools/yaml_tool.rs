@@ -1739,6 +1739,418 @@ mod tests {
         }
     }
 
+    // ── Add Anchor Point tool behavioral tests ────────────────────
+
+    fn add_anchor_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("add_anchor_point")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_horizontal_line_path() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::{LayerElem, PathCommand, PathElem};
+        let pe = PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 0.0 },
+            ],
+            fill: None, stroke: None, width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn add_anchor_parity_click_on_line_inserts_midpoint() {
+        use crate::geometry::element::{PathCommand, PathElem};
+        let Some(mut tool) = add_anchor_yaml_tool() else { return };
+        let mut model = model_with_horizontal_line_path();
+        // Click at (50, 0) — exactly on the line at t=0.5.
+        tool.on_press(&mut model, 50.0, 0.0, false, false);
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        let pe: &PathElem = match &*children[0] {
+            Element::Path(pe) => pe,
+            _ => panic!("expected Path"),
+        };
+        // Should now have 3 commands: MoveTo, LineTo(mid), LineTo(end).
+        assert_eq!(pe.d.len(), 3);
+        if let PathCommand::LineTo { x, y } = pe.d[1] {
+            assert!((x - 50.0).abs() < 0.01);
+            assert!(y.abs() < 0.01);
+        } else {
+            panic!("expected inserted LineTo at midpoint");
+        }
+        assert!(model.can_undo());
+    }
+
+    #[test]
+    fn add_anchor_parity_click_far_from_path_is_noop() {
+        use crate::geometry::element::PathElem;
+        let Some(mut tool) = add_anchor_yaml_tool() else { return };
+        let mut model = model_with_horizontal_line_path();
+        tool.on_press(&mut model, 500.0, 500.0, false, false);
+        tool.on_release(&mut model, 500.0, 500.0, false, false);
+        if let Element::Path(pe) = &*model.document().layers[0].children().unwrap()[0] {
+            // Unchanged — still 2 commands.
+            let pe: &PathElem = pe;
+            assert_eq!(pe.d.len(), 2);
+        }
+        assert!(!model.can_undo());
+    }
+
+    #[test]
+    fn add_anchor_parity_click_on_curve_splits_it() {
+        use crate::geometry::element::{
+            CommonProps, Element, LayerElem, PathCommand, PathElem,
+        };
+        use crate::document::document::Document;
+        // Single cubic curve from (0,0) to (100,0) with symmetric handles.
+        let pe = PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::CurveTo {
+                    x1: 25.0, y1: 50.0,
+                    x2: 75.0, y2: 50.0,
+                    x: 100.0, y: 0.0,
+                },
+            ],
+            fill: None, stroke: None, width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mut model = Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        );
+        let Some(mut tool) = add_anchor_yaml_tool() else { return };
+        // Click near the curve's midpoint at t=0.5.
+        let (mid_x, mid_y) =
+            crate::geometry::path_ops::eval_cubic(
+                0.0, 0.0, 25.0, 50.0, 75.0, 50.0, 100.0, 0.0, 0.5);
+        tool.on_press(&mut model, mid_x, mid_y, false, false);
+        tool.on_release(&mut model, mid_x, mid_y, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        let pe: &PathElem = match &*children[0] {
+            Element::Path(pe) => pe,
+            _ => panic!("expected Path"),
+        };
+        // Should have MoveTo + 2 CurveTos (split into halves).
+        assert_eq!(pe.d.len(), 3);
+        assert!(matches!(pe.d[1], PathCommand::CurveTo { .. }));
+        assert!(matches!(pe.d[2], PathCommand::CurveTo { .. }));
+        // First CurveTo endpoint should be the mid-point.
+        if let PathCommand::CurveTo { x, y, .. } = pe.d[1] {
+            assert!((x - mid_x).abs() < 0.1);
+            assert!((y - mid_y).abs() < 0.1);
+        }
+    }
+
+    // ── Anchor Point tool behavioral tests ────────────────────────
+
+    fn anchor_point_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("anchor_point")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_smooth_three_anchor_path() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::{LayerElem, PathCommand, PathElem};
+        let pe = PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::CurveTo {
+                    x1: 10.0, y1: 20.0, x2: 40.0, y2: 20.0,
+                    x: 50.0, y: 0.0,
+                },
+                PathCommand::CurveTo {
+                    x1: 60.0, y1: -20.0, x2: 90.0, y2: -20.0,
+                    x: 100.0, y: 0.0,
+                },
+            ],
+            fill: None,
+            stroke: None,
+            width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn anchor_point_parity_click_smooth_makes_corner() {
+        use crate::geometry::element::{is_smooth_point, PathElem};
+        let Some(mut tool) = anchor_point_yaml_tool() else { return };
+        let mut model = model_with_smooth_three_anchor_path();
+        // Smooth anchor lives at (50, 0) — click without drag.
+        tool.on_press(&mut model, 50.0, 0.0, false, false);
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        let pe: &PathElem = match &*children[0] {
+            Element::Path(pe) => pe,
+            _ => panic!("expected Path"),
+        };
+        assert!(
+            !is_smooth_point(&pe.d, 1),
+            "click on smooth anchor should convert it to corner",
+        );
+        assert!(model.can_undo());
+    }
+
+    #[test]
+    fn anchor_point_parity_drag_handle_moves_it() {
+        use crate::geometry::element::{PathCommand, PathElem};
+        let Some(mut tool) = anchor_point_yaml_tool() else { return };
+        let mut model = model_with_smooth_three_anchor_path();
+        // Outgoing handle of anchor 1 at (60, -20) — drag it by (+10, +5).
+        tool.on_press(&mut model, 60.0, -20.0, false, false);
+        tool.on_release(&mut model, 70.0, -15.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        let pe: &PathElem = match &*children[0] {
+            Element::Path(pe) => pe,
+            _ => panic!("expected Path"),
+        };
+        // x1 of cmd[2] (the outgoing handle of anchor 1) should now
+        // be (70, -15); x2 of cmd[1] (the incoming handle of anchor 1)
+        // should be UNCHANGED at (40, 20) — independent move.
+        if let PathCommand::CurveTo { x1, y1, .. } = pe.d[2] {
+            assert!((x1 - 70.0).abs() < 0.01);
+            assert!((y1 - (-15.0)).abs() < 0.01);
+        }
+        if let PathCommand::CurveTo { x2, y2, .. } = pe.d[1] {
+            assert!((x2 - 40.0).abs() < 0.01);
+            assert!((y2 - 20.0).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn anchor_point_parity_drag_corner_pulls_out_smooth_handles() {
+        use crate::geometry::element::{
+            is_smooth_point, LayerElem, PathCommand, PathElem,
+        };
+        use crate::document::document::Document;
+        // Start with a CORNER anchor path (all LineTos).
+        let pe = PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 50.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 0.0 },
+            ],
+            fill: None, stroke: None, width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mut model = Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        );
+        let Some(mut tool) = anchor_point_yaml_tool() else { return };
+        // Corner anchor at (50, 0). Press there, drag to (50, 30).
+        tool.on_press(&mut model, 50.0, 0.0, false, false);
+        tool.on_release(&mut model, 50.0, 30.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        let pe: &PathElem = match &*children[0] {
+            Element::Path(pe) => pe,
+            _ => panic!("expected Path"),
+        };
+        // Anchor 1 should now be smooth.
+        assert!(is_smooth_point(&pe.d, 1));
+    }
+
+    #[test]
+    fn anchor_point_parity_click_without_hit_is_noop() {
+        let Some(mut tool) = anchor_point_yaml_tool() else { return };
+        let mut model = model_with_smooth_three_anchor_path();
+        tool.on_press(&mut model, 500.0, 500.0, false, false);
+        tool.on_release(&mut model, 500.0, 500.0, false, false);
+        assert!(!model.can_undo());
+    }
+
+    // ── Delete Anchor Point tool behavioral tests ────────────────
+
+    use crate::geometry::element::{PathCommand, PathElem};
+
+    fn delete_anchor_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("delete_anchor_point")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_four_anchor_path() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::LayerElem;
+        let pe = PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::CurveTo {
+                    x1: 10.0, y1: 0.0, x2: 20.0, y2: 0.0,
+                    x: 30.0, y: 0.0,
+                },
+                PathCommand::CurveTo {
+                    x1: 40.0, y1: 0.0, x2: 50.0, y2: 0.0,
+                    x: 60.0, y: 0.0,
+                },
+                PathCommand::CurveTo {
+                    x1: 70.0, y1: 0.0, x2: 80.0, y2: 0.0,
+                    x: 90.0, y: 0.0,
+                },
+            ],
+            fill: None,
+            stroke: None,
+            width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn delete_anchor_parity_click_on_interior_removes_anchor() {
+        let Some(mut tool) = delete_anchor_yaml_tool() else { return };
+        let mut model = model_with_four_anchor_path();
+        // Click on the anchor at (60, 0) — command index 2.
+        tool.on_press(&mut model, 60.0, 0.0, false, false);
+        tool.on_release(&mut model, 60.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "path should still exist");
+        if let Element::Path(pe) = &*children[0] {
+            // Should go from 4 anchors to 3.
+            assert_eq!(pe.d.len(), 3);
+        } else {
+            panic!("expected Path");
+        }
+        assert!(model.can_undo(), "delete should be undoable");
+    }
+
+    #[test]
+    fn delete_anchor_parity_click_empty_is_noop() {
+        let Some(mut tool) = delete_anchor_yaml_tool() else { return };
+        let mut model = model_with_four_anchor_path();
+        tool.on_press(&mut model, 500.0, 500.0, false, false);
+        tool.on_release(&mut model, 500.0, 500.0, false, false);
+        // Path unchanged, no undo snapshot.
+        if let Element::Path(pe) = &*model.document().layers[0].children().unwrap()[0] {
+            assert_eq!(pe.d.len(), 4);
+        }
+        assert!(!model.can_undo());
+    }
+
     // ── Pen tool behavioral tests ──────────────────────────────────
     //
     // Native PenTool had no unit tests. These cover the externally-

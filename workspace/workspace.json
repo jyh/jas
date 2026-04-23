@@ -15233,6 +15233,127 @@
     }
   },
   "tools": {
+    "add_anchor_point": {
+      "id": "add_anchor_point",
+      "cursor": "crosshair",
+      "menu_label": "Add Anchor Point Tool",
+      "shortcut": "=",
+      "handlers": {
+        "on_mousedown": [
+          {
+            "doc.path.insert_anchor_on_segment_near": {
+              "x": "event.x",
+              "y": "event.y",
+              "hit_radius": "8"
+            }
+          }
+        ]
+      }
+    },
+    "anchor_point": {
+      "id": "anchor_point",
+      "cursor": "crosshair",
+      "menu_label": "Anchor Point Tool",
+      "shortcut": "C",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "pressed_smooth",
+            "pressed_corner",
+            "pressed_handle"
+          ]
+        },
+        "hit_path": {
+          "default": null
+        },
+        "hit_anchor_idx": {
+          "default": 0
+        },
+        "handle_type": {
+          "default": ""
+        },
+        "press_x": {
+          "default": 0
+        },
+        "press_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.anchor_point.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.anchor_point.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.path.probe_anchor_hit": {
+              "x": "event.x",
+              "y": "event.y",
+              "hit_radius": "8"
+            }
+          },
+          {
+            "set": {
+              "tool.anchor_point.press_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.anchor_point.press_y": "event.y"
+            }
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.anchor_point.mode != 'idle'",
+            "then": [
+              {
+                "doc.path.commit_anchor_edit": {
+                  "origin_x": "tool.anchor_point.press_x",
+                  "origin_y": "tool.anchor_point.press_y",
+                  "target_x": "event.x",
+                  "target_y": "event.y"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.anchor_point.mode": "'idle'"
+            }
+          }
+        ]
+      }
+    },
+    "delete_anchor_point": {
+      "id": "delete_anchor_point",
+      "cursor": "crosshair",
+      "menu_label": "Delete Anchor Point Tool",
+      "shortcut": "-",
+      "handlers": {
+        "on_mousedown": [
+          {
+            "doc.path.delete_anchor_near": {
+              "x": "event.x",
+              "y": "event.y",
+              "hit_radius": "8"
+            }
+          }
+        ]
+      }
+    },
     "ellipse": {
       "id": "ellipse",
       "cursor": "crosshair",
