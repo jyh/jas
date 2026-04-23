@@ -122,13 +122,17 @@ PATTERNS = {
 }
 
 
-def measure() -> dict:
-    """Walk PATTERNS and compute the per-app, per-category counts."""
+def measure(repo: Path = REPO, patterns: dict = PATTERNS) -> dict:
+    """Walk patterns and compute the per-app, per-category counts.
+
+    repo and patterns are injectable so tests can exercise the logic
+    against temp fixtures instead of the real repo.
+    """
     report = {}
-    for app, categories in PATTERNS.items():
+    for app, categories in patterns.items():
         app_report = {}
         for cat_name, spec in categories.items():
-            files = sorted(REPO.glob(spec["glob"]))
+            files = sorted(repo.glob(spec["glob"]))
             excl = spec.get("exclude_pattern")
             if excl:
                 exclude_re = re.compile(excl)
