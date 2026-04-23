@@ -18,7 +18,6 @@ use crate::tools::pen_tool::PenTool;
 use crate::tools::add_anchor_point_tool::AddAnchorPointTool;
 use crate::tools::delete_anchor_point_tool::DeleteAnchorPointTool;
 use crate::tools::anchor_point_tool::AnchorPointTool;
-use crate::tools::pencil_tool::PencilTool;
 use crate::tools::path_eraser_tool::PathEraserTool;
 use crate::tools::smooth_tool::SmoothTool;
 use crate::tools::type_tool::TypeTool;
@@ -88,7 +87,7 @@ impl TabState {
         tools.insert(ToolKind::AddAnchorPoint, Box::new(AddAnchorPointTool::new()));
         tools.insert(ToolKind::DeleteAnchorPoint, Box::new(DeleteAnchorPointTool::new()));
         tools.insert(ToolKind::AnchorPoint, Box::new(AnchorPointTool::new()));
-        tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
+        tools.insert(ToolKind::Pencil, yaml_tool("pencil"));
         tools.insert(ToolKind::PathEraser, Box::new(PathEraserTool::new()));
         tools.insert(ToolKind::Smooth, Box::new(SmoothTool::new()));
         tools.insert(ToolKind::Type, Box::new(TypeTool::new()));

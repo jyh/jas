@@ -336,6 +336,7 @@ impl CanvasTool for YamlTool {
             "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
             "star" => draw_star_overlay(ctx, render, &eval_ctx),
             "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
+            "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render),
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -533,6 +534,56 @@ fn draw_buffer_polygon_overlay(
     let points: Vec<(f64, f64)> =
         crate::interpreter::point_buffers::with_points(name, |pts| pts.to_vec());
     draw_closed_polygon_from_points(ctx, &points, render);
+}
+
+/// Draw an OPEN polyline — like buffer_polygon but without
+/// close_path / fill. Used by Pencil's overlay: the user sees the raw
+/// traced path while dragging, then the final fit_curve result lands
+/// as a Bezier Path element on mouseup.
+fn draw_buffer_polyline_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+) {
+    let name = render
+        .get("buffer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if name.is_empty() {
+        return;
+    }
+    let points: Vec<(f64, f64)> = crate::interpreter::point_buffers::with_points(
+        name, |pts| pts.to_vec());
+    if points.len() < 2 {
+        return;
+    }
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+    let Some(stroke) = &style.stroke else {
+        return;
+    };
+    ctx.set_stroke_style_str(stroke);
+    if let Some(w) = style.stroke_width {
+        ctx.set_line_width(w);
+    }
+    if let Some(dash) = &style.stroke_dasharray {
+        let arr = js_sys::Array::new();
+        for d in dash {
+            arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+        }
+        let _ = ctx.set_line_dash(&arr);
+    }
+    ctx.begin_path();
+    ctx.move_to(points[0].0, points[0].1);
+    for p in &points[1..] {
+        ctx.line_to(p.0, p.1);
+    }
+    ctx.stroke();
+    if style.stroke_dasharray.is_some() {
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
 }
 
 /// Draw a regular-N-gon overlay inscribed by a first-edge vector.
@@ -1484,6 +1535,119 @@ mod tests {
             assert_eq!(r.height, 60.0);
         } else {
             panic!("expected Rect");
+        }
+    }
+
+    // ── Pencil tool behavioral tests ───────────────────────────────
+
+    fn pencil_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("pencil")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn pencil_parity_freehand_draw_creates_path() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        for i in 1..=20 {
+            let x = i as f64 * 5.0;
+            let y = (i as f64 * 0.1).sin() * 20.0;
+            tool.on_move(&mut model, x, y, false, false, true);
+        }
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        match &*children[0] {
+            Element::Path(pe) => {
+                assert!(
+                    pe.d.len() >= 2,
+                    "path should have MoveTo + at least one CurveTo",
+                );
+                assert!(matches!(pe.d[0], PathCommand::MoveTo { .. }));
+                for cmd in &pe.d[1..] {
+                    assert!(matches!(cmd, PathCommand::CurveTo { .. }));
+                }
+            }
+            _ => panic!("expected Path element"),
+        }
+    }
+
+    #[test]
+    fn pencil_parity_click_without_drag_creates_degenerate_path() {
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press + release at same point — on_release pushes the final
+        // point, giving the buffer 2 identical points. fit_curve
+        // returns 1 degenerate segment, which still lands a Path.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+        );
+    }
+
+    #[test]
+    fn pencil_parity_path_uses_model_defaults() {
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        if let Element::Path(pe) = &*children[0] {
+            assert!(pe.stroke.is_some(), "pencil path should have a stroke");
+            assert!(pe.fill.is_none(), "pencil path should have no fill");
+        } else {
+            panic!("expected Path element");
+        }
+    }
+
+    #[test]
+    fn pencil_parity_release_without_press_is_noop() {
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn pencil_parity_path_starts_at_press_point() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 15.0, 25.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        if let Element::Path(pe) =
+            &*model.document().layers[0].children().unwrap()[0]
+        {
+            if let PathCommand::MoveTo { x, y } = pe.d[0] {
+                assert_eq!(x, 15.0);
+                assert_eq!(y, 25.0);
+            } else {
+                panic!("first command should be MoveTo");
+            }
         }
     }
 

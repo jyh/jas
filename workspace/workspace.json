@@ -15895,6 +15895,138 @@
         }
       }
     },
+    "pencil": {
+      "id": "pencil",
+      "cursor": "crosshair",
+      "menu_label": "Pencil Tool",
+      "shortcut": "N",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.pencil.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.pencil.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          },
+          {
+            "buffer.push": {
+              "buffer": "pencil",
+              "x": "event.x",
+              "y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.pencil.mode": "'drawing'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.pencil.mode == 'drawing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "pencil",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.pencil.mode == 'drawing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "pencil",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              },
+              {
+                "doc.add_path_from_buffer": {
+                  "buffer": "pencil",
+                  "fit_error": "4"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.pencil.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.pencil.mode": "'idle'"
+                }
+              },
+              {
+                "buffer.clear": {
+                  "buffer": "pencil"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.pencil.mode == 'drawing'",
+        "render": {
+          "type": "buffer_polyline",
+          "buffer": "pencil",
+          "style": "stroke: black; stroke-width: 1;"
+        }
+      }
+    },
     "polygon": {
       "id": "polygon",
       "cursor": "crosshair",

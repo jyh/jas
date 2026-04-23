@@ -1,0 +1,70 @@
+# Pencil tool — freehand drawing with automatic Bezier curve fitting.
+#
+# Accumulates a point per mouse event in the "pencil" buffer during
+# the drag. On mouseup, runs fit_curve (L2 kernel) on the buffer and
+# appends a MoveTo + CurveTo[]... Path element to the document.
+#
+# The fit-error parameter (4.0, matching native FIT_ERROR) controls
+# smoothing tightness: smaller = more segments tracking the user's
+# wiggles closer, larger = fewer segments smoothing over them.
+#
+# Validated against schema/tool.schema.json.
+
+id: pencil
+cursor: crosshair
+menu_label: "Pencil Tool"
+shortcut: "N"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+
+handlers:
+
+  on_enter:
+    - set: { tool.pencil.mode: "'idle'" }
+    - "buffer.clear": { buffer: "pencil" }
+
+  on_leave:
+    - set: { tool.pencil.mode: "'idle'" }
+    - "buffer.clear": { buffer: "pencil" }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - "buffer.clear": { buffer: "pencil" }
+    - "buffer.push": { buffer: "pencil", x: "event.x", y: "event.y" }
+    - set: { tool.pencil.mode: "'drawing'" }
+
+  on_mousemove:
+    - if: "tool.pencil.mode == 'drawing'"
+      then:
+        - "buffer.push": { buffer: "pencil", x: "event.x", y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.pencil.mode == 'drawing'"
+      then:
+        # Final point on release, same as native — without this a
+        # click (press+release at same point) would leave a 1-point
+        # buffer that fit_curve rejects.
+        - "buffer.push": { buffer: "pencil", x: "event.x", y: "event.y" }
+        - "doc.add_path_from_buffer":
+            buffer: "pencil"
+            fit_error: "4"
+    - set: { tool.pencil.mode: "'idle'" }
+    - "buffer.clear": { buffer: "pencil" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.pencil.mode: "'idle'" }
+        - "buffer.clear": { buffer: "pencil" }
+
+# Thin black polyline following the raw drag — the final committed
+# path is the smoothed fit_curve output, not this preview.
+overlay:
+  if: "tool.pencil.mode == 'drawing'"
+  render:
+    type: buffer_polyline
+    buffer: "pencil"
+    style: "stroke: black; stroke-width: 1;"
