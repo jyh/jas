@@ -318,6 +318,15 @@ impl CanvasTool for YamlTool {
         self.dispatch("on_dblclick", payload, model);
     }
 
+    fn on_key(&mut self, model: &mut Model, key: &str) -> bool {
+        // Important: `workspace::keyboard` routes Escape / Enter via
+        // `on_key`, not `on_key_event`. A YamlTool that only overrode
+        // the latter would miss those keys entirely — found the hard
+        // way when Escape-to-commit-pen-path stopped working in
+        // dx serve. Dispatch here too, with empty modifiers.
+        self.on_key_event(model, key, KeyMods::default())
+    }
+
     fn on_key_event(
         &mut self,
         model: &mut Model,
@@ -1853,6 +1862,30 @@ mod tests {
                 pe.d.last().unwrap(),
                 PathCommand::ClosePath,
             ));
+        }
+    }
+
+    #[test]
+    fn pen_parity_escape_via_on_key_commits() {
+        // Regression guard for workspace::keyboard's Escape/Enter
+        // path — it calls tool.on_key(), NOT tool.on_key_event().
+        // A YamlTool that only overrode on_key_event would miss
+        // Escape entirely (dx serve bug surfaced this).
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pen_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        // Using on_key (NOT on_key_event) — the shell's actual call path.
+        tool.on_key(&mut model, "Escape");
+
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Path(pe) = &*children[0] {
+            assert!(matches!(pe.d[0], PathCommand::MoveTo { .. }));
+            assert!(!matches!(pe.d.last().unwrap(), PathCommand::ClosePath));
         }
     }
 
