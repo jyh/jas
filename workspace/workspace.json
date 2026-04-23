@@ -15375,6 +15375,12 @@
         },
         "start_y": {
           "default": 0
+        },
+        "cur_x": {
+          "default": 0
+        },
+        "cur_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -15394,7 +15400,9 @@
         ],
         "on_mousedown": [
           {
-            "doc.snapshot": {}
+            "set": {
+              "tool.rect.mode": "'drawing'"
+            }
           },
           {
             "set": {
@@ -15408,20 +15416,12 @@
           },
           {
             "set": {
-              "tool.rect.mode": "'drawing'"
+              "tool.rect.cur_x": "event.x"
             }
           },
           {
-            "doc.add_element": {
-              "parent": "[0]",
-              "element": {
-                "type": "rect",
-                "x": "event.x",
-                "y": "event.y",
-                "width": "0",
-                "height": "0",
-                "fill": "'#4a90d9'"
-              }
+            "set": {
+              "tool.rect.cur_y": "event.y"
             }
           }
         ],
@@ -15430,37 +15430,43 @@
             "if": "tool.rect.mode == 'drawing'",
             "then": [
               {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "x",
-                  "value": "min(tool.rect.start_x, event.x)"
+                "set": {
+                  "tool.rect.cur_x": "event.x"
                 }
               },
               {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "y",
-                  "value": "min(tool.rect.start_y, event.y)"
-                }
-              },
-              {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "width",
-                  "value": "abs(event.x - tool.rect.start_x)"
-                }
-              },
-              {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "height",
-                  "value": "abs(event.y - tool.rect.start_y)"
+                "set": {
+                  "tool.rect.cur_y": "event.y"
                 }
               }
             ]
           }
         ],
         "on_mouseup": [
+          {
+            "if": "tool.rect.mode == 'drawing'",
+            "then": [
+              {
+                "if": "abs(event.x - tool.rect.start_x) > 1 and abs(event.y - tool.rect.start_y) > 1",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.add_element": {
+                      "element": {
+                        "type": "rect",
+                        "x": "min(tool.rect.start_x, event.x)",
+                        "y": "min(tool.rect.start_y, event.y)",
+                        "width": "abs(event.x - tool.rect.start_x)",
+                        "height": "abs(event.y - tool.rect.start_y)"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
           {
             "set": {
               "tool.rect.mode": "'idle'"
@@ -15479,6 +15485,17 @@
             ]
           }
         ]
+      },
+      "overlay": {
+        "if": "tool.rect.mode == 'drawing'",
+        "render": {
+          "type": "rect",
+          "x": "min(tool.rect.start_x, tool.rect.cur_x)",
+          "y": "min(tool.rect.start_y, tool.rect.cur_y)",
+          "width": "abs(tool.rect.cur_x - tool.rect.start_x)",
+          "height": "abs(tool.rect.cur_y - tool.rect.start_y)",
+          "style": "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
+        }
       }
     },
     "selection": {
