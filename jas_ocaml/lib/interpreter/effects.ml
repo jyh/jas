@@ -126,9 +126,21 @@ let rec run_effects_inner
     match eff with
     | `Assoc _ ->
       let mem key = Workspace_loader.json_member key eff in
-      (* let: { name: expr, ... } — PHASE3 §5.1 *)
-      (match mem "let" with
-       | Some (`Assoc pairs) ->
+      (* let: { name: expr, ... } — PHASE3 §5.1
+         Two shapes:
+           Sibling-threading: extends ctx for later siblings.
+           Scoped: `let: {...} in: [...]` runs the nested list
+           with the bindings in scope, then drops them. Matches
+           the form used in workspace/tools/*.yaml (selection etc). *)
+      (match mem "let", mem "in" with
+       | Some (`Assoc pairs), Some (`List in_effects) ->
+         let extended = List.fold_left (fun acc (name, expr) ->
+           let value = eval_expr expr store acc in
+           (name, value_to_json value) :: List.filter (fun (k, _) -> k <> name) acc
+         ) !ctx_ref pairs in
+         run_effects_inner in_effects extended store actions dialogs
+           ~platform_effects ~schema diagnostics
+       | Some (`Assoc pairs), _ ->
          ctx_ref := List.fold_left (fun acc (name, expr) ->
            let value = eval_expr expr store acc in
            (name, value_to_json value) :: List.filter (fun (k, _) -> k <> name) acc
@@ -259,8 +271,28 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     State_store.set store key (`Float (current -. by))
   | _ ->
 
-  (* if: { condition, then, else } *)
+  (* if: two supported shapes
+       Flat (tool-YAML authoring convention):
+         if: "<expr>"  then: [...]  else: [...]
+       Nested (legacy actions.yaml):
+         if: { condition: <expr>, then: [...], else: [...] }
+     Both accepted so selection.yaml + action fixtures coexist. *)
   match mem "if" with
+  | Some (`String cond_expr) ->
+    let eval_ctx = State_store.eval_context ~extra:ctx store in
+    let result = Expr_eval.evaluate cond_expr eval_ctx in
+    if Expr_eval.to_bool result then
+      (match mem "then" with
+       | Some (`List then_effects) ->
+         run_effects_inner then_effects ctx store actions dialogs
+           ~platform_effects ~schema diagnostics
+       | _ -> ())
+    else
+      (match mem "else" with
+       | Some (`List else_effects) ->
+         run_effects_inner else_effects ctx store actions dialogs
+           ~platform_effects ~schema diagnostics
+       | _ -> ())
   | Some (`Assoc cond) ->
     let cond_expr = (match List.assoc_opt "condition" cond with Some (`String s) -> s | _ -> "false") in
     let eval_ctx = State_store.eval_context ~extra:ctx store in
