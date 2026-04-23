@@ -11,6 +11,39 @@ from workspace_interpreter.expr import evaluate
 from workspace_interpreter.state_store import StateStore
 
 
+def _set_by_scoped_target(store: StateStore, raw_target: str, value) -> None:
+    """Route a scope-qualified ``set:`` target to the right section
+    of the StateStore.
+
+    Target shapes (leading ``$`` stripped):
+        ``tool.<id>.<key>``   -> ``store.set_tool``
+        ``panel.<key>``       -> active panel's scope
+        ``state.<key>``       -> global state (explicit)
+        anything else         -> global state (bare, legacy)
+
+    Matches the Rust/Swift/OCaml set_by_scoped_target dispatchers.
+    """
+    target = raw_target[1:] if raw_target.startswith("$") else raw_target
+    if "." not in target:
+        store.set(target, value)
+        return
+    head, rest = target.split(".", 1)
+    if head == "tool":
+        if "." not in rest:
+            # tool.<id> without field — malformed, drop silently.
+            return
+        tool_id, key = rest.split(".", 1)
+        store.set_tool(tool_id, key, value)
+    elif head == "panel":
+        panel_id = store.get_active_panel_id()
+        if panel_id is not None:
+            store.set_panel(panel_id, rest, value)
+    elif head == "state":
+        store.set(rest, value)
+    else:
+        store.set(target, value)
+
+
 def run_effects(effects: list, ctx: dict, store: StateStore,
                 actions: dict | None = None,
                 platform_effects: dict | None = None,
@@ -138,8 +171,9 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 return None, result
 
     # let: { name: expr, ... } — PHASE3 §5.1
-    # Evaluates each expression against current ctx (earlier names visible
-    # to later ones in the same block), returns an extended ctx.
+    # Two shapes: sibling-threading (no `in:`) and scoped (`let: {...}
+    # in: [...]` runs the nested list with bindings, then drops them).
+    # Tool YAMLs (e.g. selection) use the scoped form.
     if "let" in effect:
         from workspace_interpreter.expr_types import ValueType
         bindings = effect["let"]
@@ -153,6 +187,13 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 new_ctx[name] = result
             else:
                 new_ctx[name] = result.value
+        if "in" in effect and isinstance(effect["in"], list):
+            run_effects(
+                effect["in"], new_ctx, store,
+                actions, platform_effects, dialogs,
+                schema, diagnostics,
+            )
+            return None
         return new_ctx
 
     # snapshot — PHASE3 §5.2 — push undo checkpoint on active document
@@ -598,9 +639,14 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 active_panel=store.get_active_panel_id(),
             )
         else:
+            # YAML authors target state scopes via dotted paths with
+            # optional $ prefix: $tool.selection.mode, $state.fill_color,
+            # $panel.mode. The non-schema branch dispatches through
+            # _set_by_scoped_target. Unscoped keys continue to write
+            # to the global state map (legacy behavior).
             for key, expr in effect["set"].items():
                 value = _eval(expr, store, ctx)
-                store.set(key, value)
+                _set_by_scoped_target(store, key, value)
         return
 
     # toggle: state_key_name
@@ -642,18 +688,31 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         # Would need access to original defaults — skip for now
         return
 
-    # if: { condition, then, else }
+    # if: two supported shapes
+    #   Flat (tool-YAML authoring):  if: "<expr>"  then: [...]  else: [...]
+    #   Nested (legacy actions):      if: { condition: <expr>, then: [...], else: [...] }
     if "if" in effect:
-        cond = effect["if"]
-        cond_expr = cond.get("condition", "false")
+        cond_val = effect["if"]
+        if isinstance(cond_val, str):
+            cond_expr = cond_val
+            then_list = effect.get("then", [])
+            else_list = effect.get("else", [])
+        elif isinstance(cond_val, dict):
+            cond_expr = cond_val.get("condition", "false")
+            then_list = cond_val.get("then", [])
+            else_list = cond_val.get("else", [])
+        else:
+            return
         eval_ctx = store.eval_context(ctx)
         result = evaluate(str(cond_expr), eval_ctx)
         if result.to_bool():
-            run_effects(cond.get("then", []), ctx, store, actions, platform_effects, dialogs,
-                        schema, diagnostics)
-        elif "else" in cond:
-            run_effects(cond["else"], ctx, store, actions, platform_effects, dialogs,
-                        schema, diagnostics)
+            if isinstance(then_list, list) and then_list:
+                run_effects(then_list, ctx, store, actions, platform_effects,
+                            dialogs, schema, diagnostics)
+        else:
+            if isinstance(else_list, list) and else_list:
+                run_effects(else_list, ctx, store, actions, platform_effects,
+                            dialogs, schema, diagnostics)
         return
 
     # set_panel_state: { key, value, panel? }

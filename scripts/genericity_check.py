@@ -103,7 +103,11 @@ PATTERNS = {
         "tool_files": {
             "kind": "files",
             "glob": "jas/tools/*_tool.py",
-            "exclude_pattern": r"_test\.py$",
+            # Exclude *_test.py and yaml_tool.py (the generic YAML-
+            # driven tool runtime — infrastructure, not per-tool code).
+            # Matches the yaml_tool.rs / YamlTool.swift / yaml_tool.ml
+            # exclusions.
+            "exclude_pattern": r"(_test\.py|/yaml_tool\.py)$",
         },
         "panel_menu_items": {
             "kind": "regex_count",

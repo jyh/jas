@@ -517,6 +517,126 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
                 return Value.bool_(True)
         return Value.bool_(False)
 
+    # ── Math primitives ───────────────────────────────────────
+
+    if name == "min":
+        if not node.args:
+            return Value.null()
+        vals = [eval_node(a, ctx) for a in node.args]
+        nums = [v.value for v in vals if v.type == ValueType.NUMBER]
+        if not nums:
+            return Value.null()
+        return Value.number(min(nums))
+
+    if name == "max":
+        if not node.args:
+            return Value.null()
+        vals = [eval_node(a, ctx) for a in node.args]
+        nums = [v.value for v in vals if v.type == ValueType.NUMBER]
+        if not nums:
+            return Value.null()
+        return Value.number(max(nums))
+
+    if name == "abs":
+        if len(node.args) != 1:
+            return Value.null()
+        a = eval_node(node.args[0], ctx)
+        if a.type != ValueType.NUMBER:
+            return Value.null()
+        return Value.number(abs(a.value))
+
+    if name == "sqrt":
+        if len(node.args) != 1:
+            return Value.null()
+        a = eval_node(node.args[0], ctx)
+        if a.type != ValueType.NUMBER or a.value < 0:
+            return Value.null()
+        import math
+        return Value.number(math.sqrt(a.value))
+
+    if name == "hypot":
+        if len(node.args) != 2:
+            return Value.null()
+        va = eval_node(node.args[0], ctx)
+        vb = eval_node(node.args[1], ctx)
+        if va.type != ValueType.NUMBER or vb.type != ValueType.NUMBER:
+            return Value.null()
+        import math
+        return Value.number(math.hypot(va.value, vb.value))
+
+    # ── Doc-aware primitives ──────────────────────────────────
+
+    if name == "hit_test":
+        if len(node.args) != 2:
+            return Value.null()
+        from workspace_interpreter import doc_primitives
+        vx = eval_node(node.args[0], ctx)
+        vy = eval_node(node.args[1], ctx)
+        if vx.type != ValueType.NUMBER or vy.type != ValueType.NUMBER:
+            return Value.null()
+        path = doc_primitives.hit_test(vx.value, vy.value)
+        return Value.path(path) if path is not None else Value.null()
+
+    if name == "hit_test_deep":
+        if len(node.args) != 2:
+            return Value.null()
+        from workspace_interpreter import doc_primitives
+        vx = eval_node(node.args[0], ctx)
+        vy = eval_node(node.args[1], ctx)
+        if vx.type != ValueType.NUMBER or vy.type != ValueType.NUMBER:
+            return Value.null()
+        path = doc_primitives.hit_test_deep(vx.value, vy.value)
+        return Value.path(path) if path is not None else Value.null()
+
+    if name == "selection_contains":
+        if len(node.args) != 1:
+            return Value.bool_(False)
+        from workspace_interpreter import doc_primitives
+        v = eval_node(node.args[0], ctx)
+        if v.type != ValueType.PATH:
+            return Value.bool_(False)
+        return Value.bool_(doc_primitives.selection_contains(v.value))
+
+    if name == "selection_empty":
+        from workspace_interpreter import doc_primitives
+        return Value.bool_(doc_primitives.selection_empty())
+
+    # ── Buffer primitives ────────────────────────────────────
+
+    if name == "buffer_length":
+        if len(node.args) != 1:
+            return Value.number(0)
+        from workspace_interpreter import point_buffers
+        v = eval_node(node.args[0], ctx)
+        if v.type != ValueType.STRING:
+            return Value.number(0)
+        return Value.number(point_buffers.length(v.value))
+
+    if name == "anchor_buffer_length":
+        if len(node.args) != 1:
+            return Value.number(0)
+        from workspace_interpreter import anchor_buffers
+        v = eval_node(node.args[0], ctx)
+        if v.type != ValueType.STRING:
+            return Value.number(0)
+        return Value.number(anchor_buffers.length(v.value))
+
+    if name == "anchor_buffer_close_hit":
+        if len(node.args) != 4:
+            return Value.bool_(False)
+        from workspace_interpreter import anchor_buffers
+        vn = eval_node(node.args[0], ctx)
+        vx = eval_node(node.args[1], ctx)
+        vy = eval_node(node.args[2], ctx)
+        vr = eval_node(node.args[3], ctx)
+        if (vn.type != ValueType.STRING
+                or vx.type != ValueType.NUMBER
+                or vy.type != ValueType.NUMBER
+                or vr.type != ValueType.NUMBER):
+            return Value.bool_(False)
+        return Value.bool_(anchor_buffers.close_hit(
+            vn.value, vx.value, vy.value, vr.value))
+
     # Unknown function
     return Value.null()
 

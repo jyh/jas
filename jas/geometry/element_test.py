@@ -1,4 +1,13 @@
+import os
+import sys
+
 from absl.testing import absltest
+
+# Ensure repo root is on sys.path so `workspace_interpreter.*` imports
+# resolve when the test runs via pytest from the repo root.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from geometry.element import (
     BlendMode, Color, RgbColor, HsbColor, CmykColor,
@@ -577,16 +586,18 @@ class PathOffsetTest(absltest.TestCase):
 
 
 class PenToolPathTest(absltest.TestCase):
-    """Tests for pen tool path construction logic.
+    """Tests for pen-path construction logic using Anchor buffers.
 
-    These test the path command generation without requiring a GUI context.
-    """
+    Pen tool is YAML-driven post-migration; PenPoint is gone. These
+    tests exercise the equivalent Anchor dataclass from
+    workspace_interpreter.anchor_buffers (plus add_path_from_anchor_buffer
+    is covered end-to-end in jas/tools/yaml_tool_effects_test.py)."""
 
     def test_straight_line_two_points(self):
         """Two points with no handle drag produces CurveTo with control points at anchors."""
-        from tools.pen_tool import PenPoint
-        p0 = PenPoint(0, 0)
-        p1 = PenPoint(100, 0)
+        from workspace_interpreter.anchor_buffers import Anchor
+        p0 = Anchor(0, 0, 0, 0, 0, 0, False)
+        p1 = Anchor(100, 0, 100, 0, 100, 0, False)
         cmds = [MoveTo(p0.x, p0.y)]
         cmds.append(CurveTo(p0.hx_out, p0.hy_out, p1.hx_in, p1.hy_in, p1.x, p1.y))
         self.assertEqual(len(cmds), 2)
@@ -596,9 +607,8 @@ class PenToolPathTest(absltest.TestCase):
 
     def test_handle_drag_creates_smooth_curve(self):
         """Dragging a handle sets symmetric handles on the point."""
-        from tools.pen_tool import PenPoint
-        p = PenPoint(50, 50)
-        # Simulate drag to (70, 50) — sets hx_out=70, hy_out=50, hx_in=30, hy_in=50
+        from workspace_interpreter.anchor_buffers import Anchor
+        p = Anchor(50, 50, 50, 50, 50, 50, False)
         p.hx_out = 70
         p.hy_out = 50
         p.hx_in = 2 * p.x - 70
@@ -608,8 +618,10 @@ class PenToolPathTest(absltest.TestCase):
 
     def test_closed_path_has_close_command(self):
         """A closed pen path ends with CurveTo back to start and ClosePath."""
-        from tools.pen_tool import PenPoint
-        pts = [PenPoint(0, 0), PenPoint(100, 0), PenPoint(50, 50)]
+        from workspace_interpreter.anchor_buffers import Anchor
+        pts = [Anchor(0, 0, 0, 0, 0, 0, False),
+               Anchor(100, 0, 100, 0, 100, 0, False),
+               Anchor(50, 50, 50, 50, 50, 50, False)]
         cmds = [MoveTo(pts[0].x, pts[0].y)]
         for i in range(1, len(pts)):
             prev, curr = pts[i - 1], pts[i]
@@ -620,15 +632,19 @@ class PenToolPathTest(absltest.TestCase):
                             pts[0].hx_in, pts[0].hy_in, pts[0].x, pts[0].y))
         cmds.append(ClosePath())
         self.assertIsInstance(cmds[-1], ClosePath)
-        self.assertEqual(len(cmds), 5)  # MoveTo + 2 CurveTo + CurveTo(close) + ClosePath
+        self.assertEqual(len(cmds), 5)
 
-    def test_pen_point_default_handles_at_anchor(self):
-        """New PenPoint has all handles at the anchor position."""
-        from tools.pen_tool import PenPoint
-        p = PenPoint(42, 99)
-        self.assertEqual((p.hx_in, p.hy_in), (42, 99))
-        self.assertEqual((p.hx_out, p.hy_out), (42, 99))
-        self.assertFalse(p.smooth)
+    def test_anchor_default_handles_at_anchor(self):
+        """An Anchor from anchor_buffers.push starts with all handles at (x, y)."""
+        from workspace_interpreter import anchor_buffers
+        anchor_buffers.clear("test_anchor_default")
+        anchor_buffers.push("test_anchor_default", 42, 99)
+        a = anchor_buffers.first("test_anchor_default")
+        self.assertIsNotNone(a)
+        self.assertEqual((a.hx_in, a.hy_in), (42, 99))
+        self.assertEqual((a.hx_out, a.hy_out), (42, 99))
+        self.assertFalse(a.smooth)
+        anchor_buffers.clear("test_anchor_default")
 
 
 class WithFillStrokeTest(absltest.TestCase):
