@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 
 import {
   renderElement, renderDocument,
+  setBrushLibraries, lookupBrush,
 } from "../../static/js/engine/renderer.mjs";
 import {
   mkRect, mkCircle, mkEllipse, mkLine, mkPath, mkText,
@@ -154,5 +155,111 @@ describe("number formatting", () => {
   it("float gets up to 6 decimals, trailing zeros trimmed", () => {
     assert.match(renderElement(mkRect({ x: 1.5 })), /x="1\.5"/);
     assert.match(renderElement(mkRect({ x: 0.1 + 0.2 })), /x="0\.3"/);
+  });
+});
+
+describe("brush library registry", () => {
+  it("setBrushLibraries replaces the registry", () => {
+    setBrushLibraries({
+      lib_a: { brushes: [{ slug: "b1", type: "calligraphic", angle: 0, roundness: 100, size: 4 }] },
+    });
+    assert.ok(lookupBrush("lib_a/b1"));
+    setBrushLibraries({});
+    assert.equal(lookupBrush("lib_a/b1"), null);
+  });
+
+  it("lookupBrush handles bad input", () => {
+    setBrushLibraries({});
+    assert.equal(lookupBrush(null), null);
+    assert.equal(lookupBrush(""), null);
+    assert.equal(lookupBrush("noslash"), null);
+    assert.equal(lookupBrush("lib/missing"), null);
+  });
+});
+
+describe("renderer — brushed paths", () => {
+  it("path with stroke_brush emits brushed outline", () => {
+    setBrushLibraries({
+      default_brushes: {
+        brushes: [
+          { slug: "oval_5pt", type: "calligraphic", angle: 0, roundness: 100, size: 4 },
+        ],
+      },
+    });
+    const p = mkPath({
+      d: [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 0 }],
+      stroke_brush: "default_brushes/oval_5pt",
+      stroke: { color: "#ff0000" },
+    });
+    const svg = renderElement(p);
+    // Brushed render emits a single closed path filled with stroke
+    // colour; no plain stroke= attribute (we use fill).
+    assert.match(svg, /^<path /);
+    assert.match(svg, /fill="#ff0000"/);
+    assert.match(svg, /stroke="none"/);
+    assert.match(svg, /jas:stroke-brush="default_brushes\/oval_5pt"/);
+    // Outline path should be closed (Z) and have multiple L commands.
+    assert.match(svg, / Z"/);
+  });
+
+  it("path with stroke_brush but unknown slug falls back to plain", () => {
+    setBrushLibraries({});
+    const p = mkPath({
+      d: [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 0 }],
+      stroke_brush: "no_such_lib/no_such_brush",
+      stroke: { color: "#ff0000", width: 2 },
+    });
+    const svg = renderElement(p);
+    // Falls back to plain path render — no jas:stroke-brush in output,
+    // and the original stroke= attribute is honoured.
+    assert.doesNotMatch(svg, /jas:stroke-brush/);
+    assert.match(svg, /stroke="#ff0000"/);
+    assert.match(svg, /stroke-width="2"/);
+  });
+
+  it("path without stroke_brush uses plain renderer", () => {
+    const p = mkPath({
+      d: [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 0 }],
+      stroke: { color: "#000000", width: 1 },
+    });
+    const svg = renderElement(p);
+    assert.match(svg, /^<path /);
+    assert.doesNotMatch(svg, /jas:stroke-brush/);
+    assert.match(svg, /d="M 0 0 L 10 0"/);
+  });
+
+  it("stroke_brush of unknown brush type falls back to plain path", () => {
+    // Phase 1 only renders Calligraphic; other types should not crash
+    // — they fall back to the plain path render until their renderer
+    // lands.
+    setBrushLibraries({
+      lib: { brushes: [{ slug: "art_brush", type: "art" }] },
+    });
+    const p = mkPath({
+      d: [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 0 }],
+      stroke_brush: "lib/art_brush",
+      stroke: { color: "#00ff00" },
+    });
+    const svg = renderElement(p);
+    assert.match(svg, /^<path /);
+    assert.doesNotMatch(svg, /jas:stroke-brush/);
+    assert.match(svg, /stroke="#00ff00"/);
+  });
+
+  it("degenerate brushed path (single MoveTo) emits empty string", () => {
+    setBrushLibraries({
+      default_brushes: {
+        brushes: [
+          { slug: "oval_5pt", type: "calligraphic", angle: 0, roundness: 100, size: 4 },
+        ],
+      },
+    });
+    const p = mkPath({
+      d: [{ type: "M", x: 5, y: 5 }],
+      stroke_brush: "default_brushes/oval_5pt",
+      stroke: { color: "#ff0000" },
+    });
+    const svg = renderElement(p);
+    assert.equal(svg, "");
   });
 });
