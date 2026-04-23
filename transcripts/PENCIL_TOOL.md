@@ -26,7 +26,7 @@ Bezier spline via the Schneider curve-fit algorithm.
 the fitted curve and the sampled polyline. Smaller values
 produce more segments that track the user's wiggles closer;
 larger values produce fewer, smoother segments. 4.0 matches
-the native Illustrator Pencil default.
+the common default for vector-illustration pencil tools.
 
 Promoting `FIT_ERROR` to a workspace state key or per-call
 dialog argument would let the user tune smoothness. Today it's
@@ -58,15 +58,15 @@ preview. Render type: `buffer_polyline`. Style:
 
 ## Known gaps
 
-- **Alt-to-close** — Illustrator's Pencil closes the path when
-  Alt is held at release. Not wired; the current tool always
-  produces open paths.
-- **Edit-existing-path mode** — Illustrator's Pencil has a
-  modifier that lets the user redraw a section of an existing
-  selected path. Out of scope for the current tool.
-- **Smoothness panel** — Illustrator exposes FIT_ERROR and
-  related knobs in a "Pencil Tool Options" dialog; no equivalent
-  panel exists here yet.
+- **Alt-to-close** — peer tools close the path when Alt is held
+  at release. Not wired; the current tool always produces open
+  paths.
+- **Edit-existing-path mode** — peer tools have a modifier that
+  lets the user redraw a section of an existing selected path.
+  Out of scope for the current tool.
+- **Smoothness panel** — peer tools expose FIT_ERROR and related
+  knobs in a "Pencil Tool Options" dialog; no equivalent panel
+  exists here yet.
 
 ## Related tools
 

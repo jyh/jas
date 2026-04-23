@@ -138,6 +138,26 @@ state:
     default: false
     description: "Active stroke profile is flipped"
 
+  stroke_brush:
+    type: string
+    default: null
+    nullable: true
+    description: >
+      Active stroke brush, encoded as "<library_slug>/<brush_slug>".
+      Null when no brush is applied; non-null causes the brush
+      renderer to take over from the native stroke pipeline. See
+      transcripts/BRUSHES.md §Stroke styling interaction.
+
+  stroke_brush_overrides:
+    type: string
+    default: null
+    nullable: true
+    description: >
+      Per-instance brush parameter overrides as compact JSON.
+      Polymorphic by brush type; partial dict layered over the
+      master library brush at render time. Edited via the
+      Brush Options dialog in instance_edit mode.
+
   # ── Align panel ───────────────────────────────────────────────
   # Mirror state for the Align panel's four persistent fields.
   # See transcripts/ALIGN.md §Panel state.
@@ -221,6 +241,61 @@ state:
       When true, DIVIDE fragments with no fill and no stroke are
       discarded rather than kept as invisible paths. Edited via the
       Boolean Options dialog.
+
+  # ── Brushes panel ─────────────────────────────────────────────
+  # Mirror state for the Brushes panel. See
+  # transcripts/BRUSHES.md §Panel state.
+
+  brushes_selected_library:
+    type: string
+    default: "default_brushes"
+    description: >
+      Library slug owning the current panel selection. Changing
+      libraries clears brushes_selected_brushes.
+
+  brushes_selected_brushes:
+    type: list
+    item_type: string
+    default: []
+    description: >
+      List of brush slugs selected within brushes_selected_library.
+      Slug-keyed (not index-keyed) so library reordering or
+      duplication does not scramble the selection.
+
+  brushes_open_libraries:
+    type: list
+    item_type: object
+    default: [{ id: "default_brushes", collapsed: false }]
+    description: >
+      Libraries currently open as disclosure sections in the panel
+      body, each with its collapsed state. Initialised at startup
+      from preferences.brushes.persistent_libraries; falls back to
+      [{ id: default_brushes, collapsed: false }] when the
+      preference list is empty.
+
+  brushes_view_mode:
+    type: enum
+    values: [thumbnail, list]
+    default: thumbnail
+    description: "Brushes panel tile rendering mode."
+
+  brushes_thumbnail_size:
+    type: enum
+    values: [small, medium, large]
+    default: small
+    description: >
+      Brushes panel thumbnail tile size. Small=48x16, Medium=72x24,
+      Large=96x32. Disabled (radio dim) when view_mode == list.
+
+  brushes_category_filter:
+    type: list
+    item_type: string
+    default: [calligraphic, scatter, art, pattern, bristle]
+    description: >
+      Brush types currently visible in the panel body. Each toggled
+      independently from the panel menu's "Show X Brushes" checkbox
+      group. Empty list renders the body with a "No brushes match
+      current filter" hint.
 
   fill_on_top:
     type: bool
