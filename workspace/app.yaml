@@ -1,4 +1,8 @@
 version: 1
+# Workspace-schema version stamp. Checked by the compiler's validator.
+# Bump the major version for breaking schema changes; minor for additive.
+# See FLASK_PARITY.md §12 and schema/README.md.
+schema_version: "2.0"
 app:
   name: "Jas"
   description: >

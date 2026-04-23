@@ -1,0 +1,75 @@
+# Rectangle tool.
+#
+# Mouse-down starts a rect at the click point; mouse-move stretches it
+# (live preview via overlay); mouse-up commits. Uses `doc.replace_at`
+# on each mousemove frame to update the last-added rect's dimensions
+# in place — undo sees a single rect-creation step, not 60.
+#
+# Validated against schema/tool.schema.json.
+
+id: rect
+cursor: crosshair
+menu_label: "Rectangle Tool"
+shortcut: "M"
+
+state:
+  # States: idle | drawing
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+  start_x: { default: 0 }
+  start_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.rect.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.rect.mode: "'idle'" }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - set: { tool.rect.start_x: "event.x" }
+    - set: { tool.rect.start_y: "event.y" }
+    - set: { tool.rect.mode: "'drawing'" }
+    - "doc.add_element":
+        parent: "[0]"
+        element:
+          type: rect
+          x: "event.x"
+          y: "event.y"
+          width: "0"
+          height: "0"
+          fill: "'#4a90d9'"
+
+  on_mousemove:
+    - if: "tool.rect.mode == 'drawing'"
+      then:
+        - "doc.set_attr":
+            path: "[0, layer_length([0]) - 1]"
+            attr: "x"
+            value: "min(tool.rect.start_x, event.x)"
+        - "doc.set_attr":
+            path: "[0, layer_length([0]) - 1]"
+            attr: "y"
+            value: "min(tool.rect.start_y, event.y)"
+        - "doc.set_attr":
+            path: "[0, layer_length([0]) - 1]"
+            attr: "width"
+            value: "abs(event.x - tool.rect.start_x)"
+        - "doc.set_attr":
+            path: "[0, layer_length([0]) - 1]"
+            attr: "height"
+            value: "abs(event.y - tool.rect.start_y)"
+
+  on_mouseup:
+    - set: { tool.rect.mode: "'idle'" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.rect.mode: "'idle'" }
+
+# Nothing to draw as an overlay — the rectangle itself is being drawn
+# into the document in real-time via doc.set_attr in on_mousemove.

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/tool.schema.json",
+  "title": "Tool",
+  "description": "A tool specification — handlers for mouse/keyboard events, tool-local state, and an optional render overlay. Each tool YAML file in workspace/tools/ must match this schema.",
+  "type": "object",
+  "required": ["id", "handlers"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Tool identifier. Must match the filename stem."
+    },
+    "cursor": {
+      "type": "string",
+      "description": "CSS cursor name or a custom cursor defined in theme."
+    },
+    "menu_label": {
+      "type": "string",
+      "description": "Human-readable label shown in tool-switcher menus."
+    },
+    "shortcut": {
+      "type": "string",
+      "description": "Keyboard shortcut that activates this tool (single char or chord)."
+    },
+    "platform": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["web", "native", "macos", "linux", "windows"] },
+      "description": "Platform filter. Omit for all platforms."
+    },
+    "state": {
+      "type": "object",
+      "description": "Tool-local state slots. Namespaced as $tool.<id>.* in expressions.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["default"],
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "description": "Default value — any JSON scalar or object."
+          },
+          "enum": {
+            "type": "array",
+            "description": "Optional enumeration of valid values. Validator checks all writes against this list if specified."
+          }
+        }
+      }
+    },
+    "handlers": {
+      "type": "object",
+      "description": "Event handlers. Each key is an event name; value is an effect list.",
+      "additionalProperties": false,
+      "properties": {
+        "on_enter": { "$ref": "#/$defs/effectList" },
+        "on_leave": { "$ref": "#/$defs/effectList" },
+        "on_mousedown": { "$ref": "#/$defs/effectList" },
+        "on_mousemove": { "$ref": "#/$defs/effectList" },
+        "on_mouseup": { "$ref": "#/$defs/effectList" },
+        "on_keydown": { "$ref": "#/$defs/effectList" },
+        "on_keyup": { "$ref": "#/$defs/effectList" },
+        "on_wheel": { "$ref": "#/$defs/effectList" },
+        "on_dblclick": { "$ref": "#/$defs/effectList" },
+        "on_contextmenu": { "$ref": "#/$defs/effectList" }
+      }
+    },
+    "overlay": {
+      "type": "object",
+      "description": "Tool overlay drawn into the canvas overlay layer each frame the `if:` guard is truthy.",
+      "required": ["render"],
+      "additionalProperties": false,
+      "properties": {
+        "if": {
+          "type": "string",
+          "description": "Expression evaluated each frame; overlay renders when truthy."
+        },
+        "render": {
+          "type": "object",
+          "description": "Render spec — element type + attributes. Any expression-valued field is evaluated per frame."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "effectList": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}
