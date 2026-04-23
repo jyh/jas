@@ -125,7 +125,208 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // ── Buffer effects (Phase 3) ─────────────────────────────────
+
+    // buffer.push: { buffer, x, y } — append to named point buffer.
+    effects["buffer.push"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        pointBuffersPush(name, x, y)
+        return nil
+    }
+
+    // buffer.clear: { buffer }
+    effects["buffer.clear"] = { spec, ctx, _ in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        pointBuffersClear(name)
+        return nil
+    }
+
+    // anchor.push: { buffer, x, y } — append a corner anchor.
+    effects["anchor.push"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        anchorBuffersPush(name, x, y)
+        return nil
+    }
+
+    // anchor.set_last_out: { buffer, hx, hy } — convert last anchor
+    // into smooth, mirroring the in-handle.
+    effects["anchor.set_last_out"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        let hx = evalNumber(args["hx"], store: store, ctx: ctx)
+        let hy = evalNumber(args["hy"], store: store, ctx: ctx)
+        anchorBuffersSetLastOutHandle(name, hx, hy)
+        return nil
+    }
+
+    // anchor.pop: { buffer } — drop last anchor.
+    effects["anchor.pop"] = { spec, _, _ in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        anchorBuffersPop(name)
+        return nil
+    }
+
+    // anchor.clear: { buffer }
+    effects["anchor.clear"] = { spec, _, _ in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        anchorBuffersClear(name)
+        return nil
+    }
+
+    // doc.select_polygon_from_buffer: { buffer, additive }
+    // Uses the named point buffer as a selection polygon.
+    effects["doc.select_polygon_from_buffer"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        let additive = evalBool(args["additive"], store: store, ctx: ctx)
+        let points = pointBuffersPoints(name)
+        guard points.count >= 3 else { return nil }
+        Controller(model: model).selectPolygon(polygon: points, extend: additive)
+        return nil
+    }
+
+    // doc.add_path_from_buffer: { buffer, fit_error? }
+    // Runs fitCurve on the named buffer and appends a cubic-Bezier
+    // Path to the document. Used by Pencil.
+    effects["doc.add_path_from_buffer"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        let fitError = evalNumberWithDefault(args["fit_error"],
+                                             default: 4.0,
+                                             store: store, ctx: ctx)
+        let points = pointBuffersPoints(name)
+        guard points.count >= 2 else { return nil }
+        let segments = fitCurve(points: points, error: fitError)
+        guard !segments.isEmpty else { return nil }
+        // FitSegment: p1 = start, c1/c2 = control handles, p2 = end.
+        var cmds: [PathCommand] = []
+        cmds.append(.moveTo(segments[0].p1x, segments[0].p1y))
+        for seg in segments {
+            cmds.append(.curveTo(
+                x1: seg.c1x, y1: seg.c1y,
+                x2: seg.c2x, y2: seg.c2y,
+                x: seg.p2x, y: seg.p2y
+            ))
+        }
+        let pathElem = makePathFromCommands(
+            cmds, model: model, spec: args,
+            store: store, ctx: ctx)
+        Controller(model: model).addElement(.path(pathElem))
+        return nil
+    }
+
+    // doc.add_path_from_anchor_buffer: { buffer, closed }
+    // Walks the anchor buffer emitting MoveTo + CurveTo per adjacent
+    // pair; appends a closing CurveTo + ClosePath when closed=true.
+    effects["doc.add_path_from_anchor_buffer"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String else { return nil }
+        let closed = evalBool(args["closed"], store: store, ctx: ctx)
+        let anchors = anchorBuffersAnchors(name)
+        guard anchors.count >= 2 else { return nil }
+        var cmds: [PathCommand] = [.moveTo(anchors[0].x, anchors[0].y)]
+        for i in 1..<anchors.count {
+            let prev = anchors[i - 1]
+            let curr = anchors[i]
+            cmds.append(.curveTo(
+                x1: prev.hxOut, y1: prev.hyOut,
+                x2: curr.hxIn, y2: curr.hyIn,
+                x: curr.x, y: curr.y
+            ))
+        }
+        if closed {
+            let last = anchors.last!
+            let first = anchors[0]
+            cmds.append(.curveTo(
+                x1: last.hxOut, y1: last.hyOut,
+                x2: first.hxIn, y2: first.hyIn,
+                x: first.x, y: first.y
+            ))
+            cmds.append(.closePath)
+        }
+        let pathElem = makePathFromCommands(
+            cmds, model: model, spec: args,
+            store: store, ctx: ctx)
+        Controller(model: model).addElement(.path(pathElem))
+        return nil
+    }
+
     return effects
+}
+
+/// Build a Path element from a command list, applying model defaults
+/// for fill/stroke when the spec omits them. Shared by
+/// doc.add_path_from_buffer and doc.add_path_from_anchor_buffer.
+private func makePathFromCommands(
+    _ cmds: [PathCommand],
+    model: Model,
+    spec: [String: Any],
+    store: StateStore,
+    ctx: [String: Any]
+) -> Path {
+    // Resolve fill: absent → model default, null → strip, explicit → parse.
+    let fill: Fill? = {
+        if !spec.keys.contains("fill") { return model.defaultFill }
+        let v = evalExprAsValue(spec["fill"], store: store, ctx: ctx)
+        switch v {
+        case .null: return nil
+        case .color(let c): return Fill(color: Color.fromHex(c) ?? .black)
+        case .string(let s):
+            if let c = Color.fromHex(s) { return Fill(color: c) }
+            return model.defaultFill
+        default: return model.defaultFill
+        }
+    }()
+    let stroke: Stroke? = {
+        if !spec.keys.contains("stroke") { return model.defaultStroke }
+        let v = evalExprAsValue(spec["stroke"], store: store, ctx: ctx)
+        switch v {
+        case .null: return nil
+        case .color(let c):
+            return Color.fromHex(c).map { Stroke(color: $0, width: 1.0) }
+        case .string(let s):
+            if let c = Color.fromHex(s) {
+                return Stroke(color: c, width: 1.0)
+            }
+            return model.defaultStroke
+        default: return model.defaultStroke
+        }
+    }()
+    return Path(d: cmds, fill: fill, stroke: stroke)
+}
+
+/// Evaluate a Value-returning arg, handling nil / number-literal /
+/// string-expression cases.
+private func evalExprAsValue(
+    _ arg: Any?, store: StateStore, ctx: [String: Any]
+) -> Value {
+    guard let arg = arg else { return .null }
+    if let s = arg as? String {
+        let evalCtx = store.evalContext(extra: ctx)
+        return evaluate(s, context: evalCtx)
+    }
+    return Value.fromJson(arg)
+}
+
+/// Evaluate a number-returning arg with a default when the spec omits
+/// the field (nil — NOT the same as the field being present with a
+/// 0-valued expression).
+private func evalNumberWithDefault(
+    _ arg: Any?, default defVal: Double,
+    store: StateStore, ctx: [String: Any]
+) -> Double {
+    guard arg != nil else { return defVal }
+    let v = evalNumber(arg, store: store, ctx: ctx)
+    return v == 0 ? defVal : v
 }
 
 // MARK: - Path validity
