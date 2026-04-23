@@ -32,3 +32,8 @@
  (name align_apply_test)
  (modules align_apply_test)
  (libraries jas alcotest))
+
+(test
+ (name doc_primitives_test)
+ (modules doc_primitives_test)
+ (libraries jas alcotest))
