@@ -200,29 +200,34 @@ let () =
 
     "selection tool", [
       Alcotest.test_case "selection tool: marquee select" `Quick (fun () ->
-        let tool = new Jas.Selection_tool.selection_tool in
+        (* YAML-driven Selection tracks marquee_end via on_move, so
+           callers that want a marquee must emit an intermediate move
+           before release — matches the runtime sequence. *)
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Selection in
         let rect = make_rect 50.0 50.0 20.0 20.0 in
         let layer = make_layer ~name:"L" [|rect|] in
         let doc = Jas.Document.make_document [|layer|] in
         let model = Jas.Model.create ~document:doc () in
         let (ctx, _model, _ctrl) = make_ctx ~model () in
         tool#on_press ctx 45.0 45.0 ~shift:false ~alt:false;
+        tool#on_move ctx 75.0 75.0 ~shift:false ~dragging:true;
         tool#on_release ctx 75.0 75.0 ~shift:false ~alt:false;
         assert (not (Jas.Document.PathMap.is_empty model#document.Jas.Document.selection)));
 
       Alcotest.test_case "selection tool: marquee miss" `Quick (fun () ->
-        let tool = new Jas.Selection_tool.selection_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Selection in
         let rect = make_rect 50.0 50.0 20.0 20.0 in
         let layer = make_layer ~name:"L" [|rect|] in
         let doc = Jas.Document.make_document [|layer|] in
         let model = Jas.Model.create ~document:doc () in
         let (ctx, _model, _ctrl) = make_ctx ~model () in
         tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
+        tool#on_move ctx 10.0 10.0 ~shift:false ~dragging:true;
         tool#on_release ctx 10.0 10.0 ~shift:false ~alt:false;
         assert (Jas.Document.PathMap.is_empty model#document.Jas.Document.selection));
 
       Alcotest.test_case "selection tool: move selection" `Quick (fun () ->
-        let tool = new Jas.Selection_tool.selection_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Selection in
         let rect = make_rect 50.0 50.0 20.0 20.0 in
         let layer = make_layer ~name:"L" [|rect|] in
         let doc = Jas.Document.make_document [|layer|] in
@@ -514,7 +519,7 @@ let () =
 
     "pencil tool", [
       Alcotest.test_case "pencil tool: freehand draw creates path" `Quick (fun () ->
-        let tool = new Jas.Pencil_tool.pencil_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
         for i = 1 to 20 do
@@ -539,7 +544,7 @@ let () =
         | _ -> assert false);
 
       Alcotest.test_case "pencil tool: click without drag creates degenerate path" `Quick (fun () ->
-        let tool = new Jas.Pencil_tool.pencil_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
         tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -547,7 +552,7 @@ let () =
         assert (Array.length children = 1));
 
       Alcotest.test_case "pencil tool: path has stroke" `Quick (fun () ->
-        let tool = new Jas.Pencil_tool.pencil_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
         tool#on_move ctx 50.0 50.0 ~shift:false ~dragging:true;
@@ -561,21 +566,21 @@ let () =
         | _ -> assert false);
 
       Alcotest.test_case "pencil tool: release without press is noop" `Quick (fun () ->
-        let tool = new Jas.Pencil_tool.pencil_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
         let children = layer_children model in
         assert (Array.length children = 0));
 
       Alcotest.test_case "pencil tool: move without press is noop" `Quick (fun () ->
-        let tool = new Jas.Pencil_tool.pencil_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
         let children = layer_children model in
         assert (Array.length children = 0));
 
       Alcotest.test_case "pencil tool: path starts at press point" `Quick (fun () ->
-        let tool = new Jas.Pencil_tool.pencil_tool in
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 15.0 25.0 ~shift:false ~alt:false;
         tool#on_move ctx 50.0 50.0 ~shift:false ~dragging:true;
