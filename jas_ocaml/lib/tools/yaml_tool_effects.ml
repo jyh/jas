@@ -791,6 +791,255 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* ── Probe / commit anchor + partial selection ─────────── *)
+
+  let encode_path (path : int list) : Yojson.Safe.t =
+    `Assoc [("__path__", `List (List.map (fun i -> `Int i) path))]
+  in
+
+  let decode_path (v : Yojson.Safe.t) : int list option =
+    match v with
+    | `Assoc pairs ->
+      (match List.assoc_opt "__path__" pairs with
+       | Some (`List arr) ->
+         let out = List.filter_map (function
+           | `Int i -> Some i | _ -> None) arr in
+         if List.length out = List.length arr then Some out else None
+       | _ -> None)
+    | _ -> None
+  in
+
+  let find_path_handle_near doc x y radius
+    : (int list * int * string) option =
+    let result = ref None in
+    let check (d : Element.path_command list) path =
+      (* Iterate anchors (0..n-1) and query handle positions. *)
+      let rec walk ai =
+        match Path_ops.cmd_start_point d 0 with
+        | _ ->
+          let (h_in, h_out) = Element.path_handle_positions d ai in
+          (match h_in with
+           | Some (hx, hy) ->
+             let dx = x -. hx and dy = y -. hy in
+             if Float.sqrt (dx *. dx +. dy *. dy) < radius then begin
+               result := Some (path, ai, "in");
+               raise Exit
+             end
+           | None -> ());
+          (match h_out with
+           | Some (hx, hy) ->
+             let dx = x -. hx and dy = y -. hy in
+             if Float.sqrt (dx *. dx +. dy *. dy) < radius then begin
+               result := Some (path, ai, "out");
+               raise Exit
+             end
+           | None -> ());
+          let elem = Element.make_path d in
+          let total = Element.control_point_count elem in
+          if ai + 1 < total then walk (ai + 1)
+      in
+      try walk 0 with Exit -> ()
+    in
+    let layer_count = Array.length doc.Document.layers in
+    (try
+      for li = 0 to layer_count - 1 do
+        let children = match doc.layers.(li) with
+          | Element.Layer { children; _ } -> children | _ -> [||]
+        in
+        let cn = Array.length children in
+        for ci = 0 to cn - 1 do
+          match children.(ci) with
+          | Element.Path { d; _ } when not (Element.is_locked children.(ci)) ->
+            check d [li; ci];
+            (match !result with Some _ -> raise Exit | None -> ())
+          | Element.Group { children = gc; _ }
+            when not (Element.is_locked children.(ci)) ->
+            Array.iteri (fun gi g ->
+              match g with
+              | Element.Path { d; _ } when not (Element.is_locked g) ->
+                check d [li; ci; gi];
+                (match !result with Some _ -> raise Exit | None -> ())
+              | _ -> ()
+            ) gc
+          | _ -> ()
+        done
+      done
+    with Exit -> ());
+    !result
+  in
+
+  let find_path_anchor_by_cp doc x y radius : (int list * int) option =
+    let result = ref None in
+    let check elem path =
+      let cps = Element.control_points elem in
+      List.iteri (fun i (px, py) ->
+        match !result with
+        | Some _ -> ()
+        | None ->
+          let dx = x -. px and dy = y -. py in
+          if Float.sqrt (dx *. dx +. dy *. dy) < radius then
+            result := Some (path, i)
+      ) cps
+    in
+    let layer_count = Array.length doc.Document.layers in
+    (try
+      for li = 0 to layer_count - 1 do
+        let children = match doc.layers.(li) with
+          | Element.Layer { children; _ } -> children | _ -> [||]
+        in
+        let cn = Array.length children in
+        for ci = 0 to cn - 1 do
+          let child = children.(ci) in
+          (match child with
+           | Element.Path _ when not (Element.is_locked child) ->
+             check child [li; ci];
+             (match !result with Some _ -> raise Exit | None -> ())
+           | Element.Group { children = gc; _ }
+             when not (Element.is_locked child) ->
+             Array.iteri (fun gi g ->
+               match g with
+               | Element.Path _ when not (Element.is_locked g) ->
+                 check g [li; ci; gi];
+                 (match !result with Some _ -> raise Exit | None -> ())
+               | _ -> ()
+             ) gc
+           | _ -> ())
+        done
+      done
+    with Exit -> ());
+    !result
+  in
+
+  let doc_path_probe_anchor_hit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let raw_r = eval_number (lookup "hit_radius") store ctx in
+       let radius = if raw_r = 0.0 then 8.0 else raw_r in
+       let doc = ctrl#document in
+       (match find_path_handle_near doc x y radius with
+        | Some (path, ai, handle_type) ->
+          State_store.set_tool store "anchor_point" "mode"
+            (`String "pressed_handle");
+          State_store.set_tool store "anchor_point" "handle_type"
+            (`String handle_type);
+          State_store.set_tool store "anchor_point" "hit_anchor_idx"
+            (`Int ai);
+          State_store.set_tool store "anchor_point" "hit_path"
+            (encode_path path)
+        | None ->
+          (match find_path_anchor_by_cp doc x y radius with
+           | Some (path, ai) ->
+             let elem = Document.get_element doc path in
+             let mode = match elem with
+               | Element.Path { d; _ } when Element.is_smooth_point d ai ->
+                 "pressed_smooth"
+               | _ -> "pressed_corner"
+             in
+             State_store.set_tool store "anchor_point" "mode"
+               (`String mode);
+             State_store.set_tool store "anchor_point" "hit_anchor_idx"
+               (`Int ai);
+             State_store.set_tool store "anchor_point" "hit_path"
+               (encode_path path)
+           | None ->
+             State_store.set_tool store "anchor_point" "mode"
+               (`String "idle")))
+     | _ -> ());
+    `Null
+  in
+
+  let doc_path_commit_anchor_edit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let tx = eval_number (lookup "target_x") store ctx in
+       let ty = eval_number (lookup "target_y") store ctx in
+       let ox = eval_number (lookup "origin_x") store ctx in
+       let oy = eval_number (lookup "origin_y") store ctx in
+       let mode = match State_store.get_tool store "anchor_point" "mode" with
+         | `String s -> s | _ -> "idle"
+       in
+       if mode <> "idle" then begin
+         match decode_path (State_store.get_tool store "anchor_point" "hit_path") with
+         | None -> ()
+         | Some path ->
+           let ai = match State_store.get_tool store "anchor_point" "hit_anchor_idx" with
+             | `Int i -> i | _ -> 0
+           in
+           let elem = Document.get_element ctrl#document path in
+           (match elem with
+            | Element.Path { d; _ } ->
+              let apply new_cmds =
+                let new_elem = path_with_commands elem new_cmds in
+                ctrl#set_document
+                  (Document.replace_element ctrl#document path new_elem)
+              in
+              (match mode with
+               | "pressed_smooth" ->
+                 ctrl#model#snapshot;
+                 apply (Element.convert_smooth_to_corner d ai)
+               | "pressed_corner" ->
+                 let moved = Float.hypot (tx -. ox) (ty -. oy) in
+                 if moved > 1.0 then begin
+                   ctrl#model#snapshot;
+                   apply (Element.convert_corner_to_smooth d ai tx ty)
+                 end
+               | "pressed_handle" ->
+                 let handle_type = match
+                   State_store.get_tool store "anchor_point" "handle_type"
+                 with `String s -> s | _ -> "" in
+                 let dx = tx -. ox and dy = ty -. oy in
+                 if Float.abs dx > 0.5 || Float.abs dy > 0.5 then begin
+                   ctrl#model#snapshot;
+                   apply (Element.move_path_handle_independent
+                            d ai handle_type dx dy)
+                 end
+               | _ -> ())
+            | _ -> ())
+       end
+     | _ -> ());
+    `Null
+  in
+
+  let doc_move_path_handle spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let dx = eval_number (lookup "dx") store ctx in
+       let dy = eval_number (lookup "dy") store ctx in
+       (match decode_path
+                (State_store.get_tool store "partial_selection" "handle_path")
+        with
+        | None -> ()
+        | Some path ->
+          let ai = match State_store.get_tool store "partial_selection"
+                           "handle_anchor_idx" with
+            | `Int i -> i | _ -> 0 in
+          let ht = match State_store.get_tool store "partial_selection"
+                           "handle_type" with
+            | `String s -> s | _ -> "" in
+          ctrl#move_path_handle path ai ht dx dy)
+     | _ -> ());
+    `Null
+  in
+
+  let doc_path_commit_partial_marquee spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let (rx, ry, rw, rh, additive) = normalize_rect_args args store ctx in
+       if rw > 1.0 || rh > 1.0 then begin
+         ctrl#model#snapshot;
+         ctrl#partial_select_rect ~extend:additive rx ry rw rh
+       end
+       else if not additive then
+         ctrl#set_selection Document.PathMap.empty
+     | _ -> ());
+    `Null
+  in
+
   let doc_add_path_from_anchor_buffer spec ctx store =
     (match spec with
      | `Assoc args ->
@@ -852,4 +1101,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      doc_path_insert_anchor_on_segment_near);
     ("doc.path.erase_at_rect", doc_path_erase_at_rect);
     ("doc.path.smooth_at_cursor", doc_path_smooth_at_cursor);
+    ("doc.path.probe_anchor_hit", doc_path_probe_anchor_hit);
+    ("doc.path.commit_anchor_edit", doc_path_commit_anchor_edit);
+    ("doc.move_path_handle", doc_move_path_handle);
+    ("doc.path.commit_partial_marquee", doc_path_commit_partial_marquee);
   ]
