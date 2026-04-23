@@ -3,7 +3,6 @@ pub mod text_edit;
 pub mod text_measure;
 pub mod yaml_tool;
 pub mod partial_selection_tool;
-pub mod pen_tool;
 pub mod add_anchor_point_tool;
 pub mod delete_anchor_point_tool;
 pub mod anchor_point_tool;

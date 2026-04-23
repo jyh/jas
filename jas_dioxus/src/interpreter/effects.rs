@@ -432,6 +432,56 @@ fn run_one(
         return;
     }
 
+    // anchor.push: { buffer: <name>, x: <expr>, y: <expr> }
+    //   Append a corner-kind anchor at (x, y) with both handles
+    //   coincident to the anchor position. Used by Pen's click-to-place.
+    if let Some(serde_json::Value::Object(ap)) = effect.get("anchor.push") {
+        let name = ap.get("buffer").and_then(|v| v.as_str()).unwrap_or("");
+        if !name.is_empty() {
+            let x = eval_number(ap.get("x"), store, ctx);
+            let y = eval_number(ap.get("y"), store, ctx);
+            super::anchor_buffers::push(name, x, y);
+        }
+        return;
+    }
+
+    // anchor.set_last_out: { buffer: <name>, hx: <expr>, hy: <expr> }
+    //   Write the out-handle of the most-recently-pushed anchor and
+    //   mirror the in-handle around the anchor. Flips the anchor to
+    //   smooth=true. Used by Pen's click-drag.
+    if let Some(serde_json::Value::Object(ah)) = effect.get("anchor.set_last_out") {
+        let name = ah.get("buffer").and_then(|v| v.as_str()).unwrap_or("");
+        if !name.is_empty() {
+            let hx = eval_number(ah.get("hx"), store, ctx);
+            let hy = eval_number(ah.get("hy"), store, ctx);
+            super::anchor_buffers::set_last_out_handle(name, hx, hy);
+        }
+        return;
+    }
+
+    // anchor.pop: { buffer: <name> }
+    //   Drop the last anchor. Used on double-click to remove the
+    //   extra anchor the second mousedown pushed before the
+    //   double-click dispatched.
+    if let Some(serde_json::Value::Object(ap)) = effect.get("anchor.pop") {
+        if let Some(name) = ap.get("buffer").and_then(|v| v.as_str()) {
+            if !name.is_empty() {
+                super::anchor_buffers::pop(name);
+            }
+        }
+        return;
+    }
+
+    // anchor.clear: { buffer: <name> }
+    if let Some(serde_json::Value::Object(ac)) = effect.get("anchor.clear") {
+        if let Some(name) = ac.get("buffer").and_then(|v| v.as_str()) {
+            if !name.is_empty() {
+                super::anchor_buffers::clear(name);
+            }
+        }
+        return;
+    }
+
     // log: message (debug only)
     if effect.contains_key("log") {
         return;
@@ -572,6 +622,76 @@ fn run_doc_effect(
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
                 Controller::select_rect(model, rx, ry, rw, rh, additive);
+            }
+        }
+        "doc.add_path_from_anchor_buffer" => {
+            // Converts a named anchor buffer into a Bezier Path
+            // element and appends it to the document. Each pair of
+            // consecutive anchors becomes one cubic-Bezier CurveTo
+            // using the prev-out and curr-in handles. When `closed`
+            // is true, a final CurveTo back to the first anchor plus
+            // a ClosePath are emitted.
+            //
+            // Mirrors PenTool::finish. The near-first-point
+            // auto-close check the native tool did happens in YAML
+            // (on_mousedown-near-first-anchor → commit closed); this
+            // effect just honors the `closed` flag the handler sets.
+            if let serde_json::Value::Object(args) = spec {
+                let name = args
+                    .get("buffer")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if name.is_empty() {
+                    return;
+                }
+                let closed = eval_bool(args.get("closed"), store, ctx);
+                let default_fill = model.default_fill;
+                let default_stroke = model.default_stroke;
+                let fill = resolve_fill_field(
+                    args.get("fill"), store, ctx, default_fill);
+                let stroke = resolve_stroke_field(
+                    args.get("stroke"), store, ctx, default_stroke);
+
+                let anchors: Vec<super::anchor_buffers::Anchor> =
+                    super::anchor_buffers::with_anchors(
+                        name, |a| a.to_vec());
+                if anchors.len() < 2 {
+                    return;
+                }
+                let mut cmds: Vec<PathCommand> = Vec::new();
+                cmds.push(PathCommand::MoveTo {
+                    x: anchors[0].x,
+                    y: anchors[0].y,
+                });
+                for i in 1..anchors.len() {
+                    let prev = &anchors[i - 1];
+                    let curr = &anchors[i];
+                    cmds.push(PathCommand::CurveTo {
+                        x1: prev.hx_out, y1: prev.hy_out,
+                        x2: curr.hx_in,  y2: curr.hy_in,
+                        x: curr.x, y: curr.y,
+                    });
+                }
+                if closed {
+                    let last = &anchors[anchors.len() - 1];
+                    let p0 = &anchors[0];
+                    cmds.push(PathCommand::CurveTo {
+                        x1: last.hx_out, y1: last.hy_out,
+                        x2: p0.hx_in,    y2: p0.hy_in,
+                        x: p0.x, y: p0.y,
+                    });
+                    cmds.push(PathCommand::ClosePath);
+                }
+                let elem = Element::Path(PathElem {
+                    d: cmds,
+                    fill,
+                    stroke,
+                    width_points: Vec::new(),
+                    common: CommonProps::default(),
+                    fill_gradient: None,
+                    stroke_gradient: None,
+                });
+                Controller::add_element(model, elem);
             }
         }
         "doc.add_path_from_buffer" => {

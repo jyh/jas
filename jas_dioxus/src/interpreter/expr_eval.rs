@@ -972,6 +972,55 @@ fn eval_func(
             Value::Number(super::point_buffers::length(&name) as f64)
         }
 
+        // anchor_buffer_length("<name>") -> number
+        // Count of anchors in the named buffer.
+        "anchor_buffer_length" => {
+            if args.len() != 1 {
+                return Value::Number(0.0);
+            }
+            let name_val = eval_inner(&args[0], ctx, scope, store_cb);
+            let name = match name_val {
+                Value::Str(s) => s,
+                _ => return Value::Number(0.0),
+            };
+            Value::Number(super::anchor_buffers::length(&name) as f64)
+        }
+
+        // anchor_buffer_close_hit("<name>", x, y, radius) -> bool
+        // True when the buffer has >= 2 anchors and (x, y) lies
+        // within `radius` pixels of the first anchor. Used by Pen's
+        // "click near start to close the path" gesture.
+        "anchor_buffer_close_hit" => {
+            if args.len() != 4 {
+                return Value::Bool(false);
+            }
+            let name = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Str(s) => s,
+                _ => return Value::Bool(false),
+            };
+            let x = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Bool(false),
+            };
+            let y = match eval_inner(&args[2], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Bool(false),
+            };
+            let r = match eval_inner(&args[3], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Bool(false),
+            };
+            if super::anchor_buffers::length(&name) < 2 {
+                return Value::Bool(false);
+            }
+            let Some(first) = super::anchor_buffers::first(&name) else {
+                return Value::Bool(false);
+            };
+            let dx = x - first.x;
+            let dy = y - first.y;
+            Value::Bool(dx.hypot(dy) <= r)
+        }
+
         // Unknown function
         _ => Value::Null,
     }

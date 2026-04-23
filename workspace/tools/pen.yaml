@@ -1,0 +1,135 @@
+# Pen tool — Bezier path construction.
+#
+# State machine:
+#   idle     → no anchors placed; mousedown pushes the first
+#   placing  → anchors exist, waiting for the next click
+#   dragging → currently dragging the most-recent anchor's out-handle
+#
+# Interactions:
+#   click            places a corner anchor at the cursor
+#   click+drag       places a smooth anchor; the drag sets the out-handle
+#                    and mirrors the in-handle, giving a tangent-continuous
+#                    curve through the anchor
+#   click near first after the first two anchors, clicking within
+#                    close_radius=8px of the starting anchor closes the path
+#   Escape / Enter   commits the in-progress path (open) via on_keydown
+#   double-click     commits (pops the extra anchor the second mousedown
+#                    already placed, then finishes open)
+#   tool deactivate  commits any in-progress path (on_leave handler)
+#
+# Anchor storage: the thread-local "pen" anchor buffer
+# (interpreter/anchor_buffers.rs) — richer than the point buffer used
+# by Pencil/Lasso because each entry carries x, y, incoming handle,
+# outgoing handle, and a smooth/corner flag.
+#
+# Validated against schema/tool.schema.json.
+
+id: pen
+cursor: crosshair
+menu_label: "Pen Tool"
+shortcut: "P"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, placing, dragging]
+  mouse_x: { default: 0 }
+  mouse_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.pen.mode: "'idle'" }
+    - "anchor.clear": { buffer: "pen" }
+
+  on_leave:
+    # Commit any in-progress path before switching tools. Matches
+    # native PenTool::deactivate.
+    - if: "anchor_buffer_length('pen') >= 2"
+      then:
+        - "doc.snapshot": {}
+        - "doc.add_path_from_anchor_buffer":
+            buffer: "pen"
+            closed: "false"
+    - set: { tool.pen.mode: "'idle'" }
+    - "anchor.clear": { buffer: "pen" }
+
+  on_mousedown:
+    # Close-path gesture: if we already have 2+ anchors and this
+    # click lands near the first one, finish the path closed instead
+    # of adding another anchor.
+    - if: "anchor_buffer_close_hit('pen', event.x, event.y, 8)"
+      then:
+        - "doc.snapshot": {}
+        - "doc.add_path_from_anchor_buffer":
+            buffer: "pen"
+            closed: "true"
+        - "anchor.clear": { buffer: "pen" }
+        - set: { tool.pen.mode: "'idle'" }
+      else:
+        # Normal anchor placement. Snapshot once per drag-start —
+        # subsequent presses reuse the same undoable checkpoint
+        # because anchor state lives outside the document.
+        - if: "anchor_buffer_length('pen') == 0"
+          then:
+            - "doc.snapshot": {}
+        - "anchor.push":
+            buffer: "pen"
+            x: "event.x"
+            y: "event.y"
+        - set: { tool.pen.mode: "'dragging'" }
+
+  on_mousemove:
+    - set: { tool.pen.mouse_x: "event.x" }
+    - set: { tool.pen.mouse_y: "event.y" }
+    - if: "tool.pen.mode == 'dragging'"
+      then:
+        # Drag the last anchor's out-handle (mirrors in-handle via
+        # set_last_out_handle in anchor_buffers.rs).
+        - "anchor.set_last_out":
+            buffer: "pen"
+            hx: "event.x"
+            hy: "event.y"
+
+  on_mouseup:
+    # End of click-drag; remain in "placing" so the next click adds
+    # another anchor.
+    - if: "tool.pen.mode == 'dragging'"
+      then:
+        - set: { tool.pen.mode: "'placing'" }
+
+  on_dblclick:
+    # Pop the extra anchor the second mousedown already placed,
+    # then commit open. Matches native PenTool::on_double_click.
+    - "anchor.pop": { buffer: "pen" }
+    - if: "anchor_buffer_length('pen') >= 2"
+      then:
+        - "doc.add_path_from_anchor_buffer":
+            buffer: "pen"
+            closed: "false"
+    - "anchor.clear": { buffer: "pen" }
+    - set: { tool.pen.mode: "'idle'" }
+
+  on_keydown:
+    # Escape or Enter commit the current path (open).
+    - if: "event.key == 'Escape' or event.key == 'Enter'"
+      then:
+        - if: "anchor_buffer_length('pen') >= 2"
+          then:
+            - "doc.add_path_from_anchor_buffer":
+                buffer: "pen"
+                closed: "false"
+        - "anchor.clear": { buffer: "pen" }
+        - set: { tool.pen.mode: "'idle'" }
+
+overlay:
+  if: "anchor_buffer_length('pen') > 0"
+  render:
+    type: pen_overlay
+    buffer: "pen"
+    mouse_x: "tool.pen.mouse_x"
+    mouse_y: "tool.pen.mouse_y"
+    close_radius: "8"
+    # Preview curve from last anchor to cursor only renders when
+    # placing (not actively dragging a handle).
+    placing: "tool.pen.mode == 'placing'"
