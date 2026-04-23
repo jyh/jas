@@ -1,0 +1,56 @@
+# Path Eraser tool.
+#
+# Press-and-drag to sweep a rectangular eraser across paths. Each
+# path that intersects the eraser is split into sub-paths that hug
+# the eraser boundary (curves preserved via De Casteljau);
+# whole-path erase when the bounds are smaller than the eraser.
+#
+# The eraser kernel (split_path_at_eraser etc.) lives in
+# geometry/path_ops.rs — L2 per NATIVE_BOUNDARY.md §5.
+# doc.path.erase_at_rect wraps the hit-test + split + document
+# update.
+#
+# Validated against schema/tool.schema.json.
+
+id: path_eraser
+cursor: crosshair
+menu_label: "Path Eraser Tool"
+shortcut: "E"
+
+state:
+  erasing: { default: false }
+  last_x: { default: 0 }
+  last_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.path_eraser.erasing: false }
+
+  on_leave:
+    - set: { tool.path_eraser.erasing: false }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - "doc.path.erase_at_rect":
+        last_x: "event.x"
+        last_y: "event.y"
+        x: "event.x"
+        y: "event.y"
+    - set: { tool.path_eraser.erasing: true }
+    - set: { tool.path_eraser.last_x: "event.x" }
+    - set: { tool.path_eraser.last_y: "event.y" }
+
+  on_mousemove:
+    - if: "tool.path_eraser.erasing"
+      then:
+        - "doc.path.erase_at_rect":
+            last_x: "tool.path_eraser.last_x"
+            last_y: "tool.path_eraser.last_y"
+            x: "event.x"
+            y: "event.y"
+    - set: { tool.path_eraser.last_x: "event.x" }
+    - set: { tool.path_eraser.last_y: "event.y" }
+
+  on_mouseup:
+    - set: { tool.path_eraser.erasing: false }

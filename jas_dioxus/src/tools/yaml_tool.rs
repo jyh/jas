@@ -1739,6 +1739,219 @@ mod tests {
         }
     }
 
+    // ── Path Eraser tool behavioral tests ─────────────────────────
+
+    fn path_eraser_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("path_eraser")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_long_line_path() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::{
+            LayerElem, PathCommand, PathElem, Color, Stroke,
+        };
+        let pe = PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 0.0 },
+            ],
+            fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn path_eraser_parity_splits_open_path() {
+        let Some(mut tool) = path_eraser_yaml_tool() else { return };
+        let mut model = model_with_long_line_path();
+        // Press in the middle of the line at (50, 0) — should split
+        // the line into two sub-paths.
+        tool.on_press(&mut model, 50.0, 0.0, false, false);
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            2,
+            "single line should split into 2 sub-paths",
+        );
+        assert!(model.can_undo());
+    }
+
+    #[test]
+    fn path_eraser_parity_miss_does_nothing() {
+        let Some(mut tool) = path_eraser_yaml_tool() else { return };
+        let mut model = model_with_long_line_path();
+        // Press far from the line.
+        tool.on_press(&mut model, 500.0, 500.0, false, false);
+        tool.on_release(&mut model, 500.0, 500.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+            "miss should not change the path count",
+        );
+    }
+
+    // ── Smooth tool behavioral tests ──────────────────────────────
+
+    fn smooth_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("smooth")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_selected_zigzag_path() -> Model {
+        use crate::document::document::{Document, ElementSelection};
+        use crate::geometry::element::{
+            Color, LayerElem, PathCommand, PathElem, Stroke,
+        };
+        let mut cmds = vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }];
+        for i in 1..=20 {
+            let x = i as f64 * 5.0;
+            let y = if i % 2 == 0 { 5.0 } else { -5.0 };
+            cmds.push(PathCommand::LineTo { x, y });
+        }
+        let pe = PathElem {
+            d: cmds,
+            fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(Element::Path(pe))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: vec![ElementSelection::all(vec![0, 0])],
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn smooth_parity_reduces_commands_on_zigzag() {
+        let Some(mut tool) = smooth_yaml_tool() else { return };
+        let mut model = model_with_selected_zigzag_path();
+        let original_len = {
+            if let Element::Path(pe) =
+                &*model.document().layers[0].children().unwrap()[0]
+            {
+                pe.d.len()
+            } else {
+                panic!("expected Path");
+            }
+        };
+        // Smooth at the midpoint of the zigzag — radius 100 covers
+        // the whole path.
+        tool.on_press(&mut model, 50.0, 0.0, false, false);
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        let new_len = {
+            if let Element::Path(pe) =
+                &*model.document().layers[0].children().unwrap()[0]
+            {
+                pe.d.len()
+            } else {
+                panic!("expected Path");
+            }
+        };
+        assert!(
+            new_len < original_len,
+            "smooth should reduce command count on a zigzag (was {}, now {})",
+            original_len, new_len,
+        );
+        assert!(model.can_undo());
+    }
+
+    #[test]
+    fn smooth_parity_only_affects_selected_paths() {
+        use crate::document::document::Document;
+        // Unselected zigzag — smooth should do nothing.
+        let mut model = model_with_selected_zigzag_path();
+        let mut doc = model.document().clone();
+        doc.selection.clear();
+        model.set_document(doc);
+        let original_len = {
+            if let Element::Path(pe) =
+                &*model.document().layers[0].children().unwrap()[0]
+            {
+                pe.d.len()
+            } else {
+                panic!("expected Path");
+            }
+        };
+        let Some(mut tool) = smooth_yaml_tool() else { return };
+        tool.on_press(&mut model, 50.0, 0.0, false, false);
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        let new_len = {
+            if let Element::Path(pe) =
+                &*model.document().layers[0].children().unwrap()[0]
+            {
+                pe.d.len()
+            } else {
+                panic!("expected Path");
+            }
+        };
+        assert_eq!(new_len, original_len);
+        let _ = Document::default(); // keep the import used
+    }
+
     // ── Add Anchor Point tool behavioral tests ────────────────────
 
     fn add_anchor_yaml_tool() -> Option<YamlTool> {
