@@ -335,6 +335,7 @@ impl CanvasTool for YamlTool {
             "line" => draw_line_overlay(ctx, render, &eval_ctx),
             "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
             "star" => draw_star_overlay(ctx, render, &eval_ctx),
+            "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -513,6 +514,25 @@ fn draw_line_overlay(
     if style.stroke_dasharray.is_some() {
         let _ = ctx.set_line_dash(&js_sys::Array::new());
     }
+}
+
+/// Draw a closed polygon whose points come from a thread-local named
+/// point buffer (see `interpreter::point_buffers`). Fields:
+/// `buffer` (the buffer name), `style`. Used by Lasso's overlay.
+fn draw_buffer_polygon_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+) {
+    let name = render
+        .get("buffer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if name.is_empty() {
+        return;
+    }
+    let points: Vec<(f64, f64)> =
+        crate::interpreter::point_buffers::with_points(name, |pts| pts.to_vec());
+    draw_closed_polygon_from_points(ctx, &points, render);
 }
 
 /// Draw a regular-N-gon overlay inscribed by a first-edge vector.
@@ -1465,6 +1485,97 @@ mod tests {
         } else {
             panic!("expected Rect");
         }
+    }
+
+    // ── Lasso tool behavioral tests ────────────────────────────────
+
+    fn lasso_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("lasso")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn selection_parity_model_for_lasso() -> Model {
+        // Single rect at (50, 50, 20, 20). Matches the fixture the
+        // deleted lasso_tool.rs tests used.
+        model_with_rect_at(50.0, 50.0, 20.0, 20.0)
+    }
+
+    #[test]
+    fn lasso_parity_lasso_select() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        // Polygon enclosing the rect.
+        tool.on_press(&mut model, 40.0, 40.0, false, false);
+        tool.on_move(&mut model, 80.0, 40.0, false, false, true);
+        tool.on_move(&mut model, 80.0, 80.0, false, false, true);
+        tool.on_move(&mut model, 40.0, 80.0, false, false, true);
+        tool.on_release(&mut model, 40.0, 80.0, false, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_lasso_miss() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        // Polygon nowhere near the rect.
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 10.0, 0.0, false, false, true);
+        tool.on_move(&mut model, 10.0, 10.0, false, false, true);
+        tool.on_move(&mut model, 0.0, 10.0, false, false, true);
+        tool.on_release(&mut model, 0.0, 10.0, false, false);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_click_without_drag_clears() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.document().selection.is_empty());
+        // Press + release at same point, no shift — buffer has 1 point,
+        // fewer than 3 → falls into "clear selection" branch.
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_click_without_drag_shift_preserves() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        // Shift+click without drag — shift_held captured at press,
+        // the "clear selection" else-branch is guarded by not
+        // shift_held so nothing happens.
+        tool.on_press(&mut model, 5.0, 5.0, true, false);
+        tool.on_release(&mut model, 5.0, 5.0, true, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_state_transitions() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("drawing"));
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
     }
 
     // ── Interior Selection tool behavioral tests ──────────────────

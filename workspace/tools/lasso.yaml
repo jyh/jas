@@ -1,0 +1,83 @@
+# Lasso tool — freehand polygon selection.
+#
+# Accumulates a point per mousemove into a thread-local point buffer
+# named "lasso". On mouseup, if the buffer has >= 3 points the tool
+# fires doc.select_polygon_from_buffer (routes to
+# Controller::select_polygon); if fewer than 3 AND shift isn't held,
+# the polygon is treated as a click and clears the selection. Short
+# clicks with shift preserve whatever was selected before.
+#
+# The min-distance filter that the native tool used to keep the
+# polygon from exploding with vertices during fast moves is not
+# replicated here — Controller::select_polygon accepts dense polygons
+# and the downstream hit-test doesn't care. If profile shows heavy
+# allocation, a `hypot_from_buffer_last(...)` primitive could gate
+# push-back.
+#
+# Validated against schema/tool.schema.json.
+
+id: lasso
+cursor: crosshair
+menu_label: "Lasso Tool"
+shortcut: "Q"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+  shift_held: { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.lasso.mode: "'idle'" }
+    - "buffer.clear": { buffer: "lasso" }
+
+  on_leave:
+    - set: { tool.lasso.mode: "'idle'" }
+    - "buffer.clear": { buffer: "lasso" }
+
+  on_mousedown:
+    # Fresh buffer per drag. Capture the shift modifier at press time
+    # so later decisions (click-without-drag clearing behavior) use
+    # press-time state.
+    - "buffer.clear": { buffer: "lasso" }
+    - "buffer.push": { buffer: "lasso", x: "event.x", y: "event.y" }
+    - set: { tool.lasso.shift_held: "event.modifiers.shift" }
+    - set: { tool.lasso.mode: "'drawing'" }
+
+  on_mousemove:
+    - if: "tool.lasso.mode == 'drawing'"
+      then:
+        - "buffer.push": { buffer: "lasso", x: "event.x", y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.lasso.mode == 'drawing'"
+      then:
+        - if: "buffer_length('lasso') >= 3"
+          then:
+            - "doc.snapshot": {}
+            - "doc.select_polygon_from_buffer":
+                buffer: "lasso"
+                additive: "tool.lasso.shift_held"
+          else:
+            # Click-without-drag: if shift wasn't held, treat as
+            # "clear selection." Otherwise leave it alone.
+            - if: "not tool.lasso.shift_held"
+              then:
+                - "doc.clear_selection": {}
+    - set: { tool.lasso.mode: "'idle'" }
+    - "buffer.clear": { buffer: "lasso" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.lasso.mode: "'idle'" }
+        - "buffer.clear": { buffer: "lasso" }
+
+overlay:
+  if: "tool.lasso.mode == 'drawing'"
+  render:
+    type: buffer_polygon
+    buffer: "lasso"
+    style: "stroke: rgba(0,120,215,0.8); stroke-width: 1; fill: rgba(0,120,215,0.1);"

@@ -12,4 +12,3 @@ pub mod path_eraser_tool;
 pub mod smooth_tool;
 pub mod type_tool;
 pub mod type_on_path_tool;
-pub mod lasso_tool;

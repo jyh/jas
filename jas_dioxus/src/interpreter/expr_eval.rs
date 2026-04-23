@@ -956,6 +956,22 @@ fn eval_func(
         // selection_empty() -> bool
         "selection_empty" => super::doc_primitives::selection_empty(),
 
+        // buffer_length("<name>") -> number
+        // Count of points currently in the named thread-local buffer.
+        // Lasso uses this for the "polygon must have >= 3 points"
+        // mouseup guard.
+        "buffer_length" => {
+            if args.len() != 1 {
+                return Value::Number(0.0);
+            }
+            let name_val = eval_inner(&args[0], ctx, scope, store_cb);
+            let name = match name_val {
+                Value::Str(s) => s,
+                _ => return Value::Number(0.0),
+            };
+            Value::Number(super::point_buffers::length(&name) as f64)
+        }
+
         // Unknown function
         _ => Value::Null,
     }

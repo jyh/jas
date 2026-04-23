@@ -407,6 +407,29 @@ fn run_one(
         return;
     }
 
+    // buffer.push: { buffer: <name>, x: <expr>, y: <expr> }
+    //   Append a point to a thread-local named buffer. Used by tools
+    //   that accumulate sequences during a drag (Lasso, Pencil).
+    if let Some(serde_json::Value::Object(bp)) = effect.get("buffer.push") {
+        let name = bp.get("buffer").and_then(|v| v.as_str()).unwrap_or("");
+        if !name.is_empty() {
+            let x = eval_number(bp.get("x"), store, ctx);
+            let y = eval_number(bp.get("y"), store, ctx);
+            super::point_buffers::push(name, x, y);
+        }
+        return;
+    }
+
+    // buffer.clear: { buffer: <name> }
+    if let Some(serde_json::Value::Object(bc)) = effect.get("buffer.clear") {
+        if let Some(name) = bc.get("buffer").and_then(|v| v.as_str()) {
+            if !name.is_empty() {
+                super::point_buffers::clear(name);
+            }
+        }
+        return;
+    }
+
     // log: message (debug only)
     if effect.contains_key("log") {
         return;
@@ -547,6 +570,26 @@ fn run_doc_effect(
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
                 Controller::select_rect(model, rx, ry, rw, rh, additive);
+            }
+        }
+        "doc.select_polygon_from_buffer" => {
+            // Uses the named point buffer as a free-form polygon and
+            // selects every element whose bounds intersect it. Mirrors
+            // the Lasso tool's Controller::select_polygon call.
+            if let serde_json::Value::Object(args) = spec {
+                let name = args
+                    .get("buffer")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if name.is_empty() {
+                    return;
+                }
+                let additive = eval_bool(args.get("additive"), store, ctx);
+                let points: Vec<(f64, f64)> =
+                    super::point_buffers::with_points(name, |pts| pts.to_vec());
+                if points.len() >= 3 {
+                    Controller::select_polygon(model, &points, additive);
+                }
             }
         }
         "doc.partial_select_in_rect" => {
