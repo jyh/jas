@@ -1,24 +1,37 @@
-//! Effects interpreter — Rust port of workspace_interpreter/effects.py.
+//! Effects interpreter — Rust port of workspace_interpreter/effects.py
+//! plus the `doc.*` dispatcher mirroring jas_flask's `effects.mjs`.
 //!
-//! Executes effect lists from actions and behaviors. Each effect is a
-//! JSON object with a single key identifying the effect type.
+//! Executes effect lists from actions, behaviors, and tool handlers.
+//! Each effect is a JSON object with a single key identifying the
+//! effect type. When a `Model` is threaded through, `doc.*` effects
+//! dispatch to `Controller` methods to mutate the document; without
+//! a Model they are no-ops (matching Flask's observer fallback).
 
 use serde_json;
 use super::expr::eval;
 use super::expr_types::Value;
 use super::state_store::StateStore;
+use crate::document::controller::Controller;
+use crate::document::document::ElementPath;
+use crate::document::model::Model;
 
 /// Execute a list of effects.
+///
+/// `model` is optional. When supplied, `doc.*` effects dispatch to
+/// `Controller`. When `None`, `doc.*` effects are silently skipped —
+/// callers that don't touch the document (e.g. panel behavior actions)
+/// pass `None`.
 pub fn run_effects(
     effects: &[serde_json::Value],
     ctx: &serde_json::Value,
     store: &mut StateStore,
+    mut model: Option<&mut Model>,
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
 ) {
     for effect in effects {
         if let serde_json::Value::Object(map) = effect {
-            run_one(map, ctx, store, actions, dialogs);
+            run_one(map, ctx, store, model.as_deref_mut(), actions, dialogs);
         }
     }
 }
@@ -61,9 +74,23 @@ fn run_one(
     effect: &serde_json::Map<String, serde_json::Value>,
     ctx: &serde_json::Value,
     store: &mut StateStore,
+    mut model: Option<&mut Model>,
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
 ) {
+    // ── Document mutations (doc.*) — dispatched before generic effects
+    // so a stray `doc.` key in an effect object doesn't silently fall
+    // through to "unknown".
+    if let Some((name, spec)) = effect
+        .iter()
+        .find(|(k, _)| k.starts_with("doc."))
+    {
+        if let Some(m) = model.as_deref_mut() {
+            run_doc_effect(name, spec, ctx, store, m);
+        }
+        return;
+    }
+
     // set: { key: expr, ... }
     if let Some(serde_json::Value::Object(pairs)) = effect.get("set") {
         for (key, expr) in pairs {
@@ -127,10 +154,10 @@ fn run_one(
         let result = eval_expr(condition, store, ctx);
         if result.to_bool() {
             if let Some(serde_json::Value::Array(then_effects)) = cond.get("then") {
-                run_effects(then_effects, ctx, store, actions, dialogs);
+                run_effects(then_effects, ctx, store, model.as_deref_mut(), actions, dialogs);
             }
         } else if let Some(serde_json::Value::Array(else_effects)) = cond.get("else") {
-            run_effects(else_effects, ctx, store, actions, dialogs);
+            run_effects(else_effects, ctx, store, model.as_deref_mut(), actions, dialogs);
         }
         return;
     }
@@ -194,7 +221,7 @@ fn run_one(
                             c.insert("param".to_string(), serde_json::Value::Object(resolved));
                         }
                     }
-                    run_effects(action_effects, &dispatch_ctx, store, actions, dialogs);
+                    run_effects(action_effects, &dispatch_ctx, store, model.as_deref_mut(), actions, dialogs);
                 }
             }
         }
@@ -296,6 +323,180 @@ fn run_one(
     }
 }
 
+/// Dispatch a `doc.*` effect to the Model via `Controller`. Runs only
+/// when a Model is threaded through `run_effects`. Mirrors the `doc.*`
+/// arm of jas_flask/static/js/engine/effects.mjs.
+fn run_doc_effect(
+    name: &str,
+    spec: &serde_json::Value,
+    ctx: &serde_json::Value,
+    store: &mut StateStore,
+    model: &mut Model,
+) {
+    match name {
+        "doc.snapshot" => {
+            model.snapshot();
+        }
+        "doc.clear_selection" => {
+            Controller::clear_selection(model);
+        }
+        "doc.set_selection" => {
+            let paths = extract_path_list(spec, store, ctx);
+            let doc = model.document();
+            // Drop paths that don't resolve to an element. Matches
+            // Flask's setSelection behavior for invalid paths.
+            let valid: Vec<ElementPath> = paths
+                .into_iter()
+                .filter(|p| doc.get_element(p).is_some())
+                .collect();
+            let selection = valid
+                .into_iter()
+                .map(|p| crate::document::document::ElementSelection::all(p))
+                .collect();
+            Controller::set_selection(model, selection);
+        }
+        "doc.add_to_selection" => {
+            if let Some(path) = extract_path(spec, store, ctx) {
+                Controller::add_to_selection(model, &path);
+            }
+        }
+        "doc.toggle_selection" => {
+            if let Some(path) = extract_path(spec, store, ctx) {
+                Controller::toggle_selection(model, &path);
+            }
+        }
+        "doc.translate_selection" => {
+            if let serde_json::Value::Object(args) = spec {
+                let dx = eval_number(args.get("dx"), store, ctx);
+                let dy = eval_number(args.get("dy"), store, ctx);
+                if dx != 0.0 || dy != 0.0 {
+                    Controller::move_selection(model, dx, dy);
+                }
+            }
+        }
+        "doc.copy_selection" => {
+            if let serde_json::Value::Object(args) = spec {
+                let dx = eval_number(args.get("dx"), store, ctx);
+                let dy = eval_number(args.get("dy"), store, ctx);
+                Controller::copy_selection(model, dx, dy);
+            }
+        }
+        "doc.select_in_rect" => {
+            if let serde_json::Value::Object(args) = spec {
+                let x1 = eval_number(args.get("x1"), store, ctx);
+                let y1 = eval_number(args.get("y1"), store, ctx);
+                let x2 = eval_number(args.get("x2"), store, ctx);
+                let y2 = eval_number(args.get("y2"), store, ctx);
+                let additive = eval_bool(args.get("additive"), store, ctx);
+                let rx = x1.min(x2);
+                let ry = y1.min(y2);
+                let rw = (x2 - x1).abs();
+                let rh = (y2 - y1).abs();
+                Controller::select_rect(model, rx, ry, rw, rh, additive);
+            }
+        }
+        _ => {
+            // Effects not implemented in this phase fall through silently.
+            // doc.delete_selection, doc.add_element, doc.set_attr land in
+            // later phases alongside the tools that need them.
+        }
+    }
+}
+
+/// Evaluate a `dx`/`dy`/`x1`/… argument that may be a number literal,
+/// a numeric string expression, or a JSON number. Missing → 0.0.
+fn eval_number(
+    arg: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> f64 {
+    match arg {
+        None | Some(serde_json::Value::Null) => 0.0,
+        Some(serde_json::Value::Number(n)) => n.as_f64().unwrap_or(0.0),
+        Some(serde_json::Value::String(s)) => {
+            match eval_expr(s, store, ctx) {
+                Value::Number(n) => n,
+                _ => 0.0,
+            }
+        }
+        _ => 0.0,
+    }
+}
+
+fn eval_bool(
+    arg: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> bool {
+    match arg {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => eval_expr(s, store, ctx).to_bool(),
+        _ => false,
+    }
+}
+
+/// Pull a single path out of a `doc.*` effect spec. Accepts:
+///   - a raw JSON array of integers → path
+///   - a string that evaluates to `Value::Path` → extract indices
+///   - a string that evaluates to `Value::List` of integers → coerce
+///   - `{ path: <expr> }` → recurse
+fn extract_path(
+    spec: &serde_json::Value,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> Option<Vec<usize>> {
+    match spec {
+        serde_json::Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(item.as_u64()? as usize);
+            }
+            Some(out)
+        }
+        serde_json::Value::String(s) => {
+            match eval_expr(s, store, ctx) {
+                Value::Path(indices) => Some(indices),
+                Value::List(items) => {
+                    let mut out = Vec::with_capacity(items.len());
+                    for item in items {
+                        out.push(item.as_u64()? as usize);
+                    }
+                    Some(out)
+                }
+                _ => None,
+            }
+        }
+        serde_json::Value::Object(map) => {
+            map.get("path").and_then(|v| extract_path(v, store, ctx))
+        }
+        _ => None,
+    }
+}
+
+/// Pull a list of paths out of a `doc.*` effect spec. Accepts
+/// `{ paths: [<path-spec>, …] }` where each item is individually
+/// extract_path-able. Items that don't resolve to a path are dropped.
+fn extract_path_list(
+    spec: &serde_json::Value,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> Vec<Vec<usize>> {
+    let mut out = Vec::new();
+    if let Some(paths) = spec
+        .as_object()
+        .and_then(|o| o.get("paths"))
+        .and_then(|v| v.as_array())
+    {
+        for item in paths {
+            if let Some(p) = extract_path(item, store, ctx) {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,7 +506,7 @@ mod tests {
         let mut store = StateStore::new();
         store.set("x", serde_json::json!(0));
         let effects = vec![serde_json::json!({"set": {"x": "5"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.get("x"), &serde_json::json!(5));
     }
 
@@ -314,7 +515,7 @@ mod tests {
         let mut store = StateStore::new();
         store.set("flag", serde_json::json!(true));
         let effects = vec![serde_json::json!({"toggle": "flag"})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.get("flag"), &serde_json::json!(false));
     }
 
@@ -324,7 +525,7 @@ mod tests {
         store.set("a", serde_json::json!("#ff0000"));
         store.set("b", serde_json::json!("#00ff00"));
         let effects = vec![serde_json::json!({"swap": ["a", "b"]})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.get("a"), &serde_json::json!("#00ff00"));
         assert_eq!(store.get("b"), &serde_json::json!("#ff0000"));
     }
@@ -341,7 +542,7 @@ mod tests {
                 "else": [{"set": {"result": "\"no\""}}]
             }
         })];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.get("result"), &serde_json::json!("yes"));
     }
 
@@ -350,7 +551,7 @@ mod tests {
         let mut store = StateStore::new();
         store.set("count", serde_json::json!(5));
         let effects = vec![serde_json::json!({"increment": {"key": "count", "by": 3}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.get("count"), &serde_json::json!(8.0));
     }
 
@@ -362,7 +563,7 @@ mod tests {
             "set_x": {"effects": [{"set": {"x": "42"}}]}
         });
         let effects = vec![serde_json::json!({"dispatch": "set_x"})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, Some(&actions), None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&actions), None);
         assert_eq!(store.get("x"), &serde_json::json!(42));
     }
 
@@ -379,7 +580,7 @@ mod tests {
             }
         });
         let effects = vec![serde_json::json!({"open_dialog": {"id": "simple"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
         assert_eq!(store.dialog_id(), Some("simple"));
         assert_eq!(store.get_dialog("name"), &serde_json::json!(""));
     }
@@ -407,7 +608,7 @@ mod tests {
         let effects = vec![serde_json::json!({
             "open_dialog": {"id": "picker", "params": {"target": "\"fill\""}}
         })];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
         assert_eq!(store.dialog_id(), Some("picker"));
         assert_eq!(store.get_dialog("color"), &serde_json::json!("#00ff00"));
         // hsb_h("#00ff00") = 120
@@ -421,7 +622,7 @@ mod tests {
         defaults.insert("x".to_string(), serde_json::json!(1));
         store.init_dialog("test", defaults, None);
         let effects = vec![serde_json::json!({"close_dialog": null})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.dialog_id(), None);
     }
 
@@ -447,7 +648,7 @@ mod tests {
             }
         });
         let effects = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
         let snap = store.dialog_snapshot().expect("snapshot should be captured on open");
         assert_eq!(snap.get("left_indent"), Some(&serde_json::json!(12)));
         assert_eq!(snap.get("right_indent"), Some(&serde_json::json!(0)));
@@ -464,7 +665,7 @@ mod tests {
             }
         });
         let effects = vec![serde_json::json!({"open_dialog": {"id": "plain"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
         assert!(!store.has_dialog_snapshot());
     }
 
@@ -482,12 +683,12 @@ mod tests {
         });
         // Open captures snapshot of left_indent = 12
         let open = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
-        run_effects(&open, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        run_effects(&open, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
         // Simulate Preview live-applying an edit: state moves to 99
         store.set("left_indent", serde_json::json!(99));
         // Cancel (close_dialog with snapshot present) restores to 12
         let close = vec![serde_json::json!({"close_dialog": null})];
-        run_effects(&close, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&close, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.get("left_indent"), &serde_json::json!(12));
         assert_eq!(store.dialog_id(), None);
         assert!(!store.has_dialog_snapshot());
@@ -506,14 +707,14 @@ mod tests {
             }
         });
         let open = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
-        run_effects(&open, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        run_effects(&open, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
         store.set("left_indent", serde_json::json!(99));
         // OK action equivalent: clear snapshot, then close
         let ok_then_close = vec![
             serde_json::json!({"clear_dialog_snapshot": null}),
             serde_json::json!({"close_dialog": null}),
         ];
-        run_effects(&ok_then_close, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&ok_then_close, &serde_json::json!({}), &mut store, None, None, None);
         // Without snapshot to restore from, the user's edit (99) survives
         assert_eq!(store.get("left_indent"), &serde_json::json!(99));
         assert_eq!(store.dialog_id(), None);
@@ -532,11 +733,340 @@ mod tests {
         });
         // Open dialog
         let effects = vec![serde_json::json!({"open_dialog": {"id": "picker"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
         assert_eq!(store.get_dialog("color"), &serde_json::json!("#aabbcc"));
         // Set global state from dialog
         let effects = vec![serde_json::json!({"set": {"fill_color": "dialog.color"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
         assert_eq!(store.get("fill_color"), &serde_json::json!("#aabbcc"));
+    }
+
+    // ── doc.* effect dispatch (Phase 1 of the Rust YAML tool runtime) ─
+    //
+    // Parallels jas_flask/tests/js/test_doc_effects.mjs. Each effect
+    // is exercised in isolation via run_effects with a live Model.
+    // Without a Model supplied, doc.* effects are silent no-ops —
+    // matching Flask's observer-fallback behavior.
+
+    use crate::document::controller::Controller;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::document::model::Model;
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, LayerElem, RectElem,
+    };
+
+    fn make_model_two_rects() -> Model {
+        let rect0 = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let rect1 = Element::Rect(RectElem {
+            x: 50.0, y: 50.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![
+                std::rc::Rc::new(rect0),
+                std::rc::Rc::new(rect1),
+            ],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn doc_snapshot_pushes_undo() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        assert!(!model.can_undo());
+        let effects = vec![serde_json::json!({"doc.snapshot": {}})];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert!(model.can_undo());
+    }
+
+    #[test]
+    fn doc_snapshot_without_model_is_noop() {
+        // No Model supplied — doc.snapshot must be silently skipped,
+        // not dispatched to some phantom model and not crash.
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({"doc.snapshot": {}})];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None);
+        // If we reached here without panic, the no-op path worked.
+    }
+
+    #[test]
+    fn doc_clear_selection_empties_selection() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert_eq!(model.document().selection.len(), 1);
+        let effects = vec![serde_json::json!({"doc.clear_selection": {}})];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 0);
+    }
+
+    #[test]
+    fn doc_set_selection_from_paths_list() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let effects = vec![serde_json::json!({
+            "doc.set_selection": { "paths": [[0, 0], [0, 1]] }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 2);
+        assert_eq!(sel[0].path, vec![0, 0]);
+        assert_eq!(sel[1].path, vec![0, 1]);
+    }
+
+    #[test]
+    fn doc_set_selection_drops_invalid_paths() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let effects = vec![serde_json::json!({
+            "doc.set_selection": { "paths": [[0, 0], [99, 99]] }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0].path, vec![0, 0]);
+    }
+
+    #[test]
+    fn doc_add_to_selection_raw_array() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let effects = vec![serde_json::json!({"doc.add_to_selection": [0, 0]})];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 1);
+        assert_eq!(model.document().selection[0].path, vec![0, 0]);
+    }
+
+    #[test]
+    fn doc_add_to_selection_is_idempotent() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let effects = vec![serde_json::json!({"doc.add_to_selection": [0, 0]})];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 1);
+    }
+
+    #[test]
+    fn doc_toggle_selection_adds_when_absent() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let effects = vec![serde_json::json!({"doc.toggle_selection": [0, 0]})];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 1);
+    }
+
+    #[test]
+    fn doc_toggle_selection_removes_when_present() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::set_selection(
+            &mut model,
+            vec![ElementSelection::all(vec![0, 0])],
+        );
+        let effects = vec![serde_json::json!({"doc.toggle_selection": [0, 0]})];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 0);
+    }
+
+    #[test]
+    fn doc_translate_selection_moves_rect() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        // Literal numeric args:
+        let effects = vec![serde_json::json!({
+            "doc.translate_selection": { "dx": 5, "dy": 7 }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let elem = &model.document().layers[0].children().unwrap()[0];
+        if let Element::Rect(r) = &**elem {
+            assert_eq!(r.x, 5.0);
+            assert_eq!(r.y, 7.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn doc_translate_selection_zero_delta_is_noop() {
+        // Zero deltas skip the clone+replace machinery entirely.
+        // We can't observe that directly but can confirm no panic
+        // and no movement.
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let effects = vec![serde_json::json!({
+            "doc.translate_selection": { "dx": 0, "dy": 0 }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let elem = &model.document().layers[0].children().unwrap()[0];
+        if let Element::Rect(r) = &**elem {
+            assert_eq!(r.x, 0.0);
+            assert_eq!(r.y, 0.0);
+        }
+    }
+
+    #[test]
+    fn doc_translate_selection_expression_args() {
+        // dx / dy as string expressions that read from scope.
+        let mut store = StateStore::new();
+        store.set("offset_x", serde_json::json!(3));
+        store.set("offset_y", serde_json::json!(4));
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let effects = vec![serde_json::json!({
+            "doc.translate_selection": {
+                "dx": "state.offset_x",
+                "dy": "state.offset_y"
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let elem = &model.document().layers[0].children().unwrap()[0];
+        if let Element::Rect(r) = &**elem {
+            assert_eq!(r.x, 3.0);
+            assert_eq!(r.y, 4.0);
+        }
+    }
+
+    #[test]
+    fn doc_select_in_rect_covers_both() {
+        // Rect covering both rects (0,0,10,10 and 50,50,10,10) at (0..60, 0..60)
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let effects = vec![serde_json::json!({
+            "doc.select_in_rect": {
+                "x1": 0, "y1": 0, "x2": 60, "y2": 60, "additive": false
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 2);
+    }
+
+    #[test]
+    fn doc_select_in_rect_additive_extends_selection() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        // Pre-select rect0
+        Controller::select_element(&mut model, &vec![0, 0]);
+        // Additive select rect covering only rect1
+        let effects = vec![serde_json::json!({
+            "doc.select_in_rect": {
+                "x1": 45, "y1": 45, "x2": 65, "y2": 65, "additive": true
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 2);
+    }
+
+    #[test]
+    fn doc_copy_selection_duplicates_element() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let children_before = model.document().layers[0].children().unwrap().len();
+        let effects = vec![serde_json::json!({
+            "doc.copy_selection": { "dx": 100, "dy": 0 }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let children_after = model.document().layers[0].children().unwrap().len();
+        assert_eq!(children_after, children_before + 1);
+    }
+
+    #[test]
+    fn doc_path_extract_from_let_binding() {
+        // Exercise the let-bound Path expression path: a handler builds
+        // a Path value via hit_test-style primitives and binds it under
+        // `hit`; doc.set_selection: { paths: [hit] } references it.
+        //
+        // Here we seed the scope directly with a Path value in ctx so
+        // the string expression "hit" resolves without needing hit_test
+        // primitives (those land in Phase 2).
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let ctx = serde_json::json!({
+            "hit": { "__path__": [0, 0] }
+        });
+        let effects = vec![serde_json::json!({
+            "doc.set_selection": { "paths": ["hit"] }
+        })];
+        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 1);
+        assert_eq!(model.document().selection[0].path, vec![0, 0]);
+    }
+
+    #[test]
+    fn doc_effect_inside_if_then_branch() {
+        // Recursive run_effects must thread Model through to doc.* effects
+        // nested inside if/then/else branches.
+        let mut store = StateStore::new();
+        store.set("should_clear", serde_json::json!(true));
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let effects = vec![serde_json::json!({
+            "if": {
+                "condition": "state.should_clear",
+                "then": [{"doc.clear_selection": {}}],
+                "else": []
+            }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().selection.len(), 0);
     }
 }
