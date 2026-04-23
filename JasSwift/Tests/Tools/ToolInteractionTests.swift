@@ -537,10 +537,14 @@ private func selectionTool() -> CanvasTool {
     }
 }
 
-// MARK: - Pencil tool tests
+// MARK: - Pencil tool tests (YAML-driven per Phase 7.9)
+
+private func pencilTool() -> CanvasTool {
+    createTools()[.pencil]!
+}
 
 @Test func pencilToolFreehandDrawCreatesPath() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     for i in 1...20 {
@@ -563,16 +567,18 @@ private func selectionTool() -> CanvasTool {
 }
 
 @Test func pencilToolClickWithoutDragCreatesPath() {
-    let tool = PencilTool()
+    // fit_curve on a 2-point identical-coordinate buffer still emits
+    // one degenerate curveTo; the path exists but is zero-length.
+    // Matches native behavior.
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 1)
+    #expect(layerChildren(model).count == 1)
 }
 
 @Test func pencilToolPathHasStroke() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
@@ -587,23 +593,21 @@ private func selectionTool() -> CanvasTool {
 }
 
 @Test func pencilToolReleaseWithoutPressIsNoop() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func pencilToolMoveWithoutPressIsNoop() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func pencilToolPathStartsAtPressPoint() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 15, y: 25, shift: false, alt: false)
     tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
