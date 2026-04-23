@@ -32,6 +32,30 @@ use crate::tools::selection_tool::SelectionTool;
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
+use crate::tools::yaml_tool::YamlTool;
+
+/// Build the canvas Selection tool. Tries the YAML runtime first
+/// (reads `workspace/tools/selection.yaml` via the bundled
+/// `workspace.json`); falls back to the native [`SelectionTool`] if
+/// the YAML spec is missing or malformed.
+///
+/// Per RUST_TOOL_RUNTIME.md, Selection is the validation target for
+/// the YAML tool runtime: behavior-for-behavior parity is proven by
+/// the `selection_parity_*` tests in `tools/yaml_tool.rs`, so the
+/// YAML path is the primary choice here. The native fallback is a
+/// safety rail for environments where workspace.json is unexpectedly
+/// unavailable at build time.
+fn selection_tool() -> Box<dyn CanvasTool> {
+    use crate::interpreter::workspace::Workspace;
+    if let Some(ws) = Workspace::load() {
+        if let Some(spec) = ws.data().get("tools").and_then(|t| t.get("selection")) {
+            if let Some(yaml_tool) = YamlTool::from_workspace_tool(spec) {
+                return Box::new(yaml_tool);
+            }
+        }
+    }
+    Box::new(SelectionTool::new())
+}
 
 /// Shared application state handle, available via `use_context::<AppHandle>()`.
 pub(crate) type AppHandle = Rc<RefCell<AppState>>;
@@ -65,7 +89,7 @@ impl TabState {
 
     pub(crate) fn with_model(model: Model) -> Self {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
-        tools.insert(ToolKind::Selection, Box::new(SelectionTool::new()));
+        tools.insert(ToolKind::Selection, selection_tool());
         tools.insert(ToolKind::PartialSelection, Box::new(PartialSelectionTool::new()));
         tools.insert(ToolKind::InteriorSelection, Box::new(InteriorSelectionTool::new()));
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
