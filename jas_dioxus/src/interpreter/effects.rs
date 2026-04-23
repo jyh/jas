@@ -14,9 +14,12 @@ use super::state_store::StateStore;
 use crate::document::controller::Controller;
 use crate::document::document::ElementPath;
 use crate::document::model::Model;
+use crate::algorithms::fit_curve::fit_curve;
 use crate::geometry::element::{
-    Color, CommonProps, Element, Fill, RectElem, Stroke,
+    Color, CommonProps, Element, Fill, LineElem, PathCommand, PathElem,
+    PolygonElem, RectElem, Stroke,
 };
+use crate::geometry::regular_shapes::{regular_polygon_points, star_points};
 
 /// Execute a list of effects.
 ///
@@ -406,6 +409,29 @@ fn run_one(
         return;
     }
 
+    // buffer.push: { buffer: <name>, x: <expr>, y: <expr> }
+    //   Append a point to a thread-local named buffer. Used by tools
+    //   that accumulate sequences during a drag (Lasso, Pencil).
+    if let Some(serde_json::Value::Object(bp)) = effect.get("buffer.push") {
+        let name = bp.get("buffer").and_then(|v| v.as_str()).unwrap_or("");
+        if !name.is_empty() {
+            let x = eval_number(bp.get("x"), store, ctx);
+            let y = eval_number(bp.get("y"), store, ctx);
+            super::point_buffers::push(name, x, y);
+        }
+        return;
+    }
+
+    // buffer.clear: { buffer: <name> }
+    if let Some(serde_json::Value::Object(bc)) = effect.get("buffer.clear") {
+        if let Some(name) = bc.get("buffer").and_then(|v| v.as_str()) {
+            if !name.is_empty() {
+                super::point_buffers::clear(name);
+            }
+        }
+        return;
+    }
+
     // log: message (debug only)
     if effect.contains_key("log") {
         return;
@@ -548,6 +574,111 @@ fn run_doc_effect(
                 Controller::select_rect(model, rx, ry, rw, rh, additive);
             }
         }
+        "doc.add_path_from_buffer" => {
+            // Runs fit_curve on the named buffer's points and
+            // appends the resulting cubic-Bezier path to the
+            // document. Mirrors PencilTool::finish. Pops only when
+            // the buffer has >= 2 points; otherwise no-ops.
+            //
+            // Fit-error controls smoothing vs fidelity (smaller =
+            // more accurate, more segments). The field `fit_error`
+            // defaults to 4.0 to match native FIT_ERROR.
+            //
+            // fill/stroke spec fields are handled like doc.add_element:
+            // omitted → model defaults; explicit → resolver parses
+            // the Value.
+            if let serde_json::Value::Object(args) = spec {
+                let name = args
+                    .get("buffer")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if name.is_empty() {
+                    return;
+                }
+                let fit_error_val = args.get("fit_error");
+                let fit_error = if fit_error_val.is_some() {
+                    eval_number(fit_error_val, store, ctx)
+                } else {
+                    4.0
+                };
+                let default_fill = model.default_fill;
+                let default_stroke = model.default_stroke;
+                let fill = resolve_fill_field(
+                    args.get("fill"), store, ctx, default_fill);
+                let stroke = resolve_stroke_field(
+                    args.get("stroke"), store, ctx, default_stroke);
+                let points: Vec<(f64, f64)> = super::point_buffers::with_points(
+                    name, |pts| pts.to_vec());
+                if points.len() < 2 {
+                    return;
+                }
+                let segments = fit_curve(&points, fit_error);
+                if segments.is_empty() {
+                    return;
+                }
+                let mut cmds: Vec<PathCommand> = Vec::new();
+                cmds.push(PathCommand::MoveTo {
+                    x: segments[0].0,
+                    y: segments[0].1,
+                });
+                for seg in &segments {
+                    cmds.push(PathCommand::CurveTo {
+                        x1: seg.2, y1: seg.3,
+                        x2: seg.4, y2: seg.5,
+                        x: seg.6, y: seg.7,
+                    });
+                }
+                let elem = Element::Path(PathElem {
+                    d: cmds,
+                    fill,
+                    stroke,
+                    width_points: Vec::new(),
+                    common: CommonProps::default(),
+                    fill_gradient: None,
+                    stroke_gradient: None,
+                });
+                Controller::add_element(model, elem);
+            }
+        }
+        "doc.select_polygon_from_buffer" => {
+            // Uses the named point buffer as a free-form polygon and
+            // selects every element whose bounds intersect it. Mirrors
+            // the Lasso tool's Controller::select_polygon call.
+            if let serde_json::Value::Object(args) = spec {
+                let name = args
+                    .get("buffer")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if name.is_empty() {
+                    return;
+                }
+                let additive = eval_bool(args.get("additive"), store, ctx);
+                let points: Vec<(f64, f64)> =
+                    super::point_buffers::with_points(name, |pts| pts.to_vec());
+                if points.len() >= 3 {
+                    Controller::select_polygon(model, &points, additive);
+                }
+            }
+        }
+        "doc.partial_select_in_rect" => {
+            // Same shape as doc.select_in_rect but routes through
+            // Controller::partial_select_rect so selection entries
+            // are SelectionKind::Partial (individual control points)
+            // instead of SelectionKind::All (whole-element). Used by
+            // the Partial Selection and Interior Selection tools.
+            if let serde_json::Value::Object(args) = spec {
+                let x1 = eval_number(args.get("x1"), store, ctx);
+                let y1 = eval_number(args.get("y1"), store, ctx);
+                let x2 = eval_number(args.get("x2"), store, ctx);
+                let y2 = eval_number(args.get("y2"), store, ctx);
+                let additive = eval_bool(args.get("additive"), store, ctx);
+                let rx = x1.min(x2);
+                let ry = y1.min(y2);
+                let rw = (x2 - x1).abs();
+                let rh = (y2 - y1).abs();
+                Controller::partial_select_rect(model, rx, ry, rw, rh, additive);
+            }
+        }
         _ => {
             // Effects not implemented in this phase fall through silently.
             // doc.delete_selection, doc.add_element, doc.set_attr land in
@@ -653,6 +784,8 @@ fn build_element(
             let y = eval_number(spec.get("y"), store, ctx);
             let width = eval_number(spec.get("width"), store, ctx);
             let height = eval_number(spec.get("height"), store, ctx);
+            let rx = eval_number(spec.get("rx"), store, ctx);
+            let ry = eval_number(spec.get("ry"), store, ctx);
             let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
             let stroke =
                 resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
@@ -661,8 +794,8 @@ fn build_element(
                 y,
                 width,
                 height,
-                rx: 0.0,
-                ry: 0.0,
+                rx,
+                ry,
                 fill,
                 stroke,
                 common: CommonProps::default(),
@@ -670,8 +803,73 @@ fn build_element(
                 stroke_gradient: None,
             }))
         }
-        // Other element types (ellipse, line, path, …) land alongside
-        // their tool ports.
+        "polygon" => {
+            // Regular N-gon with the first edge from (x1, y1) to (x2, y2).
+            // `sides` defaults to 5, matching native POLYGON_SIDES.
+            let x1 = eval_number(spec.get("x1"), store, ctx);
+            let y1 = eval_number(spec.get("y1"), store, ctx);
+            let x2 = eval_number(spec.get("x2"), store, ctx);
+            let y2 = eval_number(spec.get("y2"), store, ctx);
+            let sides = eval_number(spec.get("sides"), store, ctx) as usize;
+            let sides = if sides == 0 { 5 } else { sides };
+            let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            let points = regular_polygon_points(x1, y1, x2, y2, sides);
+            Some(Element::Polygon(PolygonElem {
+                points,
+                fill,
+                stroke,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))
+        }
+
+        "star" => {
+            // Star inscribed in the axis-aligned bounding box between
+            // (x1, y1) and (x2, y2). `points` defaults to 5.
+            let x1 = eval_number(spec.get("x1"), store, ctx);
+            let y1 = eval_number(spec.get("y1"), store, ctx);
+            let x2 = eval_number(spec.get("x2"), store, ctx);
+            let y2 = eval_number(spec.get("y2"), store, ctx);
+            let points_n = eval_number(spec.get("points"), store, ctx) as usize;
+            let points_n = if points_n == 0 { 5 } else { points_n };
+            let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            let pts = star_points(x1, y1, x2, y2, points_n);
+            Some(Element::Polygon(PolygonElem {
+                points: pts,
+                fill,
+                stroke,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))
+        }
+
+        "line" => {
+            let x1 = eval_number(spec.get("x1"), store, ctx);
+            let y1 = eval_number(spec.get("y1"), store, ctx);
+            let x2 = eval_number(spec.get("x2"), store, ctx);
+            let y2 = eval_number(spec.get("y2"), store, ctx);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            Some(Element::Line(LineElem {
+                x1,
+                y1,
+                x2,
+                y2,
+                stroke,
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+                stroke_gradient: None,
+            }))
+        }
+
+        // Other element types (ellipse, polygon, path, …) land
+        // alongside their tool ports.
         _ => None,
     }
 }

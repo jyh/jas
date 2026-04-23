@@ -332,6 +332,11 @@ impl CanvasTool for YamlTool {
             .unwrap_or("");
         match render_type {
             "rect" => draw_rect_overlay(ctx, render, &eval_ctx),
+            "line" => draw_line_overlay(ctx, render, &eval_ctx),
+            "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
+            "star" => draw_star_overlay(ctx, render, &eval_ctx),
+            "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
+            "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render),
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -417,15 +422,32 @@ fn draw_rect_overlay(
     let y = eval_number_field(eval_ctx, render.get("y"));
     let width = eval_number_field(eval_ctx, render.get("width"));
     let height = eval_number_field(eval_ctx, render.get("height"));
+    // rx/ry give rounded corners — SVG-style. When either is > 0 the
+    // fill/stroke path must walk corner arcs instead of using the
+    // straight-corner fill_rect / stroke_rect fast path.
+    let rx = eval_number_field(eval_ctx, render.get("rx"));
+    let ry = eval_number_field(eval_ctx, render.get("ry"));
     let style_str = render
         .get("style")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let style = parse_style(style_str);
 
+    let rounded = rx > 0.0 || ry > 0.0;
+    let build_path = || {
+        if rounded {
+            build_rounded_rect_path(ctx, x, y, width, height, rx, ry);
+        }
+    };
+
     if let Some(fill) = &style.fill {
         ctx.set_fill_style_str(fill);
-        ctx.fill_rect(x, y, width, height);
+        if rounded {
+            build_path();
+            ctx.fill();
+        } else {
+            ctx.fill_rect(x, y, width, height);
+        }
     }
     if let Some(stroke) = &style.stroke {
         ctx.set_stroke_style_str(stroke);
@@ -439,7 +461,12 @@ fn draw_rect_overlay(
             }
             let _ = ctx.set_line_dash(&arr);
         }
-        ctx.stroke_rect(x, y, width, height);
+        if rounded {
+            build_path();
+            ctx.stroke();
+        } else {
+            ctx.stroke_rect(x, y, width, height);
+        }
         // Reset dash if we set one, so subsequent native strokes aren't
         // unexpectedly dashed. CanvasRenderingContext2d is stateful, so
         // reset with an empty array.
@@ -447,6 +474,236 @@ fn draw_rect_overlay(
             let _ = ctx.set_line_dash(&js_sys::Array::new());
         }
     }
+}
+
+/// Draw a straight-line overlay. Fields: x1/y1/x2/y2 (numbers or
+/// string expressions), style (CSS subset). Stroke only — line
+/// overlays don't have a fillable interior.
+fn draw_line_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+
+    let Some(stroke) = &style.stroke else {
+        return;
+    };
+    ctx.set_stroke_style_str(stroke);
+    if let Some(w) = style.stroke_width {
+        ctx.set_line_width(w);
+    }
+    if let Some(dash) = &style.stroke_dasharray {
+        let arr = js_sys::Array::new();
+        for d in dash {
+            arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+        }
+        let _ = ctx.set_line_dash(&arr);
+    }
+    ctx.begin_path();
+    ctx.move_to(x1, y1);
+    ctx.line_to(x2, y2);
+    ctx.stroke();
+    if style.stroke_dasharray.is_some() {
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+}
+
+/// Draw a closed polygon whose points come from a thread-local named
+/// point buffer (see `interpreter::point_buffers`). Fields:
+/// `buffer` (the buffer name), `style`. Used by Lasso's overlay.
+fn draw_buffer_polygon_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+) {
+    let name = render
+        .get("buffer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if name.is_empty() {
+        return;
+    }
+    let points: Vec<(f64, f64)> =
+        crate::interpreter::point_buffers::with_points(name, |pts| pts.to_vec());
+    draw_closed_polygon_from_points(ctx, &points, render);
+}
+
+/// Draw an OPEN polyline — like buffer_polygon but without
+/// close_path / fill. Used by Pencil's overlay: the user sees the raw
+/// traced path while dragging, then the final fit_curve result lands
+/// as a Bezier Path element on mouseup.
+fn draw_buffer_polyline_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+) {
+    let name = render
+        .get("buffer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if name.is_empty() {
+        return;
+    }
+    let points: Vec<(f64, f64)> = crate::interpreter::point_buffers::with_points(
+        name, |pts| pts.to_vec());
+    if points.len() < 2 {
+        return;
+    }
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+    let Some(stroke) = &style.stroke else {
+        return;
+    };
+    ctx.set_stroke_style_str(stroke);
+    if let Some(w) = style.stroke_width {
+        ctx.set_line_width(w);
+    }
+    if let Some(dash) = &style.stroke_dasharray {
+        let arr = js_sys::Array::new();
+        for d in dash {
+            arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+        }
+        let _ = ctx.set_line_dash(&arr);
+    }
+    ctx.begin_path();
+    ctx.move_to(points[0].0, points[0].1);
+    for p in &points[1..] {
+        ctx.line_to(p.0, p.1);
+    }
+    ctx.stroke();
+    if style.stroke_dasharray.is_some() {
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+}
+
+/// Draw a regular-N-gon overlay inscribed by a first-edge vector.
+/// Fields: x1/y1/x2/y2 (the edge endpoints), sides (default 5),
+/// style.
+fn draw_regular_polygon_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let sides = eval_number_field(eval_ctx, render.get("sides")) as usize;
+    let sides = if sides == 0 { 5 } else { sides };
+    let pts = crate::geometry::regular_shapes::regular_polygon_points(
+        x1, y1, x2, y2, sides,
+    );
+    draw_closed_polygon_from_points(ctx, &pts, render);
+}
+
+/// Draw a star overlay inscribed in a bounding box. Fields:
+/// x1/y1/x2/y2 (box corners), points (default 5 outer vertices),
+/// style.
+fn draw_star_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let points_n = eval_number_field(eval_ctx, render.get("points")) as usize;
+    let points_n = if points_n == 0 { 5 } else { points_n };
+    let pts = crate::geometry::regular_shapes::star_points(
+        x1, y1, x2, y2, points_n,
+    );
+    draw_closed_polygon_from_points(ctx, &pts, render);
+}
+
+/// Shared closed-polygon drawing: build a path from `points`, apply
+/// fill/stroke style, and reset dash state if we set one. Shared by
+/// the polygon and star overlay types — they differ only in how
+/// points are computed.
+fn draw_closed_polygon_from_points(
+    ctx: &CanvasRenderingContext2d,
+    points: &[(f64, f64)],
+    render: &serde_json::Value,
+) {
+    if points.is_empty() {
+        return;
+    }
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+
+    let build_path = || {
+        ctx.begin_path();
+        ctx.move_to(points[0].0, points[0].1);
+        for p in &points[1..] {
+            ctx.line_to(p.0, p.1);
+        }
+        ctx.close_path();
+    };
+
+    if let Some(fill) = &style.fill {
+        ctx.set_fill_style_str(fill);
+        build_path();
+        ctx.fill();
+    }
+    if let Some(stroke) = &style.stroke {
+        ctx.set_stroke_style_str(stroke);
+        if let Some(w) = style.stroke_width {
+            ctx.set_line_width(w);
+        }
+        if let Some(dash) = &style.stroke_dasharray {
+            let arr = js_sys::Array::new();
+            for d in dash {
+                arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+            }
+            let _ = ctx.set_line_dash(&arr);
+        }
+        build_path();
+        ctx.stroke();
+        if style.stroke_dasharray.is_some() {
+            let _ = ctx.set_line_dash(&js_sys::Array::new());
+        }
+    }
+}
+
+/// Begin + trace a rounded-rectangle path in the canvas context.
+/// Matches native RoundedRectTool::draw_overlay: max-radius is clamped
+/// to half the shorter side so the arcs don't overlap on small rects.
+fn build_rounded_rect_path(
+    ctx: &CanvasRenderingContext2d,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    rx: f64,
+    ry: f64,
+) {
+    // SVG allows distinct rx / ry; native only uses one radius. Use
+    // the stronger constraint of both for overlap-safe clamping.
+    let r = rx.max(ry).min(w / 2.0).min(h / 2.0).max(0.0);
+    ctx.begin_path();
+    ctx.move_to(x + r, y);
+    ctx.line_to(x + w - r, y);
+    ctx.quadratic_curve_to(x + w, y, x + w, y + r);
+    ctx.line_to(x + w, y + h - r);
+    ctx.quadratic_curve_to(x + w, y + h, x + w - r, y + h);
+    ctx.line_to(x + r, y + h);
+    ctx.quadratic_curve_to(x, y + h, x, y + h - r);
+    ctx.line_to(x, y + r);
+    ctx.quadratic_curve_to(x, y, x + r, y);
+    ctx.close_path();
 }
 
 #[cfg(test)]
@@ -1276,6 +1533,573 @@ mod tests {
             assert_eq!(r.y, 20.0);
             assert_eq!(r.width, 90.0);
             assert_eq!(r.height, 60.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    // ── Pencil tool behavioral tests ───────────────────────────────
+
+    fn pencil_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("pencil")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn pencil_parity_freehand_draw_creates_path() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        for i in 1..=20 {
+            let x = i as f64 * 5.0;
+            let y = (i as f64 * 0.1).sin() * 20.0;
+            tool.on_move(&mut model, x, y, false, false, true);
+        }
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        match &*children[0] {
+            Element::Path(pe) => {
+                assert!(
+                    pe.d.len() >= 2,
+                    "path should have MoveTo + at least one CurveTo",
+                );
+                assert!(matches!(pe.d[0], PathCommand::MoveTo { .. }));
+                for cmd in &pe.d[1..] {
+                    assert!(matches!(cmd, PathCommand::CurveTo { .. }));
+                }
+            }
+            _ => panic!("expected Path element"),
+        }
+    }
+
+    #[test]
+    fn pencil_parity_click_without_drag_creates_degenerate_path() {
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press + release at same point — on_release pushes the final
+        // point, giving the buffer 2 identical points. fit_curve
+        // returns 1 degenerate segment, which still lands a Path.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+        );
+    }
+
+    #[test]
+    fn pencil_parity_path_uses_model_defaults() {
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        if let Element::Path(pe) = &*children[0] {
+            assert!(pe.stroke.is_some(), "pencil path should have a stroke");
+            assert!(pe.fill.is_none(), "pencil path should have no fill");
+        } else {
+            panic!("expected Path element");
+        }
+    }
+
+    #[test]
+    fn pencil_parity_release_without_press_is_noop() {
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn pencil_parity_path_starts_at_press_point() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 15.0, 25.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        if let Element::Path(pe) =
+            &*model.document().layers[0].children().unwrap()[0]
+        {
+            if let PathCommand::MoveTo { x, y } = pe.d[0] {
+                assert_eq!(x, 15.0);
+                assert_eq!(y, 25.0);
+            } else {
+                panic!("first command should be MoveTo");
+            }
+        }
+    }
+
+    // ── Lasso tool behavioral tests ────────────────────────────────
+
+    fn lasso_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("lasso")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn selection_parity_model_for_lasso() -> Model {
+        // Single rect at (50, 50, 20, 20). Matches the fixture the
+        // deleted lasso_tool.rs tests used.
+        model_with_rect_at(50.0, 50.0, 20.0, 20.0)
+    }
+
+    #[test]
+    fn lasso_parity_lasso_select() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        // Polygon enclosing the rect.
+        tool.on_press(&mut model, 40.0, 40.0, false, false);
+        tool.on_move(&mut model, 80.0, 40.0, false, false, true);
+        tool.on_move(&mut model, 80.0, 80.0, false, false, true);
+        tool.on_move(&mut model, 40.0, 80.0, false, false, true);
+        tool.on_release(&mut model, 40.0, 80.0, false, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_lasso_miss() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        // Polygon nowhere near the rect.
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 10.0, 0.0, false, false, true);
+        tool.on_move(&mut model, 10.0, 10.0, false, false, true);
+        tool.on_move(&mut model, 0.0, 10.0, false, false, true);
+        tool.on_release(&mut model, 0.0, 10.0, false, false);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_click_without_drag_clears() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.document().selection.is_empty());
+        // Press + release at same point, no shift — buffer has 1 point,
+        // fewer than 3 → falls into "clear selection" branch.
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_click_without_drag_shift_preserves() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        // Shift+click without drag — shift_held captured at press,
+        // the "clear selection" else-branch is guarded by not
+        // shift_held so nothing happens.
+        tool.on_press(&mut model, 5.0, 5.0, true, false);
+        tool.on_release(&mut model, 5.0, 5.0, true, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn lasso_parity_state_transitions() {
+        let Some(mut tool) = lasso_yaml_tool() else { return };
+        let mut model = selection_parity_model_for_lasso();
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("drawing"));
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+    }
+
+    // ── Interior Selection tool behavioral tests ──────────────────
+    //
+    // The native tool had no unit tests; these check the basic shape
+    // of interior selection — recursing into groups on click, and
+    // partial-style selection on marquee.
+
+    fn interior_selection_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("interior_selection")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    fn model_with_rect_inside_group() -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::{GroupElem, LayerElem};
+        let rect = Element::Rect(RectElem {
+            x: 50.0, y: 50.0, width: 20.0, height: 20.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn interior_selection_parity_click_enters_group() {
+        let Some(mut tool) = interior_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_inside_group();
+        // Click inside the rect (which lives at layer[0]/group[0]/rect[0]).
+        tool.on_press(&mut model, 55.0, 55.0, false, false);
+        tool.on_release(&mut model, 55.0, 55.0, false, false);
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 1);
+        assert_eq!(
+            sel[0].path,
+            vec![0, 0, 0],
+            "interior selection should pick the leaf inside the group",
+        );
+    }
+
+    #[test]
+    fn interior_selection_parity_marquee_selects_partial() {
+        let Some(mut tool) = interior_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_inside_group();
+        tool.on_press(&mut model, 40.0, 40.0, false, false);
+        tool.on_move(&mut model, 80.0, 80.0, false, false, true);
+        tool.on_release(&mut model, 80.0, 80.0, false, false);
+        // partial_select_in_rect produced a selection; entries are
+        // SelectionKind::Partial so even whole-box coverage lists the
+        // element with partial control points.
+        assert!(!model.document().selection.is_empty());
+    }
+
+    // ── Polygon tool behavioral tests ──────────────────────────────
+
+    fn polygon_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("polygon")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn polygon_parity_draw_polygon() {
+        let Some(mut tool) = polygon_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_move(&mut model, 100.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 50.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Polygon(p) = &*children[0] {
+            assert_eq!(p.points.len(), 5);
+        } else {
+            panic!("expected Polygon element");
+        }
+    }
+
+    #[test]
+    fn polygon_parity_short_drag_no_polygon() {
+        let Some(mut tool) = polygon_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    // ── Star tool behavioral tests ─────────────────────────────────
+
+    fn star_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("star")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn star_parity_draw_star() {
+        let Some(mut tool) = star_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 110.0, 120.0, false, false, true);
+        tool.on_release(&mut model, 110.0, 120.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Polygon(p) = &*children[0] {
+            // 5 outer points × 2 (alternating inner/outer) = 10 vertices.
+            assert_eq!(p.points.len(), 10);
+        } else {
+            panic!("expected Polygon element");
+        }
+    }
+
+    #[test]
+    fn star_parity_zero_size_not_created() {
+        let Some(mut tool) = star_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn star_parity_negative_drag_normalizes() {
+        let Some(mut tool) = star_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_move(&mut model, 0.0, 0.0, false, false, true);
+        tool.on_release(&mut model, 0.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Polygon(p) = &*children[0] {
+            assert_eq!(p.points.len(), 10);
+            // First outer point at top-center of the (normalized)
+            // bounding box — center.x = 50, top.y = 0.
+            assert!((p.points[0].0 - 50.0).abs() < 1e-9);
+            assert!((p.points[0].1 - 0.0).abs() < 1e-9);
+        } else {
+            panic!("expected Polygon element");
+        }
+    }
+
+    // ── Line tool behavioral tests ─────────────────────────────────
+
+    fn line_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("line")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn line_parity_draw_line() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 30.0, 40.0, false, false, true);
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Line(line) = &*children[0] {
+            assert_eq!(line.x1, 10.0);
+            assert_eq!(line.y1, 20.0);
+            assert_eq!(line.x2, 50.0);
+            assert_eq!(line.y2, 60.0);
+        } else {
+            panic!("expected Line element");
+        }
+    }
+
+    #[test]
+    fn line_parity_short_line_not_created() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press and release at same point — hypot distance = 0.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn line_parity_idle_after_release() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("drawing"));
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+    }
+
+    #[test]
+    fn line_parity_move_without_press_is_noop() {
+        let Some(mut tool) = line_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // on_mousemove's handler is guarded by `mode == "drawing"`;
+        // without a prior on_mousedown, mode stays "idle" and nothing
+        // happens.
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
+        assert_eq!(tool.tool_state("mode"), &serde_json::json!("idle"));
+    }
+
+    // ── RoundedRect tool behavioral tests ──────────────────────────
+
+    fn rounded_rect_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("rounded_rect")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn rounded_rect_parity_draw_with_radius() {
+        let Some(mut tool) = rounded_rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 110.0, 70.0, false, false, true);
+        tool.on_release(&mut model, 110.0, 70.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 100.0);
+            assert_eq!(r.height, 50.0);
+            assert_eq!(r.rx, 10.0);
+            assert_eq!(r.ry, 10.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn rounded_rect_parity_zero_size_not_created() {
+        let Some(mut tool) = rounded_rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn rounded_rect_parity_negative_drag_normalizes() {
+        let Some(mut tool) = rounded_rect_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 100.0, 80.0, false, false);
+        tool.on_move(&mut model, 10.0, 20.0, false, false, true);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 90.0);
+            assert_eq!(r.height, 60.0);
+            assert_eq!(r.rx, 10.0);
         } else {
             panic!("expected Rect");
         }

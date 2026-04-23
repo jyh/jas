@@ -1,0 +1,115 @@
+# Interior Selection tool.
+#
+# Like Selection, but hit-testing recurses into groups so inside-group
+# leaves can be picked individually. Marquee selects control points
+# (SelectionKind::Partial) rather than whole elements.
+#
+# Shares state-machine shape with selection.yaml:
+#   idle     — nothing happening
+#   marquee  — dragging an empty-space rectangle
+#   drag_move — dragging a selected element (live-edit, no dashed ghost)
+#
+# Validated against schema/tool.schema.json.
+
+id: interior_selection
+cursor: arrow
+menu_label: "Interior Selection Tool"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, marquee, drag_move]
+  marquee_start_x: { default: 0 }
+  marquee_start_y: { default: 0 }
+  marquee_end_x: { default: 0 }
+  marquee_end_y: { default: 0 }
+  drag_start_x: { default: 0 }
+  drag_start_y: { default: 0 }
+  alt_held: { default: false }
+  copied: { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.interior_selection.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.interior_selection.mode: "'idle'" }
+
+  on_mousedown:
+    - let:
+        # hit_test_deep recurses into groups — key difference from
+        # regular Selection's hit_test.
+        hit: "hit_test_deep(event.x, event.y)"
+      in:
+        - if: "hit == null"
+          then:
+            - if: "not event.modifiers.shift"
+              then:
+                - "doc.clear_selection": {}
+            - set: { tool.interior_selection.mode: "'marquee'" }
+            - set: { tool.interior_selection.marquee_start_x: "event.x" }
+            - set: { tool.interior_selection.marquee_start_y: "event.y" }
+            - set: { tool.interior_selection.marquee_end_x: "event.x" }
+            - set: { tool.interior_selection.marquee_end_y: "event.y" }
+          else:
+            - "doc.snapshot": {}
+            - if: "event.modifiers.shift"
+              then:
+                - "doc.toggle_selection": "hit"
+              else:
+                - "doc.set_selection": { paths: [hit] }
+            - set: { tool.interior_selection.mode: "'drag_move'" }
+            - set: { tool.interior_selection.drag_start_x: "event.x" }
+            - set: { tool.interior_selection.drag_start_y: "event.y" }
+            - set: { tool.interior_selection.alt_held: "event.modifiers.alt" }
+            - set: { tool.interior_selection.copied: "false" }
+
+  on_mousemove:
+    - if: "tool.interior_selection.mode == 'marquee'"
+      then:
+        - set: { tool.interior_selection.marquee_end_x: "event.x" }
+        - set: { tool.interior_selection.marquee_end_y: "event.y" }
+    - if: "tool.interior_selection.mode == 'drag_move'"
+      then:
+        - if: "tool.interior_selection.alt_held and not tool.interior_selection.copied"
+          then:
+            - "doc.copy_selection":
+                dx: "event.x - tool.interior_selection.drag_start_x"
+                dy: "event.y - tool.interior_selection.drag_start_y"
+            - set: { tool.interior_selection.copied: "true" }
+          else:
+            - "doc.translate_selection":
+                dx: "event.x - tool.interior_selection.drag_start_x"
+                dy: "event.y - tool.interior_selection.drag_start_y"
+        - set: { tool.interior_selection.drag_start_x: "event.x" }
+        - set: { tool.interior_selection.drag_start_y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.interior_selection.mode == 'marquee'"
+      then:
+        # partial_select_in_rect selects control points rather than
+        # whole elements — this is what makes Interior Selection
+        # "interior."
+        - "doc.partial_select_in_rect":
+            x1: "min(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)"
+            y1: "min(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)"
+            x2: "max(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)"
+            y2: "max(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)"
+            additive: "event.modifiers.shift"
+    - set: { tool.interior_selection.mode: "'idle'" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.interior_selection.mode: "'idle'" }
+
+overlay:
+  if: "tool.interior_selection.mode == 'marquee'"
+  render:
+    type: rect
+    x: "min(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)"
+    y: "min(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)"
+    width: "abs(tool.interior_selection.marquee_end_x - tool.interior_selection.marquee_start_x)"
+    height: "abs(tool.interior_selection.marquee_end_y - tool.interior_selection.marquee_start_y)"
+    style: "stroke: rgba(0,120,215,0.8); stroke-width: 1; fill: rgba(0,120,215,0.1);"

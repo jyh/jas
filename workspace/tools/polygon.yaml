@@ -1,0 +1,79 @@
+# Polygon tool.
+#
+# Press-drag-release creates a regular N-gon whose first edge runs
+# from the mousedown point to the mouseup point. Default sides = 5
+# (matches native POLYGON_SIDES). Drags shorter than 2 pixels
+# (hypot-distance) are rejected to match native short_drag_no_polygon.
+#
+# Shape geometry lives in jas_dioxus/src/geometry/regular_shapes.rs::
+# regular_polygon_points — a native L2 primitive per NATIVE_BOUNDARY.md.
+# The doc.add_element effect's 'polygon' arm calls it with the edge
+# endpoints and `sides`.
+#
+# Validated against schema/tool.schema.json.
+
+id: polygon
+cursor: crosshair
+menu_label: "Polygon Tool"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+  start_x: { default: 0 }
+  start_y: { default: 0 }
+  cur_x: { default: 0 }
+  cur_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.polygon.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.polygon.mode: "'idle'" }
+
+  on_mousedown:
+    - set: { tool.polygon.mode: "'drawing'" }
+    - set: { tool.polygon.start_x: "event.x" }
+    - set: { tool.polygon.start_y: "event.y" }
+    - set: { tool.polygon.cur_x: "event.x" }
+    - set: { tool.polygon.cur_y: "event.y" }
+
+  on_mousemove:
+    - if: "tool.polygon.mode == 'drawing'"
+      then:
+        - set: { tool.polygon.cur_x: "event.x" }
+        - set: { tool.polygon.cur_y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.polygon.mode == 'drawing'"
+      then:
+        - if: "hypot(event.x - tool.polygon.start_x, event.y - tool.polygon.start_y) > 2"
+          then:
+            - "doc.snapshot": {}
+            - "doc.add_element":
+                element:
+                  type: polygon
+                  x1: "tool.polygon.start_x"
+                  y1: "tool.polygon.start_y"
+                  x2: "event.x"
+                  y2: "event.y"
+                  sides: "5"
+    - set: { tool.polygon.mode: "'idle'" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.polygon.mode: "'idle'" }
+
+overlay:
+  if: "tool.polygon.mode == 'drawing'"
+  render:
+    type: polygon
+    x1: "tool.polygon.start_x"
+    y1: "tool.polygon.start_y"
+    x2: "tool.polygon.cur_x"
+    y2: "tool.polygon.cur_y"
+    sides: "5"
+    style: "stroke: rgb(100,100,100); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"

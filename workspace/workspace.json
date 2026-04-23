@@ -15357,6 +15357,818 @@
         ]
       }
     },
+    "interior_selection": {
+      "id": "interior_selection",
+      "cursor": "arrow",
+      "menu_label": "Interior Selection Tool",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "marquee",
+            "drag_move"
+          ]
+        },
+        "marquee_start_x": {
+          "default": 0
+        },
+        "marquee_start_y": {
+          "default": 0
+        },
+        "marquee_end_x": {
+          "default": 0
+        },
+        "marquee_end_y": {
+          "default": 0
+        },
+        "drag_start_x": {
+          "default": 0
+        },
+        "drag_start_y": {
+          "default": 0
+        },
+        "alt_held": {
+          "default": false
+        },
+        "copied": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.interior_selection.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.interior_selection.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "let": {
+              "hit": "hit_test_deep(event.x, event.y)"
+            },
+            "in": [
+              {
+                "if": "hit == null",
+                "then": [
+                  {
+                    "if": "not event.modifiers.shift",
+                    "then": [
+                      {
+                        "doc.clear_selection": {}
+                      }
+                    ]
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.mode": "'marquee'"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.marquee_start_x": "event.x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.marquee_start_y": "event.y"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.marquee_end_x": "event.x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.marquee_end_y": "event.y"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "if": "event.modifiers.shift",
+                    "then": [
+                      {
+                        "doc.toggle_selection": "hit"
+                      }
+                    ],
+                    "else": [
+                      {
+                        "doc.set_selection": {
+                          "paths": [
+                            "hit"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.mode": "'drag_move'"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.drag_start_x": "event.x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.drag_start_y": "event.y"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.alt_held": "event.modifiers.alt"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.copied": "false"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.interior_selection.mode == 'marquee'",
+            "then": [
+              {
+                "set": {
+                  "tool.interior_selection.marquee_end_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.interior_selection.marquee_end_y": "event.y"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.interior_selection.mode == 'drag_move'",
+            "then": [
+              {
+                "if": "tool.interior_selection.alt_held and not tool.interior_selection.copied",
+                "then": [
+                  {
+                    "doc.copy_selection": {
+                      "dx": "event.x - tool.interior_selection.drag_start_x",
+                      "dy": "event.y - tool.interior_selection.drag_start_y"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.copied": "true"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "doc.translate_selection": {
+                      "dx": "event.x - tool.interior_selection.drag_start_x",
+                      "dy": "event.y - tool.interior_selection.drag_start_y"
+                    }
+                  }
+                ]
+              },
+              {
+                "set": {
+                  "tool.interior_selection.drag_start_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.interior_selection.drag_start_y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.interior_selection.mode == 'marquee'",
+            "then": [
+              {
+                "doc.partial_select_in_rect": {
+                  "x1": "min(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)",
+                  "y1": "min(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)",
+                  "x2": "max(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)",
+                  "y2": "max(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)",
+                  "additive": "event.modifiers.shift"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.interior_selection.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.interior_selection.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.interior_selection.mode == 'marquee'",
+        "render": {
+          "type": "rect",
+          "x": "min(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)",
+          "y": "min(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)",
+          "width": "abs(tool.interior_selection.marquee_end_x - tool.interior_selection.marquee_start_x)",
+          "height": "abs(tool.interior_selection.marquee_end_y - tool.interior_selection.marquee_start_y)",
+          "style": "stroke: rgba(0,120,215,0.8); stroke-width: 1; fill: rgba(0,120,215,0.1);"
+        }
+      }
+    },
+    "lasso": {
+      "id": "lasso",
+      "cursor": "crosshair",
+      "menu_label": "Lasso Tool",
+      "shortcut": "Q",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        },
+        "shift_held": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.lasso.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "lasso"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.lasso.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "lasso"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "buffer.clear": {
+              "buffer": "lasso"
+            }
+          },
+          {
+            "buffer.push": {
+              "buffer": "lasso",
+              "x": "event.x",
+              "y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.lasso.shift_held": "event.modifiers.shift"
+            }
+          },
+          {
+            "set": {
+              "tool.lasso.mode": "'drawing'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.lasso.mode == 'drawing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "lasso",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.lasso.mode == 'drawing'",
+            "then": [
+              {
+                "if": "buffer_length('lasso') >= 3",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.select_polygon_from_buffer": {
+                      "buffer": "lasso",
+                      "additive": "tool.lasso.shift_held"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "if": "not tool.lasso.shift_held",
+                    "then": [
+                      {
+                        "doc.clear_selection": {}
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.lasso.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "lasso"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.lasso.mode": "'idle'"
+                }
+              },
+              {
+                "buffer.clear": {
+                  "buffer": "lasso"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.lasso.mode == 'drawing'",
+        "render": {
+          "type": "buffer_polygon",
+          "buffer": "lasso",
+          "style": "stroke: rgba(0,120,215,0.8); stroke-width: 1; fill: rgba(0,120,215,0.1);"
+        }
+      }
+    },
+    "line": {
+      "id": "line",
+      "cursor": "crosshair",
+      "menu_label": "Line Tool",
+      "shortcut": "\\",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        },
+        "start_x": {
+          "default": 0
+        },
+        "start_y": {
+          "default": 0
+        },
+        "cur_x": {
+          "default": 0
+        },
+        "cur_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.line.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.line.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "set": {
+              "tool.line.mode": "'drawing'"
+            }
+          },
+          {
+            "set": {
+              "tool.line.start_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.line.start_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.line.cur_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.line.cur_y": "event.y"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.line.mode == 'drawing'",
+            "then": [
+              {
+                "set": {
+                  "tool.line.cur_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.line.cur_y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.line.mode == 'drawing'",
+            "then": [
+              {
+                "if": "hypot(event.x - tool.line.start_x, event.y - tool.line.start_y) > 2",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.add_element": {
+                      "element": {
+                        "type": "line",
+                        "x1": "tool.line.start_x",
+                        "y1": "tool.line.start_y",
+                        "x2": "event.x",
+                        "y2": "event.y"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.line.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.line.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.line.mode == 'drawing'",
+        "render": {
+          "type": "line",
+          "x1": "tool.line.start_x",
+          "y1": "tool.line.start_y",
+          "x2": "tool.line.cur_x",
+          "y2": "tool.line.cur_y",
+          "style": "stroke: rgba(0,0,0,0.5); stroke-width: 1;"
+        }
+      }
+    },
+    "pencil": {
+      "id": "pencil",
+      "cursor": "crosshair",
+      "menu_label": "Pencil Tool",
+      "shortcut": "N",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.pencil.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.pencil.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          },
+          {
+            "buffer.push": {
+              "buffer": "pencil",
+              "x": "event.x",
+              "y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.pencil.mode": "'drawing'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.pencil.mode == 'drawing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "pencil",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.pencil.mode == 'drawing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "pencil",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              },
+              {
+                "doc.add_path_from_buffer": {
+                  "buffer": "pencil",
+                  "fit_error": "4"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.pencil.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "pencil"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.pencil.mode": "'idle'"
+                }
+              },
+              {
+                "buffer.clear": {
+                  "buffer": "pencil"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.pencil.mode == 'drawing'",
+        "render": {
+          "type": "buffer_polyline",
+          "buffer": "pencil",
+          "style": "stroke: black; stroke-width: 1;"
+        }
+      }
+    },
+    "polygon": {
+      "id": "polygon",
+      "cursor": "crosshair",
+      "menu_label": "Polygon Tool",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        },
+        "start_x": {
+          "default": 0
+        },
+        "start_y": {
+          "default": 0
+        },
+        "cur_x": {
+          "default": 0
+        },
+        "cur_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.polygon.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.polygon.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "set": {
+              "tool.polygon.mode": "'drawing'"
+            }
+          },
+          {
+            "set": {
+              "tool.polygon.start_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.polygon.start_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.polygon.cur_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.polygon.cur_y": "event.y"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.polygon.mode == 'drawing'",
+            "then": [
+              {
+                "set": {
+                  "tool.polygon.cur_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.polygon.cur_y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.polygon.mode == 'drawing'",
+            "then": [
+              {
+                "if": "hypot(event.x - tool.polygon.start_x, event.y - tool.polygon.start_y) > 2",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.add_element": {
+                      "element": {
+                        "type": "polygon",
+                        "x1": "tool.polygon.start_x",
+                        "y1": "tool.polygon.start_y",
+                        "x2": "event.x",
+                        "y2": "event.y",
+                        "sides": "5"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.polygon.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.polygon.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.polygon.mode == 'drawing'",
+        "render": {
+          "type": "polygon",
+          "x1": "tool.polygon.start_x",
+          "y1": "tool.polygon.start_y",
+          "x2": "tool.polygon.cur_x",
+          "y2": "tool.polygon.cur_y",
+          "sides": "5",
+          "style": "stroke: rgb(100,100,100); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
+        }
+      }
+    },
     "rect": {
       "id": "rect",
       "cursor": "crosshair",
@@ -15494,6 +16306,151 @@
           "y": "min(tool.rect.start_y, tool.rect.cur_y)",
           "width": "abs(tool.rect.cur_x - tool.rect.start_x)",
           "height": "abs(tool.rect.cur_y - tool.rect.start_y)",
+          "style": "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
+        }
+      }
+    },
+    "rounded_rect": {
+      "id": "rounded_rect",
+      "cursor": "crosshair",
+      "menu_label": "Rounded Rectangle Tool",
+      "shortcut": "E",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        },
+        "start_x": {
+          "default": 0
+        },
+        "start_y": {
+          "default": 0
+        },
+        "cur_x": {
+          "default": 0
+        },
+        "cur_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.rounded_rect.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.rounded_rect.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "set": {
+              "tool.rounded_rect.mode": "'drawing'"
+            }
+          },
+          {
+            "set": {
+              "tool.rounded_rect.start_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.rounded_rect.start_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.rounded_rect.cur_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.rounded_rect.cur_y": "event.y"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.rounded_rect.mode == 'drawing'",
+            "then": [
+              {
+                "set": {
+                  "tool.rounded_rect.cur_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.rounded_rect.cur_y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.rounded_rect.mode == 'drawing'",
+            "then": [
+              {
+                "if": "abs(event.x - tool.rounded_rect.start_x) > 1 and abs(event.y - tool.rounded_rect.start_y) > 1",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.add_element": {
+                      "element": {
+                        "type": "rect",
+                        "x": "min(tool.rounded_rect.start_x, event.x)",
+                        "y": "min(tool.rounded_rect.start_y, event.y)",
+                        "width": "abs(event.x - tool.rounded_rect.start_x)",
+                        "height": "abs(event.y - tool.rounded_rect.start_y)",
+                        "rx": "10",
+                        "ry": "10"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.rounded_rect.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.rounded_rect.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.rounded_rect.mode == 'drawing'",
+        "render": {
+          "type": "rect",
+          "x": "min(tool.rounded_rect.start_x, tool.rounded_rect.cur_x)",
+          "y": "min(tool.rounded_rect.start_y, tool.rounded_rect.cur_y)",
+          "width": "abs(tool.rounded_rect.cur_x - tool.rounded_rect.start_x)",
+          "height": "abs(tool.rounded_rect.cur_y - tool.rounded_rect.start_y)",
+          "rx": "10",
+          "ry": "10",
           "style": "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
         }
       }
@@ -15745,6 +16702,148 @@
           "width": "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)",
           "height": "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)",
           "style": "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
+        }
+      }
+    },
+    "star": {
+      "id": "star",
+      "cursor": "crosshair",
+      "menu_label": "Star Tool",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        },
+        "start_x": {
+          "default": 0
+        },
+        "start_y": {
+          "default": 0
+        },
+        "cur_x": {
+          "default": 0
+        },
+        "cur_y": {
+          "default": 0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.star.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.star.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "set": {
+              "tool.star.mode": "'drawing'"
+            }
+          },
+          {
+            "set": {
+              "tool.star.start_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.star.start_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.star.cur_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.star.cur_y": "event.y"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.star.mode == 'drawing'",
+            "then": [
+              {
+                "set": {
+                  "tool.star.cur_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.star.cur_y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.star.mode == 'drawing'",
+            "then": [
+              {
+                "if": "abs(event.x - tool.star.start_x) > 1 and abs(event.y - tool.star.start_y) > 1",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.add_element": {
+                      "element": {
+                        "type": "star",
+                        "x1": "tool.star.start_x",
+                        "y1": "tool.star.start_y",
+                        "x2": "event.x",
+                        "y2": "event.y",
+                        "points": "5"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.star.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.star.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.star.mode == 'drawing'",
+        "render": {
+          "type": "star",
+          "x1": "tool.star.start_x",
+          "y1": "tool.star.start_y",
+          "x2": "tool.star.cur_x",
+          "y2": "tool.star.cur_y",
+          "points": "5",
+          "style": "stroke: rgb(100,100,100); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
         }
       }
     }

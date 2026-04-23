@@ -874,6 +874,35 @@ fn eval_func(
             }
         }
 
+        // sqrt(x) -> Number | Null
+        "sqrt" => {
+            if args.len() != 1 {
+                return Value::Null;
+            }
+            match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) if n >= 0.0 => Value::Number(n.sqrt()),
+                _ => Value::Null,
+            }
+        }
+
+        // hypot(dx, dy) -> sqrt(dx*dx + dy*dy). Used by tools that
+        // test a 2D distance threshold (Line's "ignore too-short
+        // drags", Pen's click-vs-drag disambiguation).
+        "hypot" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let dx = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let dy = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            Value::Number(dx.hypot(dy))
+        }
+
         // ── Document-aware primitives ─────────────────────────
         //
         // Available only during a tool dispatch that has registered a
@@ -897,6 +926,24 @@ fn eval_func(
             super::doc_primitives::hit_test(x, y)
         }
 
+        // hit_test_deep(x, y) -> Path | null
+        // Like hit_test but recurses into groups. Used by the
+        // Interior Selection tool to pick inside-group leaves.
+        "hit_test_deep" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let x = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let y = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            super::doc_primitives::hit_test_deep(x, y)
+        }
+
         // selection_contains(path) -> bool
         "selection_contains" => {
             if args.is_empty() {
@@ -908,6 +955,22 @@ fn eval_func(
 
         // selection_empty() -> bool
         "selection_empty" => super::doc_primitives::selection_empty(),
+
+        // buffer_length("<name>") -> number
+        // Count of points currently in the named thread-local buffer.
+        // Lasso uses this for the "polygon must have >= 3 points"
+        // mouseup guard.
+        "buffer_length" => {
+            if args.len() != 1 {
+                return Value::Number(0.0);
+            }
+            let name_val = eval_inner(&args[0], ctx, scope, store_cb);
+            let name = match name_val {
+                Value::Str(s) => s,
+                _ => return Value::Number(0.0),
+            };
+            Value::Number(super::point_buffers::length(&name) as f64)
+        }
 
         // Unknown function
         _ => Value::Null,
