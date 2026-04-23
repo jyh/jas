@@ -35,6 +35,15 @@ state:
   marquee_end_y: { default: 0 }
   drag_start_x: { default: 0 }
   drag_start_y: { default: 0 }
+  # Was Alt held when the drag started? Frozen at mousedown — changes
+  # to the Alt state during the drag are intentionally ignored, so the
+  # first move cleanly decides "copy" vs "translate."
+  alt_held: { default: false }
+  # Has the Alt+drag already produced a copy this drag? The first
+  # mousemove in drag_move with alt_held=true fires doc.copy_selection
+  # (which replaces selection with the new copies); subsequent moves
+  # translate those copies instead of copying again.
+  copied: { default: false }
 
 handlers:
 
@@ -68,6 +77,11 @@ handlers:
             - set: { tool.selection.mode: "'drag_move'" }
             - set: { tool.selection.drag_start_x: "event.x" }
             - set: { tool.selection.drag_start_y: "event.y" }
+            # Capture Alt at press time — if the user releases Alt
+            # partway through the drag, the drag still "copies on
+            # first move" because they started the drag with Alt.
+            - set: { tool.selection.alt_held: "event.modifiers.alt" }
+            - set: { tool.selection.copied: "false" }
 
   on_mousemove:
     - if: "tool.selection.mode == 'marquee'"
@@ -76,9 +90,21 @@ handlers:
         - set: { tool.selection.marquee_end_y: "event.y" }
     - if: "tool.selection.mode == 'drag_move'"
       then:
-        - "doc.translate_selection":
-            dx: "event.x - tool.selection.drag_start_x"
-            dy: "event.y - tool.selection.drag_start_y"
+        # Alt+drag copies the selection on the first move, then
+        # translates the copies on every subsequent move. After the
+        # copy, doc.copy_selection replaces the selection with the
+        # new copies, so translate_selection below moves the copies —
+        # the originals stay put.
+        - if: "tool.selection.alt_held and not tool.selection.copied"
+          then:
+            - "doc.copy_selection":
+                dx: "event.x - tool.selection.drag_start_x"
+                dy: "event.y - tool.selection.drag_start_y"
+            - set: { tool.selection.copied: "true" }
+          else:
+            - "doc.translate_selection":
+                dx: "event.x - tool.selection.drag_start_x"
+                dy: "event.y - tool.selection.drag_start_y"
         - set: { tool.selection.drag_start_x: "event.x" }
         - set: { tool.selection.drag_start_y: "event.y" }
 

@@ -1120,4 +1120,84 @@ mod tests {
             panic!("expected Rect element");
         }
     }
+
+    #[test]
+    fn selection_parity_alt_drag_copies_element() {
+        // Alt+drag: first move produces a copy at the drag offset and
+        // re-selects the copy; subsequent moves translate the copy
+        // further. The original stays where it was. Mirrors the
+        // self.alt_held + copied flag dance in
+        // selection_tool.rs::on_move.
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let children_before =
+            model.document().layers[0].children().unwrap().len();
+        // Press *with alt held*, two moves, release. End deltas are
+        // the same as selection_parity_move_selection (dx=10, dy=10
+        // cumulative), but the YAML handler branches into
+        // doc.copy_selection on the first move because alt_held was
+        // captured at press time.
+        tool.on_press(&mut model, 60.0, 60.0, false, true);
+        tool.on_move(&mut model, 65.0, 65.0, false, true, true);
+        tool.on_move(&mut model, 70.0, 70.0, false, true, true);
+        tool.on_release(&mut model, 70.0, 70.0, false, true);
+
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            children_before + 1,
+            "alt+drag should have inserted exactly one copy",
+        );
+
+        // The original is at index 0, unchanged at (50, 50).
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 50.0, "original x should be unchanged");
+            assert_eq!(r.y, 50.0, "original y should be unchanged");
+        } else {
+            panic!("expected Rect at index 0");
+        }
+
+        // The copy is at index 1, translated to (60, 60) — same end
+        // position as selection_parity_move_selection. The copy
+        // happens at (+5, +5) on the first move, then the second move
+        // translates by (+5, +5) more.
+        if let Element::Rect(r) = &*children[1] {
+            assert_eq!(r.x, 60.0, "copy should be at dx=10 offset");
+            assert_eq!(r.y, 60.0, "copy should be at dy=10 offset");
+        } else {
+            panic!("expected Rect at index 1 (the copy)");
+        }
+
+        // Selection is now the copy, not the original.
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0].path, vec![0, 1]);
+    }
+
+    #[test]
+    fn selection_parity_alt_captured_at_press_not_move() {
+        // If Alt is released between press and first move, the copy
+        // still happens — the native tool captures alt_held on press
+        // and uses it through the drag, ignoring per-move alt state.
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let children_before =
+            model.document().layers[0].children().unwrap().len();
+        // Press with alt held, but first move reports alt=false.
+        tool.on_press(&mut model, 60.0, 60.0, false, true);
+        tool.on_move(&mut model, 65.0, 65.0, false, false, true);
+        tool.on_release(&mut model, 65.0, 65.0, false, false);
+        // A copy should still have been made — alt_held was captured
+        // at press time.
+        let children_after =
+            model.document().layers[0].children().unwrap().len();
+        assert_eq!(
+            children_after,
+            children_before + 1,
+            "drop of Alt mid-drag should not cancel the copy — alt_held \
+             is captured at press time",
+        );
+    }
 }
