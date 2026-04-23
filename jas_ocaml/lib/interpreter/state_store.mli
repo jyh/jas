@@ -28,6 +28,25 @@ val get_active_panel_id : t -> string option
 val get_active_panel_state : t -> (string * Yojson.Safe.t) list
 val destroy_panel : t -> string -> unit
 
+(* ── Tool-scoped state ───────────────────────────────────── *)
+
+(** Seed a tool's state with its declared defaults. Called by
+    [Yaml_tool] when a tool is constructed. *)
+val init_tool : t -> string -> (string * Yojson.Safe.t) list -> unit
+
+val has_tool : t -> string -> bool
+val get_tool : t -> string -> string -> Yojson.Safe.t
+
+(** Write into a tool's scope. Auto-creates the namespace on first
+    write, matching the Rust/Swift set_tool behavior. *)
+val set_tool : t -> string -> string -> Yojson.Safe.t -> unit
+
+val get_tool_state : t -> string -> (string * Yojson.Safe.t) list
+val destroy_tool : t -> string -> unit
+
+(** Inspect every tool scope — useful for tests. *)
+val get_tool_scopes : t -> (string * (string * Yojson.Safe.t) list) list
+
 (** Callback invoked on a panel-state write: (key, new_value). *)
 type panel_subscriber = string -> Yojson.Safe.t -> unit
 
