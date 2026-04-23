@@ -472,3 +472,206 @@ public func lineSegmentIntersectsRect(
     }
     return true
 }
+
+// MARK: - Eraser (findEraserHit + splitPathAtEraser)
+
+/// Where an eraser-stroke rectangle first clips a path's flattened
+/// polyline. Carries both flat-segment indices and the exact entry/exit
+/// points for curve-preserving splitting.
+public struct EraserHit: Equatable {
+    public let firstFlatIdx: Int
+    public let lastFlatIdx: Int
+    public let entryTSeg: Double
+    public let entry: (Double, Double)
+    public let exitTSeg: Double
+    public let exitPt: (Double, Double)
+
+    public static func == (lhs: EraserHit, rhs: EraserHit) -> Bool {
+        lhs.firstFlatIdx == rhs.firstFlatIdx
+            && lhs.lastFlatIdx == rhs.lastFlatIdx
+            && lhs.entryTSeg == rhs.entryTSeg
+            && lhs.entry.0 == rhs.entry.0 && lhs.entry.1 == rhs.entry.1
+            && lhs.exitTSeg == rhs.exitTSeg
+            && lhs.exitPt.0 == rhs.exitPt.0 && lhs.exitPt.1 == rhs.exitPt.1
+    }
+}
+
+/// Walk the flattened polyline `flat` and return the first contiguous
+/// run of segments that intersect the rect `[minX..maxX] × [minY..maxY]`,
+/// plus the exact entry/exit points. Returns nil if no segment intersects.
+public func findEraserHit(
+    _ flat: [(Double, Double)],
+    _ minX: Double, _ minY: Double, _ maxX: Double, _ maxY: Double
+) -> EraserHit? {
+    var firstHit = -1
+    var lastHit = -1
+    for i in 0..<(flat.count - 1) {
+        let (x1, y1) = flat[i]
+        let (x2, y2) = flat[i + 1]
+        if lineSegmentIntersectsRect(x1, y1, x2, y2, minX, minY, maxX, maxY) {
+            if firstHit < 0 { firstHit = i }
+            lastHit = i
+        } else if firstHit >= 0 {
+            break
+        }
+    }
+    guard firstHit >= 0 else { return nil }
+
+    let (ex1, ey1) = flat[firstHit]
+    let (ex2, ey2) = flat[firstHit + 1]
+    let entryTSeg: Double
+    if ex1 >= minX && ex1 <= maxX && ey1 >= minY && ey1 <= maxY {
+        entryTSeg = 0.0
+    } else {
+        entryTSeg = liangBarskyTMin(ex1, ey1, ex2, ey2, minX, minY, maxX, maxY)
+    }
+    let entry = (ex1 + entryTSeg * (ex2 - ex1), ey1 + entryTSeg * (ey2 - ey1))
+
+    let (lx1, ly1) = flat[lastHit]
+    let (lx2, ly2) = flat[lastHit + 1]
+    let exitTSeg: Double
+    if lx2 >= minX && lx2 <= maxX && ly2 >= minY && ly2 <= maxY {
+        exitTSeg = 1.0
+    } else {
+        exitTSeg = liangBarskyTMax(lx1, ly1, lx2, ly2, minX, minY, maxX, maxY)
+    }
+    let exitPt = (lx1 + exitTSeg * (lx2 - lx1), ly1 + exitTSeg * (ly2 - ly1))
+
+    return EraserHit(
+        firstFlatIdx: firstHit, lastFlatIdx: lastHit,
+        entryTSeg: entryTSeg, entry: entry,
+        exitTSeg: exitTSeg, exitPt: exitPt)
+}
+
+/// Map a `(flatIdx, tOnSeg)` pair back to `(commandIdx, t)` on the
+/// original command list. LineTo → 1 segment; CurveTo/QuadTo →
+/// `elementFlattenSteps` segments (matches flattenWithCmdMap).
+public func flatIndexToCmdAndT(
+    _ cmds: [PathCommand], _ flatIdx: Int, _ tOnSeg: Double
+) -> (Int, Double) {
+    var flatCount = 0
+    for cmdIdx in cmds.indices {
+        let segs: Int
+        switch cmds[cmdIdx] {
+        case .moveTo: segs = 0
+        case .lineTo: segs = 1
+        case .curveTo, .quadTo: segs = elementFlattenSteps
+        case .closePath: segs = 1
+        default: segs = 1
+        }
+        if segs > 0 && flatIdx < flatCount + segs {
+            let local = flatIdx - flatCount
+            let t = (Double(local) + tOnSeg) / Double(segs)
+            return (cmdIdx, max(0.0, min(1.0, t)))
+        }
+        flatCount += segs
+    }
+    return (max(0, cmds.count - 1), 1.0)
+}
+
+/// First half of a command split at `t` (LineTo/CurveTo/QuadTo aware).
+/// For segments without a native split representation, falls back to a
+/// LineTo to the interpolated endpoint.
+public func entryCmd(
+    _ cmd: PathCommand, _ start: (Double, Double), _ t: Double
+) -> PathCommand {
+    switch cmd {
+    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+        return splitCubicCmdAt(start, x1, y1, x2, y2, x, y, t).0
+    case .quadTo(let qx, let qy, let x, let y):
+        return splitQuadCmdAt(start, qx, qy, x, y, t).0
+    default:
+        let end = cmdEndpoint(cmd) ?? start
+        return .lineTo(start.0 + t * (end.0 - start.0),
+                       start.1 + t * (end.1 - start.1))
+    }
+}
+
+/// Second half of a command split at `t`.
+public func exitCmd(
+    _ cmd: PathCommand, _ start: (Double, Double), _ t: Double
+) -> PathCommand {
+    switch cmd {
+    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+        return splitCubicCmdAt(start, x1, y1, x2, y2, x, y, t).1
+    case .quadTo(let qx, let qy, let x, let y):
+        return splitQuadCmdAt(start, qx, qy, x, y, t).1
+    default:
+        let end = cmdEndpoint(cmd) ?? start
+        return .lineTo(end.0, end.1)
+    }
+}
+
+/// Cut `cmds` at the eraser hit. Open paths produce 0–2 sub-paths;
+/// closed paths are unwrapped into a single open path running from the
+/// exit point around the non-erased side back to the entry point.
+public func splitPathAtEraser(
+    _ cmds: [PathCommand], _ hit: EraserHit, _ isClosed: Bool
+) -> [[PathCommand]] {
+    let (entryCmdIdx, entryT) = flatIndexToCmdAndT(cmds, hit.firstFlatIdx, hit.entryTSeg)
+    let (exitCmdIdx, exitT) = flatIndexToCmdAndT(cmds, hit.lastFlatIdx, hit.exitTSeg)
+    let starts = cmdStartPoints(cmds)
+
+    if isClosed {
+        let drawingCmds: [(Int, PathCommand)] = cmds.enumerated().compactMap { (i, c) in
+            if case .closePath = c { return nil }
+            return (i, c)
+        }
+        guard !drawingCmds.isEmpty else { return [] }
+        var openCmds: [PathCommand] = []
+        openCmds.append(.moveTo(hit.exitPt.0, hit.exitPt.1))
+        if exitT < 1.0 - 1e-9 {
+            if let (origIdx, cmd) = drawingCmds.first(where: { $0.0 == exitCmdIdx }) {
+                openCmds.append(exitCmd(cmd, starts[origIdx], exitT))
+            }
+        }
+        let resumeFrom = exitCmdIdx + 1
+        for (origIdx, cmd) in drawingCmds {
+            if origIdx >= resumeFrom && origIdx < cmds.count {
+                openCmds.append(cmd)
+            }
+        }
+        if case .moveTo(let mx, let my) = drawingCmds[0].1 {
+            openCmds.append(.lineTo(mx, my))
+        }
+        for (origIdx, cmd) in drawingCmds {
+            if origIdx >= 1 && origIdx < entryCmdIdx {
+                openCmds.append(cmd)
+            }
+        }
+        if entryT > 1e-9 {
+            openCmds.append(entryCmd(cmds[entryCmdIdx], starts[entryCmdIdx], entryT))
+        } else {
+            openCmds.append(.lineTo(hit.entry.0, hit.entry.1))
+        }
+        if openCmds.count >= 2 { return [openCmds] }
+        return []
+    } else {
+        var part1: [PathCommand] = []
+        var part2: [PathCommand] = []
+        for cmd in cmds[..<entryCmdIdx] { part1.append(cmd) }
+        if entryT > 1e-9 {
+            part1.append(entryCmd(cmds[entryCmdIdx], starts[entryCmdIdx], entryT))
+        } else {
+            part1.append(.lineTo(hit.entry.0, hit.entry.1))
+        }
+        part2.append(.moveTo(hit.exitPt.0, hit.exitPt.1))
+        if exitT < 1.0 - 1e-9 {
+            part2.append(exitCmd(cmds[exitCmdIdx], starts[exitCmdIdx], exitT))
+        }
+        if exitCmdIdx + 1 < cmds.count {
+            for cmd in cmds[(exitCmdIdx + 1)...] {
+                if case .closePath = cmd { continue }
+                part2.append(cmd)
+            }
+        }
+        var result: [[PathCommand]] = []
+        let part1HasNonMove = part1.contains {
+            if case .moveTo = $0 { return false }
+            return true
+        }
+        if part1.count >= 2 && part1HasNonMove { result.append(part1) }
+        if part2.count >= 2 { result.append(part2) }
+        return result
+    }
+}
