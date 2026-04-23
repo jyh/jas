@@ -838,6 +838,41 @@ fn eval_func(
             Value::Bool(false)
         }
 
+        // ── Document-aware primitives ─────────────────────────
+        //
+        // Available only during a tool dispatch that has registered a
+        // Document via interpreter::doc_primitives::register_document.
+        // Outside dispatch they degrade to null / false rather than
+        // panicking, mirroring Flask's lenient-mode behavior.
+
+        // hit_test(x, y) -> Path | null
+        "hit_test" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let x = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let y = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            super::doc_primitives::hit_test(x, y)
+        }
+
+        // selection_contains(path) -> bool
+        "selection_contains" => {
+            if args.is_empty() {
+                return Value::Bool(false);
+            }
+            let arg = eval_inner(&args[0], ctx, scope, store_cb);
+            super::doc_primitives::selection_contains(&arg)
+        }
+
+        // selection_empty() -> bool
+        "selection_empty" => super::doc_primitives::selection_empty(),
+
         // Unknown function
         _ => Value::Null,
     }
