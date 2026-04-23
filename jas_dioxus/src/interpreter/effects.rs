@@ -14,8 +14,10 @@ use super::state_store::StateStore;
 use crate::document::controller::Controller;
 use crate::document::document::ElementPath;
 use crate::document::model::Model;
+use crate::algorithms::fit_curve::fit_curve;
 use crate::geometry::element::{
-    Color, CommonProps, Element, Fill, LineElem, PolygonElem, RectElem, Stroke,
+    Color, CommonProps, Element, Fill, LineElem, PathCommand, PathElem,
+    PolygonElem, RectElem, Stroke,
 };
 use crate::geometry::regular_shapes::{regular_polygon_points, star_points};
 
@@ -570,6 +572,72 @@ fn run_doc_effect(
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
                 Controller::select_rect(model, rx, ry, rw, rh, additive);
+            }
+        }
+        "doc.add_path_from_buffer" => {
+            // Runs fit_curve on the named buffer's points and
+            // appends the resulting cubic-Bezier path to the
+            // document. Mirrors PencilTool::finish. Pops only when
+            // the buffer has >= 2 points; otherwise no-ops.
+            //
+            // Fit-error controls smoothing vs fidelity (smaller =
+            // more accurate, more segments). The field `fit_error`
+            // defaults to 4.0 to match native FIT_ERROR.
+            //
+            // fill/stroke spec fields are handled like doc.add_element:
+            // omitted → model defaults; explicit → resolver parses
+            // the Value.
+            if let serde_json::Value::Object(args) = spec {
+                let name = args
+                    .get("buffer")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if name.is_empty() {
+                    return;
+                }
+                let fit_error_val = args.get("fit_error");
+                let fit_error = if fit_error_val.is_some() {
+                    eval_number(fit_error_val, store, ctx)
+                } else {
+                    4.0
+                };
+                let default_fill = model.default_fill;
+                let default_stroke = model.default_stroke;
+                let fill = resolve_fill_field(
+                    args.get("fill"), store, ctx, default_fill);
+                let stroke = resolve_stroke_field(
+                    args.get("stroke"), store, ctx, default_stroke);
+                let points: Vec<(f64, f64)> = super::point_buffers::with_points(
+                    name, |pts| pts.to_vec());
+                if points.len() < 2 {
+                    return;
+                }
+                let segments = fit_curve(&points, fit_error);
+                if segments.is_empty() {
+                    return;
+                }
+                let mut cmds: Vec<PathCommand> = Vec::new();
+                cmds.push(PathCommand::MoveTo {
+                    x: segments[0].0,
+                    y: segments[0].1,
+                });
+                for seg in &segments {
+                    cmds.push(PathCommand::CurveTo {
+                        x1: seg.2, y1: seg.3,
+                        x2: seg.4, y2: seg.5,
+                        x: seg.6, y: seg.7,
+                    });
+                }
+                let elem = Element::Path(PathElem {
+                    d: cmds,
+                    fill,
+                    stroke,
+                    width_points: Vec::new(),
+                    common: CommonProps::default(),
+                    fill_gradient: None,
+                    stroke_gradient: None,
+                });
+                Controller::add_element(model, elem);
             }
         }
         "doc.select_polygon_from_buffer" => {
