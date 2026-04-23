@@ -29,6 +29,39 @@ let value_to_json (v : Expr_eval.value) : Yojson.Safe.t =
     `Assoc [("__path__", `List (List.map (fun i -> `Int i) indices))]
   | Closure _ -> `Null
 
+(** Route a scope-qualified [set:] target to the right [State_store]
+    section. Target shapes (leading [$] stripped):
+      [tool.<id>.<key>[.<more>]]  -> [State_store.set_tool]
+      [panel.<key>]               -> active panel's scope
+      [state.<key>]               -> global state (explicit)
+      [anything_else]             -> global state (bare) *)
+let set_by_scoped_target (store : State_store.t) (raw_target : string)
+    (value : Yojson.Safe.t) : unit =
+  let target =
+    if String.length raw_target > 0 && raw_target.[0] = '$'
+    then String.sub raw_target 1 (String.length raw_target - 1)
+    else raw_target
+  in
+  match String.index_opt target '.' with
+  | None -> State_store.set store target value
+  | Some i ->
+    let head = String.sub target 0 i in
+    let rest = String.sub target (i + 1) (String.length target - i - 1) in
+    match head with
+    | "tool" ->
+      (match String.index_opt rest '.' with
+       | None -> ()  (* tool.<id> without field — malformed, drop *)
+       | Some j ->
+         let tool_id = String.sub rest 0 j in
+         let key = String.sub rest (j + 1) (String.length rest - j - 1) in
+         State_store.set_tool store tool_id key value)
+    | "panel" ->
+      (match State_store.get_active_panel_id store with
+       | Some pid -> State_store.set_panel store pid rest value
+       | None -> ())
+    | "state" -> State_store.set store rest value
+    | _ -> State_store.set store target value
+
 (** Extract default values from a dialog state definition. *)
 let state_defaults (state_defs : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
   match state_defs with
@@ -93,9 +126,21 @@ let rec run_effects_inner
     match eff with
     | `Assoc _ ->
       let mem key = Workspace_loader.json_member key eff in
-      (* let: { name: expr, ... } — PHASE3 §5.1 *)
-      (match mem "let" with
-       | Some (`Assoc pairs) ->
+      (* let: { name: expr, ... } — PHASE3 §5.1
+         Two shapes:
+           Sibling-threading: extends ctx for later siblings.
+           Scoped: `let: {...} in: [...]` runs the nested list
+           with the bindings in scope, then drops them. Matches
+           the form used in workspace/tools/*.yaml (selection etc). *)
+      (match mem "let", mem "in" with
+       | Some (`Assoc pairs), Some (`List in_effects) ->
+         let extended = List.fold_left (fun acc (name, expr) ->
+           let value = eval_expr expr store acc in
+           (name, value_to_json value) :: List.filter (fun (k, _) -> k <> name) acc
+         ) !ctx_ref pairs in
+         run_effects_inner in_effects extended store actions dialogs
+           ~platform_effects ~schema diagnostics
+       | Some (`Assoc pairs), _ ->
          ctx_ref := List.fold_left (fun acc (name, expr) ->
            let value = eval_expr expr store acc in
            (name, value_to_json value) :: List.filter (fun (k, _) -> k <> name) acc
@@ -143,7 +188,14 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     (diagnostics : Schema.diagnostic list ref) : unit =
   let mem key = Workspace_loader.json_member key eff in
 
-  (* set: { key: expr, ... } *)
+  (* set: { key: expr, ... }
+     YAML authors target state scopes via dotted paths with optional
+     [$] prefix: [$tool.selection.mode], [$state.fill_color],
+     [$panel.mode]. The non-schema branch strips [$], then dispatches
+     on the first segment so writes land in the matching store
+     section. Unscoped keys (no leading [state.]/[panel.]/[tool.])
+     continue to write to the global state map — preserves call-site
+     behavior from before the tool-state scope was introduced. *)
   (match mem "set" with
    | Some (`Assoc pairs) ->
      if schema then begin
@@ -156,7 +208,7 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
      end else
        List.iter (fun (key, expr) ->
          let value = eval_expr expr store ctx in
-         State_store.set store key (value_to_json value)
+         set_by_scoped_target store key (value_to_json value)
        ) pairs
    | _ ->
 
@@ -219,8 +271,28 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     State_store.set store key (`Float (current -. by))
   | _ ->
 
-  (* if: { condition, then, else } *)
+  (* if: two supported shapes
+       Flat (tool-YAML authoring convention):
+         if: "<expr>"  then: [...]  else: [...]
+       Nested (legacy actions.yaml):
+         if: { condition: <expr>, then: [...], else: [...] }
+     Both accepted so selection.yaml + action fixtures coexist. *)
   match mem "if" with
+  | Some (`String cond_expr) ->
+    let eval_ctx = State_store.eval_context ~extra:ctx store in
+    let result = Expr_eval.evaluate cond_expr eval_ctx in
+    if Expr_eval.to_bool result then
+      (match mem "then" with
+       | Some (`List then_effects) ->
+         run_effects_inner then_effects ctx store actions dialogs
+           ~platform_effects ~schema diagnostics
+       | _ -> ())
+    else
+      (match mem "else" with
+       | Some (`List else_effects) ->
+         run_effects_inner else_effects ctx store actions dialogs
+           ~platform_effects ~schema diagnostics
+       | _ -> ())
   | Some (`Assoc cond) ->
     let cond_expr = (match List.assoc_opt "condition" cond with Some (`String s) -> s | _ -> "false") in
     let eval_ctx = State_store.eval_context ~extra:ctx store in

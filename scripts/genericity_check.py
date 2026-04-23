@@ -88,6 +88,10 @@ PATTERNS = {
         "tool_files": {
             "kind": "files",
             "glob": "jas_ocaml/lib/tools/*_tool.ml",
+            # yaml_tool.ml is the generic YAML-driven tool runtime —
+            # infrastructure, not per-tool code. Excluding it matches
+            # the yaml_tool.rs / YamlTool.swift exclusions.
+            "exclude_pattern": r"/yaml_tool\.ml$",
         },
         "panel_menu_items": {
             "kind": "regex_count",

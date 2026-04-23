@@ -973,6 +973,127 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Bool false
     end
 
+    (* ── Math primitives ─────────────────────────────────── *)
+
+    else if name = "min" then begin
+      if List.length args < 1 then Null
+      else
+        let vals = List.filter_map (fun a ->
+          match eval_node ~local_env ?store_cb a ctx with
+          | Number n -> Some n | _ -> None) args in
+        match vals with
+        | [] -> Null
+        | hd :: tl -> Number (List.fold_left Float.min hd tl)
+    end
+
+    else if name = "max" then begin
+      if List.length args < 1 then Null
+      else
+        let vals = List.filter_map (fun a ->
+          match eval_node ~local_env ?store_cb a ctx with
+          | Number n -> Some n | _ -> None) args in
+        match vals with
+        | [] -> Null
+        | hd :: tl -> Number (List.fold_left Float.max hd tl)
+    end
+
+    else if name = "abs" then begin
+      if List.length args <> 1 then Null
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | Number n -> Number (Float.abs n)
+        | _ -> Null
+    end
+
+    else if name = "sqrt" then begin
+      if List.length args <> 1 then Null
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | Number n when n >= 0.0 -> Number (Float.sqrt n)
+        | _ -> Null
+    end
+
+    else if name = "hypot" then begin
+      if List.length args <> 2 then Null
+      else
+        let va = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let vb = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match va, vb with
+        | Number a, Number b -> Number (Float.hypot a b)
+        | _ -> Null
+    end
+
+    (* ── Doc-aware primitives ─────────────────────────────── *)
+
+    else if name = "hit_test" then begin
+      if List.length args <> 2 then Null
+      else
+        let vx = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let vy = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match vx, vy with
+        | Number x, Number y ->
+          (match Doc_primitives.hit_test x y with
+           | Some p -> Path p
+           | None -> Null)
+        | _ -> Null
+    end
+
+    else if name = "hit_test_deep" then begin
+      if List.length args <> 2 then Null
+      else
+        let vx = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let vy = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match vx, vy with
+        | Number x, Number y ->
+          (match Doc_primitives.hit_test_deep x y with
+           | Some p -> Path p
+           | None -> Null)
+        | _ -> Null
+    end
+
+    else if name = "selection_contains" then begin
+      if List.length args <> 1 then Bool false
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | Path p -> Bool (Doc_primitives.selection_contains p)
+        | _ -> Bool false
+    end
+
+    else if name = "selection_empty" then begin
+      Bool (Doc_primitives.selection_empty ())
+    end
+
+    (* ── Buffer primitives ────────────────────────────────── *)
+
+    else if name = "buffer_length" then begin
+      if List.length args <> 1 then Number 0.0
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | Str name -> Number (float_of_int (Point_buffers.length name))
+        | _ -> Number 0.0
+    end
+
+    else if name = "anchor_buffer_length" then begin
+      if List.length args <> 1 then Number 0.0
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | Str name -> Number (float_of_int (Anchor_buffers.length name))
+        | _ -> Number 0.0
+    end
+
+    else if name = "anchor_buffer_close_hit" then begin
+      if List.length args <> 4 then Bool false
+      else
+        let vname = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let vx = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        let vy = eval_node ~local_env ?store_cb (List.nth args 2) ctx in
+        let vr = eval_node ~local_env ?store_cb (List.nth args 3) ctx in
+        match vname, vx, vy, vr with
+        | Str name, Number x, Number y, Number r ->
+          Bool (Anchor_buffers.close_hit name x y r)
+        | _ -> Bool false
+    end
+
     (* Unknown function *)
     else Null
   end
