@@ -1268,6 +1268,104 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         }
         return .bool(false)
 
+    // ── Math primitives (Phase 3 of Swift YAML tool runtime) ────
+    case "min", "max":
+        guard !args.isEmpty else { return .null }
+        let fold: (Double, Double) -> Double = (name == "min") ? Swift.min : Swift.max
+        var acc: Double? = nil
+        for a in args {
+            let v = evalNode(a, ctx)
+            guard case .number(let n) = v else { return .null }
+            acc = acc.map { fold($0, n) } ?? n
+        }
+        return .number(acc ?? 0)
+
+    case "abs":
+        guard args.count == 1 else { return .null }
+        let a = evalNode(args[0], ctx)
+        guard case .number(let n) = a else { return .null }
+        return .number(Swift.abs(n))
+
+    case "sqrt":
+        guard args.count == 1 else { return .null }
+        let a = evalNode(args[0], ctx)
+        guard case .number(let n) = a, n >= 0 else { return .null }
+        return .number(n.squareRoot())
+
+    case "hypot":
+        guard args.count == 2 else { return .null }
+        let vx = evalNode(args[0], ctx)
+        let vy = evalNode(args[1], ctx)
+        guard case .number(let dx) = vx, case .number(let dy) = vy else {
+            return .null
+        }
+        return .number((dx * dx + dy * dy).squareRoot())
+
+    // ── Document-aware primitives (Phase 3) ─────────────────────
+    //
+    // Available only during a tool dispatch that has registered a
+    // Document via registerDocument(). Outside dispatch they degrade
+    // to .null / .bool(false).
+
+    case "hit_test":
+        guard args.count == 2 else { return .null }
+        let vx = evalNode(args[0], ctx)
+        let vy = evalNode(args[1], ctx)
+        guard case .number(let x) = vx, case .number(let y) = vy else {
+            return .null
+        }
+        return docHitTest(x, y)
+
+    case "hit_test_deep":
+        guard args.count == 2 else { return .null }
+        let vx = evalNode(args[0], ctx)
+        let vy = evalNode(args[1], ctx)
+        guard case .number(let x) = vx, case .number(let y) = vy else {
+            return .null
+        }
+        return docHitTestDeep(x, y)
+
+    case "selection_contains":
+        guard args.count == 1 else { return .bool(false) }
+        let v = evalNode(args[0], ctx)
+        guard case .path(let p) = v else { return .bool(false) }
+        return docSelectionContains(p)
+
+    case "selection_empty":
+        return docSelectionEmpty()
+
+    // ── Buffer primitives (Phase 3) ─────────────────────────────
+
+    case "buffer_length":
+        guard args.count == 1 else { return .number(0) }
+        let v = evalNode(args[0], ctx)
+        guard case .string(let name) = v else { return .number(0) }
+        return .number(Double(pointBuffersLength(name)))
+
+    case "anchor_buffer_length":
+        guard args.count == 1 else { return .number(0) }
+        let v = evalNode(args[0], ctx)
+        guard case .string(let name) = v else { return .number(0) }
+        return .number(Double(anchorBuffersLength(name)))
+
+    case "anchor_buffer_close_hit":
+        guard args.count == 4 else { return .bool(false) }
+        let vn = evalNode(args[0], ctx)
+        let vx = evalNode(args[1], ctx)
+        let vy = evalNode(args[2], ctx)
+        let vr = evalNode(args[3], ctx)
+        guard case .string(let name) = vn,
+              case .number(let x) = vx,
+              case .number(let y) = vy,
+              case .number(let r) = vr else {
+            return .bool(false)
+        }
+        if anchorBuffersLength(name) < 2 { return .bool(false) }
+        guard let first = anchorBuffersFirst(name) else { return .bool(false) }
+        let dx = x - first.x
+        let dy = y - first.y
+        return .bool((dx * dx + dy * dy).squareRoot() <= r)
+
     // Unknown function
     default:
         return .null

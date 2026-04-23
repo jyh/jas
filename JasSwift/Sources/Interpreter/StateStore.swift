@@ -15,6 +15,15 @@ public class StateStore {
     private var panels: [String: [String: Any]] = [:]
     private var activePanel: String?
 
+    // MARK: - Tool state
+    //
+    // Parallels `panels` but keyed by tool id. YAML tool handlers
+    // read/write via `$tool.<id>.<key>`; the `set` effect routes
+    // those targets here via [`setTool`]. Populated when YamlTool
+    // (Phase 5) constructs with a tool spec and seeds its defaults.
+
+    private var tools: [String: [String: Any]] = [:]
+
     // MARK: - Dialog state
 
     private var dialog: [String: Any] = [:]
@@ -87,6 +96,43 @@ public class StateStore {
         if activePanel == panelId {
             activePanel = nil
         }
+    }
+
+    // MARK: - Tool state
+
+    public func initTool(_ toolId: String, defaults: [String: Any]) {
+        tools[toolId] = defaults
+    }
+
+    public func hasTool(_ toolId: String) -> Bool {
+        tools[toolId] != nil
+    }
+
+    public func getTool(_ toolId: String, _ key: String) -> Any? {
+        tools[toolId]?[key]
+    }
+
+    public func setTool(_ toolId: String, _ key: String, _ value: Any?) {
+        // Create the tool namespace on first write — less friction for
+        // callers that haven't explicitly run initTool. Mirrors the Rust
+        // set_tool behavior.
+        if tools[toolId] == nil {
+            tools[toolId] = [:]
+        }
+        tools[toolId]?[key] = value
+    }
+
+    public func getToolState(_ toolId: String) -> [String: Any] {
+        tools[toolId] ?? [:]
+    }
+
+    public func destroyTool(_ toolId: String) {
+        tools.removeValue(forKey: toolId)
+    }
+
+    /// Return the whole tool scope (for tests / inspection).
+    public func getToolScopes() -> [String: [String: Any]] {
+        tools
     }
 
     // MARK: - Dialog state
@@ -232,6 +278,10 @@ public class StateStore {
         } else {
             ctx["panel"] = [String: Any]()
         }
+
+        // Tool scope — one nested dict per registered tool. Expressions
+        // read as `tool.<id>.<key>`.
+        ctx["tool"] = tools
 
         if dialogId != nil {
             ctx["dialog"] = dialog

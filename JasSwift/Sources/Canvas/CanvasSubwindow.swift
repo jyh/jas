@@ -2025,20 +2025,6 @@ class CanvasNSView: NSView {
         return nil
     }
 
-    // MARK: - Pen tool backward-compatibility
-
-    func penFinish(forceClose: Bool = false) {
-        guard let ctx = toolContext, let penTool = tools[.pen] as? PenTool else { return }
-        penTool.finish(ctx, close: forceClose)
-    }
-
-    func penCancel() {
-        guard let penTool = tools[.pen] as? PenTool else { return }
-        penTool.points.removeAll()
-        penTool.penState = .idle
-        needsDisplay = true
-    }
-
     // MARK: - Event dispatch
 
     override func keyDown(with event: NSEvent) {

@@ -23,10 +23,14 @@ private func layerChildren(_ model: Model) -> [Element] {
     model.document.layers[0].children
 }
 
-// MARK: - Line tool tests
+// MARK: - Line tool tests (YAML-driven per Phase 7.3)
+
+private func lineTool() -> CanvasTool {
+    createTools()[.line]!
+}
 
 @Test func lineToolDrawLine() {
-    let tool = LineTool()
+    let tool = lineTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onMove(ctx, x: 30, y: 40, shift: false, dragging: true)
@@ -43,19 +47,30 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-@Test func lineToolZeroLengthLineStillCreated() {
-    let tool = LineTool()
+@Test func lineToolZeroLengthNotCreated() {
+    // YAML uses hypot > 2 to suppress stray clicks, matching native's
+    // behavior (native DrawingToolBase also guarded on length).
+    let tool = lineTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 1)
+    #expect(layerChildren(model).isEmpty)
 }
 
 // MARK: - Rect tool tests
 
+/// Per Phase 7 of SWIFT_TOOL_RUNTIME.md the Rect tool is now
+/// YAML-driven. These tests run against createTools() so they
+/// exercise the live wiring, matching the Rust rect_parity_* set.
+
+private func rectTool() -> CanvasTool {
+    // The registry handles YAML→native fallback; tests just ask for
+    // the wired-in tool.
+    createTools()[.rect]!
+}
+
 @Test func rectToolDrawRect() {
-    let tool = RectTool()
+    let tool = rectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)
@@ -71,23 +86,19 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-@Test func rectToolZeroSizeRectStillCreated() {
-    let tool = RectTool()
+@Test func rectToolZeroSizeNotCreated() {
+    // YAML behavior: a plain click (release at press) is suppressed
+    // so no invisible shape is deposited. Prior native behavior
+    // was to create a zero-size rect; the YAML policy supersedes.
+    let tool = rectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 1)
-    if case .rect(let r) = children[0] {
-        #expect(r.width == 0)
-        #expect(r.height == 0)
-    } else {
-        Issue.record("Expected Rect element")
-    }
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func rectToolNegativeDragNormalizes() {
-    let tool = RectTool()
+    let tool = rectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 100, y: 80, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
@@ -103,10 +114,17 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-// MARK: - Rounded rect tool tests
+// MARK: - Rounded rect tool tests (YAML-driven per Phase 7.2)
+
+private func roundedRectTool() -> CanvasTool {
+    createTools()[.roundedRect]!
+}
+
+/// rx/ry default the rounded_rect YAML hardcodes.
+private let roundedRectYamlRadius: Double = 10
 
 @Test func roundedRectToolDrawRoundedRect() {
-    let tool = RoundedRectTool()
+    let tool = roundedRectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)
@@ -117,24 +135,23 @@ private func layerChildren(_ model: Model) -> [Element] {
         #expect(r.y == 20)
         #expect(r.width == 100)
         #expect(r.height == 50)
-        #expect(r.rx == roundedRectRadius)
-        #expect(r.ry == roundedRectRadius)
+        #expect(r.rx == roundedRectYamlRadius)
+        #expect(r.ry == roundedRectYamlRadius)
     } else {
         Issue.record("Expected Rect element")
     }
 }
 
 @Test func roundedRectToolZeroSizeNotCreated() {
-    let tool = RoundedRectTool()
+    let tool = roundedRectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func roundedRectToolNegativeDragNormalizes() {
-    let tool = RoundedRectTool()
+    let tool = roundedRectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 100, y: 80, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
@@ -145,40 +162,47 @@ private func layerChildren(_ model: Model) -> [Element] {
         #expect(r.y == 20)
         #expect(r.width == 90)
         #expect(r.height == 60)
-        #expect(r.rx == roundedRectRadius)
-        #expect(r.ry == roundedRectRadius)
+        #expect(r.rx == roundedRectYamlRadius)
+        #expect(r.ry == roundedRectYamlRadius)
     } else {
         Issue.record("Expected Rect element")
     }
 }
 
-// MARK: - Star tool tests
+// MARK: - Star tool tests (YAML-driven per Phase 7.5)
+
+private func starTool() -> CanvasTool {
+    createTools()[.star]!
+}
+
+/// Default outer-vertex count the star YAML commits on mouseup.
+/// Kept local because the constant lives in the YAML spec now.
+private let defaultStarPoints = 5
 
 @Test func starToolDrawStar() {
-    let tool = StarTool()
+    let tool = starTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 120, shift: false, alt: false)
     let children = layerChildren(model)
     #expect(children.count == 1)
     if case .polygon(let p) = children[0] {
-        #expect(p.points.count == 2 * starPoints)
+        #expect(p.points.count == 2 * defaultStarPoints)
     } else {
         Issue.record("Expected Polygon element")
     }
 }
 
 @Test func starToolZeroSizeNotCreated() {
-    let tool = StarTool()
+    let tool = starTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func starToolFirstVertexAtTop() {
-    let tool = StarTool()
+    let tool = starTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     tool.onRelease(ctx, x: 100, y: 100, shift: false, alt: false)
@@ -191,13 +215,17 @@ private func layerChildren(_ model: Model) -> [Element] {
 }
 
 @Test func starToolDefaultPointsIsFive() {
-    #expect(starPoints == 5)
+    #expect(defaultStarPoints == 5)
 }
 
-// MARK: - Polygon tool tests
+// MARK: - Polygon tool tests (YAML-driven per Phase 7.4)
+
+private func polygonTool() -> CanvasTool {
+    createTools()[.polygon]!
+}
 
 @Test func polygonToolDrawPolygon() {
-    let tool = PolygonTool()
+    let tool = polygonTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 50, y: 50, shift: false, alt: false)
     tool.onRelease(ctx, x: 100, y: 50, shift: false, alt: false)
@@ -210,10 +238,14 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-// MARK: - Selection tool tests
+// MARK: - Selection tool tests (YAML-driven per Phase 7.6)
+
+private func selectionTool() -> CanvasTool {
+    createTools()[.selection]!
+}
 
 @Test func selectionToolMarqueeSelect() {
-    let tool = SelectionTool()
+    let tool = selectionTool()
     let rect: Element = .rect(Rect(x: 50, y: 50, width: 20, height: 20,
                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
     let layer = Layer(name: "L", children: [rect])
@@ -221,12 +253,13 @@ private func layerChildren(_ model: Model) -> [Element] {
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
     tool.onPress(ctx, x: 45, y: 45, shift: false, alt: false)
+    tool.onMove(ctx, x: 75, y: 75, shift: false, dragging: true)
     tool.onRelease(ctx, x: 75, y: 75, shift: false, alt: false)
     #expect(!model.document.selection.isEmpty)
 }
 
 @Test func selectionToolMarqueeMiss() {
-    let tool = SelectionTool()
+    let tool = selectionTool()
     let rect: Element = .rect(Rect(x: 50, y: 50, width: 20, height: 20,
                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
     let layer = Layer(name: "L", children: [rect])
@@ -234,30 +267,20 @@ private func layerChildren(_ model: Model) -> [Element] {
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
+    tool.onMove(ctx, x: 10, y: 10, shift: false, dragging: true)
     tool.onRelease(ctx, x: 10, y: 10, shift: false, alt: false)
     #expect(model.document.selection.isEmpty)
 }
 
 @Test func selectionToolMoveSelection() {
-    let tool = SelectionTool()
+    let tool = selectionTool()
     let rect: Element = .rect(Rect(x: 50, y: 50, width: 20, height: 20,
                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
     let layer = Layer(name: "L", children: [rect])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
-    let ctrl = Controller(model: model)
-    ctrl.selectRect(x: 45, y: 45, width: 30, height: 30, extend: false)
-    #expect(!model.document.selection.isEmpty)
-    let ctx = ToolContext(
-        model: model,
-        controller: ctrl,
-        hitTestSelection: { _ in true },
-        hitTestHandle: { _ in nil },
-        hitTestText: { _ in nil },
-        hitTestPathCurve: { _, _ in nil },
-        requestUpdate: {},
-        drawElementOverlay: { _, _, _ in }
-    )
+    let (ctx, _, _) = makeCtx(model: model)
+    // Click on the rect to select it, then drag to move.
     tool.onPress(ctx, x: 60, y: 60, shift: false, alt: false)
     tool.onMove(ctx, x: 70, y: 70, shift: false, dragging: true)
     tool.onRelease(ctx, x: 70, y: 70, shift: false, alt: false)
@@ -270,15 +293,25 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-// MARK: - Add Anchor Point tool tests
+// MARK: - Add Anchor Point tool tests (YAML-driven per Phase 7.11-13)
+//
+// Drag-adjusts-handles, cusp-drag, and Space+drag reposition from the
+// native tool are dropped per the YAML MVP scope — insertion of an
+// anchor on a segment is all that remains. The Anchor Point tool
+// covers corner/smooth toggling for previously-placed anchors.
+
+private func addAnchorPointTool() -> CanvasTool {
+    createTools()[.addAnchorPoint]!
+}
+
+private let aapCurvePathElem: Element = .path(Path(
+    d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+))
 
 @Test func addAnchorPointClickOnPathAddsPoint() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
@@ -298,12 +331,8 @@ private func layerChildren(_ model: Model) -> [Element] {
 }
 
 @Test func addAnchorPointClickAwayDoesNothing() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
@@ -317,12 +346,8 @@ private func layerChildren(_ model: Model) -> [Element] {
 }
 
 @Test func addAnchorPointSplitPreservesEndpoints() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
@@ -344,154 +369,27 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-@Test func addAnchorPointDragAdjustsHandles() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    let doc = Document(layers: [layer])
-    let model = Model(document: doc)
-    let (ctx, _, _) = makeCtx(model: model)
-    // Press at midpoint to split, then drag upward
-    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
-    tool.onMove(ctx, x: 50, y: 20, shift: false, dragging: true)
-    tool.onRelease(ctx, x: 50, y: 20, shift: false, alt: false)
-    if case .path(let p) = layerChildren(model)[0] {
-        #expect(p.d.count == 3)
-        // Outgoing handle (x1, y1 of second CurveTo) at drag position
-        if case .curveTo(let x1, let y1, _, _, _, _) = p.d[2] {
-            #expect(abs(x1 - 50.0) < 0.01)
-            #expect(abs(y1 - 20.0) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-        // Incoming handle (x2, y2 of first CurveTo) mirrored
-        if case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] {
-            #expect(abs(x2 - 50.0) < 0.01)
-            #expect(abs(y2 - (-20.0)) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-    } else {
-        Issue.record("Expected Path element")
-    }
-}
-
-@Test func addAnchorPointCuspDragLeavesIncomingHandle() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    let doc = Document(layers: [layer])
-    let model = Model(document: doc)
-    let (ctx, _, _) = makeCtx(model: model)
-    // Split the curve at midpoint
-    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
-    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
-    if case .path(let p) = layerChildren(model)[0] {
-        #expect(p.d.count == 3)
-        // Record incoming handle before cusp update
-        var inX2 = 0.0, inY2 = 0.0
-        if case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] {
-            inX2 = x2; inY2 = y2
-        }
-        // Apply cusp update directly
-        var cmds = p.d
-        AddAnchorPointTool.updateHandles(&cmds, firstCmdIdx: 1,
-                                          anchorX: 50, anchorY: 0,
-                                          dragX: 50, dragY: 20, cusp: true)
-        // Outgoing handle at drag position
-        if case .curveTo(let x1, let y1, _, _, _, _) = cmds[2] {
-            #expect(abs(x1 - 50.0) < 0.01)
-            #expect(abs(y1 - 20.0) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-        // Incoming handle unchanged (cusp)
-        if case .curveTo(_, _, let x2, let y2, _, _) = cmds[1] {
-            #expect(abs(x2 - inX2) < 0.01)
-            #expect(abs(y2 - inY2) < 0.01)
-        } else { Issue.record("Expected curveTo") }
-    } else {
-        Issue.record("Expected Path element")
-    }
-}
-
-@Test func addAnchorPointInsertUpdatesSelectionIndices() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    // Select the path as a whole.
+@Test func addAnchorPointInsertPreservesSelection() {
+    let tool = addAnchorPointTool()
+    let layer = Layer(name: "L", children: [aapCurvePathElem])
     let sel: Selection = [ElementSelection.all([0, 0])]
     let doc = Document(layers: [layer], selection: sel)
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
-    // Insert at midpoint
     tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
     tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
-    // Path now has 3 anchors
     if case .path(let p) = layerChildren(model)[0] {
         #expect(p.d.count == 3)
     } else {
         Issue.record("Expected Path element")
     }
-    // Selection was `.all` and should remain so — the new anchor is
-    // implicitly included.
     let es = model.document.getElementSelection([0, 0])
     #expect(es != nil)
     #expect(es!.kind == .all)
 }
 
-@Test func addAnchorPointSpaceRepositionsAnchor() {
-    let tool = AddAnchorPointTool()
-    let pathElem: Element = .path(Path(
-        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
-    let layer = Layer(name: "L", children: [pathElem])
-    let doc = Document(layers: [layer])
-    let model = Model(document: doc)
-    let (ctx, _, _) = makeCtx(model: model)
-
-    // Insert point at midpoint
-    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
-
-    // Simulate Space press (keyCode 49), then drag to reposition
-    let spaceKey: UInt16 = 49
-    #expect(tool.onKey(ctx, keyCode: spaceKey) == true)
-    tool.onMove(ctx, x: 60, y: 10, shift: false, dragging: true)
-
-    // Anchor command endpoint should be at (60, 10)
-    if case .path(let p) = layerChildren(model)[0] {
-        if case .curveTo(_, _, _, _, let x, let y) = p.d[1] {
-            #expect(abs(x - 60.0) < 1.0)
-            #expect(abs(y - 10.0) < 1.0)
-        } else { Issue.record("Expected CurveTo") }
-    } else { Issue.record("Expected Path") }
-
-    // Release Space, drag further — should adjust handles, not reposition
-    _ = tool.onKeyUp(ctx, keyCode: spaceKey)
-    tool.onMove(ctx, x: 70, y: 20, shift: false, dragging: true)
-
-    // Anchor should still be near (60, 10)
-    if case .path(let p) = layerChildren(model)[0] {
-        if case .curveTo(_, _, _, _, let x, let y) = p.d[1] {
-            #expect(abs(x - 60.0) < 1.0)
-            #expect(abs(y - 10.0) < 1.0)
-        } else { Issue.record("Expected CurveTo") }
-        // Outgoing handle should reflect the drag
-        if case .curveTo(let x1, let y1, _, _, _, _) = p.d[2] {
-            #expect(abs(x1 - 70.0) < 1.0)
-            #expect(abs(y1 - 20.0) < 1.0)
-        } else { Issue.record("Expected CurveTo") }
-    } else { Issue.record("Expected Path") }
-
-    tool.onRelease(ctx, x: 70, y: 20, shift: false, alt: false)
-}
-
 @Test func addAnchorPointSplitLineSegment() {
-    let tool = AddAnchorPointTool()
+    let tool = addAnchorPointTool()
     let pathElem: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(100, 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
@@ -514,10 +412,14 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
-// MARK: - Pencil tool tests
+// MARK: - Pencil tool tests (YAML-driven per Phase 7.9)
+
+private func pencilTool() -> CanvasTool {
+    createTools()[.pencil]!
+}
 
 @Test func pencilToolFreehandDrawCreatesPath() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     for i in 1...20 {
@@ -540,16 +442,18 @@ private func layerChildren(_ model: Model) -> [Element] {
 }
 
 @Test func pencilToolClickWithoutDragCreatesPath() {
-    let tool = PencilTool()
+    // fit_curve on a 2-point identical-coordinate buffer still emits
+    // one degenerate curveTo; the path exists but is zero-length.
+    // Matches native behavior.
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 1)
+    #expect(layerChildren(model).count == 1)
 }
 
 @Test func pencilToolPathHasStroke() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
@@ -564,23 +468,21 @@ private func layerChildren(_ model: Model) -> [Element] {
 }
 
 @Test func pencilToolReleaseWithoutPressIsNoop() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func pencilToolMoveWithoutPressIsNoop() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func pencilToolPathStartsAtPressPoint() {
-    let tool = PencilTool()
+    let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 15, y: 25, shift: false, alt: false)
     tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
@@ -617,8 +519,12 @@ private func makeClosedPath() -> Element {
                stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
 }
 
+private func pathEraserTool() -> CanvasTool {
+    createTools()[.pathEraser]!
+}
+
 @Test func pathEraserDeletesSmallPath() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let small = makeLinePath(0, 0, 1, 1)
     let layer = Layer(name: "L", children: [small])
     let doc = Document(layers: [layer])
@@ -630,7 +536,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserSplitsOpenPath() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -642,7 +548,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserOpensClosedPath() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeClosedPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -661,7 +567,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserMissDoesNothing() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -673,7 +579,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserReleaseWithoutPressIsNoop() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -684,7 +590,7 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserMoveWithoutPressIsNoop() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path = makeLongPath()
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
@@ -695,14 +601,14 @@ private func makeClosedPath() -> Element {
 }
 
 @Test func pathEraserStateTransitions() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let (ctx, _, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     tool.onRelease(ctx, x: 0, y: 0, shift: false, alt: false)
 }
 
 @Test func pathEraserLockedPathNotErased() {
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let small: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(1, 1)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1),
@@ -720,7 +626,7 @@ private func makeClosedPath() -> Element {
 @Test func pathEraserSplitEndpointsHugEraser() {
     // Horizontal path (0,0)→(100,0)→(200,0).
     // Erase at x=50 with eraserSize=2 => eraser rect x=[48,52].
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(200, 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
@@ -750,7 +656,7 @@ private func makeClosedPath() -> Element {
 
 @Test func pathEraserSplitPreservesCurves() {
     // Cubic curve from (0,0) to (200,0) arching upward.
-    let tool = PathEraserTool()
+    let tool = pathEraserTool()
     let path: Element = .path(Path(
         d: [.moveTo(0, 0), .curveTo(x1: 50, y1: -100, x2: 150, y2: -100, x: 200, y: 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
@@ -981,7 +887,7 @@ private func makeClosedPath() -> Element {
     let m = Model()
     m.defaultFill = Fill(color: Color(r: 1, g: 0, b: 0))
     m.defaultStroke = Stroke(color: Color(r: 0, g: 0, b: 1), width: 3.0)
-    let tool = RectTool()
+    let tool = rectTool()
     let (ctx, _, _) = makeCtx(model: m)
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)

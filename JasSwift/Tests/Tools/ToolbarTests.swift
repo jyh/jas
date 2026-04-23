@@ -121,13 +121,13 @@ import Testing
 
 @Test func canvasToolProtocolHasRequiredMethods() {
     // Verify the protocol exists and has the expected shape
-    // by checking a concrete implementation can be referenced
-    let tool: any CanvasTool = SelectionTool()
-    _ = tool  // Protocol compiles and concrete type conforms
+    // by checking the registry-wired tool conforms.
+    let tool: any CanvasTool = createTools()[.selection]!
+    _ = tool
 }
 
 @Test func selectionToolConformsToCanvasTool() {
-    let tool = SelectionTool()
+    let tool = createTools()[.selection]!
     #expect(tool is CanvasTool)
 }
 
