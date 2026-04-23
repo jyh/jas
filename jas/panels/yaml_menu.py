@@ -7,6 +7,8 @@ and enabled_when conditions.
 
 from __future__ import annotations
 
+import os
+
 from workspace_interpreter.loader import load_workspace
 from workspace_interpreter.expr import evaluate
 
