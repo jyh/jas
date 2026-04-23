@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/app.schema.json",
+  "title": "App",
+  "description": "Top-level workspace app spec — window dimensions, brand, and schema version stamp.",
+  "type": "object",
+  "required": ["app"],
+  "additionalProperties": true,
+  "properties": {
+    "version": {
+      "description": "Compiled-workspace format version (integer, existing field). Distinct from schema_version.",
+      "type": "integer"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of the YAML schema this workspace targets. Validator rejects unknown versions."
+    },
+    "app": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "window": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "width": { "type": "integer" },
+            "height": { "type": "integer" },
+            "min_width": { "type": "integer" },
+            "min_height": { "type": "integer" }
+          }
+        },
+        "brand": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/features.schema.json",
+  "title": "Features",
+  "description": "Runtime feature-capability declarations. Menu items hide_if: against $features.<name>.available so deployments without a feature can omit it from UI.",
+  "type": "object",
+  "required": ["features"],
+  "additionalProperties": true,
+  "properties": {
+    "features": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "oneOf": [
+              { "type": "boolean" },
+              { "type": "string", "description": "Expression evaluating to boolean." }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

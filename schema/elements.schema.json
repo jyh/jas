@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/elements.schema.json",
+  "title": "Elements",
+  "description": "Default fill / stroke / font attributes per element type. Used when new elements are created by tools and no explicit style is provided.",
+  "type": "object",
+  "required": ["elements"],
+  "additionalProperties": true,
+  "properties": {
+    "elements": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fill": { "$ref": "#/$defs/fillOrNull" },
+          "stroke": { "$ref": "#/$defs/strokeOrNull" },
+          "font": { "$ref": "#/$defs/fontOrNull" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fillOrNull": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "Hex color #rrggbb."
+        },
+        {
+          "type": "object",
+          "description": "Structured fill (gradient, pattern, etc.). Left open — framework code interprets."
+        }
+      ]
+    },
+    "strokeOrNull": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+            "width": { "type": "number", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "fontOrNull": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "family": { "type": "string" },
+            "size": { "type": "number", "minimum": 0 },
+            "weight": { "type": "string" },
+            "style": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}
