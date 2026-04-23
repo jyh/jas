@@ -2578,8 +2578,8 @@ actions:
   apply_brush_to_selection:
     description: >
       Apply a brush to every path in the canvas selection.
-      Sets jas:stroke-brush to "<library>/<brush_slug>" on each
-      element; clears any per-element jas:stroke-brush-overrides.
+      Sets stroke_brush to "<library>/<brush_slug>" on each
+      element; clears any per-element stroke_brush_overrides.
       Single-click on a panel tile fires this action plus the
       state.stroke_brush write in one transaction.
     category: brushes
@@ -2587,13 +2587,25 @@ actions:
       library: { type: string }
       brush_slug: { type: string }
     effects:
-      - log: "apply_brush_to_selection (library={{param.library}}, brush={{param.brush_slug}})"
+      - "doc.snapshot": {}
+      - "doc.set_attr_on_selection":
+          attr: "stroke_brush"
+          value: '"{{param.library}}/{{param.brush_slug}}"'
+      - "doc.set_attr_on_selection":
+          attr: "stroke_brush_overrides"
+          value: "null"
 
   remove_brush_from_selection:
     description: >
-      Strip jas:stroke-brush and jas:stroke-brush-overrides from
-      every selected element. The element re-renders with the
-      native stroke pipeline.
+      Strip stroke_brush and stroke_brush_overrides from every
+      selected element. The element re-renders with the native
+      stroke pipeline.
     category: brushes
     effects:
-      - log: "remove_brush_from_selection"
+      - "doc.snapshot": {}
+      - "doc.set_attr_on_selection":
+          attr: "stroke_brush"
+          value: "null"
+      - "doc.set_attr_on_selection":
+          attr: "stroke_brush_overrides"
+          value: "null"

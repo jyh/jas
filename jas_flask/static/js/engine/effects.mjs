@@ -192,6 +192,24 @@ function runEffect(effect, scope, store, options) {
           model.mutate((d) => setElementAttr(d, path, attr, value));
           return;
         }
+        case "doc.set_attr_on_selection": {
+          // Spec: { attr: <name>, value: <expr> }
+          // Apply setElementAttr to every path in the current
+          // selection. No-op when the selection is empty. Used by
+          // bulk panel-driven edits (e.g. apply_brush_to_selection).
+          const attr = String(spec.attr || "");
+          if (!attr) return;
+          const value = toJson(evaluate(String(spec.value ?? "null"), scope));
+          model.mutate((d) => {
+            if (!d.selection || d.selection.length === 0) return d;
+            let next = d;
+            for (const path of d.selection) {
+              next = setElementAttr(next, path, attr, value);
+            }
+            return next;
+          });
+          return;
+        }
         // Other doc.* effects land in subsequent phases.
       }
     }
