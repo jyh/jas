@@ -112,6 +112,44 @@ class TestPanelState:
         assert changes == [("h", 180)]
 
 
+class TestToolState:
+    """Phase 1 of PYTHON_TOOL_RUNTIME.md — tool-scoped state."""
+
+    def test_init_tool_seeds_defaults(self):
+        store = StateStore()
+        store.init_tool("selection", {"mode": "idle", "count": 0})
+        assert store.get_tool("selection", "mode") == "idle"
+        assert store.get_tool("selection", "count") == 0
+
+    def test_set_tool_auto_creates_namespace(self):
+        store = StateStore()
+        store.set_tool("pen", "mode", "drawing")
+        assert store.has_tool("pen")
+        assert store.get_tool("pen", "mode") == "drawing"
+
+    def test_tool_scoping(self):
+        store = StateStore()
+        store.init_tool("rect", {"mode": "idle"})
+        store.init_tool("line", {"mode": "drawing"})
+        assert store.get_tool("rect", "mode") == "idle"
+        assert store.get_tool("line", "mode") == "drawing"
+
+    def test_destroy_tool_removes_scope(self):
+        store = StateStore()
+        store.init_tool("pen", {"mode": "idle"})
+        assert store.has_tool("pen")
+        store.destroy_tool("pen")
+        assert not store.has_tool("pen")
+        assert store.get_tool("pen", "mode") is None
+
+    def test_eval_context_includes_tool_scope(self):
+        store = StateStore()
+        store.init_tool("selection", {"mode": "marquee"})
+        ctx = store.eval_context()
+        assert "tool" in ctx
+        assert ctx["tool"]["selection"]["mode"] == "marquee"
+
+
 class TestContextForEval:
     def test_eval_context(self):
         store = StateStore({"fill_color": "#ff0000"})

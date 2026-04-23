@@ -11,6 +11,39 @@ from workspace_interpreter.expr import evaluate
 from workspace_interpreter.state_store import StateStore
 
 
+def _set_by_scoped_target(store: StateStore, raw_target: str, value) -> None:
+    """Route a scope-qualified ``set:`` target to the right section
+    of the StateStore.
+
+    Target shapes (leading ``$`` stripped):
+        ``tool.<id>.<key>``   -> ``store.set_tool``
+        ``panel.<key>``       -> active panel's scope
+        ``state.<key>``       -> global state (explicit)
+        anything else         -> global state (bare, legacy)
+
+    Matches the Rust/Swift/OCaml set_by_scoped_target dispatchers.
+    """
+    target = raw_target[1:] if raw_target.startswith("$") else raw_target
+    if "." not in target:
+        store.set(target, value)
+        return
+    head, rest = target.split(".", 1)
+    if head == "tool":
+        if "." not in rest:
+            # tool.<id> without field — malformed, drop silently.
+            return
+        tool_id, key = rest.split(".", 1)
+        store.set_tool(tool_id, key, value)
+    elif head == "panel":
+        panel_id = store.get_active_panel_id()
+        if panel_id is not None:
+            store.set_panel(panel_id, rest, value)
+    elif head == "state":
+        store.set(rest, value)
+    else:
+        store.set(target, value)
+
+
 def run_effects(effects: list, ctx: dict, store: StateStore,
                 actions: dict | None = None,
                 platform_effects: dict | None = None,
@@ -598,9 +631,14 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 active_panel=store.get_active_panel_id(),
             )
         else:
+            # YAML authors target state scopes via dotted paths with
+            # optional $ prefix: $tool.selection.mode, $state.fill_color,
+            # $panel.mode. The non-schema branch dispatches through
+            # _set_by_scoped_target. Unscoped keys continue to write
+            # to the global state map (legacy behavior).
             for key, expr in effect["set"].items():
                 value = _eval(expr, store, ctx)
-                store.set(key, value)
+                _set_by_scoped_target(store, key, value)
         return
 
     # toggle: state_key_name
