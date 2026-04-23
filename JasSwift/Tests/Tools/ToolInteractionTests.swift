@@ -109,10 +109,17 @@ private func rectTool() -> CanvasTool {
     }
 }
 
-// MARK: - Rounded rect tool tests
+// MARK: - Rounded rect tool tests (YAML-driven per Phase 7.2)
+
+private func roundedRectTool() -> CanvasTool {
+    createTools()[.roundedRect]!
+}
+
+/// rx/ry default the rounded_rect YAML hardcodes.
+private let roundedRectYamlRadius: Double = 10
 
 @Test func roundedRectToolDrawRoundedRect() {
-    let tool = RoundedRectTool()
+    let tool = roundedRectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)
@@ -123,24 +130,23 @@ private func rectTool() -> CanvasTool {
         #expect(r.y == 20)
         #expect(r.width == 100)
         #expect(r.height == 50)
-        #expect(r.rx == roundedRectRadius)
-        #expect(r.ry == roundedRectRadius)
+        #expect(r.rx == roundedRectYamlRadius)
+        #expect(r.ry == roundedRectYamlRadius)
     } else {
         Issue.record("Expected Rect element")
     }
 }
 
 @Test func roundedRectToolZeroSizeNotCreated() {
-    let tool = RoundedRectTool()
+    let tool = roundedRectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
-    let children = layerChildren(model)
-    #expect(children.count == 0)
+    #expect(layerChildren(model).isEmpty)
 }
 
 @Test func roundedRectToolNegativeDragNormalizes() {
-    let tool = RoundedRectTool()
+    let tool = roundedRectTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 100, y: 80, shift: false, alt: false)
     tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
@@ -151,8 +157,8 @@ private func rectTool() -> CanvasTool {
         #expect(r.y == 20)
         #expect(r.width == 90)
         #expect(r.height == 60)
-        #expect(r.rx == roundedRectRadius)
-        #expect(r.ry == roundedRectRadius)
+        #expect(r.rx == roundedRectYamlRadius)
+        #expect(r.ry == roundedRectYamlRadius)
     } else {
         Issue.record("Expected Rect element")
     }

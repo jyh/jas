@@ -132,7 +132,8 @@ func createTools() -> [Tool: CanvasTool] {
     // Tools migrated to YAML per SWIFT_TOOL_RUNTIME.md Phase 7.
     // Require the workspace to load — a missing workspace.json means
     // the whole app is non-functional anyway.
-    guard let rectTool = loadYamlTool("rect") else {
+    guard let rectTool = loadYamlTool("rect"),
+          let roundedRectTool = loadYamlTool("rounded_rect") else {
         fatalError("workspace/workspace.json missing or malformed — cannot load YAML tools")
     }
     return [
@@ -150,7 +151,7 @@ func createTools() -> [Tool: CanvasTool] {
         .typeOnPath: TypeOnPathTool(),
         .line: LineTool(),
         .rect: rectTool,
-        .roundedRect: RoundedRectTool(),
+        .roundedRect: roundedRectTool,
         .polygon: PolygonTool(),
         .star: StarTool(),
         .lasso: LassoTool(),
