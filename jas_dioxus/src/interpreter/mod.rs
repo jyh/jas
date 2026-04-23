@@ -13,6 +13,7 @@ pub mod expr;
 pub mod state_store;
 pub mod effects;
 pub mod doc_primitives;
+pub mod point_buffers;
 pub mod schema;
 pub mod scope;
 pub mod workspace;

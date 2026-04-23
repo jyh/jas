@@ -1,0 +1,80 @@
+# Star tool.
+#
+# Press-drag-release creates a star inscribed in the axis-aligned
+# bounding box between the press point and the release point.
+# Default outer-vertex count is 5 (matches native STAR_POINTS);
+# inner-to-outer radius ratio is fixed at 0.4 (STAR_INNER_RATIO).
+# Drags smaller than 1 pixel in either dimension are rejected to
+# match native zero_size_not_created.
+#
+# Shape geometry lives in jas_dioxus/src/geometry/regular_shapes.rs::
+# star_points. The doc.add_element effect's 'star' arm calls it with
+# the bounding box corners and outer-vertex count.
+#
+# Validated against schema/tool.schema.json.
+
+id: star
+cursor: crosshair
+menu_label: "Star Tool"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+  start_x: { default: 0 }
+  start_y: { default: 0 }
+  cur_x: { default: 0 }
+  cur_y: { default: 0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.star.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.star.mode: "'idle'" }
+
+  on_mousedown:
+    - set: { tool.star.mode: "'drawing'" }
+    - set: { tool.star.start_x: "event.x" }
+    - set: { tool.star.start_y: "event.y" }
+    - set: { tool.star.cur_x: "event.x" }
+    - set: { tool.star.cur_y: "event.y" }
+
+  on_mousemove:
+    - if: "tool.star.mode == 'drawing'"
+      then:
+        - set: { tool.star.cur_x: "event.x" }
+        - set: { tool.star.cur_y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.star.mode == 'drawing'"
+      then:
+        - if: "abs(event.x - tool.star.start_x) > 1 and abs(event.y - tool.star.start_y) > 1"
+          then:
+            - "doc.snapshot": {}
+            - "doc.add_element":
+                element:
+                  type: star
+                  x1: "tool.star.start_x"
+                  y1: "tool.star.start_y"
+                  x2: "event.x"
+                  y2: "event.y"
+                  points: "5"
+    - set: { tool.star.mode: "'idle'" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.star.mode: "'idle'" }
+
+overlay:
+  if: "tool.star.mode == 'drawing'"
+  render:
+    type: star
+    x1: "tool.star.start_x"
+    y1: "tool.star.start_y"
+    x2: "tool.star.cur_x"
+    y2: "tool.star.cur_y"
+    points: "5"
+    style: "stroke: rgb(100,100,100); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"

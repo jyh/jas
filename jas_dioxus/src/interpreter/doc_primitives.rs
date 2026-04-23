@@ -67,6 +67,11 @@ where
 /// `hit_test(x, y)` → `Path | null`. Returns the path of the topmost
 /// unlocked, visible element whose bounding box contains the point.
 /// Matches `hitTestImpl` in `jas_flask/static/js/engine/geometry.mjs`.
+///
+/// This is the "flat" variant — stops at direct layer children without
+/// recursing into groups. Selection tool uses it because it wants to
+/// select whole groups on click. For the per-element-through-groups
+/// behavior (used by InteriorSelection), see [`hit_test_deep`].
 pub fn hit_test(x: f64, y: f64) -> Value {
     with_doc(Value::Null, |doc| {
         use crate::geometry::element::Visibility;
@@ -88,6 +93,74 @@ pub fn hit_test(x: f64, y: f64) -> Value {
                     let (bx, by, bw, bh) = child.bounds();
                     if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
                         return Value::Path(vec![li, ci]);
+                    }
+                }
+            }
+        }
+        Value::Null
+    })
+}
+
+/// `hit_test_deep(x, y)` → `Path | null`. Recurses into groups so the
+/// returned path points at the deepest leaf element under the cursor.
+/// Matches `hit_recursive` in the deleted
+/// `jas_dioxus/src/tools/interior_selection_tool.rs`.
+pub fn hit_test_deep(x: f64, y: f64) -> Value {
+    use crate::geometry::element::{Element, Visibility};
+    fn recurse(
+        elem: &Element,
+        path: Vec<usize>,
+        ancestor_vis: Visibility,
+        x: f64,
+        y: f64,
+    ) -> Option<Vec<usize>> {
+        let effective = std::cmp::min(ancestor_vis, elem.visibility());
+        if effective == Visibility::Invisible {
+            return None;
+        }
+        if elem.is_group_or_layer() {
+            if let Some(children) = elem.children() {
+                for (i, child) in children.iter().enumerate().rev() {
+                    if child.locked() {
+                        continue;
+                    }
+                    let mut child_path = path.clone();
+                    child_path.push(i);
+                    if let Some(result) =
+                        recurse(child, child_path, effective, x, y)
+                    {
+                        return Some(result);
+                    }
+                }
+            }
+            return None;
+        }
+        let (bx, by, bw, bh) = elem.bounds();
+        if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
+            Some(path)
+        } else {
+            None
+        }
+    }
+    with_doc(Value::Null, |doc| {
+        for (li, layer) in doc.layers.iter().enumerate() {
+            let layer_vis = layer.visibility();
+            if layer_vis == Visibility::Invisible {
+                continue;
+            }
+            if let Some(children) = layer.children() {
+                for (ci, child) in children.iter().enumerate().rev() {
+                    if child.locked() {
+                        continue;
+                    }
+                    let child_vis = std::cmp::min(layer_vis, child.visibility());
+                    if child_vis == Visibility::Invisible {
+                        continue;
+                    }
+                    if let Some(path) =
+                        recurse(child, vec![li, ci], child_vis, x, y)
+                    {
+                        return Value::Path(path);
                     }
                 }
             }
