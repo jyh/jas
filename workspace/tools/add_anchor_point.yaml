@@ -1,0 +1,29 @@
+# Add Anchor Point tool.
+#
+# Click on a path segment to insert a new anchor at the projected
+# point. The geometry kernels (split_cubic / closest_segment_and_t
+# / insert_point_in_path) live in geometry/path_ops.rs (L2 per
+# NATIVE_BOUNDARY.md §5). doc.path.insert_anchor_on_segment_near
+# walks all unlocked Path elements, picks the closest segment
+# across the document, and does the split iff the distance is
+# within hit_radius.
+#
+# MVP scope: click-to-insert only. Native also supported
+# Alt+click-to-toggle (covered by the Anchor Point tool now) and
+# Space+drag reposition (dropped — users can Undo + re-add if the
+# insert wasn't where they wanted).
+#
+# Validated against schema/tool.schema.json.
+
+id: add_anchor_point
+cursor: crosshair
+menu_label: "Add Anchor Point Tool"
+shortcut: "="
+
+handlers:
+
+  on_mousedown:
+    - "doc.path.insert_anchor_on_segment_near":
+        x: "event.x"
+        y: "event.y"
+        hit_radius: "8"

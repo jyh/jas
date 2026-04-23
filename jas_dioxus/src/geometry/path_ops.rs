@@ -12,6 +12,257 @@
 
 use crate::geometry::element::PathCommand;
 
+/// Linear interpolation — helper used by split_cubic /
+/// insert_point_in_path.
+pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + t * (b - a)
+}
+
+/// Evaluate a cubic Bezier at parameter `t ∈ [0, 1]`. Returns the
+/// (x, y) point on the curve.
+pub fn eval_cubic(
+    x0: f64, y0: f64,
+    x1: f64, y1: f64,
+    x2: f64, y2: f64,
+    x3: f64, y3: f64,
+    t: f64,
+) -> (f64, f64) {
+    let mt = 1.0 - t;
+    let x = mt.powi(3) * x0
+        + 3.0 * mt.powi(2) * t * x1
+        + 3.0 * mt * t.powi(2) * x2
+        + t.powi(3) * x3;
+    let y = mt.powi(3) * y0
+        + 3.0 * mt.powi(2) * t * y1
+        + 3.0 * mt * t.powi(2) * y2
+        + t.powi(3) * y3;
+    (x, y)
+}
+
+/// Closest-point projection onto a line segment from (x0, y0) to
+/// (x1, y1). Returns (distance, t) where t is clamped to [0, 1].
+pub fn closest_on_line(
+    x0: f64, y0: f64, x1: f64, y1: f64, px: f64, py: f64,
+) -> (f64, f64) {
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let len_sq = dx * dx + dy * dy;
+    if len_sq == 0.0 {
+        let d = (px - x0).hypot(py - y0);
+        return (d, 0.0);
+    }
+    let t = ((px - x0) * dx + (py - y0) * dy) / len_sq;
+    let t = t.clamp(0.0, 1.0);
+    let qx = x0 + t * dx;
+    let qy = y0 + t * dy;
+    let d = (px - qx).hypot(py - qy);
+    (d, t)
+}
+
+/// Closest-point projection onto a cubic Bezier. Returns
+/// (distance, t). Uses a coarse 50-sample pass followed by a
+/// trisection refinement over ~20 iterations — sufficient accuracy
+/// for interactive-hit-test purposes (native-equivalent).
+pub fn closest_on_cubic(
+    x0: f64, y0: f64,
+    x1: f64, y1: f64,
+    x2: f64, y2: f64,
+    x3: f64, y3: f64,
+    px: f64, py: f64,
+) -> (f64, f64) {
+    let steps = 50;
+    let mut best_dist = f64::INFINITY;
+    let mut best_t = 0.0;
+    for i in 0..=steps {
+        let t = i as f64 / steps as f64;
+        let (bx, by) = eval_cubic(x0, y0, x1, y1, x2, y2, x3, y3, t);
+        let d = (px - bx).hypot(py - by);
+        if d < best_dist {
+            best_dist = d;
+            best_t = t;
+        }
+    }
+    let mut lo = (best_t - 1.0 / steps as f64).max(0.0);
+    let mut hi = (best_t + 1.0 / steps as f64).min(1.0);
+    for _ in 0..20 {
+        let t1 = lo + (hi - lo) / 3.0;
+        let t2 = hi - (hi - lo) / 3.0;
+        let (bx1, by1) = eval_cubic(x0, y0, x1, y1, x2, y2, x3, y3, t1);
+        let (bx2, by2) = eval_cubic(x0, y0, x1, y1, x2, y2, x3, y3, t2);
+        let d1 = (px - bx1).hypot(py - by1);
+        let d2 = (px - bx2).hypot(py - by2);
+        if d1 < d2 {
+            hi = t2;
+        } else {
+            lo = t1;
+        }
+    }
+    best_t = (lo + hi) / 2.0;
+    let (bx, by) = eval_cubic(x0, y0, x1, y1, x2, y2, x3, y3, best_t);
+    best_dist = (px - bx).hypot(py - by);
+    (best_dist, best_t)
+}
+
+/// Split a cubic Bezier at parameter `t`. Returns the two half-cubics
+/// as `((a1x, a1y, b1x, b1y, mx, my), (b2x, b2y, a3x, a3y, endX, endY))`
+/// — control handles of the first half, then control handles and
+/// endpoint of the second half. Start point P0 is implicit.
+pub fn split_cubic(
+    x0: f64, y0: f64,
+    x1: f64, y1: f64,
+    x2: f64, y2: f64,
+    x3: f64, y3: f64,
+    t: f64,
+) -> (
+    (f64, f64, f64, f64, f64, f64),
+    (f64, f64, f64, f64, f64, f64),
+) {
+    let a1x = lerp(x0, x1, t);
+    let a1y = lerp(y0, y1, t);
+    let a2x = lerp(x1, x2, t);
+    let a2y = lerp(y1, y2, t);
+    let a3x = lerp(x2, x3, t);
+    let a3y = lerp(y2, y3, t);
+    let b1x = lerp(a1x, a2x, t);
+    let b1y = lerp(a1y, a2y, t);
+    let b2x = lerp(a2x, a3x, t);
+    let b2y = lerp(a2y, a3y, t);
+    let mx = lerp(b1x, b2x, t);
+    let my = lerp(b1y, b2y, t);
+    (
+        (a1x, a1y, b1x, b1y, mx, my),
+        (b2x, b2y, a3x, a3y, x3, y3),
+    )
+}
+
+/// Find which path segment `(px, py)` is closest to, and the
+/// parameter `t` on that segment. Returns `(command_index, t)` — the
+/// index refers to the command list position of the LineTo / CurveTo
+/// that owns the segment.
+pub fn closest_segment_and_t(
+    d: &[PathCommand], px: f64, py: f64,
+) -> Option<(usize, f64)> {
+    let mut best_dist = f64::INFINITY;
+    let mut best_seg: usize = 0;
+    let mut best_t: f64 = 0.0;
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+    for (i, cmd) in d.iter().enumerate() {
+        match cmd {
+            PathCommand::MoveTo { x, y } => {
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::LineTo { x, y } => {
+                let (dist, t) = closest_on_line(cx, cy, *x, *y, px, py);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_seg = i;
+                    best_t = t;
+                }
+                cx = *x;
+                cy = *y;
+            }
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                let (dist, t) = closest_on_cubic(
+                    cx, cy, *x1, *y1, *x2, *y2, *x, *y, px, py);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_seg = i;
+                    best_t = t;
+                }
+                cx = *x;
+                cy = *y;
+            }
+            _ => {}
+        }
+    }
+    if best_dist.is_finite() {
+        Some((best_seg, best_t))
+    } else {
+        None
+    }
+}
+
+/// Result of [`insert_point_in_path`] — the new command list, the
+/// command index of the first half of the split, and the new anchor
+/// position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsertAnchorResult {
+    pub commands: Vec<PathCommand>,
+    pub first_new_idx: usize,
+    pub anchor_x: f64,
+    pub anchor_y: f64,
+}
+
+/// Insert an anchor at parameter `t` along the segment at
+/// `seg_idx`. Returns the new command list plus metadata. For a
+/// LineTo segment, inserts a LineTo + LineTo (splits at lerp). For
+/// a CurveTo, uses `split_cubic` to produce two CurveTos that match
+/// the original curve shape, splitting at `t`.
+pub fn insert_point_in_path(
+    d: &[PathCommand], seg_idx: usize, t: f64,
+) -> InsertAnchorResult {
+    let mut result = Vec::new();
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+    let mut first_new_idx = 0;
+    let mut anchor_x = 0.0;
+    let mut anchor_y = 0.0;
+    for (i, cmd) in d.iter().enumerate() {
+        if i == seg_idx {
+            match cmd {
+                PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                    let (
+                        (a1x, a1y, b1x, b1y, mx, my),
+                        (b2x, b2y, a3x, a3y, ex, ey),
+                    ) = split_cubic(cx, cy, *x1, *y1, *x2, *y2, *x, *y, t);
+                    first_new_idx = result.len();
+                    anchor_x = mx;
+                    anchor_y = my;
+                    result.push(PathCommand::CurveTo {
+                        x1: a1x, y1: a1y, x2: b1x, y2: b1y,
+                        x: mx, y: my,
+                    });
+                    result.push(PathCommand::CurveTo {
+                        x1: b2x, y1: b2y, x2: a3x, y2: a3y,
+                        x: ex, y: ey,
+                    });
+                    cx = *x;
+                    cy = *y;
+                    continue;
+                }
+                PathCommand::LineTo { x, y } => {
+                    let mx = lerp(cx, *x, t);
+                    let my = lerp(cy, *y, t);
+                    first_new_idx = result.len();
+                    anchor_x = mx;
+                    anchor_y = my;
+                    result.push(PathCommand::LineTo { x: mx, y: my });
+                    result.push(PathCommand::LineTo { x: *x, y: *y });
+                    cx = *x;
+                    cy = *y;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        match cmd {
+            PathCommand::MoveTo { x, y } => { cx = *x; cy = *y; }
+            PathCommand::LineTo { x, y }
+            | PathCommand::CurveTo { x, y, .. } => { cx = *x; cy = *y; }
+            _ => {}
+        }
+        result.push(*cmd);
+    }
+    InsertAnchorResult {
+        commands: result,
+        first_new_idx,
+        anchor_x,
+        anchor_y,
+    }
+}
+
 /// Delete the anchor at `anchor_idx` from `d`. Returns `None` if the
 /// result would have < 2 anchors (caller should remove the element
 /// entirely).

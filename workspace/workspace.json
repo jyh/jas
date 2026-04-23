@@ -15233,6 +15233,23 @@
     }
   },
   "tools": {
+    "add_anchor_point": {
+      "id": "add_anchor_point",
+      "cursor": "crosshair",
+      "menu_label": "Add Anchor Point Tool",
+      "shortcut": "=",
+      "handlers": {
+        "on_mousedown": [
+          {
+            "doc.path.insert_anchor_on_segment_near": {
+              "x": "event.x",
+              "y": "event.y",
+              "hit_radius": "8"
+            }
+          }
+        ]
+      }
+    },
     "anchor_point": {
       "id": "anchor_point",
       "cursor": "crosshair",
