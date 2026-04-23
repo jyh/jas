@@ -26,7 +26,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python scripts/genericity_check.py
+      - name: Self-test the lint script
+        run: python scripts/genericity_check_test.py
+      - name: Run the lint
+        run: python scripts/genericity_check.py
 
   rust:
     name: Rust tests
