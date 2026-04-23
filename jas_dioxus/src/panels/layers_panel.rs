@@ -114,6 +114,7 @@ mod tests {
                 1.0,
             )),
             swatch_libraries: serde_json::json!({}),
+            brush_libraries: serde_json::json!({}),
             stroke_panel: StrokePanelState::default(),
             gradient_panel: crate::workspace::app_state::GradientPanelState::default(),
             character_panel: crate::workspace::app_state::CharacterPanelState::default(),
