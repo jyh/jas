@@ -8,11 +8,17 @@ use std::collections::HashMap;
 use serde_json;
 use super::expr_types::Value;
 
-/// Reactive state store for global, panel-scoped, and dialog-scoped state.
+/// Reactive state store for global, panel-scoped, tool-scoped, and
+/// dialog-scoped state. Mirrors `jas_flask/static/js/engine/store.mjs`
+/// except for reactivity (handled by Dioxus signals at the UI layer).
 pub struct StateStore {
     state: HashMap<String, serde_json::Value>,
     panels: HashMap<String, HashMap<String, serde_json::Value>>,
     active_panel: Option<String>,
+    /// Per-tool local state. YAML handlers read/write via `$tool.<id>.<key>`
+    /// paths; the `set` effect routes prefixed targets here via
+    /// [`StateStore::set_tool`].
+    tools: HashMap<String, HashMap<String, serde_json::Value>>,
     dialog: Option<HashMap<String, serde_json::Value>>,
     dialog_id: Option<String>,
     dialog_params: Option<HashMap<String, serde_json::Value>>,
@@ -28,6 +34,7 @@ impl StateStore {
             state: HashMap::new(),
             panels: HashMap::new(),
             active_panel: None,
+            tools: HashMap::new(),
             dialog: None,
             dialog_id: None,
             dialog_params: None,
@@ -163,6 +170,48 @@ impl StateStore {
         }
     }
 
+    // ── Tool state ───────────────────────────────────────
+    //
+    // Parallels `panel` scope but keyed by tool id (e.g. "selection").
+    // YAML tool handlers write to `$tool.<id>.<key>`; the `set` effect
+    // routes those targets here via [`set_tool`], and `eval_context`
+    // exposes them under the `tool` key so expressions like
+    // `$tool.selection.mode == "marquee"` resolve.
+
+    /// Seed a tool's state namespace with `defaults` — typically the
+    /// initial values declared in the tool's YAML `state:` block. Call
+    /// once when a tool is registered.
+    pub fn init_tool(&mut self, tool_id: &str, defaults: HashMap<String, serde_json::Value>) {
+        self.tools.insert(tool_id.to_string(), defaults);
+    }
+
+    pub fn get_tool(&self, tool_id: &str, key: &str) -> &serde_json::Value {
+        self.tools
+            .get(tool_id)
+            .and_then(|t| t.get(key))
+            .unwrap_or(&serde_json::Value::Null)
+    }
+
+    pub fn set_tool(&mut self, tool_id: &str, key: &str, value: serde_json::Value) {
+        // Create the tool namespace on first write — less friction for
+        // callers that haven't explicitly run init_tool. Mirrors Flask
+        // which auto-creates intermediates on dotted-path set().
+        self.tools
+            .entry(tool_id.to_string())
+            .or_default()
+            .insert(key.to_string(), value);
+    }
+
+    pub fn destroy_tool(&mut self, tool_id: &str) {
+        self.tools.remove(tool_id);
+    }
+
+    /// Return the whole tool scope (for tests / inspection). The returned
+    /// map is keyed by tool id; inner maps are key → value.
+    pub fn tool_scopes(&self) -> &HashMap<String, HashMap<String, serde_json::Value>> {
+        &self.tools
+    }
+
     // ── List operations ──────────────────────────────────
 
     pub fn list_push(
@@ -216,6 +265,21 @@ impl StateStore {
             serde_json::Value::Object(serde_json::Map::new())
         };
         ctx.insert("panel".to_string(), panel_state);
+
+        // Tool state — one nested object per registered tool. Expressions
+        // read this as `tool.<id>.<key>`.
+        let tool_obj: serde_json::Map<String, serde_json::Value> = self
+            .tools
+            .iter()
+            .map(|(tid, scope)| {
+                let inner: serde_json::Map<String, serde_json::Value> = scope
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                (tid.clone(), serde_json::Value::Object(inner))
+            })
+            .collect();
+        ctx.insert("tool".to_string(), serde_json::Value::Object(tool_obj));
 
         // Dialog state
         if let Some(ref dialog) = self.dialog {
