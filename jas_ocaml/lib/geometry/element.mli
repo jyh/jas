@@ -574,7 +574,7 @@ val make_circle : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -
 val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
-val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> element
+val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> ?stroke_brush:string option -> ?stroke_brush_overrides:string option -> path_command list -> element
 
 val tspans_from_content : string -> tspan array
 (** Build a one-element [tspan] array that mirrors the given content
