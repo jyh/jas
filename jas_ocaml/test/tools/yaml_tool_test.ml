@@ -246,8 +246,83 @@ let dispatch_tests = [
     | None -> assert false);
 ]
 
+(* Phase 5b: overlay style + color parsing. *)
+
+let overlay_style_tests = [
+  Alcotest.test_case "parse_style_empty" `Quick (fun () ->
+    let s = Yaml_tool.parse_style "" in
+    assert (s.fill = None);
+    assert (s.stroke = None);
+    assert (s.stroke_width = None);
+    assert (s.stroke_dasharray = None));
+
+  Alcotest.test_case "parse_style_fill_and_stroke" `Quick (fun () ->
+    let s = Yaml_tool.parse_style
+      "fill: rgba(0,120,215,0.1); stroke: rgb(0,120,215); stroke-width: 2" in
+    assert (s.fill = Some "rgba(0,120,215,0.1)");
+    assert (s.stroke = Some "rgb(0,120,215)");
+    assert (s.stroke_width = Some 2.0));
+
+  Alcotest.test_case "parse_style_dasharray" `Quick (fun () ->
+    let s = Yaml_tool.parse_style "stroke: black; stroke-dasharray: 4 4" in
+    assert (s.stroke_dasharray = Some [4.0; 4.0]));
+
+  Alcotest.test_case "parse_style_dasharray_comma" `Quick (fun () ->
+    let s = Yaml_tool.parse_style "stroke-dasharray: 3, 5, 2" in
+    assert (s.stroke_dasharray = Some [3.0; 5.0; 2.0]));
+
+  Alcotest.test_case "parse_style_ignores_unknown" `Quick (fun () ->
+    let s = Yaml_tool.parse_style "fill: red; opacity: 0.5; foo: bar" in
+    assert (s.fill = Some "red"));
+]
+
+let overlay_color_tests = [
+  Alcotest.test_case "parse_color_hex6" `Quick (fun () ->
+    match Yaml_tool.parse_color "#ff0000" with
+    | Some (r, g, b, a) ->
+      assert (abs_float (r -. 1.0) < 1e-6);
+      assert (abs_float g < 1e-6);
+      assert (abs_float b < 1e-6);
+      assert (abs_float (a -. 1.0) < 1e-9)
+    | None -> assert false);
+
+  Alcotest.test_case "parse_color_hex3" `Quick (fun () ->
+    match Yaml_tool.parse_color "#fff" with
+    | Some (r, g, b, _) ->
+      assert (abs_float (r -. 1.0) < 1e-6);
+      assert (abs_float (g -. 1.0) < 1e-6);
+      assert (abs_float (b -. 1.0) < 1e-6)
+    | None -> assert false);
+
+  Alcotest.test_case "parse_color_rgb" `Quick (fun () ->
+    match Yaml_tool.parse_color "rgb(0, 120, 215)" with
+    | Some (r, g, b, a) ->
+      assert (abs_float r < 1e-9);
+      assert (abs_float (g -. (120.0 /. 255.0)) < 1e-6);
+      assert (abs_float (b -. (215.0 /. 255.0)) < 1e-6);
+      assert (abs_float (a -. 1.0) < 1e-9)
+    | None -> assert false);
+
+  Alcotest.test_case "parse_color_rgba" `Quick (fun () ->
+    match Yaml_tool.parse_color "rgba(0, 120, 215, 0.1)" with
+    | Some (_, _, _, a) ->
+      assert (abs_float (a -. 0.1) < 1e-6)
+    | None -> assert false);
+
+  Alcotest.test_case "parse_color_none" `Quick (fun () ->
+    assert (Yaml_tool.parse_color "none" = None));
+
+  Alcotest.test_case "parse_color_named_black" `Quick (fun () ->
+    assert (Yaml_tool.parse_color "black" = Some (0.0, 0.0, 0.0, 1.0)));
+
+  Alcotest.test_case "parse_color_invalid" `Quick (fun () ->
+    assert (Yaml_tool.parse_color "garbage" = None));
+]
+
 let () =
   Alcotest.run "Yaml_tool" [
     "ToolSpec parsing", tool_spec_tests;
     "Dispatch", dispatch_tests;
+    "Overlay style parse", overlay_style_tests;
+    "Overlay color parse", overlay_color_tests;
   ]
