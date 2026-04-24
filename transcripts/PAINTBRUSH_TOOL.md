@@ -49,7 +49,7 @@ Tool Options dialog. The dialog is declared in
 `workspace/dialogs/paintbrush_tool_options.yaml`
 (id: `paintbrush_tool_options`) and wired via a new
 `tool_options_dialog` field on the tool yaml. The toolbar dispatches
-`dialog.open` with that id on icon double-click.
+the `open_dialog` action with that id on icon double-click.
 `BLOB_BRUSH_TOOL.md` co-introduces the same `tool_options_dialog`
 pattern.
 

@@ -158,6 +158,51 @@ state:
       master library brush at render time. Edited via the
       Brush Options dialog in instance_edit mode.
 
+  # ── Paintbrush tool options ───────────────────────────────────
+  # Per-document preferences for the Paintbrush tool. Edited via
+  # the Paintbrush Tool Options dialog (double-click the tool
+  # icon). See transcripts/PAINTBRUSH_TOOL.md §Tool options.
+
+  paintbrush_fidelity:
+    type: number
+    default: 3
+    description: >
+      5-stop slider position (1-5) for curve-fit tolerance. Maps
+      to fit_error as [0.5, 2.5, 5.0, 7.5, 10.0] pt. Lower tick =
+      more faithful to raw drag; higher tick = smoother output.
+      See PAINTBRUSH_TOOL.md §Fidelity → fit_error mapping.
+
+  paintbrush_fill_new_strokes:
+    type: bool
+    default: false
+    description: >
+      When true, new Paintbrush commits set fill=state.fill_color
+      on the Path element. When false, fill=none. Does not apply
+      to edit-gesture commits (preservation rules).
+
+  paintbrush_keep_selected:
+    type: bool
+    default: true
+    description: >
+      When true, the path committed by a Paintbrush drag becomes
+      the canvas selection after commit.
+
+  paintbrush_edit_selected_paths:
+    type: bool
+    default: true
+    description: >
+      When true, Option/Alt-drag within paintbrush_edit_within px
+      of a selected Path rewrites the nearest sub-segment of that
+      path instead of starting a new stroke. See
+      PAINTBRUSH_TOOL.md §Edit gesture.
+
+  paintbrush_edit_within:
+    type: number
+    default: 12
+    description: >
+      Proximity threshold in px for the Paintbrush edit gesture.
+      Press and release distances are both bounded by this value.
+
   # ── Align panel ───────────────────────────────────────────────
   # Mirror state for the Align panel's four persistent fields.
   # See transcripts/ALIGN.md §Panel state.
