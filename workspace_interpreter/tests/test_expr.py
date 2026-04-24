@@ -488,3 +488,57 @@ class TestAstCache:
         for _ in range(5):
             assert evaluate("a + b", ctx).value == 13
             assert evaluate("a * b", ctx).value == 30
+
+
+class TestBrushTypeOf:
+    """brush_type_of(slug) -- Blob Brush dialog gating helper."""
+
+    @staticmethod
+    def _ctx():
+        return {
+            "brush_libraries": {
+                "mylib": {
+                    "brushes": [
+                        {"slug": "cal_1", "name": "Cal 1",
+                         "type": "calligraphic", "size": 5.0},
+                        {"slug": "art_1", "name": "Art 1", "type": "art"},
+                    ],
+                },
+                "other": {
+                    "brushes": [
+                        {"slug": "scat_1", "name": "Scat 1",
+                         "type": "scatter"},
+                    ],
+                },
+            },
+        }
+
+    def test_calligraphic(self):
+        r = evaluate('brush_type_of("mylib/cal_1")', self._ctx())
+        assert r.type == ValueType.STRING
+        assert r.value == "calligraphic"
+
+    def test_art(self):
+        r = evaluate('brush_type_of("mylib/art_1")', self._ctx())
+        assert r.value == "art"
+
+    def test_other_library(self):
+        r = evaluate('brush_type_of("other/scat_1")', self._ctx())
+        assert r.value == "scatter"
+
+    def test_unknown_slug_returns_null(self):
+        r = evaluate('brush_type_of("mylib/missing")', self._ctx())
+        assert r.type == ValueType.NULL
+
+    def test_missing_library_returns_null(self):
+        r = evaluate('brush_type_of("nowhere/cal_1")', self._ctx())
+        assert r.type == ValueType.NULL
+
+    def test_malformed_slug_returns_null(self):
+        # Missing slash.
+        r = evaluate('brush_type_of("just_a_slug")', self._ctx())
+        assert r.type == ValueType.NULL
+
+    def test_null_when_no_brush_libraries(self):
+        r = evaluate('brush_type_of("mylib/cal_1")', {})
+        assert r.type == ValueType.NULL
