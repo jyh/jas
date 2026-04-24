@@ -407,6 +407,43 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.paintbrush.edit_start — { x, y, within }.
+    // Paintbrush edit-gesture target selection at mousedown. See
+    // PAINTBRUSH_TOOL.md §Edit gesture. Scans selected Paths, picks
+    // the one whose closest flat point is nearest and ≤ within px of
+    // (x, y). Writes tool.paintbrush.mode='edit' + edit_target_path
+    // + edit_entry_idx. Leaves tool state untouched when no target
+    // qualifies (mode stays 'drawing').
+    effects["doc.paintbrush.edit_start"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let within = evalNumber(args["within"], store: store, ctx: ctx)
+        paintbrushEditStart(model: model, store: store,
+                            x: x, y: y, within: within)
+        return nil
+    }
+
+    // doc.paintbrush.edit_commit — { buffer, fit_error?, within }.
+    // Paintbrush edit-gesture splice at mouseup. Reads target and
+    // entry_idx stashed by edit_start, computes exit_idx on the
+    // target's flat polyline nearest the buffer's last point, and if
+    // within range, replaces the target's [c0..c1] command range
+    // with a fit_curve of the drag buffer (start-point prepended for
+    // seamless splice, mirroring pathSmoothAtCursor). Preserves all
+    // non-`d` attributes on the target.
+    effects["doc.paintbrush.edit_commit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let buffer = args["buffer"] as? String else { return nil }
+        let rawE = evalNumber(args["fit_error"], store: store, ctx: ctx)
+        let fitError = rawE == 0 ? 4.0 : rawE
+        let within = evalNumber(args["within"], store: store, ctx: ctx)
+        paintbrushEditCommit(model: model, store: store,
+                             buffer: buffer, fitError: fitError,
+                             within: within)
+        return nil
+    }
+
     // doc.path.smooth_at_cursor — { x, y, radius?, fit_error? }.
     // Iterates selected unlocked Paths, finds the contiguous flat
     // range within `radius` of (x, y), re-fits it via fitCurve with
@@ -566,9 +603,18 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
-    // doc.add_path_from_buffer: { buffer, fit_error? }
-    // Runs fitCurve on the named buffer and appends a cubic-Bezier
-    // Path to the document. Used by Pencil.
+    // doc.add_path_from_buffer: {
+    //   buffer, fit_error?,
+    //   stroke_brush?, stroke_brush_overrides?,  // Paintbrush semantics
+    //   fill_new_strokes?, close?,
+    //   fill?, stroke?                             // Pencil-style defaults
+    // }
+    //
+    // Runs fitCurve on the named buffer and appends a cubic-Bezier Path
+    // to the document. Used by Pencil (no stroke_brush key) and
+    // Paintbrush (passes stroke_brush + friends). See
+    // PAINTBRUSH_TOOL.md §Fill and stroke for the stroke-width commit
+    // rule when stroke_brush is present.
     effects["doc.add_path_from_buffer"] = { spec, ctx, store in
         guard let args = spec as? [String: Any],
               let name = args["buffer"] as? String else { return nil }
@@ -579,7 +625,6 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         guard points.count >= 2 else { return nil }
         let segments = fitCurve(points: points, error: fitError)
         guard !segments.isEmpty else { return nil }
-        // FitSegment: p1 = start, c1/c2 = control handles, p2 = end.
         var cmds: [PathCommand] = []
         cmds.append(.moveTo(segments[0].p1x, segments[0].p1y))
         for seg in segments {
@@ -588,6 +633,11 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
                 x2: seg.c2x, y2: seg.c2y,
                 x: seg.p2x, y: seg.p2y
             ))
+        }
+        // Paintbrush §Gestures close-at-release: when close=true, append
+        // ClosePath after the last CurveTo.
+        if evalBool(args["close"], store: store, ctx: ctx) {
+            cmds.append(.closePath)
         }
         let pathElem = makePathFromCommands(
             cmds, model: model, spec: args,
@@ -639,11 +689,16 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
 /// for fill/stroke when the spec omits them. Shared by
 /// doc.add_path_from_buffer and doc.add_path_from_anchor_buffer.
 ///
-/// Also threads an optional `stroke_brush` expression from spec onto
-/// the new Path. The Paintbrush tool's on_mouseup handler passes
-/// `stroke_brush: "state.stroke_brush"` so the active brush from the
-/// panel rides through to the canvas renderer's brush dispatch
-/// (BRUSHES.md §Stroke styling interaction).
+/// Pencil-style callers (no `stroke_brush` key) get the default-fill/
+/// default-stroke behaviour from resolveFillField/resolveStrokeField.
+///
+/// Paintbrush-style callers (presence of `stroke_brush` key) switch on
+/// the PAINTBRUSH_TOOL.md §Fill and stroke commit rules:
+///   - stroke = Stroke(state.stroke_color, paintbrushStrokeWidth(...))
+///     where the width is brush.size (Calligraphic/Scatter/Bristle)
+///     or state.stroke_width (no brush, or Art/Pattern).
+///   - fill = state.fill_color when fill_new_strokes is true, else nil.
+///   - stroke_brush_overrides passed through onto the committed Path.
 private func makePathFromCommands(
     _ cmds: [PathCommand],
     model: Model,
@@ -651,17 +706,104 @@ private func makePathFromCommands(
     store: StateStore,
     ctx: [String: Any]
 ) -> Path {
-    let fill = resolveFillField(spec["fill"], hasKey: spec.keys.contains("fill"),
-                                 default: model.defaultFill,
-                                 store: store, ctx: ctx)
-    let stroke = resolveStrokeField(spec["stroke"], hasKey: spec.keys.contains("stroke"),
-                                     default: model.defaultStroke,
-                                     store: store, ctx: ctx)
+    let hasStrokeBrushArg = spec.keys.contains("stroke_brush")
     let strokeBrush = resolveStrokeBrushField(spec["stroke_brush"],
-                                              hasKey: spec.keys.contains("stroke_brush"),
+                                              hasKey: hasStrokeBrushArg,
                                               store: store, ctx: ctx)
+    let strokeBrushOverrides = resolveStrokeBrushField(
+        spec["stroke_brush_overrides"],
+        hasKey: spec.keys.contains("stroke_brush_overrides"),
+        store: store, ctx: ctx)
+
+    let fill: Fill? = {
+        if spec.keys.contains("fill_new_strokes") {
+            if evalBool(spec["fill_new_strokes"], store: store, ctx: ctx) {
+                let v = evalExprAsValue("state.fill_color",
+                                        store: store, ctx: ctx)
+                switch v {
+                case .color(let c): return Color.fromHex(c).map { Fill(color: $0) }
+                case .string(let s): return Color.fromHex(s).map { Fill(color: $0) }
+                default: return nil
+                }
+            }
+            return nil
+        }
+        return resolveFillField(spec["fill"],
+                                hasKey: spec.keys.contains("fill"),
+                                default: model.defaultFill,
+                                store: store, ctx: ctx)
+    }()
+
+    let stroke: Stroke? = {
+        if hasStrokeBrushArg {
+            let colorVal = evalExprAsValue("state.stroke_color",
+                                           store: store, ctx: ctx)
+            let color: Color
+            switch colorVal {
+            case .color(let c): color = Color.fromHex(c) ?? .black
+            case .string(let s): color = Color.fromHex(s) ?? .black
+            default: color = .black
+            }
+            let width = paintbrushStrokeWidth(
+                strokeBrush: strokeBrush,
+                overrides: strokeBrushOverrides,
+                store: store, ctx: ctx)
+            return Stroke(color: color, width: width)
+        }
+        return resolveStrokeField(spec["stroke"],
+                                  hasKey: spec.keys.contains("stroke"),
+                                  default: model.defaultStroke,
+                                  store: store, ctx: ctx)
+    }()
+
     return Path(d: cmds, fill: fill, stroke: stroke,
-                strokeBrush: strokeBrush)
+                strokeBrush: strokeBrush,
+                strokeBrushOverrides: strokeBrushOverrides)
+}
+
+/// Paintbrush-tool stroke-width commit rule per PAINTBRUSH_TOOL.md
+/// §Fill and stroke:
+///   - No brush slug → state.stroke_width.
+///   - Brush with `size` (Calligraphic / Scatter / Bristle) → effective
+///     size (overrides.size first, else brush.size).
+///   - Brush with no `size` field (Art / Pattern) → state.stroke_width.
+private func paintbrushStrokeWidth(
+    strokeBrush: String?,
+    overrides: String?,
+    store: StateStore,
+    ctx: [String: Any]
+) -> Double {
+    let stateWidth: Double = {
+        let v = evalExprAsValue("state.stroke_width", store: store, ctx: ctx)
+        if case .number(let n) = v { return n }
+        return 1.0
+    }()
+    guard let slug = strokeBrush else { return stateWidth }
+    // overrides.size takes precedence.
+    if let json = overrides,
+       let data = json.data(using: .utf8),
+       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let sz = obj["size"] as? Double {
+        return sz
+    }
+    // Parse "libId/brushSlug" and look up brush.size from libraries.
+    let parts = slug.split(separator: "/", maxSplits: 1,
+                           omittingEmptySubsequences: false)
+    guard parts.count == 2 else { return stateWidth }
+    let libId = String(parts[0])
+    let brushSlug = String(parts[1])
+    let path = "brush_libraries.\(libId).brushes"
+    guard let arr = store.getDataPath(path) as? [[String: Any]] else {
+        return stateWidth
+    }
+    for brush in arr {
+        if let s = brush["slug"] as? String, s == brushSlug {
+            if let sz = brush["size"] as? Double { return sz }
+            if let sz = brush["size"] as? Int { return Double(sz) }
+            return stateWidth
+        }
+    }
+    return stateWidth
 }
 
 /// Resolve an optional `stroke_brush:` field on a path-creating
@@ -1212,6 +1354,102 @@ private func pathMoveLatchedHandle(
     let handleType = (store.getTool("partial_selection", "handle_type") as? String) ?? ""
     Controller(model: model).movePathHandle(
         path, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
+}
+
+/// Implementation of doc.paintbrush.edit_start. See
+/// PAINTBRUSH_TOOL.md §Edit gesture — Target selection.
+private func paintbrushEditStart(
+    model: Model, store: StateStore,
+    x: Double, y: Double, within: Double
+) {
+    let withinSq = within * within
+    var best: (path: ElementPath, entryIdx: Int, dsq: Double)? = nil
+    for es in model.document.selection {
+        guard case .path(let pe) = model.document.getElement(es.path),
+              !pe.locked, pe.d.count >= 2 else { continue }
+        let (flat, _) = flattenWithCmdMap(pe.d)
+        guard !flat.isEmpty else { continue }
+        for (i, pt) in flat.enumerated() {
+            let dx = pt.0 - x, dy = pt.1 - y
+            let dsq = dx * dx + dy * dy
+            if dsq > withinSq { continue }
+            if let b = best, b.dsq <= dsq { continue }
+            best = (path: es.path, entryIdx: i, dsq: dsq)
+        }
+    }
+    if let b = best {
+        store.setTool("paintbrush", "mode", "edit")
+        store.setTool("paintbrush", "edit_target_path", encodePath(b.path))
+        store.setTool("paintbrush", "edit_entry_idx", b.entryIdx)
+    }
+}
+
+/// Implementation of doc.paintbrush.edit_commit. See
+/// PAINTBRUSH_TOOL.md §Edit gesture — Splice.
+private func paintbrushEditCommit(
+    model: Model, store: StateStore,
+    buffer: String, fitError: Double, within: Double
+) {
+    guard let targetPath = decodePath(store.getTool("paintbrush", "edit_target_path")) else {
+        return
+    }
+    let entryIdx: Int = {
+        let v = store.getTool("paintbrush", "edit_entry_idx")
+        if let n = v as? Int { return n }
+        if let n = v as? NSNumber { return n.intValue }
+        return -1
+    }()
+    guard entryIdx >= 0 else { return }
+    let dragPoints = pointBuffersPoints(buffer)
+    guard dragPoints.count >= 2 else { return }
+
+    guard case .path(let targetPe) = model.document.getElement(targetPath),
+          !targetPe.locked, targetPe.d.count >= 2 else { return }
+    let (flat, cmdMap) = flattenWithCmdMap(targetPe.d)
+    guard !flat.isEmpty, entryIdx < flat.count else { return }
+
+    let last = dragPoints.last!
+    let withinSq = within * within
+    var best: (idx: Int, dsq: Double)? = nil
+    for (i, pt) in flat.enumerated() {
+        let dx = pt.0 - last.0, dy = pt.1 - last.1
+        let dsq = dx * dx + dy * dy
+        if let b = best, b.dsq <= dsq { continue }
+        best = (idx: i, dsq: dsq)
+    }
+    guard let b = best, b.dsq <= withinSq else { return }
+    let exitIdx = b.idx
+    if exitIdx == entryIdx { return }
+
+    let loFlat = min(entryIdx, exitIdx), hiFlat = max(entryIdx, exitIdx)
+    let c0 = cmdMap[loFlat], c1 = cmdMap[hiFlat]
+    if c0 >= c1 || c1 >= targetPe.d.count { return }
+
+    // Reverse drag if user dragged back-to-front so splice matches
+    // the path's flow.
+    let orderedDrag: [(Double, Double)] =
+        exitIdx < entryIdx ? dragPoints.reversed() : dragPoints
+    let startPt = cmdStartPoint(targetPe.d, c0)
+    var pointsToFit: [(Double, Double)] = [startPt]
+    pointsToFit.append(contentsOf: orderedDrag)
+    guard pointsToFit.count >= 2 else { return }
+
+    let segments = fitCurve(points: pointsToFit, error: fitError)
+    guard !segments.isEmpty else { return }
+
+    var newCmds: [PathCommand] = []
+    newCmds.append(contentsOf: targetPe.d[..<c0])
+    for seg in segments {
+        newCmds.append(.curveTo(
+            x1: seg.c1x, y1: seg.c1y,
+            x2: seg.c2x, y2: seg.c2y,
+            x: seg.p2x, y: seg.p2y))
+    }
+    newCmds.append(contentsOf: targetPe.d[(c1 + 1)...])
+
+    let newDoc = model.document.replaceElement(
+        targetPath, with: .path(pathWithCommands(targetPe, newCmds)))
+    model.document = newDoc
 }
 
 /// Implementation of doc.path.smooth_at_cursor.
