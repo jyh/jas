@@ -638,3 +638,48 @@ def split_path_at_eraser(cmds, hit: EraserHit, is_closed: bool) -> list[list]:
     if len(part2) >= 2:
         result.append(part2)
     return result
+
+
+# Path / PolygonSet adapters.
+#
+# Blob Brush's commit path needs to hand PathCommand geometry to the
+# algorithms.boolean module (which speaks in PolygonSet / Ring terms)
+# and then convert the unioned / subtracted result back to a
+# list[PathCommand] for the new element's d field. The algorithm
+# module is deliberately geometry-only; this pair is the element-level
+# bridge.
+#
+# PolygonSet is list[Ring], Ring is list[tuple[float, float]] -- same
+# shape as live.flatten_path_to_rings, which we reuse verbatim for the
+# forward direction. The reverse direction emits
+# MoveTo + LineTo* + ClosePath per ring.
+
+
+def path_to_polygon_set(
+    d: list[PathCommand],
+) -> list[list[tuple[float, float]]]:
+    """Flatten a PathCommand list to the PolygonSet shape expected by
+    algorithms.boolean. Alias for live.flatten_path_to_rings, named
+    to match BLOB_BRUSH_TOOL.md Commit pipeline.
+    """
+    from geometry.live import flatten_path_to_rings
+    return flatten_path_to_rings(d)
+
+
+def polygon_set_to_path(
+    ps: list[list[tuple[float, float]]],
+) -> list[PathCommand]:
+    """Emit a PathCommand list from a PolygonSet. One
+    MoveTo + LineTo* + ClosePath subpath per ring. Rings with fewer
+    than 3 vertices are dropped.
+    """
+    out: list[PathCommand] = []
+    for ring in ps:
+        if len(ring) < 3:
+            continue
+        x0, y0 = ring[0]
+        out.append(MoveTo(x0, y0))
+        for x, y in ring[1:]:
+            out.append(LineTo(x, y))
+        out.append(ClosePath())
+    return out
