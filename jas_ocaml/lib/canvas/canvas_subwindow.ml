@@ -26,6 +26,13 @@ let _brush_libraries : Yojson.Safe.t ref = ref `Null
 let set_brush_libraries (libs : Yojson.Safe.t) : unit =
   _brush_libraries := libs
 
+(* Wire the standalone Brush_registry as the source of truth.
+   yaml_tool_effects.brush.* effects update Brush_registry; the
+   canvas registry mirrors. App startup also calls
+   set_brush_libraries directly with the loaded workspace data;
+   that flows through Brush_registry too via the symmetry below. *)
+let () = Brush_registry.on_change (fun libs -> _brush_libraries := libs)
+
 (* Look up a brush by "<library>/<brush>" slug. Returns None for
    missing slug, malformed input, or unknown library/brush. *)
 let lookup_brush (slug : string) : Yojson.Safe.t option =
