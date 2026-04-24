@@ -73,12 +73,25 @@ class ToolButton(QToolButton):
     ARTWORK_SIZE = 28
     BUTTON_SIZE = 32
 
+    # Emitted when the user double-clicks a tool icon. Toolbar bubbles
+    # this as its own tool_options_requested signal, which jas_app
+    # dispatches as an open_dialog effect using the tool's
+    # tool_options_dialog field (PAINTBRUSH_TOOL.md §Tool options).
+    tool_options_requested = Signal(object)
+
     def __init__(self, tool, parent=None, has_alternates=False):
         super().__init__(parent)
         self.tool = tool
         self.has_alternates = has_alternates
         self.setCheckable(True)
         self.setFixedSize(self.BUTTON_SIZE, self.BUTTON_SIZE)
+
+    def mouseDoubleClickEvent(self, event):
+        # Double-click: request the tool's options dialog. Qt also
+        # fires mousePressEvent for this click, so the tool still
+        # gets selected normally.
+        self.tool_options_requested.emit(self.tool)
+        super().mouseDoubleClickEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -118,6 +131,8 @@ class ToolButton(QToolButton):
             self._draw_anchor_point_tool(painter)
         elif self.tool == Tool.PENCIL:
             self._draw_pencil_tool(painter)
+        elif self.tool == Tool.PAINTBRUSH:
+            self._draw_paintbrush_tool(painter)
         elif self.tool == Tool.PATH_ERASER:
             self._draw_path_eraser_tool(painter)
         elif self.tool == Tool.SMOOTH:
@@ -448,6 +463,56 @@ class ToolButton(QToolButton):
         tip.cubicTo(69.02, 201.82, 69.61, 208.63, 71.47, 214.03)
         tip.closeSubpath()
         painter.drawPath(tip)
+        painter.restore()
+
+    def _draw_paintbrush_tool(self, painter):
+        """Paintbrush icon — angled handle + ferrule + bristled tip,
+        visually distinct from Pencil. Matches PAINTBRUSH_TOOL.md
+        §Tool icon (Rust icons.rs / Swift Toolbar.swift equivalents)."""
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        # Handle (diagonal rectangle)
+        painter.setBrush(_icon_color())
+        handle = QPainterPath()
+        handle.moveTo(30, 230)
+        handle.lineTo(60, 255)
+        handle.lineTo(200, 115)
+        handle.lineTo(165, 80)
+        handle.closeSubpath()
+        painter.drawPath(handle)
+
+        # Ferrule (darker band)
+        painter.save()
+        painter.translate(187, 75)
+        painter.rotate(-45)
+        painter.translate(-187, -75)
+        painter.setBrush(_inactive_bg())
+        painter.drawRect(165, 60, 45, 30)
+        painter.restore()
+
+        # Bristled tip (rounded)
+        painter.setBrush(_icon_color())
+        tip = QPainterPath()
+        tip.moveTo(195, 45)
+        tip.quadTo(225, 20, 250, 40)
+        tip.quadTo(255, 70, 225, 90)
+        tip.lineTo(185, 65)
+        tip.closeSubpath()
+        painter.drawPath(tip)
+
+        # Bristle highlights (white strokes)
+        painter.setPen(QPen(QColor("white"), 4))
+        painter.drawLine(205, 55, 225, 82)
+        painter.drawLine(220, 45, 238, 70)
+        painter.drawLine(235, 45, 242, 75)
+        painter.setPen(Qt.PenStyle.NoPen)
+
         painter.restore()
 
     def _draw_path_eraser_tool(self, painter):
@@ -1011,6 +1076,10 @@ class Toolbar(QWidget):
     """Vertical toolbar with tool icons in a 2-column grid."""
 
     tool_changed = Signal(Tool)
+    # Bubbled from ToolButton.tool_options_requested; jas_app dispatches
+    # open_dialog using the tool's workspace.json tool_options_dialog
+    # field (PAINTBRUSH_TOOL.md §Tool options).
+    tool_options_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1090,6 +1159,10 @@ class Toolbar(QWidget):
 
         self.buttons[Tool.SELECTION].setChecked(True)
         self.button_group.buttonClicked.connect(self._on_button_clicked)
+
+        # Bubble each button's double-click options-request up.
+        for btn in self.buttons.values():
+            btn.tool_options_requested.connect(self.tool_options_requested.emit)
 
         # Long-press timer for the arrow slot
         self._long_press_timer = QTimer(self)
