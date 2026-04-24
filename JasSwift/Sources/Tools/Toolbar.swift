@@ -7,7 +7,15 @@ public var toolbarIconColor = NSColor(white: 0.8, alpha: 1.0)
 
 /// Tool button and icon drawing utilities for the toolbar.
 public struct ToolbarView {
-    static func toolButton(currentTool: Binding<Tool>, tool: Tool) -> some View {
+    /// Optional double-click handler. When set, double-clicking the
+    /// tool icon invokes this closure with the current tool; the
+    /// parent view looks up the tool's tool_options_dialog field and
+    /// dispatches open_dialog. See PAINTBRUSH_TOOL.md §Tool options.
+    static func toolButton(
+        currentTool: Binding<Tool>,
+        tool: Tool,
+        onRequestOptions: ((Tool) -> Void)? = nil
+    ) -> some View {
         Button(action: { currentTool.wrappedValue = tool }) {
             toolIcon(tool)
                 .frame(width: 32, height: 32)
@@ -17,18 +25,23 @@ public struct ToolbarView {
                 .cornerRadius(3)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            onRequestOptions?(tool)
+        })
     }
 
     /// A button that shows one tool but long-press reveals alternates.
     static func toolButtonWithAlternates(
         currentTool: Binding<Tool>,
         visibleTool: Binding<Tool>,
-        alternates: [Tool]
+        alternates: [Tool],
+        onRequestOptions: ((Tool) -> Void)? = nil
     ) -> some View {
         ArrowSlotButton(
             currentTool: currentTool,
             visibleTool: visibleTool,
-            alternates: alternates
+            alternates: alternates,
+            onRequestOptions: onRequestOptions
         )
     }
 
@@ -820,6 +833,7 @@ private struct ArrowSlotButton: View {
     @Binding var currentTool: Tool
     @Binding var visibleTool: Tool
     let alternates: [Tool]
+    var onRequestOptions: ((Tool) -> Void)? = nil
     @State private var showingMenu = false
 
     var body: some View {
@@ -834,6 +848,9 @@ private struct ArrowSlotButton: View {
                 ? SwiftUI.Color(nsColor: NSColor(white: 0.38, alpha: 1.0))
                 : SwiftUI.Color.clear)
             .cornerRadius(3)
+            .onTapGesture(count: 2) {
+                onRequestOptions?(visibleTool)
+            }
             .onTapGesture {
                 currentTool = visibleTool
             }
