@@ -18,6 +18,23 @@ val get : t -> string -> Yojson.Safe.t
 val set : t -> string -> Yojson.Safe.t -> unit
 val get_all : t -> (string * Yojson.Safe.t) list
 
+(* ── Data namespace (workspace-loaded reference data) ──── *)
+
+val set_data : t -> Yojson.Safe.t -> unit
+(** Replace the data namespace. App startup typically calls this
+    with the loaded workspace so data.brush_libraries etc.
+    resolve. *)
+
+val get_data : t -> Yojson.Safe.t
+
+val get_data_path : t -> string -> Yojson.Safe.t
+(** Read a value at a dotted "data.x.y" or "x.y" path. Returns
+    Null on any missing intermediate. *)
+
+val set_data_path : t -> string -> Yojson.Safe.t -> unit
+(** Write at a dotted path inside the data namespace. Intermediate
+    objects are created on demand. *)
+
 (* ── Panel-scoped state ──────────────────────────────────── *)
 
 val init_panel : t -> string -> (string * Yojson.Safe.t) list -> unit

@@ -177,6 +177,215 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      | _ -> ());
     `Null
   in
+  (* ── brush.* library mutation helpers ─────────────────── *)
+
+  let eval_string_value arg store ctx : string =
+    match arg with
+    | None | Some `Null -> ""
+    | Some (`String s) ->
+      let eval_ctx = State_store.eval_context ~extra:ctx store in
+      (match Expr_eval.evaluate s eval_ctx with
+       | Expr_eval.Str rs -> rs
+       | _ -> "")
+    | _ -> ""
+  in
+
+  let eval_string_list arg store ctx : string list =
+    match arg with
+    | Some (`List items) ->
+      List.filter_map (fun v -> match v with
+        | `String s -> Some s
+        | _ -> None) items
+    | Some (`String s) ->
+      let eval_ctx = State_store.eval_context ~extra:ctx store in
+      (match Expr_eval.evaluate s eval_ctx with
+       | Expr_eval.List items ->
+         List.filter_map (fun v -> match v with
+           | `String s -> Some s
+           | _ -> None) items
+       | _ -> [])
+    | _ -> []
+  in
+
+  let resolve_value_or_expr arg store ctx : Yojson.Safe.t =
+    match arg with
+    | None | Some `Null -> `Null
+    | Some (`String s) ->
+      let eval_ctx = State_store.eval_context ~extra:ctx store in
+      Expr_eval.value_to_json (Expr_eval.evaluate s eval_ctx)
+    | Some v -> v
+  in
+
+  (* Sync the canvas brush registry with the current
+     data.brush_libraries so the next paint sees the update. The
+     registry lives in its own module to avoid a dependency cycle
+     between yaml_tool_effects and canvas_subwindow. *)
+  let sync_canvas_brushes (store : State_store.t) =
+    Brush_registry.set
+      (State_store.get_data_path store "brush_libraries")
+  in
+
+  let library_brushes_path lib_id =
+    "brush_libraries." ^ lib_id ^ ".brushes"
+  in
+
+  let brush_filter_library_by_slug store lib_id slugs =
+    let path = library_brushes_path lib_id in
+    match State_store.get_data_path store path with
+    | `List brushes ->
+      let next = List.filter (fun b ->
+        match b with
+        | `Assoc fields ->
+          (match List.assoc_opt "slug" fields with
+           | Some (`String s) -> not (List.mem s slugs)
+           | _ -> true)
+        | _ -> true
+      ) brushes in
+      State_store.set_data_path store path (`List next)
+    | _ -> ()
+  in
+
+  let brush_duplicate_in_library store lib_id slugs : string list =
+    let path = library_brushes_path lib_id in
+    match State_store.get_data_path store path with
+    | `List brushes ->
+      let existing = ref (List.fold_left (fun acc b ->
+        match b with
+        | `Assoc fields ->
+          (match List.assoc_opt "slug" fields with
+           | Some (`String s) -> s :: acc
+           | _ -> acc)
+        | _ -> acc) [] brushes)
+      in
+      let new_slugs = ref [] in
+      let rec unique_slug base n =
+        let candidate = if n = 1
+          then base ^ "_copy"
+          else Printf.sprintf "%s_copy_%d" base n in
+        if List.mem candidate !existing
+        then unique_slug base (n + 1)
+        else candidate
+      in
+      let next = List.concat_map (fun b ->
+        match b with
+        | `Assoc fields ->
+          let slug = match List.assoc_opt "slug" fields with
+            | Some (`String s) -> s | _ -> "" in
+          if List.mem slug slugs then begin
+            let new_slug = unique_slug slug 1 in
+            existing := new_slug :: !existing;
+            new_slugs := new_slug :: !new_slugs;
+            let name = match List.assoc_opt "name" fields with
+              | Some (`String n) -> n
+              | _ -> "Brush" in
+            let copy_fields = List.map (fun (k, v) ->
+              match k with
+              | "name" -> (k, `String (name ^ " copy"))
+              | "slug" -> (k, `String new_slug)
+              | _ -> (k, v)) fields in
+            [b; `Assoc copy_fields]
+          end
+          else [b]
+        | _ -> [b]
+      ) brushes in
+      State_store.set_data_path store path (`List next);
+      List.rev !new_slugs
+    | _ -> []
+  in
+
+  let brush_append_to_library store lib_id brush =
+    let path = library_brushes_path lib_id in
+    let brushes = match State_store.get_data_path store path with
+      | `List bs -> bs
+      | _ -> [] in
+    State_store.set_data_path store path (`List (brushes @ [brush]))
+  in
+
+  let brush_update_in_library store lib_id slug patch =
+    let path = library_brushes_path lib_id in
+    let patch_fields = match patch with `Assoc fs -> fs | _ -> [] in
+    if patch_fields = [] then ()
+    else match State_store.get_data_path store path with
+      | `List brushes ->
+        let next = List.map (fun b ->
+          match b with
+          | `Assoc fields ->
+            let matches = match List.assoc_opt "slug" fields with
+              | Some (`String s) -> s = slug
+              | _ -> false in
+            if matches then
+              let merged = List.map (fun (k, v) ->
+                match List.assoc_opt k patch_fields with
+                | Some new_v -> (k, new_v)
+                | None -> (k, v)) fields in
+              let added = List.filter
+                (fun (k, _) -> not (List.mem_assoc k fields)) patch_fields in
+              `Assoc (merged @ added)
+            else b
+          | _ -> b
+        ) brushes in
+        State_store.set_data_path store path (`List next)
+      | _ -> ()
+  in
+
+  let brush_delete_selected spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lib_id = eval_string_value (List.assoc_opt "library" args) store ctx in
+       let slugs = eval_string_list (List.assoc_opt "slugs" args) store ctx in
+       if lib_id <> "" && slugs <> [] then begin
+         brush_filter_library_by_slug store lib_id slugs;
+         State_store.set_panel store "brushes" "selected_brushes" (`List []);
+         sync_canvas_brushes store
+       end
+     | _ -> ());
+    `Null
+  in
+
+  let brush_duplicate_selected spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lib_id = eval_string_value (List.assoc_opt "library" args) store ctx in
+       let slugs = eval_string_list (List.assoc_opt "slugs" args) store ctx in
+       if lib_id <> "" && slugs <> [] then begin
+         let new_slugs = brush_duplicate_in_library store lib_id slugs in
+         State_store.set_panel store "brushes" "selected_brushes"
+           (`List (List.map (fun s -> `String s) new_slugs));
+         sync_canvas_brushes store
+       end
+     | _ -> ());
+    `Null
+  in
+
+  let brush_append_effect spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lib_id = eval_string_value (List.assoc_opt "library" args) store ctx in
+       let brush = resolve_value_or_expr (List.assoc_opt "brush" args) store ctx in
+       (match brush with
+        | `Assoc _ when lib_id <> "" ->
+          brush_append_to_library store lib_id brush;
+          sync_canvas_brushes store
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  let brush_update_effect spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lib_id = eval_string_value (List.assoc_opt "library" args) store ctx in
+       let slug = eval_string_value (List.assoc_opt "slug" args) store ctx in
+       let patch = resolve_value_or_expr (List.assoc_opt "patch" args) store ctx in
+       (match patch with
+        | `Assoc _ when lib_id <> "" && slug <> "" ->
+          brush_update_in_library store lib_id slug patch;
+          sync_canvas_brushes store
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
   (* Phase 1 supports brush attributes only; other attrs ignored.
      Used by apply_brush_to_selection / remove_brush_from_selection
      in actions.yaml. Mirrors the JS Phase 1.8 effect. *)
@@ -1243,6 +1452,10 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.toggle_selection", doc_toggle_selection);
     ("doc.translate_selection", doc_translate_selection);
     ("doc.set_attr_on_selection", doc_set_attr_on_selection);
+    ("brush.delete_selected", brush_delete_selected);
+    ("brush.duplicate_selected", brush_duplicate_selected);
+    ("brush.append", brush_append_effect);
+    ("brush.update", brush_update_effect);
     ("doc.copy_selection", doc_copy_selection);
     ("doc.select_in_rect", doc_select_in_rect);
     ("doc.partial_select_in_rect", doc_partial_select_in_rect);
