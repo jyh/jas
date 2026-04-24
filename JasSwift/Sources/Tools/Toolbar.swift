@@ -303,6 +303,57 @@ public struct ToolbarView {
                 tipPath.closeSubpath()
                 context.fill(tipPath.applying(transform), with: .color(.white))
 
+            case .paintbrush:
+                // Paintbrush — angled handle + ferrule + rounded
+                // bristled tip. Matches PAINTBRUSH_TOOL.md §Tool icon
+                // (Rust icons.rs equivalent).
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+
+                // Handle (diagonal)
+                var handle = SwiftUI.Path()
+                handle.move(to: CGPoint(x: 30, y: 230))
+                handle.addLine(to: CGPoint(x: 60, y: 255))
+                handle.addLine(to: CGPoint(x: 200, y: 115))
+                handle.addLine(to: CGPoint(x: 165, y: 80))
+                handle.closeSubpath()
+                context.fill(handle.applying(transform), with: .color(color))
+
+                // Ferrule (rotated darker band)
+                let ferruleTx = CGAffineTransform(translationX: -187, y: -75)
+                    .rotated(by: -45 * .pi / 180)
+                    .translatedBy(x: 187, y: 75)
+                var ferrule = SwiftUI.Path()
+                ferrule.addRect(CGRect(x: 165, y: 60, width: 45, height: 30))
+                let darkColor = SwiftUI.Color(nsColor: NSColor(white: 0.39, alpha: 1.0))
+                context.fill(ferrule.applying(ferruleTx).applying(transform),
+                             with: .color(darkColor))
+
+                // Bristled tip
+                var tip = SwiftUI.Path()
+                tip.move(to: CGPoint(x: 195, y: 45))
+                tip.addQuadCurve(to: CGPoint(x: 250, y: 40),
+                                 control: CGPoint(x: 225, y: 20))
+                tip.addQuadCurve(to: CGPoint(x: 225, y: 90),
+                                 control: CGPoint(x: 255, y: 70))
+                tip.addLine(to: CGPoint(x: 185, y: 65))
+                tip.closeSubpath()
+                context.fill(tip.applying(transform), with: .color(color))
+
+                // Bristle highlights
+                var hi1 = SwiftUI.Path()
+                hi1.move(to: CGPoint(x: 205, y: 55))
+                hi1.addLine(to: CGPoint(x: 225, y: 82))
+                var hi2 = SwiftUI.Path()
+                hi2.move(to: CGPoint(x: 220, y: 45))
+                hi2.addLine(to: CGPoint(x: 238, y: 70))
+                var hi3 = SwiftUI.Path()
+                hi3.move(to: CGPoint(x: 235, y: 45))
+                hi3.addLine(to: CGPoint(x: 242, y: 75))
+                context.stroke(hi1.applying(transform), with: .color(.white), lineWidth: 4)
+                context.stroke(hi2.applying(transform), with: .color(.white), lineWidth: 4)
+                context.stroke(hi3.applying(transform), with: .color(.white), lineWidth: 4)
+
             case .pathEraser:
                 // Path Eraser icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28
                 let s: CGFloat = 28.0 / 256.0
@@ -841,6 +892,7 @@ private struct ArrowSlotButton: View {
         case .deleteAnchorPoint: return "Delete Anchor Point"
         case .anchorPoint: return "Anchor Point"
         case .pencil: return "Pencil"
+        case .paintbrush: return "Paintbrush"
         case .pathEraser: return "Path Eraser"
         case .smooth: return "Smooth"
         case .typeTool: return "Type"

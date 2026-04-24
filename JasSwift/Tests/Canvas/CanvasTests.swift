@@ -9,7 +9,7 @@ import AppKit
 
 @Test func toolEnumCases() {
     let tools = Tool.allCases
-    #expect(tools.count == 18)
+    #expect(tools.count == 19)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.partialSelection))
     #expect(tools.contains(.interiorSelection))
@@ -18,6 +18,7 @@ import AppKit
     #expect(tools.contains(.deleteAnchorPoint))
     #expect(tools.contains(.anchorPoint))
     #expect(tools.contains(.pencil))
+    #expect(tools.contains(.paintbrush))
     #expect(tools.contains(.pathEraser))
     #expect(tools.contains(.smooth))
     #expect(tools.contains(.typeTool))
