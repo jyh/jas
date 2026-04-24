@@ -455,7 +455,20 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         stroke = _resolve_stroke(
             spec.get("stroke") if isinstance(spec, dict) else None,
             has_stroke, default_stroke, store, ctx)
-        return PathElem(d=tuple(cmds), fill=fill, stroke=stroke)
+        # Optional stroke_brush passthrough — Paintbrush tool's
+        # on_mouseup passes "state.stroke_brush" so the active brush
+        # rides along onto the new path. Renderer dispatch consumes
+        # it via the calligraphic outliner. Mirrors the JS / Rust /
+        # Swift / OCaml passthroughs.
+        stroke_brush = None
+        if isinstance(spec, dict) and "stroke_brush" in spec:
+            sb_raw = spec.get("stroke_brush")
+            if sb_raw is not None:
+                sb_val = _eval_value(sb_raw, store, ctx)
+                if sb_val.type == ValueType.STRING and sb_val.value:
+                    stroke_brush = sb_val.value
+        return PathElem(d=tuple(cmds), fill=fill, stroke=stroke,
+                        stroke_brush=stroke_brush)
 
     def doc_add_path_from_buffer(spec, ctx, store):
         if not isinstance(spec, dict):
