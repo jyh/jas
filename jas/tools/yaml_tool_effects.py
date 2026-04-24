@@ -240,6 +240,28 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.move_selection(dx, dy)
         return None
 
+    def doc_set_attr_on_selection(spec, ctx, store):
+        """Phase 1 supports brush attributes only; other attrs ignored.
+        Used by apply_brush_to_selection / remove_brush_from_selection.
+        Mirrors the JS Phase 1.8 effect."""
+        if not isinstance(spec, dict):
+            return None
+        attr = spec.get("attr")
+        if not isinstance(attr, str) or not attr:
+            return None
+        value = None
+        raw = spec.get("value")
+        if raw is not None:
+            v = _eval_value(raw, store, ctx)
+            if v.type == ValueType.STRING and v.value:
+                value = v.value
+        if attr == "stroke_brush":
+            controller.set_selection_stroke_brush(value)
+        elif attr == "stroke_brush_overrides":
+            controller.set_selection_stroke_brush_overrides(value)
+        # Phase 1: other attrs ignored
+        return None
+
     def doc_copy_selection(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
@@ -1044,6 +1066,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.add_to_selection"] = doc_add_to_selection
     effects["doc.toggle_selection"] = doc_toggle_selection
     effects["doc.translate_selection"] = doc_translate_selection
+    effects["doc.set_attr_on_selection"] = doc_set_attr_on_selection
     effects["doc.copy_selection"] = doc_copy_selection
     effects["doc.select_in_rect"] = doc_select_in_rect
     effects["doc.partial_select_in_rect"] = doc_partial_select_in_rect

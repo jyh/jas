@@ -1293,6 +1293,22 @@ def with_stroke(element: Element, stroke: Stroke | None) -> Element:
     return element
 
 
+def with_stroke_brush(element: Element, slug: str | None) -> Element:
+    """Return a copy of element with stroke_brush replaced. Path-only;
+    other element types are returned unchanged. See BRUSHES.md."""
+    if isinstance(element, Path):
+        return dataclasses.replace(element, stroke_brush=slug)
+    return element
+
+
+def with_stroke_brush_overrides(element: Element, overrides: str | None) -> Element:
+    """Return a copy of element with stroke_brush_overrides replaced.
+    Path-only."""
+    if isinstance(element, Path):
+        return dataclasses.replace(element, stroke_brush_overrides=overrides)
+    return element
+
+
 def with_fill_gradient(element: Element, gradient: Gradient | None) -> Element:
     """Phase 5: replace the optional fill_gradient on the element. Pass
     None to clear (demote to solid)."""
