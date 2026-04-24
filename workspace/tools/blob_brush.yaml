@@ -1,0 +1,126 @@
+# Blob Brush tool — freehand filled-region drawing. Sweeps an oval
+# tip along the pointer path, accumulates dabs, unions them on
+# commit into a single closed filled Path tagged
+# jas:tool-origin="blob_brush". Alt-at-press enters erase mode,
+# which boolean_subtracts the swept region from each overlapping
+# blob-brush element.
+#
+# Tool options (per-document state.blob_brush_*) drive:
+#   - Fidelity → RDP simplification epsilon on commit.
+#   - Keep Selected post-commit.
+#   - Merge-only-with-selection filter (painting mode only).
+#   - Default tip shape (size / angle / roundness) when no
+#     Calligraphic brush is active.
+#
+# See transcripts/BLOB_BRUSH_TOOL.md for the full spec.
+
+id: blob_brush
+cursor: none
+menu_label: "Blob Brush Tool"
+shortcut: "Shift+B"
+tool_options_dialog: "blob_brush_tool_options"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, painting, erasing]
+  # Current pointer position. Written each mousemove so the hover
+  # overlay cursor can render an oval at the pointer without
+  # per-frame event access.
+  hover_x: { default: 0 }
+  hover_y: { default: 0 }
+  has_hovered: { default: false }
+  # Latched Option/Alt state for the erase-mode cursor style.
+  alt_held: { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.blob_brush.mode: "'idle'" }
+    - set: { tool.blob_brush.has_hovered: "false" }
+    - "buffer.clear": { buffer: "blob_brush" }
+
+  on_leave:
+    - set: { tool.blob_brush.mode: "'idle'" }
+    - set: { tool.blob_brush.has_hovered: "false" }
+    - "buffer.clear": { buffer: "blob_brush" }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - "buffer.clear": { buffer: "blob_brush" }
+    - "buffer.push": { buffer: "blob_brush", x: "event.x", y: "event.y" }
+    # Alt-at-press latches erase mode per BLOB_BRUSH_TOOL.md
+    # §Gestures. Mode is locked; later Alt toggles are ignored.
+    - if: "event.modifiers.alt"
+      then:
+        - set: { tool.blob_brush.mode: "'erasing'" }
+      else:
+        - set: { tool.blob_brush.mode: "'painting'" }
+
+  on_mousemove:
+    - set: { tool.blob_brush.hover_x: "event.x" }
+    - set: { tool.blob_brush.hover_y: "event.y" }
+    - set: { tool.blob_brush.has_hovered: "true" }
+    - set: { tool.blob_brush.alt_held: "event.modifiers.alt" }
+    # During painting/erasing, arc-length dab accumulation is
+    # handled inside the doc.blob_brush.sweep_sample effect — it
+    # pushes a dab only when the cumulative distance since the
+    # last buffer entry exceeds the tip's ½ min-dimension.
+    - if: "tool.blob_brush.mode == 'painting' || tool.blob_brush.mode == 'erasing'"
+      then:
+        - "doc.blob_brush.sweep_sample":
+            buffer: "blob_brush"
+            x: "event.x"
+            y: "event.y"
+
+  on_mouseup:
+    - if: "tool.blob_brush.mode == 'painting'"
+      then:
+        # Always force a final dab at release to avoid a bald spot.
+        - "buffer.push": { buffer: "blob_brush", x: "event.x", y: "event.y" }
+        - "doc.blob_brush.commit_painting":
+            buffer: "blob_brush"
+            fidelity_epsilon: "if state.blob_brush_fidelity == 1 then 0.5 else (state.blob_brush_fidelity - 1) * 2.5"
+            merge_only_with_selection: "state.blob_brush_merge_only_with_selection"
+            keep_selected: "state.blob_brush_keep_selected"
+    - if: "tool.blob_brush.mode == 'erasing'"
+      then:
+        - "buffer.push": { buffer: "blob_brush", x: "event.x", y: "event.y" }
+        - "doc.blob_brush.commit_erasing":
+            buffer: "blob_brush"
+            fidelity_epsilon: "if state.blob_brush_fidelity == 1 then 0.5 else (state.blob_brush_fidelity - 1) * 2.5"
+    - set: { tool.blob_brush.mode: "'idle'" }
+    - set: { tool.blob_brush.alt_held: "false" }
+    - "buffer.clear": { buffer: "blob_brush" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.blob_brush.mode: "'idle'" }
+        - "buffer.clear": { buffer: "blob_brush" }
+
+# Two overlays layered: the hover-cursor oval (always when
+# has_hovered) and the drag preview (during painting / erasing).
+# Since the overlay schema currently supports only a single render
+# field, the oval_cursor render type's dispatcher draws the drag-
+# preview overlay in addition when mode != idle. That keeps the
+# schema unchanged and colocates the preview logic with the tip-
+# shape evaluation.
+overlay:
+  if: "tool.blob_brush.has_hovered"
+  render:
+    type: oval_cursor
+    x: "tool.blob_brush.hover_x"
+    y: "tool.blob_brush.hover_y"
+    # Effective tip shape per §Runtime tip resolution. When a
+    # Calligraphic brush is active the oval_cursor renderer
+    # resolves size/angle/roundness from the brush (+ overrides);
+    # otherwise it uses the state.blob_brush_* defaults passed
+    # here.
+    default_size: "state.blob_brush_size"
+    default_angle: "state.blob_brush_angle"
+    default_roundness: "state.blob_brush_roundness"
+    stroke_color: "state.fill_color"
+    dashed: "tool.blob_brush.alt_held"
+    buffer: "blob_brush"
+    mode: "tool.blob_brush.mode"

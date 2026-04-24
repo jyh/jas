@@ -1,0 +1,222 @@
+blob_brush_tool_options:
+  summary: "Blob Brush Tool Options"
+  description: >
+    Modal dialog opened by double-clicking the Blob Brush icon in
+    the toolbar. Edits six per-document options that drive the
+    Blob Brush tool's sweep and commit behaviour:
+
+    - Fidelity: 5-stop slider (Accurate ↔ Smooth) driving the
+      RDP simplification epsilon at commit. Tick 1 = 0.5,
+      tick 3 (default) = 5.0, tick 5 = 10.0. See
+      BLOB_BRUSH_TOOL.md §Fidelity → simplification tolerance
+      mapping.
+    - Keep Selected: when on, the new / merged element becomes
+      the canvas selection after commit. Default false.
+    - Merge Only with Selection: when on, painting-mode sweeps
+      merge only with existing Blob Brush elements in the
+      selection; erasing-mode is unaffected.
+    - Size / Angle / Roundness: default tip shape values used
+      when no Calligraphic brush is active. Each is a variation
+      widget (fixed / random / pressure / tilt / bearing /
+      rotation). Rotation mode is disabled for size and
+      roundness. When a Calligraphic brush IS active in the
+      Brushes panel, these rows are disabled with a "(set by
+      active brush)" hint — the brush's own values take
+      precedence. See §Runtime tip resolution.
+
+    Reset restores defaults without committing. Cancel discards
+    edits. OK writes all six values to state.blob_brush_*. See
+    BLOB_BRUSH_TOOL.md.
+  modal: true
+  width: 520
+  params: {}
+  state:
+    fidelity:
+      type: number
+      default: 3
+      description: "5-stop slider position (1-5); maps to RDP epsilon"
+    keep_selected:
+      type: bool
+      default: false
+      description: "New / merged element becomes canvas selection after commit"
+    merge_only_with_selection:
+      type: bool
+      default: false
+      description: "Painting-mode merge scoped to the current selection"
+    size:
+      type: number
+      default: 10
+      description: "Default tip diameter in pt"
+    angle:
+      type: number
+      default: 0
+      description: "Default tip rotation in degrees"
+    roundness:
+      type: number
+      default: 100
+      description: "Default tip aspect in percent"
+  init:
+    fidelity: "state.blob_brush_fidelity"
+    keep_selected: "state.blob_brush_keep_selected"
+    merge_only_with_selection: "state.blob_brush_merge_only_with_selection"
+    size: "state.blob_brush_size"
+    angle: "state.blob_brush_angle"
+    roundness: "state.blob_brush_roundness"
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+
+      # ── Keep Selected + Merge Only with Selection (top toggles) ──
+      - id: bbo_keep_selected
+        type: toggle
+        label: "Keep Selected"
+        bind:
+          checked: "dialog.keep_selected"
+
+      - id: bbo_merge_only_with_selection
+        type: toggle
+        label: "Merge Only with Selection"
+        bind:
+          checked: "dialog.merge_only_with_selection"
+
+      # ── Fidelity section ──
+      - type: container
+        layout: column
+        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        children:
+          - { type: text, content: "Fidelity", style: { font_size: 12, weight: bold } }
+          - type: row
+            children:
+              - type: col
+                col: 12
+                children:
+                  - id: bbo_fidelity
+                    type: slider
+                    min: 1
+                    max: 5
+                    step: 1
+                    bind:
+                      value: "dialog.fidelity"
+          - type: row
+            children:
+              - type: col
+                col: 6
+                children:
+                  - { type: text, content: "Accurate", style: { font_size: 10 } }
+              - type: col
+                col: 6
+                children:
+                  - { type: text, content: "Smooth", style: { font_size: 10, alignment: end } }
+
+      # ── Default Brush Options section ──
+      # Size / Angle / Roundness variation widgets. Disabled when
+      # a Calligraphic brush is active (that brush's own values
+      # drive Blob Brush instead — see §Runtime tip resolution).
+      - type: container
+        layout: column
+        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        children:
+          - { type: text, content: "Default Brush Options",
+              style: { font_size: 12, weight: bold } }
+
+          # When a Calligraphic brush is active, display a hint
+          # row explaining why the widgets below are disabled.
+          - type: row
+            bind:
+              visible: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+            children:
+              - type: col
+                col: 12
+                children:
+                  - { type: text,
+                      content: "Set by active Calligraphic brush",
+                      style: { font_size: 10, style: italic } }
+
+          # Size (variation widget)
+          - type: row
+            children:
+              - type: col
+                col: 2
+                children:
+                  - { type: text, content: "Size:", style: { font_size: 11 } }
+              - type: col
+                col: 10
+                children:
+                  - include: variation_widget
+                    id_prefix: bbo_size
+                    base_bind: "dialog.size"
+                    mode_bind: "dialog.size_mode"
+                    unit: "pt"
+                    min: 0.5
+                    max: 500
+                    step: 0.1
+                    disable_rotation: true
+                    disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+
+          # Angle (variation widget)
+          - type: row
+            children:
+              - type: col
+                col: 2
+                children:
+                  - { type: text, content: "Angle:", style: { font_size: 11 } }
+              - type: col
+                col: 10
+                children:
+                  - include: variation_widget
+                    id_prefix: bbo_angle
+                    base_bind: "dialog.angle"
+                    mode_bind: "dialog.angle_mode"
+                    unit: "°"
+                    min: -180
+                    max: 180
+                    step: 1
+                    disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+
+          # Roundness (variation widget)
+          - type: row
+            children:
+              - type: col
+                col: 2
+                children:
+                  - { type: text, content: "Roundness:", style: { font_size: 11 } }
+              - type: col
+                col: 10
+                children:
+                  - include: variation_widget
+                    id_prefix: bbo_roundness
+                    base_bind: "dialog.roundness"
+                    mode_bind: "dialog.roundness_mode"
+                    unit: "%"
+                    min: 0
+                    max: 100
+                    step: 1
+                    disable_rotation: true
+                    disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+
+      # ── Reset + Cancel + OK ──
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: space-between }
+        children:
+          - type: button
+            label: "Reset"
+            action: blob_brush_tool_options_reset
+          - type: container
+            layout: row
+            style: { gap: 8 }
+            children:
+              - { type: button, label: "Cancel", action: dismiss_dialog }
+              - type: button
+                label: "OK"
+                action: blob_brush_tool_options_confirm
+                variant: primary
+                params:
+                  fidelity: "dialog.fidelity"
+                  keep_selected: "dialog.keep_selected"
+                  merge_only_with_selection: "dialog.merge_only_with_selection"
+                  size: "dialog.size"
+                  angle: "dialog.angle"
+                  roundness: "dialog.roundness"
