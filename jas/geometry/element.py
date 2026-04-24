@@ -872,6 +872,12 @@ class Path(Element):
     stroke_brush: str | None = None
     # Per-instance brush parameter overrides as compact JSON.
     stroke_brush_overrides: str | None = None
+    # Optional jas:tool-origin tag identifying the tool that produced
+    # this element. Blob Brush sets "blob_brush" on its commits so
+    # subsequent sweeps can merge / erase into the same element.
+    # Preserved by mutations; optional on export. See
+    # BLOB_BRUSH_TOOL.md §Fill and stroke.
+    tool_origin: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
