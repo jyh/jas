@@ -367,6 +367,58 @@ public struct ToolbarView {
                 context.stroke(hi2.applying(transform), with: .color(.white), lineWidth: 4)
                 context.stroke(hi3.applying(transform), with: .color(.white), lineWidth: 4)
 
+            case .blobBrush:
+                // Blob Brush — angled handle + ferrule, filled oval
+                // tip, and a filled blob trail below. Distinct from
+                // Paintbrush's bristled tip: emphasizes filled-region
+                // output. Matches BLOB_BRUSH_TOOL.md §Tool icon.
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+
+                // Handle (diagonal, shared with Paintbrush shape)
+                var handle = SwiftUI.Path()
+                handle.move(to: CGPoint(x: 30, y: 230))
+                handle.addLine(to: CGPoint(x: 60, y: 255))
+                handle.addLine(to: CGPoint(x: 200, y: 115))
+                handle.addLine(to: CGPoint(x: 165, y: 80))
+                handle.closeSubpath()
+                context.fill(handle.applying(transform), with: .color(color))
+
+                // Ferrule (rotated darker band)
+                let ferruleTx = CGAffineTransform(translationX: -187, y: -75)
+                    .rotated(by: -45 * .pi / 180)
+                    .translatedBy(x: 187, y: 75)
+                var ferrule = SwiftUI.Path()
+                ferrule.addRect(CGRect(x: 165, y: 60, width: 45, height: 30))
+                let darkColor = SwiftUI.Color(nsColor: NSColor(white: 0.39, alpha: 1.0))
+                context.fill(ferrule.applying(ferruleTx).applying(transform),
+                             with: .color(darkColor))
+
+                // Filled oval tip
+                var tip = SwiftUI.Path()
+                tip.addEllipse(in: CGRect(x: 180, y: 32, width: 80, height: 56))
+                context.fill(tip.applying(transform), with: .color(color))
+
+                // Filled wavy blob trail
+                var trail = SwiftUI.Path()
+                trail.move(to: CGPoint(x: 50, y: 250))
+                trail.addQuadCurve(to: CGPoint(x: 115, y: 240),
+                                   control: CGPoint(x: 80, y: 230))
+                trail.addQuadCurve(to: CGPoint(x: 175, y: 245),
+                                   control: CGPoint(x: 145, y: 255))
+                trail.addQuadCurve(to: CGPoint(x: 225, y: 245),
+                                   control: CGPoint(x: 205, y: 230))
+                trail.addQuadCurve(to: CGPoint(x: 230, y: 250),
+                                   control: CGPoint(x: 245, y: 265))
+                trail.addQuadCurve(to: CGPoint(x: 185, y: 245),
+                                   control: CGPoint(x: 210, y: 235))
+                trail.addQuadCurve(to: CGPoint(x: 125, y: 250),
+                                   control: CGPoint(x: 155, y: 260))
+                trail.addQuadCurve(to: CGPoint(x: 55, y: 260),
+                                   control: CGPoint(x: 90, y: 240))
+                trail.closeSubpath()
+                context.fill(trail.applying(transform), with: .color(color))
+
             case .pathEraser:
                 // Path Eraser icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28
                 let s: CGFloat = 28.0 / 256.0
@@ -910,6 +962,7 @@ private struct ArrowSlotButton: View {
         case .anchorPoint: return "Anchor Point"
         case .pencil: return "Pencil"
         case .paintbrush: return "Paintbrush"
+        case .blobBrush: return "Blob Brush"
         case .pathEraser: return "Path Eraser"
         case .smooth: return "Smooth"
         case .typeTool: return "Type"
