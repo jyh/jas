@@ -188,12 +188,14 @@ pressed or released during the drag.
 
 **Implementation state.** The close gesture is wired end-to-end
 (Alt-at-release closes the committed path). The dashed hint overlay
-is wired in Rust (`jas_dioxus`) as an optional `close_hint` field
-on the `buffer_polyline` overlay render type — truthy values draw a
-dashed line from the cursor back to the press point. Swift / OCaml /
-Python have not yet ported the `close_hint` field; users on those
-apps can still close paths with Alt-release but don't see the live
-preview.
+is wired in Rust and Swift as an optional `close_hint` field on the
+`buffer_polyline` overlay render type — truthy values draw a dashed
+line from the cursor back to the press point. OCaml and Python do
+not yet render any YAML-driven tool overlay (their `yaml_tool.draw_overlay`
+methods are still stubs from Phase 5a of the OCaml / Python tool-
+runtime migrations); users on those apps can still close paths with
+Alt-release but see neither the main preview polyline nor the close
+hint.
 
 ## YAML tool runtime fit
 
