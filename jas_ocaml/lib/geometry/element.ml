@@ -654,6 +654,12 @@ type element =
       mask : mask option;
       fill_gradient : gradient option;
       stroke_gradient : gradient option;
+      (* Active brush reference as <library_slug>/<brush_slug>, or
+         None for plain native-stroke. Consumed by the canvas
+         renderer (BRUSHES.md Stroke styling interaction). *)
+      stroke_brush : string option;
+      (* Per-instance brush parameter overrides as compact JSON. *)
+      stroke_brush_overrides : string option;
     }
   | Text of {
       x : float; y : float;
@@ -1081,7 +1087,7 @@ let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = 
   Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
-  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush = None; stroke_brush_overrides = None }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /

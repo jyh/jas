@@ -378,6 +378,8 @@ type element =
       mask : mask option;
       fill_gradient : gradient option;
       stroke_gradient : gradient option;
+      stroke_brush : string option;
+      stroke_brush_overrides : string option;
     }
   | Text of {
       x : float; y : float;

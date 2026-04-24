@@ -738,6 +738,8 @@ let rec parse_element j =
            opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
              fill_gradient = None;
              stroke_gradient = None;
+             stroke_brush = None;
+             stroke_brush_overrides = None;
            }
   | "text" ->
     let content = parse_content_or_tspans j in
