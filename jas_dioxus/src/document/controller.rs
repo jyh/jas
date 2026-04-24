@@ -389,6 +389,39 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Set stroke_brush on all selected elements (paths only).
+    /// Used by apply_brush_to_selection. See BRUSHES.md.
+    pub fn set_selection_stroke_brush(model: &mut Model, slug: Option<String>) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::with_stroke_brush(elem, slug.clone()),
+                );
+            }
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Set stroke_brush_overrides on all selected elements (paths only).
+    pub fn set_selection_stroke_brush_overrides(
+        model: &mut Model, overrides: Option<String>,
+    ) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::with_stroke_brush_overrides(elem, overrides.clone()),
+                );
+            }
+        }
+        model.set_document(new_doc);
+    }
+
     /// Set the fill of all selected elements.
     pub fn set_selection_fill(model: &mut Model, fill: Option<Fill>) {
         let doc = model.document().clone();
