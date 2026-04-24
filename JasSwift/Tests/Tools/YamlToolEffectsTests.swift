@@ -731,3 +731,112 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     #expect(model.document.selection.count == 1)
     #expect(model.document.selection.first?.path == [0, 0])
 }
+
+// MARK: - Blob Brush commit effects
+
+private func seedBlobBrushSweep() {
+    pointBuffersClear("blob_brush")
+    // Short horizontal sweep; 6 points spanning 50 pt.
+    for i in 0...5 {
+        pointBuffersPush("blob_brush", Double(i) * 10.0, 0.0)
+    }
+}
+
+private func blobBrushStateDefaults(_ store: StateStore) {
+    store.set("fill_color", "#ff0000")
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+}
+
+@Test func blobBrushCommitPaintingCreatesTaggedPath() {
+    let store = StateStore()
+    blobBrushStateDefaults(store)
+    let model = Model(document: Document(
+        layers: [Layer(children: [])],
+        selectedLayer: 0, selection: []))
+    seedBlobBrushSweep()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.blob_brush.commit_painting": [
+            "buffer": "blob_brush",
+            "fidelity_epsilon": "5.0",
+            "merge_only_with_selection": "false",
+            "keep_selected": "false",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let children = model.document.layers[0].children
+    #expect(children.count == 1)
+    if case .path(let pe) = children[0] {
+        #expect(pe.toolOrigin == "blob_brush")
+        #expect(pe.fill != nil)
+        #expect(pe.stroke == nil)
+        // At least one MoveTo + multiple LineTos + ClosePath.
+        #expect(pe.d.count >= 3)
+    } else {
+        Issue.record("expected .path")
+    }
+}
+
+@Test func blobBrushCommitErasingDeletesFullyCoveredElement() {
+    let store = StateStore()
+    blobBrushStateDefaults(store)
+    // Small 4×2 blob-brush square fully inside the sweep's coverage
+    // area (sweep = 50pt horizontal, 10pt tip → covers y ∈ [-5, 5]).
+    let target: Element = .path(Path(
+        d: [
+            .moveTo(23, -1),
+            .lineTo(27, -1),
+            .lineTo(27, 1),
+            .lineTo(23, 1),
+            .closePath,
+        ],
+        fill: Fill(color: Color.fromHex("#ff0000")!),
+        toolOrigin: "blob_brush"))
+    let model = Model(document: Document(
+        layers: [Layer(children: [target])],
+        selectedLayer: 0, selection: []))
+    seedBlobBrushSweep()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.blob_brush.commit_erasing": [
+            "buffer": "blob_brush",
+            "fidelity_epsilon": "5.0",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let children = model.document.layers[0].children
+    #expect(children.isEmpty,
+            "erasing should delete fully-covered element")
+}
+
+@Test func blobBrushCommitErasingIgnoresNonBlobBrushElements() {
+    let store = StateStore()
+    blobBrushStateDefaults(store)
+    // Same square but WITHOUT toolOrigin — erase must skip.
+    let target: Element = .path(Path(
+        d: [
+            .moveTo(20, -2),
+            .lineTo(30, -2),
+            .lineTo(30, 2),
+            .lineTo(20, 2),
+            .closePath,
+        ],
+        fill: Fill(color: Color.fromHex("#ff0000")!)))
+    let model = Model(document: Document(
+        layers: [Layer(children: [target])],
+        selectedLayer: 0, selection: []))
+    seedBlobBrushSweep()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.blob_brush.commit_erasing": [
+            "buffer": "blob_brush",
+            "fidelity_epsilon": "5.0",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let children = model.document.layers[0].children
+    #expect(children.count == 1,
+            "erasing must not touch non-blob-brush elements")
+}

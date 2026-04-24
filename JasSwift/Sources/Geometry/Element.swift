@@ -2280,6 +2280,12 @@ public struct Path: Equatable {
     /// layered over the master brush at render time. See BRUSHES.md
     /// §Panel state.
     public let strokeBrushOverrides: String?
+    /// Optional `jas:tool-origin` tag identifying the tool that
+    /// produced this element. Blob Brush sets `"blob_brush"` on its
+    /// commits so subsequent sweeps can merge / erase into the same
+    /// element. Preserved by mutations; optional on export.
+    /// See BLOB_BRUSH_TOOL.md §Fill and stroke.
+    public let toolOrigin: String?
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -2292,7 +2298,8 @@ public struct Path: Equatable {
                 fillGradient: Gradient? = nil,
                 strokeGradient: Gradient? = nil,
                 strokeBrush: String? = nil,
-                strokeBrushOverrides: String? = nil) {
+                strokeBrushOverrides: String? = nil,
+                toolOrigin: String? = nil) {
         self.d = d
         self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -2304,6 +2311,7 @@ public struct Path: Equatable {
         self.strokeGradient = strokeGradient
         self.strokeBrush = strokeBrush
         self.strokeBrushOverrides = strokeBrushOverrides
+        self.toolOrigin = toolOrigin
     }
 
     public var bounds: BBox {

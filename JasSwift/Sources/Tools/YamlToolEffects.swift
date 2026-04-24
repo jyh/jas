@@ -444,6 +444,48 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.blob_brush.commit_painting — {
+    //   buffer, fidelity_epsilon?,
+    //   merge_only_with_selection?, keep_selected?
+    // }.
+    // Blob Brush painting-mode commit. Builds the swept region from
+    // the named buffer, merges with qualifying existing blob-brush
+    // elements (per BLOB_BRUSH_TOOL.md §Merge condition +
+    // §Multi-element merge), and commits a single filled Path at the
+    // lowest matching z-index (or appends to layer 0 when no matches).
+    effects["doc.blob_brush.commit_painting"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let buffer = args["buffer"] as? String,
+              !buffer.isEmpty else { return nil }
+        let epsilon = evalNumber(args["fidelity_epsilon"], store: store, ctx: ctx)
+        let mergeOnlyWithSelection = evalBool(
+            args["merge_only_with_selection"], store: store, ctx: ctx)
+        let keepSelected = evalBool(args["keep_selected"], store: store, ctx: ctx)
+        blobBrushCommitPainting(
+            model: model, store: store, ctx: ctx,
+            buffer: buffer, fidelityEpsilon: epsilon,
+            mergeOnlyWithSelection: mergeOnlyWithSelection,
+            keepSelected: keepSelected)
+        return nil
+    }
+
+    // doc.blob_brush.commit_erasing — { buffer, fidelity_epsilon? }.
+    // Blob Brush erasing-mode commit. Same sweep-region generation as
+    // painting; then boolean_subtract the region from each overlapping
+    // jas:tool-origin == "blob_brush" element (fill match not
+    // required). Empty remainder → delete; non-empty update in place.
+    // See BLOB_BRUSH_TOOL.md §Erase gesture.
+    effects["doc.blob_brush.commit_erasing"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let buffer = args["buffer"] as? String,
+              !buffer.isEmpty else { return nil }
+        let epsilon = evalNumber(args["fidelity_epsilon"], store: store, ctx: ctx)
+        blobBrushCommitErasing(
+            model: model, store: store, ctx: ctx,
+            buffer: buffer, fidelityEpsilon: epsilon)
+        return nil
+    }
+
     // doc.path.smooth_at_cursor — { x, y, radius?, fit_error? }.
     // Iterates selected unlocked Paths, finds the contiguous flat
     // range within `radius` of (x, y), re-fits it via fitCurve with
@@ -1583,6 +1625,326 @@ private func evalNumberWithDefault(
     guard arg != nil else { return defVal }
     let v = evalNumber(arg, store: store, ctx: ctx)
     return v == 0 ? defVal : v
+}
+
+// MARK: - Blob Brush commit helpers + effects
+
+/// Resolve the effective tip shape (size pt, angle deg, roundness
+/// percent) at commit time per BLOB_BRUSH_TOOL.md §Runtime tip
+/// resolution. When state.stroke_brush points to a Calligraphic
+/// library brush, its size/angle/roundness drive the tip (with
+/// state.stroke_brush_overrides layered on top). Otherwise the
+/// dialog defaults state.blob_brush_* are used.
+///
+/// Variation modes other than `fixed` are evaluated as the base
+/// value in Phase 1 (matches the Paintbrush Phase 1 decision for
+/// pressure/tilt/bearing).
+private func blobBrushEffectiveTip(
+    store: StateStore, ctx: [String: Any]
+) -> (Double, Double, Double) {
+    func numOr(_ expr: String, _ def: Double) -> Double {
+        if case .number(let n) = evalExprAsValue(expr, store: store, ctx: ctx) {
+            return n
+        }
+        return def
+    }
+    let defaultSize = numOr("state.blob_brush_size", 10.0)
+    let defaultAngle = numOr("state.blob_brush_angle", 0.0)
+    let defaultRoundness = numOr("state.blob_brush_roundness", 100.0)
+
+    let slugVal = evalExprAsValue("state.stroke_brush", store: store, ctx: ctx)
+    let slug: String
+    if case .string(let s) = slugVal, !s.isEmpty {
+        slug = s
+    } else {
+        return (defaultSize, defaultAngle, defaultRoundness)
+    }
+    guard let slashIdx = slug.firstIndex(of: "/") else {
+        return (defaultSize, defaultAngle, defaultRoundness)
+    }
+    let libId = String(slug[..<slashIdx])
+    let brushSlug = String(slug[slug.index(after: slashIdx)...])
+    guard let brushes = store.getDataPath("brush_libraries.\(libId).brushes") as? [[String: Any]],
+          let brush = brushes.first(where: { ($0["slug"] as? String) == brushSlug }) else {
+        return (defaultSize, defaultAngle, defaultRoundness)
+    }
+    guard (brush["type"] as? String) == "calligraphic" else {
+        return (defaultSize, defaultAngle, defaultRoundness)
+    }
+    let size = (brush["size"] as? NSNumber)?.doubleValue ?? defaultSize
+    let angle = (brush["angle"] as? NSNumber)?.doubleValue ?? defaultAngle
+    let roundness = (brush["roundness"] as? NSNumber)?.doubleValue ?? defaultRoundness
+
+    // Apply state.stroke_brush_overrides (compact JSON) if present.
+    let overridesVal = evalExprAsValue("state.stroke_brush_overrides",
+                                       store: store, ctx: ctx)
+    guard case .string(let overridesRaw) = overridesVal,
+          !overridesRaw.isEmpty,
+          let data = overridesRaw.data(using: .utf8),
+          let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    else {
+        return (size, angle, roundness)
+    }
+    let sizeOut = (obj["size"] as? NSNumber)?.doubleValue ?? size
+    let angleOut = (obj["angle"] as? NSNumber)?.doubleValue ?? angle
+    let roundnessOut = (obj["roundness"] as? NSNumber)?.doubleValue ?? roundness
+    return (sizeOut, angleOut, roundnessOut)
+}
+
+/// Generate a 16-segment polygon ring approximating an ellipse
+/// centered at (cx, cy) with horizontal axis = size/2, vertical
+/// axis = size × roundness/100 / 2, rotated by `angleDeg`.
+private func blobBrushOvalRing(
+    cx: Double, cy: Double,
+    size: Double, angleDeg: Double, roundnessPct: Double
+) -> BoolRing {
+    let segments = 16
+    let rx = size * 0.5
+    let ry = size * (roundnessPct / 100.0) * 0.5
+    let rad = angleDeg * .pi / 180.0
+    let cs = cos(rad), sn = sin(rad)
+    var out: BoolRing = []
+    out.reserveCapacity(segments)
+    for i in 0..<segments {
+        let t = 2.0 * .pi * Double(i) / Double(segments)
+        let lx = rx * cos(t)
+        let ly = ry * sin(t)
+        let x = cx + lx * cs - ly * sn
+        let y = cy + lx * sn + ly * cs
+        out.append((x, y))
+    }
+    return out
+}
+
+/// Arc-length resample a point sequence at uniform `spacing`
+/// intervals, interpolating between input points so consecutive
+/// output dabs are at most `spacing` apart regardless of input
+/// density. Always keeps the first and last points.
+private func blobBrushArcLengthSubsample(
+    _ points: [(Double, Double)], spacing: Double
+) -> [(Double, Double)] {
+    if points.count < 2 || spacing <= 0 { return points }
+    var out: [(Double, Double)] = [points[0]]
+    var remaining = spacing
+    for i in 0..<(points.count - 1) {
+        let (ax, ay) = points[i]
+        let (bx, by) = points[i + 1]
+        let dx = bx - ax
+        let dy = by - ay
+        let segLen = (dx * dx + dy * dy).squareRoot()
+        if segLen <= 0 { continue }
+        var tAt = 0.0
+        while tAt + remaining <= segLen {
+            tAt += remaining
+            let t = tAt / segLen
+            out.append((ax + dx * t, ay + dy * t))
+            remaining = spacing
+        }
+        remaining -= segLen - tAt
+    }
+    if let tail = points.last,
+       let lastOut = out.last,
+       (lastOut.0, lastOut.1) != tail {
+        out.append(tail)
+    }
+    return out
+}
+
+/// Build the swept region from buffer points and tip params.
+/// Subsamples the buffer at ½ × min tip dimension, places an oval
+/// at each sample, and unions all ovals via booleanUnion.
+private func blobBrushSweepRegion(
+    _ points: [(Double, Double)],
+    tip: (Double, Double, Double)
+) -> BoolPolygonSet {
+    let (size, angle, roundness) = tip
+    let minDim = min(size, size * roundness / 100.0)
+    let spacing = max(minDim * 0.5, 0.5)
+    let samples = blobBrushArcLengthSubsample(points, spacing: spacing)
+    var region: BoolPolygonSet = []
+    for (cx, cy) in samples {
+        let oval: BoolPolygonSet = [blobBrushOvalRing(
+            cx: cx, cy: cy,
+            size: size, angleDeg: angle, roundnessPct: roundness)]
+        if region.isEmpty {
+            region = oval
+        } else {
+            region = booleanUnion(region, oval)
+        }
+    }
+    return region
+}
+
+/// Compare two Fill values for merge purposes per BLOB_BRUSH_TOOL.md
+/// §Merge condition. Returns true iff both are solid colors with
+/// matching sRGB hex and opacity, neither is nil.
+private func blobBrushFillMatches(_ a: Fill?, _ b: Fill?) -> Bool {
+    guard let fa = a, let fb = b else { return false }
+    return fa.color.toHex().lowercased() == fb.color.toHex().lowercased()
+        && abs(fa.opacity - fb.opacity) < 1e-9
+}
+
+/// Implementation of doc.blob_brush.commit_painting.
+/// See BLOB_BRUSH_TOOL.md §Commit pipeline + §Multi-element merge.
+private func blobBrushCommitPainting(
+    model: Model, store: StateStore, ctx: [String: Any],
+    buffer: String,
+    fidelityEpsilon _: Double, // RDP simplify deferred to follow-up
+    mergeOnlyWithSelection: Bool,
+    keepSelected _: Bool // Selection update deferred; future follow-up
+) {
+    let points = pointBuffersPoints(buffer)
+    if points.count < 2 { return }
+
+    let tip = blobBrushEffectiveTip(store: store, ctx: ctx)
+    let swept = blobBrushSweepRegion(points, tip: tip)
+    if swept.isEmpty { return }
+
+    // Resolve fill from state.fill_color.
+    let fillVal = evalExprAsValue("state.fill_color", store: store, ctx: ctx)
+    let fillColor: Color?
+    switch fillVal {
+    case .color(let c): fillColor = Color.fromHex(c)
+    case .string(let s): fillColor = Color.fromHex(s)
+    default: fillColor = nil
+    }
+    let newFill: Fill? = fillColor.map { Fill(color: $0) }
+
+    // Find matching existing blob-brush elements in top-level layers'
+    // children. Matching == toolOrigin == "blob_brush" + fill matches
+    // newFill + (optional) selection-scoped.
+    let doc = model.document
+    let selectedPaths = Set(doc.selection.map { $0.path })
+    var matches: [ElementPath] = []
+    var unified = swept
+    for (li, layer) in doc.layers.enumerated() {
+        for (ci, child) in layer.children.enumerated() {
+            guard case .path(let pe) = child else { continue }
+            guard pe.toolOrigin == "blob_brush" else { continue }
+            guard blobBrushFillMatches(pe.fill, newFill) else { continue }
+            let path: ElementPath = [li, ci]
+            if mergeOnlyWithSelection && !selectedPaths.contains(path) {
+                continue
+            }
+            let existing = pathToPolygonSet(pe.d)
+            // Cheap reject: skip if no spatial overlap.
+            if booleanIntersect(unified, existing).isEmpty { continue }
+            unified = booleanUnion(unified, existing)
+            matches.append(path)
+        }
+    }
+
+    // Insertion z = lowest matching (layer, child); default append.
+    let insertLayer: Int
+    let insertIdx: Int?
+    if matches.isEmpty {
+        insertLayer = 0
+        insertIdx = nil
+    } else {
+        let lowest = matches[0]
+        insertLayer = lowest[0]
+        insertIdx = lowest[1]
+    }
+
+    let newD = polygonSetToPath(unified)
+    if newD.isEmpty { return }
+    let newElem = Path(
+        d: newD,
+        fill: newFill, stroke: nil,
+        widthPoints: [],
+        toolOrigin: "blob_brush"
+    )
+
+    // Build new document: remove matches in reverse (so earlier
+    // indices stay valid), then insert the unified element.
+    var newDoc = doc
+    for path in matches.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
+        newDoc = newDoc.deleteElement(path)
+    }
+    if let idx = insertIdx {
+        // Lowest matching (layer, child). The post-delete layer may
+        // be shorter, but the lowest match's child index is still a
+        // valid insertion point at (insertLayer, idx).
+        newDoc = blobBrushInsertAt(newDoc, layerIdx: insertLayer,
+                                   childIdx: idx, element: .path(newElem))
+    } else {
+        // No matches — append as a top-level child of layer 0.
+        let children = newDoc.layers[insertLayer].children
+        newDoc = blobBrushInsertAt(
+            newDoc, layerIdx: insertLayer,
+            childIdx: children.count, element: .path(newElem))
+    }
+    model.document = newDoc
+}
+
+/// Implementation of doc.blob_brush.commit_erasing.
+/// See BLOB_BRUSH_TOOL.md §Erase gesture → Commit.
+private func blobBrushCommitErasing(
+    model: Model, store: StateStore, ctx: [String: Any],
+    buffer: String,
+    fidelityEpsilon _: Double
+) {
+    let points = pointBuffersPoints(buffer)
+    if points.count < 2 { return }
+
+    let tip = blobBrushEffectiveTip(store: store, ctx: ctx)
+    let swept = blobBrushSweepRegion(points, tip: tip)
+    if swept.isEmpty { return }
+
+    let doc = model.document
+    var newDoc = doc
+    // Iterate in reverse so deletions don't invalidate earlier indices.
+    for li in (0..<doc.layers.count).reversed() {
+        let children = doc.layers[li].children
+        for ci in (0..<children.count).reversed() {
+            guard case .path(let pe) = children[ci] else { continue }
+            guard pe.toolOrigin == "blob_brush" else { continue }
+            let existing = pathToPolygonSet(pe.d)
+            if booleanIntersect(existing, swept).isEmpty { continue }
+            let remainder = booleanSubtract(existing, swept)
+            let path: ElementPath = [li, ci]
+            let newD = polygonSetToPath(remainder)
+            if newD.isEmpty {
+                newDoc = newDoc.deleteElement(path)
+            } else {
+                let newPe = Path(
+                    d: newD,
+                    fill: pe.fill, stroke: pe.stroke,
+                    widthPoints: pe.widthPoints,
+                    opacity: pe.opacity, transform: pe.transform,
+                    locked: pe.locked, visibility: pe.visibility,
+                    blendMode: pe.blendMode, mask: pe.mask,
+                    fillGradient: pe.fillGradient,
+                    strokeGradient: pe.strokeGradient,
+                    strokeBrush: pe.strokeBrush,
+                    strokeBrushOverrides: pe.strokeBrushOverrides,
+                    toolOrigin: pe.toolOrigin)
+                newDoc = newDoc.replaceElement(path, with: .path(newPe))
+            }
+        }
+    }
+    model.document = newDoc
+}
+
+/// Insert `element` at `doc.layers[layerIdx].children[childIdx]`,
+/// shifting later children down. Used by blob_brush commit_painting
+/// where Controller.addElement would always append + re-select.
+private func blobBrushInsertAt(
+    _ doc: Document, layerIdx: Int, childIdx: Int, element: Element
+) -> Document {
+    var layers = doc.layers
+    guard layerIdx < layers.count else { return doc }
+    let layer = layers[layerIdx]
+    var children = layer.children
+    let clamped = max(0, min(childIdx, children.count))
+    children.insert(element, at: clamped)
+    layers[layerIdx] = Layer(
+        name: layer.name, children: children,
+        opacity: layer.opacity, transform: layer.transform)
+    return Document(
+        layers: layers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: doc.artboards,
+        artboardOptions: doc.artboardOptions)
 }
 
 // MARK: - Path validity
