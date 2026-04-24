@@ -866,6 +866,12 @@ class Path(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    # Active brush reference as "<library_slug>/<brush_slug>", or None
+    # for plain native-stroke. Consumed by the canvas renderer's brush
+    # dispatch. See transcripts/BRUSHES.md §Stroke styling interaction.
+    stroke_brush: str | None = None
+    # Per-instance brush parameter overrides as compact JSON.
+    stroke_brush_overrides: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
