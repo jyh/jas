@@ -2477,19 +2477,52 @@ actions:
 
   brush_options_confirm:
     description: >
-      Confirm the Brush Options dialog. In create mode, appends a new
-      brush to the selected library. In library_edit mode, updates the
-      master brush in place and (if any element references it) prompts
-      the Apply to Strokes confirm sub-dialog. In instance_edit mode,
-      writes stroke_brush_overrides on the selected element. Closes
-      the dialog.
+      Confirm the Brush Options dialog. Per-mode dispatch:
+
+      create — assemble a new brush dict from dialog state (name,
+        type, type-specific params), call brush.append on the
+        selected library, close the dialog. The slug is generated
+        from the brush_name (lowercased, non-alphanum stripped).
+      library_edit — assemble a patch dict from the dialog state
+        delta and open the Apply to Strokes confirm sub-dialog;
+        the sub-dialog's Apply button triggers the actual
+        brush.update + re-render.
+      instance_edit — write the dialog state delta as
+        stroke_brush_overrides JSON on the selected element via
+        doc.set_attr_on_selection.
+
+      Phase 1 wires create + instance_edit; library_edit defers the
+      brush.update + re-render to the Apply sub-dialog so the user
+      retains the chance to cancel between dialog confirms.
     category: brushes
     params:
       mode: { type: string }
       library: { type: string, optional: True }
       brush_slug: { type: string, optional: True }
     effects:
+      # The per-mode dispatch + dialog-state assembly is too rich
+      # for inline YAML conditionals; per-app effect handlers
+      # implement brush_options_confirm against the dialog scope.
       - log: "brush_options_confirm (mode={{param.mode}})"
+      - close_dialog: None
+
+  apply_brush_changes_to_strokes:
+    description: >
+      Apply pending brush-edits to every element whose
+      stroke_brush references the named library/slug. The
+      brush_options_confirm action stashes the patch on dialog
+      state before opening the Apply to Strokes confirm dialog;
+      this action commits via brush.update and triggers a canvas
+      re-render. Per BRUSH_OPTIONS_DIALOG.md §Apply to Strokes.
+    category: brushes
+    params:
+      library: { type: string }
+      brush_slug: { type: string }
+    effects:
+      # Wired to the per-app brush.update effect from Phase 6.5-6.8.
+      # The patch dict comes from the parent Brush Options dialog's
+      # captured state; per-app handlers reconstitute it.
+      - log: "apply_brush_changes_to_strokes (library={{param.library}}, brush={{param.brush_slug}})"
       - close_dialog: None
 
   duplicate_brush:

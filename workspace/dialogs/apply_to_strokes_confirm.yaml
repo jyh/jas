@@ -1,0 +1,40 @@
+apply_to_strokes_confirm:
+  summary: "Brush Change"
+  description: >
+    Confirmation sub-dialog opened by brush_options_confirm in
+    library_edit mode. Two-way per BRUSH_OPTIONS_DIALOG.md §Apply
+    to Strokes confirm dialog (no Leave Strokes branch).
+
+    Apply: library mutation commits and every element with
+      jas:stroke-brush referencing this brush is re-rendered. The
+      parent Brush Options dialog closes.
+    Cancel: library mutation is discarded; the parent Brush Options
+      dialog stays open with the user's edits still pending.
+
+    Spec carries the library + brush_slug + patch (the dialog state
+    delta) so the Apply effect chain can dispatch through brush.update
+    and re-render selection.
+  modal: true
+  params:
+    brush_name:  { type: string }
+    library:     { type: string }
+    brush_slug:  { type: string }
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - type: text
+        content: 'The brush "{{param.brush_name}}" has been modified. Apply changes to existing strokes using this brush?'
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - id: ats_apply_btn
+            type: button
+            label: "Apply"
+            variant: primary
+            action: apply_brush_changes_to_strokes
+            params:
+              library: "param.library"
+              brush_slug: "param.brush_slug"
