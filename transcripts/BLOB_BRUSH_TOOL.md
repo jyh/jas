@@ -48,8 +48,12 @@ Otherwise the sweep commits as a new independent element.
 
 ## Tool options
 
-Double-click the tool icon → Blob Brush Tool Options dialog. Stub
-list:
+Double-click the tool icon → Blob Brush Tool Options dialog. The
+dialog is wired via the `tool_options_dialog` field on the tool yaml
+— the cross-tool convention introduced alongside Paintbrush. See
+`PAINTBRUSH_TOOL.md` § Tool options for the toolbar-dispatch rule.
+
+Stub list:
 
 - `blob_brush_fidelity` — pixels; sweep-path smoothing tolerance.
 - `blob_brush_smoothness` — percent; post-union smoothing pass on
