@@ -273,6 +273,8 @@ class YamlTool(CanvasTool):
             elif render_type == "partial_selection_overlay":
                 _draw_partial_selection_overlay(
                     painter, render, eval_ctx, ctx.document)
+            elif render_type == "oval_cursor":
+                _draw_oval_cursor_overlay(painter, render, eval_ctx)
         finally:
             guard.restore()
 
@@ -774,3 +776,111 @@ def _draw_pen_overlay(painter, render: dict, eval_ctx: dict) -> None:
                 QPointF(first.x, first.y),
                 anchor_half + 2.0, anchor_half + 2.0,
             )
+
+
+def _add_oval_path(cx: float, cy: float, rx: float, ry: float, rad: float):
+    """Return a QPainterPath tracing a 24-segment rotated ellipse."""
+    from PySide6.QtGui import QPainterPath
+    segments = 24
+    cs = math.cos(rad)
+    sn = math.sin(rad)
+    path = QPainterPath()
+    for i in range(segments + 1):
+        t = 2.0 * math.pi * i / segments
+        lx = rx * math.cos(t)
+        ly = ry * math.sin(t)
+        x = cx + lx * cs - ly * sn
+        y = cy + lx * sn + ly * cs
+        if i == 0:
+            path.moveTo(x, y)
+        else:
+            path.lineTo(x, y)
+    path.closeSubpath()
+    return path
+
+
+def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    """Blob Brush oval cursor + drag preview.
+    BLOB_BRUSH_TOOL.md Overlay.
+
+    Two responsibilities:
+    1. Hover cursor -- oval outline at (x, y) using the effective tip
+       shape (size/angle/roundness). When `dashed` is truthy, the
+       stroke is dashed to signal erase mode.
+    2. Drag preview -- when mode != "idle" and a buffer is named,
+       each buffered pointer sample gets an ellipse. Painting mode
+       fills semi-transparent; erasing mode strokes dashed outlines.
+    """
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QBrush, QPen
+
+    cx = _eval_number_field(eval_ctx, render.get("x"))
+    cy = _eval_number_field(eval_ctx, render.get("y"))
+    size = max(1.0, _eval_number_field(eval_ctx, render.get("default_size")))
+    angle_deg = _eval_number_field(eval_ctx, render.get("default_angle"))
+    roundness = max(1.0,
+        _eval_number_field(eval_ctx, render.get("default_roundness")))
+    stroke_color_str = (render.get("stroke_color")
+                        if isinstance(render.get("stroke_color"), str) else "")
+    if not stroke_color_str:
+        stroke_color_str = "#000000"
+    rgba = parse_color(stroke_color_str) or (0.0, 0.0, 0.0, 1.0)
+    dashed = _eval_bool_field(eval_ctx, render.get("dashed"))
+    # Mode may be a literal-quoted string (``"'painting'"``) or an
+    # expression evaluating to a string.
+    mode = "idle"
+    mode_raw = render.get("mode")
+    if isinstance(mode_raw, str):
+        if (len(mode_raw) >= 2
+            and ((mode_raw[0] == "'" and mode_raw[-1] == "'")
+                 or (mode_raw[0] == '"' and mode_raw[-1] == '"'))):
+            mode = mode_raw[1:-1]
+        else:
+            v = evaluate(mode_raw, eval_ctx)
+            if v.type == ValueType.STRING:
+                mode = v.value
+            else:
+                mode = mode_raw
+
+    rx = size * 0.5
+    ry = size * (roundness / 100.0) * 0.5
+    rad = math.radians(angle_deg)
+
+    # Drag preview: if a buffer is named and mode != idle, draw each
+    # buffered sample as an oval. Painting = semi-transparent fill;
+    # erasing = dashed outline.
+    if mode != "idle":
+        buffer_name = (render.get("buffer")
+                       if isinstance(render.get("buffer"), str) else "")
+        if buffer_name:
+            points = point_buffers.points(buffer_name)
+            if len(points) >= 2:
+                if mode == "painting":
+                    r, g, b, _ = rgba
+                    fill_color = _qcolor((r, g, b, 0.3))
+                    painter.setBrush(QBrush(fill_color))
+                    painter.setPen(QPen(Qt.PenStyle.NoPen))
+                    for px, py in points:
+                        painter.drawPath(_add_oval_path(px, py, rx, ry, rad))
+                elif mode == "erasing":
+                    dash_pen = QPen(_qcolor(rgba), 1.0)
+                    dash_pen.setStyle(Qt.PenStyle.CustomDashLine)
+                    dash_pen.setDashPattern([3.0, 3.0])
+                    painter.setPen(dash_pen)
+                    _clear_brush(painter)
+                    for px, py in points:
+                        painter.drawPath(_add_oval_path(px, py, rx, ry, rad))
+
+    # Hover cursor outline at (cx, cy). Dashed when Alt held.
+    hover_pen = QPen(_qcolor(rgba), 1.0)
+    if dashed:
+        hover_pen.setStyle(Qt.PenStyle.CustomDashLine)
+        hover_pen.setDashPattern([4.0, 4.0])
+    painter.setPen(hover_pen)
+    _clear_brush(painter)
+    painter.drawPath(_add_oval_path(cx, cy, rx, ry, rad))
+    # Center crosshair for precision aiming.
+    crosshair_pen = QPen(_qcolor(rgba), 1.0)
+    painter.setPen(crosshair_pen)
+    painter.drawLine(cx - 3, cy, cx + 3, cy)
+    painter.drawLine(cx, cy - 3, cx, cy + 3)
