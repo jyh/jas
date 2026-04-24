@@ -6394,6 +6394,7 @@ mod tests {
                     locked,
                     visibility: vis,
                     mask: None,
+                    tool_origin: None,
                 },
             })
         }).collect();
