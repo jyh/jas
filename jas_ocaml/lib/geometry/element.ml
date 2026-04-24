@@ -660,6 +660,12 @@ type element =
       stroke_brush : string option;
       (* Per-instance brush parameter overrides as compact JSON. *)
       stroke_brush_overrides : string option;
+      (* Optional jas:tool-origin tag identifying the tool that
+         produced this element. Blob Brush sets "blob_brush" on its
+         commits so subsequent sweeps can merge / erase into the same
+         element. Preserved by mutations; optional on export.
+         See BLOB_BRUSH_TOOL.md Fill and stroke. *)
+      tool_origin : string option;
     }
   | Text of {
       x : float; y : float;
@@ -1086,8 +1092,8 @@ let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform =
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
   Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
-let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) ?(stroke_brush = None) ?(stroke_brush_overrides = None) d =
-  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush; stroke_brush_overrides }
+let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) ?(stroke_brush = None) ?(stroke_brush_overrides = None) ?(tool_origin = None) d =
+  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush; stroke_brush_overrides; tool_origin }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /
