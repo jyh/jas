@@ -2,6 +2,46 @@
 
 type tool = Selection | Partial_selection | Interior_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
 
+(** Map a tool variant to its workspace/tools/*.yaml filename stem.
+    Returns [None] for native-only tools without a YAML spec. Used
+    by the double-click handlers to look up tool_options_dialog
+    (PAINTBRUSH_TOOL.md §Tool options). *)
+let tool_yaml_id = function
+  | Selection -> Some "selection"
+  | Partial_selection -> Some "partial_selection"
+  | Interior_selection -> Some "interior_selection"
+  | Pen -> Some "pen"
+  | Add_anchor_point -> Some "add_anchor_point"
+  | Delete_anchor_point -> Some "delete_anchor_point"
+  | Anchor_point -> Some "anchor_point"
+  | Pencil -> Some "pencil"
+  | Paintbrush -> Some "paintbrush"
+  | Path_eraser -> Some "path_eraser"
+  | Smooth -> Some "smooth"
+  | Line -> Some "line"
+  | Rect -> Some "rect"
+  | Rounded_rect -> Some "rounded_rect"
+  | Polygon -> Some "polygon"
+  | Star -> Some "star"
+  | Lasso -> Some "lasso"
+  | Type_tool | Type_on_path -> None
+
+(** Look up a tool's [tool_options_dialog] field in workspace.json.
+    Returns the dialog id when set, [None] otherwise. *)
+let tool_options_dialog_id (t : tool) : string option =
+  let open Option in
+  bind (tool_yaml_id t) (fun yaml_id ->
+    bind (Workspace_loader.load ()) (fun ws ->
+      bind (Workspace_loader.json_member "tools" ws.data) (function
+        | `Assoc tools ->
+          bind (List.assoc_opt yaml_id tools) (function
+            | `Assoc fields ->
+              bind (List.assoc_opt "tool_options_dialog" fields) (function
+                | `String s -> Some s
+                | _ -> None)
+            | _ -> None)
+        | _ -> None)))
+
 let tool_button_size = 32
 let _title_bar_height = 24
 let long_press_ms = Canvas_tool.long_press_ms
@@ -1072,16 +1112,34 @@ class toolbar ~title:(_title : string) ~x ~y
           true
         end else false
       ) |> ignore;
-      (* Pencil slot: click selects, long press shows menu *)
+      (* Pencil slot: click selects, long press shows menu,
+         double-click opens tool-options dialog if set. *)
       pencil_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
       pencil_btn#event#connect#button_press ~callback:(fun ev ->
         if GdkEvent.Button.button ev = 1 then begin
-          pencil_long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
-            pencil_long_press_timer <- None;
-            self#show_pencil_slot_menu;
-            false
-          ));
-          true
+          if GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
+            (* Cancel any pending long-press timer from the first
+               click, then open the tool-options dialog if the tool
+               exposes one. See PAINTBRUSH_TOOL.md §Tool options. *)
+            (match pencil_long_press_timer with
+             | Some id -> GMain.Timeout.remove id; pencil_long_press_timer <- None
+             | None -> ());
+            (match tool_options_dialog_id pencil_slot_tool with
+             | Some dlg_id ->
+               (match Yaml_dialog_view.open_dialog dlg_id [] [] with
+                | Some ds -> Yaml_dialog_view.show_dialog ds
+                | None -> ())
+             | None -> ());
+            true
+          end
+          else begin
+            pencil_long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
+              pencil_long_press_timer <- None;
+              self#show_pencil_slot_menu;
+              false
+            ));
+            true
+          end
         end else false
       ) |> ignore;
       pencil_btn#event#connect#button_release ~callback:(fun ev ->
