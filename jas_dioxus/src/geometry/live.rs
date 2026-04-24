@@ -272,7 +272,9 @@ pub(crate) fn element_to_polygon_set(elem: &Element, precision: f64) -> PolygonS
 /// Error per segment on a circle of radius r is ≈ r·(1 − cos(π/n)),
 /// which for large n is ≈ r·(π/n)²/2. Solving for n:
 ///
-///     n ≥ π · √(r / (2 · precision))
+/// ```text
+/// n ≥ π · √(r / (2 · precision))
+/// ```
 fn circle_to_ring(cx: f64, cy: f64, r: f64, precision: f64) -> Vec<(f64, f64)> {
     let n = segments_for_arc(r, precision);
     (0..n)

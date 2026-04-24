@@ -118,6 +118,8 @@ fn align_fixture_matches_expected() {
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
             common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
         })
     }
     fn to_bounds(arr: &serde_json::Value) -> Bounds {
