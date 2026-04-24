@@ -1301,6 +1301,35 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         }
         return .number((dx * dx + dy * dy).squareRoot())
 
+    // brush_type_of(slug) — look up a brush in brush_libraries by
+    // "lib_id/brush_slug" and return its `type` field as a string.
+    // Returns .null if the slug doesn't resolve. Consumed by
+    // BLOB_BRUSH_TOOL.md §Runtime tip resolution to gate the
+    // dialog's Size/Angle/Roundness rows on the active brush being
+    // Calligraphic.
+    case "brush_type_of":
+        guard args.count == 1 else { return .null }
+        guard case .string(let slug) = evalNode(args[0], ctx) else {
+            return .null
+        }
+        guard let slashIdx = slug.firstIndex(of: "/") else { return .null }
+        let libId = String(slug[..<slashIdx])
+        let brushSlug = String(slug[slug.index(after: slashIdx)...])
+        guard let libs = ctx["brush_libraries"] as? [String: Any],
+              let lib = libs[libId] as? [String: Any],
+              let brushes = lib["brushes"] as? [[String: Any]] else {
+            return .null
+        }
+        for b in brushes {
+            if (b["slug"] as? String) == brushSlug {
+                if let t = b["type"] as? String {
+                    return .string(t)
+                }
+                return .null
+            }
+        }
+        return .null
+
     // ── Document-aware primitives (Phase 3) ─────────────────────
     //
     // Available only during a tool dispatch that has registered a

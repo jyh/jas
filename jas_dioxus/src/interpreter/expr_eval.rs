@@ -1021,6 +1021,48 @@ fn eval_func(
             Value::Bool(dx.hypot(dy) <= r)
         }
 
+        // brush_type_of(slug) — look up a brush in brush_libraries
+        // by "lib_id/brush_slug" and return its `type` field as a
+        // string. Returns Value::Null if the slug doesn't resolve.
+        // Consumed by BLOB_BRUSH_TOOL.md §Runtime tip resolution to
+        // gate the dialog's Size/Angle/Roundness rows on the active
+        // brush being Calligraphic.
+        "brush_type_of" => {
+            if args.len() != 1 {
+                return Value::Null;
+            }
+            let arg = eval_inner(&args[0], ctx, scope, store_cb);
+            let slug = match arg {
+                Value::Str(s) => s,
+                _ => return Value::Null,
+            };
+            let (lib_id, brush_slug) = match slug.split_once('/') {
+                Some(pair) => pair,
+                None => return Value::Null,
+            };
+            let libs = match ctx.get("brush_libraries") {
+                Some(v) => v,
+                None => return Value::Null,
+            };
+            let lib = match libs.get(lib_id) {
+                Some(v) => v,
+                None => return Value::Null,
+            };
+            let brushes = match lib.get("brushes").and_then(|v| v.as_array()) {
+                Some(v) => v,
+                None => return Value::Null,
+            };
+            for b in brushes {
+                if b.get("slug").and_then(|s| s.as_str()) == Some(brush_slug) {
+                    if let Some(t) = b.get("type").and_then(|t| t.as_str()) {
+                        return Value::Str(t.to_string());
+                    }
+                    return Value::Null;
+                }
+            }
+            Value::Null
+        }
+
         // Unknown function
         _ => Value::Null,
     }
@@ -1745,5 +1787,68 @@ mod tests {
             &json!({"state": {"x": 42}}),
         );
         assert_eq!(r, Value::Number(42.0));
+    }
+
+    // ── brush_type_of(slug) ── Blob Brush dialog gating helper.
+
+    fn brush_libs_ctx() -> serde_json::Value {
+        json!({
+            "brush_libraries": {
+                "mylib": {
+                    "brushes": [
+                        {"slug": "cal_1", "name": "Cal 1", "type": "calligraphic", "size": 5.0},
+                        {"slug": "art_1", "name": "Art 1", "type": "art"},
+                    ]
+                },
+                "other": {
+                    "brushes": [
+                        {"slug": "scat_1", "name": "Scat 1", "type": "scatter"},
+                    ]
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn brush_type_of_calligraphic() {
+        let r = eval("brush_type_of(\"mylib/cal_1\")", &brush_libs_ctx());
+        assert_eq!(r, Value::Str("calligraphic".to_string()));
+    }
+
+    #[test]
+    fn brush_type_of_art() {
+        let r = eval("brush_type_of(\"mylib/art_1\")", &brush_libs_ctx());
+        assert_eq!(r, Value::Str("art".to_string()));
+    }
+
+    #[test]
+    fn brush_type_of_other_library() {
+        let r = eval("brush_type_of(\"other/scat_1\")", &brush_libs_ctx());
+        assert_eq!(r, Value::Str("scatter".to_string()));
+    }
+
+    #[test]
+    fn brush_type_of_unknown_slug_returns_null() {
+        let r = eval("brush_type_of(\"mylib/missing\")", &brush_libs_ctx());
+        assert_eq!(r, Value::Null);
+    }
+
+    #[test]
+    fn brush_type_of_missing_library_returns_null() {
+        let r = eval("brush_type_of(\"nowhere/cal_1\")", &brush_libs_ctx());
+        assert_eq!(r, Value::Null);
+    }
+
+    #[test]
+    fn brush_type_of_malformed_slug_returns_null() {
+        // Missing slash
+        let r = eval("brush_type_of(\"just_a_slug\")", &brush_libs_ctx());
+        assert_eq!(r, Value::Null);
+    }
+
+    #[test]
+    fn brush_type_of_null_when_no_brush_libraries() {
+        let r = eval("brush_type_of(\"mylib/cal_1\")", &json!({}));
+        assert_eq!(r, Value::Null);
     }
 }

@@ -851,6 +851,7 @@ class MainWindow(QMainWindow):
         Tool.ANCHOR_POINT: "anchor_point",
         Tool.PENCIL: "pencil",
         Tool.PAINTBRUSH: "paintbrush",
+        Tool.BLOB_BRUSH: "blob_brush",
         Tool.PATH_ERASER: "path_eraser",
         Tool.SMOOTH: "smooth",
         Tool.LINE: "line",

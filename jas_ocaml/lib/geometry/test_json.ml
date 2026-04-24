@@ -740,6 +740,10 @@ let rec parse_element j =
              stroke_gradient = None;
              stroke_brush = None;
              stroke_brush_overrides = None;
+             tool_origin =
+               (match j |> member "tool_origin" with
+                | `String s -> Some s
+                | _ -> None);
            }
   | "text" ->
     let content = parse_content_or_tspans j in

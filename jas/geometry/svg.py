@@ -282,10 +282,16 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
 
         case Path(d=cmds, fill=fill, stroke=stroke,
-                  opacity=opacity, transform=transform):
+                  opacity=opacity, transform=transform,
+                  tool_origin=tool_origin):
+            tool_origin_attr = (
+                f' jas:tool-origin="{escape(tool_origin)}"'
+                if tool_origin else ""
+            )
             return (f'{indent}<path d="{_path_data(cmds)}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                    f'{tool_origin_attr}/>')
 
         case TextPath():
             # Destructure via attribute access to avoid an even wider
@@ -887,8 +893,10 @@ def _parse_element(node: ET.Element) -> Element | None:
 
     if tag == "path":
         d = _parse_path_d(node.get("d", ""))
+        tool_origin = node.get("jas:tool-origin")
         return Path(d=d, fill=fill, stroke=stroke,
-                    opacity=opacity, transform=transform)
+                    opacity=opacity, transform=transform,
+                    tool_origin=tool_origin)
 
     if tag == "text":
         ff = node.get("font-family", "sans-serif")

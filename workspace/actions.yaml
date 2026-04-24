@@ -2546,6 +2546,46 @@ actions:
           dialog.edit_selected_paths: true
           dialog.edit_within: 12
 
+  blob_brush_tool_options_confirm:
+    description: >
+      Commit the Blob Brush Tool Options dialog. Writes the six
+      per-document options to state.blob_brush_* and closes the
+      dialog. See BLOB_BRUSH_TOOL.md §Tool options.
+    category: brushes
+    params:
+      fidelity: { type: number }
+      keep_selected: { type: bool }
+      merge_only_with_selection: { type: bool }
+      size: { type: number }
+      angle: { type: number }
+      roundness: { type: number }
+    effects:
+      - set:
+          blob_brush_fidelity: "param.fidelity"
+          blob_brush_keep_selected: "param.keep_selected"
+          blob_brush_merge_only_with_selection: "param.merge_only_with_selection"
+          blob_brush_size: "param.size"
+          blob_brush_angle: "param.angle"
+          blob_brush_roundness: "param.roundness"
+      - close_dialog: None
+
+  blob_brush_tool_options_reset:
+    description: >
+      Restore the Blob Brush Tool Options dialog to factory
+      defaults without committing. Writes defaults into dialog
+      state; the user must still click OK for the values to
+      persist to state.blob_brush_*. Defaults per
+      BLOB_BRUSH_TOOL.md §Tool options.
+    category: brushes
+    effects:
+      - set:
+          dialog.fidelity: 3
+          dialog.keep_selected: false
+          dialog.merge_only_with_selection: false
+          dialog.size: 10
+          dialog.angle: 0
+          dialog.roundness: 100
+
   apply_brush_changes_to_strokes:
     description: >
       Apply pending brush-edits to every element whose

@@ -1038,6 +1038,7 @@ fn parse_common(node: &XmlNode) -> CommonProps {
         locked: false,
         visibility: crate::geometry::element::Visibility::default(),
         mask: None,
+        tool_origin: node.attrs.get("jas:tool-origin").cloned(),
     }
 }
 

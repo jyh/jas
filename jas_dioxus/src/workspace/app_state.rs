@@ -82,6 +82,7 @@ impl TabState {
         tools.insert(ToolKind::AnchorPoint, yaml_tool("anchor_point"));
         tools.insert(ToolKind::Pencil, yaml_tool("pencil"));
         tools.insert(ToolKind::Paintbrush, yaml_tool("paintbrush"));
+        tools.insert(ToolKind::BlobBrush, yaml_tool("blob_brush"));
         tools.insert(ToolKind::PathEraser, yaml_tool("path_eraser"));
         tools.insert(ToolKind::Smooth, yaml_tool("smooth"));
         tools.insert(ToolKind::Type, Box::new(TypeTool::new()));

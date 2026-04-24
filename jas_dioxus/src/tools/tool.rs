@@ -32,6 +32,7 @@ pub enum ToolKind {
     AnchorPoint,
     Pencil,
     Paintbrush,
+    BlobBrush,
     PathEraser,
     Smooth,
     Type,
@@ -56,6 +57,7 @@ impl ToolKind {
             ToolKind::AnchorPoint => "Anchor Point (Shift+C)",
             ToolKind::Pencil => "Pencil (N)",
             ToolKind::Paintbrush => "Paintbrush (B)",
+            ToolKind::BlobBrush => "Blob Brush (Shift+B)",
             ToolKind::PathEraser => "Path Eraser (Shift+E)",
             ToolKind::Smooth => "Smooth",
             ToolKind::Type => "Type (T)",
@@ -115,6 +117,7 @@ impl ToolKind {
             ToolKind::Pen => Some("p"),
             ToolKind::Pencil => Some("n"),
             ToolKind::Paintbrush => Some("b"),
+            ToolKind::BlobBrush => Some("B"), // Shift-B
             ToolKind::Type => Some("t"),
             ToolKind::Line => Some("l"),
             ToolKind::Rect => Some("m"),

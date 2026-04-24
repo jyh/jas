@@ -1179,6 +1179,7 @@ fn build_appstate_ctx(
         ToolKind::AnchorPoint => "anchor_point",
         ToolKind::Pencil => "pencil",
         ToolKind::Paintbrush => "paintbrush",
+        ToolKind::BlobBrush => "blob_brush",
         ToolKind::PathEraser => "path_eraser",
         ToolKind::Smooth => "smooth",
         ToolKind::Type => "type",
@@ -2533,6 +2534,7 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
                 ToolKind::AnchorPoint => "anchor_point",
                 ToolKind::Pencil => "pencil",
                 ToolKind::Paintbrush => "paintbrush",
+                ToolKind::BlobBrush => "blob_brush",
                 ToolKind::PathEraser => "path_eraser",
                 ToolKind::Smooth => "smooth",
                 ToolKind::Type => "type",
@@ -6394,6 +6396,7 @@ mod tests {
                     locked,
                     visibility: vis,
                     mask: None,
+                    tool_origin: None,
                 },
             })
         }).collect();

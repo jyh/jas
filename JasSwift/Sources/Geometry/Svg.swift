@@ -280,9 +280,13 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))/>"
 
     case .path(let v):
+        let toolOriginAttr = v.toolOrigin.map {
+            " jas:tool-origin=\"\(escapeXml($0))\""
+        } ?? ""
         return "\(indent)<path d=\"\(pathData(v.d))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
+            "\(toolOriginAttr)/>"
 
     case .text(let v):
         let areaAttrs = v.isAreaText
@@ -985,8 +989,10 @@ private func parseElement(_ node: XMLNode) -> Element? {
 
     case "path":
         let d = parsePathD(elem.attribute(forName: "d")?.stringValue ?? "")
+        let toolOrigin = elem.attribute(forName: "jas:tool-origin")?.stringValue
         return .path(Path(d: d, fill: fill, stroke: stroke,
-                              opacity: opacity, transform: transform))
+                              opacity: opacity, transform: transform,
+                              toolOrigin: toolOrigin))
 
     case "text":
         let ff = elem.attribute(forName: "font-family")?.stringValue ?? "sans-serif"

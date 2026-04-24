@@ -106,3 +106,15 @@ val exit_cmd : path_command -> (float * float) -> float -> path_command
 
 val split_path_at_eraser :
   path_command list -> eraser_hit -> bool -> path_command list list
+
+(* ── Path ↔ PolygonSet adapters ─────────────────────────── *)
+
+(** Flatten a path command list to the {!Boolean.polygon_set} shape.
+    Alias for {!Live.flatten_path_to_rings}, named to match
+    BLOB_BRUSH_TOOL.md Commit pipeline. *)
+val path_to_polygon_set : path_command list -> Boolean.polygon_set
+
+(** Emit a path command list from a polygon set. One
+    [MoveTo + LineTo* + ClosePath] subpath per ring. Rings with fewer
+    than 3 vertices are dropped. *)
+val polygon_set_to_path : Boolean.polygon_set -> path_command list

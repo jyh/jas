@@ -1131,6 +1131,334 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* ── Blob Brush commit helpers + effects ─────────────── *)
+
+  (* Runtime tip resolution per BLOB_BRUSH_TOOL.md — when
+     state.stroke_brush refers to a Calligraphic library brush, its
+     size/angle/roundness drive the tip (with stroke_brush_overrides
+     layered). Otherwise the dialog defaults state.blob_brush_* are
+     used. Variation modes other than `fixed` are evaluated as the
+     base value in Phase 1. *)
+  let blob_brush_effective_tip store ctx : float * float * float =
+    let num_or expr default =
+      match eval_expr_as_value (Some (`String expr)) store ctx with
+      | Expr_eval.Number n -> n
+      | _ -> default
+    in
+    let default_size = num_or "state.blob_brush_size" 10.0 in
+    let default_angle = num_or "state.blob_brush_angle" 0.0 in
+    let default_roundness = num_or "state.blob_brush_roundness" 100.0 in
+    let slug_val = eval_expr_as_value
+                     (Some (`String "state.stroke_brush")) store ctx in
+    let slug = match slug_val with
+      | Expr_eval.Str s when s <> "" -> Some s
+      | _ -> None
+    in
+    match slug with
+    | None -> (default_size, default_angle, default_roundness)
+    | Some slug ->
+      (match String.index_opt slug '/' with
+       | None -> (default_size, default_angle, default_roundness)
+       | Some i ->
+         let lib_id = String.sub slug 0 i in
+         let brush_slug = String.sub slug (i + 1)
+                            (String.length slug - i - 1) in
+         let path = "brush_libraries." ^ lib_id ^ ".brushes" in
+         match State_store.get_data_path store path with
+         | `List brushes ->
+           let found = List.find_opt (fun b ->
+             match b with
+             | `Assoc fields ->
+               (match List.assoc_opt "slug" fields with
+                | Some (`String s) -> s = brush_slug
+                | _ -> false)
+             | _ -> false) brushes in
+           (match found with
+            | Some (`Assoc fields) ->
+              let is_cal = match List.assoc_opt "type" fields with
+                | Some (`String "calligraphic") -> true
+                | _ -> false in
+              if not is_cal then
+                (default_size, default_angle, default_roundness)
+              else begin
+                let size = match List.assoc_opt "size" fields with
+                  | Some (`Float n) -> n
+                  | Some (`Int n) -> float_of_int n
+                  | _ -> default_size in
+                let angle = match List.assoc_opt "angle" fields with
+                  | Some (`Float n) -> n
+                  | Some (`Int n) -> float_of_int n
+                  | _ -> default_angle in
+                let roundness = match List.assoc_opt "roundness" fields with
+                  | Some (`Float n) -> n
+                  | Some (`Int n) -> float_of_int n
+                  | _ -> default_roundness in
+                (* Apply state.stroke_brush_overrides if present. *)
+                let ovr = eval_expr_as_value
+                            (Some (`String "state.stroke_brush_overrides"))
+                            store ctx in
+                match ovr with
+                | Expr_eval.Str s when s <> "" ->
+                  (try
+                     match Yojson.Safe.from_string s with
+                     | `Assoc o ->
+                       let pick key default =
+                         match List.assoc_opt key o with
+                         | Some (`Float n) -> n
+                         | Some (`Int n) -> float_of_int n
+                         | _ -> default in
+                       (pick "size" size, pick "angle" angle,
+                        pick "roundness" roundness)
+                     | _ -> (size, angle, roundness)
+                   with _ -> (size, angle, roundness))
+                | _ -> (size, angle, roundness)
+              end
+            | _ -> (default_size, default_angle, default_roundness))
+         | _ -> (default_size, default_angle, default_roundness))
+  in
+
+  (* 16-segment rotated-ellipse ring at (cx, cy). *)
+  let blob_brush_oval_ring cx cy size angle_deg roundness_pct : Boolean.ring =
+    let segments = 16 in
+    let rx = size *. 0.5 in
+    let ry = size *. (roundness_pct /. 100.0) *. 0.5 in
+    let rad = angle_deg *. Float.pi /. 180.0 in
+    let cs = cos rad and sn = sin rad in
+    Array.init segments (fun i ->
+      let t = 2.0 *. Float.pi *. float_of_int i /. float_of_int segments in
+      let lx = rx *. cos t in
+      let ly = ry *. sin t in
+      let x = cx +. lx *. cs -. ly *. sn in
+      let y = cy +. lx *. sn +. ly *. cs in
+      (x, y))
+  in
+
+  (* Arc-length resample a point sequence at uniform intervals. Always
+     keeps the first and last points. Interpolation is essential:
+     naive sample-at-existing-points leaves seams when OS mousemove
+     events are coarser than the tip radius. *)
+  let blob_brush_arc_length_subsample (points : (float * float) list)
+      (spacing : float) : (float * float) list =
+    let n = List.length points in
+    if n < 2 || spacing <= 0.0 then points
+    else begin
+      let arr = Array.of_list points in
+      let out = ref [arr.(0)] in
+      let remaining = ref spacing in
+      for i = 0 to n - 2 do
+        let (ax, ay) = arr.(i) in
+        let (bx, by) = arr.(i + 1) in
+        let dx = bx -. ax in
+        let dy = by -. ay in
+        let seg_len = sqrt (dx *. dx +. dy *. dy) in
+        if seg_len > 0.0 then begin
+          let t_at = ref 0.0 in
+          while !t_at +. !remaining <= seg_len do
+            t_at := !t_at +. !remaining;
+            let t = !t_at /. seg_len in
+            out := (ax +. dx *. t, ay +. dy *. t) :: !out;
+            remaining := spacing
+          done;
+          remaining := !remaining -. (seg_len -. !t_at)
+        end
+      done;
+      let tail = arr.(n - 1) in
+      (match !out with
+       | last :: _ when last = tail -> ()
+       | _ -> out := tail :: !out);
+      List.rev !out
+    end
+  in
+
+  (* Build the swept region from buffer points and tip params.
+     Subsamples the buffer at 1/2 * min tip dimension, places an oval
+     at each sample, and unions them via boolean_union. *)
+  let blob_brush_sweep_region (points : (float * float) list)
+      (size, angle, roundness) : Boolean.polygon_set =
+    let min_dim = min size (size *. roundness /. 100.0) in
+    let spacing = max (min_dim *. 0.5) 0.5 in
+    let samples = blob_brush_arc_length_subsample points spacing in
+    List.fold_left (fun region (cx, cy) ->
+      let oval = [blob_brush_oval_ring cx cy size angle roundness] in
+      if region = [] then oval
+      else Boolean.boolean_union region oval
+    ) [] samples
+  in
+
+  (* Fill equality per BLOB_BRUSH_TOOL.md §Merge condition. *)
+  let blob_brush_fill_matches (a : Element.fill option) (b : Element.fill option) : bool =
+    match a, b with
+    | Some fa, Some fb ->
+      let hex_of (c : Element.color) =
+        let (r, g, b, _) = Element.color_to_rgba c in
+        let clamp x = max 0 (min 255 (int_of_float (Float.round (x *. 255.0)))) in
+        Printf.sprintf "%02x%02x%02x" (clamp r) (clamp g) (clamp b)
+      in
+      (String.lowercase_ascii (hex_of fa.Element.fill_color))
+        = (String.lowercase_ascii (hex_of fb.Element.fill_color))
+      && Float.abs (fa.Element.fill_opacity -. fb.Element.fill_opacity) < 1e-9
+    | _ -> false
+  in
+
+  (* Insert element at (layer_idx, child_idx), shifting later children. *)
+  let blob_brush_insert_at (doc : Document.document)
+      (layer_idx : int) (child_idx : int)
+      (elem : Element.element) : Document.document =
+    if layer_idx < 0 || layer_idx >= Array.length doc.Document.layers then doc
+    else begin
+      let layer = doc.Document.layers.(layer_idx) in
+      let children = Document.children_of layer in
+      let n = Array.length children in
+      let clamped = max 0 (min child_idx n) in
+      let new_children = Array.init (n + 1) (fun i ->
+        if i < clamped then children.(i)
+        else if i = clamped then elem
+        else children.(i - 1)) in
+      let new_layer = Document.with_children layer new_children in
+      { doc with layers = Array.mapi (fun i l ->
+          if i = layer_idx then new_layer else l) doc.Document.layers }
+    end
+  in
+
+  let doc_blob_brush_commit_painting spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String buffer) when buffer <> "" ->
+          let _epsilon = eval_number
+                           (List.assoc_opt "fidelity_epsilon" args) store ctx in
+          let merge_only_with_selection = eval_bool
+                                            (List.assoc_opt "merge_only_with_selection" args) store ctx in
+          let _keep_selected = eval_bool
+                                 (List.assoc_opt "keep_selected" args) store ctx in
+          let points = Point_buffers.points buffer in
+          if List.length points < 2 then ()
+          else begin
+            let tip = blob_brush_effective_tip store ctx in
+            let swept = blob_brush_sweep_region points tip in
+            if swept = [] then ()
+            else begin
+              (* Resolve fill from state.fill_color. *)
+              let new_fill =
+                match eval_expr_as_value
+                        (Some (`String "state.fill_color")) store ctx with
+                | Expr_eval.Color c | Expr_eval.Str c ->
+                  (try Some (Element.make_fill (color_from_hex c))
+                   with _ -> None)
+                | _ -> None
+              in
+              let doc = ctrl#document in
+              let matches = ref [] in
+              let unified = ref swept in
+              Array.iteri (fun li layer ->
+                let children = Document.children_of layer in
+                Array.iteri (fun ci child ->
+                  match child with
+                  | Element.Path pe
+                    when pe.tool_origin = Some "blob_brush"
+                      && blob_brush_fill_matches pe.fill new_fill ->
+                    let path = [li; ci] in
+                    if merge_only_with_selection
+                       && not (Document.PathMap.mem path doc.Document.selection) then ()
+                    else begin
+                      let existing = Path_ops.path_to_polygon_set pe.d in
+                      let inter = Boolean.boolean_intersect !unified existing in
+                      if inter <> [] then begin
+                        unified := Boolean.boolean_union !unified existing;
+                        matches := path :: !matches
+                      end
+                    end
+                  | _ -> ()
+                ) children
+              ) doc.Document.layers;
+              let matches_asc = List.sort compare (List.rev !matches) in
+              let (insert_layer, insert_idx) =
+                match matches_asc with
+                | [] -> (0, None)
+                | lowest :: _ ->
+                  (match lowest with
+                   | [li; ci] -> (li, Some ci)
+                   | _ -> (0, None))
+              in
+              let new_d = Path_ops.polygon_set_to_path !unified in
+              if new_d = [] then ()
+              else begin
+                let new_elem = Element.make_path
+                                 ~fill:new_fill
+                                 ~stroke:None
+                                 ~tool_origin:(Some "blob_brush")
+                                 new_d in
+                (* Remove matches in reverse (so earlier indices stay
+                   valid), then insert. *)
+                let new_doc =
+                  List.fold_left (fun d path ->
+                    Document.delete_element d path)
+                    doc (List.rev matches_asc) in
+                let new_doc = match insert_idx with
+                  | Some idx ->
+                    blob_brush_insert_at new_doc insert_layer idx new_elem
+                  | None ->
+                    let n = Array.length
+                              (Document.children_of new_doc.Document.layers.(insert_layer)) in
+                    blob_brush_insert_at new_doc insert_layer n new_elem
+                in
+                ctrl#set_document new_doc
+              end
+            end
+          end
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  let doc_blob_brush_commit_erasing spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String buffer) when buffer <> "" ->
+          let _epsilon = eval_number
+                           (List.assoc_opt "fidelity_epsilon" args) store ctx in
+          let points = Point_buffers.points buffer in
+          if List.length points < 2 then ()
+          else begin
+            let tip = blob_brush_effective_tip store ctx in
+            let swept = blob_brush_sweep_region points tip in
+            if swept = [] then ()
+            else begin
+              let doc = ctrl#document in
+              let new_doc = ref doc in
+              let layer_count = Array.length doc.Document.layers in
+              (* Iterate in reverse so deletions don't invalidate earlier
+                 indices. *)
+              for li = layer_count - 1 downto 0 do
+                let children = Document.children_of doc.Document.layers.(li) in
+                for ci = Array.length children - 1 downto 0 do
+                  match children.(ci) with
+                  | Element.Path pe
+                    when pe.tool_origin = Some "blob_brush" ->
+                    let existing = Path_ops.path_to_polygon_set pe.d in
+                    let inter = Boolean.boolean_intersect existing swept in
+                    if inter <> [] then begin
+                      let remainder = Boolean.boolean_subtract existing swept in
+                      let path = [li; ci] in
+                      let new_d = Path_ops.polygon_set_to_path remainder in
+                      if new_d = [] then
+                        new_doc := Document.delete_element !new_doc path
+                      else
+                        let new_pe = Element.Path { pe with d = new_d } in
+                        new_doc := Document.replace_element !new_doc path new_pe
+                    end
+                  | _ -> ()
+                done
+              done;
+              ctrl#set_document !new_doc
+            end
+          end
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
   (* ── Path-editing helpers ─────────────────────────────── *)
 
   (* Rebuild a Path element with replaced command list, carrying
@@ -1915,6 +2243,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.path.smooth_at_cursor", doc_path_smooth_at_cursor);
     ("doc.paintbrush.edit_start", doc_paintbrush_edit_start);
     ("doc.paintbrush.edit_commit", doc_paintbrush_edit_commit);
+    ("doc.blob_brush.commit_painting", doc_blob_brush_commit_painting);
+    ("doc.blob_brush.commit_erasing", doc_blob_brush_commit_erasing);
     ("doc.path.probe_anchor_hit", doc_path_probe_anchor_hit);
     ("doc.path.commit_anchor_edit", doc_path_commit_anchor_edit);
     ("doc.move_path_handle", doc_move_path_handle);

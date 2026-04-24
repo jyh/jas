@@ -865,6 +865,50 @@ pub fn delete_anchor_from_path(
     Some(result)
 }
 
+// ── Path ↔ PolygonSet adapters ──
+//
+// Blob Brush's commit path needs to hand PathElem geometry to the
+// `algorithms/boolean` module (which speaks in `PolygonSet` / `Ring`
+// terms) and then convert the unioned / subtracted result back to
+// `Vec<PathCommand>` for the new element's `d` field. The algorithm
+// module is deliberately geometry-only (per its own doc comment);
+// this pair is the element-level bridge.
+//
+// `PolygonSet` is `Vec<Ring>`, `Ring` is `Vec<(f64, f64)>` — same
+// shape as `flatten_path_to_rings`, which we reuse verbatim for the
+// forward direction. The reverse direction emits
+// `MoveTo` + LineTos + `ClosePath` per ring.
+
+/// Flatten a `PathCommand` list to the `PolygonSet` shape expected by
+/// `algorithms::boolean`. Alias for `flatten_path_to_rings`, named to
+/// match BLOB_BRUSH_TOOL.md §Commit pipeline.
+pub fn path_to_polygon_set(
+    d: &[PathCommand],
+) -> Vec<Vec<(f64, f64)>> {
+    crate::geometry::element::flatten_path_to_rings(d)
+}
+
+/// Emit a `PathCommand` list from a `PolygonSet`. One
+/// `MoveTo` + LineTos + `ClosePath` subpath per ring. Rings with
+/// fewer than 3 vertices are dropped (a 1- or 2-vertex "ring" has
+/// no interior).
+pub fn polygon_set_to_path(
+    ps: &[Vec<(f64, f64)>],
+) -> Vec<PathCommand> {
+    let mut out = Vec::new();
+    for ring in ps {
+        if ring.len() < 3 {
+            continue;
+        }
+        out.push(PathCommand::MoveTo { x: ring[0].0, y: ring[0].1 });
+        for &(x, y) in &ring[1..] {
+            out.push(PathCommand::LineTo { x, y });
+        }
+        out.push(PathCommand::ClosePath);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,5 +1008,82 @@ mod tests {
         let result = delete_anchor_from_path(&cmds, 3).unwrap();
         // Should still be closed.
         assert!(matches!(result.last().unwrap(), PathCommand::ClosePath));
+    }
+
+    // ── Path ↔ PolygonSet adapter tests ──
+
+    #[test]
+    fn path_to_polygon_set_single_square() {
+        let cmds = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 10.0 },
+            PathCommand::LineTo { x: 0.0, y: 10.0 },
+            PathCommand::ClosePath,
+        ];
+        let ps = path_to_polygon_set(&cmds);
+        assert_eq!(ps.len(), 1);
+        assert_eq!(ps[0].len(), 4);
+        assert_eq!(ps[0][0], (0.0, 0.0));
+        assert_eq!(ps[0][2], (10.0, 10.0));
+    }
+
+    #[test]
+    fn path_to_polygon_set_multiple_subpaths() {
+        // Two disjoint triangles.
+        let cmds = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 0.0 },
+            PathCommand::LineTo { x: 5.0, y: 10.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 20.0, y: 0.0 },
+            PathCommand::LineTo { x: 30.0, y: 0.0 },
+            PathCommand::LineTo { x: 25.0, y: 10.0 },
+            PathCommand::ClosePath,
+        ];
+        let ps = path_to_polygon_set(&cmds);
+        assert_eq!(ps.len(), 2);
+        assert_eq!(ps[0].len(), 3);
+        assert_eq!(ps[1].len(), 3);
+        assert_eq!(ps[0][0], (0.0, 0.0));
+        assert_eq!(ps[1][0], (20.0, 0.0));
+    }
+
+    #[test]
+    fn polygon_set_to_path_single_ring() {
+        let ps = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let cmds = polygon_set_to_path(&ps);
+        // 4-vertex ring → MoveTo + 3 LineTo + ClosePath = 5 commands.
+        assert_eq!(cmds.len(), 5);
+        assert!(matches!(cmds[0], PathCommand::MoveTo { x, y } if x == 0.0 && y == 0.0));
+        assert!(matches!(cmds[4], PathCommand::ClosePath));
+    }
+
+    #[test]
+    fn polygon_set_to_path_drops_degenerate_rings() {
+        // Two rings: one valid, one 2-point (degenerate).
+        let ps = vec![
+            vec![(0.0, 0.0), (10.0, 0.0), (5.0, 10.0)],
+            vec![(20.0, 0.0), (30.0, 0.0)], // only 2 points
+        ];
+        let cmds = polygon_set_to_path(&ps);
+        // Only the valid ring should emit commands: MoveTo + 2 LineTo + Close.
+        assert_eq!(cmds.len(), 4);
+    }
+
+    #[test]
+    fn polygon_set_roundtrip_through_path() {
+        // Square → polygon → path → polygon should survive intact.
+        let cmds = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 10.0 },
+            PathCommand::LineTo { x: 0.0, y: 10.0 },
+            PathCommand::ClosePath,
+        ];
+        let ps1 = path_to_polygon_set(&cmds);
+        let cmds2 = polygon_set_to_path(&ps1);
+        let ps2 = path_to_polygon_set(&cmds2);
+        assert_eq!(ps1, ps2);
     }
 }

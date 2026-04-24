@@ -389,6 +389,7 @@ impl CanvasTool for YamlTool {
             "partial_selection_overlay" => {
                 draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
             }
+            "oval_cursor" => draw_oval_cursor_overlay(ctx, render, &eval_ctx),
             _ => {
                 // Unrecognized type — skip silently, matching the
                 // lenient-mode convention used elsewhere.
@@ -675,6 +676,159 @@ fn draw_buffer_polyline_overlay(
 ///     handle on every selected Path in the document (this is what
 ///     the user clicks on to drag a handle).
 ///   - Blue rubber-band rectangle when `mode == "marquee"`.
+/// Draw the Blob Brush tool's oval cursor + drag preview.
+///
+/// The `oval_cursor` render type has two responsibilities per
+/// BLOB_BRUSH_TOOL.md §Overlay:
+///   1. Hover cursor — draws an oval outline at (x, y) using the
+///      effective tip shape (size/angle/roundness). When `dashed`
+///      is truthy, the stroke is dashed to signal erase mode.
+///   2. Drag preview — when `mode != "idle"`, renders accumulated
+///      dabs from the buffer as semi-transparent filled ovals (for
+///      painting) or dashed outlines (for erasing).
+///
+/// Fields (all optional unless noted):
+///   x, y              current pointer position (required)
+///   default_size      tip diameter in pt (fallback when no active brush)
+///   default_angle     tip rotation in degrees (fallback)
+///   default_roundness tip aspect percent (fallback)
+///   stroke_color      outline color (defaults black)
+///   dashed            boolean; erase-mode visual
+///   buffer            point buffer name (for drag preview)
+///   mode              string tool mode (idle / painting / erasing)
+fn draw_oval_cursor_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let cx = eval_number_field(eval_ctx, render.get("x"));
+    let cy = eval_number_field(eval_ctx, render.get("y"));
+    let size = eval_number_field(eval_ctx, render.get("default_size"))
+        .max(1.0);
+    let angle_deg = eval_number_field(eval_ctx, render.get("default_angle"));
+    let roundness = eval_number_field(eval_ctx, render.get("default_roundness"))
+        .max(1.0);
+    let stroke_color = render.get("stroke_color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("#000000")
+        .to_string();
+    let stroke_color = if stroke_color.is_empty() {
+        "#000000".to_string()
+    } else {
+        stroke_color
+    };
+    // Expression fields may evaluate to a bool or a string literal.
+    let eval_bool_render = |key: &str| -> bool {
+        match render.get(key) {
+            Some(serde_json::Value::Bool(b)) => *b,
+            Some(serde_json::Value::String(s)) => {
+                crate::interpreter::expr::eval(s, eval_ctx).to_bool()
+            }
+            _ => false,
+        }
+    };
+    let dashed = eval_bool_render("dashed");
+    let mode = render.get("mode")
+        .and_then(|v| v.as_str())
+        .map(|s| {
+            // mode field may be an expression returning a string.
+            if s.starts_with('\'') || s.starts_with('"') {
+                s.trim_matches(|c: char| c == '\'' || c == '"').to_string()
+            } else {
+                match crate::interpreter::expr::eval(s, eval_ctx) {
+                    crate::interpreter::expr_types::Value::Str(rs) => rs,
+                    _ => s.to_string(),
+                }
+            }
+        })
+        .unwrap_or_else(|| "idle".to_string());
+
+    let rx = size * 0.5;
+    let ry = size * (roundness / 100.0) * 0.5;
+    let rad = angle_deg * std::f64::consts::PI / 180.0;
+
+    // Drag preview: if a buffer is named and mode != idle, draw
+    // each buffered point as an oval. Painting = semi-transparent
+    // fill; erasing = dashed outline.
+    if mode != "idle" {
+        if let Some(buffer_name) = render.get("buffer").and_then(|v| v.as_str()) {
+            let pts: Vec<(f64, f64)> =
+                crate::interpreter::point_buffers::with_points(
+                    buffer_name, |p| p.to_vec());
+            if pts.len() >= 2 {
+                ctx.set_stroke_style_str(&stroke_color);
+                ctx.set_fill_style_str(&stroke_color);
+                ctx.set_line_width(1.0);
+                let old_alpha = ctx.global_alpha();
+                if mode == "painting" {
+                    ctx.set_global_alpha(0.3);
+                    for &(px, py) in &pts {
+                        draw_oval_path(ctx, px, py, rx, ry, rad);
+                        ctx.fill();
+                    }
+                    ctx.set_global_alpha(old_alpha);
+                } else if mode == "erasing" {
+                    let arr = js_sys::Array::new();
+                    arr.push(&wasm_bindgen::JsValue::from_f64(3.0));
+                    arr.push(&wasm_bindgen::JsValue::from_f64(3.0));
+                    let _ = ctx.set_line_dash(&arr);
+                    for &(px, py) in &pts {
+                        draw_oval_path(ctx, px, py, rx, ry, rad);
+                        ctx.stroke();
+                    }
+                    let _ = ctx.set_line_dash(&js_sys::Array::new());
+                }
+            }
+        }
+    }
+
+    // Hover cursor at (cx, cy). Stroke is dashed when Alt is held
+    // (erase-mode signal).
+    ctx.set_stroke_style_str(&stroke_color);
+    ctx.set_line_width(1.0);
+    if dashed {
+        let arr = js_sys::Array::new();
+        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
+        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
+        let _ = ctx.set_line_dash(&arr);
+    }
+    draw_oval_path(ctx, cx, cy, rx, ry, rad);
+    ctx.stroke();
+    if dashed {
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+    // 1 px screen-space crosshair for precision aiming.
+    ctx.begin_path();
+    ctx.move_to(cx - 3.0, cy);
+    ctx.line_to(cx + 3.0, cy);
+    ctx.move_to(cx, cy - 3.0);
+    ctx.line_to(cx, cy + 3.0);
+    ctx.stroke();
+}
+
+/// Build a rotated ellipse path at (cx, cy) and add it to the
+/// current path; caller decides whether to fill or stroke.
+fn draw_oval_path(
+    ctx: &CanvasRenderingContext2d,
+    cx: f64, cy: f64, rx: f64, ry: f64, rad: f64,
+) {
+    const SEGMENTS: usize = 24;
+    ctx.begin_path();
+    for i in 0..=SEGMENTS {
+        let t = 2.0 * std::f64::consts::PI * (i as f64) / (SEGMENTS as f64);
+        let lx = rx * t.cos();
+        let ly = ry * t.sin();
+        let x = cx + lx * rad.cos() - ly * rad.sin();
+        let y = cy + lx * rad.sin() + ly * rad.cos();
+        if i == 0 {
+            ctx.move_to(x, y);
+        } else {
+            ctx.line_to(x, y);
+        }
+    }
+    ctx.close_path();
+}
+
 ///
 /// Fields:
 ///   mode: string — current tool mode

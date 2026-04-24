@@ -83,7 +83,7 @@ def element_to_polygon_set(elem: "Element", precision: float) -> PolygonSet:
     if isinstance(elem, CompoundShape):
         return elem.evaluate(precision)
     if isinstance(elem, (Path, TextPath)):
-        return _flatten_path_to_rings(elem.d)
+        return flatten_path_to_rings(elem.d)
     # Line has zero area; Text glyph flattening deferred.
     if isinstance(elem, (Line, Text)):
         return []
@@ -191,11 +191,14 @@ def _ellipse_to_ring(
     ]
 
 
-def _flatten_path_to_rings(d) -> PolygonSet:
+def flatten_path_to_rings(d) -> PolygonSet:
     """Flatten path commands into one ring per subpath. MoveTo starts
     a new ring; ClosePath finalizes the current ring. Open subpaths
     are finalized at the next MoveTo or end-of-commands. Rings with
     fewer than 3 points are dropped.
+
+    Exposed so path_ops can bridge PathCommand lists into the boolean
+    module's PolygonSet shape, per BLOB_BRUSH_TOOL.md Commit pipeline.
     """
     from geometry.element import (
         ArcTo,

@@ -1827,6 +1827,7 @@ mod tests {
                 locked: false,
                 visibility: Visibility::Preview,
                 mask: None,
+                tool_origin: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,

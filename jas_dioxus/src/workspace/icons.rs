@@ -47,6 +47,12 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
             let _c = c;
             r##"<g transform="scale(0.109375)"><path d="M30,230 L60,255 L200,115 L165,80 Z" fill="rgb(204,204,204)"/><rect x="165" y="60" width="45" height="30" transform="rotate(-45, 187, 75)" fill="rgb(100,100,100)"/><path d="M195,45 Q225,20 250,40 Q255,70 225,90 Q200,90 185,65 Z" fill="rgb(204,204,204)"/><path d="M205,55 L225,82 M220,45 L238,70 M235,45 L242,75" stroke="white" stroke-width="4" fill="none" stroke-linecap="round"/></g>"##.to_string()
         },
+        // Blob Brush — angled handle + filled blob output below,
+        // distinct from Paintbrush's stroke-oriented bristles.
+        ToolKind::BlobBrush => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><path d="M30,230 L60,255 L200,115 L165,80 Z" fill="rgb(204,204,204)"/><rect x="165" y="60" width="45" height="30" transform="rotate(-45, 187, 75)" fill="rgb(100,100,100)"/><ellipse cx="220" cy="60" rx="40" ry="28" fill="rgb(204,204,204)"/><path d="M50,250 Q80,230 115,240 Q145,255 175,245 Q205,230 225,245 Q245,265 230,250 Q210,235 185,245 Q155,260 125,250 Q90,240 55,260 Z" fill="rgb(204,204,204)"/></g>"##.to_string()
+        },
         // Path Eraser (rotated pencil from SVG, scaled from 256→28)
         ToolKind::PathEraser => {
             let _c = c;

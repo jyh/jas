@@ -587,3 +587,34 @@ let split_path_at_eraser (cmds : path_command list) (hit : eraser_hit)
       result := !result @ [!part2];
     !result
   end
+
+(* ── Path ↔ PolygonSet adapters ─────────────────────────── *)
+(*
+   Blob Brush's commit path needs to hand [path_command] geometry to
+   the [Boolean] module (which speaks in [polygon_set] / [ring] terms)
+   and then convert the unioned or subtracted result back to a
+   [path_command list] for the new element's [d] field. The algorithm
+   module is deliberately geometry-only; this pair is the
+   element-level bridge.
+
+   [Boolean.polygon_set] is [ring list], [ring] is [(float * float)
+   array] — same shape as [Live.flatten_path_to_rings], which we reuse
+   verbatim for the forward direction. The reverse direction emits
+   [MoveTo + LineTo* + ClosePath] per ring. *)
+
+let path_to_polygon_set d =
+  Live.flatten_path_to_rings d
+
+let polygon_set_to_path ps =
+  List.concat_map (fun ring ->
+    let n = Array.length ring in
+    if n < 3 then []
+    else begin
+      let (x0, y0) = ring.(0) in
+      let rest = ref [] in
+      for i = n - 1 downto 1 do
+        let (xi, yi) = ring.(i) in
+        rest := LineTo (xi, yi) :: !rest
+      done;
+      MoveTo (x0, y0) :: !rest @ [ClosePath]
+    end) ps

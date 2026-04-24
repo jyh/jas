@@ -24,7 +24,10 @@ from document.document import Document, ElementSelection
 from document.model import Model
 from geometry.element import Layer, Rect as RectElem
 from tools.tool import KeyMods
-from tools.yaml_tool import YamlTool, tool_spec_from_workspace
+from tools.yaml_tool import (
+    OverlayStyle, YamlTool, parse_color, parse_style,
+    tool_spec_from_workspace,
+)
 
 
 # ── ToolSpec parsing ────────────────────────────────────
@@ -342,3 +345,61 @@ class TestSelectionValidation:
         assert tool.tool_state("mode") == "marquee"
         tool.on_key_event(ctx, "Escape", KeyMods())
         assert tool.tool_state("mode") == "idle"
+
+
+# Phase 5b: overlay style + color parsing.
+
+
+class TestOverlayStyleParse:
+    def test_empty(self):
+        s = parse_style("")
+        assert s == OverlayStyle()
+
+    def test_fill_and_stroke(self):
+        s = parse_style(
+            "fill: rgba(0,120,215,0.1); stroke: rgb(0,120,215); "
+            "stroke-width: 2")
+        assert s.fill == "rgba(0,120,215,0.1)"
+        assert s.stroke == "rgb(0,120,215)"
+        assert s.stroke_width == 2.0
+
+    def test_dasharray_spaces(self):
+        s = parse_style("stroke: black; stroke-dasharray: 4 4")
+        assert s.stroke_dasharray == (4.0, 4.0)
+
+    def test_dasharray_commas(self):
+        s = parse_style("stroke-dasharray: 3, 5, 2")
+        assert s.stroke_dasharray == (3.0, 5.0, 2.0)
+
+    def test_ignores_unknown_keys(self):
+        s = parse_style("fill: red; opacity: 0.5; foo: bar")
+        assert s.fill == "red"
+
+
+class TestOverlayColorParse:
+    def test_hex6(self):
+        assert parse_color("#ff0000") == (1.0, 0.0, 0.0, 1.0)
+
+    def test_hex3(self):
+        r, g, b, a = parse_color("#fff")
+        assert (r, g, b, a) == (1.0, 1.0, 1.0, 1.0)
+
+    def test_rgb(self):
+        r, g, b, a = parse_color("rgb(0, 120, 215)")
+        assert abs(r) < 1e-9
+        assert abs(g - 120 / 255) < 1e-6
+        assert abs(b - 215 / 255) < 1e-6
+        assert a == 1.0
+
+    def test_rgba(self):
+        _, _, _, a = parse_color("rgba(0, 120, 215, 0.1)")
+        assert abs(a - 0.1) < 1e-6
+
+    def test_none(self):
+        assert parse_color("none") is None
+
+    def test_named_black(self):
+        assert parse_color("black") == (0.0, 0.0, 0.0, 1.0)
+
+    def test_invalid(self):
+        assert parse_color("garbage") is None

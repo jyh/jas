@@ -652,6 +652,7 @@ fn unpack_common(arr: &[Value]) -> CommonProps {
         visibility: vis,
         transform: unpack_transform(&arr[4]),
         mask: None,
+        tool_origin: None,
     }
 }
 
