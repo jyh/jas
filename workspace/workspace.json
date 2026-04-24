@@ -3371,7 +3371,7 @@
       ]
     },
     "brush_options_confirm": {
-      "description": "Confirm the Brush Options dialog. In create mode, appends a new brush to the selected library. In library_edit mode, updates the master brush in place and (if any element references it) prompts the Apply to Strokes confirm sub-dialog. In instance_edit mode, writes stroke_brush_overrides on the selected element. Closes the dialog.\n",
+      "description": "Confirm the Brush Options dialog. Per-mode dispatch:\ncreate \u2014 assemble a new brush dict from dialog state (name,\n  type, type-specific params), call brush.append on the\n  selected library, close the dialog. The slug is generated\n  from the brush_name (lowercased, non-alphanum stripped).\nlibrary_edit \u2014 assemble a patch dict from the dialog state\n  delta and open the Apply to Strokes confirm sub-dialog;\n  the sub-dialog's Apply button triggers the actual\n  brush.update + re-render.\ninstance_edit \u2014 write the dialog state delta as\n  stroke_brush_overrides JSON on the selected element via\n  doc.set_attr_on_selection.\n\nPhase 1 wires create + instance_edit; library_edit defers the brush.update + re-render to the Apply sub-dialog so the user retains the chance to cancel between dialog confirms.\n",
       "category": "brushes",
       "params": {
         "mode": {
@@ -3395,21 +3395,41 @@
         }
       ]
     },
+    "apply_brush_changes_to_strokes": {
+      "description": "Apply pending brush-edits to every element whose stroke_brush references the named library/slug. The brush_options_confirm action stashes the patch on dialog state before opening the Apply to Strokes confirm dialog; this action commits via brush.update and triggers a canvas re-render. Per BRUSH_OPTIONS_DIALOG.md \u00a7Apply to Strokes.\n",
+      "category": "brushes",
+      "params": {
+        "library": {
+          "type": "string"
+        },
+        "brush_slug": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "log": "apply_brush_changes_to_strokes (library={{param.library}}, brush={{param.brush_slug}})"
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
     "duplicate_brush": {
       "description": "Duplicate every brush in panel.selected_brushes within panel.selected_library. Copies are inserted immediately after their originals with \" copy\" appended to the name and a fresh slug. The copies become the new selection. Undoable.\n",
       "category": "brushes",
       "effects": [
         {
-          "log": "duplicate_brush"
+          "brush.duplicate_selected": {}
         }
       ]
     },
     "delete_brush": {
-      "description": "Permanently remove every brush in panel.selected_brushes from panel.selected_library. Any element with jas:stroke-brush referencing a deleted brush re-renders as a plain stroke. Undoable.\n",
+      "description": "Permanently remove every brush in panel.selected_brushes from panel.selected_library. Any element with stroke_brush referencing a deleted brush re-renders as a plain stroke. Undoable.\n",
       "category": "brushes",
       "effects": [
         {
-          "log": "delete_brush"
+          "brush.delete_selected": {}
         }
       ]
     },
@@ -3427,7 +3447,10 @@
       "category": "brushes",
       "effects": [
         {
-          "log": "sort_brushes_by_name"
+          "data.list_sort": {
+            "path": "data.brush_libraries.${panel.selected_library}.brushes",
+            "key": "item.name"
+          }
         }
       ]
     },
@@ -18610,6 +18633,61 @@
                 "variant": "primary",
                 "bind": {
                   "disabled": "dialog.name == \"\""
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "apply_to_strokes_confirm": {
+      "summary": "Brush Change",
+      "description": "Confirmation sub-dialog opened by brush_options_confirm in library_edit mode. Two-way per BRUSH_OPTIONS_DIALOG.md \u00a7Apply to Strokes confirm dialog (no Leave Strokes branch).\nApply: library mutation commits and every element with\n  jas:stroke-brush referencing this brush is re-rendered. The\n  parent Brush Options dialog closes.\nCancel: library mutation is discarded; the parent Brush Options\n  dialog stays open with the user's edits still pending.\n\nSpec carries the library + brush_slug + patch (the dialog state delta) so the Apply effect chain can dispatch through brush.update and re-render selection.\n",
+      "modal": true,
+      "params": {
+        "brush_name": {
+          "type": "string"
+        },
+        "library": {
+          "type": "string"
+        },
+        "brush_slug": {
+          "type": "string"
+        }
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "The brush \"{{param.brush_name}}\" has been modified. Apply changes to existing strokes using this brush?"
+          },
+          {
+            "type": "row",
+            "style": {
+              "justify": "end",
+              "gap": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "id": "ats_apply_btn",
+                "type": "button",
+                "label": "Apply",
+                "variant": "primary",
+                "action": "apply_brush_changes_to_strokes",
+                "params": {
+                  "library": "param.library",
+                  "brush_slug": "param.brush_slug"
                 }
               }
             ]

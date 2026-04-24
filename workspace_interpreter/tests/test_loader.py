@@ -39,6 +39,16 @@ class TestLoadWorkspace:
 
 
 class TestLoadSubdirectories:
+    def test_apply_to_strokes_confirm_dialog_loaded(self, workspace_path):
+        data = load_workspace(workspace_path)
+        dialogs = data["dialogs"]
+        assert "apply_to_strokes_confirm" in dialogs
+        dlg = dialogs["apply_to_strokes_confirm"]
+        assert dlg.get("modal") is True
+        params = dlg.get("params", {})
+        for key in ("brush_name", "library", "brush_slug"):
+            assert key in params, key
+
     def test_brush_options_dialog_loaded(self, workspace_path):
         data = load_workspace(workspace_path)
         assert "dialogs" in data
