@@ -18,10 +18,11 @@ _Last reviewed: 2026-04-24_
   Close-at-release itself (Alt held at release → committed path is
   closed) does work; only the visual preview is missing. Tracked in
   PAINTBRUSH_TOOL.md as a tool-overlay-system gap.
-- **Tool-options dialog double-click** — only Rust wires the
-  `tool_options_dialog` field to an `open_dialog` dispatch on icon
-  double-click. Swift / OCaml / Python register the dialog artifact
-  but don't trigger it via double-click yet.
+- _Tool-options dialog double-click — wired in all four native apps
+  as of 2026-04-24 (Rust 346bc04, Python 3ebaae6, Swift 8271808,
+  OCaml 88fe830). OCaml wires only the pencil slot (where
+  Paintbrush lives); other slots can adopt the same TWO_BUTTON_PRESS
+  check when their tools grow tool_options_dialog fields._
 - **Pressure / tilt / bearing variation** — synthesizes a fixed 0.5
   at stroke time. Calligraphic brushes with these variation modes
   render at their base size / angle / roundness. Phase 2.
@@ -306,9 +307,9 @@ Full pass: ~50 min.
 
 ## Session G — Options dialog & state persistence (~5m)
 
-_Rust only until Swift / OCaml / Python wire the dblclick trigger._
+_Wired in all four native apps as of 2026-04-24._
 
-- [ ] **PBR-110** [partial] Double-click Paintbrush icon opens
+- [ ] **PBR-110** [wired] Double-click Paintbrush icon opens
       Paintbrush Tool Options dialog.
       Do: Double-click tool icon.
       Expect: Dialog shows Fidelity slider (5-stop), Fill new
@@ -345,9 +346,9 @@ Re-run a core subset (PBR-010, 030, 050–054, 070, 100) on each of:
 | Platform | Notes                                               |
 |----------|-----------------------------------------------------|
 | Rust     | Reference. Full coverage above.                    |
-| Swift    | Dblclick options dialog not wired; skip PBR-110-113 |
-| OCaml    | Dblclick options dialog not wired; skip PBR-110-113 |
-| Python   | Dblclick options dialog not wired; skip PBR-110-113 |
+| Swift    | All sessions in scope.                              |
+| OCaml    | All sessions in scope (dblclick limited to pencil slot). |
+| Python   | All sessions in scope.                              |
 | Flask    | Tool not implemented; skip entire suite.            |
 
 - [ ] **PBR-200 .. 229** — per-platform parity results, one entry
