@@ -16924,6 +16924,9 @@
         },
         "edit_entry_idx": {
           "default": 0
+        },
+        "alt_held": {
+          "default": false
         }
       },
       "handlers": {
@@ -16987,6 +16990,11 @@
         ],
         "on_mousemove": [
           {
+            "set": {
+              "tool.paintbrush.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
             "if": "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'",
             "then": [
               {
@@ -17047,6 +17055,11 @@
             }
           },
           {
+            "set": {
+              "tool.paintbrush.alt_held": "false"
+            }
+          },
+          {
             "buffer.clear": {
               "buffer": "paintbrush"
             }
@@ -17075,7 +17088,8 @@
         "render": {
           "type": "buffer_polyline",
           "buffer": "paintbrush",
-          "style": "stroke: black; stroke-width: 1;"
+          "style": "stroke: black; stroke-width: 1;",
+          "close_hint": "tool.paintbrush.alt_held && tool.paintbrush.mode == 'drawing'"
         }
       }
     },
