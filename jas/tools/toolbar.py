@@ -39,6 +39,7 @@ class Tool(Enum):
     DELETE_ANCHOR_POINT = auto()
     ANCHOR_POINT = auto()
     PENCIL = auto()
+    PAINTBRUSH = auto()
     PATH_ERASER = auto()
     SMOOTH = auto()
     TYPE = auto()
@@ -799,7 +800,7 @@ _ARROW_SLOT_TOOLS = {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION}
 # Tools that share the pen/add-anchor-point slot
 _PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT, Tool.ANCHOR_POINT}
 # Tools that share the pencil/path-eraser slot
-_PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PATH_ERASER, Tool.SMOOTH}
+_PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PAINTBRUSH, Tool.PATH_ERASER, Tool.SMOOTH}
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TYPE, Tool.TYPE_ON_PATH}
 # Tools that share the rect/polygon slot
@@ -1080,6 +1081,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.ROUNDED_RECT])
         self.buttons[Tool.STAR] = ToolButton(Tool.STAR, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.STAR])
+        self.buttons[Tool.PAINTBRUSH] = ToolButton(Tool.PAINTBRUSH, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.PAINTBRUSH])
         self.buttons[Tool.PATH_ERASER] = ToolButton(Tool.PATH_ERASER, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.PATH_ERASER])
         self.buttons[Tool.SMOOTH] = ToolButton(Tool.SMOOTH, has_alternates=True)
