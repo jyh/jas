@@ -619,6 +619,11 @@ val with_stroke : element -> stroke option -> element
 val with_fill_gradient : element -> gradient option -> element
 val with_stroke_gradient : element -> gradient option -> element
 
+(** Replace stroke_brush / stroke_brush_overrides on Path elements.
+    Other variants are returned unchanged. See BRUSHES.md. *)
+val with_stroke_brush : element -> string option -> element
+val with_stroke_brush_overrides : element -> string option -> element
+
 (** Return a copy of [elem] with its opacity mask replaced. Preserves
     every other field. See OPACITY.md §Document model. *)
 val with_mask : element -> mask option -> element
