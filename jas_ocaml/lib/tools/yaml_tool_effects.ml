@@ -411,7 +411,11 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
-  (* Build a Path element from commands, applying model defaults. *)
+  (* Build a Path element from commands, applying model defaults.
+     Threads optional stroke_brush from spec onto the new Path so the
+     Paintbrush tool's on_mouseup can pass `state.stroke_brush`
+     through. The renderer then dispatches the brush via the
+     calligraphic outliner. *)
   let make_path_from_commands cmds spec_args store ctx : Element.element =
     let has_fill = List.mem_assoc "fill" spec_args in
     let has_stroke = List.mem_assoc "stroke" spec_args in
@@ -421,7 +425,12 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
                  store ctx default_fill in
     let stroke = resolve_stroke_field (List.assoc_opt "stroke" spec_args)
                    has_stroke store ctx default_stroke in
-    Element.make_path ~fill ~stroke cmds
+    let stroke_brush =
+      match eval_expr_as_value (List.assoc_opt "stroke_brush" spec_args) store ctx with
+      | Expr_eval.Str rs when rs <> "" -> Some rs
+      | _ -> None
+    in
+    Element.make_path ~fill ~stroke ~stroke_brush cmds
   in
 
   let doc_add_path_from_buffer spec ctx store =
