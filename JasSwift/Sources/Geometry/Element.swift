@@ -2232,6 +2232,15 @@ public struct Path: Equatable {
     public let mask: Mask?
     public let fillGradient: Gradient?
     public let strokeGradient: Gradient?
+    /// Active-brush reference as "<library_slug>/<brush_slug>", or
+    /// nil for a plain native-stroke path. Consumed by the canvas
+    /// renderer's brush dispatch (Phase 3.4). See BRUSHES.md
+    /// §Stroke styling interaction.
+    public let strokeBrush: String?
+    /// Per-instance brush-parameter overrides as compact JSON
+    /// layered over the master brush at render time. See BRUSHES.md
+    /// §Panel state.
+    public let strokeBrushOverrides: String?
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -2242,7 +2251,9 @@ public struct Path: Equatable {
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
-                strokeGradient: Gradient? = nil) {
+                strokeGradient: Gradient? = nil,
+                strokeBrush: String? = nil,
+                strokeBrushOverrides: String? = nil) {
         self.d = d
         self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -2252,6 +2263,8 @@ public struct Path: Equatable {
         self.mask = mask
         self.fillGradient = fillGradient
         self.strokeGradient = strokeGradient
+        self.strokeBrush = strokeBrush
+        self.strokeBrushOverrides = strokeBrushOverrides
     }
 
     public var bounds: BBox {
