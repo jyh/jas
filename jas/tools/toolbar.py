@@ -40,6 +40,7 @@ class Tool(Enum):
     ANCHOR_POINT = auto()
     PENCIL = auto()
     PAINTBRUSH = auto()
+    BLOB_BRUSH = auto()
     PATH_ERASER = auto()
     SMOOTH = auto()
     TYPE = auto()
@@ -133,6 +134,8 @@ class ToolButton(QToolButton):
             self._draw_pencil_tool(painter)
         elif self.tool == Tool.PAINTBRUSH:
             self._draw_paintbrush_tool(painter)
+        elif self.tool == Tool.BLOB_BRUSH:
+            self._draw_blob_brush_tool(painter)
         elif self.tool == Tool.PATH_ERASER:
             self._draw_path_eraser_tool(painter)
         elif self.tool == Tool.SMOOTH:
@@ -515,6 +518,59 @@ class ToolButton(QToolButton):
 
         painter.restore()
 
+    def _draw_blob_brush_tool(self, painter):
+        """Blob Brush icon -- same handle + ferrule as Paintbrush,
+        plus a filled oval tip and a wavy filled blob trail below.
+        Distinct from Paintbrush's bristled tip: emphasizes
+        filled-region output. Matches BLOB_BRUSH_TOOL.md Tool icon."""
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        oy = (self.ICON_SIZE - self.ARTWORK_SIZE) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        # Handle (shared with Paintbrush shape)
+        painter.setBrush(_icon_color())
+        handle = QPainterPath()
+        handle.moveTo(30, 230)
+        handle.lineTo(60, 255)
+        handle.lineTo(200, 115)
+        handle.lineTo(165, 80)
+        handle.closeSubpath()
+        painter.drawPath(handle)
+
+        # Ferrule
+        painter.save()
+        painter.translate(187, 75)
+        painter.rotate(-45)
+        painter.translate(-187, -75)
+        painter.setBrush(_inactive_bg())
+        painter.drawRect(165, 60, 45, 30)
+        painter.restore()
+
+        # Filled oval tip
+        painter.setBrush(_icon_color())
+        tip = QPainterPath()
+        tip.addEllipse(180, 32, 80, 56)
+        painter.drawPath(tip)
+
+        # Filled wavy blob trail
+        trail = QPainterPath()
+        trail.moveTo(50, 250)
+        trail.quadTo(80, 230, 115, 240)
+        trail.quadTo(145, 255, 175, 245)
+        trail.quadTo(205, 230, 225, 245)
+        trail.quadTo(245, 265, 230, 250)
+        trail.quadTo(210, 235, 185, 245)
+        trail.quadTo(155, 260, 125, 250)
+        trail.quadTo(90, 240, 55, 260)
+        trail.closeSubpath()
+        painter.drawPath(trail)
+
+        painter.restore()
+
     def _draw_path_eraser_tool(self, painter):
         # Path eraser icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
         s = 28.0 / 256.0
@@ -865,7 +921,8 @@ _ARROW_SLOT_TOOLS = {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION}
 # Tools that share the pen/add-anchor-point slot
 _PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT, Tool.ANCHOR_POINT}
 # Tools that share the pencil/path-eraser slot
-_PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PAINTBRUSH, Tool.PATH_ERASER, Tool.SMOOTH}
+_PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PAINTBRUSH, Tool.BLOB_BRUSH,
+                      Tool.PATH_ERASER, Tool.SMOOTH}
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TYPE, Tool.TYPE_ON_PATH}
 # Tools that share the rect/polygon slot
@@ -1152,6 +1209,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.STAR])
         self.buttons[Tool.PAINTBRUSH] = ToolButton(Tool.PAINTBRUSH, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.PAINTBRUSH])
+        self.buttons[Tool.BLOB_BRUSH] = ToolButton(Tool.BLOB_BRUSH, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.BLOB_BRUSH])
         self.buttons[Tool.PATH_ERASER] = ToolButton(Tool.PATH_ERASER, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.PATH_ERASER])
         self.buttons[Tool.SMOOTH] = ToolButton(Tool.SMOOTH, has_alternates=True)
