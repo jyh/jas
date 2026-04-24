@@ -1390,6 +1390,14 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
+                stroke_brush: {
+                    let s = get_s(node, "jas:stroke-brush", "");
+                    if s.is_empty() { None } else { Some(s.to_string()) }
+                },
+                stroke_brush_overrides: {
+                    let s = get_s(node, "jas:stroke-brush-overrides", "");
+                    if s.is_empty() { None } else { Some(s.to_string()) }
+                },
             }))
         }
         "text" => {

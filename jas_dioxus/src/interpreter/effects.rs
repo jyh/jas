@@ -690,6 +690,8 @@ fn run_doc_effect(
                     common: CommonProps::default(),
                     fill_gradient: None,
                     stroke_gradient: None,
+                    stroke_brush: None,
+                    stroke_brush_overrides: None,
                 });
                 Controller::add_element(model, elem);
             }
@@ -756,6 +758,8 @@ fn run_doc_effect(
                     common: CommonProps::default(),
                     fill_gradient: None,
                     stroke_gradient: None,
+                    stroke_brush: None,
+                    stroke_brush_overrides: None,
                 });
                 Controller::add_element(model, elem);
             }
@@ -1747,6 +1751,8 @@ fn path_erase_at_rect(
                             common: crate::geometry::element::CommonProps::default(),
                             fill_gradient: None,
                             stroke_gradient: None,
+                            stroke_brush: path_elem.stroke_brush.clone(),
+                            stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
                         });
                         layer_children.insert(ci, Rc::new(new_path));
                     }
@@ -1864,6 +1870,8 @@ fn path_smooth_at_cursor(
             common: path_elem.common.clone(),
             fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: path_elem.stroke_brush.clone(),
+            stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
         });
         new_doc = new_doc.replace_element(path, new_elem);
         changed = true;
@@ -1979,6 +1987,8 @@ fn path_insert_anchor_on_segment_near(
         common: pe.common.clone(),
         fill_gradient: pe.fill_gradient.clone(),
         stroke_gradient: pe.stroke_gradient.clone(),
+        stroke_brush: pe.stroke_brush.clone(),
+        stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
     };
     let doc = model.document().replace_element(
         &path, Element::Path(new_pe));
@@ -2009,6 +2019,8 @@ fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
                 common: pe.common.clone(),
                 fill_gradient: pe.fill_gradient.clone(),
                 stroke_gradient: pe.stroke_gradient.clone(),
+                stroke_brush: pe.stroke_brush.clone(),
+                stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
             };
             let new_elem = Element::Path(new_pe);
             let mut doc = model.document().replace_element(&path, new_elem);

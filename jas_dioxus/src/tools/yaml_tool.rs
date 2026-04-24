@@ -1927,6 +1927,7 @@ mod tests {
             width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
@@ -2017,6 +2018,7 @@ mod tests {
             width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
@@ -2136,6 +2138,7 @@ mod tests {
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
@@ -2213,6 +2216,7 @@ mod tests {
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
@@ -2296,6 +2300,8 @@ mod tests {
             common: CommonProps::default(),
             fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
@@ -2377,6 +2383,7 @@ mod tests {
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
@@ -2465,6 +2472,8 @@ mod tests {
             common: CommonProps::default(),
             fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),

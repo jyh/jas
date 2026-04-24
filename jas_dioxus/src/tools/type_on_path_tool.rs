@@ -817,6 +817,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         if let Some(children) = doc.layers[0].children_mut() {
             children.push(Rc::new(path));
