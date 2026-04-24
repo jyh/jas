@@ -763,6 +763,8 @@ let recognized_to_element shape template =
                    locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                      fill_gradient = None;
                      stroke_gradient = None;
+                     stroke_brush = None;
+                     stroke_brush_overrides = None;
                    }
 
 let recognize_element element cfg =
