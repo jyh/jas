@@ -42,6 +42,10 @@ state:
   #   edit_entry_idx     number (flat-polyline index on the target)
   edit_target_path: { default: null }
   edit_entry_idx: { default: 0 }
+  # Latched Option/Alt state. Each mousemove writes event.modifiers.alt
+  # so the overlay render can draw the dashed close-at-release hint
+  # without needing per-frame access to the mouse-event scope.
+  alt_held: { default: false }
 
 handlers:
 
@@ -69,6 +73,7 @@ handlers:
             within: "state.paintbrush_edit_within"
 
   on_mousemove:
+    - set: { tool.paintbrush.alt_held: "event.modifiers.alt" }
     - if: "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'"
       then:
         - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
@@ -100,6 +105,7 @@ handlers:
             fit_error: "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5"
             within: "state.paintbrush_edit_within"
     - set: { tool.paintbrush.mode: "'idle'" }
+    - set: { tool.paintbrush.alt_held: "false" }
     - "buffer.clear": { buffer: "paintbrush" }
 
   on_keydown:
@@ -110,10 +116,14 @@ handlers:
 
 # Thin polyline tracking the raw drag — the final committed path is
 # the smoothed fit_curve output, then outlined by the brush at render
-# time.
+# time. When Option/Alt is held during drawing, the render also draws
+# a dashed line from the cursor back to the press point, indicating
+# close-at-release per PAINTBRUSH_TOOL.md §Overlay → Close-at-release
+# hint.
 overlay:
   if: "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'"
   render:
     type: buffer_polyline
     buffer: "paintbrush"
     style: "stroke: black; stroke-width: 1;"
+    close_hint: "tool.paintbrush.alt_held && tool.paintbrush.mode == 'drawing'"

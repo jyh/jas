@@ -13,11 +13,12 @@ covered in Session H parity sweep.
 
 _Last reviewed: 2026-04-24_
 
-- **Close-at-release hint overlay** (spec § Overlay → Close-at-release
-  hint) — the dashed line from cursor to press-point is not rendered.
-  Close-at-release itself (Alt held at release → committed path is
-  closed) does work; only the visual preview is missing. Tracked in
-  PAINTBRUSH_TOOL.md as a tool-overlay-system gap.
+- **Close-at-release hint overlay** — Rust (`jas_dioxus`) renders
+  the dashed line from cursor to press-point when Option/Alt is held
+  during drawing. Swift / OCaml / Python haven't ported the
+  `close_hint` field on the `buffer_polyline` render type yet;
+  close-at-release itself works on all four apps. PBR-100 passes
+  everywhere, but the preview only appears on Rust.
 - _Tool-options dialog double-click — wired in all four native apps
   as of 2026-04-24 (Rust 346bc04, Python 3ebaae6, Swift 8271808,
   OCaml 88fe830). OCaml wires only the pencil slot (where
