@@ -39,10 +39,16 @@ is ignored.
 - **Press** — snapshots the document; clears the sweep buffer;
   pushes the press point as the first dab; enters `painting` or
   `erasing` mode per the Alt latch above.
-- **Drag** — at each `mousemove`, if the cumulative arc length
-  since the last dab crosses `½ × min(size, size × roundness/100)`,
-  push a new dab at the current position. Base values come from
-  § Tool options → Runtime tip resolution.
+- **Drag** — each `mousemove` pushes the raw pointer position into
+  the sweep buffer. At commit time the buffer is arc-length
+  **resampled** at `½ × min(size, size × roundness/100)` intervals,
+  **interpolating between input points** so dab spacing is uniform
+  regardless of input sample density. Interpolation matters: if
+  the OS delivers mousemove events at ~10 pt intervals and the tip
+  needs 5 pt dab spacing to avoid visible seams, naïve
+  sample-at-existing-points would emit dabs every 10 pt (seams).
+  The resampler inserts an interpolated sample at the right
+  position on each segment.
 - **Release** — always force a final dab at the release position
   (avoids a bald spot at the drag's end). Then run the
   `painting` commit (§ Fill and stroke → Commit pipeline) or the

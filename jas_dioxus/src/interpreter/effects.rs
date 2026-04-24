@@ -1117,6 +1117,47 @@ fn run_doc_effect(
                 path_paintbrush_edit_commit(model, store, &buffer, fit_error, within);
             }
         }
+        "doc.blob_brush.commit_painting" => {
+            // Blob Brush painting-mode commit. Takes the accumulated
+            // sweep buffer, generates dabs at arc-length intervals,
+            // unions them into a swept region, merges with qualifying
+            // existing blob-brush elements (per BLOB_BRUSH_TOOL.md
+            // §Merge condition + §Multi-element merge), simplifies
+            // the boundary, and commits as a single filled Path.
+            if let serde_json::Value::Object(args) = spec {
+                let buffer = args.get("buffer").and_then(|v| v.as_str())
+                    .unwrap_or("").to_string();
+                if buffer.is_empty() {
+                    return;
+                }
+                let epsilon = eval_number(args.get("fidelity_epsilon"), store, ctx);
+                let merge_only_with_selection = eval_bool(
+                    args.get("merge_only_with_selection"), store, ctx);
+                let keep_selected = eval_bool(
+                    args.get("keep_selected"), store, ctx);
+                blob_brush_commit_painting(
+                    model, store, ctx, &buffer, epsilon,
+                    merge_only_with_selection, keep_selected);
+            }
+        }
+        "doc.blob_brush.commit_erasing" => {
+            // Blob Brush erasing-mode commit. Same sweep-region
+            // generation as painting; then boolean_subtract the region
+            // from each overlapping jas:tool-origin == blob_brush
+            // element (fill match not required). Empty results delete;
+            // non-empty update in place. See BLOB_BRUSH_TOOL.md
+            // §Erase gesture.
+            if let serde_json::Value::Object(args) = spec {
+                let buffer = args.get("buffer").and_then(|v| v.as_str())
+                    .unwrap_or("").to_string();
+                if buffer.is_empty() {
+                    return;
+                }
+                let epsilon = eval_number(args.get("fidelity_epsilon"), store, ctx);
+                blob_brush_commit_erasing(
+                    model, store, ctx, &buffer, epsilon);
+            }
+        }
         "doc.path.smooth_at_cursor" => {
             // Iterates *selected* unlocked Path elements, finds the
             // contiguous flat-polyline range within `radius` of (x, y),
@@ -2585,6 +2626,364 @@ fn path_paintbrush_edit_commit(
         stroke_brush_overrides: target_path_elem.stroke_brush_overrides.clone(),
     });
     let new_doc = doc.replace_element(&target_path, new_elem);
+    model.set_document(new_doc);
+}
+
+// ── Blob Brush commit helpers + effects ──────────────────────
+
+/// Resolve the effective tip shape (size pt, angle deg, roundness
+/// percent) at commit time per BLOB_BRUSH_TOOL.md §Runtime tip
+/// resolution. When state.stroke_brush points to a Calligraphic
+/// library brush, its size/angle/roundness drive the tip (with
+/// state.stroke_brush_overrides layered on top). Otherwise the
+/// dialog defaults state.blob_brush_* are used.
+///
+/// Variation modes other than `fixed` are evaluated as the base
+/// value in Phase 1 (matches the Paintbrush Phase 1 decision for
+/// pressure/tilt/bearing).
+fn blob_brush_effective_tip(
+    store: &StateStore, ctx: &serde_json::Value,
+) -> (f64, f64, f64) {
+    let default_size = match eval_expr("state.blob_brush_size", store, ctx) {
+        Value::Number(n) => n, _ => 10.0,
+    };
+    let default_angle = match eval_expr("state.blob_brush_angle", store, ctx) {
+        Value::Number(n) => n, _ => 0.0,
+    };
+    let default_roundness = match eval_expr("state.blob_brush_roundness", store, ctx) {
+        Value::Number(n) => n, _ => 100.0,
+    };
+
+    let slug = match eval_expr("state.stroke_brush", store, ctx) {
+        Value::Str(s) if !s.is_empty() => s,
+        _ => return (default_size, default_angle, default_roundness),
+    };
+    let (lib_id, brush_slug) = match slug.split_once('/') {
+        Some(pair) => pair,
+        None => return (default_size, default_angle, default_roundness),
+    };
+    let path = format!("brush_libraries.{}.brushes", lib_id);
+    let brushes = match store.get_data_path(&path) {
+        serde_json::Value::Array(b) => b,
+        _ => return (default_size, default_angle, default_roundness),
+    };
+    let brush = brushes.iter().find(|b| {
+        b.get("slug").and_then(|s| s.as_str()) == Some(brush_slug)
+    });
+    let brush = match brush {
+        Some(b) => b,
+        None => return (default_size, default_angle, default_roundness),
+    };
+    if brush.get("type").and_then(|t| t.as_str()) != Some("calligraphic") {
+        return (default_size, default_angle, default_roundness);
+    }
+    let size = brush.get("size").and_then(|v| v.as_f64()).unwrap_or(default_size);
+    let angle = brush.get("angle").and_then(|v| v.as_f64()).unwrap_or(default_angle);
+    let roundness = brush.get("roundness").and_then(|v| v.as_f64()).unwrap_or(default_roundness);
+
+    // Apply state.stroke_brush_overrides (compact JSON) if present.
+    let overrides_raw = match eval_expr("state.stroke_brush_overrides", store, ctx) {
+        Value::Str(s) if !s.is_empty() => s,
+        _ => return (size, angle, roundness),
+    };
+    if let Ok(ovr) = serde_json::from_str::<serde_json::Value>(&overrides_raw) {
+        let size = ovr.get("size").and_then(|v| v.as_f64()).unwrap_or(size);
+        let angle = ovr.get("angle").and_then(|v| v.as_f64()).unwrap_or(angle);
+        let roundness = ovr.get("roundness").and_then(|v| v.as_f64()).unwrap_or(roundness);
+        return (size, angle, roundness);
+    }
+    (size, angle, roundness)
+}
+
+/// Generate a 16-segment polygon ring approximating an ellipse
+/// centered at (cx, cy) with horizontal axis = size/2, vertical
+/// axis = size × roundness/100 / 2, rotated by `angle_deg`.
+fn blob_brush_oval_ring(
+    cx: f64, cy: f64,
+    size: f64, angle_deg: f64, roundness_pct: f64,
+) -> Vec<(f64, f64)> {
+    const SEGMENTS: usize = 16;
+    let rx = size * 0.5;
+    let ry = size * (roundness_pct / 100.0) * 0.5;
+    let rad = angle_deg * std::f64::consts::PI / 180.0;
+    let (cs, sn) = (rad.cos(), rad.sin());
+    let mut out = Vec::with_capacity(SEGMENTS);
+    for i in 0..SEGMENTS {
+        let t = 2.0 * std::f64::consts::PI * (i as f64) / (SEGMENTS as f64);
+        let lx = rx * t.cos();
+        let ly = ry * t.sin();
+        let x = cx + lx * cs - ly * sn;
+        let y = cy + lx * sn + ly * cs;
+        out.push((x, y));
+    }
+    out
+}
+
+/// Arc-length resample a point sequence at uniform `spacing`
+/// intervals, interpolating between input points so consecutive
+/// output dabs are at most `spacing` apart regardless of input
+/// density. Always keeps the first and last points.
+fn blob_brush_arc_length_subsample(
+    points: &[(f64, f64)], spacing: f64,
+) -> Vec<(f64, f64)> {
+    if points.len() < 2 || spacing <= 0.0 {
+        return points.to_vec();
+    }
+    let mut out = vec![points[0]];
+    // remaining_to_next: how much arc length must elapse before we
+    // emit the next sample.
+    let mut remaining = spacing;
+    for window in points.windows(2) {
+        let (ax, ay) = window[0];
+        let (bx, by) = window[1];
+        let dx = bx - ax;
+        let dy = by - ay;
+        let seg_len = (dx * dx + dy * dy).sqrt();
+        if seg_len <= 0.0 {
+            continue;
+        }
+        // Walk along this segment, emitting a sample every time
+        // the cumulative distance reaches `remaining`.
+        let mut t_at = 0.0; // distance already consumed on segment
+        while t_at + remaining <= seg_len {
+            t_at += remaining;
+            let t = t_at / seg_len;
+            out.push((ax + dx * t, ay + dy * t));
+            remaining = spacing;
+        }
+        remaining -= seg_len - t_at;
+    }
+    let tail = *points.last().unwrap();
+    if out.last() != Some(&tail) {
+        out.push(tail);
+    }
+    out
+}
+
+/// Build the swept region from buffer points and tip params.
+/// Subsamples the buffer at ½ × min tip dimension, places an oval
+/// at each sample, and unions all ovals via boolean_union.
+fn blob_brush_sweep_region(
+    points: &[(f64, f64)], tip: (f64, f64, f64),
+) -> Vec<Vec<(f64, f64)>> {
+    use crate::algorithms::boolean::boolean_union;
+    let (size, angle, roundness) = tip;
+    let min_dim = size.min(size * roundness / 100.0);
+    let spacing = (min_dim * 0.5).max(0.5);
+    let samples = blob_brush_arc_length_subsample(points, spacing);
+    let mut region: Vec<Vec<(f64, f64)>> = Vec::new();
+    for (cx, cy) in samples {
+        let oval: Vec<Vec<(f64, f64)>> = vec![blob_brush_oval_ring(
+            cx, cy, size, angle, roundness)];
+        if region.is_empty() {
+            region = oval;
+        } else {
+            region = boolean_union(&region, &oval);
+        }
+    }
+    region
+}
+
+/// Compare two Fill values for merge purposes per BLOB_BRUSH_TOOL.md
+/// §Merge condition. Returns true iff both are solid colors with
+/// matching sRGB hex and opacity, neither is a gradient or None.
+fn blob_brush_fill_matches(a: &Option<Fill>, b: &Option<Fill>) -> bool {
+    match (a, b) {
+        (Some(fa), Some(fb)) => {
+            fa.color.to_hex().to_lowercase() == fb.color.to_hex().to_lowercase()
+                && (fa.opacity - fb.opacity).abs() < 1e-9
+        }
+        _ => false,
+    }
+}
+
+/// Implementation of doc.blob_brush.commit_painting.
+/// See BLOB_BRUSH_TOOL.md §Commit pipeline + §Multi-element merge.
+fn blob_brush_commit_painting(
+    model: &mut Model, store: &StateStore, ctx: &serde_json::Value,
+    buffer_name: &str,
+    _fidelity_epsilon: f64, // RDP simplify deferred to follow-up
+    merge_only_with_selection: bool,
+    _keep_selected: bool, // Selection update deferred; future follow-up
+) {
+    use crate::algorithms::boolean::boolean_union;
+    use crate::geometry::element::{Element, PathElem, CommonProps};
+    use crate::geometry::path_ops::{path_to_polygon_set, polygon_set_to_path};
+
+    let points: Vec<(f64, f64)> = super::point_buffers::with_points(
+        buffer_name, |p| p.to_vec());
+    if points.len() < 2 {
+        return;
+    }
+
+    let tip = blob_brush_effective_tip(store, ctx);
+    let swept = blob_brush_sweep_region(&points, tip);
+    if swept.is_empty() {
+        return;
+    }
+
+    // Resolve fill from state.fill_color.
+    let fill_color = match eval_expr("state.fill_color", store, ctx) {
+        Value::Color(c) | Value::Str(c) => Color::from_hex(&c),
+        _ => None,
+    };
+    let new_fill = fill_color.map(Fill::new);
+
+    // Find matching existing blob-brush elements in the top-level
+    // layer's children. Matching == jas:tool-origin == "blob_brush"
+    // + fill matches new_fill + (optional) selection-scoped.
+    let doc = model.document().clone();
+    let selected: std::collections::HashSet<Vec<usize>> = doc.selection.iter()
+        .map(|es| es.path.clone()).collect();
+    let mut matches: Vec<Vec<usize>> = Vec::new();
+    let mut unified = swept.clone();
+    for (li, layer) in doc.layers.iter().enumerate() {
+        let children = match layer.children() {
+            Some(c) => c,
+            None => continue,
+        };
+        for (ci, child) in children.iter().enumerate() {
+            let pe = match &**child {
+                Element::Path(pe) => pe,
+                _ => continue,
+            };
+            if pe.common.tool_origin.as_deref() != Some("blob_brush") {
+                continue;
+            }
+            if !blob_brush_fill_matches(&pe.fill, &new_fill) {
+                continue;
+            }
+            let path = vec![li, ci];
+            if merge_only_with_selection && !selected.contains(&path) {
+                continue;
+            }
+            let existing = path_to_polygon_set(&pe.d);
+            // Cheap reject: union-check via is_empty-after-intersect
+            use crate::algorithms::boolean::boolean_intersect;
+            let intersection = boolean_intersect(&unified, &existing);
+            if intersection.is_empty() {
+                continue;
+            }
+            unified = boolean_union(&unified, &existing);
+            matches.push(path);
+        }
+    }
+
+    // Insertion z = lowest matching (layer, child); default append.
+    let (insert_layer, insert_idx) = if matches.is_empty() {
+        // Default: append to the top-level layer 0 (first layer).
+        (0, None)
+    } else {
+        // matches is in document order (layer then child); lowest is
+        // the earliest entry.
+        let lowest = matches[0].clone();
+        (lowest[0], Some(lowest[1]))
+    };
+
+    let new_d = polygon_set_to_path(&unified);
+    if new_d.is_empty() {
+        return;
+    }
+    let mut common = CommonProps::default();
+    common.tool_origin = Some("blob_brush".to_string());
+    let new_elem = Element::Path(PathElem {
+        d: new_d,
+        fill: new_fill,
+        stroke: None,
+        width_points: Vec::new(),
+        common,
+        fill_gradient: None,
+        stroke_gradient: None,
+        stroke_brush: None,
+        stroke_brush_overrides: None,
+    });
+
+    // Build a new document: remove matches (in reverse order so
+    // earlier indices stay valid), then insert the unified element.
+    let mut new_doc = doc.clone();
+    let mut sorted_matches = matches.clone();
+    sorted_matches.sort();
+    for path in sorted_matches.iter().rev() {
+        new_doc = new_doc.delete_element(path);
+    }
+    let insert_path = if let Some(idx) = insert_idx {
+        // Lowest matching (layer, child). After deletions above, the
+        // layer may be shorter, but the lowest match's child index
+        // is still a valid insertion point (elements above it moved
+        // down if deleted, but the lowest itself was deleted too —
+        // insert at the same child index in the same layer).
+        vec![insert_layer, idx]
+    } else {
+        // No matches — append as a top-level child of layer 0.
+        let child_count = new_doc.layers.get(insert_layer)
+            .and_then(|l| l.children().map(|c| c.len()))
+            .unwrap_or(0);
+        vec![insert_layer, child_count]
+    };
+    new_doc = new_doc.insert_element_at(&insert_path, new_elem);
+    model.set_document(new_doc);
+}
+
+/// Implementation of doc.blob_brush.commit_erasing.
+/// See BLOB_BRUSH_TOOL.md §Erase gesture → Commit.
+fn blob_brush_commit_erasing(
+    model: &mut Model, store: &StateStore, ctx: &serde_json::Value,
+    buffer_name: &str,
+    _fidelity_epsilon: f64,
+) {
+    use crate::algorithms::boolean::{boolean_intersect, boolean_subtract};
+    use crate::geometry::element::{Element, PathElem};
+    use crate::geometry::path_ops::{path_to_polygon_set, polygon_set_to_path};
+
+    let points: Vec<(f64, f64)> = super::point_buffers::with_points(
+        buffer_name, |p| p.to_vec());
+    if points.len() < 2 {
+        return;
+    }
+
+    let tip = blob_brush_effective_tip(store, ctx);
+    let swept = blob_brush_sweep_region(&points, tip);
+    if swept.is_empty() {
+        return;
+    }
+
+    // Per-element subtract; collect updates / deletions.
+    let doc = model.document().clone();
+    let mut new_doc = doc.clone();
+    // Iterate in reverse order so deletions don't invalidate earlier
+    // indices.
+    for li in (0..doc.layers.len()).rev() {
+        let children = match doc.layers[li].children() {
+            Some(c) => c,
+            None => continue,
+        };
+        for ci in (0..children.len()).rev() {
+            let pe = match &*children[ci] {
+                Element::Path(pe) => pe,
+                _ => continue,
+            };
+            if pe.common.tool_origin.as_deref() != Some("blob_brush") {
+                continue;
+            }
+            let existing = path_to_polygon_set(&pe.d);
+            let intersection = boolean_intersect(&existing, &swept);
+            if intersection.is_empty() {
+                continue;
+            }
+            let remainder = boolean_subtract(&existing, &swept);
+            let path = vec![li, ci];
+            let new_d = polygon_set_to_path(&remainder);
+            if new_d.is_empty() {
+                new_doc = new_doc.delete_element(&path);
+            } else {
+                let new_elem = Element::Path(PathElem {
+                    d: new_d,
+                    ..pe.clone()
+                });
+                new_doc = new_doc.replace_element(&path, new_elem);
+            }
+        }
+    }
     model.set_document(new_doc);
 }
 
@@ -4296,5 +4695,169 @@ mod tests {
         assert_eq!(store.get_tool("sel", "mode"), &serde_json::json!("idle"));
         assert_eq!(store.get("fill_color"), &serde_json::json!("#000000"));
         assert_eq!(store.get("recent_count"), &serde_json::json!(5));
+    }
+
+    // ── Blob Brush commit tests ──
+
+    fn seed_blob_brush_sweep() {
+        super::super::point_buffers::clear("blob_brush");
+        // Short horizontal sweep; 6 points spanning 50 pt.
+        for i in 0..=5 {
+            super::super::point_buffers::push(
+                "blob_brush", i as f64 * 10.0, 0.0);
+        }
+    }
+
+    fn blob_brush_state_defaults(store: &mut StateStore) {
+        store.set("fill_color", serde_json::json!("#ff0000"));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+    }
+
+    #[test]
+    fn blob_brush_commit_painting_creates_tagged_path() {
+        let mut store = StateStore::new();
+        blob_brush_state_defaults(&mut store);
+        let mut model = make_model_with_empty_layer();
+        seed_blob_brush_sweep();
+        let effects = vec![serde_json::json!({
+            "doc.blob_brush.commit_painting": {
+                "buffer": "blob_brush",
+                "fidelity_epsilon": "5.0",
+                "merge_only_with_selection": "false",
+                "keep_selected": "false"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        let elem = &*children[0];
+        match elem {
+            Element::Path(pe) => {
+                assert_eq!(pe.common.tool_origin.as_deref(),
+                    Some("blob_brush"));
+                assert!(pe.fill.is_some());
+                assert!(pe.stroke.is_none());
+                // At least one MoveTo + multiple LineTos + ClosePath.
+                assert!(pe.d.len() >= 3);
+            }
+            _ => panic!("expected Path"),
+        }
+    }
+
+    #[test]
+    fn blob_brush_commit_erasing_deletes_fully_covered_element() {
+        use crate::geometry::element::{LayerElem, PathElem, PathCommand,
+            CommonProps, Fill, Color};
+        use crate::document::document::Document;
+
+        // Seed doc with a tiny blob-brush square fully inside the
+        // sweep's coverage area (sweep = 50pt horizontal, 10pt tip).
+        let mut common = CommonProps::default();
+        common.tool_origin = Some("blob_brush".to_string());
+        let target_path = Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 23.0, y: -1.0 },
+                PathCommand::LineTo { x: 27.0, y: -1.0 },
+                PathCommand::LineTo { x: 27.0, y:  1.0 },
+                PathCommand::LineTo { x: 23.0, y:  1.0 },
+                PathCommand::ClosePath,
+            ],
+            fill: Some(Fill::new(Color::from_hex("#ff0000").unwrap())),
+            stroke: None,
+            width_points: Vec::new(),
+            common,
+            fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(target_path)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+
+        let mut store = StateStore::new();
+        blob_brush_state_defaults(&mut store);
+        seed_blob_brush_sweep();
+
+        let effects = vec![serde_json::json!({
+            "doc.blob_brush.commit_erasing": {
+                "buffer": "blob_brush",
+                "fidelity_epsilon": "5.0"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+
+        // The 20-30 square with tip size 10 swept 0-50: fully covered.
+        // Expect the element removed.
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 0, "erasing should delete fully-covered element");
+    }
+
+    #[test]
+    fn blob_brush_commit_erasing_ignores_non_blob_brush() {
+        use crate::geometry::element::{LayerElem, PathElem, PathCommand,
+            CommonProps, Fill, Color};
+        use crate::document::document::Document;
+
+        // Same square but WITHOUT jas:tool-origin. Erase should skip.
+        let target_path = Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 20.0, y: -2.0 },
+                PathCommand::LineTo { x: 30.0, y: -2.0 },
+                PathCommand::LineTo { x: 30.0, y:  2.0 },
+                PathCommand::LineTo { x: 20.0, y:  2.0 },
+                PathCommand::ClosePath,
+            ],
+            fill: Some(Fill::new(Color::from_hex("#ff0000").unwrap())),
+            stroke: None,
+            width_points: Vec::new(),
+            common: CommonProps::default(), // tool_origin = None
+            fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(target_path)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+
+        let mut store = StateStore::new();
+        blob_brush_state_defaults(&mut store);
+        seed_blob_brush_sweep();
+
+        let effects = vec![serde_json::json!({
+            "doc.blob_brush.commit_erasing": {
+                "buffer": "blob_brush",
+                "fidelity_epsilon": "5.0"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+
+        // Element lacks jas:tool-origin → erase skips it entirely.
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "erasing must not touch non-blob-brush elements");
     }
 }
