@@ -1525,6 +1525,45 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
     }
 }
 
+/// Return a copy of the element with strokeBrush replaced.
+/// Path-only; other elements are returned unchanged. See
+/// BRUSHES.md §Stroke styling interaction.
+public func withStrokeBrush(_ element: Element, strokeBrush: String?) -> Element {
+    switch element {
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                          widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility,
+                          blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: v.fillGradient,
+                          strokeGradient: v.strokeGradient,
+                          strokeBrush: strokeBrush,
+                          strokeBrushOverrides: v.strokeBrushOverrides))
+    default:
+        return element
+    }
+}
+
+/// Return a copy of the element with strokeBrushOverrides replaced.
+/// Path-only.
+public func withStrokeBrushOverrides(_ element: Element, overrides: String?) -> Element {
+    switch element {
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                          widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility,
+                          blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: v.fillGradient,
+                          strokeGradient: v.strokeGradient,
+                          strokeBrush: v.strokeBrush,
+                          strokeBrushOverrides: overrides))
+    default:
+        return element
+    }
+}
+
 // MARK: - Selection-level mask helpers (OPACITY.md § States)
 
 /// Return the ``Mask`` on the first selected element, if any.
