@@ -28,10 +28,91 @@ from canvas.arrowheads import (
 from canvas.offset_path import (
     render_variable_width_path, render_variable_width_line,
 )
+from algorithms.calligraphic_outline import (
+    CalligraphicBrush, calligraphic_outline,
+)
 from document.model import Model
 from tools.tool import CanvasTool, ToolContext, HIT_RADIUS, HANDLE_DRAW_SIZE
 from tools.toolbar import Tool
 from tools import create_tools
+
+
+# ── Brush library registry ──────────────────────────────────
+#
+# The Path renderer needs brush parameters keyed by the
+# stroke_brush "<library>/<brush>" slug carried on each Path.
+# Threading brush_libraries through every drawing helper signature
+# would be invasive in this 1900-line file, so a module-level
+# `var` serves as the registry — same pragmatic pattern Swift's
+# CanvasSubwindow and OCaml's canvas_subwindow use. App startup
+# calls set_canvas_brush_libraries() before drawing.
+
+_brush_libraries: dict = {}
+
+
+def set_canvas_brush_libraries(libs: dict) -> None:
+    """Install the brush library registry consulted by the Path
+    renderer when a path carries a stroke_brush slug. The brushed
+    render then fills the Calligraphic outline polygon with the
+    path's stroke colour. See BRUSHES.md §Stroke styling
+    interaction."""
+    global _brush_libraries
+    _brush_libraries = libs or {}
+
+
+def _lookup_brush(slug: str) -> dict | None:
+    """Look up a brush by its <library>/<brush> slug. Returns None
+    for missing slug, malformed input, or unknown library/brush."""
+    if not slug or "/" not in slug:
+        return None
+    lib_id, _, brush_slug = slug.partition("/")
+    lib = _brush_libraries.get(lib_id)
+    if not isinstance(lib, dict):
+        return None
+    brushes = lib.get("brushes")
+    if not isinstance(brushes, list):
+        return None
+    for b in brushes:
+        if isinstance(b, dict) and b.get("slug") == brush_slug:
+            return b
+    return None
+
+
+def _calligraphic_from_dict(brush: dict) -> CalligraphicBrush | None:
+    """Extract Calligraphic params from a brush dict. Returns None
+    for non-Calligraphic types — Phase 1 ships Calligraphic only."""
+    if brush.get("type") != "calligraphic":
+        return None
+    return CalligraphicBrush(
+        angle=float(brush.get("angle", 0.0)),
+        roundness=float(brush.get("roundness", 100.0)),
+        size=float(brush.get("size", 5.0)),
+    )
+
+
+def _draw_brushed_path(painter: QPainter, d, stroke, slug: str) -> bool:
+    """Render a brushed Path: compute the Calligraphic outline
+    polygon and fill it with the stroke colour. Returns True when
+    handled; False to fall back to the plain stroke pipeline."""
+    brush = _lookup_brush(slug)
+    if brush is None:
+        return False
+    cal = _calligraphic_from_dict(brush)
+    if cal is None:
+        return False
+    pts = calligraphic_outline(d, cal)
+    if len(pts) < 3:
+        return True
+    color = _qcolor(stroke.color) if stroke is not None else _qcolor(Color.from_hex("000000"))
+    painter.setBrush(QBrush(color))
+    painter.setPen(QPen(0))
+    qpath = QPainterPath()
+    qpath.moveTo(QPointF(pts[0][0], pts[0][1]))
+    for x, y in pts[1:]:
+        qpath.lineTo(QPointF(x, y))
+    qpath.closeSubpath()
+    painter.drawPath(qpath)
+    return True
 
 
 def _make_white_arrow_cursor() -> QCursor:
@@ -1013,6 +1094,16 @@ def _draw_element_body(painter: QPainter, elem: Element,
             if outline:
                 _apply_outline_style(painter)
                 painter.drawPath(_build_path(d))
+            elif (sb := getattr(elem, "stroke_brush", None)) is not None \
+                    and _draw_brushed_path(painter, d, stroke, sb):
+                # Brushed render — the brush owns the stroke
+                # appearance (BRUSHES.md §Stroke styling
+                # interaction). Fill first if present, then we're
+                # done — skip native stroke + arrowheads.
+                if fill is not None:
+                    _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), elem.bounds())
+                    painter.setPen(QPen(0))
+                    painter.drawPath(_build_path(d))
             else:
                 # Shorten path for arrowheads
                 stroke_cmds = d

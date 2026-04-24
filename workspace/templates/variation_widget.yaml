@@ -1,0 +1,86 @@
+variation_widget:
+  description: >
+    Composite widget for a brush parameter that can vary along a stroke.
+    Renders a base-value combo plus a variation-mode select; when the
+    mode is 'random', two extra combos appear inline for min/max bounds
+    (percent of base). When the mode is one of pressure / tilt /
+    bearing / rotation, the base combo is inert (the live input drives
+    the value at stroke time); the prior base value persists for
+    round-tripping back to 'fixed' mode.
+
+    See transcripts/BRUSHES.md §Brush types and
+    transcripts/BRUSH_OPTIONS_DIALOG.md §Variation widget.
+  params:
+    id_prefix:    { type: string, default: "" }
+    label:        { type: string, default: "" }
+    base_path:    { type: string }   # e.g. "dialog.angle"
+    mode_path:    { type: string }   # e.g. "dialog.angle_variation.mode"
+    min_path:     { type: string }   # e.g. "dialog.angle_variation.min"
+    max_path:     { type: string }   # e.g. "dialog.angle_variation.max"
+    base_min:     { type: number, default: 0 }
+    base_max:     { type: number, default: 1000 }
+    base_step:    { type: number, default: 1 }
+    base_unit:    { type: string, default: "" }
+  content:
+    type: container
+    layout: row
+    style: { gap: 4, alignment: center }
+    children:
+      - type: text
+        content: "${label}"
+        style: { width: 80, font_size: 10 }
+
+      - id: "${id_prefix}_base"
+        type: combo_box
+        summary: "Base value"
+        min: "${base_min}"
+        max: "${base_max}"
+        step: "${base_step}"
+        suffix: "${base_unit}"
+        style: { width: 60 }
+        bind:
+          value: "${base_path}"
+          disabled: |
+            ${mode_path} == "pressure"
+            or ${mode_path} == "tilt"
+            or ${mode_path} == "bearing"
+            or ${mode_path} == "rotation"
+
+      - id: "${id_prefix}_mode"
+        type: select
+        summary: "Variation mode"
+        options:
+          - { label: "Fixed",    value: fixed }
+          - { label: "Random",   value: random }
+          - { label: "Pressure", value: pressure,  status: pending_stylus }
+          - { label: "Tilt",     value: tilt,      status: pending_stylus }
+          - { label: "Bearing",  value: bearing,   status: pending_stylus }
+          - { label: "Rotation", value: rotation,  status: pending_stylus }
+        style: { width: 90 }
+        bind:
+          value: "${mode_path}"
+
+      # Conditional min/max combos — visible only when mode == 'random'.
+      - id: "${id_prefix}_min"
+        type: combo_box
+        summary: "Random minimum"
+        min: 0
+        max: 1000
+        step: 1
+        suffix: "%"
+        style: { width: 50 }
+        bind:
+          value: "${min_path}"
+          visible: '${mode_path} == "random"'
+
+      - id: "${id_prefix}_max"
+        type: combo_box
+        summary: "Random maximum"
+        min: 0
+        max: 1000
+        step: 1
+        suffix: "%"
+        style: { width: 50 }
+        bind:
+          value: "${max_path}"
+          visible: '${mode_path} == "random"'

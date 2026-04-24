@@ -654,6 +654,12 @@ type element =
       mask : mask option;
       fill_gradient : gradient option;
       stroke_gradient : gradient option;
+      (* Active brush reference as <library_slug>/<brush_slug>, or
+         None for plain native-stroke. Consumed by the canvas
+         renderer (BRUSHES.md Stroke styling interaction). *)
+      stroke_brush : string option;
+      (* Per-instance brush parameter overrides as compact JSON. *)
+      stroke_brush_overrides : string option;
     }
   | Text of {
       x : float; y : float;
@@ -1080,8 +1086,8 @@ let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform =
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
   Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
-let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
-  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) ?(stroke_brush = None) ?(stroke_brush_overrides = None) d =
+  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush; stroke_brush_overrides }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /
@@ -1274,6 +1280,18 @@ let with_stroke elem s =
   | Text_path r -> Text_path { r with stroke = s }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
   | Group _ | Layer _ -> elem
+
+(* Path-only — Phase 1 brush model lives on PathElem alone. Other
+   elements are returned unchanged. See BRUSHES.md. *)
+let with_stroke_brush elem (slug : string option) =
+  match elem with
+  | Path r -> Path { r with stroke_brush = slug }
+  | _ -> elem
+
+let with_stroke_brush_overrides elem (overrides : string option) =
+  match elem with
+  | Path r -> Path { r with stroke_brush_overrides = overrides }
+  | _ -> elem
 
 (** Phase 5: replace the optional fill_gradient on the element. Pass
     [None] to clear (demote to solid). Variants without fill (Line,

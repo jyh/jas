@@ -1,0 +1,84 @@
+# Paintbrush tool — freehand drawing with the active brush from the
+# Brushes panel.
+#
+# Same gesture set as Pencil (press / drag / release with curve-fit
+# smoothing on release), with the additional behaviour that the
+# committed Path carries stroke_brush = state.stroke_brush so the
+# renderer outlines it as a brushed stroke. When state.stroke_brush is
+# null, behaves identically to Pencil — produces a plain native stroke.
+#
+# Implementation status:
+# - YAML-driven via the YamlTool runtime (see project memory entries
+#   on Rust/Swift/OCaml/Python YAML tool runtimes).
+# - Flask-side: the JS engine does not yet implement buffer.* and
+#   doc.add_path_from_buffer effects. Until those land, this tool is
+#   spec-only on Flask.
+# - Desktop apps (Rust/Swift/OCaml/Python): implementation lands as
+#   part of the Brushes propagation chain. The doc.add_path_from_buffer
+#   effect needs to pass through stroke_brush from spec into the
+#   committed PathElem; the existing _make_path_from_commands helper
+#   currently only honours fill / stroke.
+#
+# See transcripts/PAINTBRUSH_TOOL.md for the full design and known
+# gaps.
+
+id: paintbrush
+cursor: crosshair
+menu_label: "Paintbrush Tool"
+shortcut: "B"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, drawing]
+
+handlers:
+
+  on_enter:
+    - set: { tool.paintbrush.mode: "'idle'" }
+    - "buffer.clear": { buffer: "paintbrush" }
+
+  on_leave:
+    - set: { tool.paintbrush.mode: "'idle'" }
+    - "buffer.clear": { buffer: "paintbrush" }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - "buffer.clear": { buffer: "paintbrush" }
+    - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+    - set: { tool.paintbrush.mode: "'drawing'" }
+
+  on_mousemove:
+    - if: "tool.paintbrush.mode == 'drawing'"
+      then:
+        - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+
+  on_mouseup:
+    - if: "tool.paintbrush.mode == 'drawing'"
+      then:
+        # Final point on release, mirroring Pencil's behaviour — without
+        # this a click (press+release at same point) leaves a 1-point
+        # buffer that fit_curve rejects.
+        - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+        - "doc.add_path_from_buffer":
+            buffer: "paintbrush"
+            fit_error: "4"
+            stroke_brush: "state.stroke_brush"
+    - set: { tool.paintbrush.mode: "'idle'" }
+    - "buffer.clear": { buffer: "paintbrush" }
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { tool.paintbrush.mode: "'idle'" }
+        - "buffer.clear": { buffer: "paintbrush" }
+
+# Thin polyline tracking the raw drag — the final committed path is
+# the smoothed fit_curve output, then outlined by the brush at render
+# time.
+overlay:
+  if: "tool.paintbrush.mode == 'drawing'"
+  render:
+    type: buffer_polyline
+    buffer: "paintbrush"
+    style: "stroke: black; stroke-width: 1;"

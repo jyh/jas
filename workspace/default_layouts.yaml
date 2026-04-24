@@ -11,7 +11,7 @@ default_layouts:
     dock:
       dock_main:
         groups:
-          - panels: [color, swatches]
+          - panels: [color, swatches, brushes]
             active: 0
           - panels: [align, boolean]
             active: 0
@@ -53,7 +53,7 @@ default_layouts:
     dock:
       dock_main:
         groups:
-          - panels: [color, swatches]
+          - panels: [color, swatches, brushes]
             active: 0
           - panels: [stroke, properties]
             active: 0

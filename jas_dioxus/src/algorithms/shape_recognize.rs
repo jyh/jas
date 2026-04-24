@@ -471,6 +471,8 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
             })
         }
     }
@@ -1828,6 +1830,8 @@ mod tests {
             },
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         let shape = RecognizedShape::Rectangle {
             x: 10.0,
@@ -1859,6 +1863,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         let shape = RecognizedShape::RoundRect {
             x: 0.0,
@@ -1886,6 +1892,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         let shape = RecognizedShape::Arrow {
             tail: (0.0, 0.0),
@@ -1990,6 +1998,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         let shape = RecognizedShape::Scribble {
             points: vec![(0.0, 0.0), (10.0, 20.0), (20.0, 0.0), (30.0, 20.0), (40.0, 0.0)],
@@ -2061,6 +2071,8 @@ mod tests {
             d, fill: None, stroke: None, width_points: Vec::new(), common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Circle(_))) => {
@@ -2081,6 +2093,8 @@ mod tests {
             d, fill: None, stroke: None, width_points: Vec::new(), common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Rect(_))) => {

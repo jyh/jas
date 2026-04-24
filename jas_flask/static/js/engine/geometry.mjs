@@ -285,3 +285,185 @@ function translatePathCmd(cmd, dx, dy) {
   if ("y2" in out) out.y2 += dy;
   return out;
 }
+
+// ─── Calligraphic stroke outliner ──────────────────────────────
+//
+// Computes the variable-width outline of a Path stroked with a
+// Calligraphic brush. Returns a closed SVG path "d" string suitable
+// for <path d="…">. The result is a polyline approximation; bezier
+// curve-fitting on the offset points is a future polish per
+// BRUSHES.md §Wiring status open follow-ups.
+//
+// The brush is an oval pen tip with screen-fixed orientation. At
+// each sample point along the path, the offset distance perpendicular
+// to the path tangent equals half the projection of the oval onto
+// the path normal:
+//
+//   φ = θ_brush − (θ_path + π/2)
+//   d(φ) = √((a/2 · cos φ)² + (b/2 · sin φ)²)
+//
+// where a = brush.size, b = brush.size · brush.roundness / 100.
+//
+// Phase 1 limits: only the "fixed" variation mode is honoured; other
+// modes (random, pressure, tilt, bearing, rotation) degrade to fixed
+// at the brush's base value. Multi-subpath paths render the first
+// subpath only.
+//
+// Sampling: line segments at ~1pt arc-length intervals; cubic /
+// quadratic Beziers at fixed parametric resolution (32 / 24 samples).
+
+const SAMPLE_INTERVAL_PT = 1.0;
+const CUBIC_SAMPLES = 32;
+const QUADRATIC_SAMPLES = 24;
+
+/**
+ * Compute the variable-width outline of `commands` stroked with a
+ * Calligraphic brush. Returns the closed-path SVG `d` attribute as a
+ * string. Returns "" on degenerate input (empty path, single
+ * MoveTo, zero-area sweep).
+ */
+export function calligraphicOutline(commands, brush) {
+  const samples = sampleStrokePath(commands);
+  if (samples.length < 2) return "";
+
+  const a = brush.size / 2;
+  const b = (brush.size * (brush.roundness / 100)) / 2;
+  const thetaBrush = ((brush.angle || 0) * Math.PI) / 180;
+
+  const left = [];
+  const right = [];
+  for (const s of samples) {
+    const phi = thetaBrush - (s.tangent + Math.PI / 2);
+    const d = Math.sqrt(
+      (a * Math.cos(phi)) ** 2 + (b * Math.sin(phi)) ** 2,
+    );
+    const nx = -Math.sin(s.tangent);
+    const ny = Math.cos(s.tangent);
+    left.push([s.x + nx * d, s.y + ny * d]);
+    right.push([s.x - nx * d, s.y - ny * d]);
+  }
+
+  const parts = [`M ${fmt(left[0][0])} ${fmt(left[0][1])}`];
+  for (let i = 1; i < left.length; i++) {
+    parts.push(`L ${fmt(left[i][0])} ${fmt(left[i][1])}`);
+  }
+  for (let i = right.length - 1; i >= 0; i--) {
+    parts.push(`L ${fmt(right[i][0])} ${fmt(right[i][1])}`);
+  }
+  parts.push("Z");
+  return parts.join(" ");
+}
+
+function sampleStrokePath(commands) {
+  const out = [];
+  let cx = 0, cy = 0;          // current point
+  let sx = 0, sy = 0;          // subpath start
+  let started = false;
+
+  for (const cmd of commands) {
+    switch (cmd.type) {
+      case "M":
+        // Phase 1 limit: first subpath only. A second M after sampling
+        // has begun ends sampling.
+        if (started) return out;
+        cx = cmd.x; cy = cmd.y;
+        sx = cx; sy = cy;
+        break;
+      case "L":
+        sampleLine(out, cx, cy, cmd.x, cmd.y);
+        cx = cmd.x; cy = cmd.y;
+        started = true;
+        break;
+      case "H":
+        sampleLine(out, cx, cy, cmd.x, cy);
+        cx = cmd.x;
+        started = true;
+        break;
+      case "V":
+        sampleLine(out, cx, cy, cx, cmd.y);
+        cy = cmd.y;
+        started = true;
+        break;
+      case "C":
+        sampleCubic(out, cx, cy, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x, cmd.y);
+        cx = cmd.x; cy = cmd.y;
+        started = true;
+        break;
+      case "Q":
+        sampleQuadratic(out, cx, cy, cmd.x1, cmd.y1, cmd.x, cmd.y);
+        cx = cmd.x; cy = cmd.y;
+        started = true;
+        break;
+      case "Z":
+        if (cx !== sx || cy !== sy) {
+          sampleLine(out, cx, cy, sx, sy);
+        }
+        cx = sx; cy = sy;
+        return out;     // closing the subpath ends sampling
+    }
+  }
+  return out;
+}
+
+function sampleLine(out, x0, y0, x1, y1) {
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  if (len === 0) return;
+  const tangent = Math.atan2(y1 - y0, x1 - x0);
+  const n = Math.max(1, Math.ceil(len / SAMPLE_INTERVAL_PT));
+  // Skip i=0 if out is already non-empty (avoids doubled points at
+  // segment joins).
+  const startI = out.length === 0 ? 0 : 1;
+  for (let i = startI; i <= n; i++) {
+    const t = i / n;
+    out.push({
+      x: x0 + (x1 - x0) * t,
+      y: y0 + (y1 - y0) * t,
+      tangent,
+    });
+  }
+}
+
+function sampleCubic(out, x0, y0, x1, y1, x2, y2, x3, y3) {
+  const startI = out.length === 0 ? 0 : 1;
+  for (let i = startI; i <= CUBIC_SAMPLES; i++) {
+    const t = i / CUBIC_SAMPLES;
+    const u = 1 - t;
+    const x = u*u*u * x0 + 3*u*u*t * x1 + 3*u*t*t * x2 + t*t*t * x3;
+    const y = u*u*u * y0 + 3*u*u*t * y1 + 3*u*t*t * y2 + t*t*t * y3;
+    const dx = 3*u*u * (x1 - x0) + 6*u*t * (x2 - x1) + 3*t*t * (x3 - x2);
+    const dy = 3*u*u * (y1 - y0) + 6*u*t * (y2 - y1) + 3*t*t * (y3 - y2);
+    // Endpoint tangents may be zero-length when control points coincide
+    // with endpoints; fall back to the chord direction in that case.
+    let tangent;
+    if (dx === 0 && dy === 0) {
+      tangent = Math.atan2(y3 - y0, x3 - x0);
+    } else {
+      tangent = Math.atan2(dy, dx);
+    }
+    out.push({ x, y, tangent });
+  }
+}
+
+function sampleQuadratic(out, x0, y0, x1, y1, x2, y2) {
+  const startI = out.length === 0 ? 0 : 1;
+  for (let i = startI; i <= QUADRATIC_SAMPLES; i++) {
+    const t = i / QUADRATIC_SAMPLES;
+    const u = 1 - t;
+    const x = u*u * x0 + 2*u*t * x1 + t*t * x2;
+    const y = u*u * y0 + 2*u*t * y1 + t*t * y2;
+    const dx = 2*u * (x1 - x0) + 2*t * (x2 - x1);
+    const dy = 2*u * (y1 - y0) + 2*t * (y2 - y1);
+    let tangent;
+    if (dx === 0 && dy === 0) {
+      tangent = Math.atan2(y2 - y0, x2 - x0);
+    } else {
+      tangent = Math.atan2(dy, dx);
+    }
+    out.push({ x, y, tangent });
+  }
+}
+
+function fmt(n) {
+  if (Number.isInteger(n)) return String(n);
+  return parseFloat(n.toFixed(3)).toString();
+}

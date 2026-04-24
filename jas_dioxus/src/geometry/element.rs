@@ -906,7 +906,7 @@ pub struct PolygonElem {
     pub stroke_gradient: Option<Box<Gradient>>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PathElem {
     pub d: Vec<PathCommand>,
     pub fill: Option<Fill>,
@@ -917,6 +917,19 @@ pub struct PathElem {
     pub fill_gradient: Option<Box<Gradient>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroke_gradient: Option<Box<Gradient>>,
+    /// Active-brush reference as "<library_slug>/<brush_slug>", or
+    /// None for a plain native-stroke path. Consumed by the
+    /// Calligraphic outliner in the canvas renderer. See
+    /// transcripts/BRUSHES.md §Stroke styling interaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_brush: Option<String>,
+    /// Per-instance brush-parameter overrides as a compact JSON
+    /// object layered over the master brush at render time. Phase 1
+    /// stored as a JSON string so the interpreter's typed
+    /// set-effect machinery can round-trip it. See BRUSHES.md
+    /// §Panel state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_brush_overrides: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2524,6 +2537,25 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
     }
 }
 
+/// Return a copy of the element with its stroke_brush replaced.
+/// Only Path supports brushes today; other elements are returned
+/// unchanged. See BRUSHES.md §Stroke styling interaction.
+pub fn with_stroke_brush(elem: &Element, stroke_brush: Option<String>) -> Element {
+    match elem {
+        Element::Path(e) => Element::Path(PathElem { stroke_brush, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
+/// Return a copy of the element with its stroke_brush_overrides
+/// replaced. Path-only, like with_stroke_brush.
+pub fn with_stroke_brush_overrides(elem: &Element, overrides: Option<String>) -> Element {
+    match elem {
+        Element::Path(e) => Element::Path(PathElem { stroke_brush_overrides: overrides, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
 /// Return a copy of the element with its stroke replaced.
 /// Elements that do not support stroke (Group, Layer) are returned unchanged.
 pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
@@ -2761,6 +2793,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         })
     }
 
@@ -3451,6 +3485,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         });
         let blue_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 2.0));
         let path2 = with_stroke(&path, blue_stroke);

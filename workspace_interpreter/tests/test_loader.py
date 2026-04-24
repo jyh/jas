@@ -39,6 +39,42 @@ class TestLoadWorkspace:
 
 
 class TestLoadSubdirectories:
+    def test_apply_to_strokes_confirm_dialog_loaded(self, workspace_path):
+        data = load_workspace(workspace_path)
+        dialogs = data["dialogs"]
+        assert "apply_to_strokes_confirm" in dialogs
+        dlg = dialogs["apply_to_strokes_confirm"]
+        assert dlg.get("modal") is True
+        params = dlg.get("params", {})
+        for key in ("brush_name", "library", "brush_slug"):
+            assert key in params, key
+
+    def test_brush_options_dialog_loaded(self, workspace_path):
+        data = load_workspace(workspace_path)
+        assert "dialogs" in data
+        dialogs = data["dialogs"]
+        assert "brush_options" in dialogs
+        dlg = dialogs["brush_options"]
+        # Modal dialog per BRUSH_OPTIONS_DIALOG.md §Layout.
+        assert dlg.get("modal") is True
+        # Three modes per §Modes.
+        params = dlg.get("params", {})
+        assert "mode" in params
+        assert sorted(params["mode"]["values"]) == [
+            "create", "instance_edit", "library_edit",
+        ]
+        # State surface includes the Calligraphic Phase-1 fields.
+        state = dlg.get("state", {})
+        for key in (
+            "brush_name", "brush_type",
+            "angle", "angle_variation",
+            "roundness", "roundness_variation",
+            "size", "size_variation",
+        ):
+            assert key in state, key
+        # Default brush type is calligraphic per spec.
+        assert state["brush_type"]["default"] == "calligraphic"
+
     def test_load_includes_dialogs(self, workspace_path):
         data = load_workspace(workspace_path)
         assert "dialogs" in data
@@ -52,6 +88,54 @@ class TestLoadSubdirectories:
         assert "color_panel_content" in data["panels"]
         assert "stroke_panel_content" in data["panels"]
         assert "properties_panel_content" in data["panels"]
+        assert "brushes_panel_content" in data["panels"]
+
+    def test_load_includes_paintbrush_tool(self, workspace_path):
+        data = load_workspace(workspace_path)
+        assert "tools" in data
+        assert "paintbrush" in data["tools"]
+        paintbrush = data["tools"]["paintbrush"]
+        assert paintbrush.get("shortcut") == "B"
+        assert "on_mousedown" in paintbrush.get("handlers", {})
+        # The on_mouseup handler threads state.stroke_brush into the
+        # committed path (matches BRUSHES.md §Canvas tools).
+        on_mouseup = paintbrush["handlers"]["on_mouseup"]
+        # Find the doc.add_path_from_buffer effect anywhere in the
+        # handler tree (it's nested under an `if` clause).
+        def find_add_path(effects):
+            for eff in effects or []:
+                if isinstance(eff, dict):
+                    if "doc.add_path_from_buffer" in eff:
+                        return eff["doc.add_path_from_buffer"]
+                    if "then" in eff:
+                        found = find_add_path(eff["then"])
+                        if found:
+                            return found
+            return None
+        spec = find_add_path(on_mouseup)
+        assert spec is not None, "expected doc.add_path_from_buffer in on_mouseup"
+        assert spec.get("stroke_brush") == "state.stroke_brush"
+
+    def test_brushes_panel_state_defaults(self, workspace_path):
+        data = load_workspace(workspace_path)
+        panel = data["panels"]["brushes_panel_content"]
+        # Check the state surface declared in the panel matches BRUSHES.md
+        # §Panel state.
+        state_keys = panel["state"]
+        for key in (
+            "selected_library", "selected_brushes", "open_libraries",
+            "view_mode", "thumbnail_size", "category_filter",
+        ):
+            assert key in state_keys, key
+        # Defaults
+        assert state_keys["selected_library"]["default"] == "default_brushes"
+        assert state_keys["selected_brushes"]["default"] == []
+        assert state_keys["view_mode"]["default"] == "thumbnail"
+        assert state_keys["thumbnail_size"]["default"] == "small"
+        # All five brush types in the default category filter.
+        assert sorted(state_keys["category_filter"]["default"]) == [
+            "art", "bristle", "calligraphic", "pattern", "scatter",
+        ]
 
     def test_load_includes_default_layouts(self, workspace_path):
         data = load_workspace(workspace_path)
@@ -95,6 +179,29 @@ class TestLoadSubdirectories:
             assert key in first
         for stop_key in ("color", "opacity", "location"):
             assert stop_key in first["stops"][0]
+
+    def test_load_brush_libraries(self, workspace_path):
+        import os
+        brushes_dir = os.path.join(workspace_path, "brushes")
+        if not os.path.isdir(brushes_dir):
+            pytest.skip("brushes/ directory not present on this branch")
+        data = load_workspace(workspace_path)
+        assert "brush_libraries" in data
+        libs = data["brush_libraries"]
+        # Phase 0 ships one seed library: default_brushes.
+        assert "default_brushes" in libs
+        # Each library carries a name + description + non-empty brushes list.
+        for slug, lib in libs.items():
+            assert "name" in lib, slug
+            assert "description" in lib, slug
+            assert "brushes" in lib, slug
+            assert len(lib["brushes"]) > 0, slug
+        # Spot-check the seed brush shape per BRUSHES.md §Brush libraries.
+        first = libs["default_brushes"]["brushes"][0]
+        for key in ("name", "slug", "type"):
+            assert key in first
+        # The Phase 0 seed is a Calligraphic brush.
+        assert first["type"] == "calligraphic"
 
 
 class TestResolveIncludes:
@@ -303,6 +410,44 @@ class TestValidateActionRefs:
             assert shortcut["action"] in actions, (
                 f"Shortcut action '{shortcut['action']}' not in actions"
             )
+
+    def test_all_brushes_panel_actions_exist(self, workspace_path):
+        """Every action referenced by the brushes panel YAML (menu items,
+        click behaviors, toolbar buttons) must be registered in
+        actions.yaml so the interpreter can dispatch them."""
+        data = load_workspace(workspace_path)
+        actions = data["actions"]
+        panel = data["panels"]["brushes_panel_content"]
+
+        # Collect action names from the menu list.
+        for item in panel.get("menu", []):
+            if isinstance(item, str):
+                continue
+            if "action" in item:
+                assert item["action"] in actions, (
+                    f"Brushes panel menu action '{item['action']}' not in actions"
+                )
+
+        # Walk the content tree collecting action references from
+        # behaviors. Brushes uses both top-level 'action' (on icon
+        # buttons) and behaviors with effect lists.
+        def walk(node):
+            if not isinstance(node, dict):
+                return
+            for behavior in node.get("behavior", []):
+                if "action" in behavior:
+                    assert behavior["action"] in actions, (
+                        f"Brushes panel behavior action "
+                        f"'{behavior['action']}' not in actions"
+                    )
+            for child in node.get("children", []):
+                walk(child)
+            for key in ("content", "do"):
+                inner = node.get(key)
+                if isinstance(inner, dict):
+                    walk(inner)
+
+        walk(panel.get("content", {}))
 
     def test_all_menu_actions_exist(self, workspace_path):
         data = load_workspace(workspace_path)

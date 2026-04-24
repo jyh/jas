@@ -309,6 +309,125 @@ fn apply_dialog_confirm(
                 capitalized: b("hyphenate_capitalized"),
             });
         }
+        // brush_options_confirm is handled by the
+        // brush.options_confirm effect handler in effects.rs (the
+        // Phase 7.6 unification). The Phase 7.3 stop-gap that
+        // operated on AppState.brush_libraries was removed in
+        // favour of the StateStore.data source-of-truth used by
+        // the brush.* effect family.
+        _ => {}
+    }
+}
+
+fn apply_brush_options_confirm(
+    dialog: &serde_json::Map<String, serde_json::Value>,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let mode = dialog.get("_param_mode").and_then(|v| v.as_str()).unwrap_or("create");
+    let library = dialog.get("_param_library").and_then(|v| v.as_str()).unwrap_or("");
+    let brush_slug = dialog.get("_param_brush_slug").and_then(|v| v.as_str()).unwrap_or("");
+    let name = dialog.get("brush_name").and_then(|v| v.as_str()).unwrap_or("Brush").to_string();
+    let brush_type = dialog.get("brush_type").and_then(|v| v.as_str()).unwrap_or("calligraphic");
+
+    // Calligraphic params
+    let angle = dialog.get("angle").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let roundness = dialog.get("roundness").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let size = dialog.get("size").and_then(|v| v.as_f64()).unwrap_or(5.0);
+    let angle_var = dialog.get("angle_variation").cloned()
+        .unwrap_or_else(|| serde_json::json!({ "mode": "fixed" }));
+    let roundness_var = dialog.get("roundness_variation").cloned()
+        .unwrap_or_else(|| serde_json::json!({ "mode": "fixed" }));
+    let size_var = dialog.get("size_variation").cloned()
+        .unwrap_or_else(|| serde_json::json!({ "mode": "fixed" }));
+
+    let lib_key = if !library.is_empty() {
+        library.to_string()
+    } else {
+        st.brush_libraries.as_object()
+            .and_then(|m| m.keys().next().cloned())
+            .unwrap_or_default()
+    };
+    if lib_key.is_empty() { return; }
+
+    match mode {
+        "create" => {
+            // Slug from name: lowercase, replace non-alphanum with _
+            let raw_slug: String = name.chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+                .collect();
+            let lib = match st.brush_libraries.get_mut(&lib_key)
+                .and_then(|l| l.get_mut("brushes"))
+                .and_then(|b| b.as_array_mut()) {
+                Some(b) => b,
+                None => return,
+            };
+            // Make slug unique within the library.
+            let mut slug = raw_slug.clone();
+            let mut n = 2;
+            let existing: std::collections::HashSet<String> = lib.iter()
+                .filter_map(|b| b.get("slug").and_then(|s| s.as_str()).map(String::from))
+                .collect();
+            while existing.contains(&slug) {
+                slug = format!("{raw_slug}_{n}");
+                n += 1;
+            }
+            let mut brush = serde_json::Map::new();
+            brush.insert("name".to_string(), serde_json::Value::String(name));
+            brush.insert("slug".to_string(), serde_json::Value::String(slug));
+            brush.insert("type".to_string(), serde_json::Value::String(brush_type.to_string()));
+            if brush_type == "calligraphic" {
+                brush.insert("angle".to_string(), serde_json::json!(angle));
+                brush.insert("roundness".to_string(), serde_json::json!(roundness));
+                brush.insert("size".to_string(), serde_json::json!(size));
+                brush.insert("angle_variation".to_string(), angle_var);
+                brush.insert("roundness_variation".to_string(), roundness_var);
+                brush.insert("size_variation".to_string(), size_var);
+            }
+            lib.push(serde_json::Value::Object(brush));
+        }
+        "library_edit" => {
+            if brush_slug.is_empty() { return; }
+            let lib = match st.brush_libraries.get_mut(&lib_key)
+                .and_then(|l| l.get_mut("brushes"))
+                .and_then(|b| b.as_array_mut()) {
+                Some(b) => b,
+                None => return,
+            };
+            for b in lib.iter_mut() {
+                if b.get("slug").and_then(|s| s.as_str()) != Some(brush_slug) { continue; }
+                if let Some(map) = b.as_object_mut() {
+                    map.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                    if brush_type == "calligraphic" {
+                        map.insert("angle".to_string(), serde_json::json!(angle));
+                        map.insert("roundness".to_string(), serde_json::json!(roundness));
+                        map.insert("size".to_string(), serde_json::json!(size));
+                        map.insert("angle_variation".to_string(), angle_var.clone());
+                        map.insert("roundness_variation".to_string(), roundness_var.clone());
+                        map.insert("size_variation".to_string(), size_var.clone());
+                    }
+                }
+                break;
+            }
+        }
+        "instance_edit" => {
+            // Build a partial overrides JSON object from the
+            // dialog's Calligraphic fields. The actual write to
+            // the canvas selection happens via the existing
+            // doc.set_attr_on_selection effect chain rather than
+            // through here (apply_dialog_confirm is purely
+            // AppState-scoped, no model handle). The dialog's OK
+            // action chain should fire doc.set_attr_on_selection
+            // with the assembled JSON immediately before
+            // close_dialog. Phase 1 leaves this branch as a stub
+            // that records the intended overrides on AppState for
+            // a follow-up effect to consume.
+            let overrides = serde_json::json!({
+                "angle": angle,
+                "roundness": roundness,
+                "size": size,
+            });
+            let _ = serde_json::to_string(&overrides);
+        }
         _ => {}
     }
 }

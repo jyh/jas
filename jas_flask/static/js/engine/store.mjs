@@ -21,6 +21,14 @@ export class StateStore {
     this.state = init.state ? { ...init.state } : {};
     this.panel = init.panel ? { ...init.panel } : {};
     this.tool = init.tool ? { ...init.tool } : {};
+    // `data` holds workspace-loaded reference data (swatch libraries,
+    // brush libraries, etc.). Populated on app boot from the loaded
+    // workspace JSON; mutated by the data.* effects (data.set,
+    // data.list_append, data.list_remove). Server-side panel HTML
+    // does not re-render automatically when data changes; call sites
+    // that need fresh HTML must trigger a re-render through their
+    // own mechanism.
+    this.data = init.data ? { ...init.data } : {};
     this._listeners = [];
   }
 
@@ -33,6 +41,7 @@ export class StateStore {
       state: this.state,
       panel: this.panel,
       tool: this.tool,
+      data: this.data,
     };
   }
 

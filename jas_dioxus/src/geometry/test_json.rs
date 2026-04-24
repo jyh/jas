@@ -884,6 +884,8 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             common,
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         }),
         "text" => Element::Text(TextElem {
             x: parse_f(&v["x"]),

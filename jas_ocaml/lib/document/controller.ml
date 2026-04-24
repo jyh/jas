@@ -453,6 +453,26 @@ class controller ?(model = Model.create ()) () =
       ) doc.Document.selection doc in
       model#set_document new_doc
 
+    (* Brush attribute writeback — Path-only. Used by
+       apply_brush_to_selection / remove_brush_from_selection. *)
+    method set_selection_stroke_brush (slug : string option) =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        let new_elem = Element.with_stroke_brush elem slug in
+        Document.replace_element acc path new_elem
+      ) doc.Document.selection doc in
+      model#set_document new_doc
+
+    method set_selection_stroke_brush_overrides (overrides : string option) =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        let new_elem = Element.with_stroke_brush_overrides elem overrides in
+        Document.replace_element acc path new_elem
+      ) doc.Document.selection doc in
+      model#set_document new_doc
+
     (* Phase 5: gradient writeback. Pass [None] to clear (demote). *)
     method set_selection_fill_gradient (g : Element.gradient option) =
       let doc = model#document in

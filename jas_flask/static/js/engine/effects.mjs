@@ -23,9 +23,11 @@ import { Scope } from "./scope.mjs";
 import { toBool, toJson, PATH } from "./value.mjs";
 import {
   setSelection, addToSelection, toggleSelection, clearSelection,
-  getElement,
+  getElement, mkPath,
 } from "./document.mjs";
 import { hitTestRect, translateElement } from "./geometry.mjs";
+import * as pointBuffers from "./point_buffers.mjs";
+import { fitCurve } from "./fit_curve.mjs";
 
 /**
  * Run a list of effects. Each effect is a YAML-derived dict with a
@@ -103,6 +105,203 @@ function runEffect(effect, scope, store, options) {
   if ("log" in effect) {
     if (options.onLog) options.onLog(String(effect.log));
     else if (typeof console !== "undefined") console.log("[effect log]", effect.log);
+    return;
+  }
+
+  // ── Data namespace mutations ─────────────────────────
+  // Reads/writes to workspace-loaded reference data (swatch
+  // libraries, brush libraries, etc.). Currently JS-side only —
+  // server-rendered panel HTML does not refresh on data writes; the
+  // canvas-side renderer that walks the JS data store does pick up
+  // changes at next paint.
+  if ("data.set" in effect) {
+    const spec = effect["data.set"];
+    if (spec && typeof spec === "object") {
+      const path = String(spec.path || "");
+      if (!path) return;
+      const value = _resolveValueOrExpr(spec.value, scope);
+      _writeDataPath(store, path, value);
+    }
+    return;
+  }
+  if ("data.list_append" in effect) {
+    const spec = effect["data.list_append"];
+    if (spec && typeof spec === "object") {
+      const path = String(spec.path || "");
+      if (!path) return;
+      const value = _resolveValueOrExpr(spec.value, scope);
+      const cur = _readDataPath(store, path);
+      const next = Array.isArray(cur) ? cur.slice() : [];
+      next.push(value);
+      _writeDataPath(store, path, next);
+    }
+    return;
+  }
+  if ("data.list_remove" in effect) {
+    const spec = effect["data.list_remove"];
+    if (spec && typeof spec === "object") {
+      const path = String(spec.path || "");
+      if (!path) return;
+      const index = Number(toJson(evaluate(String(spec.index ?? "0"), scope))) || 0;
+      const cur = _readDataPath(store, path);
+      if (!Array.isArray(cur)) return;
+      if (index < 0 || index >= cur.length) return;
+      const next = cur.slice();
+      next.splice(index, 1);
+      _writeDataPath(store, path, next);
+    }
+    return;
+  }
+  if ("data.list_insert" in effect) {
+    // Insert one item at the given index. Index === length is allowed
+    // (append). Out-of-range indices clamp.
+    const spec = effect["data.list_insert"];
+    if (spec && typeof spec === "object") {
+      const path = String(spec.path || "");
+      if (!path) return;
+      const value = _resolveValueOrExpr(spec.value, scope);
+      const index = Number(toJson(evaluate(String(spec.index ?? "0"), scope))) || 0;
+      const cur = _readDataPath(store, path);
+      const base = Array.isArray(cur) ? cur.slice() : [];
+      const i = Math.max(0, Math.min(index, base.length));
+      base.splice(i, 0, value);
+      _writeDataPath(store, path, base);
+    }
+    return;
+  }
+  if ("data.list_sort" in effect) {
+    // Sort a list at the given path by a per-item key expression.
+    // The expression is evaluated with `item` bound to each list
+    // entry; sort is stable, ascending lexicographic on the
+    // resulting strings.
+    const spec = effect["data.list_sort"];
+    if (spec && typeof spec === "object") {
+      const path = String(spec.path || "");
+      if (!path) return;
+      const keyExpr = String(spec.key || "item");
+      const cur = _readDataPath(store, path);
+      if (!Array.isArray(cur)) return;
+      const next = cur.slice().sort((a, b) => {
+        const ka = String(toJson(evaluate(keyExpr, scope.extend({ item: a })))) || "";
+        const kb = String(toJson(evaluate(keyExpr, scope.extend({ item: b })))) || "";
+        return ka < kb ? -1 : ka > kb ? 1 : 0;
+      });
+      _writeDataPath(store, path, next);
+    }
+    return;
+  }
+
+  // ── Brush library shortcuts ──────────────────────────
+  // Higher-level operations that compose data.* primitives in ways
+  // the YAML language can't express natively (multi-item removal by
+  // slug, slug uniqueness, cross-document scans). All write through
+  // the data.brush_libraries store and clear panel.selected_brushes
+  // when they affect the selection.
+  if ("brush.delete_selected" in effect) {
+    const spec = effect["brush.delete_selected"] || {};
+    const libId = String(toJson(evaluate(
+      String(spec.library ?? "panel.selected_library"), scope)));
+    const slugs = toJson(evaluate(
+      String(spec.slugs ?? "panel.selected_brushes"), scope));
+    if (!libId || !Array.isArray(slugs) || slugs.length === 0) return;
+    const lib = store.data.brush_libraries && store.data.brush_libraries[libId];
+    if (!lib || !Array.isArray(lib.brushes)) return;
+    const slugSet = new Set(slugs);
+    lib.brushes = lib.brushes.filter((b) => !slugSet.has(b.slug));
+    if (store._notify) store._notify(`data.brush_libraries.${libId}.brushes`, lib.brushes);
+    // Clear the panel selection of the removed slugs.
+    if (store.panel && store.panel.brushes) {
+      store.panel.brushes.selected_brushes = [];
+      if (store._notify) store._notify("panel.brushes.selected_brushes", []);
+    }
+    return;
+  }
+  if ("brush.duplicate_selected" in effect) {
+    const spec = effect["brush.duplicate_selected"] || {};
+    const libId = String(toJson(evaluate(
+      String(spec.library ?? "panel.selected_library"), scope)));
+    const slugs = toJson(evaluate(
+      String(spec.slugs ?? "panel.selected_brushes"), scope));
+    if (!libId || !Array.isArray(slugs) || slugs.length === 0) return;
+    const lib = store.data.brush_libraries && store.data.brush_libraries[libId];
+    if (!lib || !Array.isArray(lib.brushes)) return;
+    const existingSlugs = new Set(lib.brushes.map((b) => b.slug));
+    const newSlugs = [];
+    // Walk the selected slugs in their current positional order.
+    for (let i = lib.brushes.length - 1; i >= 0; i--) {
+      const b = lib.brushes[i];
+      if (!slugs.includes(b.slug)) continue;
+      const copy = { ...b, name: (b.name || "Brush") + " copy" };
+      // Generate a unique slug: <orig>_copy, _copy_2, _copy_3, …
+      let newSlug = `${b.slug}_copy`;
+      let n = 2;
+      while (existingSlugs.has(newSlug)) {
+        newSlug = `${b.slug}_copy_${n++}`;
+      }
+      copy.slug = newSlug;
+      existingSlugs.add(newSlug);
+      lib.brushes.splice(i + 1, 0, copy);
+      newSlugs.push(newSlug);
+    }
+    if (store._notify) store._notify(`data.brush_libraries.${libId}.brushes`, lib.brushes);
+    // Replace the panel selection with the new copies.
+    if (store.panel && store.panel.brushes) {
+      store.panel.brushes.selected_brushes = newSlugs;
+      if (store._notify) store._notify("panel.brushes.selected_brushes", newSlugs);
+    }
+    return;
+  }
+  if ("brush.append" in effect) {
+    // Append a new brush to the named library. Used by
+    // brush_options_confirm in create mode.
+    const spec = effect["brush.append"] || {};
+    const libId = String(toJson(evaluate(
+      String(spec.library ?? "panel.selected_library"), scope)));
+    const brush = _resolveValueOrExpr(spec.brush, scope);
+    if (!libId || !brush || typeof brush !== "object") return;
+    const lib = store.data.brush_libraries && store.data.brush_libraries[libId];
+    if (!lib || !Array.isArray(lib.brushes)) return;
+    lib.brushes.push(brush);
+    if (store._notify) store._notify(`data.brush_libraries.${libId}.brushes`, lib.brushes);
+    return;
+  }
+  if ("brush.update" in effect) {
+    // Update a master brush in place. Used by brush_options_confirm
+    // in library_edit mode. Replaces whichever fields appear in the
+    // patch object; preserves other fields.
+    const spec = effect["brush.update"] || {};
+    const libId = String(toJson(evaluate(
+      String(spec.library ?? "panel.selected_library"), scope)));
+    const slug = String(toJson(evaluate(
+      String(spec.slug ?? '""'), scope)));
+    const patch = _resolveValueOrExpr(spec.patch, scope);
+    if (!libId || !slug || !patch || typeof patch !== "object") return;
+    const lib = store.data.brush_libraries && store.data.brush_libraries[libId];
+    if (!lib || !Array.isArray(lib.brushes)) return;
+    const idx = lib.brushes.findIndex((b) => b.slug === slug);
+    if (idx < 0) return;
+    lib.brushes[idx] = { ...lib.brushes[idx], ...patch };
+    if (store._notify) store._notify(`data.brush_libraries.${libId}.brushes`, lib.brushes);
+    return;
+  }
+
+  // ── Buffer mutations (for accumulator tools) ────────
+  if ("buffer.push" in effect) {
+    const spec = effect["buffer.push"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      const x = Number(toJson(evaluate(String(spec.x ?? "0"), scope))) || 0;
+      const y = Number(toJson(evaluate(String(spec.y ?? "0"), scope))) || 0;
+      if (name) pointBuffers.push(name, x, y);
+    }
+    return;
+  }
+  if ("buffer.clear" in effect) {
+    const spec = effect["buffer.clear"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      if (name) pointBuffers.clear(name);
+    }
     return;
   }
 
@@ -188,8 +387,78 @@ function runEffect(effect, scope, store, options) {
           const path = extractPath(spec.path, scope);
           const attr = String(spec.attr || "");
           if (!path || !attr) return;
-          const value = toJson(evaluate(String(spec.value ?? "null"), scope));
+          const value = _resolveValueOrExpr(spec.value, scope);
           model.mutate((d) => setElementAttr(d, path, attr, value));
+          return;
+        }
+        case "doc.set_attr_on_selection": {
+          // Spec: { attr: <name>, value: <expr> }
+          // Apply setElementAttr to every path in the current
+          // selection. No-op when the selection is empty. Used by
+          // bulk panel-driven edits (e.g. apply_brush_to_selection).
+          const attr = String(spec.attr || "");
+          if (!attr) return;
+          const value = _resolveValueOrExpr(spec.value, scope);
+          model.mutate((d) => {
+            if (!d.selection || d.selection.length === 0) return d;
+            let next = d;
+            for (const path of d.selection) {
+              next = setElementAttr(next, path, attr, value);
+            }
+            return next;
+          });
+          return;
+        }
+        case "doc.add_path_from_buffer": {
+          // Spec: { buffer: <name>, fit_error?: <expr>,
+          //         stroke_brush?: <expr>, stroke?: <expr>,
+          //         fill?: <expr> }
+          // Read the named point buffer, fit a Bezier spline,
+          // build a Path element, and append it to layer 0
+          // (matches Pencil/Paintbrush semantics). Optional
+          // stroke_brush / stroke / fill ride along on the new
+          // element so a brushed stroke is rendered through the
+          // brush pipeline at next paint.
+          const name = String(spec.buffer || "");
+          if (!name) return;
+          const fitError = "fit_error" in spec
+            ? Number(toJson(evaluate(String(spec.fit_error), scope))) || 4.0
+            : 4.0;
+          const pts = pointBuffers.points(name);
+          if (pts.length < 2) return;
+          const segments = fitCurve(pts, fitError);
+          if (segments.length === 0) return;
+
+          // Build path commands: MoveTo(first), then a CurveTo per
+          // segment. fit_curve emits (p1x, p1y, c1x, c1y, c2x, c2y,
+          // p2x, p2y) tuples; we use the first segment's p1 as the
+          // initial MoveTo target.
+          const cmds = [{ type: "M", x: segments[0][0], y: segments[0][1] }];
+          for (const s of segments) {
+            cmds.push({
+              type: "C",
+              x1: s[2], y1: s[3],
+              x2: s[4], y2: s[5],
+              x: s[6], y: s[7],
+            });
+          }
+
+          // Optional attribute passthrough. Each is evaluated
+          // against the current scope so authors can write
+          // 'state.stroke_brush' (or 'null') in YAML.
+          const extra = {};
+          if ("stroke_brush" in spec) {
+            extra.stroke_brush = toJson(evaluate(String(spec.stroke_brush), scope));
+          }
+          if ("stroke" in spec) {
+            extra.stroke = toJson(evaluate(String(spec.stroke), scope));
+          }
+          if ("fill" in spec) {
+            extra.fill = toJson(evaluate(String(spec.fill), scope));
+          }
+
+          const elem = mkPath({ d: cmds, ...extra });
+          model.mutate((d) => addElementAt(d, [0], elem));
           return;
         }
         // Other doc.* effects land in subsequent phases.
@@ -209,6 +478,74 @@ function runEffect(effect, scope, store, options) {
  * `$tool.selection.mode` or `tool.selection.mode`; both should resolve
  * the same store path.
  */
+/**
+ * Resolve a YAML-author-provided value field. Two shapes:
+ * - String → treated as an expression source, parsed and evaluated.
+ *   This matches the existing convention for set:, doc.set_attr,
+ *   etc.
+ * - Non-string (object / array / number / boolean / null) → used
+ *   verbatim. Lets data.list_append etc. accept inline JSON
+ *   literals where the expression language has no object literal
+ *   syntax.
+ *
+ * Undefined defaults to null.
+ */
+function _resolveValueOrExpr(spec, scope) {
+  if (spec === undefined) return null;
+  if (typeof spec === "string") {
+    return toJson(evaluate(spec, scope));
+  }
+  return spec;
+}
+
+/**
+ * Walk a dotted path inside store.data. Returns undefined for any
+ * missing intermediate. Path may use either `data.x.y` (with the
+ * scope prefix) or `x.y` (bare); both resolve to the data namespace.
+ */
+function _readDataPath(store, rawPath) {
+  if (!store || !store.data) return undefined;
+  const path = rawPath.startsWith("data.") ? rawPath.slice(5) : rawPath;
+  if (!path) return store.data;
+  const segs = path.split(".");
+  let cur = store.data;
+  for (const k of segs) {
+    if (cur == null || typeof cur !== "object") return undefined;
+    cur = cur[k];
+  }
+  return cur;
+}
+
+/**
+ * Write a value at a dotted path inside store.data. Intermediate
+ * dicts are created on demand. Numeric path segments are interpreted
+ * as array indices when the parent is already an array. Fires the
+ * store's listeners with the qualified `data.<path>` key so observers
+ * can re-render.
+ */
+function _writeDataPath(store, rawPath, value) {
+  if (!store || !store.data) return;
+  const path = rawPath.startsWith("data.") ? rawPath.slice(5) : rawPath;
+  if (!path) return;
+  const segs = path.split(".");
+  let cur = store.data;
+  for (let i = 0; i < segs.length - 1; i++) {
+    const k = segs[i];
+    if (cur[k] == null || typeof cur[k] !== "object") {
+      cur[k] = {};
+    }
+    cur = cur[k];
+  }
+  const last = segs[segs.length - 1];
+  if (Array.isArray(cur)) {
+    const idx = Number(last);
+    if (Number.isInteger(idx)) cur[idx] = value;
+  } else {
+    cur[last] = value;
+  }
+  if (store._notify) store._notify("data." + path, value);
+}
+
 function normalizeTarget(raw) {
   const s = String(raw);
   return s.startsWith("$") ? s.slice(1) : s;

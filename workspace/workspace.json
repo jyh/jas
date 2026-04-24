@@ -3340,6 +3340,256 @@
           "log": "rearrange_artboards (deferred)"
         }
       ]
+    },
+    "open_brush_options": {
+      "description": "Open the Brush Options dialog. Mode is one of create, library_edit, instance_edit (see BRUSH_OPTIONS_DIALOG.md \u00a7Modes). Library + brush_slug parameters select the master brush; instance_edit reads the brush from the canvas selection's jas:stroke-brush attribute.\n",
+      "category": "brushes",
+      "params": {
+        "mode": {
+          "type": "string"
+        },
+        "library": {
+          "type": "string",
+          "optional": true
+        },
+        "brush_slug": {
+          "type": "string",
+          "optional": true
+        }
+      },
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "brush_options",
+            "params": {
+              "mode": "param.mode",
+              "library": "param.library",
+              "brush_slug": "param.brush_slug"
+            }
+          }
+        }
+      ]
+    },
+    "brush_options_confirm": {
+      "description": "Confirm the Brush Options dialog. Per-mode dispatch:\ncreate \u2014 assemble a new brush dict from dialog state (name,\n  type, type-specific params), call brush.append on the\n  selected library, close the dialog. The slug is generated\n  from the brush_name (lowercased, non-alphanum stripped).\nlibrary_edit \u2014 assemble a patch dict from the dialog state\n  delta and open the Apply to Strokes confirm sub-dialog;\n  the sub-dialog's Apply button triggers the actual\n  brush.update + re-render.\ninstance_edit \u2014 write the dialog state delta as\n  stroke_brush_overrides JSON on the selected element via\n  doc.set_attr_on_selection.\n\nPhase 1 wires create + instance_edit; library_edit defers the brush.update + re-render to the Apply sub-dialog so the user retains the chance to cancel between dialog confirms.\n",
+      "category": "brushes",
+      "params": {
+        "mode": {
+          "type": "string"
+        },
+        "library": {
+          "type": "string",
+          "optional": true
+        },
+        "brush_slug": {
+          "type": "string",
+          "optional": true
+        }
+      },
+      "effects": [
+        {
+          "brush.options_confirm": {}
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "apply_brush_changes_to_strokes": {
+      "description": "Apply pending brush-edits to every element whose stroke_brush references the named library/slug. The brush_options_confirm action stashes the patch on dialog state before opening the Apply to Strokes confirm dialog; this action commits via brush.update and triggers a canvas re-render. Per BRUSH_OPTIONS_DIALOG.md \u00a7Apply to Strokes.\n",
+      "category": "brushes",
+      "params": {
+        "library": {
+          "type": "string"
+        },
+        "brush_slug": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "log": "apply_brush_changes_to_strokes (library={{param.library}}, brush={{param.brush_slug}})"
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "duplicate_brush": {
+      "description": "Duplicate every brush in panel.selected_brushes within panel.selected_library. Copies are inserted immediately after their originals with \" copy\" appended to the name and a fresh slug. The copies become the new selection. Undoable.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "brush.duplicate_selected": {}
+        }
+      ]
+    },
+    "delete_brush": {
+      "description": "Permanently remove every brush in panel.selected_brushes from panel.selected_library. Any element with stroke_brush referencing a deleted brush re-renders as a plain stroke. Undoable.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "brush.delete_selected": {}
+        }
+      ]
+    },
+    "select_all_unused_brushes": {
+      "description": "Replace panel.selected_brushes with every brush in the panel whose slug does not appear as jas:stroke-brush on any element in the document.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "log": "select_all_unused_brushes"
+        }
+      ]
+    },
+    "sort_brushes_by_name": {
+      "description": "Permanently reorder panel.selected_library's brushes alphabetically (case-sensitive, lexicographic). Slugs unchanged; selection preserved. Persisted on next save_brush_library.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "data.list_sort": {
+            "path": "data.brush_libraries.${panel.selected_library}.brushes",
+            "key": "item.name"
+          }
+        }
+      ]
+    },
+    "set_brush_view_mode": {
+      "description": "Set panel.view_mode (thumbnail / list).\n",
+      "category": "brushes",
+      "params": {
+        "view_mode": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "brushes",
+            "key": "view_mode",
+            "value": "param.view_mode"
+          }
+        },
+        {
+          "set": {
+            "brushes_view_mode": "param.view_mode"
+          }
+        }
+      ]
+    },
+    "set_brush_thumbnail_size": {
+      "description": "Set panel.thumbnail_size (small / medium / large). Disabled when view_mode == list.\n",
+      "category": "brushes",
+      "params": {
+        "size": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "brushes",
+            "key": "thumbnail_size",
+            "value": "param.size"
+          }
+        },
+        {
+          "set": {
+            "brushes_thumbnail_size": "param.size"
+          }
+        }
+      ]
+    },
+    "toggle_brush_category": {
+      "description": "Toggle a brush type's membership in panel.category_filter. Unchecking all five hides every tile.\n",
+      "category": "brushes",
+      "params": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "log": "toggle_brush_category (type={{param.type}})"
+        }
+      ]
+    },
+    "toggle_brush_library_persistent": {
+      "description": "Toggle panel.selected_library's slug in the user's preferences.brushes.persistent_libraries list. Persistent libraries auto-open on app launch.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "log": "toggle_brush_library_persistent"
+        }
+      ]
+    },
+    "save_brush_library": {
+      "description": "Open the Save Brush Library dialog, prompting for a name. The selected library's manifest and artwork files are written to workspace/brushes/<new_slug>/.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "log": "save_brush_library"
+        }
+      ]
+    },
+    "open_brush_libraries_menu": {
+      "description": "Show the dynamic Open Brush Library submenu listing all libraries discovered under workspace/brushes/. Selecting an unopened library appends to panel.open_libraries; selecting an already-open library closes it.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "log": "open_brush_libraries_menu"
+        }
+      ]
+    },
+    "apply_brush_to_selection": {
+      "description": "Apply a brush to every path in the canvas selection. Sets stroke_brush to \"<library>/<brush_slug>\" on each element; clears any per-element stroke_brush_overrides. Single-click on a panel tile fires this action plus the state.stroke_brush write in one transaction.\n",
+      "category": "brushes",
+      "params": {
+        "library": {
+          "type": "string"
+        },
+        "brush_slug": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "doc.snapshot": {}
+        },
+        {
+          "doc.set_attr_on_selection": {
+            "attr": "stroke_brush",
+            "value": "\"{{param.library}}/{{param.brush_slug}}\""
+          }
+        },
+        {
+          "doc.set_attr_on_selection": {
+            "attr": "stroke_brush_overrides",
+            "value": "null"
+          }
+        }
+      ]
+    },
+    "remove_brush_from_selection": {
+      "description": "Strip stroke_brush and stroke_brush_overrides from every selected element. The element re-renders with the native stroke pipeline.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "doc.snapshot": {}
+        },
+        {
+          "doc.set_attr_on_selection": {
+            "attr": "stroke_brush",
+            "value": "null"
+          }
+        },
+        {
+          "doc.set_attr_on_selection": {
+            "attr": "stroke_brush_overrides",
+            "value": "null"
+          }
+        }
+      ]
     }
   },
   "version": 1,
@@ -3392,7 +3642,8 @@
             {
               "panels": [
                 "color",
-                "swatches"
+                "swatches",
+                "brushes"
               ],
               "active": 0
             },
@@ -3513,7 +3764,8 @@
             {
               "panels": [
                 "color",
-                "swatches"
+                "swatches",
+                "brushes"
               ],
               "active": 0
             },
@@ -4135,6 +4387,46 @@
     "link_unlinked": {
       "viewbox": "0 0 16 16",
       "svg": "<path d=\"M2.5,11.5 a2.5,2.5 0 0 1 0,-3.5 l2,-2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n<path d=\"M13.5,4.5 a2.5,2.5 0 0 1 0,3.5 l-2,2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n<line x1=\"6\" y1=\"11\" x2=\"10\" y2=\"5\"\n      stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/>\n"
+    },
+    "brush_libraries_menu": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"3\" width=\"2\" height=\"11\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"5\" y=\"3\" width=\"2\" height=\"11\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <rect x=\"8.5\" y=\"3\" width=\"2\" height=\"11\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" transform=\"rotate(8 9.5 8.5)\"/> <rect x=\"11.5\" y=\"5\" width=\"2.5\" height=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/>\n"
+    },
+    "remove_brush_stroke": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2.5\" y=\"2.5\" width=\"11\" height=\"11\" fill=\"#fff\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"3\" y1=\"13\" x2=\"13\" y2=\"3\" stroke=\"#d22\" stroke-width=\"1.6\" stroke-linecap=\"round\"/>\n"
+    },
+    "brush_options_for_selection": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,11 q3,-2 6,0 t6,0\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <circle cx=\"11\" cy=\"5\" r=\"2.6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"11\" y1=\"1.5\" x2=\"11\" y2=\"2.8\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"11\" y1=\"7.2\" x2=\"11\" y2=\"8.5\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"7.5\" y1=\"5\" x2=\"8.8\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"13.2\" y1=\"5\" x2=\"14.5\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"1.2\"/>\n"
+    },
+    "new_brush": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"9\" height=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/> <line x1=\"11.5\" y1=\"11.5\" x2=\"11.5\" y2=\"14.5\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"/> <line x1=\"10\" y1=\"13\" x2=\"13\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"/>\n"
+    },
+    "delete_brush": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"2.5\" x2=\"10\" y2=\"2.5\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/> <path d=\"M3.5,4 L4.5,14 L11.5,14 L12.5,4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linejoin=\"round\"/> <line x1=\"6.5\" y1=\"6.5\" x2=\"6.5\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1\"/> <line x1=\"9.5\" y1=\"6.5\" x2=\"9.5\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"1\"/>\n"
+    },
+    "brush_type_calligraphic": {
+      "viewbox": "0 0 12 12",
+      "svg": "<ellipse cx=\"6\" cy=\"6\" rx=\"4.5\" ry=\"2\" fill=\"currentColor\" transform=\"rotate(-30 6 6)\"/>\n"
+    },
+    "brush_type_scatter": {
+      "viewbox": "0 0 12 12",
+      "svg": "<circle cx=\"3\" cy=\"9\" r=\"1.4\" fill=\"currentColor\"/> <circle cx=\"6.5\" cy=\"5\" r=\"1.4\" fill=\"currentColor\"/> <circle cx=\"10\" cy=\"8\" r=\"1.4\" fill=\"currentColor\"/>\n"
+    },
+    "brush_type_art": {
+      "viewbox": "0 0 12 12",
+      "svg": "<path d=\"M1,9 Q6,1 11,5 L11,7 Q6,3 1,11 Z\" fill=\"currentColor\"/>\n"
+    },
+    "brush_type_pattern": {
+      "viewbox": "0 0 12 12",
+      "svg": "<rect x=\"0.5\" y=\"4\" width=\"3\" height=\"4\" fill=\"currentColor\"/> <rect x=\"4.5\" y=\"4\" width=\"3\" height=\"4\" fill=\"currentColor\"/> <rect x=\"8.5\" y=\"4\" width=\"3\" height=\"4\" fill=\"currentColor\"/>\n"
+    },
+    "brush_type_bristle": {
+      "viewbox": "0 0 12 12",
+      "svg": "<line x1=\"6\" y1=\"2\" x2=\"3\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"2\" x2=\"5\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"2\" x2=\"7\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"2\" x2=\"9\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/>\n"
     }
   },
   "layout": {
@@ -5584,6 +5876,11 @@
       "min_zoom": 0.1,
       "max_zoom": 64.0,
       "fit_padding_px": 20
+    },
+    "brushes": {
+      "persistent_libraries": [
+        "default_brushes"
+      ]
     }
   },
   "runtime_contexts": {
@@ -6231,6 +6528,18 @@
       "default": false,
       "description": "Active stroke profile is flipped"
     },
+    "stroke_brush": {
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "description": "Active stroke brush, encoded as \"<library_slug>/<brush_slug>\". Null when no brush is applied; non-null causes the brush renderer to take over from the native stroke pipeline. See transcripts/BRUSHES.md \u00a7Stroke styling interaction.\n"
+    },
+    "stroke_brush_overrides": {
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "description": "Per-instance brush parameter overrides as compact JSON. Polymorphic by brush type; partial dict layered over the master library brush at render time. Edited via the Brush Options dialog in instance_edit mode.\n"
+    },
     "align_to": {
       "type": "enum",
       "values": [
@@ -6293,6 +6602,59 @@
       "type": "bool",
       "default": false,
       "description": "When true, DIVIDE fragments with no fill and no stroke are discarded rather than kept as invisible paths. Edited via the Boolean Options dialog.\n"
+    },
+    "brushes_selected_library": {
+      "type": "string",
+      "default": "default_brushes",
+      "description": "Library slug owning the current panel selection. Changing libraries clears brushes_selected_brushes.\n"
+    },
+    "brushes_selected_brushes": {
+      "type": "list",
+      "item_type": "string",
+      "default": [],
+      "description": "List of brush slugs selected within brushes_selected_library. Slug-keyed (not index-keyed) so library reordering or duplication does not scramble the selection.\n"
+    },
+    "brushes_open_libraries": {
+      "type": "list",
+      "item_type": "object",
+      "default": [
+        {
+          "id": "default_brushes",
+          "collapsed": false
+        }
+      ],
+      "description": "Libraries currently open as disclosure sections in the panel body, each with its collapsed state. Initialised at startup from preferences.brushes.persistent_libraries; falls back to [{ id: default_brushes, collapsed: false }] when the preference list is empty.\n"
+    },
+    "brushes_view_mode": {
+      "type": "enum",
+      "values": [
+        "thumbnail",
+        "list"
+      ],
+      "default": "thumbnail",
+      "description": "Brushes panel tile rendering mode."
+    },
+    "brushes_thumbnail_size": {
+      "type": "enum",
+      "values": [
+        "small",
+        "medium",
+        "large"
+      ],
+      "default": "small",
+      "description": "Brushes panel thumbnail tile size. Small=48x16, Medium=72x24, Large=96x32. Disabled (radio dim) when view_mode == list.\n"
+    },
+    "brushes_category_filter": {
+      "type": "list",
+      "item_type": "string",
+      "default": [
+        "calligraphic",
+        "scatter",
+        "art",
+        "pattern",
+        "bristle"
+      ],
+      "description": "Brush types currently visible in the panel body. Each toggled independently from the panel menu's \"Show X Brushes\" checkbox group. Empty list renders the body with a \"No brushes match current filter\" hint.\n"
     },
     "fill_on_top": {
       "type": "bool",
@@ -8016,6 +8378,457 @@
                 "style": {
                   "size": 20
                 }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "brushes_panel_content": {
+      "id": "brushes_panel_content",
+      "type": "panel",
+      "summary": "Brushes",
+      "description": "Brush library panel for managing named brushes organised into libraries. The panel displays a scrollable area of collapsible library sections (each rendering its brushes as tiles) above a bottom toolbar with five icon buttons.\nPhase 1 ships Calligraphic brushes only. Scatter, Art, Pattern, and Bristle types follow as their data models and renderers land. See transcripts/BRUSHES.md.\nLayout (top to bottom):\nRow 1 \u2014 Brush tiles area. Scrollable container rendering one collapsible disclosure section per entry in panel.open_libraries. Each section header shows the library name; expanded sections render the library's brushes as tiles (1:3 aspect at small size, matching BRUSHES.md \u00a7Controls).\nRow 2 \u2014 Bottom toolbar (left to right): Brush Libraries menu, Remove Brush Stroke, Brush Options for Selection, New Brush, Delete Brush.\nSingle-click a tile to select it AND set state.stroke_brush AND apply jas:stroke-brush to the canvas selection. Selection uses the generic select effect with mode=auto: plain click, Shift+click for ranges, Cmd/Ctrl+click to toggle. Selection is per-library; the selected_brushes panel state tracks slugs (not indices) within selected_library.\nDouble-click a tile to open the Brush Options dialog in library_edit mode for the master brush.\n",
+      "state": {
+        "selected_library": {
+          "type": "string",
+          "default": "default_brushes",
+          "description": "Library slug owning the current panel selection."
+        },
+        "selected_brushes": {
+          "type": "list",
+          "item_type": "string",
+          "default": [],
+          "description": "Brush slugs selected within selected_library. Slug-keyed so library reordering or duplication does not scramble the selection.\n"
+        },
+        "open_libraries": {
+          "type": "list",
+          "item_type": "object",
+          "default": [
+            {
+              "id": "default_brushes",
+              "collapsed": false
+            }
+          ],
+          "description": "List of open libraries with their collapsed state. Each entry has an \"id\" (library slug) and \"collapsed\" (bool).\n"
+        },
+        "view_mode": {
+          "type": "enum",
+          "values": [
+            "thumbnail",
+            "list"
+          ],
+          "default": "thumbnail",
+          "description": "Tile rendering mode."
+        },
+        "thumbnail_size": {
+          "type": "enum",
+          "values": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "default": "small",
+          "description": "Thumbnail tile size when view_mode == thumbnail. small=48x16, medium=72x24, large=96x32.\n"
+        },
+        "category_filter": {
+          "type": "list",
+          "item_type": "string",
+          "default": [
+            "calligraphic",
+            "scatter",
+            "art",
+            "pattern",
+            "bristle"
+          ],
+          "description": "Brush types currently visible. Toggled per-type from the panel menu's \"Show X Brushes\" checkboxes.\n"
+        }
+      },
+      "init": {
+        "selected_library": "state.brushes_selected_library",
+        "selected_brushes": "state.brushes_selected_brushes",
+        "open_libraries": "state.brushes_open_libraries",
+        "view_mode": "state.brushes_view_mode",
+        "thumbnail_size": "state.brushes_thumbnail_size",
+        "category_filter": "state.brushes_category_filter"
+      },
+      "menu": [
+        {
+          "label": "New Brush",
+          "action": "open_brush_options",
+          "params": {
+            "mode": "create"
+          },
+          "enabled_when": "canvas_selection_non_empty",
+          "description": "Open the Brush Options dialog in create mode with the canvas selection's geometry pre-filled as the new brush's artwork. OK appends a new brush to the selected library.\n"
+        },
+        {
+          "label": "Duplicate Brush",
+          "action": "duplicate_brush",
+          "enabled_when": "panel.selected_brushes.length > 0",
+          "description": "Create a copy of each currently selected brush in the selected library. The copies are inserted immediately after their originals with \" copy\" appended to the name and a fresh slug. The copies become the new selection.\n"
+        },
+        {
+          "label": "Delete Brush",
+          "action": "delete_brush",
+          "enabled_when": "panel.selected_brushes.length > 0",
+          "description": "Remove the currently selected brushes from the selected library. Any element with jas:stroke-brush referencing a deleted brush re-renders as a plain stroke (null-on-missing fallback). Undoable.\n"
+        },
+        {
+          "label": "Brush Options...",
+          "action": "open_brush_options",
+          "params": {
+            "mode": "library_edit"
+          },
+          "enabled_when": "panel.selected_brushes.length > 0",
+          "description": "Open the Brush Options dialog in library_edit mode for the first selected brush. OK prompts the Apply to Strokes confirm dialog.\n"
+        },
+        "separator",
+        {
+          "label": "Select All Unused",
+          "action": "select_all_unused_brushes",
+          "description": "Replace selected_brushes with every brush in the panel whose slug does not appear as jas:stroke-brush on any element in the document.\n"
+        },
+        "separator",
+        {
+          "label": "Sort by Name",
+          "action": "sort_brushes_by_name",
+          "enabled_when": "panel.selected_library != null",
+          "description": "Permanently reorder the selected library's brushes alphabetically (case-sensitive, lexicographic). Slugs unchanged; selection preserved.\n"
+        },
+        "separator",
+        {
+          "label": "Thumbnail View",
+          "action": "set_brush_view_mode",
+          "params": {
+            "view_mode": "thumbnail"
+          },
+          "checked_when": "panel.view_mode == \"thumbnail\"",
+          "description": "Render each tile as a stroke preview thumbnail."
+        },
+        {
+          "label": "List View",
+          "action": "set_brush_view_mode",
+          "params": {
+            "view_mode": "list"
+          },
+          "checked_when": "panel.view_mode == \"list\"",
+          "description": "Render each tile as an icon + name row."
+        },
+        "separator",
+        {
+          "label": "Small Thumbnail View",
+          "action": "set_brush_thumbnail_size",
+          "params": {
+            "size": "small"
+          },
+          "checked_when": "panel.thumbnail_size == \"small\"",
+          "enabled_when": "panel.view_mode == \"thumbnail\"",
+          "description": "Display brush thumbnails at 48x16 pixels."
+        },
+        {
+          "label": "Medium Thumbnail View",
+          "action": "set_brush_thumbnail_size",
+          "params": {
+            "size": "medium"
+          },
+          "checked_when": "panel.thumbnail_size == \"medium\"",
+          "enabled_when": "panel.view_mode == \"thumbnail\"",
+          "description": "Display brush thumbnails at 72x24 pixels."
+        },
+        {
+          "label": "Large Thumbnail View",
+          "action": "set_brush_thumbnail_size",
+          "params": {
+            "size": "large"
+          },
+          "checked_when": "panel.thumbnail_size == \"large\"",
+          "enabled_when": "panel.view_mode == \"thumbnail\"",
+          "description": "Display brush thumbnails at 96x32 pixels."
+        },
+        "separator",
+        {
+          "label": "Show Calligraphic Brushes",
+          "action": "toggle_brush_category",
+          "params": {
+            "type": "calligraphic"
+          },
+          "checked_when": "panel.category_filter contains \"calligraphic\"",
+          "description": "Toggle visibility of Calligraphic brushes in the panel body."
+        },
+        {
+          "label": "Show Scatter Brushes",
+          "action": "toggle_brush_category",
+          "params": {
+            "type": "scatter"
+          },
+          "checked_when": "panel.category_filter contains \"scatter\"",
+          "description": "Toggle visibility of Scatter brushes."
+        },
+        {
+          "label": "Show Art Brushes",
+          "action": "toggle_brush_category",
+          "params": {
+            "type": "art"
+          },
+          "checked_when": "panel.category_filter contains \"art\"",
+          "description": "Toggle visibility of Art brushes."
+        },
+        {
+          "label": "Show Pattern Brushes",
+          "action": "toggle_brush_category",
+          "params": {
+            "type": "pattern"
+          },
+          "checked_when": "panel.category_filter contains \"pattern\"",
+          "description": "Toggle visibility of Pattern brushes."
+        },
+        {
+          "label": "Show Bristle Brushes",
+          "action": "toggle_brush_category",
+          "params": {
+            "type": "bristle"
+          },
+          "checked_when": "panel.category_filter contains \"bristle\"",
+          "description": "Toggle visibility of Bristle brushes."
+        },
+        "separator",
+        {
+          "label": "Make Persistent",
+          "action": "toggle_brush_library_persistent",
+          "checked_when": "preferences.brushes.persistent_libraries contains panel.selected_library",
+          "description": "Toggle the selected library's presence in the user's persistent_libraries preference. Persistent libraries auto-open on app launch.\n"
+        },
+        {
+          "label": "Open Brush Library",
+          "type": "submenu",
+          "dynamic": true,
+          "description": "Submenu listing all brush libraries discovered under workspace/brushes/<slug>/library.json. Selecting a library opens or closes it (toggle via checkmark).\n"
+        },
+        {
+          "label": "Save Brush Library",
+          "action": "save_brush_library",
+          "enabled_when": "panel.selected_library != null",
+          "description": "Open the Save Brush Library dialog. The selected library's manifest and artwork files are written to workspace/brushes/<new_slug>/.\n"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "bp_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "id": "bp_brush_tiles",
+            "type": "container",
+            "layout": "column",
+            "summary": "Brush libraries",
+            "description": "Scrollable area of collapsible library sections. Each section is a disclosure (triangle + name); expanding renders the library's brushes as tiles. Tile size and view mode are controlled by panel.thumbnail_size / panel.view_mode.\nSingle-click a tile to select it, set state.stroke_brush, and apply jas:stroke-brush to the canvas selection. Double-click opens Brush Options in library_edit mode.\n",
+            "style": {
+              "flex": 1,
+              "overflow_y": "auto"
+            },
+            "foreach": {
+              "source": "panel.open_libraries",
+              "as": "lib"
+            },
+            "do": {
+              "type": "disclosure",
+              "label": "{{data.brush_libraries[lib.id].name}}",
+              "bind": {
+                "collapsed": "lib.collapsed"
+              },
+              "children": [
+                {
+                  "type": "container",
+                  "layout": "wrap",
+                  "style": {
+                    "gap": 2,
+                    "padding": 2
+                  },
+                  "foreach": {
+                    "source": "data.brush_libraries[lib.id].brushes",
+                    "as": "brush"
+                  },
+                  "do": {
+                    "type": "container",
+                    "id": "bp_tile_{{lib.id}}_{{brush.slug}}",
+                    "summary": "{{brush.name}}",
+                    "style": {
+                      "width": 48,
+                      "height": 16,
+                      "border": "1px solid var(--app-border,#555)"
+                    },
+                    "bind": {
+                      "selected_in": "panel.selected_brushes"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "select": {
+                              "target": "brush.slug",
+                              "list": "selected_brushes",
+                              "scope": "selected_library",
+                              "scope_value": "lib.id",
+                              "mode": "auto"
+                            }
+                          },
+                          {
+                            "set": {
+                              "stroke_brush": "\"{{lib.id}}/{{brush.slug}}\""
+                            }
+                          },
+                          {
+                            "set": {
+                              "stroke_brush_overrides": null
+                            }
+                          }
+                        ],
+                        "action": "apply_brush_to_selection",
+                        "params": {
+                          "library": "lib.id",
+                          "brush_slug": "brush.slug"
+                        }
+                      },
+                      {
+                        "event": "double_click",
+                        "action": "open_brush_options",
+                        "params": {
+                          "mode": "library_edit",
+                          "library": "lib.id",
+                          "brush_slug": "brush.slug"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": "bp_toolbar",
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center",
+              "padding": 2
+            },
+            "children": [
+              {
+                "id": "bp_libraries_menu_btn",
+                "type": "icon_button",
+                "summary": "Brush Libraries Menu",
+                "description": "Opens the Open Brush Library dynamic submenu listing all available libraries.\n",
+                "icon": "brush_libraries_menu",
+                "style": {
+                  "size": 18
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "open_brush_libraries_menu"
+                  }
+                ]
+              },
+              {
+                "id": "bp_remove_brush_stroke_btn",
+                "type": "icon_button",
+                "summary": "Remove Brush Stroke",
+                "description": "Strip jas:stroke-brush and jas:stroke-brush-overrides from every selected element; null state.stroke_brush.\n",
+                "icon": "remove_brush_stroke",
+                "style": {
+                  "size": 18
+                },
+                "bind": {
+                  "disabled": "not canvas_selection_has_brushed_stroke"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "set": {
+                          "stroke_brush": null
+                        }
+                      },
+                      {
+                        "set": {
+                          "stroke_brush_overrides": null
+                        }
+                      }
+                    ],
+                    "action": "remove_brush_from_selection"
+                  }
+                ]
+              },
+              {
+                "id": "bp_options_for_selection_btn",
+                "type": "icon_button",
+                "summary": "Brush Options for Selection",
+                "description": "Open the Brush Options dialog in instance_edit mode for the selected stroke. Edits the per-instance overrides.\n",
+                "icon": "brush_options_for_selection",
+                "style": {
+                  "size": 18
+                },
+                "bind": {
+                  "disabled": "not canvas_selection_is_single_brushed_stroke"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "open_brush_options",
+                    "params": {
+                      "mode": "instance_edit"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "bp_new_brush_btn",
+                "type": "icon_button",
+                "summary": "New Brush",
+                "description": "Open the Brush Options dialog in create mode with the canvas selection pre-filled as the new brush's artwork.\n",
+                "icon": "new_brush",
+                "style": {
+                  "size": 18
+                },
+                "bind": {
+                  "disabled": "not canvas_selection_non_empty"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "open_brush_options",
+                    "params": {
+                      "mode": "create"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "bp_delete_brush_btn",
+                "type": "icon_button",
+                "summary": "Delete Brush",
+                "description": "Permanently remove every brush in selected_brushes from the selected library. Undoable.\n",
+                "icon": "delete_brush",
+                "style": {
+                  "size": 18
+                },
+                "bind": {
+                  "disabled": "panel.selected_brushes.length == 0"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "delete_brush"
+                  }
+                ]
               }
             ]
           }
@@ -13533,7 +14346,7 @@
                 },
                 "bind": {
                   "value": "panel.miter_limit",
-                  "disabled": "panel.join != \"miter\""
+                  "disabled": "panel.join != \"miter\" or state.stroke_brush != null"
                 }
               }
             ]
@@ -13855,7 +14668,7 @@
                     },
                     "bind": {
                       "value": "panel.dash_1",
-                      "disabled": "not panel.dashed"
+                      "disabled": "not panel.dashed or state.stroke_brush != null"
                     }
                   },
                   {
@@ -13888,7 +14701,7 @@
                     },
                     "bind": {
                       "value": "panel.gap_1",
-                      "disabled": "not panel.dashed"
+                      "disabled": "not panel.dashed or state.stroke_brush != null"
                     }
                   },
                   {
@@ -13921,7 +14734,7 @@
                     },
                     "bind": {
                       "value": "panel.dash_2",
-                      "disabled": "not panel.dashed"
+                      "disabled": "not panel.dashed or state.stroke_brush != null"
                     }
                   },
                   {
@@ -13954,7 +14767,7 @@
                     },
                     "bind": {
                       "value": "panel.gap_2",
-                      "disabled": "not panel.dashed"
+                      "disabled": "not panel.dashed or state.stroke_brush != null"
                     }
                   },
                   {
@@ -13987,7 +14800,7 @@
                     },
                     "bind": {
                       "value": "panel.dash_3",
-                      "disabled": "not panel.dashed"
+                      "disabled": "not panel.dashed or state.stroke_brush != null"
                     }
                   },
                   {
@@ -14020,7 +14833,7 @@
                     },
                     "bind": {
                       "value": "panel.gap_3",
-                      "disabled": "not panel.dashed"
+                      "disabled": "not panel.dashed or state.stroke_brush != null"
                     }
                   },
                   {
@@ -16016,6 +16829,139 @@
         }
       }
     },
+    "paintbrush": {
+      "id": "paintbrush",
+      "cursor": "crosshair",
+      "menu_label": "Paintbrush Tool",
+      "shortcut": "B",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "drawing"
+          ]
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.paintbrush.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "paintbrush"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.paintbrush.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "paintbrush"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "buffer.clear": {
+              "buffer": "paintbrush"
+            }
+          },
+          {
+            "buffer.push": {
+              "buffer": "paintbrush",
+              "x": "event.x",
+              "y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.paintbrush.mode": "'drawing'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.paintbrush.mode == 'drawing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "paintbrush",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.paintbrush.mode == 'drawing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "paintbrush",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              },
+              {
+                "doc.add_path_from_buffer": {
+                  "buffer": "paintbrush",
+                  "fit_error": "4",
+                  "stroke_brush": "state.stroke_brush"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.paintbrush.mode": "'idle'"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "paintbrush"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.paintbrush.mode": "'idle'"
+                }
+              },
+              {
+                "buffer.clear": {
+                  "buffer": "paintbrush"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.paintbrush.mode == 'drawing'",
+        "render": {
+          "type": "buffer_polyline",
+          "buffer": "paintbrush",
+          "style": "stroke: black; stroke-width: 1;"
+        }
+      }
+    },
     "partial_selection": {
       "id": "partial_selection",
       "cursor": "arrow",
@@ -17694,6 +18640,61 @@
         ]
       }
     },
+    "apply_to_strokes_confirm": {
+      "summary": "Brush Change",
+      "description": "Confirmation sub-dialog opened by brush_options_confirm in library_edit mode. Two-way per BRUSH_OPTIONS_DIALOG.md \u00a7Apply to Strokes confirm dialog (no Leave Strokes branch).\nApply: library mutation commits and every element with\n  jas:stroke-brush referencing this brush is re-rendered. The\n  parent Brush Options dialog closes.\nCancel: library mutation is discarded; the parent Brush Options\n  dialog stays open with the user's edits still pending.\n\nSpec carries the library + brush_slug + patch (the dialog state delta) so the Apply effect chain can dispatch through brush.update and re-render selection.\n",
+      "modal": true,
+      "params": {
+        "brush_name": {
+          "type": "string"
+        },
+        "library": {
+          "type": "string"
+        },
+        "brush_slug": {
+          "type": "string"
+        }
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "The brush \"{{param.brush_name}}\" has been modified. Apply changes to existing strokes using this brush?"
+          },
+          {
+            "type": "row",
+            "style": {
+              "justify": "end",
+              "gap": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "id": "ats_apply_btn",
+                "type": "button",
+                "label": "Apply",
+                "variant": "primary",
+                "action": "apply_brush_changes_to_strokes",
+                "params": {
+                  "library": "param.library",
+                  "brush_slug": "param.brush_slug"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
     "artboard_options": {
       "summary": "Artboard Options",
       "description": "Modal dialog for editing the properties of a single artboard. ARTBOARDS.md \u00a7Artboard Options Dialogue.\nBatched commit: edits don't apply until OK; Cancel discards; a single undo entry records the OK (via snapshot inside the confirm action, plus the dialog-snapshot preview-restore for reversible preview_targets).\nLayout follows the reference image: Name / Preset rows, then a pair of rows with Width / Height on the left and X / Y on the right (with the reference-point widget and chain-link toggle in the middle column). Orientation button and Fill selector share the next row. Display section groups the three show_* toggles plus the Video Ruler Pixel Aspect Ratio input. Global section carries the document-wide fade_region_outside_artboard toggle with the indented update_while_dragging toggle. Info section displays the live Artboards count. Footer: Delete / Cancel / OK.\nPhase-1 deferrals: CHAIN_LINK_BUTTON state persists in dialog state but does not alter Width / Height edits (drag-resize is not wired). update_while_dragging persists but has no observable effect in Flask. video_ruler_pixel_aspect_ratio round-trips but does not distort the canvas.\n",
@@ -18576,6 +19577,670 @@
                   "precision": "dialog.precision",
                   "remove_redundant_points": "dialog.remove_redundant_points",
                   "divide_remove_unpainted": "dialog.divide_remove_unpainted"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "brush_options": {
+      "summary": "Brush Options",
+      "description": "Modal dialog for creating, editing, or per-instance overriding a brush. Three modes selected by param.mode:\ncreate \u2014 opened by NEW_BRUSH_BUTTON or the New Brush menu item. BRUSH_TYPE_RADIO is enabled; the user picks a type and configures the per-type body. OK appends a new brush to the selected library in panel.selected_library.\nlibrary_edit \u2014 opened by double-click on a brush tile or the Brush Options... menu item. BRUSH_TYPE_RADIO is disabled; the body shows the selected brush's parameters seeded from data.brush_libraries[param.library].brushes[param.index]. OK mutates the master brush in place and prompts the Apply to Strokes confirm sub-dialog.\ninstance_edit \u2014 opened by BRUSH_OPTIONS_FOR_SELECTION_BUTTON. BRUSH_TYPE_RADIO is disabled; the body is seeded from the selected element's stroke_brush_overrides layered over the master brush. OK writes stroke_brush_overrides on the selected element. No Apply to Strokes prompt.\nPhase 1 ships the Calligraphic body only. Scatter, Art, Pattern, and Bristle bodies follow as their data models and renderers land. See transcripts/BRUSH_OPTIONS_DIALOG.md.\n",
+      "modal": true,
+      "width": 360,
+      "params": {
+        "mode": {
+          "type": "enum",
+          "values": [
+            "create",
+            "library_edit",
+            "instance_edit"
+          ]
+        },
+        "library": {
+          "type": "string",
+          "optional": true
+        },
+        "brush_slug": {
+          "type": "string",
+          "optional": true
+        }
+      },
+      "state": {
+        "brush_name": {
+          "type": "string",
+          "default": "",
+          "description": "User-editable brush name."
+        },
+        "brush_type": {
+          "type": "enum",
+          "values": [
+            "calligraphic",
+            "scatter",
+            "art",
+            "pattern",
+            "bristle"
+          ],
+          "default": "calligraphic",
+          "description": "Brush type. Editable only when mode == create; disabled in library_edit and instance_edit (conversion between types is not supported).\n"
+        },
+        "angle": {
+          "type": "number",
+          "default": 0,
+          "description": "Tip orientation in degrees, screen-fixed."
+        },
+        "angle_variation": {
+          "type": "object",
+          "default": {
+            "mode": "fixed"
+          },
+          "description": "Variation mode + min/max for angle."
+        },
+        "roundness": {
+          "type": "number",
+          "default": 100,
+          "description": "Tip roundness as percent. 100 = circular."
+        },
+        "roundness_variation": {
+          "type": "object",
+          "default": {
+            "mode": "fixed"
+          }
+        },
+        "size": {
+          "type": "number",
+          "default": 5,
+          "description": "Major-axis length in points."
+        },
+        "size_variation": {
+          "type": "object",
+          "default": {
+            "mode": "fixed"
+          }
+        }
+      },
+      "init": {
+        "brush_name": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].name : \"\"",
+        "brush_type": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].type : \"calligraphic\"",
+        "angle": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle : 0",
+        "angle_variation": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle_variation : { mode: \"fixed\" }",
+        "roundness": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness : 100",
+        "roundness_variation": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness_variation : { mode: \"fixed\" }",
+        "size": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size : 5",
+        "size_variation": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size_variation : { mode: \"fixed\" }"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 10,
+          "padding": 16
+        },
+        "children": [
+          {
+            "id": "bo_type_radio",
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "bind": {
+              "disabled": "param.mode != \"create\""
+            },
+            "children": [
+              {
+                "id": "bo_type_calligraphic",
+                "type": "icon_button",
+                "summary": "Calligraphic",
+                "icon": "brush_type_calligraphic",
+                "style": {
+                  "size": 24
+                },
+                "bind": {
+                  "checked": "dialog.brush_type == \"calligraphic\""
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "set": {
+                          "dialog.brush_type": "\"calligraphic\""
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "bo_type_scatter",
+                "type": "icon_button",
+                "summary": "Scatter",
+                "icon": "brush_type_scatter",
+                "style": {
+                  "size": 24
+                },
+                "bind": {
+                  "checked": "dialog.brush_type == \"scatter\"",
+                  "disabled": "true"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "set": {
+                          "dialog.brush_type": "\"scatter\""
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "bo_type_art",
+                "type": "icon_button",
+                "summary": "Art",
+                "icon": "brush_type_art",
+                "style": {
+                  "size": 24
+                },
+                "bind": {
+                  "checked": "dialog.brush_type == \"art\"",
+                  "disabled": "true"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "set": {
+                          "dialog.brush_type": "\"art\""
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "bo_type_pattern",
+                "type": "icon_button",
+                "summary": "Pattern",
+                "icon": "brush_type_pattern",
+                "style": {
+                  "size": 24
+                },
+                "bind": {
+                  "checked": "dialog.brush_type == \"pattern\"",
+                  "disabled": "true"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "set": {
+                          "dialog.brush_type": "\"pattern\""
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "bo_type_bristle",
+                "type": "icon_button",
+                "summary": "Bristle",
+                "icon": "brush_type_bristle",
+                "style": {
+                  "size": 24
+                },
+                "bind": {
+                  "checked": "dialog.brush_type == \"bristle\"",
+                  "disabled": "true"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "set": {
+                          "dialog.brush_type": "\"bristle\""
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Name:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 9,
+                "children": [
+                  {
+                    "id": "bo_name_input",
+                    "type": "text_input",
+                    "placeholder": "Brush Name",
+                    "bind": {
+                      "value": "dialog.brush_name"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "bo_body_calligraphic",
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "gap": 6
+            },
+            "bind": {
+              "visible": "dialog.brush_type == \"calligraphic\""
+            },
+            "children": [
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 4,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Angle",
+                    "style": {
+                      "width": 80,
+                      "font_size": 10
+                    }
+                  },
+                  {
+                    "id": "bo_cal_angle_base",
+                    "type": "combo_box",
+                    "summary": "Base value",
+                    "min": -180,
+                    "max": 180,
+                    "step": 1,
+                    "suffix": "\u00b0",
+                    "style": {
+                      "width": 60
+                    },
+                    "bind": {
+                      "value": "dialog.angle",
+                      "disabled": "dialog.angle_variation.mode == \"pressure\"\nor dialog.angle_variation.mode == \"tilt\"\nor dialog.angle_variation.mode == \"bearing\"\nor dialog.angle_variation.mode == \"rotation\"\n"
+                    }
+                  },
+                  {
+                    "id": "bo_cal_angle_mode",
+                    "type": "select",
+                    "summary": "Variation mode",
+                    "options": [
+                      {
+                        "label": "Fixed",
+                        "value": "fixed"
+                      },
+                      {
+                        "label": "Random",
+                        "value": "random"
+                      },
+                      {
+                        "label": "Pressure",
+                        "value": "pressure",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Tilt",
+                        "value": "tilt",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Bearing",
+                        "value": "bearing",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Rotation",
+                        "value": "rotation",
+                        "status": "pending_stylus"
+                      }
+                    ],
+                    "style": {
+                      "width": 90
+                    },
+                    "bind": {
+                      "value": "dialog.angle_variation.mode"
+                    }
+                  },
+                  {
+                    "id": "bo_cal_angle_min",
+                    "type": "combo_box",
+                    "summary": "Random minimum",
+                    "min": 0,
+                    "max": 1000,
+                    "step": 1,
+                    "suffix": "%",
+                    "style": {
+                      "width": 50
+                    },
+                    "bind": {
+                      "value": "dialog.angle_variation.min",
+                      "visible": "dialog.angle_variation.mode == \"random\""
+                    }
+                  },
+                  {
+                    "id": "bo_cal_angle_max",
+                    "type": "combo_box",
+                    "summary": "Random maximum",
+                    "min": 0,
+                    "max": 1000,
+                    "step": 1,
+                    "suffix": "%",
+                    "style": {
+                      "width": 50
+                    },
+                    "bind": {
+                      "value": "dialog.angle_variation.max",
+                      "visible": "dialog.angle_variation.mode == \"random\""
+                    }
+                  }
+                ],
+                "_template": "variation_widget"
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 4,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Roundness",
+                    "style": {
+                      "width": 80,
+                      "font_size": 10
+                    }
+                  },
+                  {
+                    "id": "bo_cal_roundness_base",
+                    "type": "combo_box",
+                    "summary": "Base value",
+                    "min": 0,
+                    "max": 100,
+                    "step": 1,
+                    "suffix": "%",
+                    "style": {
+                      "width": 60
+                    },
+                    "bind": {
+                      "value": "dialog.roundness",
+                      "disabled": "dialog.roundness_variation.mode == \"pressure\"\nor dialog.roundness_variation.mode == \"tilt\"\nor dialog.roundness_variation.mode == \"bearing\"\nor dialog.roundness_variation.mode == \"rotation\"\n"
+                    }
+                  },
+                  {
+                    "id": "bo_cal_roundness_mode",
+                    "type": "select",
+                    "summary": "Variation mode",
+                    "options": [
+                      {
+                        "label": "Fixed",
+                        "value": "fixed"
+                      },
+                      {
+                        "label": "Random",
+                        "value": "random"
+                      },
+                      {
+                        "label": "Pressure",
+                        "value": "pressure",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Tilt",
+                        "value": "tilt",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Bearing",
+                        "value": "bearing",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Rotation",
+                        "value": "rotation",
+                        "status": "pending_stylus"
+                      }
+                    ],
+                    "style": {
+                      "width": 90
+                    },
+                    "bind": {
+                      "value": "dialog.roundness_variation.mode"
+                    }
+                  },
+                  {
+                    "id": "bo_cal_roundness_min",
+                    "type": "combo_box",
+                    "summary": "Random minimum",
+                    "min": 0,
+                    "max": 1000,
+                    "step": 1,
+                    "suffix": "%",
+                    "style": {
+                      "width": 50
+                    },
+                    "bind": {
+                      "value": "dialog.roundness_variation.min",
+                      "visible": "dialog.roundness_variation.mode == \"random\""
+                    }
+                  },
+                  {
+                    "id": "bo_cal_roundness_max",
+                    "type": "combo_box",
+                    "summary": "Random maximum",
+                    "min": 0,
+                    "max": 1000,
+                    "step": 1,
+                    "suffix": "%",
+                    "style": {
+                      "width": 50
+                    },
+                    "bind": {
+                      "value": "dialog.roundness_variation.max",
+                      "visible": "dialog.roundness_variation.mode == \"random\""
+                    }
+                  }
+                ],
+                "_template": "variation_widget"
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 4,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Size",
+                    "style": {
+                      "width": 80,
+                      "font_size": 10
+                    }
+                  },
+                  {
+                    "id": "bo_cal_size_base",
+                    "type": "combo_box",
+                    "summary": "Base value",
+                    "min": 0,
+                    "max": 1000,
+                    "step": 0.5,
+                    "suffix": "pt",
+                    "style": {
+                      "width": 60
+                    },
+                    "bind": {
+                      "value": "dialog.size",
+                      "disabled": "dialog.size_variation.mode == \"pressure\"\nor dialog.size_variation.mode == \"tilt\"\nor dialog.size_variation.mode == \"bearing\"\nor dialog.size_variation.mode == \"rotation\"\n"
+                    }
+                  },
+                  {
+                    "id": "bo_cal_size_mode",
+                    "type": "select",
+                    "summary": "Variation mode",
+                    "options": [
+                      {
+                        "label": "Fixed",
+                        "value": "fixed"
+                      },
+                      {
+                        "label": "Random",
+                        "value": "random"
+                      },
+                      {
+                        "label": "Pressure",
+                        "value": "pressure",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Tilt",
+                        "value": "tilt",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Bearing",
+                        "value": "bearing",
+                        "status": "pending_stylus"
+                      },
+                      {
+                        "label": "Rotation",
+                        "value": "rotation",
+                        "status": "pending_stylus"
+                      }
+                    ],
+                    "style": {
+                      "width": 90
+                    },
+                    "bind": {
+                      "value": "dialog.size_variation.mode"
+                    }
+                  },
+                  {
+                    "id": "bo_cal_size_min",
+                    "type": "combo_box",
+                    "summary": "Random minimum",
+                    "min": 0,
+                    "max": 1000,
+                    "step": 1,
+                    "suffix": "%",
+                    "style": {
+                      "width": 50
+                    },
+                    "bind": {
+                      "value": "dialog.size_variation.min",
+                      "visible": "dialog.size_variation.mode == \"random\""
+                    }
+                  },
+                  {
+                    "id": "bo_cal_size_max",
+                    "type": "combo_box",
+                    "summary": "Random maximum",
+                    "min": 0,
+                    "max": 1000,
+                    "step": 1,
+                    "suffix": "%",
+                    "style": {
+                      "width": 50
+                    },
+                    "bind": {
+                      "value": "dialog.size_variation.max",
+                      "visible": "dialog.size_variation.mode == \"random\""
+                    }
+                  }
+                ],
+                "_template": "variation_widget"
+              }
+            ]
+          },
+          {
+            "id": "bo_body_other",
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "gap": 6,
+              "padding": 10
+            },
+            "bind": {
+              "visible": "dialog.brush_type != \"calligraphic\""
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Body for this brush type is not yet available.",
+                "style": {
+                  "font_size": 11,
+                  "color": "var(--app-text-dim, #888)",
+                  "text_align": "center"
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "end"
+            },
+            "children": [
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "id": "bo_ok_btn",
+                "type": "button",
+                "label": "OK",
+                "variant": "primary",
+                "bind": {
+                  "disabled": "dialog.brush_name == \"\""
+                },
+                "action": "brush_options_confirm",
+                "params": {
+                  "mode": "param.mode",
+                  "library": "param.library",
+                  "brush_slug": "param.brush_slug"
                 }
               }
             ]
@@ -23059,6 +24724,154 @@
           }
         ]
       }
+    },
+    "variation_widget": {
+      "description": "Composite widget for a brush parameter that can vary along a stroke. Renders a base-value combo plus a variation-mode select; when the mode is 'random', two extra combos appear inline for min/max bounds (percent of base). When the mode is one of pressure / tilt / bearing / rotation, the base combo is inert (the live input drives the value at stroke time); the prior base value persists for round-tripping back to 'fixed' mode.\nSee transcripts/BRUSHES.md \u00a7Brush types and transcripts/BRUSH_OPTIONS_DIALOG.md \u00a7Variation widget.\n",
+      "params": {
+        "id_prefix": {
+          "type": "string",
+          "default": ""
+        },
+        "label": {
+          "type": "string",
+          "default": ""
+        },
+        "base_path": {
+          "type": "string"
+        },
+        "mode_path": {
+          "type": "string"
+        },
+        "min_path": {
+          "type": "string"
+        },
+        "max_path": {
+          "type": "string"
+        },
+        "base_min": {
+          "type": "number",
+          "default": 0
+        },
+        "base_max": {
+          "type": "number",
+          "default": 1000
+        },
+        "base_step": {
+          "type": "number",
+          "default": 1
+        },
+        "base_unit": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "content": {
+        "type": "container",
+        "layout": "row",
+        "style": {
+          "gap": 4,
+          "alignment": "center"
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "${label}",
+            "style": {
+              "width": 80,
+              "font_size": 10
+            }
+          },
+          {
+            "id": "${id_prefix}_base",
+            "type": "combo_box",
+            "summary": "Base value",
+            "min": "${base_min}",
+            "max": "${base_max}",
+            "step": "${base_step}",
+            "suffix": "${base_unit}",
+            "style": {
+              "width": 60
+            },
+            "bind": {
+              "value": "${base_path}",
+              "disabled": "${mode_path} == \"pressure\"\nor ${mode_path} == \"tilt\"\nor ${mode_path} == \"bearing\"\nor ${mode_path} == \"rotation\"\n"
+            }
+          },
+          {
+            "id": "${id_prefix}_mode",
+            "type": "select",
+            "summary": "Variation mode",
+            "options": [
+              {
+                "label": "Fixed",
+                "value": "fixed"
+              },
+              {
+                "label": "Random",
+                "value": "random"
+              },
+              {
+                "label": "Pressure",
+                "value": "pressure",
+                "status": "pending_stylus"
+              },
+              {
+                "label": "Tilt",
+                "value": "tilt",
+                "status": "pending_stylus"
+              },
+              {
+                "label": "Bearing",
+                "value": "bearing",
+                "status": "pending_stylus"
+              },
+              {
+                "label": "Rotation",
+                "value": "rotation",
+                "status": "pending_stylus"
+              }
+            ],
+            "style": {
+              "width": 90
+            },
+            "bind": {
+              "value": "${mode_path}"
+            }
+          },
+          {
+            "id": "${id_prefix}_min",
+            "type": "combo_box",
+            "summary": "Random minimum",
+            "min": 0,
+            "max": 1000,
+            "step": 1,
+            "suffix": "%",
+            "style": {
+              "width": 50
+            },
+            "bind": {
+              "value": "${min_path}",
+              "visible": "${mode_path} == \"random\""
+            }
+          },
+          {
+            "id": "${id_prefix}_max",
+            "type": "combo_box",
+            "summary": "Random maximum",
+            "min": 0,
+            "max": 1000,
+            "step": 1,
+            "suffix": "%",
+            "style": {
+              "width": 50
+            },
+            "bind": {
+              "value": "${max_path}",
+              "visible": "${mode_path} == \"random\""
+            }
+          }
+        ]
+      }
     }
   },
   "swatch_libraries": {
@@ -24921,6 +26734,31 @@
               "location": 100
             }
           ]
+        }
+      ]
+    }
+  },
+  "brush_libraries": {
+    "default_brushes": {
+      "name": "Default Brushes",
+      "description": "Starter brush library shipped with the application. Calligraphic seed for Phase 1; other brush types added as renderer support lands.",
+      "brushes": [
+        {
+          "name": "5 pt. Oval",
+          "slug": "oval_5pt",
+          "type": "calligraphic",
+          "angle": 0,
+          "roundness": 100,
+          "size": 5,
+          "angle_variation": {
+            "mode": "fixed"
+          },
+          "roundness_variation": {
+            "mode": "fixed"
+          },
+          "size_variation": {
+            "mode": "fixed"
+          }
         }
       ]
     }

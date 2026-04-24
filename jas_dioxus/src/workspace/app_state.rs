@@ -116,6 +116,10 @@ pub(crate) struct AppState {
     pub(crate) app_default_stroke: Option<Stroke>,
     /// Mutable swatch libraries (initialized from workspace data).
     pub(crate) swatch_libraries: serde_json::Value,
+    /// Mutable brush libraries (initialized from workspace data).
+    /// Keyed by library slug. Mutated by the brush.* and data.*
+    /// effect handlers. See `transcripts/BRUSHES.md`.
+    pub(crate) brush_libraries: serde_json::Value,
     /// Stroke panel state — mirrored to/from global state for selection sync.
     pub(crate) stroke_panel: StrokePanelState,
     /// Gradient panel state — mirrored to/from the active fill or stroke
@@ -600,6 +604,9 @@ impl AppState {
             app_default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             swatch_libraries: crate::interpreter::workspace::Workspace::load()
                 .map(|ws| ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::json!({})))
+                .unwrap_or(serde_json::json!({})),
+            brush_libraries: crate::interpreter::workspace::Workspace::load()
+                .map(|ws| ws.data().get("brush_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
             stroke_panel: StrokePanelState::default(),
             gradient_panel: GradientPanelState::default(),
@@ -1336,6 +1343,7 @@ impl AppState {
             self.boolean_panel.precision,
             &self.artboards_panel_selection,
             tab.model.mask_isolation_path.as_deref(),
+            &self.brush_libraries,
         );
 
         // Draw tool overlay

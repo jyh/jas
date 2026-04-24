@@ -400,7 +400,7 @@ content:
           style: { width: 40 }
           bind:
             value: "panel.miter_limit"
-            disabled: 'panel.join != "miter"'
+            disabled: 'panel.join != "miter" or state.stroke_brush != null'
 
     # ── Align Stroke ───────────────────────────────────────
     - type: container
@@ -528,7 +528,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.dash_1"
-                disabled: "not panel.dashed"
+                disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "dash"
               style: { font_size: 9, text_align: center }
@@ -545,7 +545,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.gap_1"
-                disabled: "not panel.dashed"
+                disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "gap"
               style: { font_size: 9, text_align: center }
@@ -562,7 +562,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.dash_2"
-                disabled: "not panel.dashed"
+                disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "dash"
               style: { font_size: 9, text_align: center }
@@ -579,7 +579,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.gap_2"
-                disabled: "not panel.dashed"
+                disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "gap"
               style: { font_size: 9, text_align: center }
@@ -596,7 +596,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.dash_3"
-                disabled: "not panel.dashed"
+                disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "dash"
               style: { font_size: 9, text_align: center }
@@ -613,7 +613,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.gap_3"
-                disabled: "not panel.dashed"
+                disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "gap"
               style: { font_size: 9, text_align: center }

@@ -605,6 +605,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         }));
         let ps = element_to_polygon_set(&sq, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 1, "closed square path → 1 ring");
@@ -630,6 +632,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         }));
         let cs = CompoundShape {
             operation: CompoundOperation::Union,
@@ -668,6 +672,8 @@ mod tests {
             common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
         }));
         let ps = element_to_polygon_set(&p, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 2, "two disjoint subpaths → 2 rings");

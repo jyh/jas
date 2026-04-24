@@ -21,6 +21,8 @@ from geometry.element import (
     with_fill as _with_fill, with_stroke as _with_stroke,
     with_fill_gradient as _with_fill_gradient,
     with_stroke_gradient as _with_stroke_gradient,
+    with_stroke_brush as _with_stroke_brush,
+    with_stroke_brush_overrides as _with_stroke_brush_overrides,
     with_width_points as _with_width_points,
     with_mask as _with_mask,
     element_fill as _element_fill, element_stroke as _element_stroke,
@@ -559,6 +561,29 @@ class Controller:
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
             new_elem = _with_stroke(elem, stroke)
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    def set_selection_stroke_brush(self, slug: str | None) -> None:
+        """Set stroke_brush on every selected element (paths only).
+        Used by apply_brush_to_selection / remove_brush_from_selection."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = _with_stroke_brush(elem, slug)
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    def set_selection_stroke_brush_overrides(self, overrides: str | None) -> None:
+        """Set stroke_brush_overrides on every selected element (paths only)."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = _with_stroke_brush_overrides(elem, overrides)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.document = new_doc
