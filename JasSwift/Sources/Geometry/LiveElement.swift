@@ -269,7 +269,7 @@ private func ellipseToRing(cx: Double, cy: Double, rx: Double, ry: Double, preci
 /// finalizes. Open subpaths finalize at next MoveTo or end. Rings
 /// with fewer than 3 points are dropped. Bezier / quad segments use
 /// 20 steps; Smooth / Arc approximate as line-to-endpoint.
-private func flattenPathToRings(_ d: [PathCommand]) -> BoolPolygonSet {
+public func flattenPathToRings(_ d: [PathCommand]) -> BoolPolygonSet {
     let steps = 20
     var rings: BoolPolygonSet = []
     var cur: BoolRing = []

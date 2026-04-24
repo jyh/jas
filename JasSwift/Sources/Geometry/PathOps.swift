@@ -675,3 +675,41 @@ public func splitPathAtEraser(
         return result
     }
 }
+
+// MARK: - Path ↔ PolygonSet adapters
+//
+// Blob Brush's commit path needs to hand PathElem geometry to the
+// Algorithms/Boolean module (which speaks in `BoolPolygonSet` /
+// `BoolRing` terms) and then convert the unioned / subtracted result
+// back to `[PathCommand]` for the new element's `d` field. The
+// algorithm module is deliberately geometry-only; this pair is the
+// element-level bridge.
+//
+// `BoolPolygonSet` is `[BoolRing]`, `BoolRing` is `[(Double, Double)]`
+// — same shape as `flattenPathToRings`, which we reuse verbatim for
+// the forward direction. The reverse direction emits
+// `MoveTo` + LineTos + `ClosePath` per ring.
+
+/// Flatten a `PathCommand` list to the `BoolPolygonSet` shape expected
+/// by Algorithms/Boolean. Alias for `flattenPathToRings`, named to
+/// match BLOB_BRUSH_TOOL.md §Commit pipeline.
+public func pathToPolygonSet(_ d: [PathCommand]) -> BoolPolygonSet {
+    flattenPathToRings(d)
+}
+
+/// Emit a `[PathCommand]` from a `BoolPolygonSet`. One
+/// `MoveTo` + LineTos + `ClosePath` subpath per ring. Rings with
+/// fewer than 3 vertices are dropped (a 1- or 2-vertex "ring" has
+/// no interior).
+public func polygonSetToPath(_ ps: BoolPolygonSet) -> [PathCommand] {
+    var out: [PathCommand] = []
+    for ring in ps {
+        if ring.count < 3 { continue }
+        out.append(.moveTo(ring[0].0, ring[0].1))
+        for i in 1..<ring.count {
+            out.append(.lineTo(ring[i].0, ring[i].1))
+        }
+        out.append(.closePath)
+    }
+    return out
+}
