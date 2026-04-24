@@ -386,6 +386,16 @@ time).
 Defined as a workspace template `variation_widget` under
 `workspace/templates/`, alongside `fill_stroke_widget`.
 
+**Phase 1 note.** The `pressure`, `tilt`, and `bearing` modes
+currently render live only in the Brush Options preview strip.
+Canvas tools (Paintbrush, Blob Brush) synthesize a fixed mid-range
+value (`0.5`) at stroke time — these modes are effectively inert on
+committed paths until Phase 2 plumbing extends the point buffer,
+`fit_curve`, and renderer to carry per-anchor samples. See
+`PAINTBRUSH_TOOL.md` § Phase 1 / Phase 2 split for the rollout plan.
+`random` and `rotation` modes are unaffected and work end-to-end in
+Phase 1.
+
 ## Colorization
 
 Applies to Scatter, Art, and Pattern brushes (Calligraphic and Bristle

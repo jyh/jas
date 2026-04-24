@@ -13,6 +13,7 @@ public enum Tool: String, CaseIterable {
     case deleteAnchorPoint
     case anchorPoint
     case pencil
+    case paintbrush
     case pathEraser
     case smooth
     case typeTool
@@ -23,6 +24,34 @@ public enum Tool: String, CaseIterable {
     case polygon
     case star
     case lasso
+}
+
+/// Map a Tool enum case to the matching workspace/tools/*.yaml
+/// filename stem. Used to look up per-tool workspace metadata such
+/// as the tool_options_dialog field (PAINTBRUSH_TOOL.md §Tool
+/// options). Returns nil for native-only tools that have no YAML
+/// spec (Type / TypeOnPath).
+func toolYamlId(_ tool: Tool) -> String? {
+    switch tool {
+    case .selection: return "selection"
+    case .partialSelection: return "partial_selection"
+    case .interiorSelection: return "interior_selection"
+    case .pen: return "pen"
+    case .addAnchorPoint: return "add_anchor_point"
+    case .deleteAnchorPoint: return "delete_anchor_point"
+    case .anchorPoint: return "anchor_point"
+    case .pencil: return "pencil"
+    case .paintbrush: return "paintbrush"
+    case .pathEraser: return "path_eraser"
+    case .smooth: return "smooth"
+    case .line: return "line"
+    case .rect: return "rect"
+    case .roundedRect: return "rounded_rect"
+    case .polygon: return "polygon"
+    case .star: return "star"
+    case .lasso: return "lasso"
+    case .typeTool, .typeOnPath: return nil
+    }
 }
 
 // MARK: - Canvas entry for multi-canvas workspace
@@ -235,6 +264,22 @@ public struct ContentView: View {
                               yamlDialogState = openYamlDialog(
                                   dialogId: "color_picker",
                                   rawParams: ["target": forFill ? "fill" : "stroke"],
+                                  liveState: liveState
+                              )
+                          }, onOpenToolOptions: { tool in
+                              // Paintbrush Tool Options etc.: look up the
+                              // tool_options_dialog field on the tool's
+                              // workspace entry and open the dialog. See
+                              // PAINTBRUSH_TOOL.md §Tool options.
+                              guard let yamlId = toolYamlId(tool) else { return }
+                              guard let ws = WorkspaceData.load() else { return }
+                              let tools = ws.data["tools"] as? [String: Any] ?? [:]
+                              let toolSpec = tools[yamlId] as? [String: Any] ?? [:]
+                              guard let dialogId = toolSpec["tool_options_dialog"] as? String else { return }
+                              let liveState: [String: Any] = ws.stateDefaults()
+                              yamlDialogState = openYamlDialog(
+                                  dialogId: dialogId,
+                                  rawParams: [:],
                                   liveState: liveState
                               )
                           }) },
@@ -483,6 +528,7 @@ struct ToolbarPanel: View {
     var model: Model?
     var theme: Theme
     var onOpenColorPicker: ((Bool) -> Void)?
+    var onOpenToolOptions: ((Tool) -> Void)?
     @State private var arrowSlotTool: Tool = .partialSelection
     @State private var penSlotTool: Tool = .pen
     @State private var pencilSlotTool: Tool = .pencil
@@ -496,40 +542,48 @@ struct ToolbarPanel: View {
             // Tool buttons
             VStack(spacing: 2) {
                 HStack(spacing: 2) {
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .selection)
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .selection,
+                                           onRequestOptions: onOpenToolOptions)
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $arrowSlotTool,
-                        alternates: [.partialSelection, .interiorSelection]
+                        alternates: [.partialSelection, .interiorSelection],
+                        onRequestOptions: onOpenToolOptions
                     )
                 }
                 HStack(spacing: 2) {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $penSlotTool,
-                        alternates: [.pen, .addAnchorPoint, .deleteAnchorPoint, .anchorPoint]
+                        alternates: [.pen, .addAnchorPoint, .deleteAnchorPoint, .anchorPoint],
+                        onRequestOptions: onOpenToolOptions
                     )
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $pencilSlotTool,
-                        alternates: [.pencil, .pathEraser, .smooth]
+                        alternates: [.pencil, .paintbrush, .pathEraser, .smooth],
+                        onRequestOptions: onOpenToolOptions
                     )
                 }
                 HStack(spacing: 2) {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $textSlotTool,
-                        alternates: [.typeTool, .typeOnPath]
+                        alternates: [.typeTool, .typeOnPath],
+                        onRequestOptions: onOpenToolOptions
                     )
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .line,
+                                           onRequestOptions: onOpenToolOptions)
                 }
                 HStack(spacing: 2) {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $shapeSlotTool,
-                        alternates: [.rect, .roundedRect, .polygon, .star]
+                        alternates: [.rect, .roundedRect, .polygon, .star],
+                        onRequestOptions: onOpenToolOptions
                     )
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .lasso)
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .lasso,
+                                           onRequestOptions: onOpenToolOptions)
                 }
             }
             .padding(4)

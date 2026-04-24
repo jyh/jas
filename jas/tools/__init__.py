@@ -70,6 +70,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.DELETE_ANCHOR_POINT: _yaml_tool("delete_anchor_point"),
         Tool.ANCHOR_POINT: _yaml_tool("anchor_point"),
         Tool.PENCIL: _yaml_tool("pencil"),
+        Tool.PAINTBRUSH: _yaml_tool("paintbrush"),
         Tool.PATH_ERASER: _yaml_tool("path_eraser"),
         Tool.SMOOTH: _yaml_tool("smooth"),
         Tool.TYPE: TypeTool(),

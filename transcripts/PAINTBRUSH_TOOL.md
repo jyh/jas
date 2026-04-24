@@ -10,89 +10,247 @@ When `state.stroke_brush == null`, the tool degrades to a plain
 freehand path tool driven by the native stroke values — equivalent to
 the Pencil tool with no brush applied.
 
-**Status:** stub. Full design is a follow-up; the panel spec
-(`BRUSHES.md`) is authored first.
-
 **Shortcut:** B.
 
 **Cursor:** crosshair.
 
 ## Gestures
 
+All point-buffer operations below target the `"paintbrush"` buffer in
+the YAML runtime (`buffer.push` / `buffer.clear`).
+
+Option/Alt is evaluated twice, at different events (time-disjoint):
+at `mousedown` it may trigger `edit` mode (see § Edit gesture); at
+`mouseup` in `drawing` mode it closes the new path. In `edit` mode,
+Alt at release is ignored.
+
 - **Press** — snapshots the document, clears the paintbrush point
-  buffer, pushes the press point. Enters `drawing` mode.
+  buffer, pushes the press point. If Option/Alt is held, there is a
+  non-empty selection, `paintbrush_edit_selected_paths` is on, and
+  the press is within `paintbrush_edit_within` px of a selected
+  Path, enters `edit` mode with that Path as the target. Otherwise
+  enters `drawing` mode.
 - **Drag** — pushes each intermediate position into the buffer.
-- **Release** — pushes the final position, runs
-  `fit_curve(points, FIT_ERROR)`, appends the resulting path to the
-  document with `jas:stroke-brush = state.stroke_brush` (or no
-  attribute when null).
-- **Option / Alt + drag near a selected path** — rewrites the
-  nearest sub-segment of the selected path, reusing Pencil's
-  edit-existing gesture and the same proximity threshold. The brush
-  reference of the modified path is preserved.
+- **Release** —
+  - In `drawing` mode: pushes the final position. If Option/Alt is
+    held at release, the committed path is closed (last command is
+    `Z`). Runs `fit_curve(points, fit_error)` where `fit_error`
+    derives from `paintbrush_fidelity` (see § Tool options). Appends
+    the resulting Path to the document per § Fill and stroke.
+  - In `edit` mode: runs the splice per § Edit gesture. Alt at
+    release is ignored.
 - **Escape** — cancels the drag, clearing the buffer without
-  committing.
+  committing. Applies in both modes.
 
 ## Tool options
 
-Double-click the tool icon → Paintbrush Tool Options dialog. Stub
-list:
+Double-click the Paintbrush icon in the toolbar opens the Paintbrush
+Tool Options dialog. The dialog is declared in
+`workspace/dialogs/paintbrush_tool_options.yaml`
+(id: `paintbrush_tool_options`) and wired via a new
+`tool_options_dialog` field on the tool yaml. The toolbar dispatches
+the `open_dialog` action with that id on icon double-click.
+`BLOB_BRUSH_TOOL.md` co-introduces the same `tool_options_dialog`
+pattern.
 
-- `paintbrush_fidelity` — pixels; curve-fit tolerance. Lower =
-  follows wiggles closer.
-- `paintbrush_smoothness` — percent; post-fit smoothing pass.
-- `paintbrush_keep_selected` — boolean; if on, the new path becomes
-  the canvas selection after commit.
-- `paintbrush_edit_selected_paths` — boolean; if on, Option/Alt-drag
-  near a selected path rewrites it (per Gestures).
-- `paintbrush_within_distance` — pixels; proximity threshold for the
-  rewrite gesture.
+### Options
 
-Full dialog spec deferred to a follow-up.
+| Option                           | Widget                             | Default |
+|----------------------------------|------------------------------------|---------|
+| `paintbrush_fidelity`            | 5-stop slider, Accurate ↔ Smooth   | 3       |
+| `paintbrush_fill_new_strokes`    | checkbox                           | false   |
+| `paintbrush_keep_selected`       | checkbox                           | true    |
+| `paintbrush_edit_selected_paths` | checkbox                           | true    |
+| `paintbrush_edit_within`         | slider + numeric (pixels), 1–50    | 12      |
+
+Dialog buttons: **Reset** (restores defaults above; affects dialog
+state only, does not commit until OK), **Cancel** (discards edits),
+**OK** (writes all five values to `state.paintbrush_*`).
+
+### Fidelity → fit_error mapping
+
+The Fidelity slider has 5 discrete tick stops. Position maps to
+`fit_curve` tolerance (pt):
+
+| Tick | Label     | `fit_error` |
+|------|-----------|-------------|
+| 1    | Accurate  | 0.5         |
+| 2    | —         | 2.5         |
+| 3    | (default) | 5.0         |
+| 4    | —         | 7.5         |
+| 5    | Smooth    | 10.0        |
+
+### Option persistence
+
+Option values live in `state.paintbrush_*` (per-document), aligned
+with the existing YAML tool-runtime convention. A future migration
+to a dedicated preference namespace is out of scope.
 
 ## Fill and stroke
 
-The committed Path picks up `state.stroke_color` and no fill.
-`jas:stroke-brush` is written when `state.stroke_brush` is non-null.
+Behavior at commit time for a **new** Path (the § Edit gesture has
+its own preservation rules):
+
+- **`fill`** — when `paintbrush_fill_new_strokes` is off, `fill =
+  none`. When on, `fill = state.fill_color`.
+- **`stroke`** — `stroke = state.stroke_color`.
+- **`stroke-width`** —
+  - When `state.stroke_brush == null`: `state.stroke_width`.
+  - When the brush has a `size` parameter (Calligraphic, Scatter,
+    Bristle): effective `size` (post-override nominal base value;
+    variation is not pre-evaluated).
+  - When the brush has no `size` parameter (Art, Pattern):
+    `state.stroke_width`.
+- **`jas:stroke-brush`** — written when `state.stroke_brush` is
+  non-null; absent otherwise.
+
+The brush renderer ignores `stroke-width` when `jas:stroke-brush` is
+set; the committed value exists as a fallback for brush removal,
+cross-tool export, and non-jas-aware SVG consumers.
+
+## Edit gesture
+
+When the Alt-drag edit is triggered (see § Gestures), the drag is
+committed as a splice into the target Path rather than a new
+element.
+
+### Target selection at `on_mousedown`
+
+1. For each selected Path element, flatten its commands and find
+   the closest point on the polyline to the press location.
+2. Pick the Path with the smallest such distance. If that distance
+   is ≤ `paintbrush_edit_within`, enter `edit` mode with this Path
+   as `target`; record the flat-point index as `entry_idx`.
+   Otherwise fall through to `drawing` mode.
+
+### Splice at `on_mouseup`
+
+1. On the target's flattened polyline, find the flat point closest
+   to the final drag position. If distance >
+   `paintbrush_edit_within`, abort (no commit). Record as
+   `exit_idx`.
+2. Flatten target's commands with a parallel `cmd_map` (same helper
+   the Smooth tool uses — `flatten_with_cmd_map`).
+3. Map `[min(entry_idx, exit_idx), max(entry_idx, exit_idx)]` back
+   to a command range `[c0..c1]` via `cmd_map`.
+4. Prepend `target.commands[c0]`'s start-point to the drag buffer
+   (seamless splice; mirrors Smooth § Algorithm step 4).
+5. Run `fit_curve(buffer, fit_error)` using the
+   `paintbrush_fidelity`-derived `fit_error`.
+6. Replace `target.commands[c0..c1]` with the fit output.
+
+### Preservation rules
+
+| Attribute                        | On edit commit                                 |
+|----------------------------------|------------------------------------------------|
+| `jas:stroke-brush`               | preserved                                      |
+| `jas:stroke-brush-overrides`     | preserved                                      |
+| `stroke`, `stroke-width`, `fill` | preserved                                      |
+| `d`                              | `[c0..c1]` replaced; outside verbatim          |
+| Selection                        | target stays selected (independent of `paintbrush_keep_selected`, which governs new-path commits) |
+
+Tool-state values (`state.stroke_brush`, `state.stroke_color`,
+`state.fill_color`, `paintbrush_fill_new_strokes`) are **not
+consulted** during an edit. Active brush context applies only to
+new paths. To rebrush an existing path, use the Brushes panel.
+
+### Edge cases
+
+- **Closed target path, drag crossing the seam.** Flat indices
+  wrap; replace the *shorter* of the two possible arcs.
+- **Drag returning near the entry point** (`entry_idx ≈
+  exit_idx`). Replacement range is a single point; fit-output
+  degenerate. Abort and commit nothing.
+- **No selection under press.** Alt has no effect; gesture
+  degrades silently to normal draw mode.
+- **Alt released mid-drag in `edit` mode.** Mode was locked in at
+  press; releasing Alt does not exit edit. Only Escape aborts.
+- **Alt held throughout, edit didn't trigger (nothing in range).**
+  Drawing mode proceeds; if Alt is still held at release, the new
+  path closes. The dashed close-hint overlay (see § Overlay) makes
+  the closing intent visible during the drag.
 
 ## Overlay
 
-A thin polyline tracking the raw drag, in `state.stroke_color`. The
-final committed path is the smoothed `fit_curve` output rendered with
-the active brush, not this preview.
+A thin black polyline tracking the raw drag. The final committed
+path is the smoothed `fit_curve` output outlined by the active
+brush at render time, not this preview.
+
+Render type: `buffer_polyline`. Style: `stroke: black; stroke-width: 1;`.
+
+### Close-at-release hint
+
+While in `drawing` mode with Option/Alt held, the overlay
+additionally renders a 1 px dashed black line from the current
+cursor position back to the press point, indicating
+close-at-release. The hint appears or disappears live as Alt is
+pressed or released during the drag.
+
+**Implementation state.** The close gesture is wired end-to-end
+(Alt-at-release closes the committed path). The dashed hint overlay
+is wired in Rust and Swift as an optional `close_hint` field on the
+`buffer_polyline` overlay render type — truthy values draw a dashed
+line from the cursor back to the press point. OCaml and Python do
+not yet render any YAML-driven tool overlay (their `yaml_tool.draw_overlay`
+methods are still stubs from Phase 5a of the OCaml / Python tool-
+runtime migrations); users on those apps can still close paths with
+Alt-release but see neither the main preview polyline nor the close
+hint.
 
 ## YAML tool runtime fit
 
 This tool belongs under the YamlTool runtime (per the existing
-tool-runtime migration in all four native apps). Handler YAML lives
-at `workspace/tools/paintbrush.yaml`. State machine, gesture set, and
-overlay shape are declared in YAML; the brush-aware commit step
-references the same `add_path_from_buffer` effect used by Pencil,
-extended to forward `state.stroke_brush` into the new path's
-attributes.
+tool-runtime migration in all four native apps). Handler YAML
+lives at `workspace/tools/paintbrush.yaml`. State machine, gesture
+set, and overlay shape are declared in YAML; the brush-aware
+commit step references the same `add_path_from_buffer` effect used
+by Pencil, extended to forward `state.stroke_brush` into the new
+path's attributes and to honour `paintbrush_fill_new_strokes`.
 
-## Known gaps
+## Phase 1 / Phase 2 split
 
-This entire doc is a stub. Items to flesh out before implementation:
+### Phase 1 (this spec)
 
-- Final FIT_ERROR / smoothness defaults and how they map to the two
-  user-facing options (`fidelity`, `smoothness`).
-- Pressure handling — variation modes on the active brush that
-  consume pressure (Calligraphic `pressure` mode) need stylus input
-  during the drag, not just at commit.
-- Interaction when the active brush is Bristle — the brush is
-  rendered with overlapping strokes per pen-down event; do successive
-  Paintbrush strokes union into one element or stay separate?
-- Closing gesture — should holding Alt at release close the path?
-  Open question; matches the Pencil-tool open question.
+- Point buffer stores `(x, y)` only — no pressure, tilt, or
+  bearing.
+- Brush `pressure`, `tilt`, `bearing` variation modes synthesize
+  `0.5` (mid-range) at stroke time; these modes are effectively
+  inert on canvas commits.
+- Plain-path `fill` honours `paintbrush_fill_new_strokes`
+  end-to-end.
+
+### Phase 2 (follow-up cross-app project)
+
+- Extend the point buffer to `(x, y, pressure, tilt, bearing)`.
+- Extend `fit_curve` to emit a parallel per-anchor sample array.
+- Commit stores the samples as `jas:stroke-pressure`,
+  `jas:stroke-tilt`, `jas:stroke-bearing` (compact arrays) on the
+  Path element.
+- Brush renderer consumes the arrays for `pressure` / `tilt` /
+  `bearing` variation modes.
+- Rollout order: Swift/Rust first (richest stylus APIs), OCaml
+  next (GDK axes), Python last (toolkit-dependent — may ship
+  inert), Flask via Pointer Events API.
+
+See `BRUSHES.md` § Variation widget for the panel-side note on the
+current Phase 1 inertness of these modes on canvas commits.
 
 ## Related tools
 
 - **Brushes panel** (`BRUSHES.md`) — sets `state.stroke_brush` and
   defines the per-brush rendering rules this tool consumes.
+- **Brush Options dialog** (`BRUSH_OPTIONS_DIALOG.md`) — edits the
+  *brush itself* (library parameters, per-instance overrides).
+  Distinct from this tool's options dialog, which edits the
+  *tool's behavior*.
 - **Blob Brush** (`BLOB_BRUSH_TOOL.md`) — paints filled regions
   rather than strokes; uses the active brush's size / shape only.
-- **Pencil** (`PENCIL_TOOL.md`) — equivalent gesture set without
-  brush coupling.
+  Co-introduces the `tool_options_dialog` convention.
+- **Pencil** (`PENCIL_TOOL.md`) — analogous freehand gesture
+  without brush coupling. Once Pencil inherits the edit gesture
+  (cross-referenced from its Known-gaps entry), both tools share
+  the same Alt semantics.
 - **Smooth** (`SMOOTH_TOOL.md`) — re-fits an existing path with a
   larger error tolerance; useful after a jittery Paintbrush drag.
+  Shares the `flatten_with_cmd_map` splice primitive used in §
+  Edit gesture.
