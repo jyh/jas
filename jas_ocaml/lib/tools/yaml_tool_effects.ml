@@ -328,6 +328,73 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
       | _ -> ()
   in
 
+  (* Generic data.* primitives — write/append/remove/insert in the
+     data namespace at a dotted path. Mirrors the JS Phase 1.13
+     effects. *)
+  let data_set spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let path = eval_string_value (List.assoc_opt "path" args) store ctx in
+       if path <> "" then begin
+         let value = resolve_value_or_expr (List.assoc_opt "value" args) store ctx in
+         State_store.set_data_path store path value
+       end
+     | _ -> ());
+    `Null
+  in
+
+  let data_list_append spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let path = eval_string_value (List.assoc_opt "path" args) store ctx in
+       if path <> "" then begin
+         let value = resolve_value_or_expr (List.assoc_opt "value" args) store ctx in
+         let cur = match State_store.get_data_path store path with
+           | `List items -> items
+           | _ -> []
+         in
+         State_store.set_data_path store path (`List (cur @ [value]))
+       end
+     | _ -> ());
+    `Null
+  in
+
+  let data_list_remove spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let path = eval_string_value (List.assoc_opt "path" args) store ctx in
+       let index = int_of_float (eval_number (List.assoc_opt "index" args) store ctx) in
+       if path <> "" then
+         (match State_store.get_data_path store path with
+          | `List items when index >= 0 && index < List.length items ->
+            let next = List.filteri (fun i _ -> i <> index) items in
+            State_store.set_data_path store path (`List next)
+          | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  let data_list_insert spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let path = eval_string_value (List.assoc_opt "path" args) store ctx in
+       let index = int_of_float (eval_number (List.assoc_opt "index" args) store ctx) in
+       if path <> "" then begin
+         let value = resolve_value_or_expr (List.assoc_opt "value" args) store ctx in
+         let cur = match State_store.get_data_path store path with
+           | `List items -> items
+           | _ -> []
+         in
+         let len = List.length cur in
+         let i = max 0 (min index len) in
+         let before = List.filteri (fun j _ -> j < i) cur in
+         let after = List.filteri (fun j _ -> j >= i) cur in
+         State_store.set_data_path store path (`List (before @ [value] @ after))
+       end
+     | _ -> ());
+    `Null
+  in
+
   let brush_delete_selected spec ctx store =
     (match spec with
      | `Assoc args ->
@@ -1452,6 +1519,10 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.toggle_selection", doc_toggle_selection);
     ("doc.translate_selection", doc_translate_selection);
     ("doc.set_attr_on_selection", doc_set_attr_on_selection);
+    ("data.set", data_set);
+    ("data.list_append", data_list_append);
+    ("data.list_remove", data_list_remove);
+    ("data.list_insert", data_list_insert);
     ("brush.delete_selected", brush_delete_selected);
     ("brush.duplicate_selected", brush_duplicate_selected);
     ("brush.append", brush_append_effect);

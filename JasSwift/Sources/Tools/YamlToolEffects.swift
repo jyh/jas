@@ -95,6 +95,54 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // data.set — { path, value }. Writes a value at a dotted path
+    // inside store.data. Mirrors the JS Phase 1.13 effect.
+    effects["data.set"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let path = args["path"] as? String, !path.isEmpty
+        else { return nil }
+        let value = resolveValueOrExpr(args["value"], store: store, ctx: ctx)
+        store.setDataPath(path, value)
+        return nil
+    }
+
+    effects["data.list_append"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let path = args["path"] as? String, !path.isEmpty
+        else { return nil }
+        let value = resolveValueOrExpr(args["value"], store: store, ctx: ctx)
+        var arr = (store.getDataPath(path) as? [Any]) ?? []
+        arr.append(value ?? NSNull())
+        store.setDataPath(path, arr)
+        return nil
+    }
+
+    effects["data.list_remove"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let path = args["path"] as? String, !path.isEmpty
+        else { return nil }
+        let index = Int(evalNumber(args["index"], store: store, ctx: ctx))
+        guard var arr = store.getDataPath(path) as? [Any] else { return nil }
+        if index >= 0 && index < arr.count {
+            arr.remove(at: index)
+            store.setDataPath(path, arr)
+        }
+        return nil
+    }
+
+    effects["data.list_insert"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let path = args["path"] as? String, !path.isEmpty
+        else { return nil }
+        let value = resolveValueOrExpr(args["value"], store: store, ctx: ctx)
+        let index = Int(evalNumber(args["index"], store: store, ctx: ctx))
+        var arr = (store.getDataPath(path) as? [Any]) ?? []
+        let i = max(0, min(index, arr.count))
+        arr.insert(value ?? NSNull(), at: i)
+        store.setDataPath(path, arr)
+        return nil
+    }
+
     // brush.delete_selected — filter library.brushes against the
     // selected slug list, clear panel.brushes.selected_brushes, and
     // sync the canvas brush registry. Mirrors the JS Phase 1.13

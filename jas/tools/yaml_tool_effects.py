@@ -346,6 +346,59 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                 next_brushes.append(b)
         store.set_data_path(path, next_brushes)
 
+    # ── Generic data.* primitives ─────────────────────────
+
+    def data_set(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        path = _eval_string_value(spec.get("path"), store, ctx)
+        if not path:
+            return None
+        value = _resolve_value_or_expr(spec.get("value"), store, ctx)
+        store.set_data_path(path, value)
+        return None
+
+    def data_list_append(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        path = _eval_string_value(spec.get("path"), store, ctx)
+        if not path:
+            return None
+        value = _resolve_value_or_expr(spec.get("value"), store, ctx)
+        cur = store.get_data_path(path)
+        arr = list(cur) if isinstance(cur, list) else []
+        arr.append(value)
+        store.set_data_path(path, arr)
+        return None
+
+    def data_list_remove(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        path = _eval_string_value(spec.get("path"), store, ctx)
+        index = int(eval_number(spec.get("index"), store, ctx))
+        cur = store.get_data_path(path)
+        if not isinstance(cur, list) or index < 0 or index >= len(cur):
+            return None
+        arr = list(cur)
+        arr.pop(index)
+        store.set_data_path(path, arr)
+        return None
+
+    def data_list_insert(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        path = _eval_string_value(spec.get("path"), store, ctx)
+        if not path:
+            return None
+        value = _resolve_value_or_expr(spec.get("value"), store, ctx)
+        index = int(eval_number(spec.get("index"), store, ctx))
+        cur = store.get_data_path(path)
+        arr = list(cur) if isinstance(cur, list) else []
+        i = max(0, min(index, len(arr)))
+        arr.insert(i, value)
+        store.set_data_path(path, arr)
+        return None
+
     def brush_delete_selected(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
@@ -1222,6 +1275,10 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.toggle_selection"] = doc_toggle_selection
     effects["doc.translate_selection"] = doc_translate_selection
     effects["doc.set_attr_on_selection"] = doc_set_attr_on_selection
+    effects["data.set"] = data_set
+    effects["data.list_append"] = data_list_append
+    effects["data.list_remove"] = data_list_remove
+    effects["data.list_insert"] = data_list_insert
     effects["brush.delete_selected"] = brush_delete_selected
     effects["brush.duplicate_selected"] = brush_duplicate_selected
     effects["brush.append"] = brush_append
