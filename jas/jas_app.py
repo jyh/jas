@@ -266,6 +266,11 @@ class MainWindow(QMainWindow):
             ws_path = os.path.join(os.path.dirname(__file__), "..", "workspace")
             ws = load_workspace(ws_path)
             self._yaml_state = StateStore(state_defaults(ws.get("state", {})))
+            # Install the brush library registry consulted by the
+            # canvas Path renderer when a path carries a stroke_brush
+            # slug. See BRUSHES.md §Stroke styling interaction.
+            from canvas.canvas import set_canvas_brush_libraries
+            set_canvas_brush_libraries(ws.get("brush_libraries", {}))
         except (OSError, ValueError) as e:
             import logging
             logging.warning(

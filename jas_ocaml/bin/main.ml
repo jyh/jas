@@ -1,5 +1,15 @@
 let () =
   ignore (GMain.init ());
+
+  (* Install the brush library registry consulted by the canvas
+     renderer when a path carries a stroke_brush slug. The registry
+     is populated from the loaded workspace; absent / empty when
+     workspace.json doesn't ship brush libraries. See BRUSHES.md. *)
+  (match Jas.Workspace_loader.load () with
+   | Some ws ->
+     Jas.Canvas_subwindow.set_brush_libraries (Jas.Workspace_loader.brush_libraries ws)
+   | None -> ());
+
   let dummy_model = Jas.Model.create () in
   let active_model = ref dummy_model in
   let active_canvas = ref None in
