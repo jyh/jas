@@ -1023,6 +1023,62 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Null
     end
 
+    (* brush_type_of(slug) — look up a brush in brush_libraries by
+       "lib_id/brush_slug" and return its [type] field as a string.
+       Returns [Null] if the slug does not resolve. Consumed by
+       BLOB_BRUSH_TOOL.md Runtime tip resolution to gate the
+       dialog's Size/Angle/Roundness rows on the active brush being
+       Calligraphic. *)
+    else if name = "brush_type_of" then begin
+      if List.length args <> 1 then Null
+      else begin
+        let arg = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        match arg with
+        | Str slug ->
+          (match String.index_opt slug '/' with
+           | None -> Null
+           | Some i ->
+             let lib_id = String.sub slug 0 i in
+             let brush_slug = String.sub slug (i + 1) (String.length slug - i - 1) in
+             let libs = match ctx with
+               | `Assoc pairs ->
+                 (match List.assoc_opt "brush_libraries" pairs with
+                  | Some v -> v
+                  | None -> `Null)
+               | _ -> `Null
+             in
+             let lib = match libs with
+               | `Assoc pairs ->
+                 (match List.assoc_opt lib_id pairs with
+                  | Some v -> v
+                  | None -> `Null)
+               | _ -> `Null
+             in
+             let brushes = match lib with
+               | `Assoc pairs ->
+                 (match List.assoc_opt "brushes" pairs with
+                  | Some (`List xs) -> xs
+                  | _ -> [])
+               | _ -> []
+             in
+             let found = List.find_opt (fun b ->
+               match b with
+               | `Assoc pairs ->
+                 (match List.assoc_opt "slug" pairs with
+                  | Some (`String s) -> s = brush_slug
+                  | _ -> false)
+               | _ -> false
+             ) brushes in
+             (match found with
+              | Some (`Assoc pairs) ->
+                (match List.assoc_opt "type" pairs with
+                 | Some (`String t) -> Str t
+                 | _ -> Null)
+              | _ -> Null))
+        | _ -> Null
+      end
+    end
+
     (* ── Doc-aware primitives ─────────────────────────────── *)
 
     else if name = "hit_test" then begin
