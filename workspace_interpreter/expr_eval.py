@@ -564,6 +564,36 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         import math
         return Value.number(math.hypot(va.value, vb.value))
 
+    # brush_type_of(slug) -- look up a brush in brush_libraries by
+    # "lib_id/brush_slug" and return its `type` field as a string.
+    # Returns Value.null() if the slug does not resolve. Consumed by
+    # BLOB_BRUSH_TOOL.md Runtime tip resolution to gate the dialog's
+    # Size/Angle/Roundness rows on the active brush being Calligraphic.
+    if name == "brush_type_of":
+        if len(node.args) != 1:
+            return Value.null()
+        arg = eval_node(node.args[0], ctx)
+        if arg.type != ValueType.STRING:
+            return Value.null()
+        slug = arg.value
+        if "/" not in slug:
+            return Value.null()
+        lib_id, _, brush_slug = slug.partition("/")
+        libs = ctx.get("brush_libraries")
+        if not isinstance(libs, dict):
+            return Value.null()
+        lib = libs.get(lib_id)
+        if not isinstance(lib, dict):
+            return Value.null()
+        brushes = lib.get("brushes")
+        if not isinstance(brushes, list):
+            return Value.null()
+        for b in brushes:
+            if isinstance(b, dict) and b.get("slug") == brush_slug:
+                t = b.get("type")
+                return Value.string(t) if isinstance(t, str) else Value.null()
+        return Value.null()
+
     # ── Doc-aware primitives ──────────────────────────────────
 
     if name == "hit_test":
