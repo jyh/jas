@@ -354,6 +354,59 @@ let ast_cache_tests = [
      | _ -> Alcotest.fail "expected Null"));
 ]
 
+(* brush_type_of(slug) — Blob Brush dialog gating helper. *)
+
+let brush_libs_ctx () : Yojson.Safe.t =
+  `Assoc [
+    ("brush_libraries", `Assoc [
+      ("mylib", `Assoc [
+        ("brushes", `List [
+          `Assoc [("slug", `String "cal_1"); ("name", `String "Cal 1");
+                  ("type", `String "calligraphic"); ("size", `Float 5.0)];
+          `Assoc [("slug", `String "art_1"); ("name", `String "Art 1");
+                  ("type", `String "art")];
+        ]);
+      ]);
+      ("other", `Assoc [
+        ("brushes", `List [
+          `Assoc [("slug", `String "scat_1"); ("name", `String "Scat 1");
+                  ("type", `String "scatter")];
+        ]);
+      ]);
+    ]);
+  ]
+
+let brush_type_of_tests = [
+  Alcotest.test_case "calligraphic" `Quick (fun () ->
+    assert_string "calligraphic"
+      (evaluate "brush_type_of(\"mylib/cal_1\")" (brush_libs_ctx ())));
+
+  Alcotest.test_case "art" `Quick (fun () ->
+    assert_string "art"
+      (evaluate "brush_type_of(\"mylib/art_1\")" (brush_libs_ctx ())));
+
+  Alcotest.test_case "other_library" `Quick (fun () ->
+    assert_string "scatter"
+      (evaluate "brush_type_of(\"other/scat_1\")" (brush_libs_ctx ())));
+
+  Alcotest.test_case "unknown_slug_returns_null" `Quick (fun () ->
+    assert_null
+      (evaluate "brush_type_of(\"mylib/missing\")" (brush_libs_ctx ())));
+
+  Alcotest.test_case "missing_library_returns_null" `Quick (fun () ->
+    assert_null
+      (evaluate "brush_type_of(\"nowhere/cal_1\")" (brush_libs_ctx ())));
+
+  Alcotest.test_case "malformed_slug_returns_null" `Quick (fun () ->
+    (* Missing slash. *)
+    assert_null
+      (evaluate "brush_type_of(\"just_a_slug\")" (brush_libs_ctx ())));
+
+  Alcotest.test_case "null_when_no_brush_libraries" `Quick (fun () ->
+    assert_null
+      (evaluate "brush_type_of(\"mylib/cal_1\")" (`Assoc [])));
+]
+
 let () =
   Alcotest.run "Expr_eval" [
     "Arithmetic", arithmetic_tests;
@@ -368,4 +421,5 @@ let () =
     "Phase3 Path", path_tests;
     "Phase3 LexicalClosure", closure_lexical_tests;
     "AstCache", ast_cache_tests;
+    "brush_type_of", brush_type_of_tests;
   ]
