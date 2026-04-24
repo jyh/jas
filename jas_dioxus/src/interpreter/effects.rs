@@ -750,6 +750,22 @@ fn run_doc_effect(
                         x: seg.6, y: seg.7,
                     });
                 }
+                // stroke_brush passthrough — when the spec carries a
+                // stroke_brush expression (typically state.stroke_brush
+                // from the Paintbrush tool), evaluate it and bake the
+                // resolved slug onto the new path. The renderer then
+                // outlines it via the brush pipeline. None / null
+                // produces a plain native-stroke path.
+                let stroke_brush_slug = args.get("stroke_brush")
+                    .and_then(|v| match v {
+                        serde_json::Value::String(s) => {
+                            match eval_expr(s, store, ctx) {
+                                Value::Str(rs) if !rs.is_empty() => Some(rs),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    });
                 let elem = Element::Path(PathElem {
                     d: cmds,
                     fill,
@@ -758,7 +774,7 @@ fn run_doc_effect(
                     common: CommonProps::default(),
                     fill_gradient: None,
                     stroke_gradient: None,
-                    stroke_brush: None,
+                    stroke_brush: stroke_brush_slug,
                     stroke_brush_overrides: None,
                 });
                 Controller::add_element(model, elem);
