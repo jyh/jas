@@ -138,6 +138,15 @@ class WorkspaceData {
         data["swatch_libraries"] as? [String: Any] ?? [:]
     }
 
+    /// Get the brush libraries data map. Each entry is a library
+    /// keyed by slug; library value carries name / description /
+    /// brushes[] per BRUSHES.md §Brush libraries. Mutated at runtime
+    /// by the brush.* and data.* effect handlers (when those land in
+    /// Swift). Phase 1 ships the seed `default_brushes` library only.
+    func brushLibraries() -> [String: Any] {
+        data["brush_libraries"] as? [String: Any] ?? [:]
+    }
+
     /// Get the icons map.
     func icons() -> [String: Any] {
         data["icons"] as? [String: Any] ?? [:]
