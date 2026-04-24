@@ -826,21 +826,124 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      Paintbrush tool's on_mouseup can pass `state.stroke_brush`
      through. The renderer then dispatches the brush via the
      calligraphic outliner. *)
+  (* Paintbrush stroke-width commit rule per PAINTBRUSH_TOOL.md
+     §Fill and stroke: no brush → state.stroke_width; brush with size
+     (Calligraphic/Scatter/Bristle) → overrides.size, else brush.size;
+     brush with no size (Art/Pattern) → state.stroke_width. *)
+  let paintbrush_stroke_width stroke_brush overrides store ctx : float =
+    let state_width =
+      match eval_expr_as_value (Some (`String "state.stroke_width"))
+              store ctx with
+      | Expr_eval.Number n -> n
+      | _ -> 1.0
+    in
+    match stroke_brush with
+    | None -> state_width
+    | Some slug ->
+      let override_size =
+        match overrides with
+        | Some json_str ->
+          (try
+             match Yojson.Safe.from_string json_str with
+             | `Assoc pairs ->
+               (match List.assoc_opt "size" pairs with
+                | Some (`Float n) -> Some n
+                | Some (`Int n) -> Some (float_of_int n)
+                | _ -> None)
+             | _ -> None
+           with _ -> None)
+        | None -> None
+      in
+      (match override_size with
+       | Some n -> n
+       | None ->
+         (* Parse "libId/brushSlug" and look up brush.size. *)
+         let parts = String.split_on_char '/' slug in
+         (match parts with
+          | [lib_id; brush_slug] ->
+            let path = "brush_libraries." ^ lib_id ^ ".brushes" in
+            let data = State_store.get_data_path store path in
+            (match data with
+             | `List brushes ->
+               let found = List.find_opt (fun b ->
+                 match b with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "slug" fields with
+                    | Some (`String s) -> s = brush_slug
+                    | _ -> false)
+                 | _ -> false
+               ) brushes in
+               (match found with
+                | Some (`Assoc fields) ->
+                  (match List.assoc_opt "size" fields with
+                   | Some (`Float n) -> n
+                   | Some (`Int n) -> float_of_int n
+                   | _ -> state_width)
+                | _ -> state_width)
+             | _ -> state_width)
+          | _ -> state_width))
+  in
+
+  (* make_path_from_commands: pencil-style callers (no stroke_brush
+     key) get default fill/stroke; paintbrush-style callers (presence
+     of stroke_brush) switch on PAINTBRUSH_TOOL.md §Fill and stroke:
+     - stroke = Stroke(state.stroke_color, paintbrush_stroke_width)
+     - fill = state.fill_color when fill_new_strokes else None
+     - stroke_brush_overrides passed onto the Path. *)
   let make_path_from_commands cmds spec_args store ctx : Element.element =
-    let has_fill = List.mem_assoc "fill" spec_args in
-    let has_stroke = List.mem_assoc "stroke" spec_args in
-    let default_fill = ctrl#model#default_fill in
-    let default_stroke = ctrl#model#default_stroke in
-    let fill = resolve_fill_field (List.assoc_opt "fill" spec_args) has_fill
-                 store ctx default_fill in
-    let stroke = resolve_stroke_field (List.assoc_opt "stroke" spec_args)
-                   has_stroke store ctx default_stroke in
+    let has_stroke_brush_arg = List.mem_assoc "stroke_brush" spec_args in
     let stroke_brush =
       match eval_expr_as_value (List.assoc_opt "stroke_brush" spec_args) store ctx with
       | Expr_eval.Str rs when rs <> "" -> Some rs
       | _ -> None
     in
-    Element.make_path ~fill ~stroke ~stroke_brush cmds
+    let stroke_brush_overrides =
+      match eval_expr_as_value
+              (List.assoc_opt "stroke_brush_overrides" spec_args) store ctx with
+      | Expr_eval.Str rs when rs <> "" -> Some rs
+      | _ -> None
+    in
+    let fill =
+      if List.mem_assoc "fill_new_strokes" spec_args then begin
+        if eval_bool (List.assoc_opt "fill_new_strokes" spec_args) store ctx
+        then
+          (match eval_expr_as_value (Some (`String "state.fill_color"))
+                   store ctx with
+           | Expr_eval.Color c | Expr_eval.Str c ->
+             (try Some (Element.make_fill (color_from_hex c))
+              with _ -> None)
+           | _ -> None)
+        else None
+      end
+      else
+        let has_fill = List.mem_assoc "fill" spec_args in
+        let default_fill = ctrl#model#default_fill in
+        resolve_fill_field (List.assoc_opt "fill" spec_args) has_fill
+          store ctx default_fill
+    in
+    let stroke =
+      if has_stroke_brush_arg then begin
+        let color_str =
+          match eval_expr_as_value (Some (`String "state.stroke_color"))
+                  store ctx with
+          | Expr_eval.Color c | Expr_eval.Str c -> c
+          | _ -> "#000000"
+        in
+        let color =
+          try color_from_hex color_str
+          with _ -> Element.color_rgb 0.0 0.0 0.0
+        in
+        let width = paintbrush_stroke_width stroke_brush
+                      stroke_brush_overrides store ctx in
+        Some (Element.make_stroke ~width color)
+      end
+      else
+        let has_stroke = List.mem_assoc "stroke" spec_args in
+        let default_stroke = ctrl#model#default_stroke in
+        resolve_stroke_field (List.assoc_opt "stroke" spec_args)
+          has_stroke store ctx default_stroke
+    in
+    Element.make_path ~fill ~stroke ~stroke_brush ~stroke_brush_overrides cmds
   in
 
   let doc_add_path_from_buffer spec ctx store =
@@ -865,10 +968,164 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
                                          seg.c2x, seg.c2y,
                                          seg.p2x, seg.p2y) :: !cmds
               ) segments;
+              (* Paintbrush §Gestures close-at-release: append ClosePath
+                 when close=true. *)
+              if eval_bool (List.assoc_opt "close" args) store ctx then
+                cmds := Element.ClosePath :: !cmds;
               let d = List.rev !cmds in
               let elem = make_path_from_commands d args store ctx in
               ctrl#add_element elem
           end
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* ── Paintbrush edit-gesture effects per PAINTBRUSH_TOOL.md
+     §Edit gesture ──────────────────────────────────────────── *)
+  let encode_path_for_paintbrush (path : int list) : Yojson.Safe.t =
+    `Assoc [("__path__", `List (List.map (fun i -> `Int i) path))]
+  in
+  let decode_path_for_paintbrush (v : Yojson.Safe.t) : int list option =
+    match v with
+    | `Assoc pairs ->
+      (match List.assoc_opt "__path__" pairs with
+       | Some (`List arr) ->
+         let out = List.filter_map (function
+           | `Int i -> Some i | _ -> None) arr in
+         if List.length out = List.length arr then Some out else None
+       | _ -> None)
+    | _ -> None
+  in
+
+  let doc_paintbrush_edit_start spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let x = eval_number (List.assoc_opt "x" args) store ctx in
+       let y = eval_number (List.assoc_opt "y" args) store ctx in
+       let within = eval_number (List.assoc_opt "within" args) store ctx in
+       let within_sq = within *. within in
+       let best = ref None in
+       let doc = ctrl#document in
+       Document.PathMap.iter (fun path _ ->
+         let elem = Document.get_element doc path in
+         match elem with
+         | Element.Path { d; _ } when not (Element.is_locked elem)
+                                    && List.length d >= 2 ->
+           let (flat, _cmd_map) = Path_ops.flatten_with_cmd_map d in
+           if flat <> [] then
+             List.iteri (fun i (fx, fy) ->
+               let dx = fx -. x and dy = fy -. y in
+               let dsq = dx *. dx +. dy *. dy in
+               if dsq <= within_sq then begin
+                 match !best with
+                 | Some (_, _, bdsq) when bdsq <= dsq -> ()
+                 | _ -> best := Some (path, i, dsq)
+               end
+             ) flat
+         | _ -> ()
+       ) doc.Document.selection;
+       (match !best with
+        | Some (path, entry_idx, _) ->
+          State_store.set_tool store "paintbrush" "mode"
+            (`String "edit");
+          State_store.set_tool store "paintbrush" "edit_target_path"
+            (encode_path_for_paintbrush path);
+          State_store.set_tool store "paintbrush" "edit_entry_idx"
+            (`Int entry_idx)
+        | None -> ())
+     | _ -> ());
+    `Null
+  in
+
+  let doc_paintbrush_edit_commit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String buffer) ->
+          let raw_e = eval_number (List.assoc_opt "fit_error" args) store ctx in
+          let fit_error = if raw_e = 0.0 then 4.0 else raw_e in
+          let within = eval_number (List.assoc_opt "within" args) store ctx in
+          let within_sq = within *. within in
+          let target_path_v = State_store.get_tool store "paintbrush"
+                                "edit_target_path" in
+          (match decode_path_for_paintbrush target_path_v with
+           | None -> ()
+           | Some target_path ->
+             let entry_idx =
+               match State_store.get_tool store "paintbrush"
+                       "edit_entry_idx" with
+               | `Int n -> n
+               | `Float n -> int_of_float n
+               | _ -> -1
+             in
+             if entry_idx < 0 then ()
+             else begin
+               let drag_points = Point_buffers.points buffer in
+               if List.length drag_points < 2 then ()
+               else begin
+                 let doc = ctrl#document in
+                 let target_elem = Document.get_element doc target_path in
+                 match target_elem with
+                 | Element.Path { d; _ } when not (Element.is_locked target_elem)
+                                            && List.length d >= 2 ->
+                   let (flat, cmd_map) = Path_ops.flatten_with_cmd_map d in
+                   if flat = [] || entry_idx >= List.length flat then ()
+                   else begin
+                     let last = List.nth drag_points
+                                  (List.length drag_points - 1) in
+                     let (last_x, last_y) = last in
+                     let best = ref None in
+                     List.iteri (fun i (fx, fy) ->
+                       let dx = fx -. last_x and dy = fy -. last_y in
+                       let dsq = dx *. dx +. dy *. dy in
+                       match !best with
+                       | Some (_, bdsq) when bdsq <= dsq -> ()
+                       | _ -> best := Some (i, dsq)
+                     ) flat;
+                     match !best with
+                     | None -> ()
+                     | Some (_, bdsq) when bdsq > within_sq -> ()
+                     | Some (exit_idx, _) when exit_idx = entry_idx -> ()
+                     | Some (exit_idx, _) ->
+                       let lo_flat = min entry_idx exit_idx in
+                       let hi_flat = max entry_idx exit_idx in
+                       let c0 = List.nth cmd_map lo_flat in
+                       let c1 = List.nth cmd_map hi_flat in
+                       if c0 >= c1 || c1 >= List.length d then ()
+                       else begin
+                         let ordered_drag =
+                           if exit_idx < entry_idx then List.rev drag_points
+                           else drag_points in
+                         let start_pt = Path_ops.cmd_start_point d c0 in
+                         let points_to_fit = start_pt :: ordered_drag in
+                         if List.length points_to_fit < 2 then ()
+                         else begin
+                           let segments = Fit_curve.fit_curve
+                                            points_to_fit fit_error in
+                           if segments = [] then ()
+                           else begin
+                             let prefix = List.filteri (fun i _ -> i < c0) d in
+                             let suffix = List.filteri (fun i _ -> i > c1) d in
+                             let new_curves = List.map (fun (seg : Fit_curve.segment) ->
+                               Element.CurveTo (seg.c1x, seg.c1y,
+                                                seg.c2x, seg.c2y,
+                                                seg.p2x, seg.p2y)
+                             ) segments in
+                             let new_cmds = prefix @ new_curves @ suffix in
+                             let new_elem = match target_elem with
+                               | Element.Path pe -> Element.Path { pe with d = new_cmds }
+                               | _ -> target_elem in
+                             let new_doc = Document.replace_element doc
+                                             target_path new_elem in
+                             ctrl#set_document new_doc
+                           end
+                         end
+                       end
+                   end
+                 | _ -> ()
+               end
+             end)
         | _ -> ())
      | _ -> ());
     `Null
@@ -1656,6 +1913,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      doc_path_insert_anchor_on_segment_near);
     ("doc.path.erase_at_rect", doc_path_erase_at_rect);
     ("doc.path.smooth_at_cursor", doc_path_smooth_at_cursor);
+    ("doc.paintbrush.edit_start", doc_paintbrush_edit_start);
+    ("doc.paintbrush.edit_commit", doc_paintbrush_edit_commit);
     ("doc.path.probe_anchor_hit", doc_path_probe_anchor_hit);
     ("doc.path.commit_anchor_edit", doc_path_commit_anchor_edit);
     ("doc.move_path_handle", doc_move_path_handle);
