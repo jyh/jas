@@ -51,6 +51,8 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Anchor_point -> (load_yaml_tool_or_fail "anchor_point" :> Canvas_tool.canvas_tool)
   (* Phase 7.9 — Pencil migrated *)
   | Toolbar.Pencil -> (load_yaml_tool_or_fail "pencil" :> Canvas_tool.canvas_tool)
+  (* Paintbrush — shares Pencil's gesture shape + active-brush *)
+  | Toolbar.Paintbrush -> (load_yaml_tool_or_fail "paintbrush" :> Canvas_tool.canvas_tool)
   (* Phase 7.15 — PathEraser migrated *)
   | Toolbar.Path_eraser -> (load_yaml_tool_or_fail "path_eraser" :> Canvas_tool.canvas_tool)
   (* Phase 7.16 — Smooth migrated *)
