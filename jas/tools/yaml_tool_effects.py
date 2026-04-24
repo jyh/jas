@@ -399,6 +399,81 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         store.set_data_path(path, arr)
         return None
 
+    def brush_options_confirm(spec, ctx, store):
+        """Per-mode dispatch reading dialog state. Phase 1
+        Calligraphic only. The YAML brush_options_confirm action
+        calls this. Mirrors the Rust apply_dialog_confirm and
+        Swift brush.options_confirm handlers."""
+        dialog = store.get_dialog_state() if hasattr(store, 'get_dialog_state') else {}
+        params = (store.get_dialog_params() if hasattr(store, 'get_dialog_params') else None) or {}
+        mode = params.get("mode") or "create"
+        library = params.get("library") or ""
+        brush_slug = params.get("brush_slug") or ""
+        name = dialog.get("brush_name") or "Brush"
+        brush_type = dialog.get("brush_type") or "calligraphic"
+        angle = float(dialog.get("angle") or 0.0)
+        roundness = float(dialog.get("roundness") or 100.0)
+        size = float(dialog.get("size") or 5.0)
+        angle_var = dialog.get("angle_variation") or {"mode": "fixed"}
+        roundness_var = dialog.get("roundness_variation") or {"mode": "fixed"}
+        size_var = dialog.get("size_variation") or {"mode": "fixed"}
+
+        lib_key = library
+        if not lib_key:
+            libs = store.get_data_path("brush_libraries") or {}
+            keys = sorted(libs.keys()) if isinstance(libs, dict) else []
+            if keys:
+                lib_key = keys[0]
+        if not lib_key:
+            return None
+
+        def _slug_from_name(s: str) -> str:
+            return "".join(
+                c.lower() if c.isalnum() else "_" for c in s
+            )
+
+        if mode == "create":
+            raw = _slug_from_name(name)
+            path = _library_brushes_path(lib_key)
+            existing = set()
+            cur = store.get_data_path(path)
+            if isinstance(cur, list):
+                existing = {b.get("slug") for b in cur if isinstance(b, dict)}
+            slug = raw
+            n = 2
+            while slug in existing:
+                slug = f"{raw}_{n}"
+                n += 1
+            brush = {"name": name, "slug": slug, "type": brush_type}
+            if brush_type == "calligraphic":
+                brush["angle"] = angle
+                brush["roundness"] = roundness
+                brush["size"] = size
+                brush["angle_variation"] = angle_var
+                brush["roundness_variation"] = roundness_var
+                brush["size_variation"] = size_var
+            _brush_append_to_library(store, lib_key, brush)
+            _sync_canvas_brushes(store)
+
+        elif mode == "library_edit" and brush_slug:
+            patch = {"name": name}
+            if brush_type == "calligraphic":
+                patch["angle"] = angle
+                patch["roundness"] = roundness
+                patch["size"] = size
+                patch["angle_variation"] = angle_var
+                patch["roundness_variation"] = roundness_var
+                patch["size_variation"] = size_var
+            _brush_update_in_library(store, lib_key, brush_slug, patch)
+            _sync_canvas_brushes(store)
+
+        elif mode == "instance_edit":
+            import json as _json
+            overrides = {"angle": angle, "roundness": roundness, "size": size}
+            controller.set_selection_stroke_brush_overrides(_json.dumps(overrides))
+
+        return None
+
     def brush_delete_selected(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
@@ -1283,6 +1358,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["brush.duplicate_selected"] = brush_duplicate_selected
     effects["brush.append"] = brush_append
     effects["brush.update"] = brush_update
+    effects["brush.options_confirm"] = brush_options_confirm
     effects["doc.copy_selection"] = doc_copy_selection
     effects["doc.select_in_rect"] = doc_select_in_rect
     effects["doc.partial_select_in_rect"] = doc_partial_select_in_rect

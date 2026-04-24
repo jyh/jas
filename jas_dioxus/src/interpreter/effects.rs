@@ -636,6 +636,12 @@ fn run_doc_effect(
                 }
             }
         }
+        "brush.options_confirm" => {
+            // Per-mode dispatch reading dialog state. Phase 1
+            // Calligraphic only. Mirrors the Swift / OCaml / Python
+            // brush.options_confirm handlers.
+            brush_options_confirm_dispatch(store, model);
+        }
         "brush.delete_selected" => {
             // Spec: { library, slugs } — filter library.brushes
             // against the selected slug list, clear panel selection.
@@ -1315,6 +1321,110 @@ fn sync_canvas_brushes(store: &StateStore) {
     // syncing we want the new value to stick, so we deliberately
     // forget the guard.
     std::mem::forget(_guard);
+}
+
+/// Dispatch brush_options_confirm — read dialog state, dispatch
+/// per mode (create / library_edit / instance_edit). Phase 1
+/// Calligraphic only. Reads dialog state via Store_dialog
+/// accessors (assumed to exist — falls back to log if not).
+fn brush_options_confirm_dispatch(store: &mut StateStore, model: &mut Model) {
+    let mode = store.dialog_params()
+        .and_then(|p| p.get("mode"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("create").to_string();
+    let library = store.dialog_params()
+        .and_then(|p| p.get("library"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("").to_string();
+    let brush_slug = store.dialog_params()
+        .and_then(|p| p.get("brush_slug"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("").to_string();
+    let name = store.get_dialog("brush_name").as_str().unwrap_or("Brush").to_string();
+    let brush_type = store.get_dialog("brush_type").as_str().unwrap_or("calligraphic").to_string();
+    let angle = store.get_dialog("angle").as_f64().unwrap_or(0.0);
+    let roundness = store.get_dialog("roundness").as_f64().unwrap_or(100.0);
+    let size = store.get_dialog("size").as_f64().unwrap_or(5.0);
+    let angle_var = match store.get_dialog("angle_variation") {
+        serde_json::Value::Null => serde_json::json!({"mode": "fixed"}),
+        v => v.clone(),
+    };
+    let roundness_var = match store.get_dialog("roundness_variation") {
+        serde_json::Value::Null => serde_json::json!({"mode": "fixed"}),
+        v => v.clone(),
+    };
+    let size_var = match store.get_dialog("size_variation") {
+        serde_json::Value::Null => serde_json::json!({"mode": "fixed"}),
+        v => v.clone(),
+    };
+
+    let lib_key = if !library.is_empty() {
+        library
+    } else {
+        match store.get_data_path("brush_libraries") {
+            serde_json::Value::Object(map) => map.keys().next().cloned().unwrap_or_default(),
+            _ => String::new(),
+        }
+    };
+    if lib_key.is_empty() { return; }
+
+    match mode.as_str() {
+        "create" => {
+            let raw: String = name.chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+                .collect();
+            let path = format!("brush_libraries.{}.brushes", lib_key);
+            let existing: std::collections::HashSet<String> = match store.get_data_path(&path) {
+                serde_json::Value::Array(a) => a.iter()
+                    .filter_map(|b| b.get("slug").and_then(|s| s.as_str()).map(String::from))
+                    .collect(),
+                _ => std::collections::HashSet::new(),
+            };
+            let mut slug = raw.clone();
+            let mut n = 2;
+            while existing.contains(&slug) {
+                slug = format!("{raw}_{n}");
+                n += 1;
+            }
+            let mut brush = serde_json::Map::new();
+            brush.insert("name".to_string(), serde_json::Value::String(name));
+            brush.insert("slug".to_string(), serde_json::Value::String(slug));
+            brush.insert("type".to_string(), serde_json::Value::String(brush_type.clone()));
+            if brush_type == "calligraphic" {
+                brush.insert("angle".to_string(), serde_json::json!(angle));
+                brush.insert("roundness".to_string(), serde_json::json!(roundness));
+                brush.insert("size".to_string(), serde_json::json!(size));
+                brush.insert("angle_variation".to_string(), angle_var);
+                brush.insert("roundness_variation".to_string(), roundness_var);
+                brush.insert("size_variation".to_string(), size_var);
+            }
+            brush_append_to_library(store, &lib_key, serde_json::Value::Object(brush));
+            sync_canvas_brushes(store);
+        }
+        "library_edit" if !brush_slug.is_empty() => {
+            let mut patch = serde_json::Map::new();
+            patch.insert("name".to_string(), serde_json::Value::String(name));
+            if brush_type == "calligraphic" {
+                patch.insert("angle".to_string(), serde_json::json!(angle));
+                patch.insert("roundness".to_string(), serde_json::json!(roundness));
+                patch.insert("size".to_string(), serde_json::json!(size));
+                patch.insert("angle_variation".to_string(), angle_var);
+                patch.insert("roundness_variation".to_string(), roundness_var);
+                patch.insert("size_variation".to_string(), size_var);
+            }
+            brush_update_in_library(store, &lib_key, &brush_slug, serde_json::Value::Object(patch));
+            sync_canvas_brushes(store);
+        }
+        "instance_edit" => {
+            let overrides = serde_json::json!({
+                "angle": angle, "roundness": roundness, "size": size,
+            });
+            let s = serde_json::to_string(&overrides).unwrap_or_default();
+            crate::document::controller::Controller::set_selection_stroke_brush_overrides(
+                model, Some(s));
+        }
+        _ => {}
+    }
 }
 
 fn eval_number(

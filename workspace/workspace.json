@@ -3388,7 +3388,7 @@
       },
       "effects": [
         {
-          "log": "brush_options_confirm (mode={{param.mode}})"
+          "brush.options_confirm": {}
         },
         {
           "close_dialog": "None"

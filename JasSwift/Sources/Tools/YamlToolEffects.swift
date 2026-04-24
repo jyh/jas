@@ -143,6 +143,98 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // brush.options_confirm — per-mode dispatch reading dialog
+    // state. Phase 1 Calligraphic only. Used by the YAML
+    // brush_options_confirm action's effects chain.
+    effects["brush.options_confirm"] = { spec, ctx, store in
+        let dialog = store.getDialogState()
+        let params = store.getDialogParams() ?? [:]
+        let mode = (params["mode"] as? String) ?? "create"
+        let library = (params["library"] as? String) ?? ""
+        let brushSlug = (params["brush_slug"] as? String) ?? ""
+        let name = (dialog["brush_name"] as? String) ?? "Brush"
+        let brushType = (dialog["brush_type"] as? String) ?? "calligraphic"
+        let angle = (dialog["angle"] as? Double) ?? 0.0
+        let roundness = (dialog["roundness"] as? Double) ?? 100.0
+        let size = (dialog["size"] as? Double) ?? 5.0
+        let angleVar = (dialog["angle_variation"] as? [String: Any]) ?? ["mode": "fixed"]
+        let roundnessVar = (dialog["roundness_variation"] as? [String: Any]) ?? ["mode": "fixed"]
+        let sizeVar = (dialog["size_variation"] as? [String: Any]) ?? ["mode": "fixed"]
+
+        var libKey = library
+        if libKey.isEmpty {
+            if let libs = store.getDataPath("brush_libraries") as? [String: Any],
+               let firstKey = libs.keys.sorted().first {
+                libKey = firstKey
+            }
+        }
+        if libKey.isEmpty { return nil }
+
+        switch mode {
+        case "create":
+            // Slug from name: lowercased, non-alphanum -> '_'.
+            var raw = ""
+            for ch in name {
+                if ch.isLetter || ch.isNumber {
+                    raw += String(ch).lowercased()
+                } else {
+                    raw += "_"
+                }
+            }
+            let path = "brush_libraries.\(libKey).brushes"
+            let existing: Set<String> = {
+                guard let arr = store.getDataPath(path) as? [[String: Any]] else { return [] }
+                return Set(arr.compactMap { $0["slug"] as? String })
+            }()
+            var slug = raw
+            var n = 2
+            while existing.contains(slug) {
+                slug = "\(raw)_\(n)"
+                n += 1
+            }
+            var brush: [String: Any] = [
+                "name": name, "slug": slug, "type": brushType,
+            ]
+            if brushType == "calligraphic" {
+                brush["angle"] = angle
+                brush["roundness"] = roundness
+                brush["size"] = size
+                brush["angle_variation"] = angleVar
+                brush["roundness_variation"] = roundnessVar
+                brush["size_variation"] = sizeVar
+            }
+            brushAppendToLibrary(store: store, libId: libKey, brush: brush)
+            syncCanvasBrushes(store: store)
+
+        case "library_edit":
+            if brushSlug.isEmpty { return nil }
+            var patch: [String: Any] = ["name": name]
+            if brushType == "calligraphic" {
+                patch["angle"] = angle
+                patch["roundness"] = roundness
+                patch["size"] = size
+                patch["angle_variation"] = angleVar
+                patch["roundness_variation"] = roundnessVar
+                patch["size_variation"] = sizeVar
+            }
+            brushUpdateInLibrary(store: store, libId: libKey, slug: brushSlug, patch: patch)
+            syncCanvasBrushes(store: store)
+
+        case "instance_edit":
+            let overrides: [String: Any] = [
+                "angle": angle, "roundness": roundness, "size": size,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: overrides),
+               let s = String(data: data, encoding: .utf8) {
+                Controller(model: model).setSelectionStrokeBrushOverrides(s)
+            }
+
+        default:
+            break
+        }
+        return nil
+    }
+
     // brush.delete_selected — filter library.brushes against the
     // selected slug list, clear panel.brushes.selected_brushes, and
     // sync the canvas brush registry. Mirrors the JS Phase 1.13

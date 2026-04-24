@@ -309,21 +309,12 @@ fn apply_dialog_confirm(
                 capitalized: b("hyphenate_capitalized"),
             });
         }
-        "brush_options_confirm" => {
-            // Phase 1 Calligraphic-only. Per BRUSH_OPTIONS_DIALOG.md
-            // §Modes:
-            //   create: assemble new brush dict, generate slug,
-            //           append to selected library.
-            //   library_edit: build patch dict, mutate master brush
-            //           in place; the Apply-to-Strokes confirm
-            //           sub-dialog is left as a follow-up wiring
-            //           (the patch is committed unconditionally for
-            //           now since canvas elements re-read brush
-            //           params at every paint).
-            //   instance_edit: build override JSON and write to
-            //           the canvas selection's stroke_brush_overrides.
-            apply_brush_options_confirm(dialog, st);
-        }
+        // brush_options_confirm is handled by the
+        // brush.options_confirm effect handler in effects.rs (the
+        // Phase 7.6 unification). The Phase 7.3 stop-gap that
+        // operated on AppState.brush_libraries was removed in
+        // favour of the StateStore.data source-of-truth used by
+        // the brush.* effect family.
         _ => {}
     }
 }
