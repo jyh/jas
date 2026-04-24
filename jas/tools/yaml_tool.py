@@ -15,13 +15,20 @@ render types land in Phase 5b alongside their tool ports.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from tools.tool import CanvasTool, ToolContext, KeyMods
 from tools import yaml_tool_effects
-from workspace_interpreter import doc_primitives
+from workspace_interpreter import (
+    anchor_buffers,
+    doc_primitives,
+    point_buffers,
+)
 from workspace_interpreter.effects import run_effects
+from workspace_interpreter.expr import evaluate
+from workspace_interpreter.expr_types import ValueType
 from workspace_interpreter.state_store import StateStore
 
 if TYPE_CHECKING:
@@ -232,8 +239,538 @@ class YamlTool(CanvasTool):
         return False
 
     def draw_overlay(self, ctx, painter) -> None:
-        # Phase 5a stub — overlay rendering land in Phase 5b.
-        # OverlaySpec is parsed and the guard can be evaluated, but
-        # the rect / line / polygon / star / buffer / pen / partial
-        # renderers go in alongside each tool's migration.
+        overlay = self._spec.overlay
+        if overlay is None:
+            return None
+        eval_ctx = self._store.eval_context()
+        if overlay.guard is not None:
+            if not evaluate(overlay.guard, eval_ctx).to_bool():
+                return None
+        render = overlay.render
+        if not isinstance(render, dict):
+            return None
+        render_type = render.get("type", "")
+        # Register the active document for doc-aware primitives. The
+        # partial_selection_overlay reads selected elements directly
+        # off ctx.document, but other render types use expression
+        # helpers that may resolve through the doc primitive shim.
+        guard = doc_primitives.register_document(ctx.document)
+        try:
+            if render_type == "rect":
+                _draw_rect_overlay(painter, render, eval_ctx)
+            elif render_type == "line":
+                _draw_line_overlay(painter, render, eval_ctx)
+            elif render_type == "polygon":
+                _draw_regular_polygon_overlay(painter, render, eval_ctx)
+            elif render_type == "star":
+                _draw_star_overlay(painter, render, eval_ctx)
+            elif render_type == "buffer_polygon":
+                _draw_buffer_polygon_overlay(painter, render)
+            elif render_type == "buffer_polyline":
+                _draw_buffer_polyline_overlay(painter, render, eval_ctx)
+            elif render_type == "pen_overlay":
+                _draw_pen_overlay(painter, render, eval_ctx)
+            elif render_type == "partial_selection_overlay":
+                _draw_partial_selection_overlay(
+                    painter, render, eval_ctx, ctx.document)
+        finally:
+            guard.restore()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Overlay rendering (Phase 5b)
+#
+# Ports jas_dioxus/src/tools/yaml_tool.rs draw_*_overlay functions
+# to QPainter. Each render type is a module-level _draw_ helper;
+# dispatch happens in YamlTool.draw_overlay above.
+# ═══════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class OverlayStyle:
+    """Subset of CSS style properties the overlay renderer
+    understands. Mirrors the Rust / OCaml OverlayStyle."""
+    fill: str | None = None
+    stroke: str | None = None
+    stroke_width: float | None = None
+    stroke_dasharray: tuple[float, ...] | None = None
+
+
+def parse_style(s: str) -> OverlayStyle:
+    """Parse a CSS-like ``"key: value; key: value"`` string.
+    Unknown keys and malformed rules are ignored."""
+    fill = stroke = None
+    stroke_width = None
+    stroke_dasharray: tuple[float, ...] | None = None
+    for rule in s.split(";"):
+        rule = rule.strip()
+        if not rule or ":" not in rule:
+            continue
+        key, _, value = rule.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if key == "fill":
+            fill = value
+        elif key == "stroke":
+            stroke = value
+        elif key == "stroke-width":
+            try:
+                stroke_width = float(value)
+            except ValueError:
+                pass
+        elif key == "stroke-dasharray":
+            parts: list[float] = []
+            for p in value.replace(",", " ").split():
+                try:
+                    parts.append(float(p))
+                except ValueError:
+                    pass
+            if parts:
+                stroke_dasharray = tuple(parts)
+    return OverlayStyle(
+        fill=fill,
+        stroke=stroke,
+        stroke_width=stroke_width,
+        stroke_dasharray=stroke_dasharray,
+    )
+
+
+def parse_color(s: str) -> tuple[float, float, float, float] | None:
+    """Parse a CSS color string into ``(r, g, b, a)`` normalized
+    to ``[0.0, 1.0]``. Accepts ``#rrggbb``/``#rgb``/``rgb(...)``/
+    ``rgba(...)``/``black``/``white``/``none``. Returns ``None``
+    for ``none`` or unparseable input."""
+    s = s.strip()
+    if not s or s == "none":
         return None
+    if s == "black":
+        return (0.0, 0.0, 0.0, 1.0)
+    if s == "white":
+        return (1.0, 1.0, 1.0, 1.0)
+    if s.startswith("#"):
+        hex_s = s[1:]
+        if len(hex_s) == 3:
+            hex_s = "".join(c * 2 for c in hex_s)
+        if len(hex_s) != 6:
+            return None
+        try:
+            r = int(hex_s[0:2], 16) / 255.0
+            g = int(hex_s[2:4], 16) / 255.0
+            b = int(hex_s[4:6], 16) / 255.0
+            return (r, g, b, 1.0)
+        except ValueError:
+            return None
+    for prefix, has_alpha in (("rgba(", True), ("rgb(", False)):
+        if s.startswith(prefix):
+            body = s[len(prefix):].rstrip(")").strip()
+            parts = [p.strip() for p in body.split(",")]
+            try:
+                if has_alpha and len(parts) == 4:
+                    return (
+                        float(parts[0]) / 255.0,
+                        float(parts[1]) / 255.0,
+                        float(parts[2]) / 255.0,
+                        float(parts[3]),
+                    )
+                if not has_alpha and len(parts) == 3:
+                    return (
+                        float(parts[0]) / 255.0,
+                        float(parts[1]) / 255.0,
+                        float(parts[2]) / 255.0,
+                        1.0,
+                    )
+            except ValueError:
+                return None
+            return None
+    return None
+
+
+def _eval_number_field(ctx: dict, field: Any) -> float:
+    """Evaluate an overlay numeric field. None / null / non-numeric
+    → 0.0; string → evaluated as an expression."""
+    if field is None:
+        return 0.0
+    if isinstance(field, bool):
+        return float(field)
+    if isinstance(field, (int, float)):
+        return float(field)
+    if isinstance(field, str):
+        v = evaluate(field, ctx)
+        if v.type == ValueType.NUMBER:
+            return float(v.value)
+    return 0.0
+
+
+def _eval_bool_field(ctx: dict, field: Any) -> bool:
+    """Evaluate an overlay bool field (expression or literal)."""
+    if field is None:
+        return False
+    if isinstance(field, bool):
+        return field
+    if isinstance(field, str):
+        return evaluate(field, ctx).to_bool()
+    return False
+
+
+def _eval_string_field(ctx: dict, field: Any) -> str:
+    """Evaluate an overlay string field that may be an expression."""
+    if field is None:
+        return ""
+    if isinstance(field, str):
+        v = evaluate(field, ctx)
+        if v.type == ValueType.STRING:
+            return str(v.value)
+        return field
+    return ""
+
+
+def _qcolor(rgba: tuple[float, float, float, float]):
+    """Build a QColor from (r, g, b, a) in [0, 1]."""
+    from PySide6.QtGui import QColor
+    r, g, b, a = rgba
+    return QColor(
+        max(0, min(255, int(round(r * 255)))),
+        max(0, min(255, int(round(g * 255)))),
+        max(0, min(255, int(round(b * 255)))),
+        max(0, min(255, int(round(a * 255)))),
+    )
+
+
+def _apply_stroke(painter, style: OverlayStyle) -> bool:
+    """Configure painter's pen from style. Returns True when a
+    stroke was set."""
+    if style.stroke is None:
+        return False
+    rgba = parse_color(style.stroke)
+    if rgba is None:
+        return False
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPen
+    pen = QPen(_qcolor(rgba))
+    if style.stroke_width is not None:
+        pen.setWidthF(style.stroke_width)
+    else:
+        pen.setWidthF(1.0)
+    if style.stroke_dasharray:
+        pen.setStyle(Qt.PenStyle.CustomDashLine)
+        # Qt expresses dash lengths in units of line-width; convert
+        # pt lengths to width-units by dividing by width.
+        w = pen.widthF() or 1.0
+        pen.setDashPattern([d / w for d in style.stroke_dasharray])
+    painter.setPen(pen)
+    return True
+
+
+def _apply_fill(painter, style: OverlayStyle) -> bool:
+    """Configure painter's brush from style. Returns True when a
+    fill was set."""
+    if style.fill is None:
+        return False
+    rgba = parse_color(style.fill)
+    if rgba is None:
+        return False
+    from PySide6.QtGui import QBrush
+    painter.setBrush(QBrush(_qcolor(rgba)))
+    return True
+
+
+def _clear_brush(painter):
+    """Reset brush to transparent so later stroke() calls don't
+    leave behind a fill."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QBrush
+    painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+
+
+def _clear_pen(painter):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPen
+    painter.setPen(QPen(Qt.PenStyle.NoPen))
+
+
+def _rounded_rect_path(x: float, y: float, w: float, h: float,
+                       rx: float, ry: float):
+    """Build a QPainterPath for a rounded rectangle. Max radius
+    clamped to half the shorter side."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QPainterPath
+    r = max(0.0, min(max(rx, ry), w / 2.0, h / 2.0))
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(x, y, w, h), r, r)
+    return path
+
+
+# ── Render handlers ────────────────────────────────────────
+
+
+def _draw_rect_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    x = _eval_number_field(eval_ctx, render.get("x"))
+    y = _eval_number_field(eval_ctx, render.get("y"))
+    w = _eval_number_field(eval_ctx, render.get("width"))
+    h = _eval_number_field(eval_ctx, render.get("height"))
+    rx = _eval_number_field(eval_ctx, render.get("rx"))
+    ry = _eval_number_field(eval_ctx, render.get("ry"))
+    style = parse_style(render.get("style", ""))
+    rounded = rx > 0.0 or ry > 0.0
+
+    from PySide6.QtCore import QRectF
+
+    if _apply_fill(painter, style):
+        _clear_pen(painter)
+        if rounded:
+            painter.drawPath(_rounded_rect_path(x, y, w, h, rx, ry))
+        else:
+            painter.fillRect(QRectF(x, y, w, h), painter.brush())
+    if _apply_stroke(painter, style):
+        _clear_brush(painter)
+        if rounded:
+            painter.drawPath(_rounded_rect_path(x, y, w, h, rx, ry))
+        else:
+            painter.drawRect(QRectF(x, y, w, h))
+
+
+def _draw_line_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    x1 = _eval_number_field(eval_ctx, render.get("x1"))
+    y1 = _eval_number_field(eval_ctx, render.get("y1"))
+    x2 = _eval_number_field(eval_ctx, render.get("x2"))
+    y2 = _eval_number_field(eval_ctx, render.get("y2"))
+    style = parse_style(render.get("style", ""))
+    if _apply_stroke(painter, style):
+        _clear_brush(painter)
+        painter.drawLine(x1, y1, x2, y2)
+
+
+def _draw_closed_polygon_from_points(painter, points, render: dict) -> None:
+    """Shared closed-polygon drawing. Builds a path from ``points``,
+    applies fill/stroke style."""
+    if not points:
+        return
+    from PySide6.QtGui import QPainterPath
+    style = parse_style(render.get("style", ""))
+    path = QPainterPath()
+    x0, y0 = points[0]
+    path.moveTo(x0, y0)
+    for px, py in points[1:]:
+        path.lineTo(px, py)
+    path.closeSubpath()
+
+    if _apply_fill(painter, style):
+        _clear_pen(painter)
+        painter.drawPath(path)
+    if _apply_stroke(painter, style):
+        _clear_brush(painter)
+        painter.drawPath(path)
+
+
+def _draw_buffer_polygon_overlay(painter, render: dict) -> None:
+    name = render.get("buffer") if isinstance(render.get("buffer"), str) else ""
+    if not name:
+        return
+    points = point_buffers.points(name)
+    _draw_closed_polygon_from_points(painter, points, render)
+
+
+def _draw_buffer_polyline_overlay(painter, render: dict,
+                                  eval_ctx: dict) -> None:
+    name = render.get("buffer") if isinstance(render.get("buffer"), str) else ""
+    if not name:
+        return
+    points = point_buffers.points(name)
+    if len(points) < 2:
+        return
+    style = parse_style(render.get("style", ""))
+    if _apply_stroke(painter, style):
+        _clear_brush(painter)
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        x0, y0 = points[0]
+        path.moveTo(x0, y0)
+        for px, py in points[1:]:
+            path.lineTo(px, py)
+        painter.drawPath(path)
+    # Close-at-release hint: dashed line from last buffer point back
+    # to the first when close_hint evaluates truthy.
+    hint_on = _eval_bool_field(eval_ctx, render.get("close_hint"))
+    if hint_on and len(points) >= 2 and style.stroke is not None:
+        rgba = parse_color(style.stroke)
+        if rgba is not None:
+            from PySide6.QtCore import Qt
+            from PySide6.QtGui import QPen
+            hint_pen = QPen(_qcolor(rgba))
+            hint_pen.setWidthF(1.0)
+            hint_pen.setStyle(Qt.PenStyle.CustomDashLine)
+            hint_pen.setDashPattern([4.0, 4.0])
+            painter.setPen(hint_pen)
+            _clear_brush(painter)
+            sx, sy = points[0]
+            ex, ey = points[-1]
+            painter.drawLine(ex, ey, sx, sy)
+
+
+def _draw_regular_polygon_overlay(painter, render: dict,
+                                  eval_ctx: dict) -> None:
+    from geometry import regular_shapes
+    x1 = _eval_number_field(eval_ctx, render.get("x1"))
+    y1 = _eval_number_field(eval_ctx, render.get("y1"))
+    x2 = _eval_number_field(eval_ctx, render.get("x2"))
+    y2 = _eval_number_field(eval_ctx, render.get("y2"))
+    sides = int(_eval_number_field(eval_ctx, render.get("sides")))
+    if sides <= 0:
+        sides = 5
+    pts = regular_shapes.regular_polygon_points(x1, y1, x2, y2, sides)
+    _draw_closed_polygon_from_points(painter, pts, render)
+
+
+def _draw_star_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    from geometry import regular_shapes
+    x1 = _eval_number_field(eval_ctx, render.get("x1"))
+    y1 = _eval_number_field(eval_ctx, render.get("y1"))
+    x2 = _eval_number_field(eval_ctx, render.get("x2"))
+    y2 = _eval_number_field(eval_ctx, render.get("y2"))
+    n = int(_eval_number_field(eval_ctx, render.get("points")))
+    if n <= 0:
+        n = 5
+    pts = regular_shapes.star_points(x1, y1, x2, y2, n)
+    _draw_closed_polygon_from_points(painter, pts, render)
+
+
+def _draw_partial_selection_overlay(painter, render: dict, eval_ctx: dict,
+                                    document) -> None:
+    """Partial Selection tool overlay: blue handle circles on every
+    selected Path plus a blue rubber-band rectangle in marquee mode."""
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QBrush, QColor, QPen
+    from geometry.element import Path as PathElem
+    from geometry.element import control_points, path_handle_positions
+
+    sel_color = QColor(0, 120, 255)
+    for es in document.selection:
+        try:
+            elem = document.get_element(es.path)
+        except Exception:
+            continue
+        if not isinstance(elem, PathElem):
+            continue
+        anchors = control_points(elem)
+        for ai, (ax, ay) in enumerate(anchors):
+            h_in, h_out = path_handle_positions(elem.d, ai)
+            for h in (h_in, h_out):
+                if h is None:
+                    continue
+                hx, hy = h
+                painter.setPen(QPen(sel_color, 1))
+                _clear_brush(painter)
+                painter.drawLine(ax, ay, hx, hy)
+                painter.setBrush(QBrush(QColor(255, 255, 255)))
+                painter.drawEllipse(QPointF(hx, hy), 3.0, 3.0)
+    # Marquee rectangle.
+    mode = _eval_string_field(eval_ctx, render.get("mode"))
+    if mode == "marquee":
+        sx = _eval_number_field(eval_ctx, render.get("marquee_start_x"))
+        sy = _eval_number_field(eval_ctx, render.get("marquee_start_y"))
+        cx = _eval_number_field(eval_ctx, render.get("marquee_cur_x"))
+        cy = _eval_number_field(eval_ctx, render.get("marquee_cur_y"))
+        rx = min(sx, cx)
+        ry = min(sy, cy)
+        rw = abs(cx - sx)
+        rh = abs(cy - sy)
+        fill_brush = QBrush(QColor(0, 120, 215, int(0.1 * 255)))
+        painter.fillRect(QRectF(rx, ry, rw, rh), fill_brush)
+        painter.setPen(QPen(QColor(0, 120, 215, int(0.8 * 255)), 1))
+        _clear_brush(painter)
+        painter.drawRect(QRectF(rx, ry, rw, rh))
+
+
+def _draw_pen_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    """Pen tool overlay: committed Bezier curves, preview curve to
+    mouse, handle lines + dots, anchor squares, close indicator."""
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen
+
+    name = render.get("buffer") if isinstance(render.get("buffer"), str) else ""
+    if not name:
+        return
+    anchors = anchor_buffers.anchors(name)
+    if not anchors:
+        return
+    mouse_x = _eval_number_field(eval_ctx, render.get("mouse_x"))
+    mouse_y = _eval_number_field(eval_ctx, render.get("mouse_y"))
+    close_radius = max(1.0, _eval_number_field(
+        eval_ctx, render.get("close_radius")))
+    placing = _eval_bool_field(eval_ctx, render.get("placing"))
+
+    # 1. Committed Bezier curves between consecutive anchors.
+    if len(anchors) >= 2:
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        _clear_brush(painter)
+        path = QPainterPath()
+        path.moveTo(anchors[0].x, anchors[0].y)
+        for i in range(1, len(anchors)):
+            prev = anchors[i - 1]
+            curr = anchors[i]
+            path.cubicTo(
+                prev.hx_out, prev.hy_out,
+                curr.hx_in, curr.hy_in,
+                curr.x, curr.y,
+            )
+        painter.drawPath(path)
+
+    # 2. Preview curve from last anchor to mouse.
+    if placing:
+        last = anchors[-1]
+        first = anchors[0]
+        dx = mouse_x - first.x
+        dy = mouse_y - first.y
+        near_start = len(anchors) >= 2 and math.hypot(dx, dy) <= close_radius
+        preview_pen = QPen(QColor(100, 100, 100), 1)
+        preview_pen.setStyle(Qt.PenStyle.CustomDashLine)
+        preview_pen.setDashPattern([4.0, 4.0])
+        painter.setPen(preview_pen)
+        _clear_brush(painter)
+        path = QPainterPath()
+        path.moveTo(last.x, last.y)
+        if near_start:
+            path.cubicTo(last.hx_out, last.hy_out,
+                         first.hx_in, first.hy_in,
+                         first.x, first.y)
+        else:
+            path.cubicTo(last.hx_out, last.hy_out,
+                         mouse_x, mouse_y,
+                         mouse_x, mouse_y)
+        painter.drawPath(path)
+
+    # 3. Handle lines + 4. Anchor squares.
+    sel_color = QColor(0, 120, 255)
+    handle_r = 3.0
+    anchor_half = 5.0
+    for a in anchors:
+        if a.smooth:
+            painter.setPen(QPen(sel_color, 1))
+            _clear_brush(painter)
+            painter.drawLine(a.hx_in, a.hy_in, a.hx_out, a.hy_out)
+            painter.setBrush(QBrush(QColor(255, 255, 255)))
+            painter.setPen(QPen(sel_color, 1))
+            painter.drawEllipse(QPointF(a.hx_in, a.hy_in),
+                                handle_r, handle_r)
+            painter.drawEllipse(QPointF(a.hx_out, a.hy_out),
+                                handle_r, handle_r)
+        painter.setPen(QPen(sel_color, 1))
+        painter.setBrush(QBrush(sel_color))
+        painter.drawRect(QRectF(
+            a.x - anchor_half, a.y - anchor_half,
+            anchor_half * 2, anchor_half * 2,
+        ))
+
+    # 5. Close indicator around the first anchor when cursor is within
+    # close_radius of it.
+    if len(anchors) >= 2:
+        first = anchors[0]
+        dx = mouse_x - first.x
+        dy = mouse_y - first.y
+        if math.hypot(dx, dy) <= close_radius:
+            painter.setPen(QPen(QColor(0, 200, 0), 2))
+            _clear_brush(painter)
+            painter.drawEllipse(
+                QPointF(first.x, first.y),
+                anchor_half + 2.0, anchor_half + 2.0,
+            )
