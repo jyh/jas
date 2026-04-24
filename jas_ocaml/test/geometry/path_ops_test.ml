@@ -207,6 +207,75 @@ let regular_shape_tests = [
     assert (Regular_shapes.star_inner_ratio = 0.4));
 ]
 
+(* Path to PolygonSet adapters — Blob Brush Phase 1.1. *)
+
+let polygon_set_tests = [
+  Alcotest.test_case "path_to_polygon_set_single_square" `Quick (fun () ->
+    let cmds = [
+      MoveTo (0.0, 0.0);
+      LineTo (10.0, 0.0);
+      LineTo (10.0, 10.0);
+      LineTo (0.0, 10.0);
+      ClosePath;
+    ] in
+    let ps = Path_ops.path_to_polygon_set cmds in
+    assert (List.length ps = 1);
+    let ring = List.hd ps in
+    assert (Array.length ring = 4);
+    assert (ring.(0) = (0.0, 0.0));
+    assert (ring.(2) = (10.0, 10.0)));
+
+  Alcotest.test_case "path_to_polygon_set_multiple_subpaths" `Quick (fun () ->
+    let cmds = [
+      MoveTo (0.0, 0.0);  LineTo (10.0, 0.0); LineTo (5.0, 10.0);  ClosePath;
+      MoveTo (20.0, 0.0); LineTo (30.0, 0.0); LineTo (25.0, 10.0); ClosePath;
+    ] in
+    let ps = Path_ops.path_to_polygon_set cmds in
+    assert (List.length ps = 2);
+    let r0 = List.nth ps 0 in
+    let r1 = List.nth ps 1 in
+    assert (Array.length r0 = 3);
+    assert (Array.length r1 = 3);
+    assert (r0.(0) = (0.0, 0.0));
+    assert (r1.(0) = (20.0, 0.0)));
+
+  Alcotest.test_case "polygon_set_to_path_single_ring" `Quick (fun () ->
+    let ring = [| (0.0, 0.0); (10.0, 0.0); (10.0, 10.0); (0.0, 10.0) |] in
+    let cmds = Path_ops.polygon_set_to_path [ring] in
+    assert (List.length cmds = 5);
+    (match List.nth cmds 0 with
+     | MoveTo (0.0, 0.0) -> ()
+     | _ -> assert false);
+    (match List.nth cmds 4 with
+     | ClosePath -> ()
+     | _ -> assert false));
+
+  Alcotest.test_case "polygon_set_to_path_drops_degenerate_rings" `Quick (fun () ->
+    let ps = [
+      [| (0.0, 0.0); (10.0, 0.0); (5.0, 10.0) |];
+      [| (20.0, 0.0); (30.0, 0.0) |];
+    ] in
+    let cmds = Path_ops.polygon_set_to_path ps in
+    assert (List.length cmds = 4));
+
+  Alcotest.test_case "polygon_set_roundtrip_through_path" `Quick (fun () ->
+    let cmds = [
+      MoveTo (0.0, 0.0);
+      LineTo (10.0, 0.0);
+      LineTo (10.0, 10.0);
+      LineTo (0.0, 10.0);
+      ClosePath;
+    ] in
+    let ps1 = Path_ops.path_to_polygon_set cmds in
+    let cmds2 = Path_ops.polygon_set_to_path ps1 in
+    let ps2 = Path_ops.path_to_polygon_set cmds2 in
+    assert (List.length ps1 = List.length ps2);
+    List.iter2 (fun a b ->
+      assert (Array.length a = Array.length b);
+      Array.iter2 (fun pa pb -> assert (pa = pb)) a b
+    ) ps1 ps2);
+]
+
 let () =
   Alcotest.run "Path ops + Regular shapes" [
     "Basic", basic_tests;
@@ -218,4 +287,5 @@ let () =
     "Insert", insert_tests;
     "Liang-Barsky", liang_barsky_tests;
     "Regular shapes", regular_shape_tests;
+    "PolygonSet", polygon_set_tests;
   ]
