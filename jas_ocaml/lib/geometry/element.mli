@@ -380,6 +380,12 @@ type element =
       stroke_gradient : gradient option;
       stroke_brush : string option;
       stroke_brush_overrides : string option;
+      (** Optional [jas:tool-origin] tag identifying the tool that
+          produced this element. Blob Brush sets ["blob_brush"] on
+          its commits so subsequent sweeps can merge / erase into
+          the same element. Preserved by mutations; optional on
+          export. See BLOB_BRUSH_TOOL.md Fill and stroke. *)
+      tool_origin : string option;
     }
   | Text of {
       x : float; y : float;
@@ -574,7 +580,7 @@ val make_circle : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -
 val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
-val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> ?stroke_brush:string option -> ?stroke_brush_overrides:string option -> path_command list -> element
+val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> ?stroke_brush:string option -> ?stroke_brush_overrides:string option -> ?tool_origin:string option -> path_command list -> element
 
 val tspans_from_content : string -> tspan array
 (** Build a one-element [tspan] array that mirrors the given content

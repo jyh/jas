@@ -765,6 +765,7 @@ let recognized_to_element shape template =
                      stroke_gradient = None;
                      stroke_brush = None;
                      stroke_brush_overrides = None;
+                     tool_origin = None;
                    }
 
 let recognize_element element cfg =

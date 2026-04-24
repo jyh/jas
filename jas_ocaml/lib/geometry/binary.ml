@@ -570,6 +570,7 @@ let rec unpack_element v =
              stroke_gradient = None;
              stroke_brush = None;
              stroke_brush_overrides = None;
+             tool_origin = None;
            }
   else if tag = tag_text then
     let content = as_str (List.nth arr 7) in

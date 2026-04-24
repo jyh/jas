@@ -204,6 +204,139 @@ let path_extract_tests = [
     assert (Document.PathMap.mem [0; 0] m#document.selection));
 ]
 
+(* Blob Brush commit effects *)
+
+let seed_blob_brush_sweep () =
+  Point_buffers.clear "blob_brush";
+  (* 6 points spanning 50pt horizontally at y=0. *)
+  for i = 0 to 5 do
+    Point_buffers.push "blob_brush" (float_of_int i *. 10.0) 0.0
+  done
+
+let blob_brush_state_defaults (store : State_store.t) =
+  State_store.set store "fill_color" (`String "#ff0000");
+  State_store.set store "blob_brush_size" (`Float 10.0);
+  State_store.set store "blob_brush_angle" (`Float 0.0);
+  State_store.set store "blob_brush_roundness" (`Float 100.0)
+
+let empty_layer_model () =
+  let layer = Element.Layer {
+    name = "L";
+    children = [||];
+    transform = None; locked = false; opacity = 1.0;
+    visibility = Preview; blend_mode = Normal; mask = None;
+    isolated_blending = false; knockout_group = false;
+  } in
+  let doc = Document.make_document [| layer |] in
+  let m = Model.create () in
+  m#set_document doc;
+  m
+
+let blob_brush_commit_tests = [
+  Alcotest.test_case "commit_painting_creates_tagged_path" `Quick (fun () ->
+    let m = empty_layer_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    blob_brush_state_defaults store;
+    seed_blob_brush_sweep ();
+    run_with_effects store
+      [`Assoc [("doc.blob_brush.commit_painting",
+                `Assoc [("buffer", `String "blob_brush");
+                        ("fidelity_epsilon", `String "5.0");
+                        ("merge_only_with_selection", `String "false");
+                        ("keep_selected", `String "false")])]]
+      ctrl;
+    let children = Document.children_of m#document.layers.(0) in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Element.Path pe ->
+      assert (pe.tool_origin = Some "blob_brush");
+      assert (pe.fill <> None);
+      assert (pe.stroke = None);
+      (* At least MoveTo + some LineTos + ClosePath. *)
+      assert (List.length pe.d >= 3)
+    | _ -> Alcotest.fail "expected Path");
+
+  Alcotest.test_case "commit_erasing_deletes_fully_covered_element" `Quick (fun () ->
+    (* Small 4x2 blob-brush square fully inside the sweep's coverage
+       area (sweep = 50pt horizontal, tip 10pt -> covers y in [-5, 5]). *)
+    let target = Element.Path {
+      d = [ Element.MoveTo (23.0, -1.0);
+            Element.LineTo (27.0, -1.0);
+            Element.LineTo (27.0, 1.0);
+            Element.LineTo (23.0, 1.0);
+            Element.ClosePath ];
+      fill = Some (Element.make_fill (
+        Element.color_rgb 1.0 0.0 0.0));
+      stroke = None; width_points = [];
+      opacity = 1.0; transform = None; locked = false;
+      visibility = Preview; blend_mode = Normal; mask = None;
+      fill_gradient = None; stroke_gradient = None;
+      stroke_brush = None; stroke_brush_overrides = None;
+      tool_origin = Some "blob_brush";
+    } in
+    let layer = Element.Layer {
+      name = "L"; children = [| target |];
+      transform = None; locked = false; opacity = 1.0;
+      visibility = Preview; blend_mode = Normal; mask = None;
+      isolated_blending = false; knockout_group = false;
+    } in
+    let doc = Document.make_document [| layer |] in
+    let m = Model.create () in
+    m#set_document doc;
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    blob_brush_state_defaults store;
+    seed_blob_brush_sweep ();
+    run_with_effects store
+      [`Assoc [("doc.blob_brush.commit_erasing",
+                `Assoc [("buffer", `String "blob_brush");
+                        ("fidelity_epsilon", `String "5.0")])]]
+      ctrl;
+    let children = Document.children_of m#document.layers.(0) in
+    Alcotest.(check int) "erase deletes fully-covered element" 0
+      (Array.length children));
+
+  Alcotest.test_case "commit_erasing_ignores_non_blob_brush" `Quick (fun () ->
+    (* Same square but tool_origin = None. Erase must skip it. *)
+    let target = Element.Path {
+      d = [ Element.MoveTo (20.0, -2.0);
+            Element.LineTo (30.0, -2.0);
+            Element.LineTo (30.0, 2.0);
+            Element.LineTo (20.0, 2.0);
+            Element.ClosePath ];
+      fill = Some (Element.make_fill (
+        Element.color_rgb 1.0 0.0 0.0));
+      stroke = None; width_points = [];
+      opacity = 1.0; transform = None; locked = false;
+      visibility = Preview; blend_mode = Normal; mask = None;
+      fill_gradient = None; stroke_gradient = None;
+      stroke_brush = None; stroke_brush_overrides = None;
+      tool_origin = None;
+    } in
+    let layer = Element.Layer {
+      name = "L"; children = [| target |];
+      transform = None; locked = false; opacity = 1.0;
+      visibility = Preview; blend_mode = Normal; mask = None;
+      isolated_blending = false; knockout_group = false;
+    } in
+    let doc = Document.make_document [| layer |] in
+    let m = Model.create () in
+    m#set_document doc;
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    blob_brush_state_defaults store;
+    seed_blob_brush_sweep ();
+    run_with_effects store
+      [`Assoc [("doc.blob_brush.commit_erasing",
+                `Assoc [("buffer", `String "blob_brush");
+                        ("fidelity_epsilon", `String "5.0")])]]
+      ctrl;
+    let children = Document.children_of m#document.layers.(0) in
+    Alcotest.(check int) "non-blob-brush untouched" 1
+      (Array.length children));
+]
+
 let () =
   Alcotest.run "Yaml_tool_effects" [
     "doc.snapshot", snapshot_tests;
@@ -214,4 +347,5 @@ let () =
     "doc.translate_selection", translate_selection_tests;
     "doc.select_in_rect", select_in_rect_tests;
     "Path extraction", path_extract_tests;
+    "Blob Brush commit", blob_brush_commit_tests;
   ]
