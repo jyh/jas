@@ -1082,6 +1082,41 @@ fn run_doc_effect(
                 path_erase_at_rect(model, last_x, last_y, x, y, eraser_size);
             }
         }
+        "doc.paintbrush.edit_start" => {
+            // Paintbrush edit-gesture target selection. See
+            // PAINTBRUSH_TOOL.md §Edit gesture. If any selected Path
+            // has a flat point within `within` px of (x, y), switches
+            // tool.paintbrush.mode to 'edit' and stashes the target
+            // path + entry flat-index in tool state. Otherwise
+            // leaves tool state untouched (mode stays 'drawing').
+            if let serde_json::Value::Object(args) = spec {
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                let within = eval_number(args.get("within"), store, ctx);
+                path_paintbrush_edit_start(&*model, store, x, y, within);
+            }
+        }
+        "doc.paintbrush.edit_commit" => {
+            // Paintbrush edit-gesture splice. Reads target + entry_idx
+            // stashed by doc.paintbrush.edit_start, computes exit_idx
+            // on the target's flat polyline from the final drag point,
+            // and replaces the affected command range with a cubic-
+            // Bezier fit of the drag buffer. Preserves all non-`d`
+            // attributes. See PAINTBRUSH_TOOL.md §Edit gesture.
+            if let serde_json::Value::Object(args) = spec {
+                let buffer = args.get("buffer").and_then(|v| v.as_str())
+                    .unwrap_or("").to_string();
+                if buffer.is_empty() {
+                    return;
+                }
+                let fit_error = {
+                    let fe = eval_number(args.get("fit_error"), store, ctx);
+                    if fe == 0.0 { 4.0 } else { fe }
+                };
+                let within = eval_number(args.get("within"), store, ctx);
+                path_paintbrush_edit_commit(model, store, &buffer, fit_error, within);
+            }
+        }
         "doc.path.smooth_at_cursor" => {
             // Iterates *selected* unlocked Path elements, finds the
             // contiguous flat-polyline range within `radius` of (x, y),
@@ -2316,6 +2351,241 @@ fn path_erase_at_rect(
         new_doc.selection.clear();
         model.set_document(new_doc);
     }
+}
+
+/// Store a document element-path in a tool scope under `key`.
+/// Shared shape with set_tool_anchor_point_path but generic over
+/// tool id. Keeps paintbrush and anchor_point separate for now.
+fn set_tool_path_generic(
+    store: &mut StateStore,
+    tool_id: &str,
+    key: &str,
+    path: &ElementPath,
+) {
+    let ids: Vec<serde_json::Value> = path
+        .iter()
+        .map(|&i| serde_json::json!(i as u64))
+        .collect();
+    store.set_tool(tool_id, key,
+        serde_json::json!({"__path__": ids}));
+}
+
+/// Read a document element-path stashed by set_tool_path_generic.
+/// Returns None when the field is missing or malformed.
+fn get_tool_path_generic(
+    store: &StateStore,
+    tool_id: &str,
+    key: &str,
+) -> Option<ElementPath> {
+    let v = store.get_tool(tool_id, key);
+    let arr = v.as_object()?.get("__path__")?.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for n in arr {
+        out.push(n.as_u64()? as usize);
+    }
+    Some(out)
+}
+
+/// Implementation of doc.paintbrush.edit_start.
+///
+/// Iterates the document's selected Path elements. For each, flattens
+/// the path and finds the closest flat point to (x, y). The selected
+/// Path whose closest flat point is nearest — and within `within` px
+/// — becomes the edit target; its flat-point index is the entry_idx.
+/// Stashes target path + entry_idx + mode='edit' into tool state.
+/// No-op when no selected Path is within range.
+fn path_paintbrush_edit_start(
+    model: &Model,
+    store: &mut StateStore,
+    x: f64, y: f64, within: f64,
+) {
+    use crate::geometry::element::Element;
+    use crate::geometry::path_ops::flatten_with_cmd_map;
+
+    let within_sq = within * within;
+    // (path, entry_idx, dsq)
+    let mut best: Option<(ElementPath, usize, f64)> = None;
+
+    for es in &model.document().selection {
+        let elem = match model.document().get_element(&es.path) {
+            Some(e) => e,
+            None => continue,
+        };
+        if elem.locked() {
+            continue;
+        }
+        let path_elem = match elem {
+            Element::Path(pe) => pe,
+            _ => continue,
+        };
+        if path_elem.d.len() < 2 {
+            continue;
+        }
+        let (flat, _cmd_map) = flatten_with_cmd_map(&path_elem.d);
+        if flat.is_empty() {
+            continue;
+        }
+        for (i, &(fx, fy)) in flat.iter().enumerate() {
+            let dx = fx - x;
+            let dy = fy - y;
+            let dsq = dx * dx + dy * dy;
+            if dsq > within_sq {
+                continue;
+            }
+            match &best {
+                Some((_, _, bdsq)) if *bdsq <= dsq => {}
+                _ => best = Some((es.path.clone(), i, dsq)),
+            }
+        }
+    }
+
+    if let Some((path, entry_idx, _)) = best {
+        store.set_tool("paintbrush", "mode",
+            serde_json::json!("edit"));
+        set_tool_path_generic(store, "paintbrush", "edit_target_path", &path);
+        store.set_tool("paintbrush", "edit_entry_idx",
+            serde_json::json!(entry_idx as u64));
+    }
+}
+
+/// Implementation of doc.paintbrush.edit_commit.
+///
+/// Reads `edit_target_path` + `edit_entry_idx` from tool state, finds
+/// the exit_idx on the target's flat polyline closest to the buffer's
+/// last point, and if within range, splices fit_curve output over the
+/// target's command range [c0..c1]. Preserves all non-`d` attributes
+/// (fill, stroke, stroke-width, stroke_brush, stroke_brush_overrides).
+/// No-op when target missing, exit out-of-range, or range degenerate.
+fn path_paintbrush_edit_commit(
+    model: &mut Model,
+    store: &StateStore,
+    buffer_name: &str,
+    fit_error: f64,
+    within: f64,
+) {
+    use crate::algorithms::fit_curve::fit_curve;
+    use crate::geometry::element::{Element, PathCommand, PathElem};
+    use crate::geometry::path_ops::{cmd_start_point, flatten_with_cmd_map};
+
+    let Some(target_path) = get_tool_path_generic(
+        store, "paintbrush", "edit_target_path") else {
+        return;
+    };
+    let entry_idx = match store.get_tool("paintbrush", "edit_entry_idx") {
+        serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) as usize,
+        _ => return,
+    };
+
+    let drag_points: Vec<(f64, f64)> = super::point_buffers::with_points(
+        buffer_name, |pts| pts.to_vec());
+    if drag_points.len() < 2 {
+        return;
+    }
+
+    let doc = model.document().clone();
+    let target_elem = match doc.get_element(&target_path) {
+        Some(e) => e,
+        None => return,
+    };
+    if target_elem.locked() {
+        return;
+    }
+    let target_path_elem = match target_elem {
+        Element::Path(pe) => pe.clone(),
+        _ => return,
+    };
+    if target_path_elem.d.len() < 2 {
+        return;
+    }
+
+    let (flat, cmd_map) = flatten_with_cmd_map(&target_path_elem.d);
+    if flat.is_empty() || entry_idx >= flat.len() {
+        return;
+    }
+
+    // Exit index: closest flat point to the final drag position.
+    let (last_x, last_y) = *drag_points.last().unwrap();
+    let within_sq = within * within;
+    let mut best: Option<(usize, f64)> = None;
+    for (i, &(fx, fy)) in flat.iter().enumerate() {
+        let dx = fx - last_x;
+        let dy = fy - last_y;
+        let dsq = dx * dx + dy * dy;
+        match best {
+            Some((_, bdsq)) if bdsq <= dsq => {}
+            _ => best = Some((i, dsq)),
+        }
+    }
+    let (exit_idx, exit_dsq) = match best {
+        Some(t) => t,
+        None => return,
+    };
+    if exit_dsq > within_sq {
+        return;
+    }
+    if exit_idx == entry_idx {
+        return; // degenerate range
+    }
+
+    let lo_flat = entry_idx.min(exit_idx);
+    let hi_flat = entry_idx.max(exit_idx);
+    let c0 = cmd_map[lo_flat];
+    let c1 = cmd_map[hi_flat];
+    if c0 >= c1 || c1 >= target_path_elem.d.len() {
+        return;
+    }
+
+    // Prepend c0's start-point to the buffer, reversing the drag
+    // direction when the user dragged back-to-front so the splice
+    // matches the path's flow.
+    let start_point = cmd_start_point(&target_path_elem.d, c0);
+    let drag_iter: Vec<(f64, f64)> = if exit_idx < entry_idx {
+        drag_points.iter().rev().cloned().collect()
+    } else {
+        drag_points.clone()
+    };
+    let mut points_to_fit = vec![start_point];
+    points_to_fit.extend_from_slice(&drag_iter);
+    if points_to_fit.len() < 2 {
+        return;
+    }
+
+    let segments = fit_curve(&points_to_fit, fit_error);
+    if segments.is_empty() {
+        return;
+    }
+
+    // Splice: target[..c0] + fit output + target[c1+1..]
+    let mut new_cmds: Vec<PathCommand> = Vec::new();
+    for cmd in &target_path_elem.d[..c0] {
+        new_cmds.push(*cmd);
+    }
+    for seg in &segments {
+        new_cmds.push(PathCommand::CurveTo {
+            x1: seg.2, y1: seg.3,
+            x2: seg.4, y2: seg.5,
+            x: seg.6, y: seg.7,
+        });
+    }
+    for cmd in &target_path_elem.d[c1 + 1..] {
+        new_cmds.push(*cmd);
+    }
+
+    // Preserve all non-`d` attributes per §Edit gesture preservation
+    // rules.
+    let new_elem = Element::Path(PathElem {
+        d: new_cmds,
+        fill: target_path_elem.fill,
+        stroke: target_path_elem.stroke,
+        width_points: target_path_elem.width_points.clone(),
+        common: target_path_elem.common.clone(),
+        fill_gradient: None,
+        stroke_gradient: None,
+        stroke_brush: target_path_elem.stroke_brush.clone(),
+        stroke_brush_overrides: target_path_elem.stroke_brush_overrides.clone(),
+    });
+    let new_doc = doc.replace_element(&target_path, new_elem);
+    model.set_document(new_doc);
 }
 
 /// Implementation of doc.path.smooth_at_cursor.
@@ -3790,6 +4060,224 @@ mod tests {
         let s = p.stroke.as_ref().expect("expected stroke");
         assert_eq!(s.width, 12.0);
         assert_eq!(p.stroke_brush_overrides.as_deref(), Some("{\"size\":12.0}"));
+    }
+
+    // ── doc.paintbrush.edit_start / edit_commit ──
+    //
+    // Tests cover the Paintbrush edit-gesture per PAINTBRUSH_TOOL.md
+    // §Edit gesture: target selection at mousedown, splice at mouseup,
+    // preservation rules, edge cases (no-selection, too-far, degenerate).
+
+    fn make_model_with_selected_path() -> Model {
+        use crate::geometry::element::{LayerElem, PathElem, StrokeAlign, LineCap, LineJoin, Arrowhead, ArrowAlign};
+        use crate::document::document::{Document, ElementSelection};
+        // Path: MoveTo(0,0) LineTo(50,0) LineTo(100,0).
+        let path_elem = Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 50.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 0.0 },
+            ],
+            fill: None,
+            stroke: Some(Stroke {
+                color: Color::BLACK, width: 1.0,
+                linecap: LineCap::Butt, linejoin: LineJoin::Miter,
+                miter_limit: 10.0, align: StrokeAlign::Center,
+                dash_pattern: [0.0; 6], dash_len: 0,
+                start_arrow: Arrowhead::None, end_arrow: Arrowhead::None,
+                start_arrow_scale: 100.0, end_arrow_scale: 100.0,
+                arrow_align: ArrowAlign::TipAtEnd, opacity: 1.0,
+            }),
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: Some("mylib/flat_1".to_string()),
+            stroke_brush_overrides: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(path_elem)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn edit_start_with_selection_within_range_sets_mode() {
+        let mut store = StateStore::new();
+        let mut model = make_model_with_selected_path();
+        // Press near middle of the path (50, 0). Within 12 px.
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_start": {
+                "x": 50, "y": 0, "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(store.get_tool("paintbrush", "mode"),
+            &serde_json::json!("edit"));
+        // entry_idx is some non-zero flat index near the press.
+        let entry = store.get_tool("paintbrush", "edit_entry_idx");
+        assert!(entry.as_u64().is_some());
+    }
+
+    #[test]
+    fn edit_start_too_far_from_path_is_noop() {
+        let mut store = StateStore::new();
+        let mut model = make_model_with_selected_path();
+        // Press far from the path.
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_start": {
+                "x": 500, "y": 500, "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // mode was untouched — default is Null.
+        assert_eq!(store.get_tool("paintbrush", "mode"),
+            &serde_json::Value::Null);
+    }
+
+    #[test]
+    fn edit_start_with_empty_selection_is_noop() {
+        let mut store = StateStore::new();
+        // Empty model, no selection.
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_start": {
+                "x": 0, "y": 0, "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(store.get_tool("paintbrush", "mode"),
+            &serde_json::Value::Null);
+    }
+
+    #[test]
+    fn edit_commit_splices_middle_and_preserves_brush() {
+        // Scenario: press at (50, 0), drag down to (75, 40), release
+        // at (100, 0). Splice replaces the second-line-segment range
+        // with a curve that bulges downward. jas:stroke-brush must be
+        // preserved.
+        let mut store = StateStore::new();
+        let mut model = make_model_with_selected_path();
+
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_start": {
+                "x": 50, "y": 0, "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(store.get_tool("paintbrush", "mode"),
+            &serde_json::json!("edit"));
+
+        super::super::point_buffers::clear("paintbrush");
+        super::super::point_buffers::push("paintbrush", 50.0, 0.0);
+        super::super::point_buffers::push("paintbrush", 75.0, 40.0);
+        super::super::point_buffers::push("paintbrush", 100.0, 0.0);
+
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_commit": {
+                "buffer": "paintbrush",
+                "fit_error": "4",
+                "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+
+        // Verify path was modified: d should no longer be exactly the
+        // 3 original commands (MoveTo + 2 LineTos).
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        let p = match &*children[0] {
+            Element::Path(pe) => pe,
+            _ => panic!("expected Path"),
+        };
+        // Preservation: jas:stroke-brush kept.
+        assert_eq!(p.stroke_brush.as_deref(), Some("mylib/flat_1"));
+        // Splice occurred: the path now contains at least one CurveTo.
+        let has_curve = p.d.iter().any(|c| matches!(c, PathCommand::CurveTo {..}));
+        assert!(has_curve, "expected splice to introduce at least one CurveTo");
+    }
+
+    #[test]
+    fn edit_commit_without_edit_start_is_noop() {
+        // Without edit_start priming, there's no target/entry_idx in
+        // tool state. The commit must gracefully no-op.
+        let mut store = StateStore::new();
+        let mut model = make_model_with_selected_path();
+        let orig_cmds = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Path(pe) => pe.d.clone(),
+            _ => panic!(),
+        };
+        super::super::point_buffers::clear("paintbrush");
+        super::super::point_buffers::push("paintbrush", 0.0, 0.0);
+        super::super::point_buffers::push("paintbrush", 10.0, 10.0);
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_commit": {
+                "buffer": "paintbrush",
+                "fit_error": "4",
+                "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let new_cmds = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Path(pe) => pe.d.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(orig_cmds, new_cmds, "edit_commit without target should not modify path");
+    }
+
+    #[test]
+    fn edit_commit_exit_too_far_aborts() {
+        // Edit starts at (50, 0), but the drag ends at (500, 500)
+        // which is > within from the target. Commit should abort.
+        let mut store = StateStore::new();
+        let mut model = make_model_with_selected_path();
+        let orig_cmds = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Path(pe) => pe.d.clone(),
+            _ => panic!(),
+        };
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_start": {
+                "x": 50, "y": 0, "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(store.get_tool("paintbrush", "mode"),
+            &serde_json::json!("edit"));
+        super::super::point_buffers::clear("paintbrush");
+        super::super::point_buffers::push("paintbrush", 50.0, 0.0);
+        super::super::point_buffers::push("paintbrush", 500.0, 500.0);
+        let effects = vec![serde_json::json!({
+            "doc.paintbrush.edit_commit": {
+                "buffer": "paintbrush",
+                "fit_error": "4",
+                "within": 12
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let new_cmds = match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Path(pe) => pe.d.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(orig_cmds, new_cmds,
+            "exit beyond within-distance must abort the splice");
     }
 
     #[test]
