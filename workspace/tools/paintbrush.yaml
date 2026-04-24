@@ -7,11 +7,20 @@
 # renderer outlines it as a brushed stroke. When state.stroke_brush is
 # null, behaves identically to Pencil — produces a plain native stroke.
 #
+# Two commit paths:
+#   drawing — new Path from the buffer (see doc.add_path_from_buffer
+#             in effects.rs).
+#   edit    — splice the drag buffer into an already-selected Path
+#             (see doc.paintbrush.edit_commit). Option/Alt at press
+#             triggers edit mode when a selected Path is within
+#             paintbrush_edit_within px; otherwise falls through to
+#             drawing mode.
+#
 # Tool options (per-document state.paintbrush_*) drive:
 #   - fit_error via fidelity → fit_error mapping
 #     [0.5, 2.5, 5, 7.5, 10] at ticks [1..5]; default tick 3 = 5.0.
 #   - optional state.fill_color fill on commit via fill_new_strokes.
-#   - Option/Alt-drag edit-existing-path gesture (Phase 1.3).
+#   - Option/Alt-drag edit-existing-path gesture.
 #   - post-commit selection via keep_selected.
 #
 # See transcripts/PAINTBRUSH_TOOL.md for the full spec.
@@ -25,7 +34,14 @@ tool_options_dialog: "paintbrush_tool_options"
 state:
   mode:
     default: "idle"
-    enum: [idle, drawing]
+    enum: [idle, drawing, edit]
+  # doc.paintbrush.edit_start writes these when it finds a target
+  # Path whose closest flat point is within paintbrush_edit_within
+  # of the press. edit_commit reads them on mouseup.
+  #   edit_target_path   Path value (serialized __path__ dict)
+  #   edit_entry_idx     number (flat-polyline index on the target)
+  edit_target_path: { default: null }
+  edit_entry_idx: { default: 0 }
 
 handlers:
 
@@ -42,9 +58,18 @@ handlers:
     - "buffer.clear": { buffer: "paintbrush" }
     - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
     - set: { tool.paintbrush.mode: "'drawing'" }
+    # Alt + edit_selected_paths opt-in: try to promote to edit mode.
+    # edit_start leaves mode='drawing' when no selected Path is
+    # within range, so it's safe to fall through.
+    - if: "event.modifiers.alt && state.paintbrush_edit_selected_paths"
+      then:
+        - "doc.paintbrush.edit_start":
+            x: "event.x"
+            y: "event.y"
+            within: "state.paintbrush_edit_within"
 
   on_mousemove:
-    - if: "tool.paintbrush.mode == 'drawing'"
+    - if: "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'"
       then:
         - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
 
@@ -62,6 +87,13 @@ handlers:
             stroke_brush: "state.stroke_brush"
             stroke_brush_overrides: "state.stroke_brush_overrides"
             fill_new_strokes: "state.paintbrush_fill_new_strokes"
+    - if: "tool.paintbrush.mode == 'edit'"
+      then:
+        - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+        - "doc.paintbrush.edit_commit":
+            buffer: "paintbrush"
+            fit_error: "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5"
+            within: "state.paintbrush_edit_within"
     - set: { tool.paintbrush.mode: "'idle'" }
     - "buffer.clear": { buffer: "paintbrush" }
 
@@ -75,7 +107,7 @@ handlers:
 # the smoothed fit_curve output, then outlined by the brush at render
 # time.
 overlay:
-  if: "tool.paintbrush.mode == 'drawing'"
+  if: "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'"
   render:
     type: buffer_polyline
     buffer: "paintbrush"

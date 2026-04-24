@@ -16915,8 +16915,15 @@
           "default": "idle",
           "enum": [
             "idle",
-            "drawing"
+            "drawing",
+            "edit"
           ]
+        },
+        "edit_target_path": {
+          "default": null
+        },
+        "edit_entry_idx": {
+          "default": 0
         }
       },
       "handlers": {
@@ -16964,11 +16971,23 @@
             "set": {
               "tool.paintbrush.mode": "'drawing'"
             }
+          },
+          {
+            "if": "event.modifiers.alt && state.paintbrush_edit_selected_paths",
+            "then": [
+              {
+                "doc.paintbrush.edit_start": {
+                  "x": "event.x",
+                  "y": "event.y",
+                  "within": "state.paintbrush_edit_within"
+                }
+              }
+            ]
           }
         ],
         "on_mousemove": [
           {
-            "if": "tool.paintbrush.mode == 'drawing'",
+            "if": "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'",
             "then": [
               {
                 "buffer.push": {
@@ -17003,6 +17022,25 @@
             ]
           },
           {
+            "if": "tool.paintbrush.mode == 'edit'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "paintbrush",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              },
+              {
+                "doc.paintbrush.edit_commit": {
+                  "buffer": "paintbrush",
+                  "fit_error": "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5",
+                  "within": "state.paintbrush_edit_within"
+                }
+              }
+            ]
+          },
+          {
             "set": {
               "tool.paintbrush.mode": "'idle'"
             }
@@ -17032,7 +17070,7 @@
         ]
       },
       "overlay": {
-        "if": "tool.paintbrush.mode == 'drawing'",
+        "if": "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'",
         "render": {
           "type": "buffer_polyline",
           "buffer": "paintbrush",
