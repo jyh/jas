@@ -1343,6 +1343,7 @@ impl AppState {
             self.boolean_panel.precision,
             &self.artboards_panel_selection,
             tab.model.mask_isolation_path.as_deref(),
+            &self.brush_libraries,
         );
 
         // Draw tool overlay

@@ -7,12 +7,125 @@ use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
+use crate::algorithms::calligraphic_outline::{calligraphic_outline, CalligraphicBrush};
 use crate::document::artboard::{Artboard, ArtboardFill};
 use crate::document::document::Document;
 use crate::geometry::element::Visibility;
 use crate::geometry::element::*;
 use crate::geometry::measure::path_point_at_offset;
 use crate::tools::tool::HANDLE_DRAW_SIZE;
+
+// ---------------------------------------------------------------------------
+// Brush library lookup (thread-local, set for the duration of render())
+// ---------------------------------------------------------------------------
+//
+// The Calligraphic outliner needs brush parameters keyed by the
+// jas:stroke-brush "<library>/<brush>" slug carried on each PathElem.
+// Threading brush_libraries through every canvas helper signature would
+// be invasive in this 2000-line file, so we mirror the thread_local
+// pattern used by `interpreter::doc_primitives` for Document.
+
+thread_local! {
+    static CURRENT_BRUSH_LIBS: RefCell<serde_json::Value> =
+        RefCell::new(serde_json::Value::Null);
+}
+
+/// Install `libs` as the current render's brush library registry.
+/// Returns a guard whose Drop restores the previous registry.
+pub struct BrushLibsGuard {
+    prior: serde_json::Value,
+}
+
+impl Drop for BrushLibsGuard {
+    fn drop(&mut self) {
+        let prior = std::mem::replace(&mut self.prior, serde_json::Value::Null);
+        CURRENT_BRUSH_LIBS.with(|c| *c.borrow_mut() = prior);
+    }
+}
+
+pub fn register_brush_libraries(libs: serde_json::Value) -> BrushLibsGuard {
+    let prior = CURRENT_BRUSH_LIBS.with(|c| c.replace(libs));
+    BrushLibsGuard { prior }
+}
+
+/// Look up a brush by its "<library>/<brush>" slug in the current
+/// thread-local registry. Returns None if the slug is missing or
+/// malformed, so the caller can fall back to the plain native stroke
+/// render (null-on-missing per BRUSHES.md §Selection model).
+fn lookup_brush(slug: &str) -> Option<serde_json::Value> {
+    let sep = slug.find('/')?;
+    let (lib_id, brush_slug) = slug.split_at(sep);
+    let brush_slug = &brush_slug[1..]; // skip the '/'
+    CURRENT_BRUSH_LIBS.with(|c| {
+        let libs = c.borrow();
+        let lib = libs.get(lib_id)?;
+        let brushes = lib.get("brushes")?.as_array()?;
+        brushes
+            .iter()
+            .find(|b| b.get("slug").and_then(|v| v.as_str()) == Some(brush_slug))
+            .cloned()
+    })
+}
+
+/// If the brush JSON describes a Calligraphic brush, extract its
+/// angle / roundness / size into the native struct. Other brush types
+/// return None in Phase 1 — the renderer falls back to plain stroke
+/// (matches BRUSHES.md Phase 1 "Calligraphic only" scope).
+fn calligraphic_from_json(brush: &serde_json::Value) -> Option<CalligraphicBrush> {
+    if brush.get("type").and_then(|v| v.as_str()) != Some("calligraphic") {
+        return None;
+    }
+    Some(CalligraphicBrush {
+        angle: brush.get("angle").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        roundness: brush.get("roundness").and_then(|v| v.as_f64()).unwrap_or(100.0),
+        size: brush.get("size").and_then(|v| v.as_f64()).unwrap_or(5.0),
+    })
+}
+
+/// Draw `elem` as a brushed stroke: compute the Calligraphic outline
+/// polygon and fill it with the element's stroke colour. Returns true
+/// if the brushed render succeeded; false when the brush is missing or
+/// not Calligraphic (the caller then falls back to the plain stroke
+/// render).
+fn draw_brushed_path(
+    ctx: &CanvasRenderingContext2d,
+    elem: &PathElem,
+    outline: bool,
+) -> bool {
+    if outline {
+        // Outline (wireframe) mode ignores brushes; caller handles.
+        return false;
+    }
+    let slug = match elem.stroke_brush.as_deref() {
+        Some(s) => s,
+        None => return false,
+    };
+    let brush = match lookup_brush(slug) {
+        Some(b) => b,
+        None => return false, // null-on-missing fallback
+    };
+    let cal = match calligraphic_from_json(&brush) {
+        Some(c) => c,
+        None => return false, // non-Calligraphic types → plain stroke fallback
+    };
+    let pts = calligraphic_outline(&elem.d, &cal);
+    if pts.len() < 3 {
+        return true; // degenerate — emit nothing, but we did "handle" it
+    }
+    let color = match elem.stroke.as_ref() {
+        Some(s) => css_color(&s.color),
+        None => "#000000".to_string(),
+    };
+    ctx.set_fill_style_str(&color);
+    ctx.begin_path();
+    ctx.move_to(pts[0].0, pts[0].1);
+    for p in &pts[1..] {
+        ctx.line_to(p.0, p.1);
+    }
+    ctx.close_path();
+    ctx.fill();
+    true
+}
 
 // ---------------------------------------------------------------------------
 // Color conversion
@@ -939,6 +1052,22 @@ fn draw_element_body(
                 ctx.set_global_alpha(base_alpha * fill_op);
                 ctx.fill();
             }
+            // Brushed stroke — when stroke_brush resolves to a known
+            // Calligraphic brush, draw its variable-width outline as a
+            // filled polygon using the element's stroke colour. Skips
+            // the native stroke / arrowhead pipeline below. See
+            // BRUSHES.md §Stroke styling interaction.
+            if !outline && e.stroke_brush.is_some() {
+                ctx.set_global_alpha(base_alpha * stroke_op);
+                if draw_brushed_path(ctx, e, outline) {
+                    // Handled; skip native stroke + arrowheads for this
+                    // path (the brush renderer owns the entire stroke
+                    // appearance).
+                    return;
+                }
+                // Fall through to native stroke when the slug didn't
+                // resolve or the brush type isn't supported yet.
+            }
             // Stroke uses a shortened path to accommodate arrowheads
             if outline || e.stroke.is_some() {
                 let shortened = if !outline {
@@ -1792,7 +1921,12 @@ pub fn render(
     precision: f64,
     panel_selected_artboards: &[String],
     mask_isolation_path: Option<&[usize]>,
+    brush_libraries: &serde_json::Value,
 ) {
+    // Install the brush registry for this render. Dropped on exit
+    // (guard restores the prior value), so nested renders nest safely.
+    let _brush_guard = register_brush_libraries(brush_libraries.clone());
+
     // Layer 1: canvas background.
     ctx.set_fill_style_str("white");
     ctx.fill_rect(0.0, 0.0, width, height);
