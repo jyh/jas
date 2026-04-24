@@ -568,6 +568,8 @@ let rec unpack_element v =
            opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
              fill_gradient = None;
              stroke_gradient = None;
+             stroke_brush = None;
+             stroke_brush_overrides = None;
            }
   else if tag = tag_text then
     let content = as_str (List.nth arr 7) in

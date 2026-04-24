@@ -1,0 +1,17 @@
+{
+  "name": "Default Brushes",
+  "description": "Starter brush library shipped with the application. Calligraphic seed for Phase 1; other brush types added as renderer support lands.",
+  "brushes": [
+    {
+      "name": "5 pt. Oval",
+      "slug": "oval_5pt",
+      "type": "calligraphic",
+      "angle": 0,
+      "roundness": 100,
+      "size": 5,
+      "angle_variation": { "mode": "fixed" },
+      "roundness_variation": { "mode": "fixed" },
+      "size_variation": { "mode": "fixed" }
+    }
+  ]
+}

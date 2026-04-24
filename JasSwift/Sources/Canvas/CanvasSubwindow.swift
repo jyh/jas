@@ -13,6 +13,63 @@ public struct CanvasBoundingBox: Equatable {
     }
 }
 
+// MARK: - Brush registry
+//
+// drawElementBody needs brush parameters keyed by the strokeBrush
+// "<library>/<brush>" slug carried on each Path. Threading
+// brushLibraries through every drawing helper signature would be
+// invasive; the canvas is single-threaded UI, so a file-local
+// `var` suffices. AppState updates this before each render.
+
+private var _currentBrushLibraries: [String: Any] = [:]
+
+public func setCanvasBrushLibraries(_ libs: [String: Any]) {
+    _currentBrushLibraries = libs
+}
+
+private func lookupBrush(_ slug: String) -> [String: Any]? {
+    guard let sep = slug.firstIndex(of: "/") else { return nil }
+    let libId = String(slug[..<sep])
+    let brushSlug = String(slug[slug.index(after: sep)...])
+    guard let lib = _currentBrushLibraries[libId] as? [String: Any],
+          let brushes = lib["brushes"] as? [[String: Any]] else {
+        return nil
+    }
+    return brushes.first { ($0["slug"] as? String) == brushSlug }
+}
+
+private func calligraphicFromJson(_ brush: [String: Any]) -> CalligraphicBrush? {
+    guard (brush["type"] as? String) == "calligraphic" else { return nil }
+    let angle = (brush["angle"] as? Double) ?? 0.0
+    let roundness = (brush["roundness"] as? Double) ?? 100.0
+    let size = (brush["size"] as? Double) ?? 5.0
+    return CalligraphicBrush(angle: angle, roundness: roundness, size: size)
+}
+
+/// Render a brushed Path: compute the Calligraphic outline polygon
+/// and fill it with the path's stroke colour. Returns true if the
+/// brushed render handled the path; false to fall back to the plain
+/// stroke pipeline (missing brush, non-Calligraphic type).
+private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
+    guard let slug = v.strokeBrush, let brush = lookupBrush(slug) else {
+        return false
+    }
+    guard let cal = calligraphicFromJson(brush) else { return false }
+    let pts = calligraphicOutline(v.d, cal)
+    if pts.count < 3 { return true }
+    let color = v.stroke.map { cgColor($0.color) }
+        ?? CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+    ctx.setFillColor(color)
+    ctx.beginPath()
+    ctx.move(to: CGPoint(x: pts[0].0, y: pts[0].1))
+    for p in pts.dropFirst() {
+        ctx.addLine(to: CGPoint(x: p.0, y: p.1))
+    }
+    ctx.closePath()
+    ctx.fillPath()
+    return true
+}
+
 // MARK: - Element drawing
 
 private func nsColor(_ c: Color) -> NSColor {
@@ -925,6 +982,16 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
             buildPath(ctx, v.d)
             applyOutlineStyle(ctx)
             ctx.strokePath()
+        } else if v.strokeBrush != nil && drawBrushedPath(ctx, v) {
+            // Brushed render handled the entire stroke appearance
+            // (BRUSHES.md §Stroke styling interaction). Fill the path
+            // first if it has a fill, then return — skip native stroke
+            // and arrowheads.
+            if v.fill != nil {
+                setFill(ctx, v.fill)
+                buildPath(ctx, v.d)
+                ctx.fillPath()
+            }
         } else {
             // Shorten path for arrowheads
             var strokeCmds = v.d

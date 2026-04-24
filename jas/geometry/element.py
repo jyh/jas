@@ -866,6 +866,12 @@ class Path(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    # Active brush reference as "<library_slug>/<brush_slug>", or None
+    # for plain native-stroke. Consumed by the canvas renderer's brush
+    # dispatch. See transcripts/BRUSHES.md §Stroke styling interaction.
+    stroke_brush: str | None = None
+    # Per-instance brush parameter overrides as compact JSON.
+    stroke_brush_overrides: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
@@ -1284,6 +1290,22 @@ def with_stroke(element: Element, stroke: Stroke | None) -> Element:
         return element
     if hasattr(element, 'stroke'):
         return dataclasses.replace(element, stroke=stroke)
+    return element
+
+
+def with_stroke_brush(element: Element, slug: str | None) -> Element:
+    """Return a copy of element with stroke_brush replaced. Path-only;
+    other element types are returned unchanged. See BRUSHES.md."""
+    if isinstance(element, Path):
+        return dataclasses.replace(element, stroke_brush=slug)
+    return element
+
+
+def with_stroke_brush_overrides(element: Element, overrides: str | None) -> Element:
+    """Return a copy of element with stroke_brush_overrides replaced.
+    Path-only."""
+    if isinstance(element, Path):
+        return dataclasses.replace(element, stroke_brush_overrides=overrides)
     return element
 
 

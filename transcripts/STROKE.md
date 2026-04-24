@@ -32,6 +32,17 @@ Several fields are conditionally disabled:
 - All six dash / gap inputs are disabled while the Dashed Line
   checkbox is off. Their values persist and reappear when
   re-enabled.
+- When `state.stroke_brush != null`, the brush takes over most of
+  the native stroke pipeline. The cap, join (and miter limit), dash
+  (and the six dash/gap inputs), arrowheads (start/end + scale +
+  link + arrow alignment), and profile (+ flip + reset) controls all
+  disable. `WEIGHT_INPUT`, the active stroke colour, and
+  `ALIGN_*_BUTTON` (for Calligraphic and Bristle brush types only)
+  remain live since the brush renderer consumes them. Disabled
+  values persist and reappear when the brush is removed via the
+  Brushes panel's `REMOVE_BRUSH_STROKE_BUTTON`. See
+  `transcripts/BRUSHES.md` § Stroke styling interaction for the
+  per-brush-type breakdown.
 
 ## Controls
 

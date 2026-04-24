@@ -1708,7 +1708,11 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       let panel_defaults = Workspace_loader.panel_state_defaults ws content_id in
       let icons_obj = Workspace_loader.icons ws in
       let swatch_libs = Workspace_loader.swatch_libraries ws in
-      let data_obj = `Assoc [("swatch_libraries", swatch_libs)] in
+      let brush_libs = Workspace_loader.brush_libraries ws in
+      let data_obj = `Assoc [
+        ("swatch_libraries", swatch_libs);
+        ("brush_libraries", brush_libs);
+      ] in
       let active_document_view =
         Active_document_view.build (get_model ())
       in

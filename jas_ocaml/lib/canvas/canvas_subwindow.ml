@@ -13,6 +13,104 @@ type bounding_box = {
 let make_bounding_box ?(x = 0.0) ?(y = 0.0) ?(width = 800.0) ?(height = 600.0) () =
   { bbox_x = x; bbox_y = y; bbox_width = width; bbox_height = height }
 
+(* ── Brush library registry ──────────────────────────────────
+   The Path renderer needs brush parameters keyed by the
+   <library>/<brush> slug carried on Path.stroke_brush. Threading
+   brush_libraries through every drawing helper would be invasive,
+   so a module-local mutable ref serves as the registry — same
+   pragmatic pattern Swift's CanvasSubwindow uses. App startup
+   calls set_brush_libraries with the loaded workspace data. *)
+
+let _brush_libraries : Yojson.Safe.t ref = ref `Null
+
+let set_brush_libraries (libs : Yojson.Safe.t) : unit =
+  _brush_libraries := libs
+
+(* Wire the standalone Brush_registry as the source of truth.
+   yaml_tool_effects.brush.* effects update Brush_registry; the
+   canvas registry mirrors. App startup also calls
+   set_brush_libraries directly with the loaded workspace data;
+   that flows through Brush_registry too via the symmetry below. *)
+let () = Brush_registry.on_change (fun libs -> _brush_libraries := libs)
+
+(* Look up a brush by "<library>/<brush>" slug. Returns None for
+   missing slug, malformed input, or unknown library/brush. *)
+let lookup_brush (slug : string) : Yojson.Safe.t option =
+  match String.index_opt slug '/' with
+  | None -> None
+  | Some sep ->
+    let lib_id = String.sub slug 0 sep in
+    let brush_slug = String.sub slug (sep + 1) (String.length slug - sep - 1) in
+    (match !_brush_libraries with
+     | `Assoc libs ->
+       (match List.assoc_opt lib_id libs with
+        | Some (`Assoc lib_fields) ->
+          (match List.assoc_opt "brushes" lib_fields with
+           | Some (`List brushes) ->
+             List.find_opt (fun b ->
+               match b with
+               | `Assoc fields ->
+                 (match List.assoc_opt "slug" fields with
+                  | Some (`String s) -> s = brush_slug
+                  | _ -> false)
+               | _ -> false
+             ) brushes
+           | _ -> None)
+        | _ -> None)
+     | _ -> None)
+
+(* Extract Calligraphic brush params from JSON. Non-Calligraphic
+   types return None (Phase 1 "Calligraphic only" scope). *)
+let calligraphic_from_json (brush : Yojson.Safe.t) : Calligraphic_outline.t option =
+  match brush with
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "calligraphic") ->
+       let get_num key default =
+         match List.assoc_opt key fields with
+         | Some (`Int n) -> float_of_int n
+         | Some (`Float f) -> f
+         | _ -> default
+       in
+       Some Calligraphic_outline.{
+         angle = get_num "angle" 0.0;
+         roundness = get_num "roundness" 100.0;
+         size = get_num "size" 5.0;
+       }
+     | _ -> None)
+  | _ -> None
+
+(* Render a brushed Path: compute the Calligraphic outline polygon
+   and fill it with the path's stroke colour. Returns true if
+   handled; false to fall back to plain stroke (missing brush,
+   non-Calligraphic type). *)
+let draw_brushed_path cr (d : Element.path_command list)
+    (stroke : Element.stroke option)
+    (slug : string) : bool =
+  match lookup_brush slug with
+  | None -> false
+  | Some brush ->
+    (match calligraphic_from_json brush with
+     | None -> false
+     | Some cal ->
+       let pts = Calligraphic_outline.outline d cal in
+       if List.length pts < 3 then true
+       else begin
+         let (r, g, b, a) = match stroke with
+           | Some s -> Element.color_to_rgba s.stroke_color
+           | None -> (0.0, 0.0, 0.0, 1.0)
+         in
+         Cairo.set_source_rgba cr r g b a;
+         (match pts with
+          | (x0, y0) :: rest ->
+            Cairo.move_to cr x0 y0;
+            List.iter (fun (x, y) -> Cairo.line_to cr x y) rest;
+            Cairo.Path.close cr;
+            Cairo.fill cr
+          | [] -> ());
+         true
+       end)
+
 let title_bar_height = 24
 
 (** Parse a CSS length in ``pt``; empty / unparseable -> [None].
@@ -433,14 +531,34 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Path { d; fill; stroke; width_points; opacity; transform; _ } ->
+  | Path { d; fill; stroke; width_points; opacity; transform; stroke_brush; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     if outline then begin
       build_path cr d;
       apply_outline_style cr;
       Cairo.stroke cr
-    end else begin
+    end
+    (* Brushed render — when stroke_brush resolves to a known
+       Calligraphic brush, fill the variable-width outline as a
+       polygon using the path's stroke colour. Skips the native
+       stroke + arrowhead pipeline below. See BRUSHES.md
+       Stroke styling interaction. *)
+    else if (match stroke_brush with Some _ -> true | None -> false)
+         && draw_brushed_path cr d stroke
+              (match stroke_brush with Some s -> s | None -> "")
+    then begin
+      (* Fill first if present — the brush owns only the stroke
+         appearance, not any fill paint. *)
+      (match fill with
+       | Some f ->
+         let (r, g, b, a) = Element.color_to_rgba f.fill_color in
+         Cairo.set_source_rgba cr r g b a;
+         build_path cr d;
+         Cairo.fill cr
+       | None -> ())
+    end
+    else begin
       (* Shorten path for arrowheads *)
       let stroke_cmds = match stroke with
         | Some s ->

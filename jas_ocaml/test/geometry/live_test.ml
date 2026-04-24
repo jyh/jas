@@ -131,6 +131,8 @@ let test_path_flattens_into_polygon_set () =
     mask = None;
     fill_gradient = None;
     stroke_gradient = None;
+    stroke_brush = None;
+    stroke_brush_overrides = None;
   } in
   let ps = Live.element_to_polygon_set path Live.default_precision in
   Alcotest.(check int) "one ring" 1 (List.length ps)

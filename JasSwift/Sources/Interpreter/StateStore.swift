@@ -36,6 +36,70 @@ public class StateStore {
     /// (used by OK actions).
     private var dialogSnapshot: [String: Any]?
 
+    // MARK: - Data namespace
+    //
+    // Workspace-loaded reference data (swatch_libraries,
+    // brush_libraries, etc.). Mirrors the JS-side `data` namespace
+    // from store.mjs and the Rust StateStore.data field. Mutated by
+    // the brush.* effect handlers and read by the canvas brush
+    // registry sync.
+
+    private var data: [String: Any] = [:]
+
+    public func setData(_ data: [String: Any]) {
+        self.data = data
+    }
+
+    public func dataAll() -> [String: Any] {
+        data
+    }
+
+    /// Read a dotted path inside `data`. Path may include the
+    /// "data." prefix or omit it. Returns nil for any missing
+    /// intermediate.
+    public func getDataPath(_ rawPath: String) -> Any? {
+        let path = rawPath.hasPrefix("data.") ? String(rawPath.dropFirst(5)) : rawPath
+        if path.isEmpty { return data }
+        var cur: Any = data
+        for seg in path.split(separator: ".") {
+            guard let dict = cur as? [String: Any], let next = dict[String(seg)] else {
+                return nil
+            }
+            cur = next
+        }
+        return cur
+    }
+
+    /// Write a value at a dotted path inside `data`. Intermediate
+    /// dicts are created on demand.
+    public func setDataPath(_ rawPath: String, _ value: Any?) {
+        let path = rawPath.hasPrefix("data.") ? String(rawPath.dropFirst(5)) : rawPath
+        if path.isEmpty {
+            if let map = value as? [String: Any] { data = map }
+            return
+        }
+        let segs = path.split(separator: ".").map(String.init)
+        // Walk-and-build. Build a new dictionary tree by reading from
+        // root, splicing in the change at the leaf, and writing back.
+        data = setPathInDict(data, segs: segs, value: value)
+    }
+
+    private func setPathInDict(_ dict: [String: Any], segs: [String], value: Any?) -> [String: Any] {
+        var result = dict
+        guard let head = segs.first else { return result }
+        if segs.count == 1 {
+            if let v = value {
+                result[head] = v
+            } else {
+                result.removeValue(forKey: head)
+            }
+            return result
+        }
+        let inner = (result[head] as? [String: Any]) ?? [:]
+        result[head] = setPathInDict(inner, segs: Array(segs.dropFirst()), value: value)
+        return result
+    }
+
     // MARK: - Init
 
     public init(defaults: [String: Any]? = nil) {

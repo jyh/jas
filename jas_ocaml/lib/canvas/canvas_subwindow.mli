@@ -11,6 +11,14 @@ type bounding_box = {
 val make_bounding_box :
   ?x:float -> ?y:float -> ?width:float -> ?height:float -> unit -> bounding_box
 
+val set_brush_libraries : Yojson.Safe.t -> unit
+(** Install the brush library registry consulted by the Path renderer
+    when a path carries a stroke_brush slug. The brushed render then
+    fills the Calligraphic outline polygon with the path's stroke
+    colour. App startup should call this once with the loaded
+    brush_libraries data; subsequent calls replace the registry.
+    See BRUSHES.md Stroke styling interaction. *)
+
 class canvas_subwindow :
   model:Model.model ->
   controller:Controller.controller ->

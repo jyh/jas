@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   elementBounds, pointInRect, rectsIntersect,
   hitTest, hitTestRect, translateElement,
+  calligraphicOutline,
 } from "../../static/js/engine/geometry.mjs";
 import {
   mkRect, mkCircle, mkEllipse, mkLine, mkPath, mkText,
@@ -244,5 +245,158 @@ describe("translateElement", () => {
     }), 100, 200);
     assert.equal(p.d[0].x, 101);
     assert.equal(p.d[1].y, 220);
+  });
+});
+
+// Helper for outline tests: parse "M x y L x y L x y ... Z" into a list
+// of [x, y] points, dropping the M / L / Z command letters.
+function parseOutlinePoints(d) {
+  if (!d) return [];
+  const tokens = d.trim().split(/\s+/);
+  const pts = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t === "M" || t === "L") {
+      pts.push([parseFloat(tokens[i + 1]), parseFloat(tokens[i + 2])]);
+      i += 3;
+    } else if (t === "Z") {
+      i += 1;
+    } else {
+      i += 1;
+    }
+  }
+  return pts;
+}
+
+describe("calligraphicOutline", () => {
+  it("empty / degenerate input returns empty string", () => {
+    assert.equal(calligraphicOutline([], { angle: 0, roundness: 100, size: 4 }), "");
+    assert.equal(calligraphicOutline(
+      [{ type: "M", x: 0, y: 0 }],
+      { angle: 0, roundness: 100, size: 4 },
+    ), "");
+  });
+
+  it("horizontal line, circular brush — outline is a stadium-like shape", () => {
+    // Horizontal line, circular tip (roundness 100, size 4) → constant
+    // half-width 2 perpendicular to the line. Sweep produces points 2pt
+    // above and below the line, joined to form a closed path.
+    const d = calligraphicOutline(
+      [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 0 }],
+      { angle: 0, roundness: 100, size: 4 },
+    );
+    assert.ok(d.startsWith("M "), `expected leading M, got: ${d.slice(0, 30)}`);
+    assert.ok(d.endsWith(" Z"), `expected trailing Z, got: ${d.slice(-10)}`);
+
+    const pts = parseOutlinePoints(d);
+    // Half-width is 2 → outline ys are ±2 (within fp tolerance).
+    for (const [, y] of pts) {
+      assert.ok(Math.abs(Math.abs(y) - 2) < 1e-3, `y=${y} not ±2`);
+    }
+    // Outline xs span 0..10.
+    const xs = pts.map((p) => p[0]);
+    assert.equal(Math.min(...xs), 0);
+    assert.equal(Math.max(...xs), 10);
+  });
+
+  it("brush angle parallel to path → minor-axis effective width", () => {
+    // Horizontal path, brush angle 0° (major axis horizontal),
+    // roundness 50% → minor axis = 50% of major. Effective half-width
+    // perpendicular to the path = b/2 = (4 · 0.5) / 2 = 1.
+    const d = calligraphicOutline(
+      [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 0 }],
+      { angle: 0, roundness: 50, size: 4 },
+    );
+    const pts = parseOutlinePoints(d);
+    for (const [, y] of pts) {
+      assert.ok(Math.abs(Math.abs(y) - 1) < 1e-3, `y=${y} not ±1`);
+    }
+  });
+
+  it("brush angle perpendicular to path → major-axis effective width", () => {
+    // Horizontal path, brush angle 90° (major axis vertical),
+    // roundness 50% → effective half-width perpendicular to the path
+    // = a/2 = 2.
+    const d = calligraphicOutline(
+      [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 0 }],
+      { angle: 90, roundness: 50, size: 4 },
+    );
+    const pts = parseOutlinePoints(d);
+    for (const [, y] of pts) {
+      assert.ok(Math.abs(Math.abs(y) - 2) < 1e-3, `y=${y} not ±2`);
+    }
+  });
+
+  it("vertical path with horizontal brush angle → effective width is the minor axis", () => {
+    // Vertical path tangent at 90°, brush angle 0° (major horizontal),
+    // roundness 50% → effective width perpendicular to path uses the
+    // major axis = a = 4 → half-width 2 horizontally on either side.
+    const d = calligraphicOutline(
+      [{ type: "M", x: 5, y: 0 }, { type: "L", x: 5, y: 10 }],
+      { angle: 0, roundness: 50, size: 4 },
+    );
+    const pts = parseOutlinePoints(d);
+    for (const [x] of pts) {
+      assert.ok(Math.abs(Math.abs(x - 5) - 2) < 1e-3, `x=${x} not 5±2`);
+    }
+  });
+
+  it("circular brush gives same width regardless of path direction", () => {
+    // Roundness 100% → circular tip → effective width is constant
+    // independent of path tangent direction. Diagonal path should still
+    // yield half-width = 2 perpendicular distance.
+    const d = calligraphicOutline(
+      [{ type: "M", x: 0, y: 0 }, { type: "L", x: 10, y: 10 }],
+      { angle: 30, roundness: 100, size: 4 },
+    );
+    const pts = parseOutlinePoints(d);
+    // Distance from each outline point to the path-line x = y is half-width.
+    // Distance from (px, py) to line x − y = 0 is |px − py| / √2.
+    for (const [x, y] of pts) {
+      const dist = Math.abs(x - y) / Math.SQRT2;
+      assert.ok(Math.abs(dist - 2) < 1e-3, `dist=${dist} not 2`);
+    }
+  });
+
+  it("multiple-segment path samples both segments", () => {
+    // M 0,0 L 10,0 L 10,10 — corner. Outline should span both segments.
+    const d = calligraphicOutline(
+      [
+        { type: "M", x: 0, y: 0 },
+        { type: "L", x: 10, y: 0 },
+        { type: "L", x: 10, y: 10 },
+      ],
+      { angle: 0, roundness: 100, size: 4 },
+    );
+    const pts = parseOutlinePoints(d);
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    // Should reach all the way to the corner extremes.
+    assert.ok(Math.max(...xs) >= 12 - 1e-3);
+    assert.ok(Math.max(...ys) >= 10 - 1e-3);
+  });
+
+  it("cubic curve sampled and outlined", () => {
+    // A simple cubic from (0,0) to (10,0) with control points pulling
+    // up. Just verify we get a non-trivial closed path with samples.
+    const d = calligraphicOutline(
+      [
+        { type: "M", x: 0, y: 0 },
+        { type: "C", x1: 3, y1: 5, x2: 7, y2: 5, x: 10, y: 0 },
+      ],
+      { angle: 0, roundness: 100, size: 4 },
+    );
+    const pts = parseOutlinePoints(d);
+    // 32 cubic samples → roughly 33 forward + 33 reverse = ~66 points.
+    assert.ok(pts.length > 50, `expected >50 outline points, got ${pts.length}`);
+    // Outline reaches above the curve (max y around peak).
+    const ys = pts.map((p) => p[1]);
+    assert.ok(Math.max(...ys) > 3, "outline should reach above curve");
+    // The "right" (below-curve) side dips below y=0 at the endpoints
+    // where the tangent is steepest. The exact minimum depends on the
+    // tangent angle; at the cubic's endpoints the perpendicular drop is
+    // ~half-width · cos(tangent) — well below zero but not the full -2.
+    assert.ok(Math.min(...ys) < -0.5, "outline should dip below path baseline");
   });
 });

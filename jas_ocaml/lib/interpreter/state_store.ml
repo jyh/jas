@@ -35,6 +35,11 @@ type t = {
   mutable dialog_snapshot : (string * Yojson.Safe.t) list option;
   mutable panel_subscribers : (string * panel_subscriber list) list;
   mutable global_subscribers : global_subscriber list;
+  (** Workspace-loaded reference data (swatch_libraries,
+      brush_libraries, etc.). Mirrors the JS-side `data` namespace
+      and the Rust StateStore.data field. Mutated by the brush.*
+      effect handlers. *)
+  mutable data : Yojson.Safe.t;
 }
 
 let create ?(defaults = []) () : t =
@@ -48,7 +53,8 @@ let create ?(defaults = []) () : t =
     dialog_props = [];
     dialog_snapshot = None;
     panel_subscribers = [];
-    global_subscribers = [] }
+    global_subscribers = [];
+    data = `Assoc [] }
 
 (* ── Global state ─────────────────────────────────────── *)
 
@@ -63,6 +69,54 @@ let set (store : t) (key : string) (value : Yojson.Safe.t) : unit =
 
 let subscribe_global (store : t) (callback : global_subscriber) : unit =
   store.global_subscribers <- callback :: store.global_subscribers
+
+(* ── Data namespace ─────────────────────────────────── *)
+
+let set_data (store : t) (data : Yojson.Safe.t) : unit =
+  store.data <- data
+
+let get_data (store : t) : Yojson.Safe.t =
+  store.data
+
+(* Strip optional "data." prefix and split on '.'. *)
+let split_data_path (raw : string) : string list =
+  let path =
+    if String.length raw >= 5 && String.sub raw 0 5 = "data."
+    then String.sub raw 5 (String.length raw - 5)
+    else raw
+  in
+  if path = "" then [] else String.split_on_char '.' path
+
+let rec get_path (json : Yojson.Safe.t) (segs : string list) : Yojson.Safe.t =
+  match segs, json with
+  | [], _ -> json
+  | seg :: rest, `Assoc fields ->
+    (match List.assoc_opt seg fields with
+     | Some v -> get_path v rest
+     | None -> `Null)
+  | _ -> `Null
+
+let get_data_path (store : t) (raw_path : string) : Yojson.Safe.t =
+  get_path store.data (split_data_path raw_path)
+
+let rec set_path (json : Yojson.Safe.t) (segs : string list) (value : Yojson.Safe.t)
+  : Yojson.Safe.t =
+  match segs with
+  | [] -> value
+  | seg :: rest ->
+    let fields = match json with `Assoc fs -> fs | _ -> [] in
+    let inner = match List.assoc_opt seg fields with
+      | Some v -> v
+      | None -> `Assoc []
+    in
+    let new_inner = set_path inner rest value in
+    let other = List.filter (fun (k, _) -> k <> seg) fields in
+    `Assoc ((seg, new_inner) :: other)
+
+let set_data_path (store : t) (raw_path : string) (value : Yojson.Safe.t) : unit =
+  let segs = split_data_path raw_path in
+  if segs = [] then store.data <- value
+  else store.data <- set_path store.data segs value
 
 let get_all (store : t) : (string * Yojson.Safe.t) list =
   store.state

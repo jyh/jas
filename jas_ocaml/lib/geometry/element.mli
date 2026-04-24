@@ -378,6 +378,8 @@ type element =
       mask : mask option;
       fill_gradient : gradient option;
       stroke_gradient : gradient option;
+      stroke_brush : string option;
+      stroke_brush_overrides : string option;
     }
   | Text of {
       x : float; y : float;
@@ -572,7 +574,7 @@ val make_circle : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -
 val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
-val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> element
+val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> ?stroke_brush:string option -> ?stroke_brush_overrides:string option -> path_command list -> element
 
 val tspans_from_content : string -> tspan array
 (** Build a one-element [tspan] array that mirrors the given content
@@ -616,6 +618,11 @@ val with_stroke : element -> stroke option -> element
     return unchanged. *)
 val with_fill_gradient : element -> gradient option -> element
 val with_stroke_gradient : element -> gradient option -> element
+
+(** Replace stroke_brush / stroke_brush_overrides on Path elements.
+    Other variants are returned unchanged. See BRUSHES.md. *)
+val with_stroke_brush : element -> string option -> element
+val with_stroke_brush_overrides : element -> string option -> element
 
 (** Return a copy of [elem] with its opacity mask replaced. Preserves
     every other field. See OPACITY.md §Document model. *)

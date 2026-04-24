@@ -736,6 +736,8 @@ fn unpack_element(v: &Value) -> Element {
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
             })
         }
         TAG_TEXT => {
