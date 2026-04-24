@@ -165,7 +165,7 @@ layout:
                     action: select_tool
                     params: { tool: partial_selection }
                 bind:
-                  checked: 'mem(state.active_tool, ["partial_selection", "interior_selection"])'
+                  checked: 'mem(state.active_tool, ["partial_selection", "interior_selection", "magic_wand"])'
                 alternates:
                   menu_id: arrow_alternates
                   items:
@@ -177,6 +177,15 @@ layout:
                       label: "Interior Selection"
                       icon: "interior_selection_arrow"
                       description: "Select objects within groups without ungrouping"
+                    - id: magic_wand
+                      label: "Magic Wand (Y)"
+                      icon: "magic_wand"
+                      description: >
+                        Click an element to select every other element in
+                        the document that shares its fill color, stroke
+                        color, stroke weight, opacity, and blend mode within
+                        the Magic Wand Panel's tolerances. Shift+click adds
+                        to the selection; Alt+click subtracts.
 
               # Row 1, Col 0: Pen slot
               - id: btn_pen_slot
