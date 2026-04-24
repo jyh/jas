@@ -579,6 +579,36 @@ fn run_doc_effect(
                 }
             }
         }
+        "doc.set_attr_on_selection" => {
+            // Spec: { attr: <name>, value: <expr> }
+            // Phase 1 supports brush attributes only; other attrs log
+            // and ignore. Used by apply_brush_to_selection /
+            // remove_brush_from_selection in actions.yaml. Mirrors
+            // the JS Phase 1.8 effect.
+            if let serde_json::Value::Object(args) = spec {
+                let attr = args
+                    .get("attr")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let value_str = args.get("value")
+                    .and_then(|v| match v {
+                        serde_json::Value::String(s) => {
+                            match eval_expr(s, store, ctx) {
+                                Value::Str(rs) if !rs.is_empty() => Some(rs),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    });
+                match attr {
+                    "stroke_brush" =>
+                        Controller::set_selection_stroke_brush(model, value_str),
+                    "stroke_brush_overrides" =>
+                        Controller::set_selection_stroke_brush_overrides(model, value_str),
+                    _ => {} // Phase 1: only brush attrs supported
+                }
+            }
+        }
         "doc.copy_selection" => {
             if let serde_json::Value::Object(args) = spec {
                 let dx = eval_number(args.get("dx"), store, ctx);

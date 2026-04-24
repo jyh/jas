@@ -2537,6 +2537,25 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
     }
 }
 
+/// Return a copy of the element with its stroke_brush replaced.
+/// Only Path supports brushes today; other elements are returned
+/// unchanged. See BRUSHES.md §Stroke styling interaction.
+pub fn with_stroke_brush(elem: &Element, stroke_brush: Option<String>) -> Element {
+    match elem {
+        Element::Path(e) => Element::Path(PathElem { stroke_brush, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
+/// Return a copy of the element with its stroke_brush_overrides
+/// replaced. Path-only, like with_stroke_brush.
+pub fn with_stroke_brush_overrides(elem: &Element, overrides: Option<String>) -> Element {
+    match elem {
+        Element::Path(e) => Element::Path(PathElem { stroke_brush_overrides: overrides, ..e.clone() }),
+        _ => elem.clone(),
+    }
+}
+
 /// Return a copy of the element with its stroke replaced.
 /// Elements that do not support stroke (Group, Layer) are returned unchanged.
 pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
