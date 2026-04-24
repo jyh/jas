@@ -26,6 +26,11 @@ pub struct StateStore {
     /// `preview_targets`. Restored on close_dialog unless first cleared
     /// by the `clear_dialog_snapshot` effect (used by OK actions).
     dialog_snapshot: Option<HashMap<String, serde_json::Value>>,
+    /// Workspace-loaded reference data (swatch_libraries,
+    /// brush_libraries, etc.). Mirrors the JS-side `data` namespace
+    /// from jas_flask/static/js/engine/store.mjs. Mutated by the
+    /// data.* and brush.* effect handlers.
+    data: serde_json::Value,
 }
 
 impl StateStore {
@@ -39,6 +44,81 @@ impl StateStore {
             dialog_id: None,
             dialog_params: None,
             dialog_snapshot: None,
+            data: serde_json::Value::Object(serde_json::Map::new()),
+        }
+    }
+
+    /// Initialise the data namespace from a JSON object. Replaces
+    /// any existing data. App startup typically calls this with the
+    /// loaded workspace so data.brush_libraries / data.swatch_libraries
+    /// resolve in YAML expressions.
+    pub fn set_data(&mut self, data: serde_json::Value) {
+        self.data = data;
+    }
+
+    pub fn data(&self) -> &serde_json::Value {
+        &self.data
+    }
+
+    /// Read a dotted path inside `data`. Path may include the
+    /// `data.` prefix or omit it; both walk the same tree. Returns
+    /// `Value::Null` for any missing intermediate.
+    pub fn get_data_path(&self, raw_path: &str) -> serde_json::Value {
+        let path = raw_path.strip_prefix("data.").unwrap_or(raw_path);
+        if path.is_empty() {
+            return self.data.clone();
+        }
+        let mut cur = &self.data;
+        for seg in path.split('.') {
+            match cur.get(seg) {
+                Some(v) => cur = v,
+                None => return serde_json::Value::Null,
+            }
+        }
+        cur.clone()
+    }
+
+    /// Write a value at a dotted path inside `data`. Intermediate
+    /// objects are created on demand. Numeric segments index into
+    /// arrays when the parent is already an array.
+    pub fn set_data_path(&mut self, raw_path: &str, value: serde_json::Value) {
+        let path = raw_path.strip_prefix("data.").unwrap_or(raw_path);
+        if path.is_empty() {
+            self.data = value;
+            return;
+        }
+        if !self.data.is_object() {
+            self.data = serde_json::Value::Object(serde_json::Map::new());
+        }
+        let segs: Vec<&str> = path.split('.').collect();
+        let mut cur = &mut self.data;
+        for seg in &segs[..segs.len() - 1] {
+            if !cur.is_object() {
+                if let Some(map) = cur.as_array_mut() {
+                    if let Ok(idx) = seg.parse::<usize>() {
+                        if idx < map.len() {
+                            cur = &mut map[idx];
+                            continue;
+                        }
+                    }
+                }
+                return; // can't descend
+            }
+            let map = cur.as_object_mut().unwrap();
+            if !map.contains_key(*seg) {
+                map.insert(seg.to_string(), serde_json::json!({}));
+            }
+            cur = map.get_mut(*seg).unwrap();
+        }
+        let last = segs.last().unwrap();
+        if let Some(map) = cur.as_object_mut() {
+            map.insert(last.to_string(), value);
+        } else if let Some(arr) = cur.as_array_mut() {
+            if let Ok(idx) = last.parse::<usize>() {
+                if idx < arr.len() {
+                    arr[idx] = value;
+                }
+            }
         }
     }
 
