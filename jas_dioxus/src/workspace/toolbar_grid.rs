@@ -5,10 +5,52 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
 
-use super::app_state::{Act, AppState};
+use super::app_state::{Act, AppHandle, AppState};
 use super::icons::toolbar_svg_icon;
 use super::theme::*;
 use crate::tools::tool::ToolKind;
+
+/// YAML id for each ToolKind (matches the filename in `workspace/tools/`).
+/// Returns None for native-only tools (Type / TypeOnPath) which have no
+/// YAML spec.
+fn tool_yaml_id(kind: ToolKind) -> Option<&'static str> {
+    Some(match kind {
+        ToolKind::Selection => "selection",
+        ToolKind::PartialSelection => "partial_selection",
+        ToolKind::InteriorSelection => "interior_selection",
+        ToolKind::Pen => "pen",
+        ToolKind::AddAnchorPoint => "add_anchor_point",
+        ToolKind::DeleteAnchorPoint => "delete_anchor_point",
+        ToolKind::AnchorPoint => "anchor_point",
+        ToolKind::Pencil => "pencil",
+        ToolKind::Paintbrush => "paintbrush",
+        ToolKind::PathEraser => "path_eraser",
+        ToolKind::Smooth => "smooth",
+        ToolKind::Line => "line",
+        ToolKind::Rect => "rect",
+        ToolKind::RoundedRect => "rounded_rect",
+        ToolKind::Polygon => "polygon",
+        ToolKind::Star => "star",
+        ToolKind::Lasso => "lasso",
+        ToolKind::Type | ToolKind::TypeOnPath => return None,
+    })
+}
+
+/// Look up a tool's `tool_options_dialog` field in workspace.json.
+/// Returns the dialog id when present, None otherwise. The toolbar
+/// dispatches `open_dialog` with this id on icon double-click.
+/// See PAINTBRUSH_TOOL.md §Tool options for the convention.
+fn tool_options_dialog_id(kind: ToolKind) -> Option<String> {
+    use crate::interpreter::workspace::Workspace;
+    let yaml_id = tool_yaml_id(kind)?;
+    let ws = Workspace::load()?;
+    ws.data()
+        .get("tools")?
+        .get(yaml_id)?
+        .get("tool_options_dialog")?
+        .as_str()
+        .map(String::from)
+}
 
 /// Toolbar layout: 2-column grid matching the Python/Qt version.
 /// Each entry is (row, col, primary_tool, alternates).
@@ -17,7 +59,7 @@ pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 0, &[ToolKind::Selection]),
     (0, 1, &[ToolKind::PartialSelection, ToolKind::InteriorSelection]),
     (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
-    (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
+    (1, 1, &[ToolKind::Pencil, ToolKind::Paintbrush, ToolKind::PathEraser, ToolKind::Smooth]),
     (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
     (2, 1, &[ToolKind::Line]),
     (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
@@ -37,6 +79,8 @@ pub(crate) fn ToolbarGrid(
     popup_slot: Signal<Option<usize>>,
 ) -> Element {
     let act = use_context::<Act>();
+    let app = use_context::<AppHandle>();
+    let yaml_dialog_sig = use_context::<crate::interpreter::dialog_view::DialogCtx>().0;
 
     // If active tool is an alternate that's not currently visible, update the slot.
     // Collect updates first, then apply — writing to signals during render can cause
@@ -115,6 +159,23 @@ pub(crate) fn ToolbarGrid(
                     onmouseup: move |_| {
                         // If popup hasn't shown yet, cancel by ignoring
                         // (timer will fire but popup will be dismissed on next click)
+                    },
+                    ondoubleclick: {
+                        let app_dbl = app.clone();
+                        let mut dlg_sig = yaml_dialog_sig;
+                        move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            let Some(dlg_id) = tool_options_dialog_id(kind) else { return; };
+                            // Activate the tool first so the dialog opens
+                            // over the tool it belongs to.
+                            let st = app_dbl.borrow();
+                            let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                            drop(st);
+                            let empty = serde_json::Map::new();
+                            crate::interpreter::dialog_view::open_dialog(
+                                &mut dlg_sig, &dlg_id, &empty, &live_state,
+                            );
+                        }
                     },
                     dangerous_inner_html: "{svg_html}",
                 }
