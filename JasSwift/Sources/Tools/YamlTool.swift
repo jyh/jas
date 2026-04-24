@@ -252,6 +252,8 @@ final class YamlTool: CanvasTool {
         case "partial_selection_overlay":
             drawPartialSelectionOverlay(cgCtx, render, evalCtx,
                                          model: ctx.model)
+        case "oval_cursor":
+            drawOvalCursorOverlay(cgCtx, render, evalCtx)
         default: break
         }
         _ = _reg
@@ -692,4 +694,141 @@ private func drawBufferPolylineOverlay(
         cgCtx.strokePath()
         cgCtx.setLineDash(phase: 0, lengths: [])
     }
+}
+
+/// Blob Brush oval cursor + drag preview. BLOB_BRUSH_TOOL.md §Overlay.
+///
+/// Two responsibilities:
+///   1. Hover cursor — oval outline at (x, y) using the effective tip
+///      shape (size/angle/roundness). When `dashed` is truthy, the
+///      stroke is dashed to signal erase mode.
+///   2. Drag preview — when `mode != "idle"`, renders accumulated dabs
+///      from `buffer` as semi-transparent filled ovals (painting) or
+///      dashed outlines (erasing).
+///
+/// Fields (all optional unless noted):
+///   x, y              current pointer position (required)
+///   default_size      tip diameter in pt
+///   default_angle     tip rotation in degrees
+///   default_roundness tip aspect percent
+///   stroke_color      outline color (defaults #000000)
+///   dashed            boolean; erase-mode visual
+///   buffer            point-buffer name (for drag preview)
+///   mode              string tool mode (idle / painting / erasing)
+private func drawOvalCursorOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    let cx = evalOverlayNumber(spec["x"], ctx)
+    let cy = evalOverlayNumber(spec["y"], ctx)
+    let size = max(1.0, evalOverlayNumber(spec["default_size"], ctx))
+    let angleDeg = evalOverlayNumber(spec["default_angle"], ctx)
+    let roundness = max(1.0, evalOverlayNumber(spec["default_roundness"], ctx))
+    let strokeColorStr: String = {
+        if let s = spec["stroke_color"] as? String, !s.isEmpty {
+            return s
+        }
+        return "#000000"
+    }()
+    let strokeColor = parseOverlayColor(strokeColorStr)
+        ?? CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+
+    let dashed: Bool = {
+        switch spec["dashed"] {
+        case let b as Bool: return b
+        case let s as String: return evaluate(s, context: ctx).toBool()
+        default: return false
+        }
+    }()
+    let mode: String = {
+        switch spec["mode"] {
+        case let s as String:
+            if s.hasPrefix("'") || s.hasPrefix("\"") {
+                return s.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            }
+            if case .string(let rs) = evaluate(s, context: ctx) {
+                return rs
+            }
+            return s
+        default:
+            return "idle"
+        }
+    }()
+
+    let rx = size * 0.5
+    let ry = size * (roundness / 100.0) * 0.5
+    let rad = angleDeg * .pi / 180.0
+
+    // Drag preview: if a buffer is named and mode != idle, draw each
+    // buffered point as an oval. Painting = semi-transparent fill;
+    // erasing = dashed outline.
+    if mode != "idle",
+       let bufferName = spec["buffer"] as? String {
+        let pts = pointBuffersPoints(bufferName)
+        if pts.count >= 2 {
+            if mode == "painting" {
+                cgCtx.saveGState()
+                cgCtx.setAlpha(0.3)
+                cgCtx.setFillColor(strokeColor)
+                for p in pts {
+                    addOvalPath(cgCtx,
+                                cx: p.0, cy: p.1,
+                                rx: rx, ry: ry, rad: rad)
+                    cgCtx.fillPath()
+                }
+                cgCtx.restoreGState()
+            } else if mode == "erasing" {
+                cgCtx.setStrokeColor(strokeColor)
+                cgCtx.setLineWidth(1.0)
+                cgCtx.setLineDash(phase: 0, lengths: [3, 3])
+                for p in pts {
+                    addOvalPath(cgCtx,
+                                cx: p.0, cy: p.1,
+                                rx: rx, ry: ry, rad: rad)
+                    cgCtx.strokePath()
+                }
+                cgCtx.setLineDash(phase: 0, lengths: [])
+            }
+        }
+    }
+
+    // Hover cursor outline at (cx, cy). Stroke dashed when Alt held.
+    cgCtx.setStrokeColor(strokeColor)
+    cgCtx.setLineWidth(1.0)
+    if dashed {
+        cgCtx.setLineDash(phase: 0, lengths: [4, 4])
+    }
+    addOvalPath(cgCtx, cx: cx, cy: cy, rx: rx, ry: ry, rad: rad)
+    cgCtx.strokePath()
+    if dashed {
+        cgCtx.setLineDash(phase: 0, lengths: [])
+    }
+    // 1 px screen-space crosshair for precision aiming.
+    cgCtx.move(to: CGPoint(x: cx - 3, y: cy))
+    cgCtx.addLine(to: CGPoint(x: cx + 3, y: cy))
+    cgCtx.move(to: CGPoint(x: cx, y: cy - 3))
+    cgCtx.addLine(to: CGPoint(x: cx, y: cy + 3))
+    cgCtx.strokePath()
+}
+
+/// Add a 24-segment rotated-ellipse path to `cgCtx`. Caller fills or
+/// strokes the current path.
+private func addOvalPath(
+    _ cgCtx: CGContext,
+    cx: Double, cy: Double, rx: Double, ry: Double, rad: Double
+) {
+    let segments = 24
+    let cs = cos(rad), sn = sin(rad)
+    for i in 0...segments {
+        let t = 2.0 * .pi * Double(i) / Double(segments)
+        let lx = rx * cos(t)
+        let ly = ry * sin(t)
+        let x = cx + lx * cs - ly * sn
+        let y = cy + lx * sn + ly * cs
+        if i == 0 {
+            cgCtx.move(to: CGPoint(x: x, y: y))
+        } else {
+            cgCtx.addLine(to: CGPoint(x: x, y: y))
+        }
+    }
+    cgCtx.closePath()
 }
