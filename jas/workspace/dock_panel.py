@@ -265,6 +265,8 @@ class DockPanelWidget(QWidget):
                 data: dict = {}
                 if "swatch_libraries" in ws:
                     data["swatch_libraries"] = ws["swatch_libraries"]
+                if "brush_libraries" in ws:
+                    data["brush_libraries"] = ws["brush_libraries"]
                 if data:
                     ctx["data"] = data
             # Pass model accessor so panels (e.g. layers) can read/write the document
