@@ -3445,6 +3445,61 @@
         }
       ]
     },
+    "blob_brush_tool_options_confirm": {
+      "description": "Commit the Blob Brush Tool Options dialog. Writes the six per-document options to state.blob_brush_* and closes the dialog. See BLOB_BRUSH_TOOL.md \u00a7Tool options.\n",
+      "category": "brushes",
+      "params": {
+        "fidelity": {
+          "type": "number"
+        },
+        "keep_selected": {
+          "type": "bool"
+        },
+        "merge_only_with_selection": {
+          "type": "bool"
+        },
+        "size": {
+          "type": "number"
+        },
+        "angle": {
+          "type": "number"
+        },
+        "roundness": {
+          "type": "number"
+        }
+      },
+      "effects": [
+        {
+          "set": {
+            "blob_brush_fidelity": "param.fidelity",
+            "blob_brush_keep_selected": "param.keep_selected",
+            "blob_brush_merge_only_with_selection": "param.merge_only_with_selection",
+            "blob_brush_size": "param.size",
+            "blob_brush_angle": "param.angle",
+            "blob_brush_roundness": "param.roundness"
+          }
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "blob_brush_tool_options_reset": {
+      "description": "Restore the Blob Brush Tool Options dialog to factory defaults without committing. Writes defaults into dialog state; the user must still click OK for the values to persist to state.blob_brush_*. Defaults per BLOB_BRUSH_TOOL.md \u00a7Tool options.\n",
+      "category": "brushes",
+      "effects": [
+        {
+          "set": {
+            "dialog.fidelity": 3,
+            "dialog.keep_selected": false,
+            "dialog.merge_only_with_selection": false,
+            "dialog.size": 10,
+            "dialog.angle": 0,
+            "dialog.roundness": 100
+          }
+        }
+      ]
+    },
     "apply_brush_changes_to_strokes": {
       "description": "Apply pending brush-edits to every element whose stroke_brush references the named library/slug. The brush_options_confirm action stashes the patch on dialog state before opening the Apply to Strokes confirm dialog; this action commits via brush.update and triggers a canvas re-render. Per BRUSH_OPTIONS_DIALOG.md \u00a7Apply to Strokes.\n",
       "category": "brushes",
@@ -6614,6 +6669,36 @@
       "type": "number",
       "default": 12,
       "description": "Proximity threshold in px for the Paintbrush edit gesture. Press and release distances are both bounded by this value.\n"
+    },
+    "blob_brush_fidelity": {
+      "type": "number",
+      "default": 3,
+      "description": "5-stop slider position (1-5) for commit-time polygon simplification. Maps to RDP epsilon as [0.5, 2.5, 5.0, 7.5, 10.0] pt. Lower tick = more faithful to raw sweep; higher tick = smoother output boundary. See BLOB_BRUSH_TOOL.md \u00a7Fidelity \u2192 simplification tolerance mapping.\n"
+    },
+    "blob_brush_keep_selected": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, the path committed / merged by a Blob Brush sweep becomes the canvas selection after commit. Default false (Blob Brush is less selection-oriented than Paintbrush, whose equivalent flag defaults true).\n"
+    },
+    "blob_brush_merge_only_with_selection": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, a painting-mode sweep merges only with existing Blob Brush elements that are part of the current canvas selection. Independent of Erase mode, which always acts on all blob-brush elements regardless of selection. See BLOB_BRUSH_TOOL.md \u00a7Merge condition.\n"
+    },
+    "blob_brush_size": {
+      "type": "number",
+      "default": 10,
+      "description": "Default tip diameter in pt. Consulted only when no Calligraphic brush is active; a Calligraphic brush's own size (with overrides + variation) takes precedence. See BLOB_BRUSH_TOOL.md \u00a7Runtime tip resolution.\n"
+    },
+    "blob_brush_angle": {
+      "type": "number",
+      "default": 0,
+      "description": "Default tip rotation in degrees. Consulted only when no Calligraphic brush is active.\n"
+    },
+    "blob_brush_roundness": {
+      "type": "number",
+      "default": 100,
+      "description": "Default tip aspect ratio (percent: 100 = circle; lower = narrower oval). Consulted only when no Calligraphic brush is active.\n"
     },
     "align_to": {
       "type": "enum",
@@ -16225,6 +16310,226 @@
         ]
       }
     },
+    "blob_brush": {
+      "id": "blob_brush",
+      "cursor": "none",
+      "menu_label": "Blob Brush Tool",
+      "shortcut": "Shift+B",
+      "tool_options_dialog": "blob_brush_tool_options",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "painting",
+            "erasing"
+          ]
+        },
+        "hover_x": {
+          "default": 0
+        },
+        "hover_y": {
+          "default": 0
+        },
+        "has_hovered": {
+          "default": false
+        },
+        "alt_held": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.blob_brush.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.blob_brush.has_hovered": "false"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "blob_brush"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.blob_brush.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.blob_brush.has_hovered": "false"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "blob_brush"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "buffer.clear": {
+              "buffer": "blob_brush"
+            }
+          },
+          {
+            "buffer.push": {
+              "buffer": "blob_brush",
+              "x": "event.x",
+              "y": "event.y"
+            }
+          },
+          {
+            "if": "event.modifiers.alt",
+            "then": [
+              {
+                "set": {
+                  "tool.blob_brush.mode": "'erasing'"
+                }
+              }
+            ],
+            "else": [
+              {
+                "set": {
+                  "tool.blob_brush.mode": "'painting'"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mousemove": [
+          {
+            "set": {
+              "tool.blob_brush.hover_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.blob_brush.hover_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.blob_brush.has_hovered": "true"
+            }
+          },
+          {
+            "set": {
+              "tool.blob_brush.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
+            "if": "tool.blob_brush.mode == 'painting' || tool.blob_brush.mode == 'erasing'",
+            "then": [
+              {
+                "doc.blob_brush.sweep_sample": {
+                  "buffer": "blob_brush",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.blob_brush.mode == 'painting'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "blob_brush",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              },
+              {
+                "doc.blob_brush.commit_painting": {
+                  "buffer": "blob_brush",
+                  "fidelity_epsilon": "if state.blob_brush_fidelity == 1 then 0.5 else (state.blob_brush_fidelity - 1) * 2.5",
+                  "merge_only_with_selection": "state.blob_brush_merge_only_with_selection",
+                  "keep_selected": "state.blob_brush_keep_selected"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.blob_brush.mode == 'erasing'",
+            "then": [
+              {
+                "buffer.push": {
+                  "buffer": "blob_brush",
+                  "x": "event.x",
+                  "y": "event.y"
+                }
+              },
+              {
+                "doc.blob_brush.commit_erasing": {
+                  "buffer": "blob_brush",
+                  "fidelity_epsilon": "if state.blob_brush_fidelity == 1 then 0.5 else (state.blob_brush_fidelity - 1) * 2.5"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.blob_brush.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.blob_brush.alt_held": "false"
+            }
+          },
+          {
+            "buffer.clear": {
+              "buffer": "blob_brush"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "set": {
+                  "tool.blob_brush.mode": "'idle'"
+                }
+              },
+              {
+                "buffer.clear": {
+                  "buffer": "blob_brush"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": {
+        "if": "tool.blob_brush.has_hovered",
+        "render": {
+          "type": "oval_cursor",
+          "x": "tool.blob_brush.hover_x",
+          "y": "tool.blob_brush.hover_y",
+          "default_size": "state.blob_brush_size",
+          "default_angle": "state.blob_brush_angle",
+          "default_roundness": "state.blob_brush_roundness",
+          "stroke_color": "state.fill_color",
+          "dashed": "tool.blob_brush.alt_held",
+          "buffer": "blob_brush",
+          "mode": "tool.blob_brush.mode"
+        }
+      }
+    },
     "delete_anchor_point": {
       "id": "delete_anchor_point",
       "cursor": "crosshair",
@@ -19542,6 +19847,343 @@
                   "fade_region_outside_artboard": "dialog.fade_region_outside_artboard",
                   "update_while_dragging": "dialog.update_while_dragging"
                 }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "blob_brush_tool_options": {
+      "summary": "Blob Brush Tool Options",
+      "description": "Modal dialog opened by double-clicking the Blob Brush icon in the toolbar. Edits six per-document options that drive the Blob Brush tool's sweep and commit behaviour:\n- Fidelity: 5-stop slider (Accurate \u2194 Smooth) driving the\n  RDP simplification epsilon at commit. Tick 1 = 0.5,\n  tick 3 (default) = 5.0, tick 5 = 10.0. See\n  BLOB_BRUSH_TOOL.md \u00a7Fidelity \u2192 simplification tolerance\n  mapping.\n- Keep Selected: when on, the new / merged element becomes\n  the canvas selection after commit. Default false.\n- Merge Only with Selection: when on, painting-mode sweeps\n  merge only with existing Blob Brush elements in the\n  selection; erasing-mode is unaffected.\n- Size / Angle / Roundness: default tip shape values used\n  when no Calligraphic brush is active. Each is a variation\n  widget (fixed / random / pressure / tilt / bearing /\n  rotation). Rotation mode is disabled for size and\n  roundness. When a Calligraphic brush IS active in the\n  Brushes panel, these rows are disabled with a \"(set by\n  active brush)\" hint \u2014 the brush's own values take\n  precedence. See \u00a7Runtime tip resolution.\n\nReset restores defaults without committing. Cancel discards edits. OK writes all six values to state.blob_brush_*. See BLOB_BRUSH_TOOL.md.\n",
+      "modal": true,
+      "width": 520,
+      "params": {},
+      "state": {
+        "fidelity": {
+          "type": "number",
+          "default": 3,
+          "description": "5-stop slider position (1-5); maps to RDP epsilon"
+        },
+        "keep_selected": {
+          "type": "bool",
+          "default": false,
+          "description": "New / merged element becomes canvas selection after commit"
+        },
+        "merge_only_with_selection": {
+          "type": "bool",
+          "default": false,
+          "description": "Painting-mode merge scoped to the current selection"
+        },
+        "size": {
+          "type": "number",
+          "default": 10,
+          "description": "Default tip diameter in pt"
+        },
+        "angle": {
+          "type": "number",
+          "default": 0,
+          "description": "Default tip rotation in degrees"
+        },
+        "roundness": {
+          "type": "number",
+          "default": 100,
+          "description": "Default tip aspect in percent"
+        }
+      },
+      "init": {
+        "fidelity": "state.blob_brush_fidelity",
+        "keep_selected": "state.blob_brush_keep_selected",
+        "merge_only_with_selection": "state.blob_brush_merge_only_with_selection",
+        "size": "state.blob_brush_size",
+        "angle": "state.blob_brush_angle",
+        "roundness": "state.blob_brush_roundness"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "id": "bbo_keep_selected",
+            "type": "toggle",
+            "label": "Keep Selected",
+            "bind": {
+              "checked": "dialog.keep_selected"
+            }
+          },
+          {
+            "id": "bbo_merge_only_with_selection",
+            "type": "toggle",
+            "label": "Merge Only with Selection",
+            "bind": {
+              "checked": "dialog.merge_only_with_selection"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "gap": 6,
+              "padding": 10,
+              "border": "1px solid panel-border"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Fidelity",
+                "style": {
+                  "font_size": 12,
+                  "weight": "bold"
+                }
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 12,
+                    "children": [
+                      {
+                        "id": "bbo_fidelity",
+                        "type": "slider",
+                        "min": 1,
+                        "max": 5,
+                        "step": 1,
+                        "bind": {
+                          "value": "dialog.fidelity"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 6,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Accurate",
+                        "style": {
+                          "font_size": 10
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 6,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Smooth",
+                        "style": {
+                          "font_size": 10,
+                          "alignment": "end"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "gap": 6,
+              "padding": 10,
+              "border": "1px solid panel-border"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Default Brush Options",
+                "style": {
+                  "font_size": 12,
+                  "weight": "bold"
+                }
+              },
+              {
+                "type": "row",
+                "bind": {
+                  "visible": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                },
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 12,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Set by active Calligraphic brush",
+                        "style": {
+                          "font_size": 10,
+                          "style": "italic"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 2,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Size:",
+                        "style": {
+                          "font_size": 11
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 10,
+                    "children": [
+                      {
+                        "include": "variation_widget",
+                        "id_prefix": "bbo_size",
+                        "base_bind": "dialog.size",
+                        "mode_bind": "dialog.size_mode",
+                        "unit": "pt",
+                        "min": 0.5,
+                        "max": 500,
+                        "step": 0.1,
+                        "disable_rotation": true,
+                        "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 2,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Angle:",
+                        "style": {
+                          "font_size": 11
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 10,
+                    "children": [
+                      {
+                        "include": "variation_widget",
+                        "id_prefix": "bbo_angle",
+                        "base_bind": "dialog.angle",
+                        "mode_bind": "dialog.angle_mode",
+                        "unit": "\u00b0",
+                        "min": -180,
+                        "max": 180,
+                        "step": 1,
+                        "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 2,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Roundness:",
+                        "style": {
+                          "font_size": 11
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 10,
+                    "children": [
+                      {
+                        "include": "variation_widget",
+                        "id_prefix": "bbo_roundness",
+                        "base_bind": "dialog.roundness",
+                        "mode_bind": "dialog.roundness_mode",
+                        "unit": "%",
+                        "min": 0,
+                        "max": 100,
+                        "step": 1,
+                        "disable_rotation": true,
+                        "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "space-between"
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Reset",
+                "action": "blob_brush_tool_options_reset"
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 8
+                },
+                "children": [
+                  {
+                    "type": "button",
+                    "label": "Cancel",
+                    "action": "dismiss_dialog"
+                  },
+                  {
+                    "type": "button",
+                    "label": "OK",
+                    "action": "blob_brush_tool_options_confirm",
+                    "variant": "primary",
+                    "params": {
+                      "fidelity": "dialog.fidelity",
+                      "keep_selected": "dialog.keep_selected",
+                      "merge_only_with_selection": "dialog.merge_only_with_selection",
+                      "size": "dialog.size",
+                      "angle": "dialog.angle",
+                      "roundness": "dialog.roundness"
+                    }
+                  }
+                ]
               }
             ]
           }

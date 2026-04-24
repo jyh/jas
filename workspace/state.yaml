@@ -203,6 +203,65 @@ state:
       Proximity threshold in px for the Paintbrush edit gesture.
       Press and release distances are both bounded by this value.
 
+  # ── Blob Brush tool options ───────────────────────────────────
+  # Per-document preferences for the Blob Brush tool. Edited via
+  # the Blob Brush Tool Options dialog (double-click tool icon).
+  # See transcripts/BLOB_BRUSH_TOOL.md §Tool options.
+
+  blob_brush_fidelity:
+    type: number
+    default: 3
+    description: >
+      5-stop slider position (1-5) for commit-time polygon
+      simplification. Maps to RDP epsilon as
+      [0.5, 2.5, 5.0, 7.5, 10.0] pt. Lower tick = more faithful
+      to raw sweep; higher tick = smoother output boundary.
+      See BLOB_BRUSH_TOOL.md §Fidelity → simplification tolerance
+      mapping.
+
+  blob_brush_keep_selected:
+    type: bool
+    default: false
+    description: >
+      When true, the path committed / merged by a Blob Brush
+      sweep becomes the canvas selection after commit. Default
+      false (Blob Brush is less selection-oriented than
+      Paintbrush, whose equivalent flag defaults true).
+
+  blob_brush_merge_only_with_selection:
+    type: bool
+    default: false
+    description: >
+      When true, a painting-mode sweep merges only with existing
+      Blob Brush elements that are part of the current canvas
+      selection. Independent of Erase mode, which always acts on
+      all blob-brush elements regardless of selection. See
+      BLOB_BRUSH_TOOL.md §Merge condition.
+
+  blob_brush_size:
+    type: number
+    default: 10
+    description: >
+      Default tip diameter in pt. Consulted only when no
+      Calligraphic brush is active; a Calligraphic brush's own
+      size (with overrides + variation) takes precedence. See
+      BLOB_BRUSH_TOOL.md §Runtime tip resolution.
+
+  blob_brush_angle:
+    type: number
+    default: 0
+    description: >
+      Default tip rotation in degrees. Consulted only when no
+      Calligraphic brush is active.
+
+  blob_brush_roundness:
+    type: number
+    default: 100
+    description: >
+      Default tip aspect ratio (percent: 100 = circle; lower =
+      narrower oval). Consulted only when no Calligraphic brush
+      is active.
+
   # ── Align panel ───────────────────────────────────────────────
   # Mirror state for the Align panel's four persistent fields.
   # See transcripts/ALIGN.md §Panel state.
