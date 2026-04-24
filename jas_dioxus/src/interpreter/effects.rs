@@ -850,9 +850,14 @@ fn run_doc_effect(
             // more accurate, more segments). The field `fit_error`
             // defaults to 4.0 to match native FIT_ERROR.
             //
-            // fill/stroke spec fields are handled like doc.add_element:
-            // omitted → model defaults; explicit → resolver parses
-            // the Value.
+            // Pencil-style callers pass only `buffer` / `fit_error`
+            // / `fill` / `stroke`. Paintbrush-style callers also pass
+            // `stroke_brush` (even `null`), which switches the stroke
+            // computation to the PAINTBRUSH_TOOL.md §Fill and stroke
+            // rules: state.stroke_color for color, brush.size (or
+            // state.stroke_width fallback) for width. `fill_new_strokes`
+            // opts into a state.fill_color fill; `close` appends a
+            // ClosePath; `stroke_brush_overrides` is passed through.
             if let serde_json::Value::Object(args) = spec {
                 let name = args
                     .get("buffer")
@@ -867,12 +872,68 @@ fn run_doc_effect(
                 } else {
                     4.0
                 };
-                let default_fill = model.default_fill;
-                let default_stroke = model.default_stroke;
-                let fill = resolve_fill_field(
-                    args.get("fill"), store, ctx, default_fill);
-                let stroke = resolve_stroke_field(
-                    args.get("stroke"), store, ctx, default_stroke);
+
+                let has_stroke_brush_arg = args.contains_key("stroke_brush");
+                let stroke_brush_slug = args.get("stroke_brush")
+                    .and_then(|v| match v {
+                        serde_json::Value::String(s) => {
+                            match eval_expr(s, store, ctx) {
+                                Value::Str(rs) if !rs.is_empty() => Some(rs),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    });
+                let stroke_brush_overrides = args.get("stroke_brush_overrides")
+                    .and_then(|v| match v {
+                        serde_json::Value::String(s) => {
+                            match eval_expr(s, store, ctx) {
+                                Value::Str(rs) if !rs.is_empty() => Some(rs),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    });
+
+                // Fill: fill_new_strokes takes precedence when present
+                // (Paintbrush rule); else fall back to pencil-style
+                // resolver.
+                let fill = if args.contains_key("fill_new_strokes") {
+                    if eval_bool(args.get("fill_new_strokes"), store, ctx) {
+                        match eval_expr("state.fill_color", store, ctx) {
+                            Value::Color(c) => Color::from_hex(&c).map(Fill::new),
+                            Value::Str(s) => Color::from_hex(&s).map(Fill::new),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    let default_fill = model.default_fill;
+                    resolve_fill_field(args.get("fill"), store, ctx, default_fill)
+                };
+
+                // Stroke: presence of stroke_brush key (even =null)
+                // signals Paintbrush semantics — compute from state.
+                // Pencil-style callers use resolve_stroke_field as before.
+                let stroke = if has_stroke_brush_arg {
+                    let color = match eval_expr("state.stroke_color", store, ctx) {
+                        Value::Color(c) => Color::from_hex(&c).unwrap_or(Color::BLACK),
+                        Value::Str(s) => Color::from_hex(&s).unwrap_or(Color::BLACK),
+                        _ => Color::BLACK,
+                    };
+                    let width = paintbrush_stroke_width(
+                        stroke_brush_slug.as_deref(),
+                        stroke_brush_overrides.as_deref(),
+                        store,
+                        ctx,
+                    );
+                    Some(Stroke::new(color, width))
+                } else {
+                    let default_stroke = model.default_stroke;
+                    resolve_stroke_field(args.get("stroke"), store, ctx, default_stroke)
+                };
+
                 let points: Vec<(f64, f64)> = super::point_buffers::with_points(
                     name, |pts| pts.to_vec());
                 if points.len() < 2 {
@@ -894,22 +955,10 @@ fn run_doc_effect(
                         x: seg.6, y: seg.7,
                     });
                 }
-                // stroke_brush passthrough — when the spec carries a
-                // stroke_brush expression (typically state.stroke_brush
-                // from the Paintbrush tool), evaluate it and bake the
-                // resolved slug onto the new path. The renderer then
-                // outlines it via the brush pipeline. None / null
-                // produces a plain native-stroke path.
-                let stroke_brush_slug = args.get("stroke_brush")
-                    .and_then(|v| match v {
-                        serde_json::Value::String(s) => {
-                            match eval_expr(s, store, ctx) {
-                                Value::Str(rs) if !rs.is_empty() => Some(rs),
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    });
+                if eval_bool(args.get("close"), store, ctx) {
+                    cmds.push(PathCommand::ClosePath);
+                }
+
                 let elem = Element::Path(PathElem {
                     d: cmds,
                     fill,
@@ -919,7 +968,7 @@ fn run_doc_effect(
                     fill_gradient: None,
                     stroke_gradient: None,
                     stroke_brush: stroke_brush_slug,
-                    stroke_brush_overrides: None,
+                    stroke_brush_overrides,
                 });
                 Controller::add_element(model, elem);
             }
@@ -1192,6 +1241,54 @@ fn eval_string_list(
 
 /// Filter a library's brushes against `slugs`. When `keep_unmatched`
 /// is true, removes brushes whose slug is in the list (delete);
+/// Paintbrush-tool stroke-width commit rule. Returns the effective
+/// stroke-width for a new path being committed by the Paintbrush tool
+/// with the given brush reference.
+///
+/// Per PAINTBRUSH_TOOL.md §Fill and stroke:
+/// - No brush slug → state.stroke_width.
+/// - Brush with a `size` field (Calligraphic / Scatter / Bristle) →
+///   effective size (overrides.size first, else brush.size).
+/// - Brush with no `size` field (Art / Pattern) → state.stroke_width.
+fn paintbrush_stroke_width(
+    stroke_brush_slug: Option<&str>,
+    overrides_json: Option<&str>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> f64 {
+    let state_width = match eval_expr("state.stroke_width", store, ctx) {
+        Value::Number(n) => n,
+        _ => 1.0,
+    };
+
+    let Some(slug) = stroke_brush_slug else {
+        return state_width;
+    };
+
+    if let Some(ovr_json) = overrides_json {
+        if let Ok(ovr) = serde_json::from_str::<serde_json::Value>(ovr_json) {
+            if let Some(size) = ovr.get("size").and_then(|s| s.as_f64()) {
+                return size;
+            }
+        }
+    }
+
+    let (lib_id, brush_slug) = match slug.split_once('/') {
+        Some(pair) => pair,
+        None => return state_width,
+    };
+    let path = format!("brush_libraries.{}.brushes", lib_id);
+    let brushes = match store.get_data_path(&path) {
+        serde_json::Value::Array(b) => b,
+        _ => return state_width,
+    };
+    brushes
+        .iter()
+        .find(|b| b.get("slug").and_then(|s| s.as_str()) == Some(brush_slug))
+        .and_then(|b| b.get("size").and_then(|s| s.as_f64()))
+        .unwrap_or(state_width)
+}
+
 /// otherwise keeps only matching brushes.
 fn brush_filter_library_by_slug(
     store: &mut StateStore,
@@ -3443,6 +3540,256 @@ mod tests {
             ..crate::document::document::Document::default()
         };
         Model::new(doc, None)
+    }
+
+    // ── doc.add_path_from_buffer (Paintbrush commit) ──
+    //
+    // Tests cover the Paintbrush-tool commit extensions per
+    // PAINTBRUSH_TOOL.md §Fill and stroke and §Gestures:
+    // - fill_new_strokes conditional fill
+    // - stroke-width commit rule (state, brush.size, overrides)
+    // - close flag appending ClosePath
+    // - stroke_brush_overrides pass-through
+    //
+    // Each test seeds a small buffer, runs the effect, and inspects
+    // the committed PathElem on the model's empty layer.
+
+    fn seed_buffer_square(name: &str) {
+        super::super::point_buffers::clear(name);
+        super::super::point_buffers::push(name, 0.0, 0.0);
+        super::super::point_buffers::push(name, 10.0, 0.0);
+        super::super::point_buffers::push(name, 10.0, 10.0);
+        super::super::point_buffers::push(name, 0.0, 10.0);
+    }
+
+    fn committed_path(model: &Model) -> &PathElem {
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "expected one committed element");
+        match &*children[0] {
+            Element::Path(p) => p,
+            _ => panic!("expected Path"),
+        }
+    }
+
+    #[test]
+    fn add_path_from_buffer_pencil_path_has_no_stroke_brush() {
+        // Pencil-style call (no stroke_brush arg) must NOT switch on
+        // the Paintbrush stroke rule. Stroke falls back to model
+        // defaults via resolve_stroke_field.
+        seed_buffer_square("tst1");
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": { "buffer": "tst1" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        assert!(p.stroke_brush.is_none());
+    }
+
+    #[test]
+    fn add_path_from_buffer_threads_stroke_brush_slug() {
+        seed_buffer_square("tst2");
+        let mut store = StateStore::new();
+        store.set("stroke_brush", serde_json::json!("mylib/flat_1"));
+        store.set("stroke_color", serde_json::json!("#112233"));
+        store.set("stroke_width", serde_json::json!(1.0));
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst2",
+                "stroke_brush": "state.stroke_brush"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        assert_eq!(p.stroke_brush.as_deref(), Some("mylib/flat_1"));
+    }
+
+    #[test]
+    fn add_path_from_buffer_fill_new_strokes_true_uses_state_fill_color() {
+        seed_buffer_square("tst3");
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!("#abcdef"));
+        store.set("stroke_color", serde_json::json!("#000000"));
+        store.set("stroke_width", serde_json::json!(1.0));
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst3",
+                "stroke_brush": "null",
+                "fill_new_strokes": "true"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        let fill = p.fill.as_ref().expect("expected fill");
+        assert_eq!(fill.color, Color::from_hex("#abcdef").unwrap());
+    }
+
+    #[test]
+    fn add_path_from_buffer_fill_new_strokes_false_produces_no_fill() {
+        seed_buffer_square("tst4");
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!("#abcdef"));
+        store.set("stroke_color", serde_json::json!("#000000"));
+        store.set("stroke_width", serde_json::json!(1.0));
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst4",
+                "stroke_brush": "null",
+                "fill_new_strokes": "false"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        assert!(p.fill.is_none());
+    }
+
+    #[test]
+    fn add_path_from_buffer_close_appends_close_path() {
+        seed_buffer_square("tst5");
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst5",
+                "close": "true"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        assert!(matches!(p.d.last().unwrap(), PathCommand::ClosePath));
+    }
+
+    #[test]
+    fn add_path_from_buffer_no_close_omits_close_path() {
+        seed_buffer_square("tst5b");
+        let mut store = StateStore::new();
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": { "buffer": "tst5b" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        assert!(!matches!(p.d.last().unwrap(), PathCommand::ClosePath));
+    }
+
+    #[test]
+    fn add_path_from_buffer_stroke_width_from_state_when_no_brush() {
+        seed_buffer_square("tst6");
+        let mut store = StateStore::new();
+        store.set("stroke_brush", serde_json::Value::Null);
+        store.set("stroke_color", serde_json::json!("#000000"));
+        store.set("stroke_width", serde_json::json!(3.5));
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst6",
+                "stroke_brush": "state.stroke_brush"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        let s = p.stroke.as_ref().expect("expected stroke");
+        assert_eq!(s.width, 3.5);
+    }
+
+    #[test]
+    fn add_path_from_buffer_stroke_width_from_brush_size() {
+        seed_buffer_square("tst7");
+        let mut store = StateStore::new();
+        store.set("stroke_brush", serde_json::json!("lib_a/cal_1"));
+        store.set("stroke_color", serde_json::json!("#000000"));
+        store.set("stroke_width", serde_json::json!(1.0));
+        // Seed a library brush with size=8.0
+        store.set_data_path(
+            "brush_libraries.lib_a.brushes",
+            serde_json::json!([
+                { "slug": "cal_1", "name": "Cal 1", "type": "calligraphic", "size": 8.0 }
+            ]),
+        );
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst7",
+                "stroke_brush": "state.stroke_brush"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        let s = p.stroke.as_ref().expect("expected stroke");
+        assert_eq!(s.width, 8.0);
+    }
+
+    #[test]
+    fn add_path_from_buffer_stroke_width_falls_back_when_brush_has_no_size() {
+        // Art / Pattern brushes have no `size` field — Paintbrush
+        // commits use state.stroke_width.
+        seed_buffer_square("tst8");
+        let mut store = StateStore::new();
+        store.set("stroke_brush", serde_json::json!("lib_b/art_1"));
+        store.set("stroke_color", serde_json::json!("#000000"));
+        store.set("stroke_width", serde_json::json!(2.25));
+        store.set_data_path(
+            "brush_libraries.lib_b.brushes",
+            serde_json::json!([
+                { "slug": "art_1", "name": "Art 1", "type": "art" }
+            ]),
+        );
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst8",
+                "stroke_brush": "state.stroke_brush"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        let s = p.stroke.as_ref().expect("expected stroke");
+        assert_eq!(s.width, 2.25);
+    }
+
+    #[test]
+    fn add_path_from_buffer_stroke_brush_overrides_size_wins() {
+        // When stroke_brush_overrides contains `size`, it takes
+        // precedence over the library brush's size.
+        seed_buffer_square("tst9");
+        let mut store = StateStore::new();
+        store.set("stroke_brush", serde_json::json!("lib_c/cal_2"));
+        store.set("stroke_brush_overrides", serde_json::json!("{\"size\":12.0}"));
+        store.set("stroke_color", serde_json::json!("#000000"));
+        store.set("stroke_width", serde_json::json!(1.0));
+        store.set_data_path(
+            "brush_libraries.lib_c.brushes",
+            serde_json::json!([
+                { "slug": "cal_2", "name": "Cal 2", "type": "calligraphic", "size": 4.0 }
+            ]),
+        );
+        let mut model = make_model_with_empty_layer();
+        let effects = vec![serde_json::json!({
+            "doc.add_path_from_buffer": {
+                "buffer": "tst9",
+                "stroke_brush": "state.stroke_brush",
+                "stroke_brush_overrides": "state.stroke_brush_overrides"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let p = committed_path(&model);
+        let s = p.stroke.as_ref().expect("expected stroke");
+        assert_eq!(s.width, 12.0);
+        assert_eq!(p.stroke_brush_overrides.as_deref(), Some("{\"size\":12.0}"));
     }
 
     #[test]
