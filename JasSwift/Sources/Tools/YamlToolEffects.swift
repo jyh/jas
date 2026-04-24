@@ -95,6 +95,30 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.set_attr_on_selection — { attr, value }. Phase 1 supports
+    // brush attributes only; other attrs ignored. Used by
+    // apply_brush_to_selection / remove_brush_from_selection in
+    // actions.yaml. Mirrors the JS Phase 1.8 effect.
+    effects["doc.set_attr_on_selection"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let attr = args["attr"] as? String else { return nil }
+        let value: String? = {
+            let v = evalExprAsValue(args["value"], store: store, ctx: ctx)
+            if case .string(let s) = v, !s.isEmpty { return s }
+            return nil
+        }()
+        switch attr {
+        case "stroke_brush":
+            Controller(model: model).setSelectionStrokeBrush(value)
+        case "stroke_brush_overrides":
+            Controller(model: model).setSelectionStrokeBrushOverrides(value)
+        default:
+            // Phase 1: only brush attrs supported.
+            break
+        }
+        return nil
+    }
+
     // doc.copy_selection — { dx, dy }. Duplicates the selected elements
     // at an offset and reselects the copies.
     effects["doc.copy_selection"] = { spec, ctx, store in

@@ -953,6 +953,31 @@ public class Controller {
         model.document = doc
     }
 
+    /// Set strokeBrush on every selected element (paths only). Used
+    /// by apply_brush_to_selection / remove_brush_from_selection.
+    public func setSelectionStrokeBrush(_ slug: String?) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withStrokeBrush(elem, strokeBrush: slug)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
+    /// Set strokeBrushOverrides on every selected element (paths only).
+    public func setSelectionStrokeBrushOverrides(_ overrides: String?) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withStrokeBrushOverrides(elem, overrides: overrides)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
     /// Set the fillGradient of every element in the current selection.
     /// Phase 5 — pass `nil` to demote (clear gradient; existing solid
     /// fill remains).
