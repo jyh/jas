@@ -16994,8 +16994,10 @@
               {
                 "doc.add_path_from_buffer": {
                   "buffer": "paintbrush",
-                  "fit_error": "4",
-                  "stroke_brush": "state.stroke_brush"
+                  "fit_error": "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5",
+                  "stroke_brush": "state.stroke_brush",
+                  "stroke_brush_overrides": "state.stroke_brush_overrides",
+                  "fill_new_strokes": "state.paintbrush_fill_new_strokes"
                 }
               }
             ]

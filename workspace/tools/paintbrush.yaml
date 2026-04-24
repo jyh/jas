@@ -7,20 +7,14 @@
 # renderer outlines it as a brushed stroke. When state.stroke_brush is
 # null, behaves identically to Pencil — produces a plain native stroke.
 #
-# Implementation status:
-# - YAML-driven via the YamlTool runtime (see project memory entries
-#   on Rust/Swift/OCaml/Python YAML tool runtimes).
-# - Flask-side: the JS engine does not yet implement buffer.* and
-#   doc.add_path_from_buffer effects. Until those land, this tool is
-#   spec-only on Flask.
-# - Desktop apps (Rust/Swift/OCaml/Python): implementation lands as
-#   part of the Brushes propagation chain. The doc.add_path_from_buffer
-#   effect needs to pass through stroke_brush from spec into the
-#   committed PathElem; the existing _make_path_from_commands helper
-#   currently only honours fill / stroke.
+# Tool options (per-document state.paintbrush_*) drive:
+#   - fit_error via fidelity → fit_error mapping
+#     [0.5, 2.5, 5, 7.5, 10] at ticks [1..5]; default tick 3 = 5.0.
+#   - optional state.fill_color fill on commit via fill_new_strokes.
+#   - Option/Alt-drag edit-existing-path gesture (Phase 1.3).
+#   - post-commit selection via keep_selected.
 #
-# See transcripts/PAINTBRUSH_TOOL.md for the full design and known
-# gaps.
+# See transcripts/PAINTBRUSH_TOOL.md for the full spec.
 
 id: paintbrush
 cursor: crosshair
@@ -63,8 +57,11 @@ handlers:
         - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
         - "doc.add_path_from_buffer":
             buffer: "paintbrush"
-            fit_error: "4"
+            # fidelity (1..5) → fit_error: 1→0.5, else (n-1)*2.5.
+            fit_error: "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5"
             stroke_brush: "state.stroke_brush"
+            stroke_brush_overrides: "state.stroke_brush_overrides"
+            fill_new_strokes: "state.paintbrush_fill_new_strokes"
     - set: { tool.paintbrush.mode: "'idle'" }
     - "buffer.clear": { buffer: "paintbrush" }
 
