@@ -418,6 +418,12 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
 /// Build a Path element from a command list, applying model defaults
 /// for fill/stroke when the spec omits them. Shared by
 /// doc.add_path_from_buffer and doc.add_path_from_anchor_buffer.
+///
+/// Also threads an optional `stroke_brush` expression from spec onto
+/// the new Path. The Paintbrush tool's on_mouseup handler passes
+/// `stroke_brush: "state.stroke_brush"` so the active brush from the
+/// panel rides through to the canvas renderer's brush dispatch
+/// (BRUSHES.md §Stroke styling interaction).
 private func makePathFromCommands(
     _ cmds: [PathCommand],
     model: Model,
@@ -431,7 +437,27 @@ private func makePathFromCommands(
     let stroke = resolveStrokeField(spec["stroke"], hasKey: spec.keys.contains("stroke"),
                                      default: model.defaultStroke,
                                      store: store, ctx: ctx)
-    return Path(d: cmds, fill: fill, stroke: stroke)
+    let strokeBrush = resolveStrokeBrushField(spec["stroke_brush"],
+                                              hasKey: spec.keys.contains("stroke_brush"),
+                                              store: store, ctx: ctx)
+    return Path(d: cmds, fill: fill, stroke: stroke,
+                strokeBrush: strokeBrush)
+}
+
+/// Resolve an optional `stroke_brush:` field on a path-creating
+/// effect. Absent or evaluates to null/empty → nil (plain native
+/// stroke); a non-empty string → that brush slug. Mirrors the JS and
+/// Rust passthroughs.
+private func resolveStrokeBrushField(
+    _ arg: Any?, hasKey: Bool,
+    store: StateStore, ctx: [String: Any]
+) -> String? {
+    guard hasKey else { return nil }
+    let v = evalExprAsValue(arg, store: store, ctx: ctx)
+    if case .string(let s) = v, !s.isEmpty {
+        return s
+    }
+    return nil
 }
 
 /// Resolve an optional `fill:` field. Absent → default; null → nil;
