@@ -17016,7 +17016,8 @@
                   "fit_error": "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5",
                   "stroke_brush": "state.stroke_brush",
                   "stroke_brush_overrides": "state.stroke_brush_overrides",
-                  "fill_new_strokes": "state.paintbrush_fill_new_strokes"
+                  "fill_new_strokes": "state.paintbrush_fill_new_strokes",
+                  "close": "event.modifiers.alt"
                 }
               }
             ]

@@ -87,6 +87,11 @@ handlers:
             stroke_brush: "state.stroke_brush"
             stroke_brush_overrides: "state.stroke_brush_overrides"
             fill_new_strokes: "state.paintbrush_fill_new_strokes"
+            # Option/Alt at release closes the new path. In edit mode
+            # Alt is time-disjoint (triggered edit at press); close
+            # applies only to the drawing branch per PAINTBRUSH_TOOL.md
+            # §Gestures.
+            close: "event.modifiers.alt"
     - if: "tool.paintbrush.mode == 'edit'"
       then:
         - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
