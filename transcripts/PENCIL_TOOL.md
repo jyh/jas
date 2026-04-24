@@ -43,7 +43,7 @@ which filter out stray clicks.
 
 ## Fill and stroke
 
-The committed Path picks up `model.default_stroke` and no fill
+The committed Path picks up `state.stroke_color` and no fill
 (pencil strokes are open paths where a fill would generally
 not apply). A Path with `fill=None` and `stroke=<default>` is
 what the YAML's `add_path_from_buffer` produces when no
@@ -58,15 +58,19 @@ preview. Render type: `buffer_polyline`. Style:
 
 ## Known gaps
 
-- **Alt-to-close** — peer tools close the path when Alt is held
-  at release. Not wired; the current tool always produces open
-  paths.
-- **Edit-existing-path mode** — peer tools have a modifier that
-  lets the user redraw a section of an existing selected path.
-  Out of scope for the current tool.
+- **Alt-to-close and edit-existing-path mode** — Paintbrush
+  specifies both gestures with time-disjoint Alt semantics (Alt at
+  press triggers edit, Alt at release closes the new path). See
+  `PAINTBRUSH_TOOL.md` §§ Gestures / Edit gesture / Overlay —
+  port that design here when the Pencil counterparts land. The
+  close-hint overlay and edit-splice algorithm are shared;
+  Pencil's variants differ only in that there is no
+  `jas:stroke-brush` to preserve.
 - **Smoothness panel** — peer tools expose FIT_ERROR and related
   knobs in a "Pencil Tool Options" dialog; no equivalent panel
-  exists here yet.
+  exists here yet. Paintbrush defines the `tool_options_dialog`
+  field pattern in `PAINTBRUSH_TOOL.md` § Tool options if a
+  Pencil options dialog is added.
 
 ## Related tools
 

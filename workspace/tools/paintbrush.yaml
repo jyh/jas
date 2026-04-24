@@ -26,6 +26,7 @@ id: paintbrush
 cursor: crosshair
 menu_label: "Paintbrush Tool"
 shortcut: "B"
+tool_options_dialog: "paintbrush_tool_options"
 
 state:
   mode:
