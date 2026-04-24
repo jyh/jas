@@ -186,6 +186,14 @@ cursor position back to the press point, indicating
 close-at-release. The hint appears or disappears live as Alt is
 pressed or released during the drag.
 
+**Implementation gap.** The close gesture is wired end-to-end
+(Alt-at-release closes the committed path), but the dashed hint
+overlay requires the tool-overlay system to render a second shape
+alongside the existing `buffer_polyline`. That is a cross-cutting
+overlay-system extension and is tracked as a follow-up. Users can
+still close paths with Alt-release; they just don't get a live
+preview of the closing segment before commit.
+
 ## YAML tool runtime fit
 
 This tool belongs under the YamlTool runtime (per the existing
