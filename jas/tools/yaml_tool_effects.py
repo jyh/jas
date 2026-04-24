@@ -1223,6 +1223,280 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.set_document(new_doc)
         return None
 
+    # ── Blob Brush commit helpers + effects ─────────────
+
+    def _blob_brush_effective_tip(store, ctx):
+        """Runtime tip resolution per BLOB_BRUSH_TOOL.md. When
+        state.stroke_brush refers to a Calligraphic library brush,
+        its size/angle/roundness drive the tip (with
+        stroke_brush_overrides layered). Otherwise the dialog
+        defaults state.blob_brush_* are used. Variation modes other
+        than `fixed` are evaluated as the base value in Phase 1.
+        Returns (size, angle_deg, roundness_pct)."""
+        def num_or(expr, default):
+            v = _eval_value(expr, store, ctx)
+            return v.value if v.type == ValueType.NUMBER else default
+
+        default_size = num_or("state.blob_brush_size", 10.0)
+        default_angle = num_or("state.blob_brush_angle", 0.0)
+        default_roundness = num_or("state.blob_brush_roundness", 100.0)
+
+        slug_val = _eval_value("state.stroke_brush", store, ctx)
+        if slug_val.type != ValueType.STRING or not slug_val.value:
+            return (default_size, default_angle, default_roundness)
+        slug = slug_val.value
+        if "/" not in slug:
+            return (default_size, default_angle, default_roundness)
+        lib_id, _, brush_slug = slug.partition("/")
+        brushes = store.get_data_path(
+            f"brush_libraries.{lib_id}.brushes")
+        if not isinstance(brushes, list):
+            return (default_size, default_angle, default_roundness)
+        brush = next(
+            (b for b in brushes
+             if isinstance(b, dict) and b.get("slug") == brush_slug),
+            None)
+        if brush is None or brush.get("type") != "calligraphic":
+            return (default_size, default_angle, default_roundness)
+        size = float(brush.get("size", default_size))
+        angle = float(brush.get("angle", default_angle))
+        roundness = float(brush.get("roundness", default_roundness))
+
+        # Apply state.stroke_brush_overrides (compact JSON) if present.
+        ovr_val = _eval_value("state.stroke_brush_overrides", store, ctx)
+        if ovr_val.type == ValueType.STRING and ovr_val.value:
+            import json
+            try:
+                ovr = json.loads(ovr_val.value)
+                if isinstance(ovr, dict):
+                    size = float(ovr.get("size", size))
+                    angle = float(ovr.get("angle", angle))
+                    roundness = float(ovr.get("roundness", roundness))
+            except Exception:
+                pass
+        return (size, angle, roundness)
+
+    def _blob_brush_oval_ring(cx, cy, size, angle_deg, roundness_pct):
+        """16-segment rotated-ellipse ring at (cx, cy)."""
+        import math
+        segments = 16
+        rx = size * 0.5
+        ry = size * (roundness_pct / 100.0) * 0.5
+        rad = angle_deg * math.pi / 180.0
+        cs = math.cos(rad)
+        sn = math.sin(rad)
+        out = []
+        for i in range(segments):
+            t = 2.0 * math.pi * i / segments
+            lx = rx * math.cos(t)
+            ly = ry * math.sin(t)
+            x = cx + lx * cs - ly * sn
+            y = cy + lx * sn + ly * cs
+            out.append((x, y))
+        return out
+
+    def _blob_brush_arc_length_subsample(points, spacing):
+        """Arc-length resample a point sequence at uniform intervals.
+        Always keeps first and last points. Interpolation is
+        essential: naive sample-at-existing-points leaves seams when
+        OS mousemove events are coarser than the tip radius."""
+        import math
+        if len(points) < 2 or spacing <= 0.0:
+            return list(points)
+        out = [points[0]]
+        remaining = spacing
+        for i in range(len(points) - 1):
+            ax, ay = points[i]
+            bx, by = points[i + 1]
+            dx = bx - ax
+            dy = by - ay
+            seg_len = math.sqrt(dx * dx + dy * dy)
+            if seg_len <= 0.0:
+                continue
+            t_at = 0.0
+            while t_at + remaining <= seg_len:
+                t_at += remaining
+                t = t_at / seg_len
+                out.append((ax + dx * t, ay + dy * t))
+                remaining = spacing
+            remaining -= seg_len - t_at
+        tail = points[-1]
+        if out[-1] != tail:
+            out.append(tail)
+        return out
+
+    def _blob_brush_sweep_region(points, tip):
+        """Build the swept region from buffer points and tip params.
+        Subsamples at 1/2 * min tip dimension, places an oval at
+        each sample, and unions them via boolean_union."""
+        from algorithms.boolean import boolean_union
+        size, angle, roundness = tip
+        min_dim = min(size, size * roundness / 100.0)
+        spacing = max(min_dim * 0.5, 0.5)
+        samples = _blob_brush_arc_length_subsample(points, spacing)
+        region: list = []
+        for cx, cy in samples:
+            oval = [_blob_brush_oval_ring(cx, cy, size, angle, roundness)]
+            if not region:
+                region = oval
+            else:
+                region = boolean_union(region, oval)
+        return region
+
+    def _blob_brush_fill_matches(a, b):
+        """Merge condition: both solid, matching sRGB hex + opacity."""
+        if a is None or b is None:
+            return False
+        return (a.color.to_hex().lower() == b.color.to_hex().lower()
+                and abs(a.opacity - b.opacity) < 1e-9)
+
+    def _blob_brush_insert_at(doc, layer_idx, child_idx, elem):
+        """Insert elem at doc.layers[layer_idx].children[child_idx]
+        via dataclasses.replace. Shifts later children down."""
+        import dataclasses
+        if layer_idx < 0 or layer_idx >= len(doc.layers):
+            return doc
+        layer = doc.layers[layer_idx]
+        children = list(layer.children)
+        clamped = max(0, min(child_idx, len(children)))
+        children.insert(clamped, elem)
+        new_layer = dataclasses.replace(layer, children=tuple(children))
+        new_layers = list(doc.layers)
+        new_layers[layer_idx] = new_layer
+        return dataclasses.replace(doc, layers=tuple(new_layers))
+
+    def doc_blob_brush_commit_painting(spec, ctx, store):
+        """BLOB_BRUSH_TOOL.md Commit pipeline + Multi-element merge.
+        Builds the swept region, finds matching existing blob-brush
+        elements (tool_origin == "blob_brush" + fill matches +
+        optional selection-scoped), unions all matches with the
+        sweep, replaces them with a single merged Path at the lowest
+        matching z-index (or appends to layer 0 if no matches)."""
+        from algorithms.boolean import boolean_intersect, boolean_union
+        import dataclasses
+        if not isinstance(spec, dict):
+            return None
+        buffer = spec.get("buffer")
+        if not isinstance(buffer, str) or not buffer:
+            return None
+        _ = eval_number(spec.get("fidelity_epsilon"), store, ctx)
+        merge_only_with_selection = eval_bool(
+            spec.get("merge_only_with_selection"), store, ctx)
+        _keep_selected = eval_bool(spec.get("keep_selected"), store, ctx)
+        points = point_buffers.points(buffer)
+        if len(points) < 2:
+            return None
+        tip = _blob_brush_effective_tip(store, ctx)
+        swept = _blob_brush_sweep_region(points, tip)
+        if not swept:
+            return None
+        # Resolve fill from state.fill_color.
+        fill_val = _eval_value("state.fill_color", store, ctx)
+        new_fill = None
+        if fill_val.type in (ValueType.COLOR, ValueType.STRING):
+            try:
+                new_fill = Fill(color=Color.from_hex(fill_val.value))
+            except Exception:
+                new_fill = None
+        doc = controller.document
+        selected_paths = {tuple(es.path) for es in doc.selection}
+        matches = []  # list of (layer_idx, child_idx)
+        unified = swept
+        for li, layer in enumerate(doc.layers):
+            for ci, child in enumerate(layer.children):
+                if not isinstance(child, PathElem):
+                    continue
+                if child.tool_origin != "blob_brush":
+                    continue
+                if not _blob_brush_fill_matches(child.fill, new_fill):
+                    continue
+                path = (li, ci)
+                if merge_only_with_selection and path not in selected_paths:
+                    continue
+                existing = path_ops.path_to_polygon_set(list(child.d))
+                if not boolean_intersect(unified, existing):
+                    continue
+                unified = boolean_union(unified, existing)
+                matches.append(path)
+        # Insertion z = lowest matching (layer, child); default append
+        # to layer 0.
+        if not matches:
+            insert_layer = 0
+            insert_idx = None
+        else:
+            lowest = matches[0]
+            insert_layer = lowest[0]
+            insert_idx = lowest[1]
+        new_d = path_ops.polygon_set_to_path(unified)
+        if not new_d:
+            return None
+        new_elem = PathElem(
+            d=tuple(new_d),
+            fill=new_fill,
+            stroke=None,
+            width_points=(),
+            tool_origin="blob_brush",
+        )
+        # Remove matches in reverse so earlier indices stay valid.
+        new_doc = doc
+        for path in sorted(matches, reverse=True):
+            new_doc = new_doc.delete_element(list(path))
+        if insert_idx is not None:
+            new_doc = _blob_brush_insert_at(
+                new_doc, insert_layer, insert_idx, new_elem)
+        else:
+            n = len(new_doc.layers[insert_layer].children)
+            new_doc = _blob_brush_insert_at(
+                new_doc, insert_layer, n, new_elem)
+        controller.set_document(new_doc)
+        return None
+
+    def doc_blob_brush_commit_erasing(spec, ctx, store):
+        """BLOB_BRUSH_TOOL.md Erase gesture → Commit. boolean_subtract
+        the swept region from each intersecting tool_origin ==
+        "blob_brush" element. Empty remainder → delete; non-empty →
+        update in place. Non-blob-brush elements are untouched."""
+        from algorithms.boolean import boolean_intersect, boolean_subtract
+        import dataclasses
+        if not isinstance(spec, dict):
+            return None
+        buffer = spec.get("buffer")
+        if not isinstance(buffer, str) or not buffer:
+            return None
+        _ = eval_number(spec.get("fidelity_epsilon"), store, ctx)
+        points = point_buffers.points(buffer)
+        if len(points) < 2:
+            return None
+        tip = _blob_brush_effective_tip(store, ctx)
+        swept = _blob_brush_sweep_region(points, tip)
+        if not swept:
+            return None
+        doc = controller.document
+        new_doc = doc
+        # Iterate in reverse so deletions don't invalidate earlier
+        # indices.
+        for li in range(len(doc.layers) - 1, -1, -1):
+            layer = doc.layers[li]
+            for ci in range(len(layer.children) - 1, -1, -1):
+                child = layer.children[ci]
+                if not isinstance(child, PathElem):
+                    continue
+                if child.tool_origin != "blob_brush":
+                    continue
+                existing = path_ops.path_to_polygon_set(list(child.d))
+                if not boolean_intersect(existing, swept):
+                    continue
+                remainder = boolean_subtract(existing, swept)
+                path = [li, ci]
+                new_d = path_ops.polygon_set_to_path(remainder)
+                if not new_d:
+                    new_doc = new_doc.delete_element(path)
+                else:
+                    new_pe = dataclasses.replace(child, d=tuple(new_d))
+                    new_doc = new_doc.replace_element(path, new_pe)
+        controller.set_document(new_doc)
+        return None
+
     def doc_path_smooth_at_cursor(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
@@ -1595,6 +1869,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.path.smooth_at_cursor"] = doc_path_smooth_at_cursor
     effects["doc.paintbrush.edit_start"] = doc_paintbrush_edit_start
     effects["doc.paintbrush.edit_commit"] = doc_paintbrush_edit_commit
+    effects["doc.blob_brush.commit_painting"] = doc_blob_brush_commit_painting
+    effects["doc.blob_brush.commit_erasing"] = doc_blob_brush_commit_erasing
     effects["doc.path.probe_anchor_hit"] = doc_path_probe_anchor_hit
     effects["doc.path.commit_anchor_edit"] = doc_path_commit_anchor_edit
     effects["doc.move_path_handle"] = doc_move_path_handle

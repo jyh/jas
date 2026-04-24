@@ -193,3 +193,110 @@ class TestDocSelectInRect:
             },
         }])
         assert any(es.path == (0, 0) for es in model.document.selection)
+
+
+# Blob Brush commit effects.
+
+
+class TestBlobBrushCommit:
+    @staticmethod
+    def _seed_sweep():
+        from workspace_interpreter import point_buffers
+        point_buffers.clear("blob_brush")
+        # 6 points spanning 50 pt horizontally at y=0.
+        for i in range(6):
+            point_buffers.push("blob_brush", float(i) * 10.0, 0.0)
+
+    @staticmethod
+    def _blob_brush_defaults(store):
+        store.set("fill_color", "#ff0000")
+        store.set("blob_brush_size", 10.0)
+        store.set("blob_brush_angle", 0.0)
+        store.set("blob_brush_roundness", 100.0)
+
+    @staticmethod
+    def _empty_layer_model():
+        layer = Layer(name="L", children=())
+        doc = Document(layers=(layer,))
+        return Model(document=doc)
+
+    def test_commit_painting_creates_tagged_path(self):
+        from geometry.element import Path as PathElem
+        model = self._empty_layer_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        self._blob_brush_defaults(store)
+        self._seed_sweep()
+        _run(store, ctrl, [{
+            "doc.blob_brush.commit_painting": {
+                "buffer": "blob_brush",
+                "fidelity_epsilon": "5.0",
+                "merge_only_with_selection": "false",
+                "keep_selected": "false",
+            },
+        }])
+        children = model.document.layers[0].children
+        assert len(children) == 1
+        pe = children[0]
+        assert isinstance(pe, PathElem)
+        assert pe.tool_origin == "blob_brush"
+        assert pe.fill is not None
+        assert pe.stroke is None
+        # At least MoveTo + some LineTos + ClosePath.
+        assert len(pe.d) >= 3
+
+    def test_commit_erasing_deletes_fully_covered_element(self):
+        from geometry.element import (ClosePath, Color, Fill, LineTo,
+                                      MoveTo)
+        from geometry.element import Path as PathElem
+        # Small 4x2 blob-brush square fully inside sweep coverage
+        # (sweep = 50pt horizontal, tip 10pt -> covers y in [-5, 5]).
+        target = PathElem(
+            d=(MoveTo(23.0, -1.0), LineTo(27.0, -1.0),
+               LineTo(27.0, 1.0), LineTo(23.0, 1.0), ClosePath()),
+            fill=Fill(color=Color.from_hex("#ff0000")),
+            tool_origin="blob_brush",
+        )
+        layer = Layer(name="L", children=(target,))
+        doc = Document(layers=(layer,))
+        model = Model(document=doc)
+        ctrl = _ctrl(model)
+        store = StateStore()
+        self._blob_brush_defaults(store)
+        self._seed_sweep()
+        _run(store, ctrl, [{
+            "doc.blob_brush.commit_erasing": {
+                "buffer": "blob_brush",
+                "fidelity_epsilon": "5.0",
+            },
+        }])
+        children = model.document.layers[0].children
+        assert len(children) == 0, \
+            "erasing should delete fully-covered element"
+
+    def test_commit_erasing_ignores_non_blob_brush(self):
+        from geometry.element import (ClosePath, Color, Fill, LineTo,
+                                      MoveTo)
+        from geometry.element import Path as PathElem
+        # Same square but tool_origin = None -- erase must skip.
+        target = PathElem(
+            d=(MoveTo(20.0, -2.0), LineTo(30.0, -2.0),
+               LineTo(30.0, 2.0), LineTo(20.0, 2.0), ClosePath()),
+            fill=Fill(color=Color.from_hex("#ff0000")),
+        )
+        layer = Layer(name="L", children=(target,))
+        doc = Document(layers=(layer,))
+        model = Model(document=doc)
+        ctrl = _ctrl(model)
+        store = StateStore()
+        self._blob_brush_defaults(store)
+        self._seed_sweep()
+        _run(store, ctrl, [{
+            "doc.blob_brush.commit_erasing": {
+                "buffer": "blob_brush",
+                "fidelity_epsilon": "5.0",
+            },
+        }])
+        children = model.document.layers[0].children
+        assert len(children) == 1, \
+            "erasing must not touch non-blob-brush elements"
