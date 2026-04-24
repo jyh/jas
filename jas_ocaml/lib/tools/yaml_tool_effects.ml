@@ -177,6 +177,32 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      | _ -> ());
     `Null
   in
+  (* Phase 1 supports brush attributes only; other attrs ignored.
+     Used by apply_brush_to_selection / remove_brush_from_selection
+     in actions.yaml. Mirrors the JS Phase 1.8 effect. *)
+  let doc_set_attr_on_selection spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let attr = match List.assoc_opt "attr" args with
+         | Some (`String s) -> s
+         | _ -> "" in
+       let value =
+         match List.assoc_opt "value" args with
+         | None | Some `Null -> None
+         | Some (`String s) ->
+           let eval_ctx = State_store.eval_context ~extra:ctx store in
+           (match Expr_eval.evaluate s eval_ctx with
+            | Expr_eval.Str rs when rs <> "" -> Some rs
+            | _ -> None)
+         | _ -> None
+       in
+       (match attr with
+        | "stroke_brush" -> ctrl#set_selection_stroke_brush value
+        | "stroke_brush_overrides" -> ctrl#set_selection_stroke_brush_overrides value
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
   let doc_copy_selection spec ctx store =
     (match spec with
      | `Assoc args ->
@@ -1216,6 +1242,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.add_to_selection", doc_add_to_selection);
     ("doc.toggle_selection", doc_toggle_selection);
     ("doc.translate_selection", doc_translate_selection);
+    ("doc.set_attr_on_selection", doc_set_attr_on_selection);
     ("doc.copy_selection", doc_copy_selection);
     ("doc.select_in_rect", doc_select_in_rect);
     ("doc.partial_select_in_rect", doc_partial_select_in_rect);

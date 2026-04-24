@@ -1281,6 +1281,18 @@ let with_stroke elem s =
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
   | Group _ | Layer _ -> elem
 
+(* Path-only — Phase 1 brush model lives on PathElem alone. Other
+   elements are returned unchanged. See BRUSHES.md. *)
+let with_stroke_brush elem (slug : string option) =
+  match elem with
+  | Path r -> Path { r with stroke_brush = slug }
+  | _ -> elem
+
+let with_stroke_brush_overrides elem (overrides : string option) =
+  match elem with
+  | Path r -> Path { r with stroke_brush_overrides = overrides }
+  | _ -> elem
+
 (** Phase 5: replace the optional fill_gradient on the element. Pass
     [None] to clear (demote to solid). Variants without fill (Line,
     Group, Layer, Text, Text_path, Live) return unchanged. *)
