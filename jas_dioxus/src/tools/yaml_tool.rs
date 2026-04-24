@@ -384,7 +384,7 @@ impl CanvasTool for YamlTool {
             "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
             "star" => draw_star_overlay(ctx, render, &eval_ctx),
             "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
-            "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render),
+            "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render, &eval_ctx),
             "pen_overlay" => draw_pen_overlay(ctx, render, &eval_ctx),
             "partial_selection_overlay" => {
                 draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
@@ -592,9 +592,15 @@ fn draw_buffer_polygon_overlay(
 /// close_path / fill. Used by Pencil's overlay: the user sees the raw
 /// traced path while dragging, then the final fit_curve result lands
 /// as a Bezier Path element on mouseup.
+///
+/// Optional `close_hint` field (expression or bool) — when truthy,
+/// additionally draws a 1 px dashed line from the last buffer point
+/// back to the first, indicating that a close-at-release would fire
+/// right now (Paintbrush §Overlay → Close-at-release hint).
 fn draw_buffer_polyline_overlay(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
 ) {
     let name = render
         .get("buffer")
@@ -634,6 +640,32 @@ fn draw_buffer_polyline_overlay(
     }
     ctx.stroke();
     if style.stroke_dasharray.is_some() {
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
+    }
+
+    // Close-at-release hint: dashed line from current cursor back to
+    // press point when the `close_hint` field evaluates truthy.
+    let hint_on = match render.get("close_hint") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => {
+            crate::interpreter::expr::eval(s, eval_ctx).to_bool()
+        }
+        _ => false,
+    };
+    if hint_on && points.len() >= 2 {
+        let (sx, sy) = points[0];
+        let (ex, ey) = *points.last().unwrap();
+        ctx.set_stroke_style_str(stroke);
+        ctx.set_line_width(1.0);
+        let arr = js_sys::Array::new();
+        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
+        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
+        let _ = ctx.set_line_dash(&arr);
+        ctx.begin_path();
+        ctx.move_to(ex, ey);
+        ctx.line_to(sx, sy);
+        ctx.stroke();
         let _ = ctx.set_line_dash(&js_sys::Array::new());
     }
 }

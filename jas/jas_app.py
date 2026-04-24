@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
 
         # Toolbar pane
         self.toolbar = Toolbar()
+        self.toolbar.tool_options_requested.connect(self._open_tool_options_dialog)
         self._toolbar_title = PaneTitleBar(
             "", pane_id=tid,
             on_close=lambda: self._hide_pane(PaneKind.TOOLBAR),
@@ -838,6 +839,62 @@ class MainWindow(QMainWindow):
                 m.snapshot()
                 canvas._controller.set_selection_stroke(None)
         self._sync_fill_stroke_widget()
+
+    # Map Tool enum to the workspace/tools/*.yaml filename stem.
+    _TOOL_YAML_IDS = {
+        Tool.SELECTION: "selection",
+        Tool.PARTIAL_SELECTION: "partial_selection",
+        Tool.INTERIOR_SELECTION: "interior_selection",
+        Tool.PEN: "pen",
+        Tool.ADD_ANCHOR_POINT: "add_anchor_point",
+        Tool.DELETE_ANCHOR_POINT: "delete_anchor_point",
+        Tool.ANCHOR_POINT: "anchor_point",
+        Tool.PENCIL: "pencil",
+        Tool.PAINTBRUSH: "paintbrush",
+        Tool.PATH_ERASER: "path_eraser",
+        Tool.SMOOTH: "smooth",
+        Tool.LINE: "line",
+        Tool.RECT: "rect",
+        Tool.ROUNDED_RECT: "rounded_rect",
+        Tool.POLYGON: "polygon",
+        Tool.STAR: "star",
+        Tool.LASSO: "lasso",
+    }
+
+    def _open_tool_options_dialog(self, tool):
+        """Handler for Toolbar.tool_options_requested. Looks up the
+        tool's tool_options_dialog field in workspace.json; if set,
+        dispatches open_dialog and shows the dialog. See
+        PAINTBRUSH_TOOL.md §Tool options."""
+        from workspace_interpreter.effects import run_effects
+        from workspace_interpreter.loader import load_workspace
+
+        yaml_id = self._TOOL_YAML_IDS.get(tool)
+        if not yaml_id:
+            return
+        ws = load_workspace("workspace")
+        if not ws:
+            return
+        tool_spec = (ws.get("tools") or {}).get(yaml_id) or {}
+        dialog_id = tool_spec.get("tool_options_dialog")
+        if not dialog_id:
+            return
+        if not hasattr(self, "_yaml_state") or not self._yaml_state:
+            return
+        run_effects(
+            [{"open_dialog": {"id": dialog_id}}],
+            {}, self._yaml_state,
+            dialogs=ws.get("dialogs"),
+        )
+        dlg = YamlDialogView(
+            dialog_id, self._yaml_state,
+            dispatch_fn=self.dock_panel._dispatch_yaml_action
+                if hasattr(self, "dock_panel") else None,
+            parent=self,
+        )
+        dlg.exec()
+        if self._yaml_state.get_dialog_id():
+            self._yaml_state.close_dialog()
 
     def _open_color_picker(self, for_fill: bool):
         """Open the YAML color picker dialog for fill or stroke."""

@@ -7,30 +7,45 @@
 # renderer outlines it as a brushed stroke. When state.stroke_brush is
 # null, behaves identically to Pencil — produces a plain native stroke.
 #
-# Implementation status:
-# - YAML-driven via the YamlTool runtime (see project memory entries
-#   on Rust/Swift/OCaml/Python YAML tool runtimes).
-# - Flask-side: the JS engine does not yet implement buffer.* and
-#   doc.add_path_from_buffer effects. Until those land, this tool is
-#   spec-only on Flask.
-# - Desktop apps (Rust/Swift/OCaml/Python): implementation lands as
-#   part of the Brushes propagation chain. The doc.add_path_from_buffer
-#   effect needs to pass through stroke_brush from spec into the
-#   committed PathElem; the existing _make_path_from_commands helper
-#   currently only honours fill / stroke.
+# Two commit paths:
+#   drawing — new Path from the buffer (see doc.add_path_from_buffer
+#             in effects.rs).
+#   edit    — splice the drag buffer into an already-selected Path
+#             (see doc.paintbrush.edit_commit). Option/Alt at press
+#             triggers edit mode when a selected Path is within
+#             paintbrush_edit_within px; otherwise falls through to
+#             drawing mode.
 #
-# See transcripts/PAINTBRUSH_TOOL.md for the full design and known
-# gaps.
+# Tool options (per-document state.paintbrush_*) drive:
+#   - fit_error via fidelity → fit_error mapping
+#     [0.5, 2.5, 5, 7.5, 10] at ticks [1..5]; default tick 3 = 5.0.
+#   - optional state.fill_color fill on commit via fill_new_strokes.
+#   - Option/Alt-drag edit-existing-path gesture.
+#   - post-commit selection via keep_selected.
+#
+# See transcripts/PAINTBRUSH_TOOL.md for the full spec.
 
 id: paintbrush
 cursor: crosshair
 menu_label: "Paintbrush Tool"
 shortcut: "B"
+tool_options_dialog: "paintbrush_tool_options"
 
 state:
   mode:
     default: "idle"
-    enum: [idle, drawing]
+    enum: [idle, drawing, edit]
+  # doc.paintbrush.edit_start writes these when it finds a target
+  # Path whose closest flat point is within paintbrush_edit_within
+  # of the press. edit_commit reads them on mouseup.
+  #   edit_target_path   Path value (serialized __path__ dict)
+  #   edit_entry_idx     number (flat-polyline index on the target)
+  edit_target_path: { default: null }
+  edit_entry_idx: { default: 0 }
+  # Latched Option/Alt state. Each mousemove writes event.modifiers.alt
+  # so the overlay render can draw the dashed close-at-release hint
+  # without needing per-frame access to the mouse-event scope.
+  alt_held: { default: false }
 
 handlers:
 
@@ -47,9 +62,19 @@ handlers:
     - "buffer.clear": { buffer: "paintbrush" }
     - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
     - set: { tool.paintbrush.mode: "'drawing'" }
+    # Alt + edit_selected_paths opt-in: try to promote to edit mode.
+    # edit_start leaves mode='drawing' when no selected Path is
+    # within range, so it's safe to fall through.
+    - if: "event.modifiers.alt && state.paintbrush_edit_selected_paths"
+      then:
+        - "doc.paintbrush.edit_start":
+            x: "event.x"
+            y: "event.y"
+            within: "state.paintbrush_edit_within"
 
   on_mousemove:
-    - if: "tool.paintbrush.mode == 'drawing'"
+    - set: { tool.paintbrush.alt_held: "event.modifiers.alt" }
+    - if: "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'"
       then:
         - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
 
@@ -62,9 +87,25 @@ handlers:
         - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
         - "doc.add_path_from_buffer":
             buffer: "paintbrush"
-            fit_error: "4"
+            # fidelity (1..5) → fit_error: 1→0.5, else (n-1)*2.5.
+            fit_error: "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5"
             stroke_brush: "state.stroke_brush"
+            stroke_brush_overrides: "state.stroke_brush_overrides"
+            fill_new_strokes: "state.paintbrush_fill_new_strokes"
+            # Option/Alt at release closes the new path. In edit mode
+            # Alt is time-disjoint (triggered edit at press); close
+            # applies only to the drawing branch per PAINTBRUSH_TOOL.md
+            # §Gestures.
+            close: "event.modifiers.alt"
+    - if: "tool.paintbrush.mode == 'edit'"
+      then:
+        - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+        - "doc.paintbrush.edit_commit":
+            buffer: "paintbrush"
+            fit_error: "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5"
+            within: "state.paintbrush_edit_within"
     - set: { tool.paintbrush.mode: "'idle'" }
+    - set: { tool.paintbrush.alt_held: "false" }
     - "buffer.clear": { buffer: "paintbrush" }
 
   on_keydown:
@@ -75,10 +116,14 @@ handlers:
 
 # Thin polyline tracking the raw drag — the final committed path is
 # the smoothed fit_curve output, then outlined by the brush at render
-# time.
+# time. When Option/Alt is held during drawing, the render also draws
+# a dashed line from the cursor back to the press point, indicating
+# close-at-release per PAINTBRUSH_TOOL.md §Overlay → Close-at-release
+# hint.
 overlay:
-  if: "tool.paintbrush.mode == 'drawing'"
+  if: "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'"
   render:
     type: buffer_polyline
     buffer: "paintbrush"
     style: "stroke: black; stroke-width: 1;"
+    close_hint: "tool.paintbrush.alt_held && tool.paintbrush.mode == 'drawing'"

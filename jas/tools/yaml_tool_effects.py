@@ -749,31 +749,95 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             controller.add_element(elem)
         return None
 
+    def _paintbrush_stroke_width(stroke_brush, overrides, store, ctx):
+        """Paintbrush stroke-width commit rule per PAINTBRUSH_TOOL.md
+        §Fill and stroke: no brush → state.stroke_width; brush with
+        size (Calligraphic/Scatter/Bristle) → overrides.size, else
+        brush.size; brush with no size (Art/Pattern) →
+        state.stroke_width."""
+        sw_val = _eval_value("state.stroke_width", store, ctx)
+        state_width = sw_val.value if sw_val.type == ValueType.NUMBER else 1.0
+        if not stroke_brush:
+            return state_width
+        # overrides.size wins over brush.size.
+        if overrides:
+            try:
+                import json
+                obj = json.loads(overrides)
+                if isinstance(obj, dict) and "size" in obj:
+                    sz = obj["size"]
+                    if isinstance(sz, (int, float)):
+                        return float(sz)
+            except Exception:
+                pass
+        parts = stroke_brush.split("/", 1)
+        if len(parts) != 2:
+            return state_width
+        lib_id, brush_slug = parts
+        path = f"brush_libraries.{lib_id}.brushes"
+        brushes = store.get_data_path(path)
+        if not isinstance(brushes, list):
+            return state_width
+        for b in brushes:
+            if isinstance(b, dict) and b.get("slug") == brush_slug:
+                sz = b.get("size")
+                if isinstance(sz, (int, float)):
+                    return float(sz)
+                return state_width
+        return state_width
+
     def _make_path_from_commands(cmds, spec, ctx, store) -> PathElem:
-        has_fill = isinstance(spec, dict) and "fill" in spec
-        has_stroke = isinstance(spec, dict) and "stroke" in spec
-        default_fill = getattr(controller.model, "default_fill", None)
-        default_stroke = getattr(controller.model, "default_stroke", None)
-        fill = _resolve_fill(
-            spec.get("fill") if isinstance(spec, dict) else None,
-            has_fill, default_fill, store, ctx)
-        stroke = _resolve_stroke(
-            spec.get("stroke") if isinstance(spec, dict) else None,
-            has_stroke, default_stroke, store, ctx)
-        # Optional stroke_brush passthrough — Paintbrush tool's
-        # on_mouseup passes "state.stroke_brush" so the active brush
-        # rides along onto the new path. Renderer dispatch consumes
-        # it via the calligraphic outliner. Mirrors the JS / Rust /
-        # Swift / OCaml passthroughs.
+        has_stroke_brush_arg = isinstance(spec, dict) and "stroke_brush" in spec
         stroke_brush = None
-        if isinstance(spec, dict) and "stroke_brush" in spec:
-            sb_raw = spec.get("stroke_brush")
-            if sb_raw is not None:
-                sb_val = _eval_value(sb_raw, store, ctx)
-                if sb_val.type == ValueType.STRING and sb_val.value:
-                    stroke_brush = sb_val.value
+        if has_stroke_brush_arg and spec.get("stroke_brush") is not None:
+            sb_val = _eval_value(spec["stroke_brush"], store, ctx)
+            if sb_val.type == ValueType.STRING and sb_val.value:
+                stroke_brush = sb_val.value
+        stroke_brush_overrides = None
+        if isinstance(spec, dict) and "stroke_brush_overrides" in spec \
+           and spec.get("stroke_brush_overrides") is not None:
+            sbo_val = _eval_value(spec["stroke_brush_overrides"], store, ctx)
+            if sbo_val.type == ValueType.STRING and sbo_val.value:
+                stroke_brush_overrides = sbo_val.value
+
+        # Fill: fill_new_strokes takes precedence (Paintbrush rule).
+        if isinstance(spec, dict) and "fill_new_strokes" in spec:
+            if eval_bool(spec.get("fill_new_strokes"), store, ctx):
+                fc_val = _eval_value("state.fill_color", store, ctx)
+                color_str = fc_val.value \
+                    if fc_val.type in (ValueType.COLOR, ValueType.STRING) else ""
+                color = Color.from_hex(color_str) if color_str else None
+                fill = Fill(color=color) if color else None
+            else:
+                fill = None
+        else:
+            has_fill = isinstance(spec, dict) and "fill" in spec
+            default_fill = getattr(controller.model, "default_fill", None)
+            fill = _resolve_fill(
+                spec.get("fill") if isinstance(spec, dict) else None,
+                has_fill, default_fill, store, ctx)
+
+        # Stroke: presence of stroke_brush key signals Paintbrush
+        # rules (compute from state); else pencil-style fall-through.
+        if has_stroke_brush_arg:
+            sc_val = _eval_value("state.stroke_color", store, ctx)
+            color_str = sc_val.value \
+                if sc_val.type in (ValueType.COLOR, ValueType.STRING) else "#000000"
+            color = Color.from_hex(color_str) or Color.rgb(0.0, 0.0, 0.0)
+            width = _paintbrush_stroke_width(stroke_brush,
+                                             stroke_brush_overrides,
+                                             store, ctx)
+            stroke = Stroke(color=color, width=width)
+        else:
+            has_stroke = isinstance(spec, dict) and "stroke" in spec
+            default_stroke = getattr(controller.model, "default_stroke", None)
+            stroke = _resolve_stroke(
+                spec.get("stroke") if isinstance(spec, dict) else None,
+                has_stroke, default_stroke, store, ctx)
+
         return PathElem(d=tuple(cmds), fill=fill, stroke=stroke,
-                        stroke_brush=stroke_brush)
+                        stroke_brush=stroke_brush,
+                        stroke_brush_overrides=stroke_brush_overrides)
 
     def doc_add_path_from_buffer(spec, ctx, store):
         if not isinstance(spec, dict):
@@ -796,6 +860,10 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             cmds.append(CurveTo(x1=seg[2], y1=seg[3],
                                 x2=seg[4], y2=seg[5],
                                 x=seg[6], y=seg[7]))
+        # Paintbrush §Gestures close-at-release: append ClosePath when
+        # the effect was called with close=true.
+        if eval_bool(spec.get("close"), store, ctx):
+            cmds.append(ClosePath())
         elem = _make_path_from_commands(cmds, spec, ctx, store)
         controller.add_element(elem)
         return None
@@ -1005,6 +1073,154 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             new_doc = dataclasses.replace(doc, layers=tuple(layers),
                                           selection=frozenset())
             controller.set_document(new_doc)
+        return None
+
+    def _encode_path(path):
+        return {"__path__": list(path)}
+
+    def _decode_path(v):
+        if not isinstance(v, dict):
+            return None
+        arr = v.get("__path__")
+        if not isinstance(arr, list):
+            return None
+        out = []
+        for n in arr:
+            if isinstance(n, int):
+                out.append(n)
+            else:
+                return None
+        return out
+
+    def doc_paintbrush_edit_start(spec, ctx, store):
+        """Paintbrush edit-gesture target selection per
+        PAINTBRUSH_TOOL.md §Edit gesture — Target selection.
+
+        Scans selected Paths, picks the one whose closest flat
+        point is nearest and ≤ `within` px of (x, y). Writes
+        tool.paintbrush.mode='edit' + edit_target_path + entry_idx.
+        No-op when no target qualifies."""
+        if not isinstance(spec, dict):
+            return None
+        x = eval_number(spec.get("x"), store, ctx)
+        y = eval_number(spec.get("y"), store, ctx)
+        within = eval_number(spec.get("within"), store, ctx)
+        within_sq = within * within
+        best = None  # (path, entry_idx, dsq)
+        doc = controller.document
+        for es in doc.selection:
+            path = es.path
+            try:
+                elem = doc.get_element(path)
+            except Exception:
+                continue
+            if not isinstance(elem, PathElem) or elem.locked:
+                continue
+            if len(elem.d) < 2:
+                continue
+            flat, _cmd_map = path_ops.flatten_with_cmd_map(elem.d)
+            if not flat:
+                continue
+            for i, (fx, fy) in enumerate(flat):
+                dx = fx - x
+                dy = fy - y
+                dsq = dx * dx + dy * dy
+                if dsq > within_sq:
+                    continue
+                if best is not None and best[2] <= dsq:
+                    continue
+                best = (path, i, dsq)
+        if best is not None:
+            target_path, entry_idx, _ = best
+            store.set_tool("paintbrush", "mode", "edit")
+            store.set_tool("paintbrush", "edit_target_path",
+                           _encode_path(target_path))
+            store.set_tool("paintbrush", "edit_entry_idx", entry_idx)
+        return None
+
+    def doc_paintbrush_edit_commit(spec, ctx, store):
+        """Paintbrush edit-gesture splice per PAINTBRUSH_TOOL.md
+        §Edit gesture — Splice.
+
+        Reads target + entry_idx from tool state, computes exit_idx
+        on the target's flat polyline nearest the buffer's last
+        point, and if within range, replaces the target's [c0..c1]
+        command range with a fit_curve of the drag buffer (start
+        point prepended for seamless splice). Preserves all non-`d`
+        attributes."""
+        if not isinstance(spec, dict):
+            return None
+        buffer = spec.get("buffer")
+        if not isinstance(buffer, str):
+            return None
+        raw_e = eval_number(spec.get("fit_error"), store, ctx)
+        fit_error = 4.0 if raw_e == 0.0 else raw_e
+        within = eval_number(spec.get("within"), store, ctx)
+        within_sq = within * within
+        target_path = _decode_path(store.get_tool("paintbrush",
+                                                  "edit_target_path"))
+        if target_path is None:
+            return None
+        entry_idx = store.get_tool("paintbrush", "edit_entry_idx")
+        if not isinstance(entry_idx, int) or entry_idx < 0:
+            return None
+        drag_points = point_buffers.points(buffer)
+        if len(drag_points) < 2:
+            return None
+        doc = controller.document
+        try:
+            target_elem = doc.get_element(target_path)
+        except Exception:
+            return None
+        if not isinstance(target_elem, PathElem) or target_elem.locked:
+            return None
+        if len(target_elem.d) < 2:
+            return None
+        flat, cmd_map = path_ops.flatten_with_cmd_map(target_elem.d)
+        if not flat or entry_idx >= len(flat):
+            return None
+        last_x, last_y = drag_points[-1]
+        best = None  # (idx, dsq)
+        for i, (fx, fy) in enumerate(flat):
+            dx = fx - last_x
+            dy = fy - last_y
+            dsq = dx * dx + dy * dy
+            if best is not None and best[1] <= dsq:
+                continue
+            best = (i, dsq)
+        if best is None or best[1] > within_sq:
+            return None
+        exit_idx, _ = best
+        if exit_idx == entry_idx:
+            return None
+        lo_flat = min(entry_idx, exit_idx)
+        hi_flat = max(entry_idx, exit_idx)
+        c0 = cmd_map[lo_flat]
+        c1 = cmd_map[hi_flat]
+        if c0 >= c1 or c1 >= len(target_elem.d):
+            return None
+        ordered_drag = list(reversed(drag_points)) \
+            if exit_idx < entry_idx else list(drag_points)
+        start_pt = path_ops.cmd_start_point(target_elem.d, c0)
+        points_to_fit = [start_pt] + ordered_drag
+        if len(points_to_fit) < 2:
+            return None
+        segments = fit_curve(points_to_fit, fit_error)
+        if not segments:
+            return None
+        prefix = list(target_elem.d[:c0])
+        suffix = list(target_elem.d[c1 + 1:])
+        new_curves = [
+            CurveTo(x1=seg[2], y1=seg[3],
+                    x2=seg[4], y2=seg[5],
+                    x=seg[6], y=seg[7])
+            for seg in segments
+        ]
+        new_cmds = prefix + new_curves + suffix
+        import dataclasses
+        new_elem = dataclasses.replace(target_elem, d=tuple(new_cmds))
+        new_doc = doc.replace_element(target_path, new_elem)
+        controller.set_document(new_doc)
         return None
 
     def doc_path_smooth_at_cursor(spec, ctx, store):
@@ -1377,6 +1593,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.path.insert_anchor_on_segment_near"] = doc_path_insert_anchor_on_segment_near
     effects["doc.path.erase_at_rect"] = doc_path_erase_at_rect
     effects["doc.path.smooth_at_cursor"] = doc_path_smooth_at_cursor
+    effects["doc.paintbrush.edit_start"] = doc_paintbrush_edit_start
+    effects["doc.paintbrush.edit_commit"] = doc_paintbrush_edit_commit
     effects["doc.path.probe_anchor_hit"] = doc_path_probe_anchor_hit
     effects["doc.path.commit_anchor_edit"] = doc_path_commit_anchor_edit
     effects["doc.move_path_handle"] = doc_move_path_handle

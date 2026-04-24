@@ -247,7 +247,7 @@ final class YamlTool: CanvasTool {
         case "polygon": drawPolygonOverlay(cgCtx, render, evalCtx)
         case "star": drawStarOverlay(cgCtx, render, evalCtx)
         case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
-        case "buffer_polyline": drawBufferPolylineOverlay(cgCtx, render)
+        case "buffer_polyline": drawBufferPolylineOverlay(cgCtx, render, evalCtx)
         case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx)
         case "partial_selection_overlay":
             drawPartialSelectionOverlay(cgCtx, render, evalCtx,
@@ -648,9 +648,13 @@ private func evaluateOverlayBool(_ field: Any?, _ ctx: [String: Any]) -> Bool {
 }
 
 /// Stroke an open polyline made of the named point buffer's points.
-/// Used by the Pencil tool's overlay.
+/// Used by the Pencil tool's overlay. When the render spec carries a
+/// truthy `close_hint` expression, additionally draws a 1 px dashed
+/// line from the last buffer point back to the first — Paintbrush
+/// close-at-release preview per PAINTBRUSH_TOOL.md §Overlay.
 private func drawBufferPolylineOverlay(
-    _ cgCtx: CGContext, _ spec: [String: Any]
+    _ cgCtx: CGContext, _ spec: [String: Any],
+    _ evalCtx: [String: Any]
 ) {
     guard let name = spec["buffer"] as? String else { return }
     let pts = pointBuffersPoints(name)
@@ -660,13 +664,31 @@ private func drawBufferPolylineOverlay(
     for p in pts.dropFirst() {
         cgCtx.addLine(to: CGPoint(x: p.0, y: p.1))
     }
-    // Open path — only stroke, no fill/close.
     if let stroke = style.stroke {
         cgCtx.setStrokeColor(stroke)
         cgCtx.setLineWidth(style.strokeWidth)
         if !style.dash.isEmpty {
             cgCtx.setLineDash(phase: 0, lengths: style.dash)
         }
+        cgCtx.strokePath()
+        cgCtx.setLineDash(phase: 0, lengths: [])
+    }
+
+    // Close-at-release hint.
+    let hintOn: Bool = {
+        switch spec["close_hint"] {
+        case let b as Bool: return b
+        case let s as String:
+            return evaluate(s, context: evalCtx).toBool()
+        default: return false
+        }
+    }()
+    if hintOn, let last = pts.last, let stroke = style.stroke {
+        cgCtx.setStrokeColor(stroke)
+        cgCtx.setLineWidth(1.0)
+        cgCtx.setLineDash(phase: 0, lengths: [4, 4])
+        cgCtx.move(to: CGPoint(x: last.0, y: last.1))
+        cgCtx.addLine(to: CGPoint(x: first.0, y: first.1))
         cgCtx.strokePath()
         cgCtx.setLineDash(phase: 0, lengths: [])
     }

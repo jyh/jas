@@ -2509,6 +2509,43 @@ actions:
       - "brush.options_confirm": {}
       - close_dialog: None
 
+  paintbrush_tool_options_confirm:
+    description: >
+      Commit the Paintbrush Tool Options dialog. Writes the five
+      per-document options to state.paintbrush_* and closes the
+      dialog. See PAINTBRUSH_TOOL.md §Tool options.
+    category: brushes
+    params:
+      fidelity: { type: number }
+      fill_new_strokes: { type: bool }
+      keep_selected: { type: bool }
+      edit_selected_paths: { type: bool }
+      edit_within: { type: number }
+    effects:
+      - set:
+          paintbrush_fidelity: "param.fidelity"
+          paintbrush_fill_new_strokes: "param.fill_new_strokes"
+          paintbrush_keep_selected: "param.keep_selected"
+          paintbrush_edit_selected_paths: "param.edit_selected_paths"
+          paintbrush_edit_within: "param.edit_within"
+      - close_dialog: None
+
+  paintbrush_tool_options_reset:
+    description: >
+      Restore the Paintbrush Tool Options dialog to factory
+      defaults without committing. Writes defaults into dialog
+      state; the user must still click OK for the values to
+      persist to state.paintbrush_*. Defaults per
+      PAINTBRUSH_TOOL.md §Tool options.
+    category: brushes
+    effects:
+      - set:
+          dialog.fidelity: 3
+          dialog.fill_new_strokes: false
+          dialog.keep_selected: true
+          dialog.edit_selected_paths: true
+          dialog.edit_within: 12
+
   apply_brush_changes_to_strokes:
     description: >
       Apply pending brush-edits to every element whose

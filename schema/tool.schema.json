@@ -29,6 +29,11 @@
       "items": { "type": "string", "enum": ["web", "native", "macos", "linux", "windows"] },
       "description": "Platform filter. Omit for all platforms."
     },
+    "tool_options_dialog": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Id of a dialog in workspace/dialogs/ that opens when the user double-clicks this tool's icon in the toolbar. The toolbar dispatches dialog.open with this id."
+    },
     "state": {
       "type": "object",
       "description": "Tool-local state slots. Namespaced as $tool.<id>.* in expressions.",

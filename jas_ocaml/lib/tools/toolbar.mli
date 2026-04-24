@@ -1,6 +1,15 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Partial_selection | Interior_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
+type tool = Selection | Partial_selection | Interior_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
+
+(** Map a tool variant to its workspace/tools/*.yaml filename stem.
+    Returns [None] for native-only tools (Type_tool / Type_on_path). *)
+val tool_yaml_id : tool -> string option
+
+(** Look up a tool's [tool_options_dialog] field in workspace.json.
+    Returns the dialog id when set, [None] otherwise. Consumed by
+    the toolbar-slot double-click handlers. *)
+val tool_options_dialog_id : tool -> string option
 
 class toolbar : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> object
   method current_tool : tool
