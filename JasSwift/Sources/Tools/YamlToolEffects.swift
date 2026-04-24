@@ -95,6 +95,62 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // brush.delete_selected — filter library.brushes against the
+    // selected slug list, clear panel.brushes.selected_brushes, and
+    // sync the canvas brush registry. Mirrors the JS Phase 1.13
+    // effect.
+    effects["brush.delete_selected"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        let slugs = evalStringList(args["slugs"], store: store, ctx: ctx)
+        if libId.isEmpty || slugs.isEmpty { return nil }
+        brushFilterLibraryBySlug(store: store, libId: libId, slugs: Set(slugs))
+        store.setPanel("brushes", "selected_brushes", [String]())
+        syncCanvasBrushes(store: store)
+        return nil
+    }
+
+    // brush.duplicate_selected — same library, " copy" name suffix,
+    // unique <slug>_copy[_N] slug. Selection becomes the new copies.
+    effects["brush.duplicate_selected"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        let slugs = evalStringList(args["slugs"], store: store, ctx: ctx)
+        if libId.isEmpty || slugs.isEmpty { return nil }
+        let newSlugs = brushDuplicateInLibrary(store: store, libId: libId, slugs: slugs)
+        store.setPanel("brushes", "selected_brushes", newSlugs)
+        syncCanvasBrushes(store: store)
+        return nil
+    }
+
+    // brush.append — append a new brush to a library. Used by
+    // brush_options_confirm in create mode.
+    effects["brush.append"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        guard !libId.isEmpty else { return nil }
+        let brush = resolveValueOrExpr(args["brush"], store: store, ctx: ctx)
+        if let brushDict = brush as? [String: Any] {
+            brushAppendToLibrary(store: store, libId: libId, brush: brushDict)
+            syncCanvasBrushes(store: store)
+        }
+        return nil
+    }
+
+    // brush.update — patch an existing master brush in place by slug.
+    effects["brush.update"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        let slug = evalStringValue(args["slug"], store: store, ctx: ctx)
+        guard !libId.isEmpty, !slug.isEmpty else { return nil }
+        let patch = resolveValueOrExpr(args["patch"], store: store, ctx: ctx)
+        if let patchDict = patch as? [String: Any] {
+            brushUpdateInLibrary(store: store, libId: libId, slug: slug, patch: patchDict)
+            syncCanvasBrushes(store: store)
+        }
+        return nil
+    }
+
     // doc.set_attr_on_selection — { attr, value }. Phase 1 supports
     // brush attributes only; other attrs ignored. Used by
     // apply_brush_to_selection / remove_brush_from_selection in
@@ -1285,4 +1341,126 @@ private func extractPathList(
         }
     }
     return out
+}
+
+// MARK: - data.* / brush.* effect helpers
+
+/// Resolve a YAML value field. Strings are evaluated as expressions
+/// (matching the doc.set_attr / set: convention); non-strings are
+/// used verbatim. Lets brush.append etc. accept inline JSON
+/// dictionaries where the expression language has no object literal
+/// syntax. Mirrors the JS resolveValueOrExpr helper.
+private func resolveValueOrExpr(_ spec: Any?, store: StateStore, ctx: [String: Any]) -> Any? {
+    guard let spec = spec else { return nil }
+    if let s = spec as? String {
+        let v = evalExprAsValue(s, store: store, ctx: ctx)
+        return valueToAny(v)
+    }
+    return spec
+}
+
+private func valueToAny(_ v: Value) -> Any? {
+    switch v {
+    case .null: return nil
+    case .bool(let b): return b
+    case .number(let n): return n
+    case .string(let s): return s
+    case .color(let c): return c
+    case .list(let items): return items.map { $0.value }
+    case .path(let p): return p
+    case .closure: return nil
+    }
+}
+
+private func evalStringValue(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> String {
+    guard let arg = arg else { return "" }
+    if let s = arg as? String {
+        if case .string(let rs) = evalExprAsValue(s, store: store, ctx: ctx) {
+            return rs
+        }
+    }
+    return ""
+}
+
+private func evalStringList(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> [String] {
+    if let arr = arg as? [Any] {
+        return arr.compactMap { $0 as? String }
+    }
+    if let s = arg as? String {
+        if case .list(let items) = evalExprAsValue(s, store: store, ctx: ctx) {
+            return items.compactMap { $0.value as? String }
+        }
+    }
+    return []
+}
+
+/// Filter out brushes whose slug appears in `slugs` from the named
+/// library; writes the resulting list back into store.data.
+private func brushFilterLibraryBySlug(store: StateStore, libId: String, slugs: Set<String>) {
+    let path = "brush_libraries.\(libId).brushes"
+    guard let raw = store.getDataPath(path) as? [[String: Any]] else { return }
+    let next = raw.filter { brush in
+        guard let slug = brush["slug"] as? String else { return true }
+        return !slugs.contains(slug)
+    }
+    store.setDataPath(path, next)
+}
+
+/// Duplicate selected brushes within a library. Each copy gets
+/// " copy" appended to the name and a unique <slug>_copy[_N] slug.
+/// Returns the new slugs in insertion order.
+private func brushDuplicateInLibrary(store: StateStore, libId: String, slugs: [String]) -> [String] {
+    var newSlugs: [String] = []
+    let path = "brush_libraries.\(libId).brushes"
+    guard let brushes = store.getDataPath(path) as? [[String: Any]] else { return newSlugs }
+    var existingSlugs: Set<String> = Set(brushes.compactMap { $0["slug"] as? String })
+    var next: [[String: Any]] = []
+    next.reserveCapacity(brushes.count)
+    for b in brushes {
+        next.append(b)
+        guard let slug = b["slug"] as? String, slugs.contains(slug) else { continue }
+        var copy = b
+        let name = (b["name"] as? String) ?? "Brush"
+        copy["name"] = "\(name) copy"
+        var newSlug = "\(slug)_copy"
+        var n = 2
+        while existingSlugs.contains(newSlug) {
+            newSlug = "\(slug)_copy_\(n)"
+            n += 1
+        }
+        existingSlugs.insert(newSlug)
+        copy["slug"] = newSlug
+        newSlugs.append(newSlug)
+        next.append(copy)
+    }
+    store.setDataPath(path, next)
+    return newSlugs
+}
+
+private func brushAppendToLibrary(store: StateStore, libId: String, brush: [String: Any]) {
+    let path = "brush_libraries.\(libId).brushes"
+    var brushes = (store.getDataPath(path) as? [[String: Any]]) ?? []
+    brushes.append(brush)
+    store.setDataPath(path, brushes)
+}
+
+private func brushUpdateInLibrary(store: StateStore, libId: String, slug: String, patch: [String: Any]) {
+    let path = "brush_libraries.\(libId).brushes"
+    guard var brushes = store.getDataPath(path) as? [[String: Any]] else { return }
+    for i in brushes.indices {
+        if (brushes[i]["slug"] as? String) == slug {
+            for (k, v) in patch {
+                brushes[i][k] = v
+            }
+            break
+        }
+    }
+    store.setDataPath(path, brushes)
+}
+
+/// Push the current data.brush_libraries through to the canvas
+/// renderer's brush registry so the next paint sees the updates.
+private func syncCanvasBrushes(store: StateStore) {
+    let libs = (store.getDataPath("brush_libraries") as? [String: Any]) ?? [:]
+    setCanvasBrushLibraries(libs)
 }
