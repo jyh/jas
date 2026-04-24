@@ -26,4 +26,10 @@ val dialog : workspace -> string -> Yojson.Safe.t option
 val dialog_state_defaults :
   workspace -> string -> (string * Yojson.Safe.t) list
 val swatch_libraries : workspace -> Yojson.Safe.t
+
+val brush_libraries : workspace -> Yojson.Safe.t
+(* Brush libraries map keyed by slug; reads
+   workspace_data["brush_libraries"]. Returns an empty Assoc when
+   the workspace ships without brushes. *)
+
 val panel_kind_to_content_id : Workspace_layout.panel_kind -> string
