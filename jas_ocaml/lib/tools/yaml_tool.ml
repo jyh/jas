@@ -616,6 +616,128 @@ let draw_pen_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
       end
     end
 
+(** Add a 24-segment rotated-ellipse path at (cx, cy) to the current
+    Cairo path. Caller decides whether to fill or stroke. *)
+let add_oval_path (cr : Cairo.context)
+    (cx : float) (cy : float)
+    (rx : float) (ry : float) (rad : float) : unit =
+  let segments = 24 in
+  let cs = cos rad and sn = sin rad in
+  for i = 0 to segments do
+    let t = 2.0 *. Float.pi *. float_of_int i /. float_of_int segments in
+    let lx = rx *. cos t in
+    let ly = ry *. sin t in
+    let x = cx +. lx *. cs -. ly *. sn in
+    let y = cy +. lx *. sn +. ly *. cs in
+    if i = 0 then Cairo.move_to cr x y
+    else Cairo.line_to cr x y
+  done;
+  Cairo.Path.close cr
+
+(** Blob Brush oval cursor + drag preview.
+    BLOB_BRUSH_TOOL.md Overlay.
+
+    Two responsibilities:
+    1. Hover cursor — oval outline at (x, y) using the effective tip
+       shape (size / angle / roundness). When [dashed] is truthy, the
+       stroke is dashed to signal erase mode.
+    2. Drag preview — when [mode != "idle"] and a buffer is named,
+       each buffered pointer sample gets an ellipse. Painting mode
+       fills semi-transparent; erasing mode strokes dashed outlines.
+
+    Fields (all optional unless noted):
+      x, y              current pointer position (required)
+      default_size      tip diameter in pt
+      default_angle     tip rotation in degrees
+      default_roundness tip aspect percent
+      stroke_color      outline color (defaults ``#000000``)
+      dashed            boolean; erase-mode visual
+      buffer            point-buffer name (for drag preview)
+      mode              string tool mode (idle / painting / erasing) *)
+let draw_oval_cursor_overlay (cr : Cairo.context)
+    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t) : unit =
+  let cx = eval_number_field eval_ctx (render_get render "x") in
+  let cy = eval_number_field eval_ctx (render_get render "y") in
+  let size = Float.max 1.0
+               (eval_number_field eval_ctx (render_get render "default_size")) in
+  let angle_deg = eval_number_field eval_ctx
+                    (render_get render "default_angle") in
+  let roundness = Float.max 1.0
+                    (eval_number_field eval_ctx
+                       (render_get render "default_roundness")) in
+  let stroke_color_str =
+    let s = render_string render "stroke_color" in
+    if s = "" then "#000000" else s
+  in
+  let stroke_rgba = match parse_color stroke_color_str with
+    | Some rgba -> rgba
+    | None -> (0.0, 0.0, 0.0, 1.0)
+  in
+  let dashed = eval_bool_field eval_ctx (render_get render "dashed") in
+  let mode =
+    (* Evaluate the mode expression; Rust accepts either a bare
+       literal quoted string or an expression returning a string. *)
+    match render_get render "mode" with
+    | Some (`String s) ->
+      let trimmed =
+        if String.length s >= 2
+           && ((s.[0] = '\'' && s.[String.length s - 1] = '\'')
+               || (s.[0] = '"' && s.[String.length s - 1] = '"'))
+        then String.sub s 1 (String.length s - 2)
+        else
+          (match Expr_eval.evaluate s eval_ctx with
+           | Expr_eval.Str v -> v
+           | _ -> s)
+      in
+      trimmed
+    | _ -> "idle"
+  in
+  let rx = size *. 0.5 in
+  let ry = size *. (roundness /. 100.0) *. 0.5 in
+  let rad = angle_deg *. Float.pi /. 180.0 in
+  (* Drag preview: if a buffer is named and mode != idle, draw each
+     buffered point as an oval. Painting = semi-transparent fill;
+     erasing = dashed outline. *)
+  if mode <> "idle" then begin
+    match render_get render "buffer" with
+    | Some (`String buffer_name) when buffer_name <> "" ->
+      let points = Point_buffers.points buffer_name in
+      if List.length points >= 2 then begin
+        let (r, g, b, _) = stroke_rgba in
+        if mode = "painting" then begin
+          Cairo.set_source_rgba cr r g b 0.3;
+          List.iter (fun (px, py) ->
+            add_oval_path cr px py rx ry rad;
+            Cairo.fill cr
+          ) points
+        end else if mode = "erasing" then begin
+          Cairo.set_source_rgba cr r g b 1.0;
+          Cairo.set_line_width cr 1.0;
+          Cairo.set_dash cr [| 3.0; 3.0 |];
+          List.iter (fun (px, py) ->
+            add_oval_path cr px py rx ry rad;
+            Cairo.stroke cr
+          ) points;
+          Cairo.set_dash cr [||]
+        end
+      end
+    | _ -> ()
+  end;
+  (* Hover cursor outline at (cx, cy). Dashed stroke signals erase. *)
+  let (r, g, b, a) = stroke_rgba in
+  Cairo.set_source_rgba cr r g b a;
+  Cairo.set_line_width cr 1.0;
+  if dashed then Cairo.set_dash cr [| 4.0; 4.0 |];
+  add_oval_path cr cx cy rx ry rad;
+  Cairo.stroke cr;
+  if dashed then Cairo.set_dash cr [||];
+  (* Center crosshair for precision aiming. *)
+  Cairo.move_to cr (cx -. 3.0) cy;
+  Cairo.line_to cr (cx +. 3.0) cy;
+  Cairo.move_to cr cx (cy -. 3.0);
+  Cairo.line_to cr cx (cy +. 3.0);
+  Cairo.stroke cr
+
 (* ═══════════════════════════════════════════════════════════════ *)
 
 (** Build the [$event] scope for a pointer event. *)
@@ -766,6 +888,8 @@ class yaml_tool (spec : tool_spec) = object (_self)
          | "partial_selection_overlay" ->
            draw_partial_selection_overlay cr overlay.render eval_ctx
              ctx.controller#document
+         | "oval_cursor" ->
+           draw_oval_cursor_overlay cr overlay.render eval_ctx
          | _ -> ());
         guard.restore ()
 end
