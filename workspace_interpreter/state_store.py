@@ -111,6 +111,13 @@ class StateStore:
         self._dialog_snapshot: dict | None = None
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
+        # Workspace-loaded reference data (swatch_libraries,
+        # brush_libraries, etc.). Mirrors the JS-side `data`
+        # namespace from store.mjs and the Rust StateStore.data
+        # field. Mutated by the brush.* effect handlers; read by
+        # the canvas brush registry sync. App startup typically
+        # calls set_data() with the loaded workspace.
+        self._data: dict = {}
         # Phase 3: optional document tree for doc.set / snapshot effects.
         # Shape: {"layers": [<element>, ...], "artboards": [<artboard>, ...],
         # "artboard_options": {...}}. Real apps use a native Model; tests
@@ -144,6 +151,46 @@ class StateStore:
 
     def get_all(self) -> dict:
         return dict(self._state)
+
+    # ── Data namespace ───────────────────────────────────────
+
+    def set_data(self, data: dict) -> None:
+        """Replace the data namespace. App startup calls this with the
+        loaded workspace so data.brush_libraries etc. resolve in YAML
+        expressions."""
+        self._data = dict(data) if data else {}
+
+    def get_data(self) -> dict:
+        return self._data
+
+    def get_data_path(self, raw_path: str):
+        """Read a value at a dotted "data.x.y" or "x.y" path. Returns
+        None on any missing intermediate."""
+        path = raw_path[5:] if raw_path.startswith("data.") else raw_path
+        if not path:
+            return self._data
+        cur = self._data
+        for seg in path.split("."):
+            if not isinstance(cur, dict) or seg not in cur:
+                return None
+            cur = cur[seg]
+        return cur
+
+    def set_data_path(self, raw_path: str, value) -> None:
+        """Write at a dotted path inside the data namespace.
+        Intermediate dicts are created on demand."""
+        path = raw_path[5:] if raw_path.startswith("data.") else raw_path
+        if not path:
+            if isinstance(value, dict):
+                self._data = dict(value)
+            return
+        segs = path.split(".")
+        cur = self._data
+        for seg in segs[:-1]:
+            if not isinstance(cur.get(seg), dict):
+                cur[seg] = {}
+            cur = cur[seg]
+        cur[segs[-1]] = value
 
     # ── Panel state ──────────────────────────────────────────
 
