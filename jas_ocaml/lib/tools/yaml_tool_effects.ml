@@ -395,6 +395,114 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* brush.options_confirm — per-mode dispatch reading dialog
+     state. Phase 1 Calligraphic only. The YAML
+     brush_options_confirm action calls this. *)
+  let brush_options_confirm _spec _ctx store =
+    let dialog = State_store.get_dialog_state store in
+    let params = match State_store.get_dialog_params store with
+      | Some p -> p
+      | None -> [] in
+    let get_str fields k =
+      match List.assoc_opt k fields with
+      | Some (`String s) -> s
+      | _ -> ""
+    in
+    let get_num fields k default =
+      match List.assoc_opt k fields with
+      | Some (`Int n) -> float_of_int n
+      | Some (`Float f) -> f
+      | _ -> default
+    in
+    let mode = match get_str params "mode" with "" -> "create" | s -> s in
+    let library = get_str params "library" in
+    let brush_slug = get_str params "brush_slug" in
+    let name = match get_str dialog "brush_name" with "" -> "Brush" | s -> s in
+    let brush_type = match get_str dialog "brush_type" with "" -> "calligraphic" | s -> s in
+    let angle = get_num dialog "angle" 0.0 in
+    let roundness = get_num dialog "roundness" 100.0 in
+    let size = get_num dialog "size" 5.0 in
+    let angle_var = match List.assoc_opt "angle_variation" dialog with
+      | Some v -> v | None -> `Assoc [("mode", `String "fixed")] in
+    let roundness_var = match List.assoc_opt "roundness_variation" dialog with
+      | Some v -> v | None -> `Assoc [("mode", `String "fixed")] in
+    let size_var = match List.assoc_opt "size_variation" dialog with
+      | Some v -> v | None -> `Assoc [("mode", `String "fixed")] in
+
+    let lib_key =
+      if library <> "" then library
+      else match State_store.get_data_path store "brush_libraries" with
+        | `Assoc ((k, _) :: _) -> k
+        | _ -> "" in
+    if lib_key = "" then `Null
+    else begin
+      (match mode with
+       | "create" ->
+         (* Slug from name: lowercase, non-alphanum -> _ *)
+         let raw = String.map (fun c ->
+           if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') then c
+           else if c >= 'A' && c <= 'Z' then Char.chr (Char.code c + 32)
+           else '_') name in
+         let path = library_brushes_path lib_key in
+         let existing = match State_store.get_data_path store path with
+           | `List items -> List.filter_map (fun b ->
+               match b with `Assoc f ->
+                 (match List.assoc_opt "slug" f with
+                  | Some (`String s) -> Some s | _ -> None)
+               | _ -> None) items
+           | _ -> [] in
+         let slug = ref raw in
+         let n = ref 2 in
+         while List.mem !slug existing do
+           slug := Printf.sprintf "%s_%d" raw !n;
+           incr n
+         done;
+         let base = [
+           ("name", `String name);
+           ("slug", `String !slug);
+           ("type", `String brush_type);
+         ] in
+         let cal_fields =
+           if brush_type = "calligraphic"
+           then [
+             ("angle", `Float angle);
+             ("roundness", `Float roundness);
+             ("size", `Float size);
+             ("angle_variation", angle_var);
+             ("roundness_variation", roundness_var);
+             ("size_variation", size_var);
+           ]
+           else [] in
+         brush_append_to_library store lib_key (`Assoc (base @ cal_fields));
+         sync_canvas_brushes store
+       | "library_edit" when brush_slug <> "" ->
+         let base = [("name", `String name)] in
+         let cal_fields =
+           if brush_type = "calligraphic"
+           then [
+             ("angle", `Float angle);
+             ("roundness", `Float roundness);
+             ("size", `Float size);
+             ("angle_variation", angle_var);
+             ("roundness_variation", roundness_var);
+             ("size_variation", size_var);
+           ]
+           else [] in
+         brush_update_in_library store lib_key brush_slug (`Assoc (base @ cal_fields));
+         sync_canvas_brushes store
+       | "instance_edit" ->
+         let overrides = `Assoc [
+           ("angle", `Float angle);
+           ("roundness", `Float roundness);
+           ("size", `Float size);
+         ] in
+         let s = Yojson.Safe.to_string overrides in
+         ctrl#set_selection_stroke_brush_overrides (Some s)
+       | _ -> ());
+      `Null
+    end
+  in
+
   let brush_delete_selected spec ctx store =
     (match spec with
      | `Assoc args ->
@@ -1527,6 +1635,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("brush.duplicate_selected", brush_duplicate_selected);
     ("brush.append", brush_append_effect);
     ("brush.update", brush_update_effect);
+    ("brush.options_confirm", brush_options_confirm);
     ("doc.copy_selection", doc_copy_selection);
     ("doc.select_in_rect", doc_select_in_rect);
     ("doc.partial_select_in_rect", doc_partial_select_in_rect);

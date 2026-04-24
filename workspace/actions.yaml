@@ -2500,10 +2500,13 @@ actions:
       library: { type: string, optional: True }
       brush_slug: { type: string, optional: True }
     effects:
-      # The per-mode dispatch + dialog-state assembly is too rich
-      # for inline YAML conditionals; per-app effect handlers
-      # implement brush_options_confirm against the dialog scope.
-      - log: "brush_options_confirm (mode={{param.mode}})"
+      # Per-app effect handlers implement brush.options_confirm
+      # against the dialog scope. Each app reads dialog state +
+      # action params and dispatches per mode (create | library_edit
+      # | instance_edit). See per-app implementations in
+      # interpreter/renderer.rs (Rust apply_dialog_confirm),
+      # YamlToolEffects.swift / .ml / .py.
+      - "brush.options_confirm": {}
       - close_dialog: None
 
   apply_brush_changes_to_strokes:
