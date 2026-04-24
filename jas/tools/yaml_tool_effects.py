@@ -240,6 +240,161 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.move_selection(dx, dy)
         return None
 
+    # ── brush.* library mutation helpers ─────────────────
+
+    def _eval_string_value(arg, store, ctx) -> str:
+        if arg is None:
+            return ""
+        if isinstance(arg, str):
+            v = _eval_value(arg, store, ctx)
+            if v.type == ValueType.STRING:
+                return v.value
+        return ""
+
+    def _eval_string_list(arg, store, ctx) -> list[str]:
+        if isinstance(arg, list):
+            return [s for s in arg if isinstance(s, str)]
+        if isinstance(arg, str):
+            v = _eval_value(arg, store, ctx)
+            if v.type == ValueType.LIST:
+                return [s for s in v.value if isinstance(s, str)]
+        return []
+
+    def _resolve_value_or_expr(arg, store, ctx):
+        if arg is None:
+            return None
+        if isinstance(arg, str):
+            v = _eval_value(arg, store, ctx)
+            return v.to_python() if hasattr(v, 'to_python') else v.value
+        return arg
+
+    def _sync_canvas_brushes(store):
+        """Push the current data.brush_libraries into the canvas
+        renderer's brush registry so the next paint sees the
+        update."""
+        try:
+            from canvas.canvas import set_canvas_brush_libraries
+            libs = store.get_data_path("brush_libraries") or {}
+            set_canvas_brush_libraries(libs)
+        except Exception:
+            # Ran outside the canvas context (e.g. tests).
+            pass
+
+    def _library_brushes_path(lib_id):
+        return f"brush_libraries.{lib_id}.brushes"
+
+    def _brush_filter_library_by_slug(store, lib_id, slugs):
+        path = _library_brushes_path(lib_id)
+        brushes = store.get_data_path(path)
+        if not isinstance(brushes, list):
+            return
+        slug_set = set(slugs)
+        next_brushes = [b for b in brushes
+                        if not (isinstance(b, dict) and b.get("slug") in slug_set)]
+        store.set_data_path(path, next_brushes)
+
+    def _brush_duplicate_in_library(store, lib_id, slugs):
+        path = _library_brushes_path(lib_id)
+        brushes = store.get_data_path(path)
+        if not isinstance(brushes, list):
+            return []
+        existing = {b.get("slug") for b in brushes if isinstance(b, dict)}
+        new_slugs = []
+        next_brushes = []
+        for b in brushes:
+            next_brushes.append(b)
+            if not isinstance(b, dict):
+                continue
+            slug = b.get("slug")
+            if slug not in slugs:
+                continue
+            new_slug = f"{slug}_copy"
+            n = 2
+            while new_slug in existing:
+                new_slug = f"{slug}_copy_{n}"
+                n += 1
+            existing.add(new_slug)
+            copy = dict(b)
+            name = b.get("name", "Brush")
+            copy["name"] = f"{name} copy"
+            copy["slug"] = new_slug
+            new_slugs.append(new_slug)
+            next_brushes.append(copy)
+        store.set_data_path(path, next_brushes)
+        return new_slugs
+
+    def _brush_append_to_library(store, lib_id, brush):
+        path = _library_brushes_path(lib_id)
+        brushes = store.get_data_path(path)
+        if not isinstance(brushes, list):
+            brushes = []
+        brushes = list(brushes) + [brush]
+        store.set_data_path(path, brushes)
+
+    def _brush_update_in_library(store, lib_id, slug, patch):
+        path = _library_brushes_path(lib_id)
+        brushes = store.get_data_path(path)
+        if not isinstance(brushes, list):
+            return
+        next_brushes = []
+        for b in brushes:
+            if isinstance(b, dict) and b.get("slug") == slug:
+                merged = dict(b)
+                merged.update(patch)
+                next_brushes.append(merged)
+            else:
+                next_brushes.append(b)
+        store.set_data_path(path, next_brushes)
+
+    def brush_delete_selected(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        lib_id = _eval_string_value(spec.get("library"), store, ctx)
+        slugs = _eval_string_list(spec.get("slugs"), store, ctx)
+        if not lib_id or not slugs:
+            return None
+        _brush_filter_library_by_slug(store, lib_id, slugs)
+        store.set_panel("brushes", "selected_brushes", [])
+        _sync_canvas_brushes(store)
+        return None
+
+    def brush_duplicate_selected(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        lib_id = _eval_string_value(spec.get("library"), store, ctx)
+        slugs = _eval_string_list(spec.get("slugs"), store, ctx)
+        if not lib_id or not slugs:
+            return None
+        new_slugs = _brush_duplicate_in_library(store, lib_id, slugs)
+        store.set_panel("brushes", "selected_brushes", new_slugs)
+        _sync_canvas_brushes(store)
+        return None
+
+    def brush_append(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        lib_id = _eval_string_value(spec.get("library"), store, ctx)
+        if not lib_id:
+            return None
+        brush = _resolve_value_or_expr(spec.get("brush"), store, ctx)
+        if isinstance(brush, dict):
+            _brush_append_to_library(store, lib_id, brush)
+            _sync_canvas_brushes(store)
+        return None
+
+    def brush_update(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        lib_id = _eval_string_value(spec.get("library"), store, ctx)
+        slug = _eval_string_value(spec.get("slug"), store, ctx)
+        if not lib_id or not slug:
+            return None
+        patch = _resolve_value_or_expr(spec.get("patch"), store, ctx)
+        if isinstance(patch, dict):
+            _brush_update_in_library(store, lib_id, slug, patch)
+            _sync_canvas_brushes(store)
+        return None
+
     def doc_set_attr_on_selection(spec, ctx, store):
         """Phase 1 supports brush attributes only; other attrs ignored.
         Used by apply_brush_to_selection / remove_brush_from_selection.
@@ -1067,6 +1222,10 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.toggle_selection"] = doc_toggle_selection
     effects["doc.translate_selection"] = doc_translate_selection
     effects["doc.set_attr_on_selection"] = doc_set_attr_on_selection
+    effects["brush.delete_selected"] = brush_delete_selected
+    effects["brush.duplicate_selected"] = brush_duplicate_selected
+    effects["brush.append"] = brush_append
+    effects["brush.update"] = brush_update
     effects["doc.copy_selection"] = doc_copy_selection
     effects["doc.select_in_rect"] = doc_select_in_rect
     effects["doc.partial_select_in_rect"] = doc_partial_select_in_rect
