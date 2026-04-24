@@ -22,6 +22,28 @@ type tool_spec = {
     is missing. *)
 val tool_spec_from_workspace : Yojson.Safe.t -> tool_spec option
 
+(** Internal — exposed only for tests.
+
+    Subset of CSS style properties the overlay renderer
+    understands. Missing fields are [None]. *)
+type overlay_style = {
+  fill : string option;
+  stroke : string option;
+  stroke_width : float option;
+  stroke_dasharray : float list option;
+}
+
+(** Internal — exposed only for tests. Parse a CSS-like
+    ["key: value; key: value"] string. *)
+val parse_style : string -> overlay_style
+
+(** Internal — exposed only for tests. Parse a CSS color string
+    (``#rrggbb`` / ``#rgb`` / ``rgb(...)`` / ``rgba(...)`` /
+    ``black`` / ``white`` / ``none``) into ``(r, g, b, a)``
+    normalized to ``[0.0, 1.0]``. Returns [None] for unparseable
+    input or ``none``. *)
+val parse_color : string -> (float * float * float * float) option
+
 (** Fetch the handler list for an event name (e.g. ["on_mousedown"]).
     Returns [] when the event has no declared handler. *)
 val handler : tool_spec -> string -> Yojson.Safe.t list

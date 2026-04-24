@@ -222,3 +222,86 @@ import Testing
     #expect(abs(tMin - 0.25) < 1e-9)
     #expect(abs(tMax - 0.75) < 1e-9)
 }
+
+// MARK: - Path ↔ PolygonSet adapters
+
+@Test func pathToPolygonSetSingleSquare() {
+    let cmds: [PathCommand] = [
+        .moveTo(0, 0),
+        .lineTo(10, 0),
+        .lineTo(10, 10),
+        .lineTo(0, 10),
+        .closePath,
+    ]
+    let ps = pathToPolygonSet(cmds)
+    #expect(ps.count == 1)
+    #expect(ps[0].count == 4)
+    #expect(ps[0][0] == (0, 0))
+    #expect(ps[0][2] == (10, 10))
+}
+
+@Test func pathToPolygonSetMultipleSubpaths() {
+    // Two disjoint triangles.
+    let cmds: [PathCommand] = [
+        .moveTo(0, 0),
+        .lineTo(10, 0),
+        .lineTo(5, 10),
+        .closePath,
+        .moveTo(20, 0),
+        .lineTo(30, 0),
+        .lineTo(25, 10),
+        .closePath,
+    ]
+    let ps = pathToPolygonSet(cmds)
+    #expect(ps.count == 2)
+    #expect(ps[0].count == 3)
+    #expect(ps[1].count == 3)
+    #expect(ps[0][0] == (0, 0))
+    #expect(ps[1][0] == (20, 0))
+}
+
+@Test func polygonSetToPathSingleRing() {
+    let ps: BoolPolygonSet = [[(0, 0), (10, 0), (10, 10), (0, 10)]]
+    let cmds = polygonSetToPath(ps)
+    // 4-vertex ring → MoveTo + 3 LineTo + ClosePath = 5 commands.
+    #expect(cmds.count == 5)
+    if case .moveTo(let x, let y) = cmds[0] {
+        #expect(x == 0 && y == 0)
+    } else {
+        Issue.record("expected moveTo at index 0")
+    }
+    if case .closePath = cmds[4] {} else {
+        Issue.record("expected closePath at index 4")
+    }
+}
+
+@Test func polygonSetToPathDropsDegenerateRings() {
+    // Two rings: one valid (3 points), one 2-point (degenerate).
+    let ps: BoolPolygonSet = [
+        [(0, 0), (10, 0), (5, 10)],
+        [(20, 0), (30, 0)],
+    ]
+    let cmds = polygonSetToPath(ps)
+    // Only the valid ring emits commands: MoveTo + 2 LineTo + Close.
+    #expect(cmds.count == 4)
+}
+
+@Test func polygonSetRoundtripThroughPath() {
+    let cmds: [PathCommand] = [
+        .moveTo(0, 0),
+        .lineTo(10, 0),
+        .lineTo(10, 10),
+        .lineTo(0, 10),
+        .closePath,
+    ]
+    let ps1 = pathToPolygonSet(cmds)
+    let cmds2 = polygonSetToPath(ps1)
+    let ps2 = pathToPolygonSet(cmds2)
+    #expect(ps1.count == ps2.count)
+    for i in ps1.indices {
+        #expect(ps1[i].count == ps2[i].count)
+        for j in ps1[i].indices {
+            #expect(ps1[i][j] == ps2[i][j])
+        }
+    }
+}

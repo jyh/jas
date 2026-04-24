@@ -9,6 +9,17 @@
     default in the Boolean Options dialog. Equals 0.01 mm. *)
 val default_precision : float
 
+(** Ring-aware path flattening. MoveTo starts a new ring; ClosePath
+    finalizes. Open subpaths finalize at the next MoveTo or end.
+    Rings with fewer than 3 points are dropped. Bezier / quad use
+    20 steps; Smooth / Arc approximate as a line to the endpoint.
+
+    Exposed so [Path_ops] can bridge [Element.path_command] lists
+    into the boolean module's [polygon_set] shape — see
+    BLOB_BRUSH_TOOL.md Commit pipeline. *)
+val flatten_path_to_rings :
+  Element.path_command list -> Boolean.polygon_set
+
 (** Flatten a document element into a polygon set for the boolean
     algorithm. See BOOLEAN.md § Geometry and precision for per-kind
     handling. *)

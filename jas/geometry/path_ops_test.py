@@ -15,7 +15,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from geometry import path_ops, regular_shapes
-from geometry.element import CurveTo, LineTo, MoveTo
+from geometry.element import ClosePath, CurveTo, LineTo, MoveTo
 
 
 def _close(a, b, tol=1e-9):
@@ -198,3 +198,65 @@ class TestRegularShapes:
 
     def test_star_inner_ratio(self):
         assert regular_shapes.STAR_INNER_RATIO == 0.4
+
+
+# Path to PolygonSet adapters — Blob Brush Phase 1.1.
+
+
+class TestPolygonSetAdapters:
+    def test_path_to_polygon_set_single_square(self):
+        cmds = [
+            MoveTo(0, 0),
+            LineTo(10, 0),
+            LineTo(10, 10),
+            LineTo(0, 10),
+            ClosePath(),
+        ]
+        ps = path_ops.path_to_polygon_set(cmds)
+        assert len(ps) == 1
+        assert len(ps[0]) == 4
+        assert ps[0][0] == (0, 0)
+        assert ps[0][2] == (10, 10)
+
+    def test_path_to_polygon_set_multiple_subpaths(self):
+        cmds = [
+            MoveTo(0, 0), LineTo(10, 0), LineTo(5, 10), ClosePath(),
+            MoveTo(20, 0), LineTo(30, 0), LineTo(25, 10), ClosePath(),
+        ]
+        ps = path_ops.path_to_polygon_set(cmds)
+        assert len(ps) == 2
+        assert len(ps[0]) == 3
+        assert len(ps[1]) == 3
+        assert ps[0][0] == (0, 0)
+        assert ps[1][0] == (20, 0)
+
+    def test_polygon_set_to_path_single_ring(self):
+        ps = [[(0, 0), (10, 0), (10, 10), (0, 10)]]
+        cmds = path_ops.polygon_set_to_path(ps)
+        # 4-vertex ring -> MoveTo + 3 LineTo + ClosePath = 5 commands.
+        assert len(cmds) == 5
+        assert isinstance(cmds[0], MoveTo)
+        assert cmds[0].x == 0 and cmds[0].y == 0
+        assert isinstance(cmds[4], ClosePath)
+
+    def test_polygon_set_to_path_drops_degenerate_rings(self):
+        ps = [
+            [(0, 0), (10, 0), (5, 10)],
+            [(20, 0), (30, 0)],
+        ]
+        cmds = path_ops.polygon_set_to_path(ps)
+        # Only the valid ring emits commands: MoveTo + 2 LineTo + Close.
+        assert len(cmds) == 4
+
+    def test_polygon_set_roundtrip_through_path(self):
+        cmds = [
+            MoveTo(0, 0),
+            LineTo(10, 0),
+            LineTo(10, 10),
+            LineTo(0, 10),
+            ClosePath(),
+        ]
+        ps1 = path_ops.path_to_polygon_set(cmds)
+        cmds2 = path_ops.polygon_set_to_path(ps1)
+        ps2 = path_ops.path_to_polygon_set(cmds2)
+        assert ps1 == ps2

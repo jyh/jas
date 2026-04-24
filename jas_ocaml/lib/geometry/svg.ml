@@ -247,10 +247,13 @@ let rec element_svg indent (elem : Element.element) =
     Printf.sprintf "%s<polygon points=\"%s\"%s%s%s%s/>"
       indent ps (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Path { d; fill; stroke; opacity; transform; _ } ->
-    Printf.sprintf "%s<path d=\"%s\"%s%s%s%s/>"
+  | Path { d; fill; stroke; opacity; transform; tool_origin; _ } ->
+    let tool_origin_attr = match tool_origin with
+      | Some s -> Printf.sprintf " jas:tool-origin=\"%s\"" (escape_xml s)
+      | None -> "" in
+    Printf.sprintf "%s<path d=\"%s\"%s%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
-      (opacity_attr opacity) (transform_attr transform)
+      (opacity_attr opacity) (transform_attr transform) tool_origin_attr
   | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
            text_transform; font_variant; baseline_shift; line_height; letter_spacing;
            xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
@@ -666,7 +669,8 @@ let rec parse_element i =
         Some (Element.make_polygon ~fill ~stroke ~opacity ~transform pts)
       | "path" ->
         let d = parse_path_d (match get_attr attrs "d" with Some s -> s | None -> "") in
-        Some (Element.make_path ~fill ~stroke ~opacity ~transform d)
+        let tool_origin = get_attr attrs "jas:tool-origin" in
+        Some (Element.make_path ~fill ~stroke ~opacity ~transform ~tool_origin d)
       | "text" ->
         let ff = match get_attr attrs "font-family" with Some s -> s | None -> "sans-serif" in
         let fs = pt (get_attr_f attrs "font-size" 16.0) in

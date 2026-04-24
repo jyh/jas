@@ -804,6 +804,13 @@ pub struct CommonProps {
     /// modulates alpha per OPACITY.md. Storage-only in Phase 3a.
     #[serde(default)]
     pub mask: Option<Box<Mask>>,
+    /// Optional `jas:tool-origin` tag identifying the tool that
+    /// produced this element. Blob Brush sets `"blob_brush"` on its
+    /// commits so subsequent sweeps can merge / erase into the same
+    /// element. Preserved by mutations; optional on export.
+    /// See BLOB_BRUSH_TOOL.md §Fill and stroke.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_origin: Option<String>,
 }
 
 impl Default for CommonProps {
@@ -815,6 +822,7 @@ impl Default for CommonProps {
             locked: false,
             visibility: Visibility::Preview,
             mask: None,
+            tool_origin: None,
         }
     }
 }
@@ -3580,7 +3588,8 @@ mod tests {
             knockout_group: false,
             common: CommonProps { opacity: 0.75, mode: BlendMode::Normal,
                                   transform: None, locked: true,
-                                  visibility: Visibility::Outline, mask: None },
+                                  visibility: Visibility::Outline, mask: None,
+                                  tool_origin: None },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3733,6 +3742,7 @@ mod tests {
                 locked: false,
                 visibility: Visibility::Preview,
                 mask: Some(Box::new(make_square_mask())),
+                tool_origin: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,
@@ -3776,6 +3786,7 @@ mod tests {
                 locked: false,
                 visibility: Visibility::Preview,
                 mask: None,
+                tool_origin: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,

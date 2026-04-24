@@ -71,6 +71,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.ANCHOR_POINT: _yaml_tool("anchor_point"),
         Tool.PENCIL: _yaml_tool("pencil"),
         Tool.PAINTBRUSH: _yaml_tool("paintbrush"),
+        Tool.BLOB_BRUSH: _yaml_tool("blob_brush"),
         Tool.PATH_ERASER: _yaml_tool("path_eraser"),
         Tool.SMOOTH: _yaml_tool("smooth"),
         Tool.TYPE: TypeTool(),

@@ -29,6 +29,7 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
         ToolKind::AnchorPoint => "anchor_point",
         ToolKind::Pencil => "pencil",
         ToolKind::Paintbrush => "paintbrush",
+        ToolKind::BlobBrush => "blob_brush",
         ToolKind::PathEraser => "path_eraser",
         ToolKind::Smooth => "smooth",
         ToolKind::Type => "type",

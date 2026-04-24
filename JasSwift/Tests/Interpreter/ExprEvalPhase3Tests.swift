@@ -173,3 +173,59 @@ import Testing
     )
     #expect(r == .number(42))
 }
+
+// MARK: - brush_type_of(slug) — Blob Brush dialog gating helper
+
+private func brushLibsCtx() -> [String: Any] {
+    [
+        "brush_libraries": [
+            "mylib": [
+                "brushes": [
+                    ["slug": "cal_1", "name": "Cal 1", "type": "calligraphic", "size": 5.0],
+                    ["slug": "art_1", "name": "Art 1", "type": "art"],
+                ],
+            ],
+            "other": [
+                "brushes": [
+                    ["slug": "scat_1", "name": "Scat 1", "type": "scatter"],
+                ],
+            ],
+        ],
+    ]
+}
+
+@Test func brushTypeOfCalligraphic() {
+    let r = evaluate("brush_type_of(\"mylib/cal_1\")", context: brushLibsCtx())
+    #expect(r == .string("calligraphic"))
+}
+
+@Test func brushTypeOfArt() {
+    let r = evaluate("brush_type_of(\"mylib/art_1\")", context: brushLibsCtx())
+    #expect(r == .string("art"))
+}
+
+@Test func brushTypeOfOtherLibrary() {
+    let r = evaluate("brush_type_of(\"other/scat_1\")", context: brushLibsCtx())
+    #expect(r == .string("scatter"))
+}
+
+@Test func brushTypeOfUnknownSlugReturnsNull() {
+    let r = evaluate("brush_type_of(\"mylib/missing\")", context: brushLibsCtx())
+    #expect(r == .null)
+}
+
+@Test func brushTypeOfMissingLibraryReturnsNull() {
+    let r = evaluate("brush_type_of(\"nowhere/cal_1\")", context: brushLibsCtx())
+    #expect(r == .null)
+}
+
+@Test func brushTypeOfMalformedSlugReturnsNull() {
+    // Missing slash.
+    let r = evaluate("brush_type_of(\"just_a_slug\")", context: brushLibsCtx())
+    #expect(r == .null)
+}
+
+@Test func brushTypeOfNullWhenNoBrushLibraries() {
+    let r = evaluate("brush_type_of(\"mylib/cal_1\")", context: [:])
+    #expect(r == .null)
+}
