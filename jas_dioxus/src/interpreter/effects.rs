@@ -579,6 +579,114 @@ fn run_doc_effect(
                 }
             }
         }
+        "data.set" => {
+            // Spec: { path, value }. Writes a value at a dotted path
+            // inside store.data. Mirrors the JS Phase 1.13 effect.
+            if let serde_json::Value::Object(args) = spec {
+                let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                if !path.is_empty() {
+                    let value = resolve_value_or_expr(args.get("value"), store, ctx);
+                    store.set_data_path(path, value);
+                }
+            }
+        }
+        "data.list_append" => {
+            if let serde_json::Value::Object(args) = spec {
+                let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                if !path.is_empty() {
+                    let value = resolve_value_or_expr(args.get("value"), store, ctx);
+                    let cur = store.get_data_path(path);
+                    let mut next = match cur {
+                        serde_json::Value::Array(a) => a,
+                        _ => Vec::new(),
+                    };
+                    next.push(value);
+                    store.set_data_path(path, serde_json::Value::Array(next));
+                }
+            }
+        }
+        "data.list_remove" => {
+            if let serde_json::Value::Object(args) = spec {
+                let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                let index = eval_number(args.get("index"), store, ctx) as usize;
+                if !path.is_empty() {
+                    if let serde_json::Value::Array(mut arr) = store.get_data_path(path) {
+                        if index < arr.len() {
+                            arr.remove(index);
+                            store.set_data_path(path, serde_json::Value::Array(arr));
+                        }
+                    }
+                }
+            }
+        }
+        "data.list_insert" => {
+            if let serde_json::Value::Object(args) = spec {
+                let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                let index = eval_number(args.get("index"), store, ctx) as usize;
+                if !path.is_empty() {
+                    let value = resolve_value_or_expr(args.get("value"), store, ctx);
+                    let cur = store.get_data_path(path);
+                    let mut arr = match cur {
+                        serde_json::Value::Array(a) => a,
+                        _ => Vec::new(),
+                    };
+                    let i = index.min(arr.len());
+                    arr.insert(i, value);
+                    store.set_data_path(path, serde_json::Value::Array(arr));
+                }
+            }
+        }
+        "brush.delete_selected" => {
+            // Spec: { library, slugs } — filter library.brushes
+            // against the selected slug list, clear panel selection.
+            // After mutation, sync the canvas brush registry.
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let slugs = eval_string_list(args.get("slugs"), store, ctx);
+                if !lib_id.is_empty() && !slugs.is_empty() {
+                    brush_filter_library_by_slug(store, &lib_id, &slugs, /*keep_unmatched*/ true);
+                    store.set_panel("brushes", "selected_brushes",
+                                    serde_json::Value::Array(vec![]));
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        "brush.duplicate_selected" => {
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let slugs = eval_string_list(args.get("slugs"), store, ctx);
+                if !lib_id.is_empty() && !slugs.is_empty() {
+                    let new_slugs = brush_duplicate_in_library(store, &lib_id, &slugs);
+                    store.set_panel("brushes", "selected_brushes",
+                                    serde_json::Value::Array(
+                                        new_slugs.into_iter()
+                                            .map(serde_json::Value::String)
+                                            .collect()));
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        "brush.append" => {
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let brush = resolve_value_or_expr(args.get("brush"), store, ctx);
+                if !lib_id.is_empty() && brush.is_object() {
+                    brush_append_to_library(store, &lib_id, brush);
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        "brush.update" => {
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let slug = eval_string(args.get("slug"), store, ctx);
+                let patch = resolve_value_or_expr(args.get("patch"), store, ctx);
+                if !lib_id.is_empty() && !slug.is_empty() && patch.is_object() {
+                    brush_update_in_library(store, &lib_id, &slug, patch);
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
         "doc.set_attr_on_selection" => {
             // Spec: { attr: <name>, value: <expr> }
             // Phase 1 supports brush attributes only; other attrs log
@@ -1019,6 +1127,196 @@ fn run_doc_effect(
 
 /// Evaluate a `dx`/`dy`/`x1`/… argument that may be a number literal,
 /// a numeric string expression, or a JSON number. Missing → 0.0.
+/// Resolve a YAML value field. Strings are evaluated as expressions
+/// (matching the doc.set_attr / set: convention); non-strings are
+/// used verbatim. Lets data.list_append etc. accept inline JSON
+/// object literals where the expression language has no object
+/// literal syntax. Mirrors the JS _resolveValueOrExpr helper.
+fn resolve_value_or_expr(
+    spec: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> serde_json::Value {
+    match spec {
+        None | Some(serde_json::Value::Null) => serde_json::Value::Null,
+        Some(serde_json::Value::String(s)) => value_to_json(&eval_expr(s, store, ctx)),
+        Some(v) => v.clone(),
+    }
+}
+
+/// Evaluate an arg as a string. Returns "" on null / missing /
+/// non-string result.
+fn eval_string(
+    arg: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> String {
+    match arg {
+        None | Some(serde_json::Value::Null) => String::new(),
+        Some(serde_json::Value::String(s)) => match eval_expr(s, store, ctx) {
+            Value::Str(rs) => rs,
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
+/// Evaluate an arg as a list of strings. Accepts a JSON array
+/// literal or a string expression that evaluates to a List of Str.
+fn eval_string_list(
+    arg: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> Vec<String> {
+    match arg {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
+        Some(serde_json::Value::String(s)) => match eval_expr(s, store, ctx) {
+            Value::List(items) => items
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// Filter a library's brushes against `slugs`. When `keep_unmatched`
+/// is true, removes brushes whose slug is in the list (delete);
+/// otherwise keeps only matching brushes.
+fn brush_filter_library_by_slug(
+    store: &mut StateStore,
+    lib_id: &str,
+    slugs: &[String],
+    keep_unmatched: bool,
+) {
+    let path = format!("brush_libraries.{}.brushes", lib_id);
+    if let serde_json::Value::Array(brushes) = store.get_data_path(&path) {
+        let slug_set: std::collections::HashSet<&str> =
+            slugs.iter().map(String::as_str).collect();
+        let next: Vec<serde_json::Value> = brushes
+            .into_iter()
+            .filter(|b| {
+                let slug = b.get("slug").and_then(|s| s.as_str()).unwrap_or("");
+                if keep_unmatched {
+                    !slug_set.contains(slug)
+                } else {
+                    slug_set.contains(slug)
+                }
+            })
+            .collect();
+        store.set_data_path(&path, serde_json::Value::Array(next));
+    }
+}
+
+/// Duplicate brushes whose slug is in `slugs` within library
+/// `lib_id`. Each copy gets a unique <orig>_copy[_N] slug and
+/// " copy" appended to the name. Returns the new slug list (in
+/// insertion order).
+fn brush_duplicate_in_library(
+    store: &mut StateStore,
+    lib_id: &str,
+    slugs: &[String],
+) -> Vec<String> {
+    let path = format!("brush_libraries.{}.brushes", lib_id);
+    let mut new_slugs = Vec::new();
+    let brushes = match store.get_data_path(&path) {
+        serde_json::Value::Array(b) => b,
+        _ => return new_slugs,
+    };
+    let mut existing_slugs: std::collections::HashSet<String> = brushes
+        .iter()
+        .filter_map(|b| b.get("slug").and_then(|s| s.as_str()).map(String::from))
+        .collect();
+    let mut next: Vec<serde_json::Value> = Vec::with_capacity(brushes.len());
+    for b in brushes {
+        next.push(b.clone());
+        let slug = b.get("slug").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        if !slugs.contains(&slug) {
+            continue;
+        }
+        let mut copy = match b.as_object() {
+            Some(map) => map.clone(),
+            None => continue,
+        };
+        let name = copy.get("name").and_then(|n| n.as_str()).unwrap_or("Brush").to_string();
+        copy.insert("name".to_string(), serde_json::Value::String(format!("{} copy", name)));
+        let mut new_slug = format!("{}_copy", slug);
+        let mut n = 2;
+        while existing_slugs.contains(&new_slug) {
+            new_slug = format!("{}_copy_{}", slug, n);
+            n += 1;
+        }
+        existing_slugs.insert(new_slug.clone());
+        copy.insert("slug".to_string(), serde_json::Value::String(new_slug.clone()));
+        new_slugs.push(new_slug);
+        next.push(serde_json::Value::Object(copy));
+    }
+    store.set_data_path(&path, serde_json::Value::Array(next));
+    new_slugs
+}
+
+/// Append a new brush to the named library.
+fn brush_append_to_library(
+    store: &mut StateStore,
+    lib_id: &str,
+    brush: serde_json::Value,
+) {
+    let path = format!("brush_libraries.{}.brushes", lib_id);
+    let mut brushes = match store.get_data_path(&path) {
+        serde_json::Value::Array(b) => b,
+        _ => Vec::new(),
+    };
+    brushes.push(brush);
+    store.set_data_path(&path, serde_json::Value::Array(brushes));
+}
+
+/// Patch an existing master brush in place, merging fields from
+/// `patch` onto the brush identified by `slug`.
+fn brush_update_in_library(
+    store: &mut StateStore,
+    lib_id: &str,
+    slug: &str,
+    patch: serde_json::Value,
+) {
+    let path = format!("brush_libraries.{}.brushes", lib_id);
+    let mut brushes = match store.get_data_path(&path) {
+        serde_json::Value::Array(b) => b,
+        _ => return,
+    };
+    let patch_map = match patch.as_object() {
+        Some(p) => p.clone(),
+        None => return,
+    };
+    for b in brushes.iter_mut() {
+        let matches = b.get("slug").and_then(|s| s.as_str()) == Some(slug);
+        if !matches {
+            continue;
+        }
+        if let Some(map) = b.as_object_mut() {
+            for (k, v) in &patch_map {
+                map.insert(k.clone(), v.clone());
+            }
+        }
+        break;
+    }
+    store.set_data_path(&path, serde_json::Value::Array(brushes));
+}
+
+/// Push the current data.brush_libraries through to the canvas
+/// renderer's brush registry so the next paint sees the updates.
+fn sync_canvas_brushes(store: &StateStore) {
+    let libs = store.get_data_path("brush_libraries");
+    let _guard = crate::canvas::render::register_brush_libraries(libs);
+    // The guard restores the prior registry on Drop. For mutation
+    // syncing we want the new value to stick, so we deliberately
+    // forget the guard.
+    std::mem::forget(_guard);
+}
+
 fn eval_number(
     arg: Option<&serde_json::Value>,
     store: &StateStore,
