@@ -14,6 +14,7 @@ public enum Tool: String, CaseIterable {
     case anchorPoint
     case pencil
     case paintbrush
+    case blobBrush
     case pathEraser
     case smooth
     case typeTool
@@ -42,6 +43,7 @@ func toolYamlId(_ tool: Tool) -> String? {
     case .anchorPoint: return "anchor_point"
     case .pencil: return "pencil"
     case .paintbrush: return "paintbrush"
+    case .blobBrush: return "blob_brush"
     case .pathEraser: return "path_eraser"
     case .smooth: return "smooth"
     case .line: return "line"
@@ -561,7 +563,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $pencilSlotTool,
-                        alternates: [.pencil, .paintbrush, .pathEraser, .smooth],
+                        alternates: [.pencil, .paintbrush, .blobBrush, .pathEraser, .smooth],
                         onRequestOptions: onOpenToolOptions
                     )
                 }
