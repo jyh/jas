@@ -1066,6 +1066,33 @@ let inverse t =
       f = (t.b *. t.e -. t.a *. t.f) *. inv_det;
     }
 
+(* Shear matrix with horizontal shear factor [kx] (x becomes x + kx y)
+   and vertical shear factor [ky] (y becomes y + ky x). *)
+let make_shear kx ky =
+  { identity_transform with a = 1.0; b = ky; c = kx; d = 1.0 }
+
+(* Return [self other], the transform that applies [other] first
+   then [self]. Equivalent to function-composition self of other. *)
+let multiply self other =
+  {
+    a = self.a *. other.a +. self.c *. other.b;
+    b = self.b *. other.a +. self.d *. other.b;
+    c = self.a *. other.c +. self.c *. other.d;
+    d = self.b *. other.c +. self.d *. other.d;
+    e = self.a *. other.e +. self.c *. other.f +. self.e;
+    f = self.b *. other.e +. self.d *. other.f +. self.f;
+  }
+
+(* Conjugate [self] around point [(rx, ry)]: T(rx, ry) self T(-rx, -ry).
+   The result, applied to any point, behaves as if [self] were applied
+   with [(rx, ry)] as the origin. Used by the transform-tool family
+   (Scale, Rotate, Shear) to pivot a base transform around the
+   user-set reference point. *)
+let around_point self rx ry =
+  let pre = make_translate (-. rx) (-. ry) in
+  let post = make_translate rx ry in
+  multiply (multiply post self) pre
+
 let transform_of elem =
   match elem with
   | Line r -> r.transform | Rect r -> r.transform | Circle r -> r.transform
