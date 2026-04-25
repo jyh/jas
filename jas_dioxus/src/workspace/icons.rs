@@ -102,5 +102,17 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
         // Lasso (freehand loop — placeholder icon)
         ToolKind::Lasso => format!(
             r#"<path d="M14,5 C6,5 3,10 3,14 C3,20 8,24 14,22 C20,20 22,16 20,12 C18,8 12,9 12,13 C12,16 16,17 17,15" fill="none" stroke="{c}" stroke-width="1.5" stroke-linecap="round"/>"#),
+        // Scale — small square being extruded into a larger one
+        // (per SCALE_TOOL.md §Tool icon and examples/scale.png).
+        ToolKind::Scale => format!(
+            r#"<rect x="3" y="13" width="10" height="11" fill="none" stroke="{c}" stroke-width="1.5"/><rect x="13" y="3" width="12" height="13" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
+        // Rotate — curved arrow indicating circular motion (per
+        // ROTATE_TOOL.md §Tool icon).
+        ToolKind::Rotate => format!(
+            r#"<path d="M14,5 A9,9 0 1,1 5,14" fill="none" stroke="{c}" stroke-width="1.5" stroke-linecap="round"/><polyline points="11,2 14,5 11,8" fill="none" stroke="{c}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#),
+        // Shear — square slanted into a parallelogram (per
+        // SHEAR_TOOL.md §Tool icon).
+        ToolKind::Shear => format!(
+            r#"<polygon points="9,4 26,4 19,24 2,24" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
     }
 }

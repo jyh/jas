@@ -41,6 +41,9 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
         ToolKind::Polygon => "polygon",
         ToolKind::Star => "star",
         ToolKind::Lasso => "lasso",
+        ToolKind::Scale => "scale",
+        ToolKind::Rotate => "rotate",
+        ToolKind::Shear => "shear",
     }
 }
 
