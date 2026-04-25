@@ -17585,6 +17585,9 @@
         },
         "hit_handle_pos": {
           "default": null
+        },
+        "hover_kind": {
+          "default": "empty"
         }
       },
       "handlers": {
@@ -17687,6 +17690,12 @@
           {
             "set": {
               "tool.artboard.shift_held": "event.modifiers.shift"
+            }
+          },
+          {
+            "doc.artboard.probe_hover": {
+              "x": "event.x",
+              "y": "event.y"
             }
           },
           {

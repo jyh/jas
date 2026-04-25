@@ -57,6 +57,13 @@ state:
   hit_artboard_id: { default: null }
   # One of "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w", or null.
   hit_handle_pos:  { default: null }
+  # Hover classification updated on every mousemove by
+  # doc.artboard.probe_hover. Drives the dynamic cursor in
+  # cursor_css_override:
+  #   "handle:<pos>" — over a resize handle (8 directional cursors)
+  #   "interior"     — over an artboard interior (move / copy cursor)
+  #   "empty"        — over empty canvas (crosshair)
+  hover_kind:      { default: "empty" }
 
 handlers:
 
@@ -99,6 +106,12 @@ handlers:
     - set: { tool.artboard.cursor_y:   "event.y" }
     - set: { tool.artboard.alt_held:   "event.modifiers.alt" }
     - set: { tool.artboard.shift_held: "event.modifiers.shift" }
+    # Update hover classification on every mousemove so the dynamic
+    # cursor in cursor_css_override reflects what's under the cursor
+    # (idle-mode hover) or the gesture in flight (drag-mode).
+    - "doc.artboard.probe_hover":
+        x: "event.x"
+        y: "event.y"
 
     # Threshold latch — once exceeded, snapshot for undo, promote
     # *_pending → active modes (which for 'duplicating_pending' also

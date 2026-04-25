@@ -1132,6 +1132,21 @@ fn run_doc_effect(
             // doesn't shift on rounding.
             artboard_resize_commit(model, store);
         }
+        "doc.artboard.probe_hover" => {
+            // Read-only hit-test for cursor-state classification.
+            // Sets tool.artboard.hover_kind to one of:
+            //   "handle:<dir>"  (8 directions)
+            //   "interior"
+            //   "empty"
+            // Called from the YAML on_mousemove handler so the
+            // dynamic cursor in cursor_css_override reflects what's
+            // currently under the cursor.
+            if let serde_json::Value::Object(args) = spec {
+                let x = eval_number(args.get("x"), store, ctx);
+                let y = eval_number(args.get("y"), store, ctx);
+                artboard_probe_hover(model, store, x, y);
+            }
+        }
         "doc.artboard.delete_panel_selected" => {
             // Delete every panel-selected artboard, subject to the
             // at-least-one invariant from ARTBOARDS.md
@@ -2923,6 +2938,80 @@ fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
         return;
     }
     artboard_translate_from_preview(model, &target_ids, dx, dy);
+}
+
+/// Read-only hover classification per ARTBOARD_TOOL.md §Cursor states.
+/// Mirrors the hit-test priority from probe_hit but writes only to
+/// tool.artboard.hover_kind — does not mutate panel-selection or
+/// any document state. Called on every mousemove so the dynamic
+/// cursor in cursor_css_override reflects what's currently under the
+/// cursor.
+fn artboard_probe_hover(model: &mut Model, store: &mut StateStore, x: f64, y: f64) {
+    let doc = model.document();
+
+    // 1. Resize handle of the single panel-selected artboard.
+    let sel = store
+        .eval_context()
+        .get("active_document")
+        .and_then(|d| d.get("artboards_panel_selection_ids"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![]));
+    let sel_ids: Vec<String> = sel
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if sel_ids.len() == 1 {
+        if let Some(ab) = doc.artboards.iter().find(|a| a.id == sel_ids[0]) {
+            const HANDLE_HIT_RADIUS_DOC: f64 = 8.0;
+            let cx = ab.x + ab.width / 2.0;
+            let cy = ab.y + ab.height / 2.0;
+            let candidates = [
+                ("nw", ab.x, ab.y),
+                ("n", cx, ab.y),
+                ("ne", ab.x + ab.width, ab.y),
+                ("e", ab.x + ab.width, cy),
+                ("se", ab.x + ab.width, ab.y + ab.height),
+                ("s", cx, ab.y + ab.height),
+                ("sw", ab.x, ab.y + ab.height),
+                ("w", ab.x, cy),
+            ];
+            for (pos, hx, hy) in candidates {
+                if (x - hx).abs() <= HANDLE_HIT_RADIUS_DOC
+                    && (y - hy).abs() <= HANDLE_HIT_RADIUS_DOC
+                {
+                    store.set_tool(
+                        "artboard",
+                        "hover_kind",
+                        serde_json::Value::String(format!("handle:{}", pos)),
+                    );
+                    return;
+                }
+            }
+        }
+    }
+
+    // 2. Artboard interior (highest position wins on overlap).
+    for ab in doc.artboards.iter().rev() {
+        if x >= ab.x && x <= ab.x + ab.width && y >= ab.y && y <= ab.y + ab.height {
+            store.set_tool(
+                "artboard",
+                "hover_kind",
+                serde_json::Value::String("interior".into()),
+            );
+            return;
+        }
+    }
+
+    // 3. Empty canvas.
+    store.set_tool(
+        "artboard",
+        "hover_kind",
+        serde_json::Value::String("empty".into()),
+    );
 }
 
 /// Pure-input version of artboard_delete_panel_selected — operates
@@ -7440,6 +7529,42 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].1, "artboards_panel_selection");
         assert_eq!(pending[0].2, serde_json::json!(["ccc"]));
+    }
+
+    #[test]
+    fn test_doc_artboard_probe_hover_classifies_position() {
+        // Sanity-check probe_hover: cursor over interior reports
+        // "interior", off-canvas reports "empty". (Handle hits
+        // require panel-selection synced via AppState plumbing,
+        // which the unit-test environment doesn't wire.)
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("aaa00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        let mut model = Model::new(doc, None);
+        let read_hover = |st: &StateStore| {
+            st.eval_context()
+                .get("tool").unwrap_or(&serde_json::Value::Null)
+                .get("artboard").cloned().unwrap_or(serde_json::Value::Null)
+                .get("hover_kind").cloned().unwrap_or(serde_json::Value::Null)
+                .as_str().unwrap_or("").to_string()
+        };
+        // Inside the artboard.
+        run_effects(
+            &[serde_json::json!({"doc.artboard.probe_hover": {"x": "50", "y": "50"}})],
+            &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None);
+        assert_eq!(read_hover(&store), "interior");
+        // Outside any artboard.
+        run_effects(
+            &[serde_json::json!({"doc.artboard.probe_hover": {"x": "999", "y": "999"}})],
+            &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None);
+        assert_eq!(read_hover(&store), "empty");
     }
 
     #[test]

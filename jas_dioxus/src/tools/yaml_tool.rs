@@ -364,6 +364,65 @@ impl CanvasTool for YamlTool {
                     self.spec.cursor.clone()
                 }
             }
+            "artboard" => {
+                // Per ARTBOARD_TOOL.md §Cursor states. During a drag
+                // the cursor reflects the gesture in flight (move /
+                // copy / 8-way directional resize). At idle the
+                // cursor reflects what's under the pointer (handle /
+                // interior / empty), set by doc.artboard.probe_hover
+                // on each mousemove.
+                let ctx = self.store.eval_context();
+                let read_str = |k: &str| -> String {
+                    ctx.get("tool")
+                        .and_then(|t| t.get("artboard"))
+                        .and_then(|a| a.get(k))
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                        .unwrap_or_default()
+                };
+                let read_bool = |k: &str| -> bool {
+                    ctx.get("tool")
+                        .and_then(|t| t.get("artboard"))
+                        .and_then(|a| a.get(k))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                };
+                let mode = read_str("mode");
+                let alt_held = read_bool("alt_held");
+                let handle_pos = read_str("hit_handle_pos");
+
+                let resize_cursor_for = |pos: &str| -> &'static str {
+                    match pos {
+                        "nw" | "se" => "nwse-resize",
+                        "ne" | "sw" => "nesw-resize",
+                        "n" | "s" => "ns-resize",
+                        "e" | "w" => "ew-resize",
+                        _ => "default",
+                    }
+                };
+
+                // During drag — reflect the gesture.
+                match mode.as_str() {
+                    "moving" | "moving_pending" => return Some("move".into()),
+                    "duplicating" | "duplicating_pending" => return Some("copy".into()),
+                    "resizing" => {
+                        return Some(resize_cursor_for(&handle_pos).into());
+                    }
+                    "creating" => return Some("crosshair".into()),
+                    _ => {}
+                }
+
+                // Idle — reflect what's under the pointer.
+                let hover = read_str("hover_kind");
+                if let Some(rest) = hover.strip_prefix("handle:") {
+                    return Some(resize_cursor_for(rest).into());
+                }
+                match hover.as_str() {
+                    "interior" => Some(if alt_held { "copy" } else { "move" }.into()),
+                    "empty" => Some("crosshair".into()),
+                    _ => self.spec.cursor.clone(),
+                }
+            }
             _ => self.spec.cursor.clone(),
         }
     }
