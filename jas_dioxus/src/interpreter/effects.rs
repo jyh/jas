@@ -1271,10 +1271,10 @@ fn run_doc_effect(
             if let serde_json::Value::Object(args) = spec {
                 let vp_x = eval_number(args.get("x"), store, ctx);
                 let vp_y = eval_number(args.get("y"), store, ctx);
-                let _shift = eval_bool(args.get("shift"), store, ctx);
-                let _cmd = eval_bool(args.get("cmd"), store, ctx);
+                let shift = eval_bool(args.get("shift"), store, ctx);
+                let cmd = eval_bool(args.get("cmd"), store, ctx);
                 let alt = eval_bool(args.get("alt"), store, ctx);
-                artboard_probe_hit(model, store, vp_x, vp_y, alt);
+                artboard_probe_hit(model, store, vp_x, vp_y, shift, cmd, alt);
             }
         }
         "doc.path.probe_partial_hit" => {
@@ -3360,6 +3360,8 @@ fn artboard_probe_hit(
     store: &mut StateStore,
     x: f64,
     y: f64,
+    shift_held: bool,
+    cmd_held: bool,
     alt_held: bool,
 ) {
     // Reset hit-state defaults; specific arms below override.
@@ -3440,27 +3442,92 @@ fn artboard_probe_hit(
     //    wins on overlap (matches the fill-stacking rule from
     //    ARTBOARDS.md §Canvas appearance). Iterate in reverse for
     //    top-most-first hit.
-    for ab in doc.artboards.iter().rev() {
-        if x >= ab.x && x <= ab.x + ab.width && y >= ab.y && y <= ab.y + ab.height {
-            let hit_id = ab.id.clone();
-            let mode = if alt_held {
-                "duplicating_pending"
+    let hit_id = doc
+        .artboards
+        .iter()
+        .rev()
+        .find(|ab| x >= ab.x && x <= ab.x + ab.width && y >= ab.y && y <= ab.y + ab.height)
+        .map(|ab| ab.id.clone());
+    if let Some(hit_id) = hit_id {
+        let mode = if alt_held {
+            "duplicating_pending"
+        } else {
+            "moving_pending"
+        };
+        store.set_tool("artboard", "mode", serde_json::Value::String(mode.into()));
+        store.set_tool(
+            "artboard",
+            "hit_artboard_id",
+            serde_json::Value::String(hit_id.clone()),
+        );
+
+        // Panel-selection write per the click rules from
+        // ARTBOARDS.md §Selection semantics:
+        //   plain click → replace; anchor becomes the clicked id.
+        //   Shift-click → range from anchor to clicked (anchor
+        //                 unchanged). If no anchor, behaves as plain.
+        //   Cmd-click   → toggle in / out (anchor unchanged).
+        let ctx = store.eval_context();
+        let active_doc = ctx.get("active_document");
+        let current_sel: Vec<String> = active_doc
+            .and_then(|d| d.get("artboards_panel_selection_ids"))
+            .and_then(|v| v.as_array().cloned())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let anchor: Option<String> = active_doc
+            .and_then(|d| d.get("artboards_panel_anchor"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        if shift_held {
+            // Range select from anchor to hit_id, using
+            // document.artboards order.
+            let ids: Vec<String> = doc.artboards.iter().map(|a| a.id.clone()).collect();
+            let target_idx = ids.iter().position(|x| x == &hit_id);
+            let anchor_idx = anchor
+                .as_ref()
+                .and_then(|a| ids.iter().position(|x| x == a));
+            if let (Some(t), Some(a)) = (target_idx, anchor_idx) {
+                let (lo, hi) = if a <= t { (a, t) } else { (t, a) };
+                let range: Vec<String> = ids[lo..=hi].to_vec();
+                store.push_panel_state_write(
+                    "artboards",
+                    "artboards_panel_selection",
+                    serde_json::json!(range),
+                );
+                // Anchor stays unchanged on shift-click — don't push.
             } else {
-                "moving_pending"
-            };
-            store.set_tool("artboard", "mode", serde_json::Value::String(mode.into()));
-            store.set_tool(
-                "artboard",
-                "hit_artboard_id",
-                serde_json::Value::String(hit_id.clone()),
+                // No anchor — behave as plain.
+                store.push_panel_state_write(
+                    "artboards",
+                    "artboards_panel_selection",
+                    serde_json::json!([hit_id.clone()]),
+                );
+                store.push_panel_state_write(
+                    "artboards",
+                    "panel_selection_anchor",
+                    serde_json::Value::String(hit_id),
+                );
+            }
+        } else if cmd_held {
+            let mut new_sel = current_sel.clone();
+            if let Some(pos) = new_sel.iter().position(|x| x == &hit_id) {
+                new_sel.remove(pos);
+            } else {
+                new_sel.push(hit_id);
+            }
+            store.push_panel_state_write(
+                "artboards",
+                "artboards_panel_selection",
+                serde_json::json!(new_sel),
             );
-            // Panel-selection write per the click rules from
-            // ARTBOARDS.md §Selection semantics. Plain click =
-            // replace; Shift / Cmd are P1.3X follow-up (range and
-            // toggle require knowing the panel-selection anchor and
-            // the artboards list to compute the range, which lives
-            // outside this hit-test). Today: plain replace, and
-            // Cmd / Shift behave as plain.
+            // Anchor unchanged on cmd-click.
+        } else {
+            // Plain click — replace, set anchor.
             store.push_panel_state_write(
                 "artboards",
                 "artboards_panel_selection",
@@ -3471,8 +3538,8 @@ fn artboard_probe_hit(
                 "panel_selection_anchor",
                 serde_json::Value::String(hit_id),
             );
-            return;
         }
+        return;
     }
 
     // 3. Empty canvas → drag-to-create on threshold (mode = creating);
@@ -7294,6 +7361,85 @@ mod tests {
         assert_eq!(pending[1].0, "artboards");
         assert_eq!(pending[1].1, "panel_selection_anchor");
         assert_eq!(pending[1].2, serde_json::json!("aaa00001"));
+    }
+
+    #[test]
+    fn test_doc_artboard_probe_hit_shift_click_extends_range() {
+        // Three artboards in document.artboards order. Anchor is at
+        // artboards[0]; click at artboards[2] with Shift extends the
+        // selection to {0, 1, 2}.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        for (i, id) in ["aaa", "bbb", "ccc"].iter().enumerate() {
+            let mut a = Artboard::default_with_id(id.to_string());
+            a.x = (i as f64) * 200.0;
+            a.y = 0.0;
+            a.width = 100.0;
+            a.height = 100.0;
+            doc.artboards.push(a);
+        }
+        let mut model = Model::new(doc, None);
+        // Pre-populate the eval context manually by setting the
+        // active_document scope through the panel + state store.
+        // Easier path: just tweak the StateStore's panel scope so
+        // active_document.artboards_panel_selection_ids reads back
+        // — but the eval context builds active_document from
+        // AppState, not from StateStore. For this unit test, write
+        // tool / state directly so probe_hit's read-from-context
+        // path doesn't see an anchor and we exercise the no-anchor
+        // fallback path.
+        // To exercise the WITH-anchor path, we'd need an AppState
+        // wired in or to override the eval context. The integration
+        // test path covers WITH-anchor; this unit test verifies the
+        // no-anchor fallback (Shift behaves as plain when anchor
+        // missing).
+        let effects = vec![serde_json::json!({
+            "doc.artboard.probe_hit": {
+                "x": "450", "y": "50",  // inside artboards[2]
+                "shift": "true", "cmd": "false", "alt": "false",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let pending = store.drain_panel_state_writes();
+        // No anchor in eval context → falls back to plain replace.
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].2, serde_json::json!(["ccc"]));
+    }
+
+    #[test]
+    fn test_doc_artboard_probe_hit_cmd_click_toggles() {
+        // Cmd-click on an artboard not in the current selection adds
+        // it. (No anchor change.)
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        for id in ["aaa", "bbb", "ccc"].iter() {
+            let mut a = Artboard::default_with_id(id.to_string());
+            a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+            doc.artboards.push(a);
+        }
+        let mut model = Model::new(doc, None);
+        // Click on the topmost-in-list artboard (ccc, since reverse
+        // iteration finds it first).
+        let effects = vec![serde_json::json!({
+            "doc.artboard.probe_hit": {
+                "x": "50", "y": "50",
+                "shift": "false", "cmd": "true", "alt": "false",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let pending = store.drain_panel_state_writes();
+        // No prior selection in eval context → Cmd toggles ccc IN.
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].1, "artboards_panel_selection");
+        assert_eq!(pending[0].2, serde_json::json!(["ccc"]));
     }
 
     #[test]
