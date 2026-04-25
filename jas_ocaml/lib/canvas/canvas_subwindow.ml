@@ -1989,14 +1989,39 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         let alloc = canvas_area#misc#allocation in
         let w = float_of_int alloc.Gtk.width in
         let h = float_of_int alloc.Gtk.height in
-        (* Layer 1: canvas background *)
+        (* Layer 1: canvas background. Filled in screen-space
+           before the view transform so it covers the viewport
+           regardless of zoom and pan. Per ZOOM_TOOL.md
+           Anchor and clamp math (rendering pipeline). *)
         Cairo.set_source_rgb cr 1.0 1.0 1.0;
         Cairo.rectangle cr 0.0 0.0 ~w ~h;
         Cairo.fill cr;
+        (* Sync model viewport size with the current canvas
+           bounds. First-time syncs re-center on the active
+           artboard (the construction-time default 888x900 is
+           replaced). Per HAND_TOOL.md Document-open behavior. *)
+        if w > 0.0 && h > 0.0 then begin
+          let was_default =
+            abs_float (model#viewport_w -. 888.0) < 0.5
+            && abs_float (model#viewport_h -. 900.0) < 0.5
+          in
+          model#set_viewport_w w;
+          model#set_viewport_h h;
+          if was_default then
+            model#center_view_on_current_artboard
+        end;
+        (* Apply view transform: zoom + pan. Layers 2-9 draw in
+           document coordinates; Cairo translates them to screen
+           pixels. Tool overlay is drawn AFTER restoring the
+           identity transform because tool-state coords are
+           already in screen-pixel space. *)
+        Cairo.save cr;
+        Cairo.translate cr model#view_offset_x model#view_offset_y;
+        Cairo.scale cr model#zoom_level model#zoom_level;
         (* Layer 2: artboard fills *)
         draw_artboard_fills cr current_doc;
         (* Layer 3: document element tree. In mask-isolation mode
-           (OPACITY.md \167Preview interactions), render only the
+           (OPACITY.md Preview interactions), render only the
            mask subtree of the isolated element — everything else
            on the canvas is hidden until the user exits isolation. *)
         (match model#mask_isolation_path with
@@ -2022,7 +2047,8 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         draw_artboard_display_marks cr current_doc;
         (* Layer 9: selection overlays *)
         draw_selection_overlays cr current_doc;
-        (* Active tool overlay *)
+        Cairo.restore cr;
+        (* Active tool overlay (screen-space, post-transform). *)
         _self#switch_tool;
         active_tool#draw_overlay _self#tool_context cr;
         true
