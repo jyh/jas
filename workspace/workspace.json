@@ -17588,6 +17588,9 @@
         },
         "hover_kind": {
           "default": "empty"
+        },
+        "duplicated_paths": {
+          "default": []
         }
       },
       "handlers": {
@@ -17668,6 +17671,11 @@
           {
             "set": {
               "tool.artboard.snapshotted": "false"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.duplicated_paths": "[]"
             }
           }
         ],

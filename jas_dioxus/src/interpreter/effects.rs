@@ -2835,7 +2835,13 @@ fn read_artboard_panel_selection(store: &StateStore) -> Vec<String> {
 /// Layers are treated as a whole — their combined bounds are
 /// checked against artboards (per spec). Recursion-into-leaves for
 /// groups that span multiple artboards is a refinement.
-fn artboard_translate_from_preview(model: &mut Model, target_ids: &[String], dx: f64, dy: f64) {
+fn artboard_translate_from_preview(
+    model: &mut Model,
+    store: &StateStore,
+    target_ids: &[String],
+    dx: f64,
+    dy: f64,
+) {
     if !model.has_preview_snapshot() {
         // Defensive: if the threshold-latch handler missed capturing,
         // skip rather than apply against a moving target. The drag
@@ -2907,6 +2913,78 @@ fn artboard_translate_from_preview(model: &mut Model, target_ids: &[String], dx:
             ab.y += dy;
         }
     }
+
+    // Translate explicit-path elements (set by duplicate_init for
+    // Alt-drag duplicates). These deep-copies of the source's
+    // contained elements need to follow the duplicate, but the
+    // containment rule above can't reach them — they're contained
+    // in BOTH source and duplicate at the start of drag (overlap),
+    // so the "exactly one" check fails. Explicit paths bypass that.
+    if dx != 0.0 || dy != 0.0 {
+        use crate::geometry::element::{translate_element, Element, LayerElem};
+        use std::rc::Rc;
+        let dup_paths: Vec<Vec<usize>> = store
+            .eval_context()
+            .get("tool")
+            .and_then(|t| t.get("artboard"))
+            .and_then(|a| a.get("duplicated_paths"))
+            .and_then(|v| v.as_array().cloned())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|p| {
+                        p.as_array().map(|inner| {
+                            inner
+                                .iter()
+                                .filter_map(|n| n.as_u64().map(|n| n as usize))
+                                .collect()
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !dup_paths.is_empty() {
+            // Group paths by layer index for efficient per-layer
+            // mutation. Re-build affected layers with translated
+            // children.
+            let new_layers: Vec<Element> = new_doc
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(li, layer)| {
+                    let layer_dup_paths: Vec<usize> = dup_paths
+                        .iter()
+                        .filter(|p| p.first().copied() == Some(li) && p.len() == 2)
+                        .map(|p| p[1])
+                        .collect();
+                    if layer_dup_paths.is_empty() {
+                        return layer.clone();
+                    }
+                    if let Element::Layer(le) = layer {
+                        let new_children: Vec<Rc<Element>> = le
+                            .children
+                            .iter()
+                            .enumerate()
+                            .map(|(ci, child)| {
+                                if layer_dup_paths.iter().any(|&i| i == ci) {
+                                    Rc::new(translate_element(child, dx, dy))
+                                } else {
+                                    Rc::clone(child)
+                                }
+                            })
+                            .collect();
+                        Element::Layer(LayerElem {
+                            children: new_children,
+                            ..le.clone()
+                        })
+                    } else {
+                        layer.clone()
+                    }
+                })
+                .collect();
+            new_doc.layers = new_layers;
+        }
+    }
+
     model.set_document(new_doc);
 }
 
@@ -2960,11 +3038,11 @@ fn artboard_move_apply(
             .and_then(|v| v.as_str())
             .map(String::from);
         if let Some(id) = hit_id {
-            artboard_translate_from_preview(model, &[id], dx, dy);
+            artboard_translate_from_preview(model, store, &[id], dx, dy);
         }
         return;
     }
-    artboard_translate_from_preview(model, &target_ids, dx, dy);
+    artboard_translate_from_preview(model, store, &target_ids, dx, dy);
 }
 
 /// Implementation of doc.artboard.move_commit. Re-applies the final
@@ -3019,7 +3097,7 @@ fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
     if target_ids.is_empty() {
         return;
     }
-    artboard_translate_from_preview(model, &target_ids, dx, dy);
+    artboard_translate_from_preview(model, store, &target_ids, dx, dy);
 }
 
 /// Read-only hover classification per ARTBOARD_TOOL.md §Cursor states.
@@ -3133,8 +3211,21 @@ fn artboard_delete_panel_selected(model: &mut Model, store: &mut StateStore) {
 /// duplicate to document.artboards, and updates hit_artboard_id to
 /// point to the new artboard so subsequent translate ops target the
 /// duplicate (not the source). The source artboard remains unchanged.
+///
+/// Move/Copy Artwork (per ARTBOARDS.md Rearrange Dialogue Move-
+/// artwork semantics, hard-coded on in phase 1): also deep-copies
+/// every top-level element fully contained in exactly one artboard
+/// (which must be the source) and appends the copies to the same
+/// layer. The new copies' paths are stored in
+/// tool.artboard.duplicated_paths so doc.artboard.move_apply can
+/// translate them in lockstep with the duplicate artboard. Without
+/// this explicit path tracking, the containment rule would skip the
+/// copies (they're contained in BOTH source and duplicate at start
+/// of drag, since the duplicate sits at source's position).
 fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
     use crate::document::artboard::{generate_artboard_id, next_artboard_name, Artboard};
+    use crate::geometry::element::{Element, LayerElem};
+    use std::rc::Rc;
 
     let source_id = store
         .eval_context()
@@ -3154,6 +3245,61 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
     let Some(source) = source else { return; };
 
     let mut new_doc = model.document().clone();
+
+    // Pre-op artboard bounds — used for the containment rule below.
+    let artboard_bounds: Vec<(String, (f64, f64, f64, f64))> = new_doc
+        .artboards
+        .iter()
+        .map(|a| (a.id.clone(), (a.x, a.y, a.width, a.height)))
+        .collect();
+
+    // Deep-copy source-contained elements. Walk each top-level
+    // layer's children; for each child fully contained in exactly
+    // one artboard (which must be the source for it to copy), clone
+    // and append to the same layer. Track each new copy's path so
+    // move_apply can translate it.
+    let mut duplicated_paths: Vec<Vec<usize>> = Vec::new();
+    let new_layers: Vec<Element> = new_doc
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(layer_idx, layer)| match layer {
+            Element::Layer(le) => {
+                let mut new_children: Vec<Rc<Element>> = le.children.clone();
+                let original_count = le.children.len();
+                let mut appended = 0usize;
+                for child in &le.children {
+                    let bounds = child.bounds();
+                    let mut containers: Vec<&str> = Vec::new();
+                    for (id, ab) in &artboard_bounds {
+                        if artboard_contains_element_bounds(*ab, bounds) {
+                            containers.push(id);
+                        }
+                    }
+                    if containers.len() == 1 && containers[0] == source_id {
+                        // Deep-clone the element. Element's Clone is
+                        // derived; Rc::new wraps a fresh allocation
+                        // so the deep copy is independent of the
+                        // original.
+                        new_children.push(Rc::new((**child).clone()));
+                        duplicated_paths.push(vec![
+                            layer_idx,
+                            original_count + appended,
+                        ]);
+                        appended += 1;
+                    }
+                }
+                Element::Layer(LayerElem {
+                    children: new_children,
+                    ..le.clone()
+                })
+            }
+            other => other.clone(),
+        })
+        .collect();
+    new_doc.layers = new_layers;
+
+    // Mint the duplicate artboard (collision-retry id).
     let existing_ids: std::collections::HashSet<String> =
         new_doc.artboards.iter().map(|a| a.id.clone()).collect();
     let mut new_id = String::new();
@@ -3176,8 +3322,22 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
     new_doc.artboards.push(dup);
     model.set_document(new_doc);
 
-    // Retarget translate ops at the duplicate.
+    // Retarget translate ops at the duplicate, and stash the
+    // duplicated element paths for the move-translation path.
     store.set_tool("artboard", "hit_artboard_id", serde_json::json!(new_id));
+    let paths_json: Vec<serde_json::Value> = duplicated_paths
+        .iter()
+        .map(|p| {
+            serde_json::Value::Array(
+                p.iter().map(|&i| serde_json::json!(i as u64)).collect(),
+            )
+        })
+        .collect();
+    store.set_tool(
+        "artboard",
+        "duplicated_paths",
+        serde_json::Value::Array(paths_json),
+    );
 }
 
 /// Compute new (x, y, w, h) for a resize gesture given the handle
@@ -7736,6 +7896,67 @@ mod tests {
         );
         // Both still present.
         assert_eq!(model.document().artboards.len(), 2);
+    }
+
+    #[test]
+    fn test_doc_artboard_duplicate_init_deep_copies_contained_elements() {
+        // Source artboard contains one rect. duplicate_init creates
+        // the duplicate AND deep-copies the rect, tracking its new
+        // path in tool.artboard.duplicated_paths.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use std::rc::Rc;
+
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("src00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        let make_rect = |x: f64, y: f64| RectElem {
+            x, y, width: 20.0, height: 20.0,
+            rx: 0.0, ry: 0.0, fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let layer = LayerElem {
+            children: vec![Rc::new(Element::Rect(make_rect(10.0, 10.0)))],
+            ..LayerElem::default()
+        };
+        doc.layers = vec![Element::Layer(layer)];
+        let mut model = Model::new(doc, None);
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("src00001"));
+        let effects = vec![serde_json::json!({
+            "doc.artboard.duplicate_init": {}
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Two artboards now (source + duplicate).
+        assert_eq!(model.document().artboards.len(), 2);
+        // Layer's children grew from 1 to 2 (deep-copy appended).
+        if let Element::Layer(le) = &model.document().layers[0] {
+            assert_eq!(le.children.len(), 2);
+            // Both rects have the same bounds (deep-copy at source pos).
+            if let (Element::Rect(r0), Element::Rect(r1)) =
+                (le.children[0].as_ref(), le.children[1].as_ref())
+            {
+                assert_eq!(r0.x, r1.x);
+                assert_eq!(r0.y, r1.y);
+            } else {
+                panic!("expected two rects");
+            }
+        } else {
+            panic!("expected layer");
+        }
+        // duplicated_paths records [layer_idx=0, child_idx=1].
+        let paths_json = store.eval_context()
+            .get("tool").unwrap()
+            .get("artboard").unwrap()
+            .get("duplicated_paths").unwrap()
+            .clone();
+        assert_eq!(paths_json, serde_json::json!([[0, 1]]));
     }
 
     #[test]
