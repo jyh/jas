@@ -51,7 +51,11 @@ class ToolSpec:
     shortcut: str | None
     state_defaults: dict
     handlers: dict[str, list]
-    overlay: OverlaySpec | None
+    # Overlay declarations. Most tools have zero or one entry; the
+    # transform-tool family (Scale / Rotate / Shear) uses multiple
+    # to layer the reference-point cross over the drag-time bbox
+    # ghost. Each entry's guard is evaluated independently.
+    overlay: list[OverlaySpec]
 
 
 def _parse_state_defaults(val: Any) -> dict:
@@ -76,17 +80,31 @@ def _parse_handlers(val: Any) -> dict[str, list]:
     return out
 
 
-def _parse_overlay(val: Any) -> OverlaySpec | None:
-    if not isinstance(val, dict):
-        return None
-    render = val.get("render")
+def _parse_overlay_entry(obj: dict) -> OverlaySpec | None:
+    render = obj.get("render")
     if not isinstance(render, dict):
         return None
-    guard = val.get("if")
+    guard = obj.get("if")
     return OverlaySpec(
         guard=guard if isinstance(guard, str) else None,
         render=render,
     )
+
+
+def _parse_overlay(val: Any) -> list[OverlaySpec]:
+    """Accept either a single {if, render} dict (most tools) or a
+    list of such dicts (transform-tool family). Both produce the
+    same list[OverlaySpec] downstream."""
+    if isinstance(val, dict):
+        entry = _parse_overlay_entry(val)
+        return [entry] if entry else []
+    if isinstance(val, list):
+        return [
+            entry for entry in
+            (_parse_overlay_entry(item) for item in val if isinstance(item, dict))
+            if entry is not None
+        ]
+    return []
 
 
 def tool_spec_from_workspace(spec: Any) -> ToolSpec | None:
@@ -239,42 +257,48 @@ class YamlTool(CanvasTool):
         return False
 
     def draw_overlay(self, ctx, painter) -> None:
-        overlay = self._spec.overlay
-        if overlay is None:
+        if not self._spec.overlay:
             return None
         eval_ctx = self._store.eval_context()
-        if overlay.guard is not None:
-            if not evaluate(overlay.guard, eval_ctx).to_bool():
-                return None
-        render = overlay.render
-        if not isinstance(render, dict):
-            return None
-        render_type = render.get("type", "")
         # Register the active document for doc-aware primitives. The
         # partial_selection_overlay reads selected elements directly
         # off ctx.document, but other render types use expression
         # helpers that may resolve through the doc primitive shim.
         guard = doc_primitives.register_document(ctx.document)
         try:
-            if render_type == "rect":
-                _draw_rect_overlay(painter, render, eval_ctx)
-            elif render_type == "line":
-                _draw_line_overlay(painter, render, eval_ctx)
-            elif render_type == "polygon":
-                _draw_regular_polygon_overlay(painter, render, eval_ctx)
-            elif render_type == "star":
-                _draw_star_overlay(painter, render, eval_ctx)
-            elif render_type == "buffer_polygon":
-                _draw_buffer_polygon_overlay(painter, render)
-            elif render_type == "buffer_polyline":
-                _draw_buffer_polyline_overlay(painter, render, eval_ctx)
-            elif render_type == "pen_overlay":
-                _draw_pen_overlay(painter, render, eval_ctx)
-            elif render_type == "partial_selection_overlay":
-                _draw_partial_selection_overlay(
-                    painter, render, eval_ctx, ctx.document)
-            elif render_type == "oval_cursor":
-                _draw_oval_cursor_overlay(painter, render, eval_ctx)
+            for overlay in self._spec.overlay:
+                if overlay.guard is not None:
+                    if not evaluate(overlay.guard, eval_ctx).to_bool():
+                        continue
+                render = overlay.render
+                if not isinstance(render, dict):
+                    continue
+                render_type = render.get("type", "")
+                if render_type == "rect":
+                    _draw_rect_overlay(painter, render, eval_ctx)
+                elif render_type == "line":
+                    _draw_line_overlay(painter, render, eval_ctx)
+                elif render_type == "polygon":
+                    _draw_regular_polygon_overlay(painter, render, eval_ctx)
+                elif render_type == "star":
+                    _draw_star_overlay(painter, render, eval_ctx)
+                elif render_type == "buffer_polygon":
+                    _draw_buffer_polygon_overlay(painter, render)
+                elif render_type == "buffer_polyline":
+                    _draw_buffer_polyline_overlay(painter, render, eval_ctx)
+                elif render_type == "pen_overlay":
+                    _draw_pen_overlay(painter, render, eval_ctx)
+                elif render_type == "partial_selection_overlay":
+                    _draw_partial_selection_overlay(
+                        painter, render, eval_ctx, ctx.document)
+                elif render_type == "oval_cursor":
+                    _draw_oval_cursor_overlay(painter, render, eval_ctx)
+                elif render_type == "reference_point_cross":
+                    _draw_reference_point_cross(
+                        painter, render, eval_ctx, ctx.document)
+                elif render_type == "bbox_ghost":
+                    _draw_bbox_ghost(
+                        painter, render, eval_ctx, ctx.document)
         finally:
             guard.restore()
 
@@ -884,3 +908,163 @@ def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict) -> None:
     painter.setPen(crosshair_pen)
     painter.drawLine(cx - 3, cy, cx + 3, cy)
     painter.drawLine(cx, cy - 3, cx, cy + 3)
+
+
+# ── Transform-tool overlays ──────────────────────────────────
+#
+# reference_point_cross + bbox_ghost overlays for the Scale /
+# Rotate / Shear tools. See SCALE_TOOL.md §Reference-point cross
+# overlay and §Overlay.
+
+def _resolve_overlay_ref_point(render: dict, eval_ctx: dict, document):
+    """Resolve the reference-point coordinate. Reads the ref_point
+    field (typically the expression state.transform_reference_point)
+    — when it's a list of two numbers, returns those. Otherwise
+    falls back to the selection union bbox center. Returns None
+    when there is no selection (overlay hides)."""
+    from algorithms.align import union_bounds, geometric_bounds
+    expr = render.get("ref_point")
+    if isinstance(expr, str):
+        v = evaluate(expr, eval_ctx)
+        try:
+            if v.type == ValueType.LIST and len(v.value) >= 2:
+                rx = float(v.value[0])
+                ry = float(v.value[1])
+                return (rx, ry)
+        except (TypeError, ValueError):
+            pass
+    if document is None:
+        return None
+    elements = []
+    for es in document.selection:
+        try:
+            elements.append(document.get_element(es.path))
+        except Exception:
+            pass
+    if not elements:
+        return None
+    x, y, w, h = union_bounds(elements, geometric_bounds)
+    return (x + w / 2, y + h / 2)
+
+
+def _draw_reference_point_cross(painter, render: dict,
+                                eval_ctx: dict, document) -> None:
+    """Cyan-blue 12 px crosshair + 2 px center dot at the
+    reference point. Hidden when there is no selection. See
+    SCALE_TOOL.md §Reference-point cross overlay."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor, QPen
+    pt = _resolve_overlay_ref_point(render, eval_ctx, document)
+    if pt is None:
+        return None
+    rx, ry = pt
+    color = QColor(0x4A, 0x9E, 0xFF)
+    pen = QPen(color, 1.0)
+    painter.setPen(pen)
+    _clear_brush(painter)
+    arm = 6.0
+    painter.drawLine(rx - arm, ry, rx + arm, ry)
+    painter.drawLine(rx, ry - arm, rx, ry + arm)
+    painter.setBrush(color)
+    painter.drawEllipse(QPointF(rx, ry), 2.0, 2.0)
+
+
+def _draw_bbox_ghost(painter, render: dict,
+                     eval_ctx: dict, document) -> None:
+    """Dashed cyan-blue parallelogram tracking the selection's
+    post-transform bounding box during a drag. Builds the matrix
+    from (transform_kind, press, cursor, ref, shift_held) using
+    jas.algorithms.transform_apply, mirroring the effect-side
+    apply logic but without document mutation."""
+    from PySide6.QtCore import Qt, QPointF
+    from PySide6.QtGui import QColor, QPen, QPolygonF
+    from algorithms.align import union_bounds, geometric_bounds
+    from jas.algorithms.transform_apply import (
+        scale_matrix, rotate_matrix, shear_matrix)
+    from jas.geometry.element import Transform
+    import math
+    pt = _resolve_overlay_ref_point(render, eval_ctx, document)
+    if pt is None:
+        return None
+    rx, ry = pt
+    kind_expr = render.get("transform_kind", "''")
+    kind = ""
+    if isinstance(kind_expr, str):
+        v = evaluate(kind_expr, eval_ctx)
+        if v.type == ValueType.STRING:
+            kind = v.value
+    px = _eval_number_field(eval_ctx, render.get("press_x"))
+    py = _eval_number_field(eval_ctx, render.get("press_y"))
+    cx = _eval_number_field(eval_ctx, render.get("cursor_x"))
+    cy = _eval_number_field(eval_ctx, render.get("cursor_y"))
+    shift = _eval_bool_field(eval_ctx, render.get("shift_held"))
+    if kind == "scale":
+        denom_x = px - rx
+        denom_y = py - ry
+        sx = 1.0 if abs(denom_x) < 1e-9 else (cx - rx) / denom_x
+        sy = 1.0 if abs(denom_y) < 1e-9 else (cy - ry) / denom_y
+        if shift:
+            prod = sx * sy
+            sign = 1.0 if prod >= 0 else -1.0
+            s = sign * (abs(prod) ** 0.5)
+            sx, sy = s, s
+        matrix = scale_matrix(sx, sy, rx, ry)
+    elif kind == "rotate":
+        tp = math.atan2(py - ry, px - rx)
+        tc = math.atan2(cy - ry, cx - rx)
+        theta_deg = math.degrees(tc - tp)
+        if shift:
+            theta_deg = round(theta_deg / 45.0) * 45.0
+        matrix = rotate_matrix(theta_deg, rx, ry)
+    elif kind == "shear":
+        dx = cx - px
+        dy = cy - py
+        if shift:
+            if abs(dx) >= abs(dy):
+                denom = max(abs(py - ry), 1e-9)
+                k = dx / denom
+                matrix = shear_matrix(
+                    math.degrees(math.atan(k)), "horizontal", 0.0, rx, ry)
+            else:
+                denom = max(abs(px - rx), 1e-9)
+                k = dy / denom
+                matrix = shear_matrix(
+                    math.degrees(math.atan(k)), "vertical", 0.0, rx, ry)
+        else:
+            ax = px - rx
+            ay = py - ry
+            axis_len = max((ax * ax + ay * ay) ** 0.5, 1e-9)
+            perp_x = -ay / axis_len
+            perp_y = ax / axis_len
+            perp_dist = (cx - px) * perp_x + (cy - py) * perp_y
+            k = perp_dist / axis_len
+            axis_angle_deg = math.degrees(math.atan2(ay, ax))
+            matrix = shear_matrix(
+                math.degrees(math.atan(k)), "custom", axis_angle_deg, rx, ry)
+    else:
+        matrix = Transform()
+    if document is None:
+        return None
+    elements = []
+    for es in document.selection:
+        try:
+            elements.append(document.get_element(es.path))
+        except Exception:
+            pass
+    if not elements:
+        return None
+    bx, by, bw, bh = union_bounds(elements, geometric_bounds)
+    corners = [
+        matrix.apply_point(bx,        by),
+        matrix.apply_point(bx + bw,   by),
+        matrix.apply_point(bx + bw,   by + bh),
+        matrix.apply_point(bx,        by + bh),
+    ]
+    color = QColor(0x4A, 0x9E, 0xFF)
+    pen = QPen(color, 1.0)
+    pen.setStyle(Qt.PenStyle.CustomDashLine)
+    pen.setDashPattern([4.0, 2.0])
+    painter.setPen(pen)
+    _clear_brush(painter)
+    poly = QPolygonF([QPointF(c[0], c[1]) for c in corners])
+    painter.drawPolygon(poly)
