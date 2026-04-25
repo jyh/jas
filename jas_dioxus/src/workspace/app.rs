@@ -65,11 +65,16 @@ pub fn App() -> Element {
     let mut revision = use_signal(|| 0u64);
     let mut layout_revision = use_signal(|| 0u64);
 
-    // Repaint after each render
+    // Repaint after each render. Also push the canvas widget's
+    // current pixel dimensions into the active tab's Model so
+    // doc.zoom.fit_* effects can compute fit-to-viewport math.
     {
         let app = app.clone();
         use_effect(move || {
             let _rev = revision();
+            if let Ok(mut st) = app.try_borrow_mut() {
+                st.sync_viewport_dimensions();
+            }
             if let Ok(st) = app.try_borrow() {
                 st.repaint();
             }

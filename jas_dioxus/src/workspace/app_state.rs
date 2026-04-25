@@ -60,6 +60,8 @@ pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>
 pub(crate) use crate::document::model::EditingTarget;
 
 /// Per-tab state: each tab has its own document, tools, and clipboard.
+/// View state (zoom_level, view_offset_x, view_offset_y) lives on the
+/// inner Model so doc.zoom.* effects can mutate it directly.
 pub(crate) struct TabState {
     pub(crate) model: Model,
     pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
@@ -94,6 +96,15 @@ impl TabState {
         tools.insert(ToolKind::Star, yaml_tool("star"));
         tools.insert(ToolKind::Line, yaml_tool("line"));
         tools.insert(ToolKind::Lasso, yaml_tool("lasso"));
+        tools.insert(ToolKind::Hand, yaml_tool("hand"));
+        tools.insert(ToolKind::Zoom, yaml_tool("zoom"));
+        let mut model = model;
+        // Initial centering at construction time uses Model's default
+        // viewport (888x900 from layout.yaml). The first call to
+        // AppState::sync_viewport_dimensions re-runs centering with
+        // the actual canvas size. Per ZOOM_TOOL.md §Document-open
+        // behavior.
+        model.center_view_on_current_artboard();
         Self {
             model,
             tools,
@@ -107,6 +118,10 @@ pub(crate) struct AppState {
     pub(crate) tabs: Vec<TabState>,
     pub(crate) active_tab: usize,
     pub(crate) active_tool: ToolKind,
+    /// Tool to restore when the spacebar pass-through to Hand
+    /// releases. None when no Space-held pass-through is active. Per
+    /// HAND_TOOL.md §Spacebar pass-through.
+    pub(crate) prior_tool_for_spacebar: Option<ToolKind>,
     pub(crate) app_config: super::workspace::AppConfig,
     pub(crate) workspace_layout: super::workspace::WorkspaceLayout,
     /// Which fill/stroke square is on top (active). true = fill, false = stroke.
@@ -599,6 +614,7 @@ impl AppState {
             tabs,
             active_tab,
             active_tool: ToolKind::Selection,
+            prior_tool_for_spacebar: None,
             app_config,
             workspace_layout,
             fill_on_top: true,
@@ -1307,6 +1323,37 @@ impl AppState {
             .unwrap_or(&[])
     }
 
+    /// Read the canvas widget's current pixel dimensions and write
+    /// them into the active tab's Model so doc.zoom.fit_* effects
+    /// can compute the fit-to-viewport zoom factor without per-call
+    /// canvas inspection. Called once per render via the App
+    /// component's use_effect; idempotent — only mutates when the
+    /// canvas size has actually changed.
+    pub(crate) fn sync_viewport_dimensions(&mut self) {
+        use wasm_bindgen::JsCast;
+        use web_sys::HtmlCanvasElement;
+        let Some(window) = web_sys::window() else { return; };
+        let Some(document) = window.document() else { return; };
+        let Some(canvas_el) = document.get_element_by_id("jas-canvas") else { return; };
+        let canvas: HtmlCanvasElement = canvas_el.unchecked_into();
+        let cw = canvas.client_width() as f64;
+        let ch = canvas.client_height() as f64;
+        if cw <= 0.0 || ch <= 0.0 { return; }
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            let was_default = (tab.model.viewport_w - 888.0).abs() < 0.5
+                && (tab.model.viewport_h - 900.0).abs() < 0.5;
+            tab.model.viewport_w = cw;
+            tab.model.viewport_h = ch;
+            // If we were using the construction-time default
+            // viewport, re-center the document on the real canvas
+            // size now that we know it. Per ZOOM_TOOL.md
+            // §Document-open behavior.
+            if was_default {
+                tab.model.center_view_on_current_artboard();
+            }
+        }
+    }
+
     pub(crate) fn repaint(&self) {
         let window = match web_sys::window() {
             Some(w) => w,
@@ -1338,6 +1385,22 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
+        // Layer 1: canvas background. Filled in screen-space here
+        // so it covers the viewport regardless of the view
+        // transform applied below. Per ZOOM_TOOL.md §Anchor and
+        // clamp math (rendering pipeline).
+        ctx.set_fill_style_str("white");
+        ctx.fill_rect(0.0, 0.0, w, h);
+
+        // Apply view transform: zoom + pan. The renderer draws in
+        // document coordinates; the canvas context transforms them
+        // into screen pixels. Tool overlays are drawn AFTER
+        // restoring the identity transform because their tool-state
+        // coordinates (press_x, cursor_x, etc.) are already in
+        // viewport-local pixel space.
+        ctx.save();
+        ctx.translate(tab.model.view_offset_x, tab.model.view_offset_y).ok();
+        ctx.scale(tab.model.zoom_level, tab.model.zoom_level).ok();
         render::render(
             &ctx,
             w,
@@ -1348,8 +1411,9 @@ impl AppState {
             tab.model.mask_isolation_path.as_deref(),
             &self.brush_libraries,
         );
+        ctx.restore();
 
-        // Draw tool overlay
+        // Draw tool overlay (in screen-space, post-transform).
         if let Some(tool) = tab.tools.get(&self.active_tool) {
             tool.draw_overlay(&tab.model, &ctx);
         }

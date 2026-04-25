@@ -56,6 +56,10 @@ let () =
   notebook_ref := Some notebook;
   let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 ~get_model toolbar_fixed in
   toolbar_ref := Some toolbar;
+  (* Tool to restore when spacebar pass-through to Hand releases.
+     None when no Space-held pass-through is active. Per
+     HAND_TOOL.md Spacebar pass-through. *)
+  let prior_tool_for_spacebar : Jas.Toolbar.tool option ref = ref None in
 
   ignore dock_box; (* Dock panel is created inside create_main_window *)
 
@@ -105,6 +109,29 @@ let () =
       toolbar#select_tool Jas.Toolbar.Pencil; true
     end else if key = GdkKeysyms._E then begin
       toolbar#select_tool Jas.Toolbar.Path_eraser; true
+    end else if key = GdkKeysyms._h || key = GdkKeysyms._H then begin
+      toolbar#select_tool Jas.Toolbar.Hand; true
+    end else if key = GdkKeysyms._z && not (List.mem `CONTROL (GdkEvent.Key.state ev))
+             && not (List.mem `META (GdkEvent.Key.state ev)) then begin
+      (* Bare Z (without Ctrl/Cmd, which is undo) selects Zoom. *)
+      toolbar#select_tool Jas.Toolbar.Zoom; true
+    end else if key = GdkKeysyms._Z && not (List.mem `CONTROL (GdkEvent.Key.state ev))
+             && not (List.mem `META (GdkEvent.Key.state ev))
+             && not (List.mem `SHIFT (GdkEvent.Key.state ev)) then begin
+      toolbar#select_tool Jas.Toolbar.Zoom; true
+    end else if key = GdkKeysyms._space
+             && not (List.mem `CONTROL (GdkEvent.Key.state ev))
+             && not (List.mem `META (GdkEvent.Key.state ev)) then begin
+      (* Spacebar pass-through to Hand. Save the current tool and
+         switch to Hand for the duration of the hold. Per HAND_TOOL.md
+         Spacebar pass-through. The matching keyup is below. *)
+      if toolbar#current_tool <> Jas.Toolbar.Hand
+         && !prior_tool_for_spacebar = None
+      then begin
+        prior_tool_for_spacebar := Some toolbar#current_tool;
+        toolbar#select_tool Jas.Toolbar.Hand
+      end;
+      true
     end else if key = GdkKeysyms._Escape
              || key = GdkKeysyms._Return || key = GdkKeysyms._KP_Enter then begin
       (match !active_canvas with Some c -> c#pen_finish | None -> ());
@@ -136,6 +163,84 @@ let () =
         (!active_model)#undo; true
       end else if has_ctrl && has_shift && key = GdkKeysyms._Z then begin
         (!active_model)#redo; true
+      end else if has_ctrl && (key = GdkKeysyms._equal || key = GdkKeysyms._plus) then begin
+        (* Ctrl/Cmd+= zooms in centered at viewport center. Per
+           ZOOM_TOOL.md Keyboard shortcuts and actions. *)
+        let m = !active_model in
+        let z = m#zoom_level in
+        let z_new = max 0.1 (min 64.0 (z *. 1.2)) in
+        let cx = m#viewport_w /. 2.0 in
+        let cy = m#viewport_h /. 2.0 in
+        let doc_cx = (cx -. m#view_offset_x) /. z in
+        let doc_cy = (cy -. m#view_offset_y) /. z in
+        m#set_zoom_level z_new;
+        m#set_view_offset_x (cx -. doc_cx *. z_new);
+        m#set_view_offset_y (cy -. doc_cy *. z_new);
+        true
+      end else if has_ctrl && (key = GdkKeysyms._minus || key = GdkKeysyms._underscore) then begin
+        let m = !active_model in
+        let z = m#zoom_level in
+        let z_new = max 0.1 (min 64.0 (z /. 1.2)) in
+        let cx = m#viewport_w /. 2.0 in
+        let cy = m#viewport_h /. 2.0 in
+        let doc_cx = (cx -. m#view_offset_x) /. z in
+        let doc_cy = (cy -. m#view_offset_y) /. z in
+        m#set_zoom_level z_new;
+        m#set_view_offset_x (cx -. doc_cx *. z_new);
+        m#set_view_offset_y (cy -. doc_cy *. z_new);
+        true
+      end else if has_ctrl && key = GdkKeysyms._1 then begin
+        (* Ctrl/Cmd+1 — zoom to actual size. *)
+        (!active_model)#set_zoom_level 1.0;
+        true
+      end else if has_ctrl && key = GdkKeysyms._0 then begin
+        (* Ctrl/Cmd+0 — fit active artboard. Cmd+Alt+0 fits all
+           artboards (the union). *)
+        let has_alt = List.mem `MOD1 state in
+        let m = !active_model in
+        let abs_list = m#document.Jas.Document.artboards in
+        if has_alt && abs_list <> [] then begin
+          let inf = infinity and neg_inf = neg_infinity in
+          let min_x = ref inf in
+          let min_y = ref inf in
+          let max_x = ref neg_inf in
+          let max_y = ref neg_inf in
+          List.iter (fun ab ->
+            let open Jas.Artboard in
+            if ab.x < !min_x then min_x := ab.x;
+            if ab.y < !min_y then min_y := ab.y;
+            if ab.x +. ab.width > !max_x then max_x := ab.x +. ab.width;
+            if ab.y +. ab.height > !max_y then max_y := ab.y +. ab.height
+          ) abs_list;
+          let bx = !min_x in
+          let by = !min_y in
+          let bw = !max_x -. !min_x in
+          let bh = !max_y -. !min_y in
+          let pad = 20.0 in
+          let avail_w = m#viewport_w -. 2.0 *. pad in
+          let avail_h = m#viewport_h -. 2.0 *. pad in
+          if avail_w > 0.0 && avail_h > 0.0 && bw > 0.0 && bh > 0.0 then begin
+            let z = max 0.1 (min 64.0 (min (avail_w /. bw) (avail_h /. bh))) in
+            m#set_zoom_level z;
+            m#set_view_offset_x (m#viewport_w /. 2.0 -. (bx +. bw /. 2.0) *. z);
+            m#set_view_offset_y (m#viewport_h /. 2.0 -. (by +. bh /. 2.0) *. z)
+          end
+        end else begin
+          match abs_list with
+          | ab :: _ ->
+            let open Jas.Artboard in
+            let pad = 20.0 in
+            let avail_w = m#viewport_w -. 2.0 *. pad in
+            let avail_h = m#viewport_h -. 2.0 *. pad in
+            if avail_w > 0.0 && avail_h > 0.0 && ab.width > 0.0 && ab.height > 0.0 then begin
+              let z = max 0.1 (min 64.0 (min (avail_w /. ab.width) (avail_h /. ab.height))) in
+              m#set_zoom_level z;
+              m#set_view_offset_x (m#viewport_w /. 2.0 -. (ab.x +. ab.width /. 2.0) *. z);
+              m#set_view_offset_y (m#viewport_h /. 2.0 -. (ab.y +. ab.height /. 2.0) *. z)
+            end
+          | [] -> ()
+        end;
+        true
       end else if not has_ctrl && (key = GdkKeysyms._d || key = GdkKeysyms._D) then begin
         (* Reset fill/stroke defaults *)
         toolbar#reset_defaults;
@@ -154,6 +259,20 @@ let () =
 
   main_window#event#connect#key_release ~callback:(fun ev ->
     let key = GdkEvent.Key.keyval ev in
+    (* Spacebar pass-through restore: if a prior tool was saved on
+       Space-down, restore it on Space-up. Per HAND_TOOL.md
+       Spacebar pass-through. *)
+    if key = GdkKeysyms._space then begin
+      match !prior_tool_for_spacebar with
+      | Some prior ->
+        prior_tool_for_spacebar := None;
+        toolbar#select_tool prior;
+        true
+      | None ->
+        (match !active_canvas with
+         | Some c -> c#forward_key_release key
+         | None -> false)
+    end else
     match !active_canvas with
     | Some c -> c#forward_key_release key
     | None -> false

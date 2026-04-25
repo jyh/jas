@@ -1927,9 +1927,14 @@ pub fn render(
     // (guard restores the prior value), so nested renders nest safely.
     let _brush_guard = register_brush_libraries(brush_libraries.clone());
 
-    // Layer 1: canvas background.
-    ctx.set_fill_style_str("white");
-    ctx.fill_rect(0.0, 0.0, width, height);
+    // Layer 1 (canvas background) is now painted by the caller
+    // (workspace::app_state::repaint) BEFORE applying the
+    // view transform, so the background fills the viewport in
+    // screen-space rather than the document rectangle. The
+    // (width, height) parameters here are now informational only —
+    // the renderer assumes the caller has cleared / filled the
+    // viewport and applied the zoom + pan transform.
+    let _ = (width, height);
 
     // Layer 2: artboard fills (list order, later wins in overlaps).
     draw_artboard_fills(ctx, doc);

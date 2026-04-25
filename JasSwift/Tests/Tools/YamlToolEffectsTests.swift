@@ -964,3 +964,190 @@ private func magicWandStateDefaults(_ store: StateStore) {
     #expect(paths.count == 1)
     #expect(paths.contains([0, 0]))
 }
+
+// MARK: - doc.zoom.* and doc.pan.apply
+
+@Test func docZoomSet() {
+    let model = Model()
+    model.zoomLevel = 2.5
+    model.viewOffsetX = 100.0
+    model.viewOffsetY = 50.0
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.set": ["level": "1.0"]]],
+               ctx: [:], store: store, platformEffects: effects)
+    #expect(model.zoomLevel == 1.0)
+    // Pan unchanged.
+    #expect(model.viewOffsetX == 100.0)
+    #expect(model.viewOffsetY == 50.0)
+}
+
+@Test func docZoomSetClampsToMinMax() {
+    let model = Model()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.set": ["level": "1000.0"]]],
+               ctx: [:], store: store, platformEffects: effects)
+    // Default max_zoom 64.0 from preferences.yaml.
+    #expect(model.zoomLevel == 64.0)
+}
+
+@Test func docZoomSetFull() {
+    let model = Model()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.set_full": [
+        "zoom":     "2.0",
+        "offset_x": "150.0",
+        "offset_y": "75.0",
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    #expect(model.zoomLevel == 2.0)
+    #expect(model.viewOffsetX == 150.0)
+    #expect(model.viewOffsetY == 75.0)
+}
+
+@Test func docZoomApplyAnchorsAtCursor() {
+    // Anchor invariant: doc point (200, 150) at screen (200, 150)
+    // before should be at screen (200, 150) after a 2x zoom from
+    // identity. screen = offset + zoom * doc; doc was 200/1 = 200,
+    // offset_new = 200 - 200*2 = -200.
+    let model = Model()
+    model.zoomLevel = 1.0
+    model.viewOffsetX = 0.0
+    model.viewOffsetY = 0.0
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.apply": [
+        "factor":   "2.0",
+        "anchor_x": "200",
+        "anchor_y": "150",
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    #expect(model.zoomLevel == 2.0)
+    #expect(model.viewOffsetX == -200.0)
+    #expect(model.viewOffsetY == -150.0)
+}
+
+@Test func docZoomApplyClampsAtMax() {
+    let model = Model()
+    model.zoomLevel = 32.0
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.apply": [
+        "factor":   "10.0",
+        "anchor_x": "100",
+        "anchor_y": "100",
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    // Clamped to 64.0 (default max_zoom).
+    #expect(model.zoomLevel == 64.0)
+}
+
+@Test func docPanApplyTranslatesByDragDelta() {
+    let model = Model()
+    let initialZoom = model.zoomLevel
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.pan.apply": [
+        "press_x":      "100",
+        "press_y":      "50",
+        "cursor_x":     "150",
+        "cursor_y":     "120",
+        "initial_offx": "0",
+        "initial_offy": "0",
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    // delta = (50, 70); initial = (0, 0); result = (50, 70).
+    #expect(model.viewOffsetX == 50.0)
+    #expect(model.viewOffsetY == 70.0)
+    // Zoom unchanged.
+    #expect(model.zoomLevel == initialZoom)
+}
+
+@Test func docPanApplyIsIdempotent() {
+    // Calling twice with the same press / cursor / initial values
+    // gives the same result — the effect uses cumulative delta from
+    // press, not per-event delta.
+    let model = Model()
+    model.viewOffsetX = 0.0
+    model.viewOffsetY = 0.0
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    let effectList: [[String: Any]] = [["doc.pan.apply": [
+        "press_x":      "100",
+        "press_y":      "50",
+        "cursor_x":     "150",
+        "cursor_y":     "120",
+        "initial_offx": "0",
+        "initial_offy": "0",
+    ]]]
+    runEffects(effectList, ctx: [:], store: store, platformEffects: effects)
+    let afterFirst = (model.viewOffsetX, model.viewOffsetY)
+    runEffects(effectList, ctx: [:], store: store, platformEffects: effects)
+    let afterSecond = (model.viewOffsetX, model.viewOffsetY)
+    #expect(afterFirst == afterSecond)
+}
+
+@Test func docZoomFitRectCentersAndScales() {
+    // 200x100 rect at (0, 0) in 800x600 viewport with 20px padding.
+    // Zoom = min(760/200, 560/100) = 3.8.
+    // Rect center (100, 50) at zoom 3.8 → screen (380, 190).
+    // Viewport center (400, 300). offset = (400-380, 300-190) = (20, 110).
+    let model = Model()
+    model.viewportW = 800
+    model.viewportH = 600
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.fit_rect": [
+        "rect_x":  "0", "rect_y":  "0",
+        "rect_w":  "200", "rect_h": "100",
+        "padding": "20",
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    #expect(abs(model.zoomLevel - 3.8) < 1e-9)
+    #expect(abs(model.viewOffsetX - 20.0) < 1e-9)
+    #expect(abs(model.viewOffsetY - 110.0) < 1e-9)
+}
+
+@Test func docZoomFitMarqueeBelowThresholdIsNoop() {
+    let model = Model()
+    let initialZoom = model.zoomLevel
+    let initialOffX = model.viewOffsetX
+    let initialOffY = model.viewOffsetY
+    model.viewportW = 800
+    model.viewportH = 600
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.fit_marquee": [
+        "press_x":  "100", "press_y": "100",
+        "cursor_x": "105", "cursor_y": "150",  // 5x50, below threshold
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    #expect(model.zoomLevel == initialZoom)
+    #expect(model.viewOffsetX == initialOffX)
+    #expect(model.viewOffsetY == initialOffY)
+}
+
+@Test func docZoomFitAllArtboardsUnionsRectangles() {
+    // Two artboards: A at (0, 0, 100, 100), B at (200, 50, 100, 100).
+    // Union: (0, 0, 300, 150). Fit into 600x300 viewport with padding 0.
+    // Zoom = min(600/300, 300/150) = 2.0.
+    let abA = Artboard(id: "a", name: "A", x: 0, y: 0,
+                       width: 100, height: 100,
+                       fill: .transparent,
+                       showCenterMark: false, showCrossHairs: false,
+                       showVideoSafeAreas: false,
+                       videoRulerPixelAspectRatio: 1.0)
+    let abB = Artboard(id: "b", name: "B", x: 200, y: 50,
+                       width: 100, height: 100,
+                       fill: .transparent,
+                       showCenterMark: false, showCrossHairs: false,
+                       showVideoSafeAreas: false,
+                       videoRulerPixelAspectRatio: 1.0)
+    let doc = Document(layers: [Layer(children: [])],
+                       selectedLayer: 0, selection: [],
+                       artboards: [abA, abB])
+    let model = Model(document: doc)
+    model.viewportW = 600
+    model.viewportH = 300
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.fit_all_artboards": ["padding": "0"]]],
+               ctx: [:], store: store, platformEffects: effects)
+    #expect(abs(model.zoomLevel - 2.0) < 1e-9)
+}

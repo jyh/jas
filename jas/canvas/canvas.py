@@ -1665,6 +1665,14 @@ class CanvasWidget(QWidget):
         self._controller = controller
         self._bbox = bbox
         self._current_tool_enum = Tool.SELECTION
+        # Tool to restore when spacebar pass-through to Hand
+        # releases. None when no pass-through is active. Per
+        # HAND_TOOL.md §Spacebar pass-through.
+        self._prior_tool_for_spacebar: Tool | None = None
+        # Callback wired by jas_app: when set, the canvas calls it
+        # to request a tool change (rather than calling set_tool
+        # directly) so the toolbar UI stays in sync.
+        self.on_request_tool_change = None
         # Inline text editing state (managed by canvas, exposed via context)
         self._text_editor: QLineEdit | None = None
         self._editing_path: tuple[int, ...] | None = None
@@ -1765,6 +1773,17 @@ class CanvasWidget(QWidget):
             return _make_type_cursor()
         elif tool == Tool.TYPE_ON_PATH:
             return _make_type_on_path_cursor()
+        elif tool == Tool.HAND:
+            # Open vs closed hand cursor depends on whether a Hand
+            # drag is in flight. The default (idle) is open hand;
+            # _update_cursor_for_tool flips to closed during pan.
+            # Per HAND_TOOL.md §Cursor states.
+            return QCursor(Qt.CursorShape.OpenHandCursor)
+        elif tool == Tool.ZOOM:
+            # AppKit and Qt don't have a native zoom-in cursor with
+            # a plus glyph; CrossCursor is the closest match. Per
+            # ZOOM_TOOL.md §Cursor states.
+            return QCursor(Qt.CursorShape.CrossCursor)
         else:
             return QCursor(Qt.CursorShape.CrossCursor)
 
@@ -1876,6 +1895,18 @@ class CanvasWidget(QWidget):
         )
 
     def keyPressEvent(self, event):
+        # Spacebar pass-through to Hand. Save the current tool and
+        # request a switch to Hand for the duration of the hold,
+        # unless the active tool is capturing keyboard (text editing).
+        # Per HAND_TOOL.md §Spacebar pass-through.
+        if (event.key() == Qt.Key.Key_Space
+                and not self._active_tool.captures_keyboard()
+                and self._current_tool_enum != Tool.HAND
+                and self._prior_tool_for_spacebar is None
+                and self.on_request_tool_change is not None):
+            self._prior_tool_for_spacebar = self._current_tool_enum
+            self.on_request_tool_change(Tool.HAND)
+            return
         # When the active tool is capturing keyboard (active text edit
         # session), all keys go to it first.
         if self._active_tool.captures_keyboard():
@@ -1916,6 +1947,15 @@ class CanvasWidget(QWidget):
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        # Spacebar pass-through restore: if a prior tool was saved on
+        # Space-down, request a switch back to it on Space-up.
+        if (event.key() == Qt.Key.Key_Space
+                and self._prior_tool_for_spacebar is not None
+                and self.on_request_tool_change is not None):
+            prior = self._prior_tool_for_spacebar
+            self._prior_tool_for_spacebar = None
+            self.on_request_tool_change(prior)
+            return
         if self._active_tool.on_key_release(self._tool_ctx, event.key()):
             return
         super().keyReleaseEvent(event)
@@ -1971,7 +2011,32 @@ class CanvasWidget(QWidget):
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Z-layer 1: canvas background. Filled in screen-space
+        # before the view transform so it covers the viewport
+        # regardless of zoom and pan. Per ZOOM_TOOL.md §Anchor
+        # and clamp math (rendering pipeline).
         painter.fillRect(self.rect(), QColor("white"))
+        # Sync model viewport size with canvas widget bounds. First-
+        # time syncs re-center on the active artboard (the
+        # construction-time default 888x900 is replaced).
+        cw = float(self.width())
+        ch = float(self.height())
+        if cw > 0 and ch > 0:
+            was_default = (abs(self._model.viewport_w - 888.0) < 0.5
+                           and abs(self._model.viewport_h - 900.0) < 0.5)
+            self._model.viewport_w = cw
+            self._model.viewport_h = ch
+            if was_default:
+                self._model.center_view_on_current_artboard()
+        # Apply view transform: zoom + pan. Z-layers 2-9 draw in
+        # document coordinates; QPainter translates them to screen
+        # pixels. Tool overlay is drawn AFTER restoring identity
+        # transform because tool-state coords are already in
+        # screen-pixel space.
+        painter.save()
+        painter.translate(self._model.view_offset_x,
+                          self._model.view_offset_y)
+        painter.scale(self._model.zoom_level, self._model.zoom_level)
         doc = self._model.document
         # Z-layer 2: per-artboard fills.
         _draw_artboard_fills(painter, doc)
@@ -1998,7 +2063,9 @@ class CanvasWidget(QWidget):
         _draw_artboard_accent(painter, doc, self._artboards_panel_selection)
         _draw_artboard_labels(painter, doc)
         _draw_artboard_display_marks(painter, doc)
-        # Z-layer 9: selection overlays, then tool overlay.
+        # Z-layer 9: selection overlays.
         _draw_selection_overlays(painter, doc)
+        painter.restore()
+        # Tool overlay (screen-space, post-transform).
         self._active_tool.draw_overlay(self._tool_ctx, painter)
         painter.end()

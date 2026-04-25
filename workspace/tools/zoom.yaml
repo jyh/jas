@@ -1,0 +1,169 @@
+# Zoom tool — changes the canvas zoom level via click, marquee drag,
+# scrubby drag, or Ctrl+wheel. Pans as needed (marquee, fit, anchor
+# preservation). Modifies view state only: active_document.zoom_level
+# and active_document.view_offset_x / view_offset_y.
+#
+# Gestures per ZOOM_TOOL.md §Gestures:
+#   plain click     → zoom in by zoom_step centered on cursor
+#   Alt+click       → zoom out by 1/zoom_step centered on cursor
+#   drag (scrubby)  → continuous zoom anchored at mousedown; horizontal
+#                     drag distance maps to factor via gain function;
+#                     active when preferences.viewport.scrubby_zoom is true
+#   drag (marquee)  → draw a rect; on mouseup fit-inside the rect (exact
+#                     fit, no padding); active when scrubby_zoom is false
+#   Ctrl+wheel      → step zoom centered on cursor
+#   Escape          → cancel in-progress drag; revert
+#   dblclick toolbar icon → invoke zoom_to_actual_size (handled by toolbar
+#                           dispatcher reading tool_options_action)
+#
+# Cursor states (plus / minus / grayed plus / grayed minus / crosshair-
+# during-marquee) are derived per-app from active_tool, modifier state,
+# zoom_level relative to clamp limits, and tool.zoom.mode.
+
+id: zoom
+cursor: zoom_in
+menu_label: "Zoom Tool"
+shortcut: "Z"
+tool_options_action: "zoom_to_actual_size"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, dragging]
+  press_x:      { default: 0.0 }
+  press_y:      { default: 0.0 }
+  cursor_x:     { default: 0.0 }
+  cursor_y:     { default: 0.0 }
+  alt_at_press: { default: false }
+  alt_held:     { default: false }
+  # Snapshot of view state at mousedown — read by the doc.zoom.scrubby
+  # effect to compute the new zoom + offsets idempotently from cumulative
+  # drag, not from per-event deltas.
+  initial_zoom: { default: 1.0 }
+  initial_offx: { default: 0.0 }
+  initial_offy: { default: 0.0 }
+  # Latched at first significant cursor motion (4 px in either dimension).
+  # Distinguishes a press+release click from a drag.
+  moved:        { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.zoom.mode:  "'idle'" }
+    - set: { tool.zoom.moved: "false" }
+
+  on_leave:
+    - set: { tool.zoom.mode:  "'idle'" }
+    - set: { tool.zoom.moved: "false" }
+
+  on_mousedown:
+    - set: { tool.zoom.press_x:      "event.x" }
+    - set: { tool.zoom.press_y:      "event.y" }
+    - set: { tool.zoom.cursor_x:     "event.x" }
+    - set: { tool.zoom.cursor_y:     "event.y" }
+    - set: { tool.zoom.alt_at_press: "event.modifiers.alt" }
+    - set: { tool.zoom.alt_held:     "event.modifiers.alt" }
+    - set: { tool.zoom.initial_zoom: "active_document.zoom_level" }
+    - set: { tool.zoom.initial_offx: "active_document.view_offset_x" }
+    - set: { tool.zoom.initial_offy: "active_document.view_offset_y" }
+    - set: { tool.zoom.moved:        "false" }
+    - set: { tool.zoom.mode:         "'dragging'" }
+
+  on_mousemove:
+    - if: "tool.zoom.mode == 'dragging'"
+      then:
+        - set: { tool.zoom.cursor_x: "event.x" }
+        - set: { tool.zoom.cursor_y: "event.y" }
+        - set: { tool.zoom.alt_held: "event.modifiers.alt" }
+        - if: "abs(event.x - tool.zoom.press_x) > 4 || abs(event.y - tool.zoom.press_y) > 4"
+          then:
+            - set: { tool.zoom.moved: "true" }
+            # Scrubby applies continuously. Marquee just renders an
+            # overlay; commit happens on mouseup.
+            - if: "preferences.viewport.scrubby_zoom"
+              then:
+                - "doc.zoom.scrubby":
+                    press_x:      "tool.zoom.press_x"
+                    press_y:      "tool.zoom.press_y"
+                    cursor_x:     "event.x"
+                    cursor_y:     "event.y"
+                    alt_held:     "event.modifiers.alt"
+                    alt_at_press: "tool.zoom.alt_at_press"
+
+  on_mouseup:
+    - if: "tool.zoom.mode == 'dragging'"
+      then:
+        - if: "tool.zoom.moved"
+          then:
+            # Drag commit. Scrubby already wrote zoom on each
+            # move event; mouseup is a no-op for it. Marquee
+            # commits the fit-rect on mouseup.
+            - if: "not preferences.viewport.scrubby_zoom"
+              then:
+                - "doc.zoom.fit_marquee":
+                    press_x:  "tool.zoom.press_x"
+                    press_y:  "tool.zoom.press_y"
+                    cursor_x: "event.x"
+                    cursor_y: "event.y"
+          else:
+            # Click without drag — step zoom centered on cursor.
+            # Direction is determined by Alt at press time, not at
+            # release (consistent with scrubby's alt_at_press read).
+            - if: "tool.zoom.alt_at_press"
+              then:
+                - dispatch:
+                    action: zoom_out
+                    params:
+                      anchor_x: "event.x"
+                      anchor_y: "event.y"
+              else:
+                - dispatch:
+                    action: zoom_in
+                    params:
+                      anchor_x: "event.x"
+                      anchor_y: "event.y"
+    - set: { tool.zoom.mode:  "'idle'" }
+    - set: { tool.zoom.moved: "false" }
+
+  on_keydown:
+    - if: "event.key == 'Escape' && tool.zoom.mode == 'dragging'"
+      then:
+        # Cancel drag — revert any scrubby zoom changes by restoring
+        # the pre-drag snapshot.
+        - "doc.zoom.set_full":
+            zoom:    "tool.zoom.initial_zoom"
+            offset_x: "tool.zoom.initial_offx"
+            offset_y: "tool.zoom.initial_offy"
+        - set: { tool.zoom.mode:  "'idle'" }
+        - set: { tool.zoom.moved: "false" }
+
+  on_wheel:
+    # Ctrl+wheel = step zoom centered on cursor. Plain wheel is reserved
+    # for canvas pan (handled by the canvas widget, not this tool).
+    - if: "event.modifiers.ctrl"
+      then:
+        - if: "event.delta_y > 0"
+          then:
+            - dispatch:
+                action: zoom_out
+                params:
+                  anchor_x: "event.x"
+                  anchor_y: "event.y"
+          else:
+            - dispatch:
+                action: zoom_in
+                params:
+                  anchor_x: "event.x"
+                  anchor_y: "event.y"
+
+# Marquee overlay — drawn during a drag when scrubby is off and the drag
+# has exceeded the click-vs-drag threshold. Native renderer composes the
+# rectangle from the four corner coordinates.
+overlay:
+  - if: "tool.zoom.mode == 'dragging' && tool.zoom.moved && not preferences.viewport.scrubby_zoom"
+    render:
+      type: marquee_rect
+      x1: "tool.zoom.press_x"
+      y1: "tool.zoom.press_y"
+      x2: "tool.zoom.cursor_x"
+      y2: "tool.zoom.cursor_y"

@@ -467,7 +467,7 @@ pub(crate) struct HyphenationDialogValues {
 /// through to the YAML actions catalog for open_dialog, dispatch, etc.
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
-fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     // Phase 4: open_layer_options is now pure YAML. It resolves the
     // target layer via element_at(path_from_id(param.layer_id)) and
     // packs its current state as open_dialog params.
@@ -1194,6 +1194,8 @@ fn build_appstate_ctx(
         ToolKind::Scale => "scale",
         ToolKind::Rotate => "rotate",
         ToolKind::Shear => "shear",
+        ToolKind::Hand => "hand",
+        ToolKind::Zoom => "zoom",
     };
     let fill_color = match st.app_default_fill {
         None => serde_json::Value::Null,
@@ -1224,6 +1226,14 @@ fn build_appstate_ctx(
     ctx.insert("state".to_string(), state);
     ctx.insert("panel".to_string(), panel);
     ctx.insert("active_document".to_string(), build_active_document_view(st));
+    // Expose preferences.* so YAML expressions like
+    // preferences.viewport.zoom_step resolve against the workspace
+    // YAML defaults. Used by the View actions (zoom_in, fit_*, etc.)
+    // and the Zoom tool's gesture handlers.
+    let prefs = crate::interpreter::workspace::Workspace::load()
+        .and_then(|ws| ws.data().get("preferences").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    ctx.insert("preferences".to_string(), prefs);
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
     }
@@ -1260,6 +1270,9 @@ fn build_active_document_view(
             "current_artboard_id": serde_json::Value::Null,
             "current_artboard": {},
             "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+            "zoom_level": 1.0,
+            "view_offset_x": 0.0,
+            "view_offset_y": 0.0,
         });
     };
     let mut top_level_layers = Vec::new();
@@ -1392,6 +1405,9 @@ fn build_active_document_view(
         "current_artboard_id": current_id,
         "current_artboard": current_artboard_json,
         "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+        "zoom_level": tab.model.zoom_level,
+        "view_offset_x": tab.model.view_offset_x,
+        "view_offset_y": tab.model.view_offset_y,
     })
 }
 
@@ -2553,6 +2569,8 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
                 ToolKind::Scale => "scale",
                 ToolKind::Rotate => "rotate",
                 ToolKind::Shear => "shear",
+                ToolKind::Hand => "hand",
+                ToolKind::Zoom => "zoom",
             };
             serde_json::Value::String(name.to_string())
         }
@@ -2833,6 +2851,11 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
         "polygon" => Some(ToolKind::Polygon),
         "star" => Some(ToolKind::Star),
         "lasso" => Some(ToolKind::Lasso),
+        "scale" => Some(ToolKind::Scale),
+        "rotate" => Some(ToolKind::Rotate),
+        "shear" => Some(ToolKind::Shear),
+        "hand" => Some(ToolKind::Hand),
+        "zoom" => Some(ToolKind::Zoom),
         _ => None,
     }
 }

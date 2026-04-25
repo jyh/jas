@@ -299,6 +299,9 @@ class YamlTool(CanvasTool):
                 elif render_type == "bbox_ghost":
                     _draw_bbox_ghost(
                         painter, render, eval_ctx, ctx.document)
+                elif render_type == "marquee_rect":
+                    _draw_marquee_rect_overlay(
+                        painter, render, eval_ctx)
         finally:
             guard.restore()
 
@@ -527,6 +530,32 @@ def _rounded_rect_path(x: float, y: float, w: float, h: float,
 
 
 # ── Render handlers ────────────────────────────────────────
+
+
+def _draw_marquee_rect_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    """Marquee zoom rectangle: thin dashed (4,2) gray stroke between
+    (x1, y1) and (x2, y2). Used by the Zoom tool drag overlay when
+    scrubby_zoom is off. Per ZOOM_TOOL.md §Drag — marquee zoom."""
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QColor, QPen
+    x1 = _eval_number_field(eval_ctx, render.get("x1"))
+    y1 = _eval_number_field(eval_ctx, render.get("y1"))
+    x2 = _eval_number_field(eval_ctx, render.get("x2"))
+    y2 = _eval_number_field(eval_ctx, render.get("y2"))
+    x = min(x1, x2)
+    y = min(y1, y2)
+    w = abs(x1 - x2)
+    h = abs(y1 - y2)
+    if w <= 0 or h <= 0:
+        return
+    painter.save()
+    pen = QPen(QColor(102, 102, 102), 1.0)
+    pen.setStyle(Qt.PenStyle.CustomDashLine)
+    pen.setDashPattern([4.0, 2.0])
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRect(QRectF(x, y, w, h))
+    painter.restore()
 
 
 def _draw_rect_overlay(painter, render: dict, eval_ctx: dict) -> None:

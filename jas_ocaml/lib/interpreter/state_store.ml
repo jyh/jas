@@ -351,8 +351,18 @@ let eval_context ?(extra = []) (store : t) : Yojson.Safe.t =
   let tool_obj =
     `Assoc (List.map (fun (id, scope) -> (id, `Assoc scope)) store.tools)
   in
+  (* Expose preferences.* by loading the workspace JSON. Used by
+     YAML expressions like preferences.viewport.zoom_step. *)
+  let prefs_obj =
+    match Workspace_loader.load () with
+    | Some ws ->
+      (match Workspace_loader.json_member "preferences" ws.data with
+       | Some prefs -> prefs
+       | None -> `Null)
+    | None -> `Null
+  in
   let base = [("state", state_obj); ("panel", panel_obj);
-              ("tool", tool_obj)] in
+              ("tool", tool_obj); ("preferences", prefs_obj)] in
   let with_dialog =
     match store.dialog_id with
     | Some _ ->

@@ -277,6 +277,8 @@ final class YamlTool: CanvasTool {
                                          model: ctx.model)
             case "bbox_ghost":
                 drawBBoxGhost(cgCtx, render, evalCtx, model: ctx.model)
+            case "marquee_rect":
+                drawMarqueeRectOverlay(cgCtx, render, evalCtx)
             default: break
             }
         }
@@ -396,6 +398,29 @@ private func applyOverlayStyle(_ cgCtx: CGContext, _ style: OverlayStyle) {
         cgCtx.strokePath()
         cgCtx.setLineDash(phase: 0, lengths: [])
     }
+}
+
+/// Marquee zoom rectangle: thin dashed stroke between (x1, y1) and
+/// (x2, y2). Used by the Zoom tool's drag overlay when scrubby_zoom
+/// is off. Per ZOOM_TOOL.md §Drag — marquee zoom.
+private func drawMarqueeRectOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    let x1 = evalOverlayNumber(spec["x1"], ctx)
+    let y1 = evalOverlayNumber(spec["y1"], ctx)
+    let x2 = evalOverlayNumber(spec["x2"], ctx)
+    let y2 = evalOverlayNumber(spec["y2"], ctx)
+    let x = min(x1, x2)
+    let y = min(y1, y2)
+    let w = abs(x1 - x2)
+    let h = abs(y1 - y2)
+    if w <= 0 || h <= 0 { return }
+    cgCtx.saveGState()
+    cgCtx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
+    cgCtx.setLineWidth(1.0)
+    cgCtx.setLineDash(phase: 0, lengths: [4, 2])
+    cgCtx.stroke(CGRect(x: x, y: y, width: w, height: h))
+    cgCtx.restoreGState()
 }
 
 private func drawRectOverlay(

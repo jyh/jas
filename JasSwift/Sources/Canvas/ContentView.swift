@@ -29,6 +29,8 @@ public enum Tool: String, CaseIterable {
     case scale
     case rotate
     case shear
+    case hand
+    case zoom
 }
 
 /// Map a Tool enum case to the matching workspace/tools/*.yaml
@@ -60,6 +62,8 @@ func toolYamlId(_ tool: Tool) -> String? {
     case .scale: return "scale"
     case .rotate: return "rotate"
     case .shear: return "shear"
+    case .hand: return "hand"
+    case .zoom: return "zoom"
     case .typeTool, .typeOnPath: return nil
     }
 }
@@ -552,6 +556,7 @@ struct ToolbarPanel: View {
     @State private var textSlotTool: Tool = .typeTool
     @State private var shapeSlotTool: Tool = .rect
     @State private var transformSlotTool: Tool = .scale
+    @State private var navSlotTool: Tool = .hand
 
     private let toolbarWidth: CGFloat = 80
 
@@ -616,6 +621,19 @@ struct ToolbarPanel: View {
                     )
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .rotate,
                                            onRequestOptions: onOpenToolOptions)
+                }
+                // Navigation-tool family: Hand (primary, with Zoom as
+                // long-press alternate). Hand-icon dblclick →
+                // fit_active_artboard; Zoom-icon dblclick →
+                // zoom_to_actual_size, both via tool_options_action
+                // on the tool YAMLs. See HAND_TOOL.md / ZOOM_TOOL.md.
+                HStack(spacing: 2) {
+                    ToolbarView.toolButtonWithAlternates(
+                        currentTool: $currentTool,
+                        visibleTool: $navSlotTool,
+                        alternates: [.hand, .zoom],
+                        onRequestOptions: onOpenToolOptions
+                    )
                 }
             }
             .padding(4)
