@@ -2821,6 +2821,20 @@ fn read_artboard_panel_selection(store: &StateStore) -> Vec<String> {
 /// drag effects call this on every mousemove; commit effects call
 /// once with the final (rounded) delta and then drop the preview
 /// snapshot.
+///
+/// Move/Copy Artwork (per ARTBOARD_TOOL.md §Move/Copy Artwork,
+/// hard-coded on in phase 1) also translates contained elements:
+/// for each top-level element fully contained in exactly one
+/// artboard's pre-op bounds, translate by the same delta when that
+/// artboard is in target_ids. The pre-op containment is computed
+/// against the snapshot just restored, so the rule sees the
+/// artboard layout as it existed at mousedown — not the in-flight
+/// post-translate state.
+///
+/// Phase 1.3c implementation: top-level elements only. Groups and
+/// Layers are treated as a whole — their combined bounds are
+/// checked against artboards (per spec). Recursion-into-leaves for
+/// groups that span multiple artboards is a refinement.
 fn artboard_translate_from_preview(model: &mut Model, target_ids: &[String], dx: f64, dy: f64) {
     if !model.has_preview_snapshot() {
         // Defensive: if the threshold-latch handler missed capturing,
@@ -2831,6 +2845,62 @@ fn artboard_translate_from_preview(model: &mut Model, target_ids: &[String], dx:
     }
     model.restore_preview_snapshot();
     let mut new_doc = model.document().clone();
+
+    // Pre-op artboard bounds (read before any translation so the
+    // containment rule sees the mousedown-time layout).
+    let artboard_bounds: Vec<(String, (f64, f64, f64, f64))> = new_doc
+        .artboards
+        .iter()
+        .map(|a| (a.id.clone(), (a.x, a.y, a.width, a.height)))
+        .collect();
+
+    // Translate elements per the containment rule. The document
+    // root is `layers: Vec<Element>` where each layer is an
+    // Element::Layer wrapping a Vec<Rc<Element>> of children. Phase
+    // 1.3c iterates each layer's direct children (treating each
+    // child as a "top-level element" for the containment check);
+    // recursion into nested groups for the layer-spans-multiple-
+    // artboards case is a refinement.
+    if dx != 0.0 || dy != 0.0 {
+        use crate::geometry::element::{translate_element, Element, LayerElem};
+        use std::rc::Rc;
+        let new_layers: Vec<Element> = new_doc
+            .layers
+            .iter()
+            .map(|layer| match layer {
+                Element::Layer(le) => {
+                    let new_children: Vec<Rc<Element>> = le
+                        .children
+                        .iter()
+                        .map(|child| {
+                            let bounds = child.bounds();
+                            let mut containers: Vec<&str> = Vec::new();
+                            for (id, ab) in &artboard_bounds {
+                                if artboard_contains_element_bounds(*ab, bounds) {
+                                    containers.push(id);
+                                }
+                            }
+                            if containers.len() == 1
+                                && target_ids.iter().any(|id| id == containers[0])
+                            {
+                                Rc::new(translate_element(child, dx, dy))
+                            } else {
+                                Rc::clone(child)
+                            }
+                        })
+                        .collect();
+                    Element::Layer(LayerElem {
+                        children: new_children,
+                        ..le.clone()
+                    })
+                }
+                other => other.clone(),
+            })
+            .collect();
+        new_doc.layers = new_layers;
+    }
+
+    // Translate the moving artboards.
     for ab in new_doc.artboards.iter_mut() {
         if target_ids.iter().any(|id| id == &ab.id) {
             ab.x += dx;
@@ -2838,6 +2908,18 @@ fn artboard_translate_from_preview(model: &mut Model, target_ids: &[String], dx:
         }
     }
     model.set_document(new_doc);
+}
+
+/// True iff `inner` (an element's axis-aligned bounding box) is
+/// fully contained within `outer` (an artboard's bounds). Elements
+/// touching the artboard edge count as contained (≤ comparison).
+fn artboard_contains_element_bounds(
+    outer: (f64, f64, f64, f64),
+    inner: (f64, f64, f64, f64),
+) -> bool {
+    let (ox, oy, ow, oh) = outer;
+    let (ix, iy, iw, ih) = inner;
+    ix >= ox && iy >= oy && ix + iw <= ox + ow && iy + ih <= oy + oh
 }
 
 /// Implementation of doc.artboard.move_apply per ARTBOARD_TOOL.md
@@ -7735,6 +7817,78 @@ mod tests {
         assert_eq!(ab.y, 70.0);
         assert_eq!(ab.width, 200.0);
         assert_eq!(ab.height, 200.0);
+    }
+
+    #[test]
+    fn test_doc_artboard_move_apply_translates_contained_elements() {
+        // An element fully contained in the moving artboard
+        // translates by the same delta. Element outside the artboard
+        // does not move. (Move/Copy Artwork hard-coded on per spec.)
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        use crate::geometry::element::{Element, LayerElem, RectElem};
+        use std::rc::Rc;
+
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("aaa00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        // Create a layer with two rects: one inside the artboard
+        // (should move), one outside (should not).
+        use crate::geometry::element::CommonProps;
+        let make_rect = |x: f64, y: f64| RectElem {
+            x, y, width: 20.0, height: 20.0,
+            rx: 0.0, ry: 0.0, fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let inside = make_rect(10.0, 10.0);
+        let outside = make_rect(200.0, 200.0);
+        let layer = LayerElem {
+            children: vec![
+                Rc::new(Element::Rect(inside)),
+                Rc::new(Element::Rect(outside)),
+            ],
+            ..LayerElem::default()
+        };
+        doc.layers = vec![Element::Layer(layer)];
+        let mut model = Model::new(doc, None);
+        model.capture_preview_snapshot();
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("aaa00001"));
+        // Drag delta (50, 30).
+        let effects = vec![serde_json::json!({
+            "doc.artboard.move_apply": {
+                "press_x":    "0",  "press_y":   "0",
+                "cursor_x":   "50", "cursor_y":  "30",
+                "shift_held": "false",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Artboard moved.
+        assert_eq!(model.document().artboards[0].x, 50.0);
+        assert_eq!(model.document().artboards[0].y, 30.0);
+        // Inside rect followed (was at (10, 10), now (60, 40)).
+        if let Element::Layer(le) = &model.document().layers[0] {
+            if let Element::Rect(r) = le.children[0].as_ref() {
+                assert_eq!(r.x, 60.0);
+                assert_eq!(r.y, 40.0);
+            } else {
+                panic!("expected rect child 0");
+            }
+            // Outside rect unchanged.
+            if let Element::Rect(r) = le.children[1].as_ref() {
+                assert_eq!(r.x, 200.0);
+                assert_eq!(r.y, 200.0);
+            } else {
+                panic!("expected rect child 1");
+            }
+        } else {
+            panic!("expected layer at root");
+        }
     }
 
     #[test]
