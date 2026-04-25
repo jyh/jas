@@ -1751,6 +1751,33 @@ fn run_doc_effect(
                 magic_wand_apply(model, store, ctx, &seed_path, &mode);
             }
         }
+        "doc.eyedropper.sample" => {
+            // Eyedropper plain-click sample per
+            // EYEDROPPER_TOOL.md §Gestures. Reads the source-element
+            // path, snapshots its appearance into
+            // state.eyedropper_cache, and (when the selection is
+            // non-empty) applies the same appearance to every
+            // eligible target in the selection.
+            if let serde_json::Value::Object(args) = spec {
+                let Some(source_path) =
+                    args.get("source").and_then(|v| extract_path(v, store, ctx))
+                else { return; };
+                eyedropper_sample(model, store, ctx, &source_path);
+            }
+        }
+        "doc.eyedropper.apply_loaded" => {
+            // Eyedropper Alt+click apply per
+            // EYEDROPPER_TOOL.md §Gestures. Reads the cached
+            // appearance from state.eyedropper_cache and writes it
+            // to the clicked target. When the cache is null, falls
+            // through to plain-sample semantics.
+            if let serde_json::Value::Object(args) = spec {
+                let Some(target_path) =
+                    args.get("target").and_then(|v| extract_path(v, store, ctx))
+                else { return; };
+                eyedropper_apply_loaded(model, store, ctx, &target_path);
+            }
+        }
         "doc.path.smooth_at_cursor" => {
             // Iterates *selected* unlocked Path elements, finds the
             // contiguous flat-polyline range within `radius` of (x, y),
@@ -4848,6 +4875,166 @@ fn read_magic_wand_config(
     cfg.opacity = bool_at("magic_wand_opacity", cfg.opacity);
     cfg.opacity_tolerance = num_at("magic_wand_opacity_tolerance", cfg.opacity_tolerance);
     cfg.blending_mode = bool_at("magic_wand_blending_mode", cfg.blending_mode);
+    cfg
+}
+
+/// Implementation of doc.eyedropper.sample. See
+/// EYEDROPPER_TOOL.md §Gestures.
+///
+/// Snapshots the source element's attrs into state.eyedropper_cache.
+/// When the current selection is non-empty, also writes the same
+/// attrs to every eligible target in the selection (recursing into
+/// Group / Layer containers).
+fn eyedropper_sample(
+    model: &mut Model,
+    store: &mut StateStore,
+    ctx: &serde_json::Value,
+    source_path: &[usize],
+) {
+    use crate::algorithms::eyedropper::{extract_appearance, is_source_eligible};
+
+    let doc = model.document().clone();
+    let path_vec = source_path.to_vec();
+    let Some(source_elem) = doc.get_element(&path_vec).map(|e| (*e).clone())
+    else { return; };
+    if !is_source_eligible(&source_elem) {
+        return;
+    }
+
+    let appearance = extract_appearance(&source_elem);
+    let cache_json = serde_json::to_value(&appearance)
+        .unwrap_or(serde_json::Value::Null);
+    store.set("state.eyedropper_cache", cache_json);
+
+    if !doc.selection.is_empty() {
+        let cfg = read_eyedropper_config(store, ctx);
+        let mut new_doc = doc.clone();
+        let selection_paths: Vec<Vec<usize>> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        for path in &selection_paths {
+            new_doc = apply_to_target_recursive(&new_doc, path, &appearance, &cfg);
+        }
+        model.set_document(new_doc);
+    }
+}
+
+/// Implementation of doc.eyedropper.apply_loaded. See
+/// EYEDROPPER_TOOL.md §Gestures.
+///
+/// Reads state.eyedropper_cache and writes the cached attrs to the
+/// clicked target. When the cache is null, falls through to plain-
+/// sample semantics so an empty-cache Alt+click still does
+/// something useful.
+fn eyedropper_apply_loaded(
+    model: &mut Model,
+    store: &mut StateStore,
+    ctx: &serde_json::Value,
+    target_path: &[usize],
+) {
+    use crate::algorithms::eyedropper::Appearance;
+
+    let cache_json = store.get("state.eyedropper_cache").clone();
+    if cache_json.is_null() {
+        // Empty cache: fall through to sample.
+        eyedropper_sample(model, store, ctx, target_path);
+        return;
+    }
+
+    let appearance: Appearance = match serde_json::from_value(cache_json) {
+        Ok(a) => a,
+        Err(_) => return,
+    };
+
+    let cfg = read_eyedropper_config(store, ctx);
+    let doc = model.document().clone();
+    let new_doc = apply_to_target_recursive(
+        &doc, &target_path.to_vec(), &appearance, &cfg,
+    );
+    model.set_document(new_doc);
+}
+
+/// Walk the document at `path`. If the element is a Group or Layer,
+/// recurse into each child. Otherwise apply the appearance when the
+/// element is target-eligible. Returns a new Document with all
+/// applies threaded through `Document::replace_element`.
+fn apply_to_target_recursive(
+    doc: &crate::document::document::Document,
+    path: &[usize],
+    appearance: &crate::algorithms::eyedropper::Appearance,
+    cfg: &crate::algorithms::eyedropper::EyedropperConfig,
+) -> crate::document::document::Document {
+    use crate::algorithms::eyedropper::{apply_appearance, is_target_eligible};
+
+    let path_vec = path.to_vec();
+    let Some(elem) = doc.get_element(&path_vec) else { return doc.clone(); };
+    let elem_clone = (*elem).clone();
+
+    match &elem_clone {
+        Element::Group(g) => {
+            let mut acc = doc.clone();
+            for i in 0..g.children.len() {
+                let mut child_path = path.to_vec();
+                child_path.push(i);
+                acc = apply_to_target_recursive(&acc, &child_path, appearance, cfg);
+            }
+            acc
+        }
+        Element::Layer(l) => {
+            let mut acc = doc.clone();
+            for i in 0..l.children.len() {
+                let mut child_path = path.to_vec();
+                child_path.push(i);
+                acc = apply_to_target_recursive(&acc, &child_path, appearance, cfg);
+            }
+            acc
+        }
+        _ => {
+            if !is_target_eligible(&elem_clone) {
+                return doc.clone();
+            }
+            let new_elem = apply_appearance(&elem_clone, appearance, cfg);
+            doc.replace_element(&path_vec, new_elem)
+        }
+    }
+}
+
+/// Read the 25 `state.eyedropper_*` keys into an EyedropperConfig.
+/// Falls back to the spec defaults (all true) when a key is missing.
+fn read_eyedropper_config(
+    store: &StateStore, ctx: &serde_json::Value,
+) -> crate::algorithms::eyedropper::EyedropperConfig {
+    use crate::algorithms::eyedropper::EyedropperConfig;
+    let mut cfg = EyedropperConfig::default();
+    let bool_at = |key: &str, fallback: bool| -> bool {
+        match eval_expr(&format!("state.{}", key), store, ctx) {
+            Value::Bool(b) => b, _ => fallback,
+        }
+    };
+    cfg.fill                  = bool_at("eyedropper_fill",                  cfg.fill);
+    cfg.stroke                = bool_at("eyedropper_stroke",                cfg.stroke);
+    cfg.stroke_color          = bool_at("eyedropper_stroke_color",          cfg.stroke_color);
+    cfg.stroke_weight         = bool_at("eyedropper_stroke_weight",         cfg.stroke_weight);
+    cfg.stroke_cap_join       = bool_at("eyedropper_stroke_cap_join",       cfg.stroke_cap_join);
+    cfg.stroke_align          = bool_at("eyedropper_stroke_align",          cfg.stroke_align);
+    cfg.stroke_dash           = bool_at("eyedropper_stroke_dash",           cfg.stroke_dash);
+    cfg.stroke_arrowheads     = bool_at("eyedropper_stroke_arrowheads",     cfg.stroke_arrowheads);
+    cfg.stroke_profile        = bool_at("eyedropper_stroke_profile",        cfg.stroke_profile);
+    cfg.stroke_brush          = bool_at("eyedropper_stroke_brush",          cfg.stroke_brush);
+    cfg.opacity               = bool_at("eyedropper_opacity",               cfg.opacity);
+    cfg.opacity_alpha         = bool_at("eyedropper_opacity_alpha",         cfg.opacity_alpha);
+    cfg.opacity_blend         = bool_at("eyedropper_opacity_blend",         cfg.opacity_blend);
+    cfg.character             = bool_at("eyedropper_character",             cfg.character);
+    cfg.character_font        = bool_at("eyedropper_character_font",        cfg.character_font);
+    cfg.character_size        = bool_at("eyedropper_character_size",        cfg.character_size);
+    cfg.character_leading     = bool_at("eyedropper_character_leading",     cfg.character_leading);
+    cfg.character_kerning     = bool_at("eyedropper_character_kerning",     cfg.character_kerning);
+    cfg.character_tracking    = bool_at("eyedropper_character_tracking",    cfg.character_tracking);
+    cfg.character_color       = bool_at("eyedropper_character_color",       cfg.character_color);
+    cfg.paragraph             = bool_at("eyedropper_paragraph",             cfg.paragraph);
+    cfg.paragraph_align       = bool_at("eyedropper_paragraph_align",       cfg.paragraph_align);
+    cfg.paragraph_indent      = bool_at("eyedropper_paragraph_indent",      cfg.paragraph_indent);
+    cfg.paragraph_space       = bool_at("eyedropper_paragraph_space",       cfg.paragraph_space);
+    cfg.paragraph_hyphenate   = bool_at("eyedropper_paragraph_hyphenate",   cfg.paragraph_hyphenate);
     cfg
 }
 
