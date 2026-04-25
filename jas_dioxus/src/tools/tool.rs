@@ -215,6 +215,20 @@ pub trait CanvasTool {
     /// placed.
     fn edit_session_mut(&mut self)
         -> Option<&mut crate::tools::text_edit::TextEditSession> { None }
+    /// Drain pending panel-state writes the tool queued during the
+    /// most recent event dispatch. Returns owned (panel_id, key,
+    /// value) tuples; the canvas event-routing code in
+    /// workspace/app.rs applies them to AppState via the matching
+    /// apply_*_panel_field function. Default impl returns empty
+    /// (native tools that don't run a state store have nothing to
+    /// queue). YAML-driven tools override to drain their store's
+    /// pending_panel_state_writes buffer. See ARTBOARD_TOOL.md
+    /// §Selection coupling.
+    fn drain_pending_panel_writes(
+        &mut self,
+    ) -> Vec<(String, String, serde_json::Value)> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

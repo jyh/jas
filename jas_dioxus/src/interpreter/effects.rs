@@ -3442,6 +3442,7 @@ fn artboard_probe_hit(
     //    top-most-first hit.
     for ab in doc.artboards.iter().rev() {
         if x >= ab.x && x <= ab.x + ab.width && y >= ab.y && y <= ab.y + ab.height {
+            let hit_id = ab.id.clone();
             let mode = if alt_held {
                 "duplicating_pending"
             } else {
@@ -3451,21 +3452,49 @@ fn artboard_probe_hit(
             store.set_tool(
                 "artboard",
                 "hit_artboard_id",
-                serde_json::Value::String(ab.id.clone()),
+                serde_json::Value::String(hit_id.clone()),
             );
-            // Panel-selection write is Phase 1.3 — see function doc
-            // comment.
+            // Panel-selection write per the click rules from
+            // ARTBOARDS.md §Selection semantics. Plain click =
+            // replace; Shift / Cmd are P1.3X follow-up (range and
+            // toggle require knowing the panel-selection anchor and
+            // the artboards list to compute the range, which lives
+            // outside this hit-test). Today: plain replace, and
+            // Cmd / Shift behave as plain.
+            store.push_panel_state_write(
+                "artboards",
+                "artboards_panel_selection",
+                serde_json::json!([hit_id.clone()]),
+            );
+            store.push_panel_state_write(
+                "artboards",
+                "panel_selection_anchor",
+                serde_json::Value::String(hit_id),
+            );
             return;
         }
     }
 
     // 3. Empty canvas → drag-to-create on threshold (mode = creating);
     //    sub-threshold mouseup is a click-on-empty which clears panel-
-    //    selection. Phase 1.3 handles the panel-selection clear.
+    //    selection. Per ARTBOARD_TOOL.md §Empty-canvas single-click
+    //    the panel-selection clears unconditionally on any
+    //    empty-canvas mousedown — sub-threshold mouseup confirms the
+    //    click; threshold-crossing promotes to drag-to-create.
     store.set_tool(
         "artboard",
         "mode",
         serde_json::Value::String("creating".into()),
+    );
+    store.push_panel_state_write(
+        "artboards",
+        "artboards_panel_selection",
+        serde_json::json!([]),
+    );
+    store.push_panel_state_write(
+        "artboards",
+        "panel_selection_anchor",
+        serde_json::Value::Null,
     );
 }
 
@@ -7222,6 +7251,74 @@ mod tests {
         assert_eq!(ny, -5.0);
         assert_eq!(nw, 200.0);
         assert_eq!(nh, 100.0);
+    }
+
+    #[test]
+    fn test_doc_artboard_probe_hit_writes_panel_selection_on_interior_hit() {
+        // Click on an artboard interior queues a panel-state write
+        // that replaces panel-selection with the clicked artboard's
+        // id and writes the anchor. The canvas event-routing code in
+        // workspace/app.rs drains and applies these via
+        // apply_artboards_panel_field.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("aaa00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        let mut model = Model::new(doc, None);
+        // Click at (50, 50) — inside the artboard.
+        let effects = vec![serde_json::json!({
+            "doc.artboard.probe_hit": {
+                "x": "50", "y": "50",
+                "shift": "false", "cmd": "false", "alt": "false",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Tool state set.
+        let tool_mode = store.eval_context()
+            .get("tool").unwrap()
+            .get("artboard").unwrap()
+            .get("mode").unwrap()
+            .as_str().unwrap().to_string();
+        assert_eq!(tool_mode, "moving_pending");
+        // Panel-state writes queued.
+        let pending = store.drain_panel_state_writes();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].0, "artboards");
+        assert_eq!(pending[0].1, "artboards_panel_selection");
+        assert_eq!(pending[0].2, serde_json::json!(["aaa00001"]));
+        assert_eq!(pending[1].0, "artboards");
+        assert_eq!(pending[1].1, "panel_selection_anchor");
+        assert_eq!(pending[1].2, serde_json::json!("aaa00001"));
+    }
+
+    #[test]
+    fn test_doc_artboard_probe_hit_clears_panel_selection_on_empty_canvas() {
+        // Click on empty canvas queues a clear of panel-selection
+        // and the anchor.
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let doc = Document::default();
+        let mut model = Model::new(doc, None);
+        // Click at (-1000, -1000) — far from any artboard.
+        let effects = vec![serde_json::json!({
+            "doc.artboard.probe_hit": {
+                "x": "-1000", "y": "-1000",
+                "shift": "false", "cmd": "false", "alt": "false",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let pending = store.drain_panel_state_writes();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].1, "artboards_panel_selection");
+        assert_eq!(pending[0].2, serde_json::json!([]));
+        assert_eq!(pending[1].1, "panel_selection_anchor");
+        assert_eq!(pending[1].2, serde_json::Value::Null);
     }
 
     #[test]

@@ -2275,7 +2275,7 @@ fn resolve_element_arg(
 // block: artboards_panel_selection, panel_selection_anchor,
 // renaming_artboard, reference_point, rearrange_dirty.
 
-fn apply_artboards_panel_field(
+pub(crate) fn apply_artboards_panel_field(
     st: &mut crate::workspace::app_state::AppState,
     key: &str,
     value: &serde_json::Value,
