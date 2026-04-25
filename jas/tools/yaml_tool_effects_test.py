@@ -407,3 +407,155 @@ class TestMagicWandApply:
         }])
         paths = {es.path for es in model.document.selection}
         assert paths == {(0, 0)}
+
+
+# ── doc.artboard.* effects (ARTBOARD_TOOL.md) ───────────────
+
+
+def _artboard_model(artboards):
+    from document.artboard import ArtboardOptions
+    layer = Layer(name="L", children=())
+    doc = Document(layers=(layer,), artboards=tuple(artboards),
+                   artboard_options=ArtboardOptions())
+    return Model(document=doc)
+
+
+class TestDocArtboardCreateCommit:
+    def test_appends_with_rounded_bounds(self):
+        from document.artboard import Artboard
+        seed = Artboard(id="seed00001", name="Artboard 1")
+        model = _artboard_model([seed])
+        ctrl = _ctrl(model)
+        store = StateStore()
+        _run(store, ctrl, [{
+            "doc.artboard.create_commit": {
+                "x1": "10", "y1": "20", "x2": "110", "y2": "120"
+            }
+        }])
+        assert len(model.document.artboards) == 2
+        new_ab = model.document.artboards[1]
+        assert new_ab.x == 10.0
+        assert new_ab.y == 20.0
+        assert new_ab.width == 100.0
+        assert new_ab.height == 100.0
+        assert new_ab.name == "Artboard 2"
+
+    def test_clamps_at_min(self):
+        from document.artboard import Artboard
+        seed = Artboard(id="seed00001", name="Artboard 1")
+        model = _artboard_model([seed])
+        ctrl = _ctrl(model)
+        store = StateStore()
+        _run(store, ctrl, [{
+            "doc.artboard.create_commit": {
+                "x1": "50", "y1": "50", "x2": "50.4", "y2": "50.4"
+            }
+        }])
+        new_ab = model.document.artboards[1]
+        assert new_ab.width == 1.0
+        assert new_ab.height == 1.0
+
+
+class TestDocArtboardProbeHit:
+    def test_interior_sets_tool_state(self):
+        # Probe_hit on an artboard interior sets tool state. The
+        # panel-selection write also happens but verifying it
+        # requires the renderer's active_document scope plumbing —
+        # covered by the manual test suite §Session B.
+        from document.artboard import Artboard
+        ab = Artboard(id="aaa00001", name="Artboard 1",
+                      x=0.0, y=0.0, width=100.0, height=100.0)
+        model = _artboard_model([ab])
+        ctrl = _ctrl(model)
+        store = StateStore()
+        _run(store, ctrl, [{
+            "doc.artboard.probe_hit": {
+                "x": "50", "y": "50",
+                "shift": "false", "cmd": "false", "alt": "false",
+            }
+        }])
+        ctx = store.eval_context()
+        ab_state = ctx.get("tool", {}).get("artboard", {})
+        assert ab_state.get("mode") == "moving_pending"
+        assert ab_state.get("hit_artboard_id") == "aaa00001"
+
+    def test_empty_canvas_sets_creating(self):
+        from document.artboard import Artboard
+        ab = Artboard(id="aaa00001", name="Artboard 1",
+                      x=0.0, y=0.0, width=100.0, height=100.0)
+        model = _artboard_model([ab])
+        ctrl = _ctrl(model)
+        store = StateStore()
+        _run(store, ctrl, [{
+            "doc.artboard.probe_hit": {
+                "x": "999", "y": "999",
+                "shift": "false", "cmd": "false", "alt": "false",
+            }
+        }])
+        ab_state = store.eval_context().get("tool", {}).get("artboard", {})
+        assert ab_state.get("mode") == "creating"
+
+
+class TestDocArtboardProbeHover:
+    def test_classifies_position(self):
+        from document.artboard import Artboard
+        ab = Artboard(id="aaa00001", name="Artboard 1",
+                      x=0.0, y=0.0, width=100.0, height=100.0)
+        model = _artboard_model([ab])
+        ctrl = _ctrl(model)
+        store = StateStore()
+        _run(store, ctrl, [{
+            "doc.artboard.probe_hover": {"x": "50", "y": "50"}
+        }])
+        ab_state = store.eval_context().get("tool", {}).get("artboard", {})
+        assert ab_state.get("hover_kind") == "interior"
+        _run(store, ctrl, [{
+            "doc.artboard.probe_hover": {"x": "999", "y": "999"}
+        }])
+        ab_state = store.eval_context().get("tool", {}).get("artboard", {})
+        assert ab_state.get("hover_kind") == "empty"
+
+
+class TestDocArtboardMoveApply:
+    def test_translates_via_hit_fallback(self):
+        # No panel-selection set; move_apply falls back to
+        # tool.artboard.hit_artboard_id (set by probe_hit).
+        from document.artboard import Artboard
+        ab = Artboard(id="aaa00001", name="Artboard 1",
+                      x=100.0, y=100.0, width=200.0, height=200.0)
+        model = _artboard_model([ab])
+        model.capture_preview_snapshot()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        store.set_tool("artboard", "hit_artboard_id", "aaa00001")
+        _run(store, ctrl, [{
+            "doc.artboard.move_apply": {
+                "press_x": "100", "press_y": "100",
+                "cursor_x": "150", "cursor_y": "70",
+                "shift_held": "false",
+            }
+        }])
+        result = model.document.artboards[0]
+        assert result.x == 150.0
+        assert result.y == 70.0
+
+    def test_shift_constrains_to_dominant_axis(self):
+        from document.artboard import Artboard
+        ab = Artboard(id="aaa00001", name="Artboard 1",
+                      x=100.0, y=100.0, width=200.0, height=200.0)
+        model = _artboard_model([ab])
+        model.capture_preview_snapshot()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        store.set_tool("artboard", "hit_artboard_id", "aaa00001")
+        # dx=80 > dy=30 → Y locked.
+        _run(store, ctrl, [{
+            "doc.artboard.move_apply": {
+                "press_x": "100", "press_y": "100",
+                "cursor_x": "180", "cursor_y": "130",
+                "shift_held": "true",
+            }
+        }])
+        result = model.document.artboards[0]
+        assert result.x == 180.0
+        assert result.y == 100.0  # locked
