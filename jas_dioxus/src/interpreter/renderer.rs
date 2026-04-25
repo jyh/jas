@@ -1196,6 +1196,7 @@ fn build_appstate_ctx(
         ToolKind::Shear => "shear",
         ToolKind::Hand => "hand",
         ToolKind::Zoom => "zoom",
+        ToolKind::Artboard => "artboard",
     };
     let fill_color = match st.app_default_fill {
         None => serde_json::Value::Null,
@@ -1270,6 +1271,9 @@ fn build_active_document_view(
             "current_artboard_id": serde_json::Value::Null,
             "current_artboard": {},
             "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+            "artboards_panel_anchor": st.artboards_panel_anchor.clone()
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
             "zoom_level": 1.0,
             "view_offset_x": 0.0,
             "view_offset_y": 0.0,
@@ -1405,6 +1409,9 @@ fn build_active_document_view(
         "current_artboard_id": current_id,
         "current_artboard": current_artboard_json,
         "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+        "artboards_panel_anchor": st.artboards_panel_anchor.clone()
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
         "zoom_level": tab.model.zoom_level,
         "view_offset_x": tab.model.view_offset_x,
         "view_offset_y": tab.model.view_offset_y,
@@ -2274,7 +2281,7 @@ fn resolve_element_arg(
 // block: artboards_panel_selection, panel_selection_anchor,
 // renaming_artboard, reference_point, rearrange_dirty.
 
-fn apply_artboards_panel_field(
+pub(crate) fn apply_artboards_panel_field(
     st: &mut crate::workspace::app_state::AppState,
     key: &str,
     value: &serde_json::Value,
@@ -2571,6 +2578,7 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
                 ToolKind::Shear => "shear",
                 ToolKind::Hand => "hand",
                 ToolKind::Zoom => "zoom",
+                ToolKind::Artboard => "artboard",
             };
             serde_json::Value::String(name.to_string())
         }
@@ -2856,6 +2864,7 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
         "shear" => Some(ToolKind::Shear),
         "hand" => Some(ToolKind::Hand),
         "zoom" => Some(ToolKind::Zoom),
+        "artboard" => Some(ToolKind::Artboard),
         _ => None,
     }
 }

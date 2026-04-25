@@ -345,6 +345,92 @@ let build_rounded_rect_path (cr : Cairo.context)
 (* Marquee zoom rectangle: thin dashed stroke between (x1, y1) and
    (x2, y2). Used by the Zoom tool drag overlay when scrubby_zoom
    is off. Per ZOOM_TOOL.md Drag - marquee zoom. *)
+(* Draw the 8 resize handles on the single panel-selected artboard
+   per ARTBOARD_TOOL.md §Drag-to-resize. Mirrors Rust /
+   Swift draw_artboard_resize_handles. Handles are 8 px screen-space
+   squares; coordinates transform from document to viewport via
+   model#zoom_level + view_offset_*. *)
+let draw_artboard_resize_handles (cr : Cairo.context)
+    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t)
+    (model : Model.model) : unit =
+  let id =
+    match render_get render "artboard_id" with
+    | Some (`String s) ->
+      (match Expr_eval.evaluate s eval_ctx with
+       | Expr_eval.Str v -> v
+       | _ -> "")
+    | _ -> ""
+  in
+  if id = "" then () else
+  let doc = model#document in
+  match List.find_opt (fun (a : Artboard.artboard) -> a.id = id)
+          doc.artboards with
+  | None -> ()
+  | Some ab ->
+    let zoom = model#zoom_level in
+    let offx = model#view_offset_x in
+    let offy = model#view_offset_y in
+    let cx = ab.x +. ab.width /. 2.0 in
+    let cy = ab.y +. ab.height /. 2.0 in
+    let positions = [
+      (ab.x, ab.y);
+      (cx, ab.y);
+      (ab.x +. ab.width, ab.y);
+      (ab.x +. ab.width, cy);
+      (ab.x +. ab.width, ab.y +. ab.height);
+      (cx, ab.y +. ab.height);
+      (ab.x, ab.y +. ab.height);
+      (ab.x, cy);
+    ] in
+    let handle_size = 8.0 in
+    let half = handle_size /. 2.0 in
+    Cairo.save cr;
+    Cairo.set_line_width cr 1.5;
+    List.iter (fun (dx, dy) ->
+      let vx = dx *. zoom +. offx in
+      let vy = dy *. zoom +. offy in
+      Cairo.set_source_rgb cr 1.0 1.0 1.0;
+      Cairo.rectangle cr (vx -. half) (vy -. half)
+        ~w:handle_size ~h:handle_size;
+      Cairo.fill_preserve cr;
+      Cairo.set_source_rgb cr 0.0 (120.0 /. 255.0) 1.0;
+      Cairo.stroke cr
+    ) positions;
+    Cairo.restore cr
+
+(* Draw the outline-preview rectangle for in-flight move / resize /
+   duplicate gestures when update_while_dragging is false. *)
+let draw_artboard_outline_preview (cr : Cairo.context)
+    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t)
+    (model : Model.model) : unit =
+  let id =
+    match render_get render "artboard_id" with
+    | Some (`String s) ->
+      (match Expr_eval.evaluate s eval_ctx with
+       | Expr_eval.Str v -> v
+       | _ -> "")
+    | _ -> ""
+  in
+  if id = "" then () else
+  let doc = model#document in
+  match List.find_opt (fun (a : Artboard.artboard) -> a.id = id)
+          doc.artboards with
+  | None -> ()
+  | Some ab ->
+    let zoom = model#zoom_level in
+    let offx = model#view_offset_x in
+    let offy = model#view_offset_y in
+    let vx = ab.x *. zoom +. offx in
+    let vy = ab.y *. zoom +. offy in
+    let vw = ab.width *. zoom in
+    let vh = ab.height *. zoom in
+    Cairo.save cr;
+    Cairo.set_source_rgb cr 0.0 (120.0 /. 255.0) 1.0;
+    Cairo.set_line_width cr 1.0;
+    Cairo.rectangle cr vx vy ~w:vw ~h:vh;
+    Cairo.stroke cr;
+    Cairo.restore cr
+
 let draw_marquee_rect_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
     (eval_ctx : Yojson.Safe.t) : unit =
   let x1 = eval_number_field eval_ctx (render_get render "x1") in
@@ -1088,6 +1174,12 @@ class yaml_tool (spec : tool_spec) = object (_self)
             ctx.controller#document
         | "marquee_rect" ->
           draw_marquee_rect_overlay cr overlay.render eval_ctx
+        | "artboard_resize_handles" ->
+          draw_artboard_resize_handles cr overlay.render eval_ctx
+            ctx.controller#model
+        | "artboard_outline_preview" ->
+          draw_artboard_outline_preview cr overlay.render eval_ctx
+            ctx.controller#model
         | _ -> ()
       end
     ) spec.overlay;

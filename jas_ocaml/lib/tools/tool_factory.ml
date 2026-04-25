@@ -72,3 +72,5 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   (* Navigation-tool family — see HAND_TOOL.md / ZOOM_TOOL.md *)
   | Toolbar.Hand -> (load_yaml_tool_or_fail "hand" :> Canvas_tool.canvas_tool)
   | Toolbar.Zoom -> (load_yaml_tool_or_fail "zoom" :> Canvas_tool.canvas_tool)
+  (* Artboard-tool family — see ARTBOARD_TOOL.md *)
+  | Toolbar.Artboard -> (load_yaml_tool_or_fail "artboard" :> Canvas_tool.canvas_tool)

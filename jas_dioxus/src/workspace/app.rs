@@ -29,6 +29,23 @@ use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
 use crate::panels::panel_menu_state::{PanelMenuState, MenuBarState};
 use crate::panels::panel_menu_view::PanelMenuOverlay;
 
+/// Drain a tool's pending panel-state writes and apply each to
+/// AppState. Routes by panel id to the matching apply_*_panel_field
+/// function. Currently the only panel that canvas tools write to is
+/// the artboards panel (per ARTBOARD_TOOL.md §Selection coupling);
+/// add new panel routes here when other tools start queuing writes.
+fn apply_pending_panel_writes(
+    st: &mut AppState,
+    pending: Vec<(String, String, serde_json::Value)>,
+) {
+    use crate::interpreter::renderer::apply_artboards_panel_field;
+    for (panel_id, key, value) in pending {
+        if panel_id == "artboards" {
+            apply_artboards_panel_field(st, &key, &value);
+        }
+    }
+}
+
 /// Toolbar content rendered from YAML. Takes revision as prop so it only
 /// re-renders on state changes, not during layout drag/resize.
 #[component]
@@ -269,10 +286,14 @@ pub fn App() -> Element {
                     return;
                 }
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut()
+                let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_press(&mut tab.model, cx, cy, shift, alt);
-                    }
+                        tool.drain_pending_panel_writes()
+                    } else {
+                        Vec::new()
+                    };
+                apply_pending_panel_writes(st, pending);
             }));
         }
     };
@@ -289,10 +310,14 @@ pub fn App() -> Element {
             let dragging = evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary);
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut()
+                let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_move(&mut tab.model, cx, cy, shift, alt, dragging);
-                    }
+                        tool.drain_pending_panel_writes()
+                    } else {
+                        Vec::new()
+                    };
+                apply_pending_panel_writes(st, pending);
             }));
         }
     };
@@ -308,10 +333,14 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut()
+                let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_release(&mut tab.model, cx, cy, shift, alt);
-                    }
+                        tool.drain_pending_panel_writes()
+                    } else {
+                        Vec::new()
+                    };
+                apply_pending_panel_writes(st, pending);
             }));
         }
     };
@@ -324,10 +353,14 @@ pub fn App() -> Element {
             let cy = coords.y;
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut()
+                let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_double_click(&mut tab.model, cx, cy);
-                    }
+                        tool.drain_pending_panel_writes()
+                    } else {
+                        Vec::new()
+                    };
+                apply_pending_panel_writes(st, pending);
             }));
         }
     };

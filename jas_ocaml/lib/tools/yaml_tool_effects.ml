@@ -2860,7 +2860,809 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* Artboard tool helpers per ARTBOARD_TOOL.md.
+     Yojson member raises on null, so we guard the active_document
+     lookup — which is null in the unit-test context where the
+     renderer doesn't build the scope. *)
+  let artboard_panel_selection_ids store =
+    let ctx = State_store.eval_context store in
+    match Yojson.Safe.Util.member "active_document" ctx with
+    | `Null -> []
+    | active ->
+      match Yojson.Safe.Util.member "artboards_panel_selection_ids" active with
+      | `List items ->
+        List.filter_map (function `String s -> Some s | _ -> None) items
+      | _ -> []
+  in
+
+  let artboard_panel_anchor store =
+    let ctx = State_store.eval_context store in
+    match Yojson.Safe.Util.member "active_document" ctx with
+    | `Null -> None
+    | active ->
+      match Yojson.Safe.Util.member "artboards_panel_anchor" active with
+      | `String s -> Some s
+      | _ -> None
+  in
+
+  (* Hit-test handles on the panel-selected artboard; returns
+     Some (id, pos) if hit, None otherwise. *)
+  let artboard_handle_hit (doc : Document.document) sel_ids x y =
+    if List.length sel_ids <> 1 then None
+    else
+      let id = List.hd sel_ids in
+      match List.find_opt (fun (a : Artboard.artboard) -> a.id = id)
+              doc.artboards with
+      | None -> None
+      | Some ab ->
+        let r = 8.0 in
+        let cx = ab.x +. ab.width /. 2.0 in
+        let cy = ab.y +. ab.height /. 2.0 in
+        let candidates = [
+          ("nw", ab.x, ab.y);
+          ("n",  cx, ab.y);
+          ("ne", ab.x +. ab.width, ab.y);
+          ("e",  ab.x +. ab.width, cy);
+          ("se", ab.x +. ab.width, ab.y +. ab.height);
+          ("s",  cx, ab.y +. ab.height);
+          ("sw", ab.x, ab.y +. ab.height);
+          ("w",  ab.x, cy);
+        ] in
+        List.find_map (fun (pos, hx, hy) ->
+          if Float.abs (x -. hx) <= r && Float.abs (y -. hy) <= r
+          then Some (ab.id, pos) else None
+        ) candidates
+  in
+
+  (* Hit-test interior; iterates in reverse for top-most-first. *)
+  let artboard_interior_hit (doc : Document.document) x y =
+    let rec walk = function
+      | [] -> None
+      | (ab : Artboard.artboard) :: rest ->
+        match walk rest with
+        | Some _ as found -> found
+        | None ->
+          if x >= ab.x && x <= ab.x +. ab.width
+             && y >= ab.y && y <= ab.y +. ab.height
+          then Some ab.id else None
+    in
+    walk doc.artboards
+  in
+
+  (* doc.artboard.probe_hit per ARTBOARD_TOOL.md §Mousedown
+     disambiguation order. Sets tool state and writes panel-
+     selection per the click rules. *)
+  let doc_artboard_probe_hit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let shift = eval_bool (lookup "shift") store ctx in
+       let cmd = eval_bool (lookup "cmd") store ctx in
+       let alt = eval_bool (lookup "alt") store ctx in
+       State_store.set_tool store "artboard" "hit_artboard_id" `Null;
+       State_store.set_tool store "artboard" "hit_handle_pos" `Null;
+       let doc = ctrl#document in
+       let sel_ids = artboard_panel_selection_ids store in
+       (match artboard_handle_hit doc sel_ids x y with
+        | Some (id, pos) ->
+          State_store.set_tool store "artboard" "mode" (`String "resizing");
+          State_store.set_tool store "artboard" "hit_artboard_id"
+            (`String id);
+          State_store.set_tool store "artboard" "hit_handle_pos"
+            (`String pos)
+        | None ->
+          match artboard_interior_hit doc x y with
+          | Some hit_id ->
+            let mode = if alt then "duplicating_pending"
+                       else "moving_pending" in
+            State_store.set_tool store "artboard" "mode" (`String mode);
+            State_store.set_tool store "artboard" "hit_artboard_id"
+              (`String hit_id);
+            (* Click-rule panel-selection writes. *)
+            if shift then begin
+              let ids = List.map (fun (a : Artboard.artboard) -> a.id)
+                          doc.artboards in
+              match artboard_panel_anchor store with
+              | Some a ->
+                let idx_of v = match List.find_index ((=) v) ids with
+                  | Some i -> i | None -> -1 in
+                let ai = idx_of a in
+                let ti = idx_of hit_id in
+                if ai >= 0 && ti >= 0 then begin
+                  let lo = min ai ti and hi = max ai ti in
+                  let range = List.filteri (fun i _ ->
+                    i >= lo && i <= hi) ids in
+                  State_store.set_panel store "artboards"
+                    "artboards_panel_selection"
+                    (`List (List.map (fun s -> `String s) range))
+                end else begin
+                  State_store.set_panel store "artboards"
+                    "artboards_panel_selection"
+                    (`List [`String hit_id]);
+                  State_store.set_panel store "artboards"
+                    "panel_selection_anchor" (`String hit_id)
+                end
+              | None ->
+                State_store.set_panel store "artboards"
+                  "artboards_panel_selection"
+                  (`List [`String hit_id]);
+                State_store.set_panel store "artboards"
+                  "panel_selection_anchor" (`String hit_id)
+            end else if cmd then begin
+              let current = artboard_panel_selection_ids store in
+              let new_sel = if List.mem hit_id current
+                then List.filter ((<>) hit_id) current
+                else current @ [hit_id] in
+              State_store.set_panel store "artboards"
+                "artboards_panel_selection"
+                (`List (List.map (fun s -> `String s) new_sel))
+            end else begin
+              State_store.set_panel store "artboards"
+                "artboards_panel_selection"
+                (`List [`String hit_id]);
+              State_store.set_panel store "artboards"
+                "panel_selection_anchor" (`String hit_id)
+            end
+          | None ->
+            (* Empty canvas. *)
+            State_store.set_tool store "artboard" "mode" (`String "creating");
+            State_store.set_panel store "artboards"
+              "artboards_panel_selection" (`List []);
+            State_store.set_panel store "artboards"
+              "panel_selection_anchor" `Null)
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.probe_hover — read-only hover classification for
+     the dynamic cursor. *)
+  let doc_artboard_probe_hover spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let doc = ctrl#document in
+       let sel_ids = artboard_panel_selection_ids store in
+       let kind =
+         match artboard_handle_hit doc sel_ids x y with
+         | Some (_, pos) -> Printf.sprintf "handle:%s" pos
+         | None ->
+           match artboard_interior_hit doc x y with
+           | Some _ -> "interior"
+           | None -> "empty"
+       in
+       State_store.set_tool store "artboard" "hover_kind" (`String kind)
+     | _ -> ());
+    `Null
+  in
+
+  (* Translate an element by (dx, dy). Recurses into Group / Layer
+     children. Mirrors Rust's translate_element / Swift's
+     artboardTranslateElement. For leaf elements, uses
+     move_control_points with all CPs (the is_all flag preserves
+     Rect/Circle/Ellipse identity). *)
+  let rec artboard_translate_element (elem : Element.element) dx dy =
+    if dx = 0.0 && dy = 0.0 then elem
+    else match elem with
+      | Element.Group g ->
+        Element.Group { g with children =
+          Array.map (fun c -> artboard_translate_element c dx dy)
+            g.children }
+      | Element.Layer l ->
+        Element.Layer { l with children =
+          Array.map (fun c -> artboard_translate_element c dx dy)
+            l.children }
+      | _ ->
+        let n = Element.control_point_count elem in
+        Element.move_control_points ~is_all:true elem
+          (List.init n Fun.id) dx dy
+  in
+
+  (* True iff [inner] (an element bbox) is fully contained in
+     [outer] (an artboard bounds). Closed-edge ≤ comparison. *)
+  let artboard_contains_bounds outer inner =
+    let (ox, oy, ow, oh) = outer in
+    let (ix, iy, iw, ih) = inner in
+    ix >= ox && iy >= oy
+      && ix +. iw <= ox +. ow && iy +. ih <= oy +. oh
+  in
+
+  (* Read tool.artboard.duplicated_paths as a list of (li, ci)
+     pairs. Empty when no Alt-drag duplicate is in flight. *)
+  let read_duplicated_paths store =
+    let ctx = State_store.eval_context store in
+    let tool = Yojson.Safe.Util.member "tool" ctx in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    match Yojson.Safe.Util.member "duplicated_paths" ab with
+    | `List items ->
+      List.filter_map (function
+        | `List [ `Int li; `Int ci ] -> Some (li, ci)
+        | `List [ a; b ] ->
+          let f = function
+            | `Int n -> Some n
+            | `Float f -> Some (int_of_float f)
+            | _ -> None
+          in
+          (match f a, f b with
+           | Some li, Some ci -> Some (li, ci)
+           | _ -> None)
+        | _ -> None) items
+    | _ -> []
+  in
+
+  (* Apply (dx, dy) translation: restore preview snapshot, translate
+     contained elements per the containment rule, translate moving
+     artboards, translate explicit-path elements. Mirrors the Rust /
+     Swift artboard_translate_from_preview. *)
+  let artboard_translate_from_preview model store target_ids dx dy =
+    if not model#has_preview_snapshot then ()
+    else begin
+      model#restore_preview_snapshot;
+      let doc = ctrl#document in
+      (* Pre-op artboard bounds. *)
+      let artboard_bounds = List.map (fun (a : Artboard.artboard) ->
+        (a.id, (a.x, a.y, a.width, a.height))
+      ) doc.artboards in
+
+      let translate_layer_children layer =
+        match layer with
+        | Element.Layer l ->
+          let new_children = Array.map (fun child ->
+            let bb = Element.bounds child in
+            let containers = List.filter_map (fun (id, ab) ->
+              if artboard_contains_bounds ab bb then Some id else None
+            ) artboard_bounds in
+            let in_one = List.length containers = 1 in
+            let is_moving = in_one
+              && List.mem (List.hd containers) target_ids in
+            if is_moving
+            then artboard_translate_element child dx dy
+            else child
+          ) l.children in
+          Element.Layer { l with children = new_children }
+        | other -> other
+      in
+
+      let new_layers = if dx = 0.0 && dy = 0.0
+        then doc.layers
+        else Array.map translate_layer_children doc.layers in
+
+      (* Translate moving artboards. *)
+      let new_artboards = List.map (fun (a : Artboard.artboard) ->
+        if List.mem a.id target_ids
+        then { a with x = a.x +. dx; y = a.y +. dy }
+        else a
+      ) doc.artboards in
+
+      (* Explicit-path translation (for duplicate). *)
+      let new_layers =
+        if dx = 0.0 && dy = 0.0 then new_layers
+        else
+          let dup_paths = read_duplicated_paths store in
+          if dup_paths = [] then new_layers
+          else
+            Array.mapi (fun li layer ->
+              let layer_dup_idxs = List.filter_map (fun (l, c) ->
+                if l = li then Some c else None
+              ) dup_paths in
+              if layer_dup_idxs = [] then layer
+              else match layer with
+                | Element.Layer l ->
+                  let new_children = Array.mapi (fun ci child ->
+                    if List.mem ci layer_dup_idxs
+                    then artboard_translate_element child dx dy
+                    else child
+                  ) l.children in
+                  Element.Layer { l with children = new_children }
+                | other -> other
+            ) new_layers
+      in
+
+      ctrl#set_document { doc with
+        layers = new_layers;
+        artboards = new_artboards }
+    end
+  in
+
+  (* doc.artboard.move_apply — live drag-to-move. Per-artboard
+     fallback to hit_artboard_id when panel-selection empty. *)
+  let doc_artboard_move_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let press_x = eval_number (lookup "press_x") store ctx in
+       let press_y = eval_number (lookup "press_y") store ctx in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let shift = eval_bool (lookup "shift_held") store ctx in
+       let dx0 = cursor_x -. press_x in
+       let dy0 = cursor_y -. press_y in
+       let (dx, dy) = if not shift then (dx0, dy0)
+         else if Float.abs dx0 > Float.abs dy0 then (dx0, 0.0)
+         else (0.0, dy0) in
+       let target_ids =
+         let panel_ids = artboard_panel_selection_ids store in
+         if panel_ids <> [] then panel_ids
+         else
+           let tool = Yojson.Safe.Util.member "tool"
+                        (State_store.eval_context store) in
+           let ab = Yojson.Safe.Util.member "artboard" tool in
+           match Yojson.Safe.Util.member "hit_artboard_id" ab with
+           | `String s -> [s]
+           | _ -> []
+       in
+       if target_ids <> [] then
+         artboard_translate_from_preview ctrl#model store target_ids dx dy
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.move_commit — re-applies translate with integer-pt
+     rounded displacement vector. *)
+  let doc_artboard_move_commit _ _ store =
+    let tool = Yojson.Safe.Util.member "tool"
+                 (State_store.eval_context store) in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    let read_num k =
+      match Yojson.Safe.Util.member k ab with
+      | `Float f -> f
+      | `Int i -> float_of_int i
+      | _ -> 0.0
+    in
+    let read_bool k =
+      match Yojson.Safe.Util.member k ab with
+      | `Bool b -> b | _ -> false
+    in
+    let press_x = read_num "press_x" in
+    let press_y = read_num "press_y" in
+    let cursor_x = read_num "cursor_x" in
+    let cursor_y = read_num "cursor_y" in
+    let shift = read_bool "shift_held" in
+    let dx0 = cursor_x -. press_x in
+    let dy0 = cursor_y -. press_y in
+    let (dx, dy) = if not shift then (dx0, dy0)
+      else if Float.abs dx0 > Float.abs dy0 then (dx0, 0.0)
+      else (0.0, dy0) in
+    let dx = Float.round dx in
+    let dy = Float.round dy in
+    let target_ids =
+      let panel_ids = artboard_panel_selection_ids store in
+      if panel_ids <> [] then panel_ids
+      else
+        match Yojson.Safe.Util.member "hit_artboard_id" ab with
+        | `String s -> [s]
+        | _ -> []
+    in
+    if target_ids <> [] then
+      artboard_translate_from_preview ctrl#model store target_ids dx dy;
+    `Null
+  in
+
+  (* Compute new (x, y, w, h) for a resize gesture. Pure function;
+     mirrors Rust artboard_resize_compute / Swift
+     artboardResizeCompute. Modifier matrix per ARTBOARD_TOOL.md
+     §Drag-to-resize. *)
+  let artboard_resize_compute handle_pos orig_x orig_y orig_w orig_h
+        cursor_x cursor_y shift_held alt_held =
+    let orig_cx = orig_x +. orig_w /. 2.0 in
+    let orig_cy = orig_y +. orig_h /. 2.0 in
+    let orig_ratio = if orig_h > 0.0 then orig_w /. orig_h else 1.0 in
+    let is_corner = List.mem handle_pos ["nw";"ne";"se";"sw"] in
+    let is_edge = List.mem handle_pos ["n";"e";"s";"w"] in
+
+    let dominant_w_from_corner dx dy =
+      if dy <= 0.0 then
+        (Float.max dx 1.0, Float.max (dx /. orig_ratio) 1.0)
+      else if dx /. orig_w > dy /. orig_h then
+        let w = Float.max dx 1.0 in
+        (w, Float.max (w /. orig_ratio) 1.0)
+      else
+        let h = Float.max dy 1.0 in
+        (Float.max (h *. orig_ratio) 1.0, h)
+    in
+
+    if alt_held && is_corner then begin
+      let hw = ref (Float.abs (cursor_x -. orig_cx)) in
+      let hh = ref (Float.abs (cursor_y -. orig_cy)) in
+      if shift_held then begin
+        let (rw, rh) = dominant_w_from_corner (2.0 *. !hw) (2.0 *. !hh) in
+        hw := rw /. 2.0; hh := rh /. 2.0
+      end;
+      let nw = Float.max (2.0 *. !hw) 1.0 in
+      let nh = Float.max (2.0 *. !hh) 1.0 in
+      (orig_cx -. nw /. 2.0, orig_cy -. nh /. 2.0, nw, nh)
+    end
+    else if alt_held && is_edge then begin
+      let nx = ref orig_x and ny = ref orig_y in
+      let nw = ref orig_w and nh = ref orig_h in
+      (match handle_pos with
+       | "e" | "w" ->
+         let half_w = Float.max (Float.abs (cursor_x -. orig_cx)) 0.5 in
+         nw := 2.0 *. half_w;
+         nx := orig_cx -. half_w;
+         if shift_held then begin
+           nh := Float.max (!nw /. orig_ratio) 1.0;
+           ny := orig_cy -. !nh /. 2.0
+         end
+       | "n" | "s" ->
+         let half_h = Float.max (Float.abs (cursor_y -. orig_cy)) 0.5 in
+         nh := 2.0 *. half_h;
+         ny := orig_cy -. half_h;
+         if shift_held then begin
+           nw := Float.max (!nh *. orig_ratio) 1.0;
+           nx := orig_cx -. !nw /. 2.0
+         end
+       | _ -> ());
+      (!nx, !ny, Float.max !nw 1.0, Float.max !nh 1.0)
+    end
+    else if shift_held && is_corner then begin
+      let right = orig_x +. orig_w in
+      let bottom = orig_y +. orig_h in
+      match handle_pos with
+      | "se" ->
+        let dx = Float.max (cursor_x -. orig_x) 1.0 in
+        let dy = Float.max (cursor_y -. orig_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (orig_x, orig_y, nw, nh)
+      | "sw" ->
+        let dx = Float.max (right -. cursor_x) 1.0 in
+        let dy = Float.max (cursor_y -. orig_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (right -. nw, orig_y, nw, nh)
+      | "ne" ->
+        let dx = Float.max (cursor_x -. orig_x) 1.0 in
+        let dy = Float.max (bottom -. cursor_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (orig_x, bottom -. nh, nw, nh)
+      | "nw" ->
+        let dx = Float.max (right -. cursor_x) 1.0 in
+        let dy = Float.max (bottom -. cursor_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (right -. nw, bottom -. nh, nw, nh)
+      | _ -> (orig_x, orig_y, orig_w, orig_h)
+    end
+    else if shift_held && is_edge then begin
+      let nx = ref orig_x and ny = ref orig_y in
+      let nw = ref orig_w and nh = ref orig_h in
+      (match handle_pos with
+       | "e" ->
+         nw := Float.max (cursor_x -. orig_x) 1.0;
+         nh := Float.max (!nw /. orig_ratio) 1.0;
+         ny := orig_cy -. !nh /. 2.0
+       | "w" ->
+         let right = orig_x +. orig_w in
+         nw := Float.max (right -. cursor_x) 1.0;
+         nx := right -. !nw;
+         nh := Float.max (!nw /. orig_ratio) 1.0;
+         ny := orig_cy -. !nh /. 2.0
+       | "s" ->
+         nh := Float.max (cursor_y -. orig_y) 1.0;
+         nw := Float.max (!nh *. orig_ratio) 1.0;
+         nx := orig_cx -. !nw /. 2.0
+       | "n" ->
+         let bottom = orig_y +. orig_h in
+         nh := Float.max (bottom -. cursor_y) 1.0;
+         ny := bottom -. !nh;
+         nw := Float.max (!nh *. orig_ratio) 1.0;
+         nx := orig_cx -. !nw /. 2.0
+       | _ -> ());
+      (!nx, !ny, !nw, !nh)
+    end
+    else begin
+      (* Unmodified path. *)
+      let nx = ref orig_x and ny = ref orig_y in
+      let nw = ref orig_w and nh = ref orig_h in
+      let right = orig_x +. orig_w in
+      let bottom = orig_y +. orig_h in
+      (match handle_pos with
+       | "nw" ->
+         nx := Float.min cursor_x (right -. 1.0);
+         ny := Float.min cursor_y (bottom -. 1.0);
+         nw := right -. !nx; nh := bottom -. !ny
+       | "n" ->
+         ny := Float.min cursor_y (bottom -. 1.0);
+         nh := bottom -. !ny
+       | "ne" ->
+         ny := Float.min cursor_y (bottom -. 1.0);
+         nw := Float.max (cursor_x -. orig_x) 1.0;
+         nh := bottom -. !ny
+       | "e" -> nw := Float.max (cursor_x -. orig_x) 1.0
+       | "se" ->
+         nw := Float.max (cursor_x -. orig_x) 1.0;
+         nh := Float.max (cursor_y -. orig_y) 1.0
+       | "s" -> nh := Float.max (cursor_y -. orig_y) 1.0
+       | "sw" ->
+         nx := Float.min cursor_x (right -. 1.0);
+         nw := right -. !nx;
+         nh := Float.max (cursor_y -. orig_y) 1.0
+       | "w" ->
+         nx := Float.min cursor_x (right -. 1.0);
+         nw := right -. !nx
+       | _ -> ());
+      (!nx, !ny, !nw, !nh)
+    end
+  in
+
+  (* doc.artboard.resize_apply — live drag-to-resize. Targets
+     tool.artboard.hit_artboard_id (set by probe_hit). *)
+  let doc_artboard_resize_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let handle_pos = match lookup "handle_pos" with
+         | Some (`String raw) when List.mem raw
+             ["nw";"n";"ne";"e";"se";"s";"sw";"w"] -> raw
+         | Some (`String expr) ->
+           let eval_ctx = State_store.eval_context ~extra:ctx store in
+           (match Expr_eval.evaluate expr eval_ctx with
+            | Expr_eval.Str s -> s
+            | _ -> "")
+         | _ -> ""
+       in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let shift = eval_bool (lookup "shift_held") store ctx in
+       let alt = eval_bool (lookup "alt_held") store ctx in
+       let model = ctrl#model in
+       if model#has_preview_snapshot then begin
+         let tool = Yojson.Safe.Util.member "tool"
+                      (State_store.eval_context store) in
+         let ab = Yojson.Safe.Util.member "artboard" tool in
+         match Yojson.Safe.Util.member "hit_artboard_id" ab with
+         | `String target_id ->
+           model#restore_preview_snapshot;
+           let doc = ctrl#document in
+           let new_artboards = List.map (fun (a : Artboard.artboard) ->
+             if a.id <> target_id then a
+             else
+               let (nx, ny, nw, nh) = artboard_resize_compute
+                 handle_pos a.x a.y a.width a.height
+                 cursor_x cursor_y shift alt in
+               { a with x = nx; y = ny; width = nw; height = nh }
+           ) doc.artboards in
+           ctrl#set_document { doc with artboards = new_artboards }
+         | _ -> ()
+       end
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.resize_commit — integer-pt rounded final bounds. *)
+  let doc_artboard_resize_commit _ _ store =
+    let model = ctrl#model in
+    let tool = Yojson.Safe.Util.member "tool"
+                 (State_store.eval_context store) in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    let read_num k =
+      match Yojson.Safe.Util.member k ab with
+      | `Float f -> f
+      | `Int i -> float_of_int i
+      | _ -> 0.0
+    in
+    let read_bool k =
+      match Yojson.Safe.Util.member k ab with
+      | `Bool b -> b | _ -> false
+    in
+    let cursor_x = read_num "cursor_x" in
+    let cursor_y = read_num "cursor_y" in
+    let shift = read_bool "shift_held" in
+    let alt = read_bool "alt_held" in
+    let handle_pos = match Yojson.Safe.Util.member "hit_handle_pos" ab with
+      | `String s -> s | _ -> "" in
+    let target_id = match Yojson.Safe.Util.member "hit_artboard_id" ab with
+      | `String s -> Some s | _ -> None in
+    (match target_id with
+     | None -> ()
+     | Some _ when handle_pos = "" -> ()
+     | Some _ when not model#has_preview_snapshot -> ()
+     | Some target_id ->
+       model#restore_preview_snapshot;
+       let doc = ctrl#document in
+       let new_artboards = List.map (fun (a : Artboard.artboard) ->
+         if a.id <> target_id then a
+         else
+           let (nx, ny, nw, nh) = artboard_resize_compute
+             handle_pos a.x a.y a.width a.height
+             cursor_x cursor_y shift alt in
+           { a with
+             x = Float.round nx; y = Float.round ny;
+             width = Float.max (Float.round nw) 1.0;
+             height = Float.max (Float.round nh) 1.0 }
+       ) doc.artboards in
+       ctrl#set_document { doc with artboards = new_artboards });
+    `Null
+  in
+
+  (* doc.artboard.delete_panel_selected — at-least-one invariant. *)
+  let doc_artboard_delete_panel_selected _ _ store =
+    let target_ids = artboard_panel_selection_ids store in
+    if target_ids <> [] then begin
+      let doc = ctrl#document in
+      let total = List.length doc.artboards in
+      if List.length target_ids < total then begin
+        ctrl#model#snapshot;
+        let new_artboards = List.filter (fun (a : Artboard.artboard) ->
+          not (List.mem a.id target_ids)
+        ) doc.artboards in
+        ctrl#set_document { doc with artboards = new_artboards }
+      end
+    end;
+    `Null
+  in
+
+  (* doc.artboard.duplicate_init — Alt-drag duplicate setup. Runs
+     once at the threshold latch (just before doc.preview.capture).
+     Deep-copies the source artboard at its current position;
+     Move/Copy Artwork (hard-coded on per spec) deep-copies every
+     top-level layer child fully contained in the source artboard,
+     appends the copies to the same layer, and tracks new paths in
+     tool.artboard.duplicated_paths. Updates hit_artboard_id to the
+     duplicate so subsequent move ops target it. *)
+  let doc_artboard_duplicate_init _ _ store =
+    let tool = Yojson.Safe.Util.member "tool"
+                 (State_store.eval_context store) in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    (match Yojson.Safe.Util.member "hit_artboard_id" ab with
+     | `String source_id ->
+       let doc = ctrl#document in
+       (match List.find_opt (fun (a : Artboard.artboard) ->
+          a.id = source_id) doc.artboards with
+        | None -> ()
+        | Some source ->
+          let artboard_bounds = List.map (fun (a : Artboard.artboard) ->
+            (a.id, (a.x, a.y, a.width, a.height))
+          ) doc.artboards in
+          (* Deep-copy source-contained elements; track new paths. *)
+          let dup_paths = ref [] in
+          let new_layers = Array.mapi (fun li layer ->
+            match layer with
+            | Element.Layer l ->
+              let original_count = Array.length l.children in
+              let extras = ref [] in
+              let appended = ref 0 in
+              Array.iter (fun child ->
+                let bb = Element.bounds child in
+                let containers = List.filter_map (fun (id, ab) ->
+                  if artboard_contains_bounds ab bb then Some id else None
+                ) artboard_bounds in
+                if List.length containers = 1
+                   && List.hd containers = source_id then begin
+                  (* Element values in OCaml — append as-is gives a
+                     distinct entry. *)
+                  extras := child :: !extras;
+                  dup_paths := (li, original_count + !appended)
+                                 :: !dup_paths;
+                  incr appended
+                end
+              ) l.children;
+              let extras_arr = Array.of_list (List.rev !extras) in
+              Element.Layer { l with children =
+                Array.append l.children extras_arr }
+            | other -> other
+          ) doc.layers in
+          let dup_paths = List.rev !dup_paths in
+
+          (* Mint duplicate artboard (collision-retry). *)
+          let existing = List.map (fun (a : Artboard.artboard) -> a.id)
+                           doc.artboards in
+          let rec mint n =
+            if n <= 0 then None
+            else
+              let cand = Artboard.generate_id () in
+              if List.mem cand existing then mint (n - 1) else Some cand
+          in
+          (match mint 100 with
+           | None -> ()
+           | Some new_id ->
+             let dup : Artboard.artboard = {
+               source with
+               id = new_id;
+               name = Artboard.next_name doc.artboards
+             } in
+             let new_artboards = doc.artboards @ [dup] in
+             ctrl#set_document { doc with
+               layers = new_layers;
+               artboards = new_artboards };
+             State_store.set_tool store "artboard" "hit_artboard_id"
+               (`String new_id);
+             let paths_json = `List (List.map (fun (li, ci) ->
+               `List [`Int li; `Int ci]) dup_paths) in
+             State_store.set_tool store "artboard" "duplicated_paths"
+               paths_json))
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.duplicate_apply — translation alias for the
+     duplicate's drag (hit_artboard_id was retargeted by
+     duplicate_init). *)
+  let doc_artboard_duplicate_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let press_x = eval_number (lookup "press_x") store ctx in
+       let press_y = eval_number (lookup "press_y") store ctx in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let dx = cursor_x -. press_x in
+       let dy = cursor_y -. press_y in
+       let target_ids =
+         let panel_ids = artboard_panel_selection_ids store in
+         if panel_ids <> [] then panel_ids
+         else
+           let tool = Yojson.Safe.Util.member "tool"
+                        (State_store.eval_context store) in
+           let ab = Yojson.Safe.Util.member "artboard" tool in
+           match Yojson.Safe.Util.member "hit_artboard_id" ab with
+           | `String s -> [s]
+           | _ -> []
+       in
+       if target_ids <> [] then
+         artboard_translate_from_preview ctrl#model store target_ids dx dy
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.duplicate_commit — same path as move_commit. *)
+  let doc_artboard_duplicate_commit = doc_artboard_move_commit in
+
+  (* doc.artboard.create_commit — drag-to-create commit. Builds a
+     rect from (x1, y1)-(x2, y2), rounds to integer pt, clamps each
+     dimension to >= 1 pt, mints a fresh id (collision-retry against
+     existing artboards), picks the next "Artboard N" name, and
+     appends to document.artboards. Mirrors Rust P1.3a / Swift
+     P2.2a. *)
+  let doc_artboard_create_commit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let x1 = eval_number (List.assoc_opt "x1" args) store ctx in
+       let y1 = eval_number (List.assoc_opt "y1" args) store ctx in
+       let x2 = eval_number (List.assoc_opt "x2" args) store ctx in
+       let y2 = eval_number (List.assoc_opt "y2" args) store ctx in
+       let raw_x = Float.round (Float.min x1 x2) in
+       let raw_y = Float.round (Float.min y1 y2) in
+       let raw_w = Float.max (Float.round (Float.abs (x1 -. x2))) 1.0 in
+       let raw_h = Float.max (Float.round (Float.abs (y1 -. y2))) 1.0 in
+       let doc = ctrl#document in
+       let existing = List.map (fun (a : Artboard.artboard) -> a.id)
+                        doc.artboards in
+       let rec mint n =
+         if n <= 0 then None
+         else
+           let cand = Artboard.generate_id () in
+           if List.mem cand existing then mint (n - 1) else Some cand
+       in
+       (match mint 100 with
+        | None -> ()
+        | Some new_id ->
+          let new_name = Artboard.next_name doc.artboards in
+          let ab : Artboard.artboard = {
+            (Artboard.default_with_id new_id) with
+            name = new_name;
+            x = raw_x; y = raw_y;
+            width = raw_w; height = raw_h;
+          } in
+          let new_doc = { doc with artboards = doc.artboards @ [ab] } in
+          ctrl#set_document new_doc)
+     | _ -> ());
+    `Null
+  in
+
   [ ("doc.snapshot", doc_snapshot);
+    ("doc.artboard.probe_hit", doc_artboard_probe_hit);
+    ("doc.artboard.probe_hover", doc_artboard_probe_hover);
+    ("doc.artboard.create_commit", doc_artboard_create_commit);
+    ("doc.artboard.move_apply", doc_artboard_move_apply);
+    ("doc.artboard.move_commit", doc_artboard_move_commit);
+    ("doc.artboard.resize_apply", doc_artboard_resize_apply);
+    ("doc.artboard.resize_commit", doc_artboard_resize_commit);
+    ("doc.artboard.delete_panel_selected", doc_artboard_delete_panel_selected);
+    ("doc.artboard.duplicate_init", doc_artboard_duplicate_init);
+    ("doc.artboard.duplicate_apply", doc_artboard_duplicate_apply);
+    ("doc.artboard.duplicate_commit", doc_artboard_duplicate_commit);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
     ("doc.add_to_selection", doc_add_to_selection);

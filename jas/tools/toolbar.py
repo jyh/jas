@@ -57,6 +57,7 @@ class Tool(Enum):
     SHEAR = auto()
     HAND = auto()
     ZOOM = auto()
+    ARTBOARD = auto()
 
 
 def _draw_arrow_path() -> QPainterPath:

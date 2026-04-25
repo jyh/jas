@@ -86,4 +86,5 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.SCALE: _yaml_tool("scale"),
         Tool.ROTATE: _yaml_tool("rotate"),
         Tool.SHEAR: _yaml_tool("shear"),
+        Tool.ARTBOARD: _yaml_tool("artboard"),
     }

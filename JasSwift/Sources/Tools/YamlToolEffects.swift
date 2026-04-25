@@ -1027,6 +1027,196 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // ── Artboard tool effects (ARTBOARD_TOOL.md) ────────────────
+
+    // doc.artboard.probe_hit — press-time hit-test classifier per
+    // ARTBOARD_TOOL.md §Mousedown disambiguation order. Sets
+    // tool.artboard.{mode, hit_artboard_id, hit_handle_pos} and
+    // (for interior / empty hits) writes panel-selection per the
+    // click rules from ARTBOARDS.md §Selection semantics. Swift's
+    // StateStore is the panel-state authority — store.setPanel
+    // updates the panel UI directly (no separate AppState plumbing
+    // needed, unlike Rust which has a pending-writes buffer).
+    effects["doc.artboard.probe_hit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let shift = evalBool(args["shift"], store: store, ctx: ctx)
+        let cmd = evalBool(args["cmd"], store: store, ctx: ctx)
+        let alt = evalBool(args["alt"], store: store, ctx: ctx)
+        artboardProbeHit(model: model, store: store,
+                         x: x, y: y,
+                         shiftHeld: shift, cmdHeld: cmd, altHeld: alt)
+        return nil
+    }
+
+    // doc.artboard.probe_hover — read-only hover classification for
+    // dynamic cursor. Mirrors probe_hit's hit-test priority but only
+    // writes tool.artboard.hover_kind. Per ARTBOARD_TOOL.md
+    // §Cursor states.
+    effects["doc.artboard.probe_hover"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        artboardProbeHover(model: model, store: store, x: x, y: y)
+        return nil
+    }
+
+    // doc.artboard.move_apply — live drag-to-move per
+    // ARTBOARD_TOOL.md §Drag-to-move. Idempotent — restores from
+    // doc.preview.capture (taken at the threshold latch) before
+    // applying the cumulative (cursor - press) displacement. Per-
+    // artboard fallback to tool.artboard.hit_artboard_id when
+    // panel-selection is empty so single-artboard drags work end-
+    // to-end. Move/Copy Artwork (hard-coded on per spec) translates
+    // top-level elements per the containment rule from
+    // ARTBOARDS.md §Rearrange Dialogue Move-artwork semantics.
+    effects["doc.artboard.move_apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let pressX = evalNumber(args["press_x"], store: store, ctx: ctx)
+        let pressY = evalNumber(args["press_y"], store: store, ctx: ctx)
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        let shiftHeld = evalBool(args["shift_held"], store: store, ctx: ctx)
+        artboardMoveApply(
+            model: model, store: store,
+            pressX: pressX, pressY: pressY,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld)
+        return nil
+    }
+
+    // doc.artboard.move_commit — drag-to-move commit with integer-pt
+    // rounded displacement (preserves multi-select relative spacing
+    // per ARTBOARD_TOOL.md §Common rules).
+    effects["doc.artboard.move_commit"] = { _, _, store in
+        artboardMoveCommit(model: model, store: store)
+        return nil
+    }
+
+    // doc.artboard.duplicate_init — Alt-drag duplicate setup. Runs
+    // once at the threshold-latch (just before doc.preview.capture)
+    // so the preview baseline includes the duplicate. Deep-copies
+    // the source artboard at its current position, deep-copies any
+    // top-level element fully contained in the source, appends the
+    // copies to the same layer, and updates
+    // tool.artboard.hit_artboard_id + duplicated_paths so
+    // subsequent move_apply translates the duplicate + its element
+    // copies as a unit. Per ARTBOARD_TOOL.md §Alt-drag duplicate.
+    effects["doc.artboard.duplicate_init"] = { _, _, store in
+        artboardDuplicateInit(model: model, store: store)
+        return nil
+    }
+
+    // doc.artboard.duplicate_apply — translation alias for the
+    // duplicate's drag (hit_artboard_id was retargeted to the
+    // duplicate by duplicate_init).
+    effects["doc.artboard.duplicate_apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let pressX = evalNumber(args["press_x"], store: store, ctx: ctx)
+        let pressY = evalNumber(args["press_y"], store: store, ctx: ctx)
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        artboardMoveApply(
+            model: model, store: store,
+            pressX: pressX, pressY: pressY,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: false)
+        return nil
+    }
+
+    // doc.artboard.duplicate_commit — same path as move_commit.
+    effects["doc.artboard.duplicate_commit"] = { _, _, store in
+        artboardMoveCommit(model: model, store: store)
+        return nil
+    }
+
+    // doc.artboard.resize_apply — live drag-to-resize per
+    // ARTBOARD_TOOL.md §Drag-to-resize. Idempotent via the preview
+    // snapshot. Targets tool.artboard.hit_artboard_id (set by
+    // probe_hit). Modifiers: Shift = lock proportion, Alt =
+    // resize from center, Shift+Alt = both.
+    effects["doc.artboard.resize_apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        var handlePos = ""
+        if let raw = args["handle_pos"] as? String {
+            // Pass-through if the arg is already a handle name; else
+            // evaluate as an expression.
+            if ["nw","n","ne","e","se","s","sw","w"].contains(raw) {
+                handlePos = raw
+            } else {
+                let v = evalExprAsValue(args["handle_pos"],
+                                        store: store, ctx: ctx)
+                if case .string(let s) = v { handlePos = s }
+            }
+        }
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        let shiftHeld = evalBool(args["shift_held"], store: store, ctx: ctx)
+        let altHeld = evalBool(args["alt_held"], store: store, ctx: ctx)
+        artboardResizeApply(
+            model: model, store: store,
+            handlePos: handlePos, cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld, altHeld: altHeld)
+        return nil
+    }
+
+    // doc.artboard.resize_commit — re-applies the resize with
+    // integer-pt rounding on the final bounds.
+    effects["doc.artboard.resize_commit"] = { _, _, store in
+        artboardResizeCommit(model: model, store: store)
+        return nil
+    }
+
+    // doc.artboard.delete_panel_selected — deletes panel-selected
+    // artboards subject to the at-least-one invariant from
+    // ARTBOARDS.md §At-least-one-artboard invariant. Snapshots for
+    // undo. Silent no-op when selection spans every artboard
+    // (tooltip surface deferred per spec).
+    effects["doc.artboard.delete_panel_selected"] = { _, _, store in
+        artboardDeletePanelSelected(model: model, store: store)
+        return nil
+    }
+
+    // doc.artboard.create_commit — drag-to-create commit. Builds a
+    // rect from (x1,y1)-(x2,y2), rounds to integer pt, clamps each
+    // dimension to >= 1 pt, mints a fresh id (collision-retry),
+    // picks the next "Artboard N" name, and appends to
+    // document.artboards. Per ARTBOARD_TOOL.md §Drag-to-create.
+    effects["doc.artboard.create_commit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x1 = evalNumber(args["x1"], store: store, ctx: ctx)
+        let y1 = evalNumber(args["y1"], store: store, ctx: ctx)
+        let x2 = evalNumber(args["x2"], store: store, ctx: ctx)
+        let y2 = evalNumber(args["y2"], store: store, ctx: ctx)
+
+        let rawX = (min(x1, x2)).rounded()
+        let rawY = (min(y1, y2)).rounded()
+        let rawW = max(abs(x1 - x2).rounded(), 1.0)
+        let rawH = max(abs(y1 - y2).rounded(), 1.0)
+
+        let doc = model.document
+        let existing: Set<String> = Set(doc.artboards.map { $0.id })
+        var newId = ""
+        for _ in 0..<100 {
+            let candidate = generateArtboardId()
+            if !existing.contains(candidate) { newId = candidate; break }
+        }
+        guard !newId.isEmpty else { return nil }
+        let newName = nextArtboardName(doc.artboards)
+        let ab = Artboard(
+            id: newId, name: newName,
+            x: rawX, y: rawY, width: rawW, height: rawH)
+        let newAbs = doc.artboards + [ab]
+        model.document = Document(
+            layers: doc.layers,
+            selectedLayer: doc.selectedLayer,
+            selection: doc.selection,
+            artboards: newAbs,
+            artboardOptions: doc.artboardOptions)
+        return nil
+    }
+
     return effects
 }
 
@@ -2909,4 +3099,677 @@ private func walkEligibleIn(
     default:
         visit(cur, elem)
     }
+}
+
+// MARK: - Artboard tool helpers (ARTBOARD_TOOL.md)
+
+/// Implementation of doc.artboard.probe_hit per
+/// ARTBOARD_TOOL.md §Mousedown disambiguation order. Mirrors the
+/// Rust artboard_probe_hit. Sets tool state and writes panel-
+/// selection per the click rules. (x, y) are in document coordinates
+/// — the canvas widget transforms viewport pixels before passing.
+private func artboardProbeHit(
+    model: Model, store: StateStore,
+    x: Double, y: Double,
+    shiftHeld: Bool, cmdHeld: Bool, altHeld: Bool
+) {
+    // Reset hit-state defaults.
+    store.setTool("artboard", "hit_artboard_id", nil)
+    store.setTool("artboard", "hit_handle_pos", nil)
+
+    let doc = model.document
+
+    // 1. Resize handle of the single panel-selected artboard.
+    let active = store.evalContext()["active_document"] as? [String: Any]
+    let selIds = (active?["artboards_panel_selection_ids"] as? [Any])?
+        .compactMap { $0 as? String } ?? []
+    if selIds.count == 1,
+       let ab = doc.artboards.first(where: { $0.id == selIds[0] })
+    {
+        let r: Double = 8.0  // handle hit radius (document coords; phase 1 const)
+        let cx = ab.x + ab.width / 2.0
+        let cy = ab.y + ab.height / 2.0
+        let candidates: [(String, Double, Double)] = [
+            ("nw", ab.x, ab.y),
+            ("n",  cx, ab.y),
+            ("ne", ab.x + ab.width, ab.y),
+            ("e",  ab.x + ab.width, cy),
+            ("se", ab.x + ab.width, ab.y + ab.height),
+            ("s",  cx, ab.y + ab.height),
+            ("sw", ab.x, ab.y + ab.height),
+            ("w",  ab.x, cy),
+        ]
+        for (pos, hx, hy) in candidates {
+            if abs(x - hx) <= r && abs(y - hy) <= r {
+                store.setTool("artboard", "mode", "resizing")
+                store.setTool("artboard", "hit_artboard_id", ab.id)
+                store.setTool("artboard", "hit_handle_pos", pos)
+                return
+            }
+        }
+    }
+
+    // 2. Artboard interior (highest position wins on overlap —
+    //    iterate in reverse for top-most-first hit).
+    if let hit = doc.artboards.reversed().first(where: { ab in
+        x >= ab.x && x <= ab.x + ab.width
+            && y >= ab.y && y <= ab.y + ab.height
+    }) {
+        let mode = altHeld ? "duplicating_pending" : "moving_pending"
+        store.setTool("artboard", "mode", mode)
+        store.setTool("artboard", "hit_artboard_id", hit.id)
+
+        // Panel-selection write per click rules.
+        let currentSel = (active?["artboards_panel_selection_ids"] as? [Any])?
+            .compactMap { $0 as? String } ?? []
+        let anchor = active?["artboards_panel_anchor"] as? String
+
+        if shiftHeld {
+            // Range from anchor to hit, using document.artboards order.
+            let ids = doc.artboards.map { $0.id }
+            if let a = anchor, let ai = ids.firstIndex(of: a),
+               let ti = ids.firstIndex(of: hit.id) {
+                let lo = min(ai, ti); let hi = max(ai, ti)
+                store.setPanel("artboards", "artboards_panel_selection",
+                               Array(ids[lo...hi]))
+                // Anchor unchanged.
+            } else {
+                // No anchor — fall back to plain replace.
+                store.setPanel("artboards", "artboards_panel_selection", [hit.id])
+                store.setPanel("artboards", "panel_selection_anchor", hit.id)
+            }
+        } else if cmdHeld {
+            var newSel = currentSel
+            if let pos = newSel.firstIndex(of: hit.id) {
+                newSel.remove(at: pos)
+            } else {
+                newSel.append(hit.id)
+            }
+            store.setPanel("artboards", "artboards_panel_selection", newSel)
+            // Anchor unchanged.
+        } else {
+            // Plain — replace, set anchor.
+            store.setPanel("artboards", "artboards_panel_selection", [hit.id])
+            store.setPanel("artboards", "panel_selection_anchor", hit.id)
+        }
+        return
+    }
+
+    // 3. Empty canvas — drag-to-create on threshold; click clears
+    //    panel-selection.
+    store.setTool("artboard", "mode", "creating")
+    store.setPanel("artboards", "artboards_panel_selection", [String]())
+    store.setPanel("artboards", "panel_selection_anchor", nil)
+}
+
+/// Implementation of doc.artboard.probe_hover per
+/// ARTBOARD_TOOL.md §Cursor states. Read-only hover classification
+/// for the dynamic cursor — sets tool.artboard.hover_kind to one of
+/// "handle:<dir>" / "interior" / "empty".
+private func artboardProbeHover(
+    model: Model, store: StateStore, x: Double, y: Double
+) {
+    let doc = model.document
+    let active = store.evalContext()["active_document"] as? [String: Any]
+    let selIds = (active?["artboards_panel_selection_ids"] as? [Any])?
+        .compactMap { $0 as? String } ?? []
+
+    // 1. Resize handle on the single panel-selected artboard.
+    if selIds.count == 1,
+       let ab = doc.artboards.first(where: { $0.id == selIds[0] })
+    {
+        let r: Double = 8.0
+        let cx = ab.x + ab.width / 2.0
+        let cy = ab.y + ab.height / 2.0
+        let candidates: [(String, Double, Double)] = [
+            ("nw", ab.x, ab.y),
+            ("n",  cx, ab.y),
+            ("ne", ab.x + ab.width, ab.y),
+            ("e",  ab.x + ab.width, cy),
+            ("se", ab.x + ab.width, ab.y + ab.height),
+            ("s",  cx, ab.y + ab.height),
+            ("sw", ab.x, ab.y + ab.height),
+            ("w",  ab.x, cy),
+        ]
+        for (pos, hx, hy) in candidates {
+            if abs(x - hx) <= r && abs(y - hy) <= r {
+                store.setTool("artboard", "hover_kind", "handle:\(pos)")
+                return
+            }
+        }
+    }
+
+    // 2. Interior.
+    for ab in doc.artboards.reversed() {
+        if x >= ab.x && x <= ab.x + ab.width
+            && y >= ab.y && y <= ab.y + ab.height
+        {
+            store.setTool("artboard", "hover_kind", "interior")
+            return
+        }
+    }
+
+    // 3. Empty canvas.
+    store.setTool("artboard", "hover_kind", "empty")
+}
+
+/// Read the panel-selected artboard ids from the eval context.
+private func readArtboardPanelSelection(_ store: StateStore) -> [String] {
+    let active = store.evalContext()["active_document"] as? [String: Any]
+    return (active?["artboards_panel_selection_ids"] as? [Any])?
+        .compactMap { $0 as? String } ?? []
+}
+
+/// True iff `inner` (an element's bbox) is fully contained in
+/// `outer` (an artboard's bounds). ≤ comparison so elements
+/// touching the artboard edge count as contained.
+private func artboardContainsBounds(
+    _ outer: (Double, Double, Double, Double),
+    _ inner: BBox
+) -> Bool {
+    let (ox, oy, ow, oh) = outer
+    let (ix, iy, iw, ih) = inner
+    return ix >= ox && iy >= oy
+        && ix + iw <= ox + ow && iy + ih <= oy + oh
+}
+
+/// Local element translator — file-private port of the helper in
+/// JasCommands.swift. Mirrors Rust's translate_element from
+/// geometry/element.rs. Recurses into Group / Layer children.
+private func artboardTranslateElement(
+    _ elem: Element, dx: Double, dy: Double
+) -> Element {
+    if dx == 0 && dy == 0 { return elem }
+    switch elem {
+    case .group(let g):
+        return .group(Group(
+            children: g.children.map {
+                artboardTranslateElement($0, dx: dx, dy: dy)
+            },
+            opacity: g.opacity, transform: g.transform, locked: g.locked))
+    case .layer(let l):
+        return .layer(Layer(
+            name: l.name,
+            children: l.children.map {
+                artboardTranslateElement($0, dx: dx, dy: dy)
+            },
+            opacity: l.opacity, transform: l.transform, locked: l.locked))
+    default:
+        return elem.moveControlPoints(.all, dx: dx, dy: dy)
+    }
+}
+
+/// Apply a (dx, dy) displacement to every artboard in `targetIds`,
+/// using restorePreviewSnapshot as the idempotent base. Live-drag
+/// effects call this on every mousemove; commit effects call once
+/// with the final (rounded) delta and then drop the preview
+/// snapshot. Move/Copy Artwork hard-coded on (phase 1): top-level
+/// elements fully contained in exactly one artboard (which must be
+/// in targetIds) translate by the same delta. Explicit-path
+/// elements (set by duplicate_init) also translate — bypasses the
+/// containment rule for the duplicate case where source and
+/// duplicate overlap.
+private func artboardTranslateFromPreview(
+    model: Model, store: StateStore,
+    targetIds: [String], dx: Double, dy: Double
+) {
+    guard model.hasPreviewSnapshot else { return }
+    model.restorePreviewSnapshot()
+    let doc = model.document
+
+    // Pre-op artboard bounds (read before any translation).
+    let artboardBounds: [(String, (Double, Double, Double, Double))] =
+        doc.artboards.map {
+            ($0.id, ($0.x, $0.y, $0.width, $0.height))
+        }
+
+    var newLayers: [Layer] = doc.layers
+
+    // Containment-based element translation (top-level layer
+    // children). Each layer's children are walked; matching
+    // children translate by (dx, dy).
+    if dx != 0 || dy != 0 {
+        newLayers = newLayers.map { layer -> Layer in
+            let newChildren: [Element] = layer.children.map { child in
+                let bb = child.bounds
+                var containers: [String] = []
+                for (id, ab) in artboardBounds {
+                    if artboardContainsBounds(ab, bb) {
+                        containers.append(id)
+                    }
+                }
+                let inOne = containers.count == 1
+                let isMoving = inOne && targetIds.contains(containers[0])
+                if isMoving {
+                    return artboardTranslateElement(child, dx: dx, dy: dy)
+                }
+                return child
+            }
+            return Layer(
+                name: layer.name, children: newChildren,
+                opacity: layer.opacity, transform: layer.transform,
+                locked: layer.locked)
+        }
+    }
+
+    // Translate moving artboards.
+    let newAbs: [Artboard] = doc.artboards.map { ab in
+        if targetIds.contains(ab.id) {
+            return ab.with(x: ab.x + dx, y: ab.y + dy)
+        }
+        return ab
+    }
+
+    // Explicit-path translation (for duplicate's deep-copies).
+    if dx != 0 || dy != 0 {
+        let toolCtx = store.evalContext()["tool"] as? [String: Any]
+        let abCtx = toolCtx?["artboard"] as? [String: Any]
+        let rawDupPaths = abCtx?["duplicated_paths"] as? [Any] ?? []
+        var dupPaths: [[Int]] = []
+        for raw in rawDupPaths {
+            guard let inner = raw as? [Any] else { continue }
+            var path: [Int] = []
+            for v in inner {
+                if let i = v as? Int { path.append(i) }
+                else if let d = v as? Double { path.append(Int(d)) }
+            }
+            if path.count == 2 { dupPaths.append(path) }
+        }
+        if !dupPaths.isEmpty {
+            var rebuilt: [Layer] = []
+            for (li, layer) in newLayers.enumerated() {
+                let layerDupChildIdxs = dupPaths
+                    .filter { $0[0] == li }
+                    .map { $0[1] }
+                if layerDupChildIdxs.isEmpty {
+                    rebuilt.append(layer)
+                    continue
+                }
+                let newChildren: [Element] = layer.children
+                    .enumerated()
+                    .map { (ci, child) in
+                        if layerDupChildIdxs.contains(ci) {
+                            return artboardTranslateElement(child, dx: dx, dy: dy)
+                        }
+                        return child
+                    }
+                rebuilt.append(Layer(
+                    name: layer.name, children: newChildren,
+                    opacity: layer.opacity, transform: layer.transform,
+                    locked: layer.locked))
+            }
+            newLayers = rebuilt
+        }
+    }
+
+    model.document = Document(
+        layers: newLayers,
+        selectedLayer: doc.selectedLayer,
+        selection: doc.selection,
+        artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.move_apply implementation per ARTBOARD_TOOL.md
+/// §Drag-to-move.
+private func artboardMoveApply(
+    model: Model, store: StateStore,
+    pressX: Double, pressY: Double,
+    cursorX: Double, cursorY: Double,
+    shiftHeld: Bool
+) {
+    var dx = cursorX - pressX
+    var dy = cursorY - pressY
+    if shiftHeld {
+        if abs(dx) > abs(dy) { dy = 0 } else { dx = 0 }
+    }
+    var targetIds = readArtboardPanelSelection(store)
+    if targetIds.isEmpty {
+        // Single-artboard fallback to hit_artboard_id (set by
+        // probe_hit). Same shape as Rust.
+        let toolCtx = store.evalContext()["tool"] as? [String: Any]
+        let abCtx = toolCtx?["artboard"] as? [String: Any]
+        if let id = abCtx?["hit_artboard_id"] as? String {
+            targetIds = [id]
+        }
+    }
+    if targetIds.isEmpty { return }
+    artboardTranslateFromPreview(
+        model: model, store: store,
+        targetIds: targetIds, dx: dx, dy: dy)
+}
+
+/// Compute new (x, y, w, h) for a resize gesture. Mirrors Rust's
+/// artboard_resize_compute. See ARTBOARD_TOOL.md §Drag-to-resize
+/// for the full modifier matrix; comments inline below.
+private func artboardResizeCompute(
+    handlePos: String,
+    origX: Double, origY: Double, origW: Double, origH: Double,
+    cursorX: Double, cursorY: Double,
+    shiftHeld: Bool, altHeld: Bool
+) -> (Double, Double, Double, Double) {
+    let origCx = origX + origW / 2.0
+    let origCy = origY + origH / 2.0
+    let origRatio = origH > 0 ? origW / origH : 1.0
+
+    let isCorner = ["nw","ne","se","sw"].contains(handlePos)
+    let isEdge = ["n","e","s","w"].contains(handlePos)
+
+    func dominantWFromCorner(_ dx: Double, _ dy: Double) -> (Double, Double) {
+        if dy <= 0 { return (max(dx, 1.0), max(dx / origRatio, 1.0)) }
+        if dx / origW > dy / origH {
+            let w = max(dx, 1.0)
+            return (w, max(w / origRatio, 1.0))
+        } else {
+            let h = max(dy, 1.0)
+            return (max(h * origRatio, 1.0), h)
+        }
+    }
+
+    if altHeld && isCorner {
+        var hw = abs(cursorX - origCx)
+        var hh = abs(cursorY - origCy)
+        if shiftHeld {
+            let (rw, rh) = dominantWFromCorner(2.0 * hw, 2.0 * hh)
+            hw = rw / 2.0; hh = rh / 2.0
+        }
+        let nw = max(2.0 * hw, 1.0)
+        let nh = max(2.0 * hh, 1.0)
+        return (origCx - nw / 2.0, origCy - nh / 2.0, nw, nh)
+    }
+    if altHeld && isEdge {
+        var nx = origX, ny = origY, nw = origW, nh = origH
+        switch handlePos {
+        case "e", "w":
+            let halfW = max(abs(cursorX - origCx), 0.5)
+            nw = 2.0 * halfW
+            nx = origCx - halfW
+            if shiftHeld {
+                nh = max(nw / origRatio, 1.0)
+                ny = origCy - nh / 2.0
+            }
+        case "n", "s":
+            let halfH = max(abs(cursorY - origCy), 0.5)
+            nh = 2.0 * halfH
+            ny = origCy - halfH
+            if shiftHeld {
+                nw = max(nh * origRatio, 1.0)
+                nx = origCx - nw / 2.0
+            }
+        default: break
+        }
+        return (nx, ny, max(nw, 1.0), max(nh, 1.0))
+    }
+
+    if shiftHeld && isCorner {
+        let right = origX + origW
+        let bottom = origY + origH
+        switch handlePos {
+        case "se":
+            let dx = max(cursorX - origX, 1.0)
+            let dy = max(cursorY - origY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (origX, origY, nw, nh)
+        case "sw":
+            let dx = max(right - cursorX, 1.0)
+            let dy = max(cursorY - origY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (right - nw, origY, nw, nh)
+        case "ne":
+            let dx = max(cursorX - origX, 1.0)
+            let dy = max(bottom - cursorY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (origX, bottom - nh, nw, nh)
+        case "nw":
+            let dx = max(right - cursorX, 1.0)
+            let dy = max(bottom - cursorY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (right - nw, bottom - nh, nw, nh)
+        default: break
+        }
+    }
+
+    if shiftHeld && isEdge {
+        var nx = origX, ny = origY, nw = origW, nh = origH
+        switch handlePos {
+        case "e":
+            nw = max(cursorX - origX, 1.0)
+            nh = max(nw / origRatio, 1.0)
+            ny = origCy - nh / 2.0
+        case "w":
+            let right = origX + origW
+            nw = max(right - cursorX, 1.0)
+            nx = right - nw
+            nh = max(nw / origRatio, 1.0)
+            ny = origCy - nh / 2.0
+        case "s":
+            nh = max(cursorY - origY, 1.0)
+            nw = max(nh * origRatio, 1.0)
+            nx = origCx - nw / 2.0
+        case "n":
+            let bottom = origY + origH
+            nh = max(bottom - cursorY, 1.0)
+            ny = bottom - nh
+            nw = max(nh * origRatio, 1.0)
+            nx = origCx - nw / 2.0
+        default: break
+        }
+        return (nx, ny, nw, nh)
+    }
+
+    // Unmodified path.
+    var nx = origX, ny = origY, nw = origW, nh = origH
+    let right = origX + origW
+    let bottom = origY + origH
+    switch handlePos {
+    case "nw":
+        nx = min(cursorX, right - 1.0); ny = min(cursorY, bottom - 1.0)
+        nw = right - nx; nh = bottom - ny
+    case "n":
+        ny = min(cursorY, bottom - 1.0); nh = bottom - ny
+    case "ne":
+        ny = min(cursorY, bottom - 1.0)
+        nw = max(cursorX - origX, 1.0); nh = bottom - ny
+    case "e":
+        nw = max(cursorX - origX, 1.0)
+    case "se":
+        nw = max(cursorX - origX, 1.0); nh = max(cursorY - origY, 1.0)
+    case "s":
+        nh = max(cursorY - origY, 1.0)
+    case "sw":
+        nx = min(cursorX, right - 1.0); nw = right - nx
+        nh = max(cursorY - origY, 1.0)
+    case "w":
+        nx = min(cursorX, right - 1.0); nw = right - nx
+    default: break
+    }
+    return (nx, ny, nw, nh)
+}
+
+/// doc.artboard.resize_apply implementation per ARTBOARD_TOOL.md
+/// §Drag-to-resize.
+private func artboardResizeApply(
+    model: Model, store: StateStore,
+    handlePos: String, cursorX: Double, cursorY: Double,
+    shiftHeld: Bool, altHeld: Bool
+) {
+    guard model.hasPreviewSnapshot else { return }
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    let abCtx = toolCtx?["artboard"] as? [String: Any]
+    guard let targetId = abCtx?["hit_artboard_id"] as? String
+    else { return }
+
+    model.restorePreviewSnapshot()
+    let doc = model.document
+    let newAbs: [Artboard] = doc.artboards.map { ab in
+        if ab.id != targetId { return ab }
+        let (nx, ny, nw, nh) = artboardResizeCompute(
+            handlePos: handlePos,
+            origX: ab.x, origY: ab.y, origW: ab.width, origH: ab.height,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld, altHeld: altHeld)
+        return ab.with(x: nx, y: ny, width: nw, height: nh)
+    }
+    model.document = Document(
+        layers: doc.layers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.resize_commit — integer-pt rounded final bounds.
+private func artboardResizeCommit(model: Model, store: StateStore) {
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    guard let abCtx = toolCtx?["artboard"] as? [String: Any] else { return }
+    let cursorX = (abCtx["cursor_x"] as? Double) ?? 0
+    let cursorY = (abCtx["cursor_y"] as? Double) ?? 0
+    let shiftHeld = (abCtx["shift_held"] as? Bool) ?? false
+    let altHeld = (abCtx["alt_held"] as? Bool) ?? false
+    let handlePos = (abCtx["hit_handle_pos"] as? String) ?? ""
+    guard let targetId = abCtx["hit_artboard_id"] as? String,
+          !handlePos.isEmpty,
+          model.hasPreviewSnapshot
+    else { return }
+
+    model.restorePreviewSnapshot()
+    let doc = model.document
+    let newAbs: [Artboard] = doc.artboards.map { ab in
+        if ab.id != targetId { return ab }
+        let (nx, ny, nw, nh) = artboardResizeCompute(
+            handlePos: handlePos,
+            origX: ab.x, origY: ab.y, origW: ab.width, origH: ab.height,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld, altHeld: altHeld)
+        return ab.with(
+            x: nx.rounded(), y: ny.rounded(),
+            width: max(nw.rounded(), 1.0),
+            height: max(nh.rounded(), 1.0))
+    }
+    model.document = Document(
+        layers: doc.layers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.duplicate_init implementation per
+/// ARTBOARD_TOOL.md §Alt-drag duplicate. Deep-copies the source
+/// artboard + its contained elements (Move/Copy Artwork hard-coded
+/// on per spec), appends to the document, and updates tool state
+/// so subsequent translate ops target the duplicate + its element
+/// copies.
+private func artboardDuplicateInit(model: Model, store: StateStore) {
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    let abCtx = toolCtx?["artboard"] as? [String: Any]
+    guard let sourceId = abCtx?["hit_artboard_id"] as? String,
+          let source = model.document.artboards.first(where: { $0.id == sourceId })
+    else { return }
+
+    let doc = model.document
+    let artboardBounds: [(String, (Double, Double, Double, Double))] =
+        doc.artboards.map {
+            ($0.id, ($0.x, $0.y, $0.width, $0.height))
+        }
+
+    // Deep-copy source-contained elements; track new paths.
+    var duplicatedPaths: [[Int]] = []
+    var newLayers: [Layer] = []
+    for (li, layer) in doc.layers.enumerated() {
+        var newChildren = layer.children
+        let originalCount = layer.children.count
+        var appended = 0
+        for child in layer.children {
+            let bb = child.bounds
+            var containers: [String] = []
+            for (id, ab) in artboardBounds {
+                if artboardContainsBounds(ab, bb) { containers.append(id) }
+            }
+            if containers.count == 1 && containers[0] == sourceId {
+                // Element value semantics — appending creates a
+                // distinct value. Mirrors Rust's Rc::new((**child).clone()).
+                newChildren.append(child)
+                duplicatedPaths.append([li, originalCount + appended])
+                appended += 1
+            }
+        }
+        newLayers.append(Layer(
+            name: layer.name, children: newChildren,
+            opacity: layer.opacity, transform: layer.transform,
+            locked: layer.locked))
+    }
+
+    // Mint duplicate artboard (collision-retry id).
+    let existing: Set<String> = Set(doc.artboards.map { $0.id })
+    var newId = ""
+    for _ in 0..<100 {
+        let candidate = generateArtboardId()
+        if !existing.contains(candidate) { newId = candidate; break }
+    }
+    guard !newId.isEmpty else { return }
+    let dup = Artboard(
+        id: newId,
+        name: nextArtboardName(doc.artboards),
+        x: source.x, y: source.y,
+        width: source.width, height: source.height,
+        fill: source.fill,
+        showCenterMark: source.showCenterMark,
+        showCrossHairs: source.showCrossHairs,
+        showVideoSafeAreas: source.showVideoSafeAreas,
+        videoRulerPixelAspectRatio: source.videoRulerPixelAspectRatio)
+    let newAbs = doc.artboards + [dup]
+
+    model.document = Document(
+        layers: newLayers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+
+    // Retarget tool state.
+    store.setTool("artboard", "hit_artboard_id", newId)
+    store.setTool("artboard", "duplicated_paths", duplicatedPaths)
+}
+
+/// doc.artboard.delete_panel_selected — at-least-one invariant
+/// per ARTBOARDS.md.
+private func artboardDeletePanelSelected(model: Model, store: StateStore) {
+    let targetIds = readArtboardPanelSelection(store)
+    if targetIds.isEmpty { return }
+    let total = model.document.artboards.count
+    if targetIds.count >= total { return }  // invariant block
+    model.snapshot()
+    let doc = model.document
+    let newAbs = doc.artboards.filter { !targetIds.contains($0.id) }
+    model.document = Document(
+        layers: doc.layers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.move_commit — re-applies translate with integer-pt
+/// rounded displacement vector (preserves multi-select relative
+/// spacing).
+private func artboardMoveCommit(model: Model, store: StateStore) {
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    guard let abCtx = toolCtx?["artboard"] as? [String: Any] else { return }
+    let pressX = (abCtx["press_x"] as? Double) ?? 0
+    let pressY = (abCtx["press_y"] as? Double) ?? 0
+    let cursorX = (abCtx["cursor_x"] as? Double) ?? 0
+    let cursorY = (abCtx["cursor_y"] as? Double) ?? 0
+    let shiftHeld = (abCtx["shift_held"] as? Bool) ?? false
+
+    var dx = cursorX - pressX
+    var dy = cursorY - pressY
+    if shiftHeld {
+        if abs(dx) > abs(dy) { dy = 0 } else { dx = 0 }
+    }
+    dx = dx.rounded()
+    dy = dy.rounded()
+
+    var targetIds = readArtboardPanelSelection(store)
+    if targetIds.isEmpty {
+        if let id = abCtx["hit_artboard_id"] as? String {
+            targetIds = [id]
+        }
+    }
+    if targetIds.isEmpty { return }
+    artboardTranslateFromPreview(
+        model: model, store: store,
+        targetIds: targetIds, dx: dx, dy: dy)
 }

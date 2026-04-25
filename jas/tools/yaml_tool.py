@@ -302,6 +302,12 @@ class YamlTool(CanvasTool):
                 elif render_type == "marquee_rect":
                     _draw_marquee_rect_overlay(
                         painter, render, eval_ctx)
+                elif render_type == "artboard_resize_handles":
+                    _draw_artboard_resize_handles(
+                        painter, render, eval_ctx, ctx.model)
+                elif render_type == "artboard_outline_preview":
+                    _draw_artboard_outline_preview(
+                        painter, render, eval_ctx, ctx.model)
         finally:
             guard.restore()
 
@@ -530,6 +536,86 @@ def _rounded_rect_path(x: float, y: float, w: float, h: float,
 
 
 # ── Render handlers ────────────────────────────────────────
+
+
+def _draw_artboard_resize_handles(
+    painter, render: dict, eval_ctx: dict, model
+) -> None:
+    """Draw the 8 resize handles on the panel-selected artboard per
+    ARTBOARD_TOOL.md §Drag-to-resize. Mirrors Rust /
+    Swift / OCaml. Handles are 8 px screen-space squares (white
+    fill, blue border) at the four corners and four edge midpoints.
+    """
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QPen, QBrush, QColor
+    from workspace_interpreter.expr import eval_expr
+    raw = render.get("artboard_id", "")
+    id_val = eval_expr(raw, eval_ctx) if isinstance(raw, str) else raw
+    if not isinstance(id_val, str) or not id_val:
+        return
+    ab = next((a for a in model.document.artboards if a.id == id_val), None)
+    if ab is None:
+        return
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+    cx = ab.x + ab.width / 2.0
+    cy = ab.y + ab.height / 2.0
+    positions = [
+        (ab.x, ab.y),
+        (cx, ab.y),
+        (ab.x + ab.width, ab.y),
+        (ab.x + ab.width, cy),
+        (ab.x + ab.width, ab.y + ab.height),
+        (cx, ab.y + ab.height),
+        (ab.x, ab.y + ab.height),
+        (ab.x, cy),
+    ]
+    handle_size = 8.0
+    half = handle_size / 2.0
+    painter.save()
+    pen = QPen(QColor(0, 120, 255))
+    pen.setWidthF(1.5)
+    painter.setPen(pen)
+    painter.setBrush(QBrush(QColor("white")))
+    for dx, dy in positions:
+        vx = dx * zoom + offx
+        vy = dy * zoom + offy
+        painter.drawRect(QRectF(vx - half, vy - half, handle_size, handle_size))
+    painter.restore()
+
+
+def _draw_artboard_outline_preview(
+    painter, render: dict, eval_ctx: dict, model
+) -> None:
+    """Outline preview rectangle for in-flight move / resize / duplicate
+    when update_while_dragging is false. Phase 1 implementation:
+    simple stroked rectangle in theme accent color."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPen, QBrush, QColor
+    from workspace_interpreter.expr import eval_expr
+    raw = render.get("artboard_id", "")
+    id_val = eval_expr(raw, eval_ctx) if isinstance(raw, str) else raw
+    if not isinstance(id_val, str) or not id_val:
+        return
+    ab = next((a for a in model.document.artboards if a.id == id_val), None)
+    if ab is None:
+        return
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+    vx = ab.x * zoom + offx
+    vy = ab.y * zoom + offy
+    vw = ab.width * zoom
+    vh = ab.height * zoom
+    painter.save()
+    pen = QPen(QColor(0, 120, 255))
+    pen.setWidthF(1.0)
+    painter.setPen(pen)
+    painter.setBrush(QBrush(Qt.NoBrush))
+    painter.drawRect(QRectF(vx, vy, vw, vh))
+    painter.restore()
 
 
 def _draw_marquee_rect_overlay(painter, render: dict, eval_ctx: dict) -> None:

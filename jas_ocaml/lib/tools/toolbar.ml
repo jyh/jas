@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Partial_selection | Interior_selection | Magic_wand | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Blob_brush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso | Scale | Rotate | Shear | Hand | Zoom
+type tool = Selection | Partial_selection | Interior_selection | Magic_wand | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Blob_brush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso | Scale | Rotate | Shear | Hand | Zoom | Artboard
 
 (** Map a tool variant to its workspace/tools/*.yaml filename stem.
     Returns [None] for native-only tools without a YAML spec. Used
@@ -31,6 +31,7 @@ let tool_yaml_id = function
   | Shear -> Some "shear"
   | Hand -> Some "hand"
   | Zoom -> Some "zoom"
+  | Artboard -> Some "artboard"
   | Type_tool | Type_on_path -> None
 
 (** Look up a tool's [tool_options_dialog] field in workspace.json.
