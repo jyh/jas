@@ -76,6 +76,7 @@ impl TabState {
         tools.insert(ToolKind::Selection, yaml_tool("selection"));
         tools.insert(ToolKind::PartialSelection, yaml_tool("partial_selection"));
         tools.insert(ToolKind::InteriorSelection, yaml_tool("interior_selection"));
+        tools.insert(ToolKind::MagicWand, yaml_tool("magic_wand"));
         tools.insert(ToolKind::Pen, yaml_tool("pen"));
         tools.insert(ToolKind::AddAnchorPoint, yaml_tool("add_anchor_point"));
         tools.insert(ToolKind::DeleteAnchorPoint, yaml_tool("delete_anchor_point"));
