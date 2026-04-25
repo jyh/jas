@@ -65,3 +65,7 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Type_on_path -> (new Type_on_path_tool.type_on_path_tool :> Canvas_tool.canvas_tool)
   (* Phase 7.8 — Lasso migrated *)
   | Toolbar.Lasso -> (load_yaml_tool_or_fail "lasso" :> Canvas_tool.canvas_tool)
+  (* Transform-tool family — see SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md *)
+  | Toolbar.Scale -> (load_yaml_tool_or_fail "scale" :> Canvas_tool.canvas_tool)
+  | Toolbar.Rotate -> (load_yaml_tool_or_fail "rotate" :> Canvas_tool.canvas_tool)
+  | Toolbar.Shear -> (load_yaml_tool_or_fail "shear" :> Canvas_tool.canvas_tool)
