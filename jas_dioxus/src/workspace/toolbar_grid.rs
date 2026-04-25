@@ -101,6 +101,12 @@ pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (2, 1, &[ToolKind::Line]),
     (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
     (3, 1, &[ToolKind::Lasso]),
+    // Transform-tool family: Scale (with Shear as long-press alternate)
+    // and Rotate. All three share state.transform_reference_point and
+    // the dialog gestures (dblclick icon or Alt-click on canvas). See
+    // SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md.
+    (4, 0, &[ToolKind::Scale, ToolKind::Shear]),
+    (4, 1, &[ToolKind::Rotate]),
 ];
 
 /// Long-press threshold in milliseconds (matches theme.sizes.long_press_ms).
