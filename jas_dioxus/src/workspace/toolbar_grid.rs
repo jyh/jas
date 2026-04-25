@@ -34,6 +34,9 @@ fn tool_yaml_id(kind: ToolKind) -> Option<&'static str> {
         ToolKind::Polygon => "polygon",
         ToolKind::Star => "star",
         ToolKind::Lasso => "lasso",
+        ToolKind::Scale => "scale",
+        ToolKind::Rotate => "rotate",
+        ToolKind::Shear => "shear",
         ToolKind::Type | ToolKind::TypeOnPath => return None,
     })
 }
