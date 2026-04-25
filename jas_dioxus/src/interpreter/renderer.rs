@@ -1397,9 +1397,9 @@ fn build_active_document_view(
         "current_artboard_id": current_id,
         "current_artboard": current_artboard_json,
         "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
-        "zoom_level": tab.zoom_level,
-        "view_offset_x": tab.view_offset_x,
-        "view_offset_y": tab.view_offset_y,
+        "zoom_level": tab.model.zoom_level,
+        "view_offset_x": tab.model.view_offset_x,
+        "view_offset_y": tab.model.view_offset_y,
     })
 }
 

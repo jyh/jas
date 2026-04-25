@@ -64,6 +64,12 @@ pub struct Model {
     /// `undo_stack` so preview-driven applies don't pollute undo
     /// history. See SCALE_TOOL.md §Preview.
     preview_doc_snapshot: Option<Document>,
+    /// Per-document view state (per ZOOM_TOOL.md §State persistence).
+    /// Persists across tab switches within a session; reset to
+    /// defaults on document open. Not serialized to disk in Phase 1.
+    pub zoom_level: f64,
+    pub view_offset_x: f64,
+    pub view_offset_y: f64,
 }
 
 impl Default for Model {
@@ -81,6 +87,9 @@ impl Default for Model {
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
             preview_doc_snapshot: None,
+            zoom_level: 1.0,
+            view_offset_x: 0.0,
+            view_offset_y: 0.0,
         }
     }
 }
@@ -104,6 +113,9 @@ impl Model {
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
             preview_doc_snapshot: None,
+            zoom_level: 1.0,
+            view_offset_x: 0.0,
+            view_offset_y: 0.0,
         }
     }
 
