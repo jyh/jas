@@ -10,7 +10,7 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity; Magic_wand |]
 
 (** Paragraph panel state-store handle. The yaml_panel_view sets
     this ref to the panel's [State_store.t] when rendering the
@@ -79,6 +79,7 @@ let panel_label = function
   | Align -> "Align"
   | Boolean -> "Boolean"
   | Opacity -> "Opacity"
+  | Magic_wand -> "Magic Wand"
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
@@ -183,6 +184,10 @@ let panel_menu = function
       Toggle { label = "Page Knockout Group"; command = "toggle_page_knockout_group" };
       Separator;
       Action { label = "Close Opacity"; command = "close_panel"; shortcut = "" } ]
+  | Magic_wand -> [
+      Action { label = "Reset Magic Wand"; command = "reset_magic_wand_panel"; shortcut = "" };
+      Separator;
+      Action { label = "Close Magic Wand"; command = "close_panel"; shortcut = "" } ]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =
