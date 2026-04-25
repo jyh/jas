@@ -39,12 +39,13 @@ public enum DockEdge: Hashable, Codable {
 }
 
 public enum PanelKind: Hashable, Codable {
-    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean, opacity
+    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magicWand
 
     /// All panel kinds, for iteration.
     public static let all: [PanelKind] = [
         .layers, .color, .swatches, .stroke, .properties,
         .character, .paragraph, .artboards, .align, .boolean, .opacity,
+        .magicWand,
     ]
 }
 

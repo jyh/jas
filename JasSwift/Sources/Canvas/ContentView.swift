@@ -271,14 +271,21 @@ public struct ContentView: View {
                                   liveState: liveState
                               )
                           }, onOpenToolOptions: { tool in
-                              // Paintbrush Tool Options etc.: look up the
-                              // tool_options_dialog field on the tool's
-                              // workspace entry and open the dialog. See
+                              // Look up the tool's workspace entry. Prefer
+                              // tool_options_panel (Magic Wand) over
+                              // tool_options_dialog (Paintbrush, Blob Brush);
+                              // a tool yaml uses one or the other, not both.
+                              // See MAGIC_WAND_TOOL.md §Panel and
                               // PAINTBRUSH_TOOL.md §Tool options.
                               guard let yamlId = toolYamlId(tool) else { return }
                               guard let ws = WorkspaceData.load() else { return }
                               let tools = ws.data["tools"] as? [String: Any] ?? [:]
                               let toolSpec = tools[yamlId] as? [String: Any] ?? [:]
+                              if let panelId = toolSpec["tool_options_panel"] as? String,
+                                 let kind = panelIdToKind(panelId) {
+                                  workspace.workspaceLayout.showPanel(kind)
+                                  return
+                              }
                               guard let dialogId = toolSpec["tool_options_dialog"] as? String else { return }
                               let liveState: [String: Any] = ws.stateDefaults()
                               yamlDialogState = openYamlDialog(
