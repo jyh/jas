@@ -9,7 +9,7 @@ import AppKit
 
 @Test func toolEnumCases() {
     let tools = Tool.allCases
-    #expect(tools.count == 21)
+    #expect(tools.count == 24)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.partialSelection))
     #expect(tools.contains(.interiorSelection))

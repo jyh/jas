@@ -3,8 +3,8 @@ import Testing
 
 // MARK: - Tool enum tests
 
-@Test func toolEnumHasTenCases() {
-    #expect(Tool.allCases.count == 21)
+@Test func toolEnumVariantCount() {
+    #expect(Tool.allCases.count == 24)
 }
 
 @Test func toolEnumContainsAllExpected() {
@@ -30,6 +30,9 @@ import Testing
     #expect(tools.contains(.star))
     #expect(tools.contains(.lasso))
     #expect(tools.contains(.magicWand))
+    #expect(tools.contains(.scale))
+    #expect(tools.contains(.rotate))
+    #expect(tools.contains(.shear))
 }
 
 @Test func toolRawValuesUnique() {
@@ -40,7 +43,7 @@ import Testing
 @Test func toolConformsToHashable() {
     var set = Set<Tool>()
     for tool in Tool.allCases { set.insert(tool) }
-    #expect(set.count == 21)
+    #expect(set.count == 24)
 }
 
 // MARK: - Tool constants
@@ -92,33 +95,13 @@ import Testing
     #expect(alternates.contains(.polygon))
 }
 
-// MARK: - Toolbar grid layout
-
-@Test func toolbarGridHasFourRows() {
-    // Row 0: Selection, Partial/Interior Selection
-    // Row 1: Pen, Pencil
-    // Row 2: Text/TextPath, Line
-    // Row 3: Rect/Polygon
-    let rows = 4
-    #expect(rows == 4)
-}
-
-@Test func toolbarGridHasTwoColumns() {
-    let cols = 2
-    #expect(cols == 2)
-}
-
-@Test func toolbarGridHasSevenSlots() {
-    // 7 visible slots: selection, partial, pen, pencil, text, line, rect/polygon
-    let slots = 7
-    #expect(slots == 7)
-}
-
-@Test func toolbarGridThreeSharedSlots() {
-    // Arrow slot (partial/interior), Text slot (text/textPath), Shape slot (rect/polygon)
-    let sharedSlots = 3
-    #expect(sharedSlots == 3)
-}
+// Removed: toolbarGridHasFourRows / toolbarGridHasTwoColumns /
+// toolbarGridHasSevenSlots / toolbarGridThreeSharedSlots — these
+// asserted hardcoded layout numbers that had to be edited every
+// time a tool slot was added (Magic Wand had already left them
+// stale; Scale + Rotate + Shear would compound the drift). Per
+// feedback_layout_tests.md, layout-bound tests with hardcoded
+// indices are deleted, not shifted, when layouts change.
 
 // MARK: - CanvasTool protocol
 

@@ -26,6 +26,9 @@ public enum Tool: String, CaseIterable {
     case polygon
     case star
     case lasso
+    case scale
+    case rotate
+    case shear
 }
 
 /// Map a Tool enum case to the matching workspace/tools/*.yaml
@@ -54,6 +57,9 @@ func toolYamlId(_ tool: Tool) -> String? {
     case .polygon: return "polygon"
     case .star: return "star"
     case .lasso: return "lasso"
+    case .scale: return "scale"
+    case .rotate: return "rotate"
+    case .shear: return "shear"
     case .typeTool, .typeOnPath: return nil
     }
 }
@@ -545,6 +551,7 @@ struct ToolbarPanel: View {
     @State private var pencilSlotTool: Tool = .pencil
     @State private var textSlotTool: Tool = .typeTool
     @State private var shapeSlotTool: Tool = .rect
+    @State private var transformSlotTool: Tool = .scale
 
     private let toolbarWidth: CGFloat = 80
 
@@ -594,6 +601,20 @@ struct ToolbarPanel: View {
                         onRequestOptions: onOpenToolOptions
                     )
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .lasso,
+                                           onRequestOptions: onOpenToolOptions)
+                }
+                // Transform-tool family: Scale (with Shear as long-press
+                // alternate) + Rotate. All three share the dialog
+                // gesture and state.transform_reference_point. See
+                // SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md.
+                HStack(spacing: 2) {
+                    ToolbarView.toolButtonWithAlternates(
+                        currentTool: $currentTool,
+                        visibleTool: $transformSlotTool,
+                        alternates: [.scale, .shear],
+                        onRequestOptions: onOpenToolOptions
+                    )
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .rotate,
                                            onRequestOptions: onOpenToolOptions)
                 }
             }
