@@ -33,8 +33,8 @@ which invokes `fit_active_artboard`.
 
 ## Gestures
 
-All zoom operations clamp `zoom_level` to `[preferences.view.min_zoom,
-preferences.view.max_zoom]`. The applied factor is the post-clamp
+All zoom operations clamp `zoom_level` to `[preferences.viewport.min_zoom,
+preferences.viewport.max_zoom]`. The applied factor is the post-clamp
 factor; anchor recomputation uses the post-clamp value so the cursor
 stays glued to its anchor at the boundary.
 
@@ -45,8 +45,8 @@ behavior. See `## Anchor and clamp math` below.
 The drag disambiguation between scrubby and marquee is selected by a
 preference, not by modifier:
 
-- `preferences.view.scrubby_zoom == true` (default): drag = scrubby.
-- `preferences.view.scrubby_zoom == false`: drag = marquee.
+- `preferences.viewport.scrubby_zoom == true` (default): drag = scrubby.
+- `preferences.viewport.scrubby_zoom == false`: drag = marquee.
 
 Below the drag threshold (4 px in either dimension), mouseup is
 treated as a click regardless of the preference.
@@ -54,7 +54,7 @@ treated as a click regardless of the preference.
 ### Plain click — zoom in
 
 Mouseup with no Alt held and total drag distance ≤ 4 px. Zoom in by
-`preferences.view.zoom_step`, anchored on the cursor position at
+`preferences.viewport.zoom_step`, anchored on the cursor position at
 mousedown. Pan recomputes so the document point under the cursor at
 mousedown stays under the cursor after the zoom.
 
@@ -63,19 +63,19 @@ already shows the clamped state — see `## Cursor states`).
 
 ### Alt-click — zoom out
 
-Same as plain click but the factor is `1 / preferences.view.zoom_step`
+Same as plain click but the factor is `1 / preferences.viewport.zoom_step`
 and clamping is against `min_zoom`.
 
 ### Drag — scrubby zoom
 
-When `preferences.view.scrubby_zoom == true` and total drag distance
+When `preferences.viewport.scrubby_zoom == true` and total drag distance
 > 4 px in any direction:
 
 - **Anchor:** cursor position at mousedown, in viewport-local pixels.
   The document point under that pixel stays under that pixel for the
   duration of the drag.
 - **Gain:** the applied zoom factor is `exp(dx_px /
-  preferences.view.scrubby_zoom_gain)`, where `dx_px` is the signed
+  preferences.viewport.scrubby_zoom_gain)`, where `dx_px` is the signed
   horizontal drag distance from mousedown. Default
   `scrubby_zoom_gain` is 144, so 100 px right ≈ 2.0× zoom in,
   100 px left ≈ 0.5× zoom out.
@@ -95,7 +95,7 @@ When `preferences.view.scrubby_zoom == true` and total drag distance
 
 ### Drag — marquee zoom
 
-When `preferences.view.scrubby_zoom == false` and total drag distance
+When `preferences.viewport.scrubby_zoom == false` and total drag distance
 > 4 px in any direction:
 
 - During the drag, an overlay rectangle is painted from the mousedown
@@ -120,7 +120,7 @@ When `preferences.view.scrubby_zoom == false` and total drag distance
 ### Mouse wheel zoom
 
 `Ctrl+wheel` (or `Cmd+wheel` on macOS) steps zoom up or down by
-`preferences.view.zoom_step` per wheel notch, anchored on the cursor
+`preferences.viewport.zoom_step` per wheel notch, anchored on the cursor
 position. No acceleration; one notch = one step. Plain wheel (no
 modifier) is reserved for canvas pan and is not handled by this tool.
 
@@ -196,7 +196,7 @@ Coordinate / unit conventions, fixed across all four apps:
 coordinates plus a margin in screen-space pixels and returns the new
 `(zoom_level, view_offset_x, view_offset_y)`. Marquee zoom calls
 with `margin = 0` (exact fit). The three fit actions call with
-`margin = preferences.view.fit_margin_px` (default 20).
+`margin = preferences.viewport.fit_padding_px` (default 20).
 
 ## Keyboard shortcuts and actions
 
@@ -260,12 +260,12 @@ artboard in a small window).
 | `active_document.zoom_level`           | runtime context | number      | `1.0`   | Per-document; not serialized               |
 | `active_document.view_offset_x`        | runtime context | number      | `0.0`   | Per-document; not serialized; px           |
 | `active_document.view_offset_y`        | runtime context | number      | `0.0`   | Per-document; not serialized; px           |
-| `preferences.view.zoom_step`           | preferences     | number      | `1.2`   | Existing                                   |
-| `preferences.view.min_zoom`            | preferences     | number      | `0.1`   | Existing                                   |
-| `preferences.view.max_zoom`            | preferences     | number      | `64.0`  | Existing                                   |
-| `preferences.view.fit_margin_px`       | preferences     | number      | `20`    | New; screen-space margin for `fit_*`       |
-| `preferences.view.scrubby_zoom`        | preferences     | bool        | `true`  | New; drag = scrubby (true) or marquee      |
-| `preferences.view.scrubby_zoom_gain`   | preferences     | number      | `144`   | New; px of horizontal drag per e-fold      |
+| `preferences.viewport.zoom_step`           | preferences     | number      | `1.2`   | Existing                                   |
+| `preferences.viewport.min_zoom`            | preferences     | number      | `0.1`   | Existing                                   |
+| `preferences.viewport.max_zoom`            | preferences     | number      | `64.0`  | Existing                                   |
+| `preferences.viewport.fit_padding_px`      | preferences     | number      | `20`    | Existing; screen-space padding for `fit_*` |
+| `preferences.viewport.scrubby_zoom`        | preferences     | bool        | `true`  | New; drag = scrubby (true) or marquee      |
+| `preferences.viewport.scrubby_zoom_gain`   | preferences     | number      | `144`   | New; px of horizontal drag per e-fold      |
 
 The Zoom tool has no `state.zoom_*` keys. View state lives on
 `active_document.*`; tuning lives in `preferences.*`. Per-document
@@ -281,9 +281,9 @@ when a document is reopened from disk.
 - `workspace/runtime_contexts.yaml` — adds `view_offset_x`,
   `view_offset_y` declarations under `active_document`. Updates
   `zoom_level` description to note "per-document; not serialized."
-- `workspace/preferences.yaml` — adds `view.fit_margin_px`,
-  `view.scrubby_zoom`, `view.scrubby_zoom_gain` under the existing
-  `view:` block.
+- `workspace/preferences.yaml` — adds `viewport.scrubby_zoom`,
+  `viewport.scrubby_zoom_gain` under the existing `viewport:` block.
+  `viewport.fit_padding_px` is already declared and reused as-is.
 - `workspace/actions.yaml` — fills in the existing log-only stubs
   for `zoom_in`, `zoom_out` (adds optional anchor params) and
   `fit_in_window` (cleans up the "artboard origin" phrasing to
@@ -315,7 +315,7 @@ when a document is reopened from disk.
 - Marquee zoom (drag a rect, fit-inside on mouseup, exact fit).
 - Scrubby zoom (drag-to-zoom-continuously, anchor at mousedown,
   Alt-flip during drag). Mode selected by
-  `preferences.view.scrubby_zoom` (default `true`).
+  `preferences.viewport.scrubby_zoom` (default `true`).
 - Mouse wheel zoom: `Ctrl+wheel` = step zoom, cursor-centered, no
   acceleration.
 - Keyboard shortcuts: `Ctrl+=`, `Ctrl+-`, `Ctrl+0`, `Ctrl+Alt+0`,

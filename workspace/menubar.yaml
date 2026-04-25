@@ -60,7 +60,13 @@ menubar:
           enabled_when: "state.tab_count > 0" }
       - { id: menu_zoom_out, label: "Zoom &Out",      action: zoom_out,      shortcut: "Ctrl+-",
           enabled_when: "state.tab_count > 0" }
-      - { id: menu_fit,      label: "&Fit in Window",  action: fit_in_window, shortcut: "Ctrl+0",
+      - { id: menu_zoom_actual_size, label: "Actual &Size",       action: zoom_to_actual_size,  shortcut: "Ctrl+1",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_fit_artboard,     label: "Fit &Artboard in Window", action: fit_active_artboard, shortcut: "Ctrl+0",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_fit_all_artboards, label: "Fit A&ll in Window", action: fit_all_artboards,   shortcut: "Ctrl+Alt+0",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_fit,      label: "&Fit in Window",  action: fit_in_window,
           enabled_when: "state.tab_count > 0" }
 
   - id: window_menu

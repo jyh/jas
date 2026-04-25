@@ -25,7 +25,9 @@ shortcuts:
   # View
   - { key: "Ctrl+=",       action: zoom_in }
   - { key: "Ctrl+-",       action: zoom_out }
-  - { key: "Ctrl+0",       action: fit_in_window }
+  - { key: "Ctrl+0",       action: fit_active_artboard }
+  - { key: "Ctrl+Alt+0",   action: fit_all_artboards }
+  - { key: "Ctrl+1",       action: zoom_to_actual_size }
   # Tools
   - { key: "V",            action: select_tool,      params: { tool: selection } }
   - { key: "A",            action: select_tool,      params: { tool: partial_selection } }
@@ -38,6 +40,8 @@ shortcuts:
   - { key: "N",            action: select_tool,      params: { tool: pencil } }
   - { key: "Shift+E",      action: select_tool,      params: { tool: path_eraser } }
   - { key: "Q",            action: select_tool,      params: { tool: lasso } }
+  - { key: "Z",            action: select_tool,      params: { tool: zoom } }
+  - { key: "H",            action: select_tool,      params: { tool: hand } }
   # Fill / Stroke
   - { key: "D",            action: reset_fill_stroke }
   - { key: "X",            action: toggle_fill_on_top }

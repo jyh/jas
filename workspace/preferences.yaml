@@ -28,7 +28,9 @@ preferences:
     zoom_step: 1.2             # multiplier per zoom in/out
     min_zoom: 0.1
     max_zoom: 64.0
-    fit_padding_px: 20
+    fit_padding_px: 20         # screen-space padding around fit_* targets
+    scrubby_zoom: true         # if true, Zoom-tool drag = scrubby; else marquee
+    scrubby_zoom_gain: 144     # px of horizontal drag per e-fold of zoom factor
 
   brushes:
     persistent_libraries:      # list of library slugs auto-opened on launch

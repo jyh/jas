@@ -1,0 +1,79 @@
+# Hand tool — pans the canvas by click-and-drag without modifying any
+# document content. Modifies view state only:
+# active_document.view_offset_x and view_offset_y. Pan is unbounded
+# (no clamp).
+#
+# Gestures per HAND_TOOL.md §Gestures:
+#   drag         → pan; mousedown anchors the cursor-to-document
+#                  binding; on each mousemove view_offset is the
+#                  initial offset plus the cursor delta from press
+#   plain click  → no-op (no drag = no pan)
+#   Escape       → cancel in-progress drag; revert
+#   dblclick toolbar icon → invoke fit_active_artboard (handled by the
+#                           toolbar dispatcher reading
+#                           tool_options_action)
+#
+# Spacebar pass-through (Space-held while another tool is active
+# temporarily switches to Hand) is implemented per-app in keyboard
+# handlers — it's a tool-modal behavior with explicit save/restore
+# semantics, not a workspace-level shortcut. See HAND_TOOL.md
+# §Spacebar pass-through for the contract.
+
+id: hand
+cursor: open_hand
+menu_label: "Hand Tool"
+shortcut: "H"
+tool_options_action: "fit_active_artboard"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, panning]
+  press_x:      { default: 0.0 }
+  press_y:      { default: 0.0 }
+  # Snapshot of view offset at mousedown — read by doc.pan.apply to
+  # compute the new offset idempotently from cumulative drag.
+  initial_offx: { default: 0.0 }
+  initial_offy: { default: 0.0 }
+
+handlers:
+
+  on_enter:
+    - set: { tool.hand.mode: "'idle'" }
+
+  on_leave:
+    - set: { tool.hand.mode: "'idle'" }
+
+  on_mousedown:
+    - set: { tool.hand.press_x:      "event.x" }
+    - set: { tool.hand.press_y:      "event.y" }
+    - set: { tool.hand.initial_offx: "active_document.view_offset_x" }
+    - set: { tool.hand.initial_offy: "active_document.view_offset_y" }
+    - set: { tool.hand.mode:         "'panning'" }
+
+  on_mousemove:
+    - if: "tool.hand.mode == 'panning'"
+      then:
+        - "doc.pan.apply":
+            press_x:      "tool.hand.press_x"
+            press_y:      "tool.hand.press_y"
+            cursor_x:     "event.x"
+            cursor_y:     "event.y"
+            initial_offx: "tool.hand.initial_offx"
+            initial_offy: "tool.hand.initial_offy"
+
+  on_mouseup:
+    - set: { tool.hand.mode: "'idle'" }
+
+  on_keydown:
+    - if: "event.key == 'Escape' && tool.hand.mode == 'panning'"
+      then:
+        # Cancel drag — restore pre-drag pan.
+        - "doc.zoom.set_full":
+            zoom:     "active_document.zoom_level"
+            offset_x: "tool.hand.initial_offx"
+            offset_y: "tool.hand.initial_offy"
+        - set: { tool.hand.mode: "'idle'" }
+
+# Hand has no overlay — it's a direct-manipulation pan with no auxiliary
+# rendering. The cursor change between open and closed hand is per-app.

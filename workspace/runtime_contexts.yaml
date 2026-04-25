@@ -14,6 +14,8 @@ runtime_contexts:
       can_undo: false
       can_redo: false
       zoom_level: 1.0
+      view_offset_x: 0.0
+      view_offset_y: 0.0
       layers_panel_selection_count: 0
       layers_panel_selection_is_container: false
       layers_panel_selection_has_group: false
@@ -46,7 +48,23 @@ runtime_contexts:
         description: "The redo stack is non-empty"
       zoom_level:
         type: number
-        description: "Current zoom factor (1.0 = 100%)"
+        description: >
+          Current zoom factor (1.0 = 100%). Per-document; not
+          serialized to disk. Clamped at the producer side to
+          [preferences.viewport.min_zoom, preferences.viewport.max_zoom].
+      view_offset_x:
+        type: number
+        description: >
+          Pan: screen-space pixel coordinate of the document's (0,0)
+          point within the canvas widget. Positive moves the document
+          origin rightward in the viewport. Per-document; not
+          serialized.
+      view_offset_y:
+        type: number
+        description: >
+          Pan: screen-space pixel coordinate of the document's (0,0)
+          point within the canvas widget. Positive moves the document
+          origin downward. Per-document; not serialized.
       # Layers-panel rollups. These are read-only and arguably belong on
       # a panel.* namespace; they live here because `active_document` was
       # historically the only namespace with computed-property machinery.

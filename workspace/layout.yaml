@@ -399,6 +399,59 @@ layout:
                 bind:
                   checked: 'state.active_tool == "lasso"'
 
+              # Row 4, Col 0: Hand slot (Hand / Zoom)
+              - id: btn_hand_slot
+                type: icon_button
+                summary: "Hand (H)"
+                description: >
+                  Pan the canvas by click-and-drag. Spacebar held while
+                  another tool is active temporarily switches to Hand.
+                  Long-press (250ms) opens a menu to switch between Hand
+                  and Zoom tools (the navigation tool pair). Double-click
+                  the icon to invoke fit_active_artboard. The button shows
+                  checked state when either tool in this slot is active.
+                  See HAND_TOOL.md and ZOOM_TOOL.md.
+                icon: "hand"
+                grid: { row: 4, col: 0 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_hand_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: hand_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_hand_slot"
+                  - event: click
+                    action: select_tool
+                    params: { tool: hand }
+                  # Double-click is dispatched by each app's toolbar
+                  # dispatcher reading the active tool's
+                  # tool_options_action field — see
+                  # workspace/tools/hand.yaml and zoom.yaml.
+                bind:
+                  checked: 'mem(state.active_tool, ["hand", "zoom"])'
+                alternates:
+                  menu_id: hand_alternates
+                  items:
+                    - id: hand
+                      label: "Hand (H)"
+                      icon: "hand"
+                      description: "Pan the canvas by click-and-drag"
+                    - id: zoom
+                      label: "Zoom (Z)"
+                      icon: "zoom"
+                      description: >
+                        Zoom in by click; Alt-click to zoom out;
+                        drag for scrubby or marquee zoom; Ctrl+wheel
+                        for stepped zoom
+
           - type: spacer
             style: { height: 8 }
 
