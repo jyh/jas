@@ -1311,6 +1311,28 @@ impl AppState {
             .unwrap_or(&[])
     }
 
+    /// Read the canvas widget's current pixel dimensions and write
+    /// them into the active tab's Model so doc.zoom.fit_* effects
+    /// can compute the fit-to-viewport zoom factor without per-call
+    /// canvas inspection. Called once per render via the App
+    /// component's use_effect; idempotent — only mutates when the
+    /// canvas size has actually changed.
+    pub(crate) fn sync_viewport_dimensions(&mut self) {
+        use wasm_bindgen::JsCast;
+        use web_sys::HtmlCanvasElement;
+        let Some(window) = web_sys::window() else { return; };
+        let Some(document) = window.document() else { return; };
+        let Some(canvas_el) = document.get_element_by_id("jas-canvas") else { return; };
+        let canvas: HtmlCanvasElement = canvas_el.unchecked_into();
+        let cw = canvas.client_width() as f64;
+        let ch = canvas.client_height() as f64;
+        if cw <= 0.0 || ch <= 0.0 { return; }
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            tab.model.viewport_w = cw;
+            tab.model.viewport_h = ch;
+        }
+    }
+
     pub(crate) fn repaint(&self) {
         let window = match web_sys::window() {
             Some(w) => w,
