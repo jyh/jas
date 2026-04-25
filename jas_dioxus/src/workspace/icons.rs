@@ -129,5 +129,12 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
         // ARTBOARD_TOOL.md §Tool icon.
         ToolKind::Artboard => format!(
             r#"<path d="M5,6 L18,6 L23,11 L23,23 L5,23 Z" fill="none" stroke="{c}" stroke-width="2" stroke-linejoin="miter"/><polyline points="18,6 18,11 23,11" fill="none" stroke="{c}" stroke-width="2" stroke-linejoin="miter"/>"#),
+        // Eyedropper — squeeze cap (with horizontal grip lines) at
+        // upper right, thin glass tube descending at ~45° to a sharp
+        // tip at lower left. See EYEDROPPER_TOOL.md §Tool icon.
+        // Source path is the 16x16 Bootstrap-icons eyedropper, scaled
+        // 1.75x to fill the 28x28 viewBox.
+        ToolKind::Eyedropper => format!(
+            r##"<g transform="scale(1.75)"><path d="M13.354 2.646a2.121 2.121 0 0 0-3 0l-1.5 1.5-.708-.708a.5.5 0 0 0-.707.708l.353.353-5.146 5.146A1.5 1.5 0 0 0 2.2 10.5L1.5 14a.5.5 0 0 0 .6.6l3.5-.7a1.5 1.5 0 0 0 .854-.44l5.146-5.146.354.354a.5.5 0 0 0 .707-.708l-.707-.707 1.5-1.5a2.121 2.121 0 0 0 0-3.001zM5.39 12.4a.5.5 0 0 1-.285.147L2.65 13.05l.504-2.454a.5.5 0 0 1 .147-.285L8.5 5.111l1.389 1.389z" fill="{c}"/></g>"##),
     }
 }
