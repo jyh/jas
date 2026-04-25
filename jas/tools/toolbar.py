@@ -34,6 +34,7 @@ class Tool(Enum):
     SELECTION = auto()
     PARTIAL_SELECTION = auto()
     INTERIOR_SELECTION = auto()
+    MAGIC_WAND = auto()
     PEN = auto()
     ADD_ANCHOR_POINT = auto()
     DELETE_ANCHOR_POINT = auto()
@@ -116,6 +117,8 @@ class ToolButton(QToolButton):
             self._draw_partial_selection_arrow(painter)
         elif self.tool == Tool.INTERIOR_SELECTION:
             self._draw_interior_selection_arrow(painter)
+        elif self.tool == Tool.MAGIC_WAND:
+            self._draw_magic_wand_tool(painter)
         elif self.tool == Tool.LINE:
             self._draw_line_tool(painter)
         elif self.tool == Tool.RECT:
@@ -903,6 +906,46 @@ class ToolButton(QToolButton):
         path.cubicTo(12, 16, 16, 17, 17, 15)
         painter.drawPath(path)
 
+    def _draw_magic_wand_tool(self, painter):
+        """Magic Wand icon: handle line + sparkle + accent star.
+
+        Mirrors the Rust SVG glyph in
+        ``jas_dioxus/src/workspace/icons.rs``.
+        """
+        from PySide6.QtCore import QPointF
+        pen = QPen(_icon_color(), 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # Handle: lower-left to upper-right.
+        painter.drawLine(QPointF(4, 24), QPointF(17, 11))
+        # Sparkle at the tip — 4-point star, filled.
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_icon_color())
+        sparkle = QPainterPath()
+        sparkle.moveTo(21, 4)
+        sparkle.lineTo(22.5, 9.5)
+        sparkle.lineTo(28, 11)
+        sparkle.lineTo(22.5, 12.5)
+        sparkle.lineTo(21, 18)
+        sparkle.lineTo(19.5, 12.5)
+        sparkle.lineTo(14, 11)
+        sparkle.lineTo(19.5, 9.5)
+        sparkle.closeSubpath()
+        painter.drawPath(sparkle)
+        # Small accent star, upper-left.
+        accent = QPainterPath()
+        accent.moveTo(5, 5)
+        accent.lineTo(6, 7.5)
+        accent.lineTo(8.5, 8.5)
+        accent.lineTo(6, 9.5)
+        accent.lineTo(5, 12)
+        accent.lineTo(4, 9.5)
+        accent.lineTo(1.5, 8.5)
+        accent.lineTo(4, 7.5)
+        accent.closeSubpath()
+        painter.drawPath(accent)
+
     def _draw_alternate_triangle(self, painter):
         """Small filled triangle in the lower-right corner indicating alternates."""
         tri = QPainterPath()
@@ -917,7 +960,7 @@ class ToolButton(QToolButton):
 
 
 # Tools that share the partial/interior selection slot
-_ARROW_SLOT_TOOLS = {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION}
+_ARROW_SLOT_TOOLS = {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION, Tool.MAGIC_WAND}
 # Tools that share the pen/add-anchor-point slot
 _PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT, Tool.ANCHOR_POINT}
 # Tools that share the pencil/path-eraser slot
@@ -1193,6 +1236,8 @@ class Toolbar(QWidget):
         # Create hidden alternate buttons (not in grid, share slots)
         self.buttons[Tool.INTERIOR_SELECTION] = ToolButton(Tool.INTERIOR_SELECTION, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.INTERIOR_SELECTION])
+        self.buttons[Tool.MAGIC_WAND] = ToolButton(Tool.MAGIC_WAND, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.MAGIC_WAND])
         self.buttons[Tool.ADD_ANCHOR_POINT] = ToolButton(Tool.ADD_ANCHOR_POINT, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.ADD_ANCHOR_POINT])
         self.buttons[Tool.DELETE_ANCHOR_POINT] = ToolButton(Tool.DELETE_ANCHOR_POINT, has_alternates=True)
@@ -1319,9 +1364,14 @@ class Toolbar(QWidget):
 
     def _show_arrow_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION):
-            label = "Partial Selection" if tool == Tool.PARTIAL_SELECTION else "Interior Selection"
-            action = menu.addAction(label)
+        labels = {
+            Tool.PARTIAL_SELECTION: "Partial Selection",
+            Tool.INTERIOR_SELECTION: "Interior Selection",
+            Tool.MAGIC_WAND: "Magic Wand",
+        }
+        for tool in (Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION,
+                     Tool.MAGIC_WAND):
+            action = menu.addAction(labels[tool])
             action.setCheckable(True)
             action.setChecked(tool == self._arrow_slot_tool)
             action.triggered.connect(lambda checked, t=tool: self._switch_arrow_slot(t))
