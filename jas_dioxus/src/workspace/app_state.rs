@@ -60,16 +60,12 @@ pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>
 pub(crate) use crate::document::model::EditingTarget;
 
 /// Per-tab state: each tab has its own document, tools, and clipboard.
+/// View state (zoom_level, view_offset_x, view_offset_y) lives on the
+/// inner Model so doc.zoom.* effects can mutate it directly.
 pub(crate) struct TabState {
     pub(crate) model: Model,
     pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
     pub(crate) clipboard: Vec<GeoElement>,
-    /// Per-document view state (per ZOOM_TOOL.md §State persistence).
-    /// Persists across tab switches within a session; reset to defaults
-    /// on document open (not serialized to disk in Phase 1).
-    pub(crate) zoom_level: f64,
-    pub(crate) view_offset_x: f64,
-    pub(crate) view_offset_y: f64,
 }
 
 impl TabState {
@@ -106,9 +102,6 @@ impl TabState {
             model,
             tools,
             clipboard: Vec::new(),
-            zoom_level: 1.0,
-            view_offset_x: 0.0,
-            view_offset_y: 0.0,
         }
     }
 }
