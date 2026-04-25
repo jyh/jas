@@ -17704,11 +17704,21 @@
                     "doc.snapshot": {}
                   },
                   {
-                    "doc.preview.capture": {}
+                    "set": {
+                      "tool.artboard.snapshotted": "true"
+                    }
+                  }
+                ]
+              },
+              {
+                "if": "tool.artboard.mode == 'duplicating_pending'",
+                "then": [
+                  {
+                    "doc.artboard.duplicate_init": {}
                   },
                   {
                     "set": {
-                      "tool.artboard.snapshotted": "true"
+                      "tool.artboard.mode": "'duplicating'"
                     }
                   }
                 ]
@@ -17724,14 +17734,7 @@
                 ]
               },
               {
-                "if": "tool.artboard.mode == 'duplicating_pending'",
-                "then": [
-                  {
-                    "set": {
-                      "tool.artboard.mode": "'duplicating'"
-                    }
-                  }
-                ]
+                "doc.preview.capture": {}
               }
             ]
           },

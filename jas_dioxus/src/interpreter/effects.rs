@@ -1132,6 +1132,40 @@ fn run_doc_effect(
             // doesn't shift on rounding.
             artboard_resize_commit(model, store);
         }
+        "doc.artboard.duplicate_init" => {
+            // Create the duplicate-in-progress at the source artboard's
+            // current position. Called once at the threshold latch in
+            // the YAML's on_mousemove handler (right before
+            // doc.preview.capture so the preview baseline includes
+            // the new artboard). Subsequent doc.artboard.duplicate_apply
+            // calls translate the duplicate via the move-translation
+            // path; doc.artboard.duplicate_commit rounds and
+            // finalizes. Per ARTBOARD_TOOL.md §Alt-drag duplicate.
+            //
+            // Move/Copy Artwork element copy is hard-coded on per
+            // spec; element deep-copy lands in P1.3c. Today: only
+            // the artboard rect is duplicated.
+            artboard_duplicate_init(model, store);
+        }
+        "doc.artboard.duplicate_apply" => {
+            // Translate the duplicate-in-progress by (cursor - press).
+            // Since duplicate_init updated tool.artboard.hit_artboard_id
+            // to point to the new duplicate, the move logic's
+            // single-target fallback path handles the translate.
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                artboard_move_apply(model, store, press_x, press_y,
+                    cursor_x, cursor_y, false);
+            }
+        }
+        "doc.artboard.duplicate_commit" => {
+            // Re-applies translate with integer-pt rounded
+            // displacement; same path as move_commit.
+            artboard_move_commit(model, store);
+        }
         "doc.artboard.move_apply" => {
             // Live drag-to-move per ARTBOARD_TOOL.md §Drag-to-move.
             // Runs on every mousemove during a drag; idempotent
@@ -2872,6 +2906,60 @@ fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
         return;
     }
     artboard_translate_from_preview(model, &target_ids, dx, dy);
+}
+
+/// Implementation of doc.artboard.duplicate_init per ARTBOARD_TOOL.md
+/// §Alt-drag duplicate. Reads the source artboard from
+/// tool.artboard.hit_artboard_id, deep-copies it (fresh id, fresh
+/// "Artboard N" name) at the source's current position, appends the
+/// duplicate to document.artboards, and updates hit_artboard_id to
+/// point to the new artboard so subsequent translate ops target the
+/// duplicate (not the source). The source artboard remains unchanged.
+fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
+    use crate::document::artboard::{generate_artboard_id, next_artboard_name, Artboard};
+
+    let source_id = store
+        .eval_context()
+        .get("tool")
+        .and_then(|t| t.get("artboard"))
+        .and_then(|a| a.get("hit_artboard_id"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let Some(source_id) = source_id else { return; };
+
+    let source = model
+        .document()
+        .artboards
+        .iter()
+        .find(|a| a.id == source_id)
+        .cloned();
+    let Some(source) = source else { return; };
+
+    let mut new_doc = model.document().clone();
+    let existing_ids: std::collections::HashSet<String> =
+        new_doc.artboards.iter().map(|a| a.id.clone()).collect();
+    let mut new_id = String::new();
+    for _ in 0..100 {
+        let candidate = generate_artboard_id(None);
+        if !existing_ids.contains(&candidate) {
+            new_id = candidate;
+            break;
+        }
+    }
+    if new_id.is_empty() {
+        return;
+    }
+
+    let dup = Artboard {
+        id: new_id.clone(),
+        name: next_artboard_name(&new_doc.artboards),
+        ..source
+    };
+    new_doc.artboards.push(dup);
+    model.set_document(new_doc);
+
+    // Retarget translate ops at the duplicate.
+    store.set_tool("artboard", "hit_artboard_id", serde_json::json!(new_id));
 }
 
 /// Compute new (x, y, w, h) for a resize gesture given the handle
@@ -7087,6 +7175,50 @@ mod tests {
         assert_eq!(ny, -5.0);
         assert_eq!(nw, 200.0);
         assert_eq!(nh, 100.0);
+    }
+
+    #[test]
+    fn test_doc_artboard_duplicate_init_creates_at_source() {
+        // duplicate_init creates a new artboard cloned from
+        // tool.artboard.hit_artboard_id at the source's bounds, with
+        // a fresh id and "Artboard N" name. hit_artboard_id is
+        // updated to point to the new duplicate so subsequent
+        // translate ops target it (not the source).
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("src00001".into());
+        a.name = "Artboard 1".into();
+        a.x = 100.0; a.y = 200.0;
+        a.width = 50.0; a.height = 80.0;
+        doc.artboards.push(a);
+        let mut model = Model::new(doc, None);
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("src00001"));
+        let effects = vec![serde_json::json!({
+            "doc.artboard.duplicate_init": {}
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let abs = &model.document().artboards;
+        assert_eq!(abs.len(), 2);
+        assert_eq!(abs[0].id, "src00001");  // source unchanged
+        let dup = &abs[1];
+        assert_ne!(dup.id, "src00001");  // fresh id
+        assert_eq!(dup.x, 100.0);  // same position as source
+        assert_eq!(dup.y, 200.0);
+        assert_eq!(dup.width, 50.0);
+        assert_eq!(dup.height, 80.0);
+        assert_eq!(dup.name, "Artboard 2");  // next-name-rule
+        // hit_artboard_id retargeted to the duplicate
+        let new_hit = store.eval_context()
+            .get("tool").unwrap()
+            .get("artboard").unwrap()
+            .get("hit_artboard_id").unwrap()
+            .as_str().unwrap().to_string();
+        assert_eq!(new_hit, dup.id);
     }
 
     #[test]
