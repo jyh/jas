@@ -308,6 +308,17 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
+                "toggle_panel_magic_wand" => {
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::MagicWand) {
+                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::MagicWand) {
+                                st.workspace_layout.close_panel(addr);
+                            }
+                        } else {
+                            st.workspace_layout.show_panel(super::workspace::PanelKind::MagicWand);
+                        }
+                    }));
+                }
                 "toggle_panel_artboards" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Artboards) {

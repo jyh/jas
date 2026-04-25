@@ -54,6 +54,38 @@ fn tool_options_dialog_id(kind: ToolKind) -> Option<String> {
         .map(String::from)
 }
 
+/// Look up a tool's `tool_options_panel` field in workspace.json.
+/// Returns the panel id when present, None otherwise. Parallel to
+/// `tool_options_dialog_id` — dialog-style options are modal
+/// (Reset / Cancel / OK); panel-style options are persistent
+/// (Magic Wand). Use one or the other on a tool, not both.
+/// See MAGIC_WAND_TOOL.md §Magic Wand Panel.
+fn tool_options_panel_id(kind: ToolKind) -> Option<String> {
+    use crate::interpreter::workspace::Workspace;
+    let yaml_id = tool_yaml_id(kind)?;
+    let ws = Workspace::load()?;
+    ws.data()
+        .get("tools")?
+        .get(yaml_id)?
+        .get("tool_options_panel")?
+        .as_str()
+        .map(String::from)
+}
+
+/// Map a YAML panel id (the value of `tool_options_panel`) to the
+/// corresponding PanelKind. Returns None when the id doesn't match
+/// any known panel — the toolbar dblclick is silently a no-op in
+/// that case.
+fn panel_id_to_kind(id: &str) -> Option<crate::workspace::workspace::PanelKind> {
+    use crate::workspace::workspace::PanelKind;
+    Some(match id {
+        "magic_wand" => PanelKind::MagicWand,
+        // Add other tool panels here as they gain
+        // tool_options_panel fields.
+        _ => return None,
+    })
+}
+
 /// Toolbar layout: 2-column grid matching the Python/Qt version.
 /// Each entry is (row, col, primary_tool, alternates).
 /// Slots with alternates show the current alternate and support long-press to switch.
@@ -164,9 +196,22 @@ pub(crate) fn ToolbarGrid(
                     },
                     ondoubleclick: {
                         let app_dbl = app.clone();
+                        let act_dbl = act.clone();
                         let mut dlg_sig = yaml_dialog_sig;
                         move |evt: Event<MouseData>| {
                             evt.stop_propagation();
+                            // Prefer panel-style tool options (Magic
+                            // Wand) over dialog-style (Paintbrush /
+                            // Blob Brush). A tool yaml uses one or
+                            // the other, not both.
+                            if let Some(panel_id) = tool_options_panel_id(kind) {
+                                if let Some(panel_kind) = panel_id_to_kind(&panel_id) {
+                                    (act_dbl.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                        st.workspace_layout.show_panel(panel_kind);
+                                    }));
+                                }
+                                return;
+                            }
                             let Some(dlg_id) = tool_options_dialog_id(kind) else { return; };
                             // Activate the tool first so the dialog opens
                             // over the tool it belongs to.
