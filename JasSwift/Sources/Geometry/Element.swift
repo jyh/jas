@@ -1273,6 +1273,23 @@ public enum Element: Equatable {
     /// to move elements without disturbing existing rotation / scale.
     public func withTransformTranslated(dx: Double, dy: Double) -> Element {
         let t = (transform ?? .identity).translated(dx, dy)
+        return withTransformSet(t)
+    }
+
+    /// Return a copy of this element with `matrix` pre-multiplied
+    /// onto its existing transform. Used by the transform-tool
+    /// family (Scale / Rotate / Shear) to compose a per-frame
+    /// matrix on top of any existing transform without disturbing
+    /// the element's geometry. See SCALE_TOOL.md §Apply behavior.
+    public func withTransformPremultiplied(_ matrix: Transform) -> Element {
+        let t = matrix.multiply(transform ?? .identity)
+        return withTransformSet(t)
+    }
+
+    /// Internal: replace the element's transform with `t`,
+    /// preserving every other field. Shared by
+    /// `withTransformTranslated` and `withTransformPremultiplied`.
+    private func withTransformSet(_ t: Transform) -> Element {
         switch self {
         case .line(let v):
             return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
