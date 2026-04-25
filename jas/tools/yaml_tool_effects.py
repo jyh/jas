@@ -2373,19 +2373,19 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     from document import artboard as _artboard_mod
     from dataclasses import replace as _dc_replace
 
-    def _read_panel_selection_ids():
+    def _read_panel_selection_ids(store):
         ctx_obj = store.eval_context()
         active = ctx_obj.get("active_document", {}) if isinstance(ctx_obj, dict) else {}
         ids = active.get("artboards_panel_selection_ids", [])
         return [s for s in ids if isinstance(s, str)]
 
-    def _read_panel_anchor():
+    def _read_panel_anchor(store):
         ctx_obj = store.eval_context()
         active = ctx_obj.get("active_document", {}) if isinstance(ctx_obj, dict) else {}
         a = active.get("artboards_panel_anchor")
         return a if isinstance(a, str) else None
 
-    def _read_tool_artboard_field(key, default=None):
+    def _read_tool_artboard_field(store, key, default=None):
         ctx_obj = store.eval_context()
         tool = ctx_obj.get("tool", {}) if isinstance(ctx_obj, dict) else {}
         ab = tool.get("artboard", {}) if isinstance(tool, dict) else {}
@@ -2443,8 +2443,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             return _dc_replace(elem, children=new_children)
         return move_control_points(elem, selection_kind_all(), dx, dy)
 
-    def _read_duplicated_paths():
-        raw = _read_tool_artboard_field("duplicated_paths", []) or []
+    def _read_duplicated_paths(store):
+        raw = _read_tool_artboard_field(store, "duplicated_paths", []) or []
         out = []
         for p in raw:
             if isinstance(p, list) and len(p) == 2:
@@ -2455,7 +2455,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                     pass
         return out
 
-    def _artboard_translate_from_preview(target_ids, dx, dy):
+    def _artboard_translate_from_preview(store, target_ids, dx, dy):
         model = controller.model
         if not getattr(model, "has_preview_snapshot", False):
             return
@@ -2491,7 +2491,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
 
         # Explicit-path translation (for duplicate's deep-copies).
         if dx != 0.0 or dy != 0.0:
-            dup_paths = _read_duplicated_paths()
+            dup_paths = _read_duplicated_paths(store)
             if dup_paths:
                 rebuilt = []
                 for li, layer in enumerate(new_layers):
@@ -2513,45 +2513,45 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.set_document(_dc_replace(
             doc, layers=tuple(new_layers), artboards=new_artboards))
 
-    def doc_artboard_probe_hit(spec, ctx, store_arg):
+    def doc_artboard_probe_hit(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
-        x = eval_number(spec.get("x"), store_arg, ctx)
-        y = eval_number(spec.get("y"), store_arg, ctx)
-        shift = eval_bool(spec.get("shift"), store_arg, ctx)
-        cmd = eval_bool(spec.get("cmd"), store_arg, ctx)
-        alt = eval_bool(spec.get("alt"), store_arg, ctx)
-        store_arg.set_tool("artboard", "hit_artboard_id", None)
-        store_arg.set_tool("artboard", "hit_handle_pos", None)
+        x = eval_number(spec.get("x"), store, ctx)
+        y = eval_number(spec.get("y"), store, ctx)
+        shift = eval_bool(spec.get("shift"), store, ctx)
+        cmd = eval_bool(spec.get("cmd"), store, ctx)
+        alt = eval_bool(spec.get("alt"), store, ctx)
+        store.set_tool("artboard", "hit_artboard_id", None)
+        store.set_tool("artboard", "hit_handle_pos", None)
         doc = controller.document
-        sel_ids = _read_panel_selection_ids()
+        sel_ids = _read_panel_selection_ids(store)
 
         handle = _artboard_handle_hit(doc, sel_ids, x, y)
         if handle is not None:
             ab_id, pos = handle
-            store_arg.set_tool("artboard", "mode", "resizing")
-            store_arg.set_tool("artboard", "hit_artboard_id", ab_id)
-            store_arg.set_tool("artboard", "hit_handle_pos", pos)
+            store.set_tool("artboard", "mode", "resizing")
+            store.set_tool("artboard", "hit_artboard_id", ab_id)
+            store.set_tool("artboard", "hit_handle_pos", pos)
             return None
 
         hit_id = _artboard_interior_hit(doc, x, y)
         if hit_id is not None:
             mode = "duplicating_pending" if alt else "moving_pending"
-            store_arg.set_tool("artboard", "mode", mode)
-            store_arg.set_tool("artboard", "hit_artboard_id", hit_id)
+            store.set_tool("artboard", "mode", mode)
+            store.set_tool("artboard", "hit_artboard_id", hit_id)
             current = sel_ids
-            anchor = _read_panel_anchor()
+            anchor = _read_panel_anchor(store)
             if shift:
                 ids = [a.id for a in doc.artboards]
                 if anchor in ids and hit_id in ids:
                     ai = ids.index(anchor); ti = ids.index(hit_id)
                     lo, hi = min(ai, ti), max(ai, ti)
-                    store_arg.set_panel("artboards",
+                    store.set_panel("artboards",
                         "artboards_panel_selection", ids[lo:hi+1])
                 else:
-                    store_arg.set_panel("artboards",
+                    store.set_panel("artboards",
                         "artboards_panel_selection", [hit_id])
-                    store_arg.set_panel("artboards",
+                    store.set_panel("artboards",
                         "panel_selection_anchor", hit_id)
             elif cmd:
                 new_sel = list(current)
@@ -2559,45 +2559,45 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                     new_sel.remove(hit_id)
                 else:
                     new_sel.append(hit_id)
-                store_arg.set_panel("artboards",
+                store.set_panel("artboards",
                     "artboards_panel_selection", new_sel)
             else:
-                store_arg.set_panel("artboards",
+                store.set_panel("artboards",
                     "artboards_panel_selection", [hit_id])
-                store_arg.set_panel("artboards",
+                store.set_panel("artboards",
                     "panel_selection_anchor", hit_id)
             return None
 
         # Empty canvas.
-        store_arg.set_tool("artboard", "mode", "creating")
-        store_arg.set_panel("artboards", "artboards_panel_selection", [])
-        store_arg.set_panel("artboards", "panel_selection_anchor", None)
+        store.set_tool("artboard", "mode", "creating")
+        store.set_panel("artboards", "artboards_panel_selection", [])
+        store.set_panel("artboards", "panel_selection_anchor", None)
         return None
 
-    def doc_artboard_probe_hover(spec, ctx, store_arg):
+    def doc_artboard_probe_hover(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
-        x = eval_number(spec.get("x"), store_arg, ctx)
-        y = eval_number(spec.get("y"), store_arg, ctx)
+        x = eval_number(spec.get("x"), store, ctx)
+        y = eval_number(spec.get("y"), store, ctx)
         doc = controller.document
-        sel_ids = _read_panel_selection_ids()
+        sel_ids = _read_panel_selection_ids(store)
         handle = _artboard_handle_hit(doc, sel_ids, x, y)
         if handle is not None:
-            store_arg.set_tool("artboard", "hover_kind", f"handle:{handle[1]}")
+            store.set_tool("artboard", "hover_kind", f"handle:{handle[1]}")
             return None
         if _artboard_interior_hit(doc, x, y) is not None:
-            store_arg.set_tool("artboard", "hover_kind", "interior")
+            store.set_tool("artboard", "hover_kind", "interior")
             return None
-        store_arg.set_tool("artboard", "hover_kind", "empty")
+        store.set_tool("artboard", "hover_kind", "empty")
         return None
 
-    def doc_artboard_create_commit(spec, ctx, store_arg):
+    def doc_artboard_create_commit(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
-        x1 = eval_number(spec.get("x1"), store_arg, ctx)
-        y1 = eval_number(spec.get("y1"), store_arg, ctx)
-        x2 = eval_number(spec.get("x2"), store_arg, ctx)
-        y2 = eval_number(spec.get("y2"), store_arg, ctx)
+        x1 = eval_number(spec.get("x1"), store, ctx)
+        y1 = eval_number(spec.get("y1"), store, ctx)
+        x2 = eval_number(spec.get("x2"), store, ctx)
+        y2 = eval_number(spec.get("y2"), store, ctx)
         raw_x = round(min(x1, x2))
         raw_y = round(min(y1, y2))
         raw_w = max(round(abs(x1 - x2)), 1.0)
@@ -2628,28 +2628,28 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             else: dx = 0.0
         return dx, dy
 
-    def _resolve_target_ids():
-        ids = _read_panel_selection_ids()
+    def _resolve_target_ids(store):
+        ids = _read_panel_selection_ids(store)
         if ids:
             return ids
-        hit = _read_tool_artboard_field("hit_artboard_id")
+        hit = _read_tool_artboard_field(store, "hit_artboard_id")
         return [hit] if isinstance(hit, str) else []
 
-    def doc_artboard_move_apply(spec, ctx, store_arg):
+    def doc_artboard_move_apply(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
-        px = eval_number(spec.get("press_x"), store_arg, ctx)
-        py = eval_number(spec.get("press_y"), store_arg, ctx)
-        cx = eval_number(spec.get("cursor_x"), store_arg, ctx)
-        cy = eval_number(spec.get("cursor_y"), store_arg, ctx)
-        shift = eval_bool(spec.get("shift_held"), store_arg, ctx)
+        px = eval_number(spec.get("press_x"), store, ctx)
+        py = eval_number(spec.get("press_y"), store, ctx)
+        cx = eval_number(spec.get("cursor_x"), store, ctx)
+        cy = eval_number(spec.get("cursor_y"), store, ctx)
+        shift = eval_bool(spec.get("shift_held"), store, ctx)
         dx, dy = _move_compute_delta(px, py, cx, cy, shift)
-        targets = _resolve_target_ids()
+        targets = _resolve_target_ids(store)
         if targets:
-            _artboard_translate_from_preview(targets, dx, dy)
+            _artboard_translate_from_preview(store, targets, dx, dy)
         return None
 
-    def doc_artboard_move_commit(_spec, _ctx, store_arg):
+    def doc_artboard_move_commit(_spec, _ctx, store):
         ab = store.eval_context().get("tool", {}).get("artboard", {})
         px = float(ab.get("press_x", 0))
         py = float(ab.get("press_y", 0))
@@ -2658,9 +2658,9 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         shift = bool(ab.get("shift_held", False))
         dx, dy = _move_compute_delta(px, py, cx, cy, shift)
         dx = float(round(dx)); dy = float(round(dy))
-        targets = _resolve_target_ids()
+        targets = _resolve_target_ids(store)
         if targets:
-            _artboard_translate_from_preview(targets, dx, dy)
+            _artboard_translate_from_preview(store, targets, dx, dy)
         return None
 
     def _artboard_resize_compute(handle_pos, ox, oy, ow, oh, cx, cy,
@@ -2755,7 +2755,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             nx = min(cx, right - 1.0); nw = right - nx
         return (nx, ny, nw, nh)
 
-    def doc_artboard_resize_apply(spec, ctx, store_arg):
+    def doc_artboard_resize_apply(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
         raw_handle = spec.get("handle_pos")
@@ -2764,17 +2764,17 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             handle_pos = raw_handle
         else:
             from workspace_interpreter import expr as _expr
-            v = _expr.eval_expr(raw_handle, store_arg.eval_context(extra=ctx)) \
+            v = _expr.eval_expr(raw_handle, store.eval_context(extra=ctx)) \
                 if isinstance(raw_handle, str) else None
             handle_pos = v if isinstance(v, str) else ""
-        cx = eval_number(spec.get("cursor_x"), store_arg, ctx)
-        cy = eval_number(spec.get("cursor_y"), store_arg, ctx)
-        shift = eval_bool(spec.get("shift_held"), store_arg, ctx)
-        alt = eval_bool(spec.get("alt_held"), store_arg, ctx)
+        cx = eval_number(spec.get("cursor_x"), store, ctx)
+        cy = eval_number(spec.get("cursor_y"), store, ctx)
+        shift = eval_bool(spec.get("shift_held"), store, ctx)
+        alt = eval_bool(spec.get("alt_held"), store, ctx)
         model = controller.model
         if not getattr(model, "has_preview_snapshot", False):
             return None
-        target_id = _read_tool_artboard_field("hit_artboard_id")
+        target_id = _read_tool_artboard_field(store, "hit_artboard_id")
         if not isinstance(target_id, str):
             return None
         model.restore_preview_snapshot()
@@ -2790,7 +2790,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.set_document(_dc_replace(doc, artboards=tuple(new_artboards)))
         return None
 
-    def doc_artboard_resize_commit(_spec, _ctx, store_arg):
+    def doc_artboard_resize_commit(_spec, _ctx, store):
         ab = store.eval_context().get("tool", {}).get("artboard", {})
         cx = float(ab.get("cursor_x", 0))
         cy = float(ab.get("cursor_y", 0))
@@ -2818,7 +2818,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         return None
 
     def doc_artboard_delete_panel_selected(_spec, _ctx, _store):
-        targets = _read_panel_selection_ids()
+        targets = _read_panel_selection_ids(store)
         if not targets:
             return None
         doc = controller.document
@@ -2829,8 +2829,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.set_document(_dc_replace(doc, artboards=new_artboards))
         return None
 
-    def doc_artboard_duplicate_init(_spec, _ctx, store_arg):
-        source_id = _read_tool_artboard_field("hit_artboard_id")
+    def doc_artboard_duplicate_init(_spec, _ctx, store):
+        source_id = _read_tool_artboard_field(store, "hit_artboard_id")
         if not isinstance(source_id, str):
             return None
         doc = controller.document
@@ -2869,20 +2869,20 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         new_artboards = tuple(list(doc.artboards) + [dup])
         controller.set_document(_dc_replace(
             doc, layers=tuple(new_layers), artboards=new_artboards))
-        store_arg.set_tool("artboard", "hit_artboard_id", new_id)
-        store_arg.set_tool("artboard", "duplicated_paths", dup_paths)
+        store.set_tool("artboard", "hit_artboard_id", new_id)
+        store.set_tool("artboard", "duplicated_paths", dup_paths)
         return None
 
-    def doc_artboard_duplicate_apply(spec, ctx, store_arg):
+    def doc_artboard_duplicate_apply(spec, ctx, store):
         if not isinstance(spec, dict):
             return None
-        px = eval_number(spec.get("press_x"), store_arg, ctx)
-        py = eval_number(spec.get("press_y"), store_arg, ctx)
-        cx = eval_number(spec.get("cursor_x"), store_arg, ctx)
-        cy = eval_number(spec.get("cursor_y"), store_arg, ctx)
-        targets = _resolve_target_ids()
+        px = eval_number(spec.get("press_x"), store, ctx)
+        py = eval_number(spec.get("press_y"), store, ctx)
+        cx = eval_number(spec.get("cursor_x"), store, ctx)
+        cy = eval_number(spec.get("cursor_y"), store, ctx)
+        targets = _resolve_target_ids(store)
         if targets:
-            _artboard_translate_from_preview(targets, cx - px, cy - py)
+            _artboard_translate_from_preview(store, targets, cx - px, cy - py)
         return None
 
     doc_artboard_duplicate_commit = doc_artboard_move_commit
