@@ -1665,6 +1665,14 @@ class CanvasWidget(QWidget):
         self._controller = controller
         self._bbox = bbox
         self._current_tool_enum = Tool.SELECTION
+        # Tool to restore when spacebar pass-through to Hand
+        # releases. None when no pass-through is active. Per
+        # HAND_TOOL.md §Spacebar pass-through.
+        self._prior_tool_for_spacebar: Tool | None = None
+        # Callback wired by jas_app: when set, the canvas calls it
+        # to request a tool change (rather than calling set_tool
+        # directly) so the toolbar UI stays in sync.
+        self.on_request_tool_change = None
         # Inline text editing state (managed by canvas, exposed via context)
         self._text_editor: QLineEdit | None = None
         self._editing_path: tuple[int, ...] | None = None
@@ -1876,6 +1884,18 @@ class CanvasWidget(QWidget):
         )
 
     def keyPressEvent(self, event):
+        # Spacebar pass-through to Hand. Save the current tool and
+        # request a switch to Hand for the duration of the hold,
+        # unless the active tool is capturing keyboard (text editing).
+        # Per HAND_TOOL.md §Spacebar pass-through.
+        if (event.key() == Qt.Key.Key_Space
+                and not self._active_tool.captures_keyboard()
+                and self._current_tool_enum != Tool.HAND
+                and self._prior_tool_for_spacebar is None
+                and self.on_request_tool_change is not None):
+            self._prior_tool_for_spacebar = self._current_tool_enum
+            self.on_request_tool_change(Tool.HAND)
+            return
         # When the active tool is capturing keyboard (active text edit
         # session), all keys go to it first.
         if self._active_tool.captures_keyboard():
@@ -1916,6 +1936,15 @@ class CanvasWidget(QWidget):
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        # Spacebar pass-through restore: if a prior tool was saved on
+        # Space-down, request a switch back to it on Space-up.
+        if (event.key() == Qt.Key.Key_Space
+                and self._prior_tool_for_spacebar is not None
+                and self.on_request_tool_change is not None):
+            prior = self._prior_tool_for_spacebar
+            self._prior_tool_for_spacebar = None
+            self.on_request_tool_change(prior)
+            return
         if self._active_tool.on_key_release(self._tool_ctx, event.key()):
             return
         super().keyReleaseEvent(event)
