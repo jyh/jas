@@ -34,6 +34,11 @@
       "pattern": "^[a-z][a-z0-9_]*$",
       "description": "Id of a dialog in workspace/dialogs/ that opens when the user double-clicks this tool's icon in the toolbar. The toolbar dispatches dialog.open with this id."
     },
+    "tool_options_panel": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Id of a panel in workspace/panels/ that the toolbar shows / focuses when the user double-clicks this tool's icon. Parallel to tool_options_dialog: dialog destinations are modal (Reset / Cancel / OK), panel destinations are persistent. Use one or the other, not both."
+    },
     "state": {
       "type": "object",
       "description": "Tool-local state slots. Namespaced as $tool.<id>.* in expressions.",

@@ -163,6 +163,15 @@ class WorkspaceData {
     }
 }
 
+/// Map a tool yaml's `tool_options_panel` string id to the matching
+/// PanelKind. Returns nil if the id does not name a known panel.
+public func panelIdToKind(_ id: String) -> PanelKind? {
+    switch id {
+    case "magic_wand": return .magicWand
+    default: return nil
+    }
+}
+
 /// Map PanelKind to YAML content id.
 func panelKindToContentId(_ kind: PanelKind) -> String {
     switch kind {
@@ -177,5 +186,6 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     case .align: return "align_panel_content"
     case .boolean: return "boolean_panel_content"
     case .opacity: return "opacity_panel_content"
+    case .magicWand: return "magic_wand_panel_content"
     }
 }

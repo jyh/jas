@@ -105,6 +105,7 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Align => "align",
         PanelKind::Boolean => "boolean",
         PanelKind::Opacity => "opacity",
+        PanelKind::MagicWand => "magic_wand",
     }
 }
 

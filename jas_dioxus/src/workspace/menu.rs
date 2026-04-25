@@ -63,6 +63,7 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         ("Properties", "toggle_panel_properties", ""),
         ("Character", "toggle_panel_character", ""),
         ("Paragraph", "toggle_panel_paragraph", ""),
+        ("Magic Wand", "toggle_panel_magic_wand", ""),
     ]),
 ];
 
@@ -84,6 +85,7 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "toggle_panel_swatches", "toggle_panel_stroke",
     "toggle_panel_properties",
     "toggle_panel_character", "toggle_panel_paragraph",
+    "toggle_panel_magic_wand",
 ];
 
 #[cfg(test)]
@@ -234,7 +236,7 @@ mod tests {
     #[test]
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
-        assert_eq!(total, 40); // 5 + 10 + 9 + 16
+        assert_eq!(total, 41); // 5 + 10 + 9 + 17 (Window grows with Magic Wand)
     }
 
     #[test]

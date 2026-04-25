@@ -300,3 +300,110 @@ class TestBlobBrushCommit:
         children = model.document.layers[0].children
         assert len(children) == 1, \
             "erasing must not touch non-blob-brush elements"
+
+
+# ── doc.magic_wand.apply ────────────────────────────────
+
+
+class TestMagicWandApply:
+    @staticmethod
+    def _red_rect(x: float) -> RectElem:
+        from geometry.element import Color, Fill
+        return RectElem(x=x, y=0.0, width=10.0, height=10.0,
+                        fill=Fill(color=Color.rgb(1.0, 0.0, 0.0)))
+
+    @staticmethod
+    def _blue_rect(x: float) -> RectElem:
+        from geometry.element import Color, Fill
+        return RectElem(x=x, y=0.0, width=10.0, height=10.0,
+                        fill=Fill(color=Color.rgb(0.0, 0.0, 1.0)))
+
+    @staticmethod
+    def _three_rect_model() -> Model:
+        layer = Layer(name="L", children=(
+            TestMagicWandApply._red_rect(0.0),
+            TestMagicWandApply._red_rect(50.0),
+            TestMagicWandApply._blue_rect(100.0),
+        ))
+        return Model(document=Document(layers=(layer,)))
+
+    @staticmethod
+    def _set_defaults(store: StateStore) -> None:
+        store.set("magic_wand_fill_color", True)
+        store.set("magic_wand_fill_tolerance", 32.0)
+        store.set("magic_wand_stroke_color", True)
+        store.set("magic_wand_stroke_tolerance", 32.0)
+        store.set("magic_wand_stroke_weight", True)
+        store.set("magic_wand_stroke_weight_tolerance", 5.0)
+        store.set("magic_wand_opacity", True)
+        store.set("magic_wand_opacity_tolerance", 5.0)
+        store.set("magic_wand_blending_mode", False)
+
+    def test_replace_selects_all_red_rects(self):
+        model = self._three_rect_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        self._set_defaults(store)
+        _run(store, ctrl, [{
+            "doc.magic_wand.apply": {
+                "seed": {"__path__": [0, 0]},
+                "mode": "'replace'",
+            },
+        }])
+        paths = {es.path for es in model.document.selection}
+        assert paths == {(0, 0), (0, 1)}
+
+    def test_add_extends_existing_selection(self):
+        model = self._three_rect_model()
+        ctrl = _ctrl(model)
+        ctrl.set_selection(frozenset({ElementSelection.all((0, 2))}))
+        store = StateStore()
+        self._set_defaults(store)
+        _run(store, ctrl, [{
+            "doc.magic_wand.apply": {
+                "seed": {"__path__": [0, 0]},
+                "mode": "'add'",
+            },
+        }])
+        paths = {es.path for es in model.document.selection}
+        assert paths == {(0, 0), (0, 1), (0, 2)}
+
+    def test_subtract_removes_matches_only(self):
+        model = self._three_rect_model()
+        ctrl = _ctrl(model)
+        ctrl.set_selection(frozenset({
+            ElementSelection.all((0, 0)),
+            ElementSelection.all((0, 1)),
+            ElementSelection.all((0, 2)),
+        }))
+        store = StateStore()
+        self._set_defaults(store)
+        _run(store, ctrl, [{
+            "doc.magic_wand.apply": {
+                "seed": {"__path__": [0, 0]},
+                "mode": "'subtract'",
+            },
+        }])
+        paths = {es.path for es in model.document.selection}
+        assert paths == {(0, 2)}
+
+    def test_skips_locked_and_hidden_elements(self):
+        from geometry.element import Visibility
+        from dataclasses import replace as _replace
+        layer = Layer(name="L", children=(
+            self._red_rect(0.0),
+            _replace(self._red_rect(50.0), locked=True),
+            _replace(self._red_rect(100.0), visibility=Visibility.INVISIBLE),
+        ))
+        model = Model(document=Document(layers=(layer,)))
+        ctrl = _ctrl(model)
+        store = StateStore()
+        self._set_defaults(store)
+        _run(store, ctrl, [{
+            "doc.magic_wand.apply": {
+                "seed": {"__path__": [0, 0]},
+                "mode": "'replace'",
+            },
+        }])
+        paths = {es.path for es in model.document.selection}
+        assert paths == {(0, 0)}

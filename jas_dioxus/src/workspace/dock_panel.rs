@@ -23,6 +23,7 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
         ToolKind::Selection => "selection",
         ToolKind::PartialSelection => "partial_selection",
         ToolKind::InteriorSelection => "interior_selection",
+        ToolKind::MagicWand => "magic_wand",
         ToolKind::Pen => "pen",
         ToolKind::AddAnchorPoint => "add_anchor",
         ToolKind::DeleteAnchorPoint => "delete_anchor",

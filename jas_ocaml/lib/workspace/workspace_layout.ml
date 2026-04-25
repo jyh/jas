@@ -30,7 +30,7 @@ type dock_id = int
 
 type dock_edge = Left | Right | Bottom
 
-type panel_kind = Layers | Color | Swatches | Stroke | Properties | Character | Paragraph | Artboards | Align | Boolean | Opacity
+type panel_kind = Layers | Color | Swatches | Stroke | Properties | Character | Paragraph | Artboards | Align | Boolean | Opacity | Magic_wand
 
 type color_panel_mode = Grayscale | Hsb_mode | Rgb_mode | Cmyk_mode | Web_safe_rgb
 
@@ -480,6 +480,7 @@ let panel_label = function
   | Align -> "Align"
   | Boolean -> "Boolean"
   | Opacity -> "Opacity"
+  | Magic_wand -> "Magic Wand"
 
 (* ------------------------------------------------------------------ *)
 (* Close / show panels                                                *)
@@ -518,7 +519,7 @@ let show_panel l kind =
 let is_panel_visible l kind =
   not (List.mem kind l.hidden_panels)
 
-let all_panel_kinds = [Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity]
+let all_panel_kinds = [Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity; Magic_wand]
 
 let panel_menu_items l =
   List.map (fun k -> (k, is_panel_visible l k)) all_panel_kinds
@@ -649,11 +650,12 @@ let edge_of_json = function "Left" -> Left | "Right" -> Right | _ -> Bottom
 let kind_to_json = function
   | Layers -> "Layers" | Color -> "Color" | Swatches -> "Swatches" | Stroke -> "Stroke" | Properties -> "Properties"
   | Character -> "Character" | Paragraph -> "Paragraph" | Artboards -> "Artboards" | Align -> "Align"
-  | Boolean -> "Boolean" | Opacity -> "Opacity"
+  | Boolean -> "Boolean" | Opacity -> "Opacity" | Magic_wand -> "MagicWand"
 let kind_of_json = function
   | "Layers" -> Layers | "Color" -> Color | "Swatches" -> Swatches | "Stroke" -> Stroke
   | "Character" -> Character | "Paragraph" -> Paragraph | "Artboards" -> Artboards
   | "Align" -> Align | "Boolean" -> Boolean | "Opacity" -> Opacity
+  | "MagicWand" -> Magic_wand
   | _ -> Properties
 
 let panel_group_to_json g : Yojson.Safe.t =

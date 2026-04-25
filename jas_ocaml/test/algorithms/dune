@@ -41,3 +41,7 @@
 (test
  (name align_fixture_test)
  (libraries jas alcotest yojson))
+
+(test
+ (name magic_wand_test)
+ (libraries jas alcotest))

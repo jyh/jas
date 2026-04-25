@@ -2504,6 +2504,111 @@
         }
       ]
     },
+    "reset_magic_wand_panel": {
+      "description": "Reset every Magic Wand Panel control to its declared default per MAGIC_WAND_TOOL.md \u00a7State persistence: four \"obvious\" criteria checkboxes on (Fill / Stroke / Stroke Weight / Opacity), Blending Mode off, tolerances 32 / 32 / 5.0 pt / 5%. Writes both panel.<key> (immediate visual update) and state.magic_wand_<key> (per-document persistence).\n",
+      "category": "magic_wand",
+      "effects": [
+        {
+          "set_panel_state": {
+            "key": "fill_color",
+            "value": "true"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_fill_color": "true"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "fill_tolerance",
+            "value": "32"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_fill_tolerance": "32"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "stroke_color",
+            "value": "true"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_stroke_color": "true"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "stroke_tolerance",
+            "value": "32"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_stroke_tolerance": "32"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "stroke_weight",
+            "value": "true"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_stroke_weight": "true"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "stroke_weight_tolerance",
+            "value": "5.0"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_stroke_weight_tolerance": "5.0"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "opacity",
+            "value": "true"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_opacity": "true"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "opacity_tolerance",
+            "value": "5"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_opacity_tolerance": "5"
+          }
+        },
+        {
+          "set_panel_state": {
+            "key": "blending_mode",
+            "value": "false"
+          }
+        },
+        {
+          "set": {
+            "magic_wand_blending_mode": "false"
+          }
+        }
+      ]
+    },
     "boolean_union": {
       "description": "UNION_BUTTON. Destructively merge every selected element into a single path taking the union of their geometries. All operands are consumed; the result carries the frontmost operand's paint. See BOOLEAN.md \u00a7Operand and paint rules.\n",
       "category": "boolean",
@@ -4065,6 +4170,10 @@
       "viewbox": "0 0 28 28",
       "svg": "<path d=\"M14,5 C6,5 3,10 3,14 C3,20 8,24 14,22 C20,20 22,16 20,12 C18,8 12,9 12,13 C12,16 16,17 17,15\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>\n"
     },
+    "magic_wand": {
+      "viewbox": "0 0 28 28",
+      "svg": "<line x1=\"4\" y1=\"22\" x2=\"18\" y2=\"8\" stroke=\"currentColor\"\n  stroke-width=\"2\" stroke-linecap=\"round\"/>\n<polygon fill=\"currentColor\"\n  points=\"20,3 21,7 25,8 21,9 20,13 19,9 15,8 19,7\"/>\n<polygon fill=\"currentColor\"\n  points=\"24,12 24.7,13.5 26.5,14 24.7,14.5 24,16 23.3,14.5 21.5,14 23.3,13.5\"/>\n"
+    },
     "panel_layers": {
       "viewbox": "0 0 28 28",
       "svg": "<rect x=\"4\" y=\"6\" width=\"20\" height=\"4\" rx=\"1\" fill=\"currentColor\"/> <rect x=\"4\" y=\"12\" width=\"20\" height=\"4\" rx=\"1\" fill=\"currentColor\" opacity=\"0.6\"/> <rect x=\"4\" y=\"18\" width=\"20\" height=\"4\" rx=\"1\" fill=\"currentColor\" opacity=\"0.3\"/>\n"
@@ -4776,7 +4885,7 @@
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"partial_selection\", \"interior_selection\"])"
+                    "checked": "mem(state.active_tool, [\"partial_selection\", \"interior_selection\", \"magic_wand\"])"
                   },
                   "alternates": {
                     "menu_id": "arrow_alternates",
@@ -4792,6 +4901,12 @@
                         "label": "Interior Selection",
                         "icon": "interior_selection_arrow",
                         "description": "Select objects within groups without ungrouping"
+                      },
+                      {
+                        "id": "magic_wand",
+                        "label": "Magic Wand (Y)",
+                        "icon": "magic_wand",
+                        "description": "Click an element to select every other element in the document that shares its fill color, stroke color, stroke weight, opacity, and blend mode within the Magic Wand Panel's tolerances. Shift+click adds to the selection; Alt+click subtracts.\n"
                       }
                     ]
                   }
@@ -6699,6 +6814,51 @@
       "type": "number",
       "default": 100,
       "description": "Default tip aspect ratio (percent: 100 = circle; lower = narrower oval). Consulted only when no Calligraphic brush is active.\n"
+    },
+    "magic_wand_fill_color": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, Fill Color contributes to the wand match predicate. The criterion compares Euclidean distance in 0\u2013255 sRGB space against magic_wand_fill_tolerance.\n"
+    },
+    "magic_wand_fill_tolerance": {
+      "type": "number",
+      "default": 32,
+      "description": "Maximum Euclidean RGB distance (0\u2013255 scale) at which two solid fills are considered similar. Integer 0\u2013255. Default 32 matches the reference design.\n"
+    },
+    "magic_wand_stroke_color": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, Stroke Color contributes to the wand match predicate. Same Euclidean / 0\u2013255 sRGB rule as Fill Color against magic_wand_stroke_tolerance.\n"
+    },
+    "magic_wand_stroke_tolerance": {
+      "type": "number",
+      "default": 32,
+      "description": "Maximum Euclidean RGB distance (0\u2013255 scale) at which two solid strokes are considered similar. Integer 0\u2013255.\n"
+    },
+    "magic_wand_stroke_weight": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, Stroke Weight contributes to the wand match predicate. Compares |candidate.width \u2212 seed.width| against magic_wand_stroke_weight_tolerance (in pt).\n"
+    },
+    "magic_wand_stroke_weight_tolerance": {
+      "type": "number",
+      "default": 5.0,
+      "description": "Maximum stroke-weight delta in points at which two strokes are considered similar. Float \u2265 0. Default 5.0.\n"
+    },
+    "magic_wand_opacity": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, Opacity contributes to the wand match predicate. Compares |candidate.opacity \u2212 seed.opacity| \u00d7 100 against magic_wand_opacity_tolerance (in percentage points).\n"
+    },
+    "magic_wand_opacity_tolerance": {
+      "type": "number",
+      "default": 5,
+      "description": "Maximum opacity delta in percentage points at which two elements are considered similar. Integer 0\u2013100. The document model stores opacity in [0.0, 1.0]; the predicate multiplies by 100 so the user-facing tolerance is in percentage points.\n"
+    },
+    "magic_wand_blending_mode": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, Blending Mode contributes to the wand match predicate. Compares blend_mode enum values for exact equality \u2014 there is no tolerance, blend mode is categorical. Default false (the reference design ships this checkbox unchecked).\n"
     },
     "align_to": {
       "type": "enum",
@@ -12981,6 +13141,498 @@
         ]
       }
     },
+    "magic_wand_panel_content": {
+      "id": "magic_wand_panel_content",
+      "type": "panel",
+      "summary": "Magic Wand",
+      "description": "Magic Wand Panel \u2014 configures the five criteria the Magic Wand Tool uses when matching candidate elements against a clicked seed: Fill Color, Stroke Color, Stroke Weight, Opacity, and Blending Mode. Each criterion is independently enabled by a checkbox; tolerances apply only when the corresponding checkbox is on.\nLayout (top to bottom, matching the visual grouping in the reference design):\nRow 1 \u2014 Fill Color checkbox + Tolerance: numeric (0\u2013255). Row 2 \u2014 Stroke Color checkbox + Tolerance: numeric (0\u2013255). Row 3 \u2014 Stroke Weight checkbox + Tolerance: numeric (pt). Row 4 \u2014 spacer (visual separator between the appearance group\n  above and the compositing group below).\nRow 5 \u2014 Opacity checkbox + Tolerance: numeric (%). Row 6 \u2014 Blending Mode checkbox (no tolerance \u2014 blend mode is a\n  categorical enum, exact match only).\n\nDefaults: - Fill / Stroke / Stroke Weight / Opacity: enabled. - Blending Mode: disabled. - Tolerances: 32 / 32 / 5.0 pt / 5%.\nSee transcripts/MAGIC_WAND_TOOL.md for the predicate and gesture semantics. The actual matching happens inside doc.magic_wand.apply (declared in workspace/actions.yaml or registered as a doc.* effect by each native app).\n",
+      "state": {
+        "fill_color": {
+          "type": "bool",
+          "default": true,
+          "description": "Mirrors state.magic_wand_fill_color."
+        },
+        "fill_tolerance": {
+          "type": "number",
+          "default": 32,
+          "description": "Mirrors state.magic_wand_fill_tolerance (0\u2013255)."
+        },
+        "stroke_color": {
+          "type": "bool",
+          "default": true,
+          "description": "Mirrors state.magic_wand_stroke_color."
+        },
+        "stroke_tolerance": {
+          "type": "number",
+          "default": 32,
+          "description": "Mirrors state.magic_wand_stroke_tolerance (0\u2013255)."
+        },
+        "stroke_weight": {
+          "type": "bool",
+          "default": true,
+          "description": "Mirrors state.magic_wand_stroke_weight."
+        },
+        "stroke_weight_tolerance": {
+          "type": "number",
+          "default": 5.0,
+          "description": "Mirrors state.magic_wand_stroke_weight_tolerance (pt)."
+        },
+        "opacity": {
+          "type": "bool",
+          "default": true,
+          "description": "Mirrors state.magic_wand_opacity."
+        },
+        "opacity_tolerance": {
+          "type": "number",
+          "default": 5,
+          "description": "Mirrors state.magic_wand_opacity_tolerance (percent)."
+        },
+        "blending_mode": {
+          "type": "bool",
+          "default": false,
+          "description": "Mirrors state.magic_wand_blending_mode."
+        }
+      },
+      "init": {
+        "fill_color": "state.magic_wand_fill_color",
+        "fill_tolerance": "state.magic_wand_fill_tolerance",
+        "stroke_color": "state.magic_wand_stroke_color",
+        "stroke_tolerance": "state.magic_wand_stroke_tolerance",
+        "stroke_weight": "state.magic_wand_stroke_weight",
+        "stroke_weight_tolerance": "state.magic_wand_stroke_weight_tolerance",
+        "opacity": "state.magic_wand_opacity",
+        "opacity_tolerance": "state.magic_wand_opacity_tolerance",
+        "blending_mode": "state.magic_wand_blending_mode"
+      },
+      "menu": [
+        {
+          "label": "Reset",
+          "action": "reset_magic_wand_panel"
+        },
+        "separator",
+        {
+          "label": "Close Magic Wand",
+          "action": "close_panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "magic_wand_content",
+        "layout": "column",
+        "style": {
+          "padding": 8,
+          "gap": 8
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "mwp_fill_color",
+                    "type": "toggle",
+                    "label": "Fill Color",
+                    "bind": {
+                      "checked": "panel.fill_color"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "fill_color",
+                              "value": "not panel.fill_color"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_fill_color": "not state.magic_wand_fill_color"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 7,
+                "layout": "row",
+                "style": {
+                  "gap": 4,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Tolerance:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  },
+                  {
+                    "id": "mwp_fill_tolerance",
+                    "type": "number",
+                    "min": 0,
+                    "max": 255,
+                    "step": 1,
+                    "bind": {
+                      "value": "panel.fill_tolerance",
+                      "disabled": "not panel.fill_color"
+                    },
+                    "behavior": [
+                      {
+                        "event": "commit",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "fill_tolerance",
+                              "value": "event.value"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_fill_tolerance": "event.value"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "mwp_stroke_color",
+                    "type": "toggle",
+                    "label": "Stroke Color",
+                    "bind": {
+                      "checked": "panel.stroke_color"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "stroke_color",
+                              "value": "not panel.stroke_color"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_stroke_color": "not state.magic_wand_stroke_color"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 7,
+                "layout": "row",
+                "style": {
+                  "gap": 4,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Tolerance:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  },
+                  {
+                    "id": "mwp_stroke_tolerance",
+                    "type": "number",
+                    "min": 0,
+                    "max": 255,
+                    "step": 1,
+                    "bind": {
+                      "value": "panel.stroke_tolerance",
+                      "disabled": "not panel.stroke_color"
+                    },
+                    "behavior": [
+                      {
+                        "event": "commit",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "stroke_tolerance",
+                              "value": "event.value"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_stroke_tolerance": "event.value"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "mwp_stroke_weight",
+                    "type": "toggle",
+                    "label": "Stroke Weight",
+                    "bind": {
+                      "checked": "panel.stroke_weight"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "stroke_weight",
+                              "value": "not panel.stroke_weight"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_stroke_weight": "not state.magic_wand_stroke_weight"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 7,
+                "layout": "row",
+                "style": {
+                  "gap": 4,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Tolerance:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  },
+                  {
+                    "id": "mwp_stroke_weight_tolerance",
+                    "type": "number",
+                    "min": 0,
+                    "max": 100,
+                    "step": 0.1,
+                    "unit": "pt",
+                    "bind": {
+                      "value": "panel.stroke_weight_tolerance",
+                      "disabled": "not panel.stroke_weight"
+                    },
+                    "behavior": [
+                      {
+                        "event": "commit",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "stroke_weight_tolerance",
+                              "value": "event.value"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_stroke_weight_tolerance": "event.value"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "style": {
+              "height": 8
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "mwp_opacity",
+                    "type": "toggle",
+                    "label": "Opacity",
+                    "bind": {
+                      "checked": "panel.opacity"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "opacity",
+                              "value": "not panel.opacity"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_opacity": "not state.magic_wand_opacity"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 7,
+                "layout": "row",
+                "style": {
+                  "gap": 4,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Tolerance:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  },
+                  {
+                    "id": "mwp_opacity_tolerance",
+                    "type": "number",
+                    "min": 0,
+                    "max": 100,
+                    "step": 1,
+                    "unit": "%",
+                    "bind": {
+                      "value": "panel.opacity_tolerance",
+                      "disabled": "not panel.opacity"
+                    },
+                    "behavior": [
+                      {
+                        "event": "commit",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "opacity_tolerance",
+                              "value": "event.value"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_opacity_tolerance": "event.value"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "mwp_blending_mode",
+                    "type": "toggle",
+                    "label": "Blending Mode",
+                    "bind": {
+                      "checked": "panel.blending_mode"
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "effects": [
+                          {
+                            "set_panel_state": {
+                              "key": "blending_mode",
+                              "value": "not panel.blending_mode"
+                            }
+                          },
+                          {
+                            "set": {
+                              "magic_wand_blending_mode": "not state.magic_wand_blending_mode"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
     "opacity_panel_content": {
       "id": "opacity_panel_content",
       "type": "panel",
@@ -17207,6 +17859,77 @@
           "y2": "tool.line.cur_y",
           "style": "stroke: rgba(0,0,0,0.5); stroke-width: 1;"
         }
+      }
+    },
+    "magic_wand": {
+      "id": "magic_wand",
+      "cursor": "crosshair",
+      "menu_label": "Magic Wand Tool",
+      "shortcut": "Y",
+      "tool_options_panel": "magic_wand",
+      "handlers": {
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "let": {
+              "hit": "hit_test(event.x, event.y)"
+            },
+            "in": [
+              {
+                "if": "hit == null",
+                "then": [
+                  {
+                    "if": "not event.modifiers.shift and not event.modifiers.alt",
+                    "then": [
+                      {
+                        "doc.clear_selection": {}
+                      }
+                    ]
+                  }
+                ],
+                "else": [
+                  {
+                    "if": "event.modifiers.shift",
+                    "then": [
+                      {
+                        "doc.magic_wand.apply": {
+                          "seed": "hit",
+                          "mode": "'add'"
+                        }
+                      }
+                    ],
+                    "else": [
+                      {
+                        "if": "event.modifiers.alt",
+                        "then": [
+                          {
+                            "doc.magic_wand.apply": {
+                              "seed": "hit",
+                              "mode": "'subtract'"
+                            }
+                          }
+                        ],
+                        "else": [
+                          {
+                            "doc.magic_wand.apply": {
+                              "seed": "hit",
+                              "mode": "'replace'"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_dblclick": [
+          {}
+        ]
       }
     },
     "paintbrush": {

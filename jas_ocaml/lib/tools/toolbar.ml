@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Partial_selection | Interior_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Blob_brush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
+type tool = Selection | Partial_selection | Interior_selection | Magic_wand | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Blob_brush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
 
 (** Map a tool variant to its workspace/tools/*.yaml filename stem.
     Returns [None] for native-only tools without a YAML spec. Used
@@ -10,6 +10,7 @@ let tool_yaml_id = function
   | Selection -> Some "selection"
   | Partial_selection -> Some "partial_selection"
   | Interior_selection -> Some "interior_selection"
+  | Magic_wand -> Some "magic_wand"
   | Pen -> Some "pen"
   | Add_anchor_point -> Some "add_anchor_point"
   | Delete_anchor_point -> Some "delete_anchor_point"
@@ -163,7 +164,7 @@ class toolbar ~title:(_title : string) ~x ~y
     method select_tool t =
       current_tool <- t;
       (match t with
-       | Partial_selection | Interior_selection ->
+       | Partial_selection | Interior_selection | Magic_wand ->
          arrow_slot_tool <- t
        | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point ->
          pen_slot_tool <- t
@@ -242,6 +243,45 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.move_to cr (ox +. 23.5) (oy +. 16.5);
         Cairo.line_to cr (ox +. 23.5) (oy +. 23.5);
         Cairo.stroke cr
+      in
+
+      (* Magic Wand: 28x28 cell. Diagonal handle line plus a sparkle
+         polygon at the tip and a small accent star. Mirrors the Rust
+         MagicWand SVG glyph (jas_dioxus/src/workspace/icons.rs). *)
+      let draw_magic_wand_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let (fr, fg, fb) = icon_rgb () in
+        Cairo.set_source_rgb cr fr fg fb;
+        (* Handle: line from lower-left to upper-right. *)
+        Cairo.set_line_width cr 2.0;
+        Cairo.move_to cr (ox +. 4.0) (oy +. 24.0);
+        Cairo.line_to cr (ox +. 17.0) (oy +. 11.0);
+        Cairo.stroke cr;
+        (* Sparkle at the tip — 4-point star. *)
+        Cairo.move_to cr (ox +. 21.0) (oy +. 4.0);
+        Cairo.line_to cr (ox +. 22.5) (oy +. 9.5);
+        Cairo.line_to cr (ox +. 28.0) (oy +. 11.0);
+        Cairo.line_to cr (ox +. 22.5) (oy +. 12.5);
+        Cairo.line_to cr (ox +. 21.0) (oy +. 18.0);
+        Cairo.line_to cr (ox +. 19.5) (oy +. 12.5);
+        Cairo.line_to cr (ox +. 14.0) (oy +. 11.0);
+        Cairo.line_to cr (ox +. 19.5) (oy +. 9.5);
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        (* Small accent star, upper left. *)
+        Cairo.move_to cr (ox +. 5.0) (oy +. 5.0);
+        Cairo.line_to cr (ox +. 6.0) (oy +. 7.5);
+        Cairo.line_to cr (ox +. 8.5) (oy +. 8.5);
+        Cairo.line_to cr (ox +. 6.0) (oy +. 9.5);
+        Cairo.line_to cr (ox +. 5.0) (oy +. 12.0);
+        Cairo.line_to cr (ox +. 4.0) (oy +. 9.5);
+        Cairo.line_to cr (ox +. 1.5) (oy +. 8.5);
+        Cairo.line_to cr (ox +. 4.0) (oy +. 7.5);
+        Cairo.Path.close cr;
+        Cairo.fill cr
       in
 
       let draw_line_icon cr ~alloc =
@@ -403,6 +443,7 @@ class toolbar ~title:(_title : string) ~x ~y
         (match arrow_slot_tool with
         | Partial_selection -> draw_direct_arrow cr ~alloc
         | Interior_selection -> draw_arrow_plus cr ~alloc
+        | Magic_wand -> draw_magic_wand_icon cr ~alloc
         | _ -> ());
         (* Small triangle in lower-right indicating alternates *)
         let ox = (bw -. 28.0) /. 2.0 in
@@ -1563,6 +1604,7 @@ class toolbar ~title:(_title : string) ~x ~y
       in
       add_item "Partial Selection" Partial_selection;
       add_item "Interior Selection" Interior_selection;
+      add_item "Magic Wand" Magic_wand;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 
     method private show_pencil_slot_menu =

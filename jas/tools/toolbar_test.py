@@ -23,11 +23,11 @@ class ToolEnumTest(absltest.TestCase):
     """Tests for the Tool enum."""
 
     def test_tool_count(self):
-        self.assertEqual(len(Tool), 20)
+        self.assertEqual(len(Tool), 21)
 
     def test_all_tools_present(self):
         expected = {
-            "SELECTION", "PARTIAL_SELECTION", "INTERIOR_SELECTION",
+            "SELECTION", "PARTIAL_SELECTION", "INTERIOR_SELECTION", "MAGIC_WAND",
             "PEN", "ADD_ANCHOR_POINT", "DELETE_ANCHOR_POINT", "ANCHOR_POINT",
             "PENCIL", "PAINTBRUSH", "BLOB_BRUSH", "PATH_ERASER", "SMOOTH",
             "TYPE", "TYPE_ON_PATH",
@@ -80,7 +80,9 @@ class SharedSlotsTest(absltest.TestCase):
     """Tests for shared toolbar slot definitions."""
 
     def test_arrow_slot_tools(self):
-        self.assertEqual(_ARROW_SLOT_TOOLS, {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION})
+        self.assertEqual(_ARROW_SLOT_TOOLS,
+                         {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION,
+                          Tool.MAGIC_WAND})
 
     def test_text_slot_tools(self):
         self.assertEqual(_TEXT_SLOT_TOOLS, {Tool.TYPE, Tool.TYPE_ON_PATH})

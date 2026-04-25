@@ -1,0 +1,68 @@
+# Magic Wand tool — selects every element similar to a clicked
+# seed element under the enabled criteria from the Magic Wand
+# Panel (Fill Color, Stroke Color, Stroke Weight, Opacity,
+# Blending Mode). No drag, no marquee — single-click only.
+#
+# Modifiers per MAGIC_WAND_TOOL.md §Gestures:
+#   plain click  → replace selection with {seed} ∪ {similar}
+#   Shift+click  → union the wand result with existing selection
+#   Alt+click    → subtract the wand result from existing selection
+#   click empty  → clear selection
+#
+# Eligibility filter, predicate semantics, and color edge cases
+# all live in the doc.magic_wand.apply effect; see
+# MAGIC_WAND_TOOL.md §Predicate.
+#
+# Double-clicking the toolbar icon shows the Magic Wand Panel via
+# the new tool_options_panel field (parallel to
+# tool_options_dialog used by Paintbrush / Blob Brush).
+
+id: magic_wand
+cursor: crosshair
+menu_label: "Magic Wand Tool"
+shortcut: "Y"
+tool_options_panel: "magic_wand"
+
+# No tool-local state. The wand operates on a single click; there
+# is no drag accumulation or marquee state machine. All
+# persistence is in state.magic_wand_* (per-document).
+
+handlers:
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - let:
+        hit: "hit_test(event.x, event.y)"
+      in:
+        - if: "hit == null"
+          then:
+            # Click on empty canvas. Plain click clears; Shift /
+            # Alt are no-ops (no seed to compute against).
+            - if: "not event.modifiers.shift and not event.modifiers.alt"
+              then:
+                - "doc.clear_selection": {}
+          else:
+            # Modifier picks the wand mode. Default = replace.
+            - if: "event.modifiers.shift"
+              then:
+                - "doc.magic_wand.apply":
+                    seed: "hit"
+                    mode: "'add'"
+              else:
+                - if: "event.modifiers.alt"
+                  then:
+                    - "doc.magic_wand.apply":
+                        seed: "hit"
+                        mode: "'subtract'"
+                  else:
+                    - "doc.magic_wand.apply":
+                        seed: "hit"
+                        mode: "'replace'"
+
+  on_dblclick:
+    # Double-click the canvas does nothing — the dblclick-on-
+    # toolbar-icon path that summons the panel is wired by the
+    # toolbar dispatcher, not here.
+    - {}
+
+# Magic Wand has no overlay — it's a single-click tool.
