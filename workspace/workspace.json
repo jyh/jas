@@ -19604,7 +19604,7 @@
       },
       "overlay": [
         {
-          "if": "selection_exists()",
+          "if": "not selection_empty()",
           "render": {
             "type": "reference_point_cross",
             "ref_point": "state.transform_reference_point"
@@ -19981,7 +19981,7 @@
       },
       "overlay": [
         {
-          "if": "selection_exists()",
+          "if": "not selection_empty()",
           "render": {
             "type": "reference_point_cross",
             "ref_point": "state.transform_reference_point"
@@ -20462,7 +20462,7 @@
       },
       "overlay": [
         {
-          "if": "selection_exists()",
+          "if": "not selection_empty()",
           "render": {
             "type": "reference_point_cross",
             "ref_point": "state.transform_reference_point"

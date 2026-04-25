@@ -42,10 +42,12 @@ pub struct ToolSpec {
     /// Each value is the raw effect list — dispatched through
     /// `interpreter::effects::run_effects` on the corresponding event.
     pub handlers: HashMap<String, Vec<serde_json::Value>>,
-    /// Optional overlay declaration. When `render_overlay` wants to
-    /// draw, it evaluates `guard` (if any) and, when truthy, renders
-    /// `render`. Kept as a raw JSON dict for Phase 3d to interpret.
-    pub overlay: Option<OverlaySpec>,
+    /// Overlay declarations. Most tools have zero or one entry; the
+    /// transform-tool family (Scale / Rotate / Shear) uses a list to
+    /// layer the reference-point cross over the drag-time bbox ghost.
+    /// Each entry is rendered in order; each entry's `guard` is
+    /// evaluated independently.
+    pub overlay: Vec<OverlaySpec>,
 }
 
 /// Tool-overlay declaration — a guard expression plus a render dict.
@@ -136,14 +138,32 @@ fn parse_handlers(
     out
 }
 
-fn parse_overlay(val: Option<&serde_json::Value>) -> Option<OverlaySpec> {
-    let obj = val?.as_object()?;
+fn parse_overlay_entry(obj: &serde_json::Map<String, serde_json::Value>) -> Option<OverlaySpec> {
     let guard = obj
         .get("if")
         .and_then(|v| v.as_str())
         .map(String::from);
     let render = obj.get("render")?.clone();
     Some(OverlaySpec { guard, render })
+}
+
+fn parse_overlay(val: Option<&serde_json::Value>) -> Vec<OverlaySpec> {
+    let Some(v) = val else { return Vec::new(); };
+    // Accept either a single {if, render} object (most tools) or a
+    // list of such objects (transform-tool family). Both forms
+    // produce the same Vec<OverlaySpec> downstream.
+    if let Some(obj) = v.as_object() {
+        if let Some(spec) = parse_overlay_entry(obj) {
+            return vec![spec];
+        }
+        return Vec::new();
+    }
+    if let Some(arr) = v.as_array() {
+        return arr.iter()
+            .filter_map(|item| item.as_object().and_then(parse_overlay_entry))
+            .collect();
+    }
+    Vec::new()
 }
 
 /// YAML-driven tool. Holds a parsed [`ToolSpec`] and a private
@@ -355,44 +375,52 @@ impl CanvasTool for YamlTool {
     }
 
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
-        let Some(overlay) = self.spec.overlay.as_ref() else {
+        if self.spec.overlay.is_empty() {
             return;
-        };
+        }
         // Document registration lets overlay expressions call
         // hit_test / selection_contains — same pattern as dispatch().
         let _guard = doc_primitives::register_document(model.document().clone());
         let eval_ctx = self.store.eval_context();
 
-        // Guard: if present, must evaluate truthy for the overlay to draw.
-        if let Some(guard_expr) = &overlay.guard {
-            let result = crate::interpreter::expr::eval(guard_expr, &eval_ctx);
-            if !result.to_bool() {
-                return;
+        for overlay in &self.spec.overlay {
+            // Guard: if present, must evaluate truthy for this overlay
+            // layer to draw.
+            if let Some(guard_expr) = &overlay.guard {
+                let result = crate::interpreter::expr::eval(guard_expr, &eval_ctx);
+                if !result.to_bool() {
+                    continue;
+                }
             }
-        }
 
-        // Dispatch on `render.type` — Phase 3d handles `rect` (Selection
-        // tool's marquee). Other shapes extend here as their tools port.
-        let render = &overlay.render;
-        let render_type = render
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        match render_type {
-            "rect" => draw_rect_overlay(ctx, render, &eval_ctx),
-            "line" => draw_line_overlay(ctx, render, &eval_ctx),
-            "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
-            "star" => draw_star_overlay(ctx, render, &eval_ctx),
-            "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
-            "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render, &eval_ctx),
-            "pen_overlay" => draw_pen_overlay(ctx, render, &eval_ctx),
-            "partial_selection_overlay" => {
-                draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
-            }
-            "oval_cursor" => draw_oval_cursor_overlay(ctx, render, &eval_ctx),
-            _ => {
-                // Unrecognized type — skip silently, matching the
-                // lenient-mode convention used elsewhere.
+            // Dispatch on `render.type`. Each entry renders independently.
+            let render = &overlay.render;
+            let render_type = render
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match render_type {
+                "rect" => draw_rect_overlay(ctx, render, &eval_ctx),
+                "line" => draw_line_overlay(ctx, render, &eval_ctx),
+                "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
+                "star" => draw_star_overlay(ctx, render, &eval_ctx),
+                "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
+                "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render, &eval_ctx),
+                "pen_overlay" => draw_pen_overlay(ctx, render, &eval_ctx),
+                "partial_selection_overlay" => {
+                    draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
+                }
+                "oval_cursor" => draw_oval_cursor_overlay(ctx, render, &eval_ctx),
+                "reference_point_cross" => {
+                    draw_reference_point_cross(ctx, render, &eval_ctx, model);
+                }
+                "bbox_ghost" => {
+                    draw_bbox_ghost(ctx, render, &eval_ctx, model);
+                }
+                _ => {
+                    // Unrecognized type — skip silently, matching the
+                    // lenient-mode convention used elsewhere.
+                }
             }
         }
     }
@@ -1166,6 +1194,208 @@ fn build_rounded_rect_path(
     ctx.close_path();
 }
 
+/// Resolve the reference-point coordinate for a transform-tool
+/// overlay. Reads the `ref_point` render field (a `Value::List` of
+/// two numbers expressed as `state.transform_reference_point`) or,
+/// when null, falls back to the selection's union bbox center.
+/// Returns `None` when there is no selection — the caller skips
+/// drawing in that case (matches SCALE_TOOL.md §Reference point §
+/// Visibility).
+fn resolve_overlay_reference_point(
+    eval_ctx: &serde_json::Value,
+    render: &serde_json::Value,
+    model: &Model,
+) -> Option<(f64, f64)> {
+    use crate::algorithms::align;
+    use crate::interpreter::expr_types::Value;
+    // Custom reference point (state.transform_reference_point), if set.
+    if let Some(field) = render.get("ref_point") {
+        if let Some(expr) = field.as_str() {
+            if let Value::List(items) = crate::interpreter::expr::eval(expr, eval_ctx) {
+                if items.len() >= 2 {
+                    if let (Some(rx), Some(ry)) = (items[0].as_f64(), items[1].as_f64()) {
+                        return Some((rx, ry));
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: selection union bbox center.
+    let doc = model.document();
+    let elements: Vec<&crate::geometry::element::Element> = doc.selection.iter()
+        .filter_map(|es| doc.get_element(&es.path))
+        .collect();
+    if elements.is_empty() {
+        return None;
+    }
+    let (x, y, w, h) = align::union_bounds(&elements, align::geometric_bounds);
+    Some((x + w / 2.0, y + h / 2.0))
+}
+
+/// Draw the cyan-blue reference-point cross overlay used by Scale,
+/// Rotate, and Shear. Per SCALE_TOOL.md §Reference-point cross
+/// overlay: 12 px crosshair + 2 px center dot, color #4A9EFF.
+/// Hidden when there is no selection.
+fn draw_reference_point_cross(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    model: &Model,
+) {
+    let Some((rx, ry)) = resolve_overlay_reference_point(eval_ctx, render, model) else {
+        return;
+    };
+    const COLOR: &str = "#4A9EFF";
+    const ARM: f64 = 6.0; // half-length → 12 px crosshair
+    const DOT: f64 = 2.0;
+
+    ctx.set_stroke_style_str(COLOR);
+    ctx.set_line_width(1.0);
+    // Horizontal arm.
+    ctx.begin_path();
+    ctx.move_to(rx - ARM, ry);
+    ctx.line_to(rx + ARM, ry);
+    ctx.stroke();
+    // Vertical arm.
+    ctx.begin_path();
+    ctx.move_to(rx, ry - ARM);
+    ctx.line_to(rx, ry + ARM);
+    ctx.stroke();
+    // Center dot.
+    ctx.set_fill_style_str(COLOR);
+    ctx.begin_path();
+    let _ = ctx.arc(rx, ry, DOT, 0.0, std::f64::consts::TAU);
+    ctx.fill();
+}
+
+/// Draw the dashed post-transform bounding-box ghost during a drag.
+/// Reads `transform_kind` ("scale" / "rotate" / "shear"), the press
+/// and cursor coordinates, and the shift_held flag from the render
+/// dict, then composes the matrix via algorithms::transform_apply
+/// and draws the union bbox of the selection under that matrix.
+fn draw_bbox_ghost(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    model: &Model,
+) {
+    use crate::algorithms::{align, transform_apply};
+    use crate::geometry::element::Transform;
+
+    let Some((rx, ry)) = resolve_overlay_reference_point(eval_ctx, render, model) else {
+        return;
+    };
+    let kind = render.get("transform_kind")
+        .and_then(|v| v.as_str())
+        .map(|s| {
+            // The yaml writes "'scale'" so the runtime treats it as a
+            // string literal expression. Strip the wrapping quotes if
+            // present.
+            crate::interpreter::expr::eval(s, eval_ctx)
+        })
+        .map(|v| match v {
+            crate::interpreter::expr_types::Value::Str(s) => s,
+            _ => String::new(),
+        })
+        .unwrap_or_default();
+
+    let px = eval_number_field(eval_ctx, render.get("press_x"));
+    let py = eval_number_field(eval_ctx, render.get("press_y"));
+    let cx = eval_number_field(eval_ctx, render.get("cursor_x"));
+    let cy = eval_number_field(eval_ctx, render.get("cursor_y"));
+    let shift = render.get("shift_held")
+        .and_then(|v| v.as_str())
+        .map(|s| crate::interpreter::expr::eval(s, eval_ctx).to_bool())
+        .unwrap_or(false);
+
+    // Build the matrix per the gesture's tool kind. Mirrors the
+    // logic in interpreter::effects::doc.<tool>.apply but stays in
+    // overlay-land — no document mutation.
+    let matrix: Transform = match kind.as_str() {
+        "scale" => {
+            let denom_x = px - rx;
+            let denom_y = py - ry;
+            let sx = if denom_x.abs() < 1e-9 { 1.0 } else { (cx - rx) / denom_x };
+            let sy = if denom_y.abs() < 1e-9 { 1.0 } else { (cy - ry) / denom_y };
+            let (sx, sy) = if shift {
+                let prod = sx * sy;
+                let sign = if prod >= 0.0 { 1.0 } else { -1.0 };
+                let mag = prod.abs().sqrt();
+                let s = sign * mag;
+                (s, s)
+            } else { (sx, sy) };
+            transform_apply::scale_matrix(sx, sy, rx, ry)
+        }
+        "rotate" => {
+            let theta_press = (py - ry).atan2(px - rx);
+            let theta_cursor = (cy - ry).atan2(cx - rx);
+            let mut theta_deg = (theta_cursor - theta_press).to_degrees();
+            if shift { theta_deg = (theta_deg / 45.0).round() * 45.0; }
+            transform_apply::rotate_matrix(theta_deg, rx, ry)
+        }
+        "shear" => {
+            let dx = cx - px;
+            let dy = cy - py;
+            if shift {
+                if dx.abs() >= dy.abs() {
+                    let denom = (py - ry).abs().max(1e-9);
+                    let k = dx / denom;
+                    transform_apply::shear_matrix(k.atan().to_degrees(), "horizontal", 0.0, rx, ry)
+                } else {
+                    let denom = (px - rx).abs().max(1e-9);
+                    let k = dy / denom;
+                    transform_apply::shear_matrix(k.atan().to_degrees(), "vertical", 0.0, rx, ry)
+                }
+            } else {
+                let ax = px - rx;
+                let ay = py - ry;
+                let axis_len = (ax * ax + ay * ay).sqrt().max(1e-9);
+                let perp_x = -ay / axis_len;
+                let perp_y = ax / axis_len;
+                let perp_dist = (cx - px) * perp_x + (cy - py) * perp_y;
+                let k = perp_dist / axis_len;
+                let axis_angle_deg = ay.atan2(ax).to_degrees();
+                transform_apply::shear_matrix(k.atan().to_degrees(), "custom", axis_angle_deg, rx, ry)
+            }
+        }
+        _ => Transform::IDENTITY,
+    };
+
+    // Compute the selection's pre-transform union bbox in document space.
+    let doc = model.document();
+    let elements: Vec<&crate::geometry::element::Element> = doc.selection.iter()
+        .filter_map(|es| doc.get_element(&es.path))
+        .collect();
+    if elements.is_empty() {
+        return;
+    }
+    let (bx, by, bw, bh) = align::union_bounds(&elements, align::geometric_bounds);
+
+    // Transform the four corners and draw a closed quad.
+    let corners = [
+        matrix.apply_point(bx,        by),
+        matrix.apply_point(bx + bw,   by),
+        matrix.apply_point(bx + bw,   by + bh),
+        matrix.apply_point(bx,        by + bh),
+    ];
+
+    ctx.set_stroke_style_str("#4A9EFF");
+    ctx.set_line_width(1.0);
+    let dash = js_sys::Array::new();
+    dash.push(&wasm_bindgen::JsValue::from_f64(4.0));
+    dash.push(&wasm_bindgen::JsValue::from_f64(2.0));
+    let _ = ctx.set_line_dash(&dash);
+    ctx.begin_path();
+    ctx.move_to(corners[0].0, corners[0].1);
+    for c in &corners[1..] {
+        ctx.line_to(c.0, c.1);
+    }
+    ctx.close_path();
+    ctx.stroke();
+    // Reset dash so subsequent native strokes aren't unexpectedly dashed.
+    let _ = ctx.set_line_dash(&js_sys::Array::new());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1268,7 +1498,8 @@ mod tests {
     #[test]
     fn parses_overlay_spec() {
         let spec = ToolSpec::from_workspace_tool(&minimal_spec()).unwrap();
-        let overlay = spec.overlay.expect("overlay should be present");
+        assert_eq!(spec.overlay.len(), 1, "overlay should be present");
+        let overlay = &spec.overlay[0];
         assert_eq!(
             overlay.guard.as_deref(),
             Some("tool.selection.mode == 'marquee'"),
@@ -1277,10 +1508,27 @@ mod tests {
     }
 
     #[test]
-    fn missing_overlay_becomes_none() {
+    fn parses_overlay_list_form() {
+        // Transform-tool family uses a list of {if, render} entries.
+        let raw = serde_json::json!({
+            "id": "scale",
+            "handlers": {},
+            "overlay": [
+                { "if": "true", "render": { "type": "reference_point_cross" } },
+                { "if": "tool.scale.mode == 'scaling'", "render": { "type": "bbox_ghost" } },
+            ],
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        assert_eq!(spec.overlay.len(), 2);
+        assert_eq!(spec.overlay[0].render["type"], "reference_point_cross");
+        assert_eq!(spec.overlay[1].render["type"], "bbox_ghost");
+    }
+
+    #[test]
+    fn missing_overlay_becomes_empty() {
         let raw = serde_json::json!({ "id": "no_overlay" });
         let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
-        assert!(spec.overlay.is_none());
+        assert!(spec.overlay.is_empty());
     }
 
     #[test]
@@ -1295,7 +1543,7 @@ mod tests {
         let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
         assert!(spec.state_defaults.is_empty());
         assert!(spec.handlers.is_empty());
-        assert!(spec.overlay.is_none());
+        assert!(spec.overlay.is_empty());
     }
 
     #[test]
@@ -1305,7 +1553,7 @@ mod tests {
             "overlay": { "if": "true" }
         });
         let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
-        assert!(spec.overlay.is_none());
+        assert!(spec.overlay.is_empty());
     }
 
     // ── YamlTool dispatch tests (Phase 3c) ─────────────────────────
@@ -1590,7 +1838,7 @@ mod tests {
             );
         }
         // Should have the marquee overlay.
-        assert!(parsed.overlay.is_some(), "selection.yaml declares an overlay");
+        assert!(!parsed.overlay.is_empty(), "selection.yaml declares an overlay");
         // state_defaults should include 'mode' with a sensible default.
         assert_eq!(
             parsed.state_defaults.get("mode"),
