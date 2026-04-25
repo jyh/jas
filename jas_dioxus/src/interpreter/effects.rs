@@ -1431,19 +1431,94 @@ fn run_doc_effect(
                 model.view_offset_y = initial_offy + (cursor_y - press_y);
             }
         }
-        "doc.zoom.fit_rect"
-        | "doc.zoom.fit_marquee"
-        | "doc.zoom.fit_elements"
-        | "doc.zoom.fit_all_artboards" => {
-            // Fit-* effects need the canvas viewport width and
-            // height to compute the new zoom factor. Viewport
-            // plumbing through to effects is a follow-up commit;
-            // for now these are no-ops so the dispatch path
-            // doesn't error. ZOOM_TOOL.md §Keyboard shortcuts
-            // and actions, HAND_TOOL.md §Hand-icon dblclick.
-            let _ = spec;
-            let _ = store;
-            let _ = ctx;
+        "doc.zoom.fit_rect" => {
+            // Fit a document-coordinate rectangle into the visible
+            // canvas area with a screen-space padding. Used by
+            // fit_active_artboard. Per ZOOM_TOOL.md §Anchor and
+            // clamp math (`algorithms/zoom_fit_rect`).
+            if let serde_json::Value::Object(args) = spec {
+                let rect_x = eval_number(args.get("rect_x"), store, ctx);
+                let rect_y = eval_number(args.get("rect_y"), store, ctx);
+                let rect_w = eval_number(args.get("rect_w"), store, ctx);
+                let rect_h = eval_number(args.get("rect_h"), store, ctx);
+                let padding = eval_number(args.get("padding"), store, ctx);
+                fit_rect_into_viewport(model, rect_x, rect_y, rect_w, rect_h, padding);
+            }
+        }
+        "doc.zoom.fit_marquee" => {
+            // Fit a marquee rectangle (drawn from press to cursor in
+            // viewport-local pixels) into the canvas. Exact fit
+            // (zero padding) per ZOOM_TOOL.md §Drag — marquee zoom.
+            // Below the 10 px minimum-marquee threshold, treated as
+            // a click and falls through to no-op (the tool's
+            // mouseup handler dispatches step zoom in that case;
+            // marquee fit is only invoked above threshold).
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let mx = press_x.min(cursor_x);
+                let my = press_y.min(cursor_y);
+                let mw = (press_x - cursor_x).abs();
+                let mh = (press_y - cursor_y).abs();
+                if mw < 10.0 || mh < 10.0 { return; }
+                // Convert the marquee from viewport-local pixels to
+                // document coordinates using the *current* zoom and
+                // pan, then fit_rect that document rectangle.
+                let z = model.zoom_level;
+                let px = model.view_offset_x;
+                let py = model.view_offset_y;
+                let doc_x = (mx - px) / z;
+                let doc_y = (my - py) / z;
+                let doc_w = mw / z;
+                let doc_h = mh / z;
+                fit_rect_into_viewport(model, doc_x, doc_y, doc_w, doc_h, 0.0);
+            }
+        }
+        "doc.zoom.fit_elements" => {
+            // Fit the bounding box of all elements in the document
+            // into the visible canvas area with padding. If the
+            // document is empty, reset to 100% zoom centered on
+            // the document origin. Used by fit_in_window.
+            if let serde_json::Value::Object(args) = spec {
+                let padding = eval_number(args.get("padding"), store, ctx);
+                let bounds = model.document().bounds();
+                if bounds.2 <= 0.0 || bounds.3 <= 0.0 {
+                    // Empty document → 100% centered on document
+                    // origin (0, 0).
+                    model.zoom_level = 1.0;
+                    model.view_offset_x = model.viewport_w / 2.0;
+                    model.view_offset_y = model.viewport_h / 2.0;
+                } else {
+                    fit_rect_into_viewport(
+                        model, bounds.0, bounds.1, bounds.2, bounds.3, padding,
+                    );
+                }
+            }
+        }
+        "doc.zoom.fit_all_artboards" => {
+            // Fit the union of all artboard rectangles into the
+            // visible canvas area with padding. The
+            // at-least-one-artboard invariant guarantees a target.
+            if let serde_json::Value::Object(args) = spec {
+                let padding = eval_number(args.get("padding"), store, ctx);
+                let doc = model.document();
+                if doc.artboards.is_empty() { return; }
+                let mut min_x = f64::INFINITY;
+                let mut min_y = f64::INFINITY;
+                let mut max_x = f64::NEG_INFINITY;
+                let mut max_y = f64::NEG_INFINITY;
+                for ab in &doc.artboards {
+                    min_x = min_x.min(ab.x);
+                    min_y = min_y.min(ab.y);
+                    max_x = max_x.max(ab.x + ab.width);
+                    max_y = max_y.max(ab.y + ab.height);
+                }
+                fit_rect_into_viewport(
+                    model, min_x, min_y, max_x - min_x, max_y - min_y, padding,
+                );
+            }
         }
         "doc.magic_wand.apply" => {
             // Magic Wand selection per MAGIC_WAND_TOOL.md §Predicate.
@@ -1902,6 +1977,44 @@ fn brush_options_confirm_dispatch(store: &mut StateStore, model: &mut Model) {
         }
         _ => {}
     }
+}
+
+/// Compute and write a fit-to-viewport zoom + pan that places the
+/// given document-space rectangle inside the canvas viewport with
+/// `padding` screen-space pixels of breathing room on each side.
+/// Uses fit-inside (letterbox) aspect-ratio resolution: the rect
+/// is fully visible; there's slack on one axis. Centers the rect
+/// in the viewport. Clamps to [min_zoom, max_zoom].
+///
+/// Skips the write if the input rectangle is empty, the viewport
+/// is degenerate, or the post-padding viewport is non-positive.
+/// In those cases the existing view state stays unchanged.
+fn fit_rect_into_viewport(
+    model: &mut Model,
+    rect_x: f64,
+    rect_y: f64,
+    rect_w: f64,
+    rect_h: f64,
+    padding: f64,
+) {
+    if rect_w <= 0.0 || rect_h <= 0.0 { return; }
+    let vw = model.viewport_w;
+    let vh = model.viewport_h;
+    if vw <= 0.0 || vh <= 0.0 { return; }
+    let avail_w = vw - 2.0 * padding;
+    let avail_h = vh - 2.0 * padding;
+    if avail_w <= 0.0 || avail_h <= 0.0 { return; }
+    let min_zoom = read_pref_number(&serde_json::Value::Null, "min_zoom", 0.1);
+    let max_zoom = read_pref_number(&serde_json::Value::Null, "max_zoom", 64.0);
+    let z = (avail_w / rect_w).min(avail_h / rect_h).clamp(min_zoom, max_zoom);
+    // Center the rect in the viewport.
+    let rect_cx = rect_x + rect_w / 2.0;
+    let rect_cy = rect_y + rect_h / 2.0;
+    let viewport_cx = vw / 2.0;
+    let viewport_cy = vh / 2.0;
+    model.zoom_level = z;
+    model.view_offset_x = viewport_cx - rect_cx * z;
+    model.view_offset_y = viewport_cy - rect_cy * z;
 }
 
 /// Read a numeric viewport preference from workspace.json. Returns
@@ -5940,6 +6053,128 @@ mod tests {
         assert_eq!(model.view_offset_y, 70.0);
         // Zoom unchanged.
         assert_eq!(model.zoom_level, 1.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_rect_centers_and_scales() {
+        // 200x100 rect at (0, 0) should be centered in a 800x600
+        // viewport. Padding 20 → available 760x560. Zoom = min(760/200,
+        // 560/100) = min(3.8, 5.6) = 3.8.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_rect": {
+                "rect_x":  "0", "rect_y":  "0",
+                "rect_w":  "200", "rect_h": "100",
+                "padding": "20",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert!((model.zoom_level - 3.8).abs() < 1e-9, "z = {}", model.zoom_level);
+        // Rect center (100, 50) at zoom 3.8 → screen (380, 190).
+        // Viewport center (400, 300). offset = 400 - 380 = 20; 300 - 190 = 110.
+        assert!((model.view_offset_x - 20.0).abs() < 1e-9);
+        assert!((model.view_offset_y - 110.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_rect_clamps_to_max_zoom() {
+        // Tiny rect would push zoom past max_zoom (64.0); should clamp.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_rect": {
+                "rect_x":  "0", "rect_y":  "0",
+                "rect_w":  "1", "rect_h":  "1",
+                "padding": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 64.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_rect_skips_when_viewport_unset() {
+        // viewport defaults to 888x900 in Model::default(); set to 0
+        // here to verify fit_rect doesn't divide-by-zero or write
+        // garbage.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 1.5;
+        model.view_offset_x = 100.0;
+        model.view_offset_y = 50.0;
+        model.viewport_w = 0.0;
+        model.viewport_h = 0.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_rect": {
+                "rect_x":  "0", "rect_y":  "0",
+                "rect_w":  "100", "rect_h": "100",
+                "padding": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // No-op: pre-existing view state preserved.
+        assert_eq!(model.zoom_level, 1.5);
+        assert_eq!(model.view_offset_x, 100.0);
+        assert_eq!(model.view_offset_y, 50.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_marquee_below_threshold_is_noop() {
+        // Below 10 px in either dimension → ignored.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_marquee": {
+                "press_x":  "100", "press_y": "100",
+                "cursor_x": "105", "cursor_y": "150",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // No-op: Model defaults preserved.
+        assert_eq!(model.zoom_level, 1.0);
+        assert_eq!(model.view_offset_x, 0.0);
+        assert_eq!(model.view_offset_y, 0.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_all_artboards_unions_rectangles() {
+        // Two artboards: A at (0, 0, 100, 100) and B at (200, 50, 100,
+        // 100). Union: (0, 0, 300, 150). Fit into 600x300 viewport with
+        // 0 padding. Zoom = min(600/300, 300/150) = 2.0.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("a".into());
+        a.name = "A".into();
+        a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        let mut b = Artboard::default_with_id("b".into());
+        b.name = "B".into();
+        b.x = 200.0; b.y = 50.0;
+        b.width = 100.0; b.height = 100.0;
+        doc.artboards.push(b);
+        let mut model = Model::new(doc, None);
+        model.viewport_w = 600.0;
+        model.viewport_h = 300.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_all_artboards": { "padding": "0" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert!((model.zoom_level - 2.0).abs() < 1e-9, "z = {}", model.zoom_level);
     }
 
     #[test]

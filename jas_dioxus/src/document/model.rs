@@ -70,6 +70,13 @@ pub struct Model {
     pub zoom_level: f64,
     pub view_offset_x: f64,
     pub view_offset_y: f64,
+    /// Canvas viewport dimensions in screen-space pixels. Updated by
+    /// the canvas widget on render / resize. Read by doc.zoom.fit_*
+    /// effects to compute the new zoom factor that fits a rect into
+    /// the visible canvas area. Defaults match the layout.yaml
+    /// canvas_pane default_position width/height.
+    pub viewport_w: f64,
+    pub viewport_h: f64,
 }
 
 impl Default for Model {
@@ -90,6 +97,8 @@ impl Default for Model {
             zoom_level: 1.0,
             view_offset_x: 0.0,
             view_offset_y: 0.0,
+            viewport_w: 888.0,
+            viewport_h: 900.0,
         }
     }
 }
@@ -116,6 +125,8 @@ impl Model {
             zoom_level: 1.0,
             view_offset_x: 0.0,
             view_offset_y: 0.0,
+            viewport_w: 888.0,
+            viewport_h: 900.0,
         }
     }
 
