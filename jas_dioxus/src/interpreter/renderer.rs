@@ -2851,6 +2851,11 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
         "polygon" => Some(ToolKind::Polygon),
         "star" => Some(ToolKind::Star),
         "lasso" => Some(ToolKind::Lasso),
+        "scale" => Some(ToolKind::Scale),
+        "rotate" => Some(ToolKind::Rotate),
+        "shear" => Some(ToolKind::Shear),
+        "hand" => Some(ToolKind::Hand),
+        "zoom" => Some(ToolKind::Zoom),
         _ => None,
     }
 }

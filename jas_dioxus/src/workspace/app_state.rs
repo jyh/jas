@@ -111,6 +111,10 @@ pub(crate) struct AppState {
     pub(crate) tabs: Vec<TabState>,
     pub(crate) active_tab: usize,
     pub(crate) active_tool: ToolKind,
+    /// Tool to restore when the spacebar pass-through to Hand
+    /// releases. None when no Space-held pass-through is active. Per
+    /// HAND_TOOL.md §Spacebar pass-through.
+    pub(crate) prior_tool_for_spacebar: Option<ToolKind>,
     pub(crate) app_config: super::workspace::AppConfig,
     pub(crate) workspace_layout: super::workspace::WorkspaceLayout,
     /// Which fill/stroke square is on top (active). true = fill, false = stroke.
@@ -603,6 +607,7 @@ impl AppState {
             tabs,
             active_tab,
             active_tool: ToolKind::Selection,
+            prior_tool_for_spacebar: None,
             app_config,
             workspace_layout,
             fill_on_top: true,
