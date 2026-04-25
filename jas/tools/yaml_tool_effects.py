@@ -1743,9 +1743,17 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         axis_angle_deg = math.degrees(math.atan2(ay, ax))
         return (math.degrees(math.atan(k)), "custom", axis_angle_deg)
 
-    def _apply_matrix_to_selection(matrix) -> None:
+    def _apply_matrix_to_selection(
+        matrix,
+        stroke_factor: float | None = None,
+        corner_factors: tuple[float, float] | None = None,
+    ) -> None:
         """Pre-multiply matrix onto every selected element's
-        transform via dataclasses.replace."""
+        transform via dataclasses.replace. Optionally multiplies
+        stroke widths (when stroke_factor is set) and rounded_rect
+        rx / ry (when corner_factors is set with axis-independent
+        |sx|, |sy| factors)."""
+        from geometry.element import Rect as RectElem
         doc = controller.document
         new_doc = doc
         for es in doc.selection:
@@ -1755,12 +1763,25 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                 continue
             current = getattr(elem, "transform", None) or Transform()
             new_t = matrix.multiply(current)
-            new_elem = dataclasses.replace(elem, transform=new_t)
-            new_doc = new_doc.replace_element(es.path, new_elem)
+            elem = dataclasses.replace(elem, transform=new_t)
+            if stroke_factor is not None:
+                stroke = getattr(elem, "stroke", None)
+                if stroke is not None:
+                    new_stroke = dataclasses.replace(
+                        stroke, width=stroke.width * stroke_factor)
+                    elem = dataclasses.replace(elem, stroke=new_stroke)
+            if corner_factors is not None and isinstance(elem, RectElem):
+                sx_abs, sy_abs = corner_factors
+                elem = dataclasses.replace(
+                    elem,
+                    rx=elem.rx * sx_abs,
+                    ry=elem.ry * sy_abs)
+            new_doc = new_doc.replace_element(es.path, elem)
         controller.set_document(new_doc)
 
     def doc_scale_apply(spec, ctx, store):
-        from jas.algorithms.transform_apply import scale_matrix
+        from jas.algorithms.transform_apply import (
+            scale_matrix, stroke_width_factor)
         if not isinstance(spec, dict):
             return None
         copy = _eval_bool_arg(spec.get("copy"), store, ctx)
@@ -1780,7 +1801,17 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         if copy:
             controller.copy_selection(0.0, 0.0)
         rx, ry = _resolve_reference_point(store, ctx)
-        _apply_matrix_to_selection(scale_matrix(sx, sy, rx, ry))
+        # Read state.scale_strokes (default true) and state.scale_corners
+        # (default false) — see SCALE_TOOL.md §Apply behavior.
+        strokes_v = _eval_value("state.scale_strokes", store, ctx)
+        scale_strokes = strokes_v.value if strokes_v.type == ValueType.BOOL else True
+        corners_v = _eval_value("state.scale_corners", store, ctx)
+        scale_corners = corners_v.value if corners_v.type == ValueType.BOOL else False
+        _apply_matrix_to_selection(
+            scale_matrix(sx, sy, rx, ry),
+            stroke_factor=stroke_width_factor(sx, sy) if scale_strokes else None,
+            corner_factors=(abs(sx), abs(sy)) if scale_corners else None,
+        )
         return None
 
     def doc_rotate_apply(spec, ctx, store):

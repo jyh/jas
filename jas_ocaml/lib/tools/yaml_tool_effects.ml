@@ -1984,15 +1984,74 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
   in
 
   (* Apply [matrix] to every element selected, pre-multiplied onto
-     the existing transform. Returns the new document. *)
-  let apply_matrix_to_selection (matrix : Element.transform) =
+     the existing transform. Optionally multiplies stroke widths
+     (when [scale_strokes] is set with the geometric-mean factor)
+     and rounded_rect corner radii (when [scale_corners] is set
+     with axis-independent abs-factors). *)
+  let apply_matrix_to_selection
+      ?(scale_strokes : float option = None)
+      ?(scale_corners : (float * float) option = None)
+      (matrix : Element.transform) =
+    let scale_stroke_width (factor : float) elem =
+      match elem with
+      | Element.Line r ->
+        (match r.stroke with
+         | Some s -> Element.with_stroke elem
+                       (Some { s with stroke_width = s.stroke_width *. factor })
+         | None -> elem)
+      | Element.Rect r ->
+        (match r.stroke with
+         | Some s -> Element.with_stroke elem
+                       (Some { s with stroke_width = s.stroke_width *. factor })
+         | None -> elem)
+      | Element.Circle r ->
+        (match r.stroke with
+         | Some s -> Element.with_stroke elem
+                       (Some { s with stroke_width = s.stroke_width *. factor })
+         | None -> elem)
+      | Element.Ellipse r ->
+        (match r.stroke with
+         | Some s -> Element.with_stroke elem
+                       (Some { s with stroke_width = s.stroke_width *. factor })
+         | None -> elem)
+      | Element.Polyline r ->
+        (match r.stroke with
+         | Some s -> Element.with_stroke elem
+                       (Some { s with stroke_width = s.stroke_width *. factor })
+         | None -> elem)
+      | Element.Polygon r ->
+        (match r.stroke with
+         | Some s -> Element.with_stroke elem
+                       (Some { s with stroke_width = s.stroke_width *. factor })
+         | None -> elem)
+      | Element.Path r ->
+        (match r.stroke with
+         | Some s -> Element.with_stroke elem
+                       (Some { s with stroke_width = s.stroke_width *. factor })
+         | None -> elem)
+      | _ -> elem
+    in
+    let scale_rr_corners (sx_abs, sy_abs) elem =
+      match elem with
+      | Element.Rect r ->
+        Element.Rect { r with rx = r.rx *. sx_abs; ry = r.ry *. sy_abs }
+      | _ -> elem
+    in
     let doc = ctrl#document in
     let new_doc = ref doc in
     Document.PathMap.iter (fun path _ ->
       if is_valid_path !new_doc path then begin
         let elem = Document.get_element !new_doc path in
-        let new_elem = Element.with_transform_premultiplied matrix elem in
-        new_doc := Document.replace_element !new_doc path new_elem
+        let elem = Element.with_transform_premultiplied matrix elem in
+        let elem = match scale_strokes with
+          | Some factor -> scale_stroke_width factor elem
+          | None -> elem
+        in
+        let elem = match scale_corners with
+          | Some sxy -> scale_rr_corners sxy elem
+          | None -> elem
+        in
+        new_doc := Document.replace_element !new_doc path elem
       end
     ) doc.selection;
     ctrl#set_document !new_doc
@@ -2018,10 +2077,30 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
       if copy then ctrl#copy_selection 0.0 0.0;
       let (rx, ry) = resolve_reference_point store ctx in
       let matrix = Transform_apply.scale_matrix ~sx ~sy ~rx ~ry in
-      apply_matrix_to_selection matrix
-      (* Stroke-width and corner adjustments deferred — see the Rust
-         side for the full scaffold; the matrix-only apply is what
-         matters for visible behavior. *)
+      let strokes_on =
+        match Expr_eval.evaluate "state.scale_strokes"
+                (State_store.eval_context ~extra:ctx store) with
+        | Expr_eval.Bool b -> b
+        | _ -> true
+      in
+      let corners_on =
+        match Expr_eval.evaluate "state.scale_corners"
+                (State_store.eval_context ~extra:ctx store) with
+        | Expr_eval.Bool b -> b
+        | _ -> false
+      in
+      let stroke_factor =
+        if strokes_on then
+          Some (Transform_apply.stroke_width_factor ~sx ~sy)
+        else None
+      in
+      let corner_factors =
+        if corners_on then Some (abs_float sx, abs_float sy) else None
+      in
+      apply_matrix_to_selection
+        ~scale_strokes:stroke_factor
+        ~scale_corners:corner_factors
+        matrix
     end
   in
 
