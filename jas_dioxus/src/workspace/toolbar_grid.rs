@@ -18,6 +18,7 @@ fn tool_yaml_id(kind: ToolKind) -> Option<&'static str> {
         ToolKind::Selection => "selection",
         ToolKind::PartialSelection => "partial_selection",
         ToolKind::InteriorSelection => "interior_selection",
+        ToolKind::MagicWand => "magic_wand",
         ToolKind::Pen => "pen",
         ToolKind::AddAnchorPoint => "add_anchor_point",
         ToolKind::DeleteAnchorPoint => "delete_anchor_point",
@@ -58,7 +59,7 @@ fn tool_options_dialog_id(kind: ToolKind) -> Option<String> {
 /// Slots with alternates show the current alternate and support long-press to switch.
 pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 0, &[ToolKind::Selection]),
-    (0, 1, &[ToolKind::PartialSelection, ToolKind::InteriorSelection]),
+    (0, 1, &[ToolKind::PartialSelection, ToolKind::InteriorSelection, ToolKind::MagicWand]),
     (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
     (1, 1, &[ToolKind::Pencil, ToolKind::Paintbrush, ToolKind::BlobBrush, ToolKind::PathEraser, ToolKind::Smooth]),
     (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),

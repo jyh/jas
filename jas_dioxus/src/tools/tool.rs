@@ -26,6 +26,7 @@ pub enum ToolKind {
     Selection,
     PartialSelection,
     InteriorSelection,
+    MagicWand,
     Pen,
     AddAnchorPoint,
     DeleteAnchorPoint,
@@ -51,6 +52,7 @@ impl ToolKind {
             ToolKind::Selection => "Selection (V)",
             ToolKind::PartialSelection => "Partial Selection (A)",
             ToolKind::InteriorSelection => "Interior Selection",
+            ToolKind::MagicWand => "Magic Wand (Y)",
             ToolKind::Pen => "Pen (P)",
             ToolKind::AddAnchorPoint => "Add Anchor Point (+)",
             ToolKind::DeleteAnchorPoint => "Delete Anchor Point (-)",
@@ -114,6 +116,7 @@ impl ToolKind {
         match self {
             ToolKind::Selection => Some("v"),
             ToolKind::PartialSelection => Some("a"),
+            ToolKind::MagicWand => Some("y"),
             ToolKind::Pen => Some("p"),
             ToolKind::Pencil => Some("n"),
             ToolKind::Paintbrush => Some("b"),
