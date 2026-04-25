@@ -1905,6 +1905,214 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* ── Transform tools (Scale / Rotate / Shear) ─────────── *)
+
+  (* Resolve the active reference point. Reads
+     state.transform_reference_point as a Value.List of two numbers
+     when set, else falls back to the union bounding-box center of
+     the current selection. *)
+  let resolve_reference_point store ctx : float * float =
+    let eval_ctx = State_store.eval_context ~extra:ctx store in
+    (match Expr_eval.evaluate "state.transform_reference_point" eval_ctx with
+     | Expr_eval.List items when List.length items >= 2 ->
+       let to_f = function
+         | `Int i -> Some (float_of_int i)
+         | `Float f -> Some f | _ -> None
+       in
+       (match to_f (List.nth items 0), to_f (List.nth items 1) with
+        | Some rx, Some ry -> Some (rx, ry)
+        | _ -> None)
+     | _ -> None)
+    |> function
+    | Some pt -> pt
+    | None ->
+      let doc = ctrl#document in
+      let elements = Document.PathMap.bindings doc.selection
+                     |> List.filter_map (fun (path, _) ->
+                       if is_valid_path doc path
+                       then Some (Document.get_element doc path)
+                       else None)
+      in
+      if elements = [] then (0.0, 0.0)
+      else
+        let (x, y, w, h) =
+          Align.union_bounds elements Align.geometric_bounds in
+        (x +. w /. 2.0, y +. h /. 2.0)
+  in
+
+  let drag_to_scale_factors ~px ~py ~cx ~cy ~rx ~ry ~shift =
+    let denom_x = px -. rx and denom_y = py -. ry in
+    let sx = if abs_float denom_x < 1e-9 then 1.0 else (cx -. rx) /. denom_x in
+    let sy = if abs_float denom_y < 1e-9 then 1.0 else (cy -. ry) /. denom_y in
+    if shift then
+      let prod = sx *. sy in
+      let sign = if prod >= 0.0 then 1.0 else -. 1.0 in
+      let s = sign *. sqrt (abs_float prod) in
+      (s, s)
+    else (sx, sy)
+  in
+
+  let drag_to_rotate_angle ~px ~py ~cx ~cy ~rx ~ry ~shift =
+    let theta_press = atan2 (py -. ry) (px -. rx) in
+    let theta_cursor = atan2 (cy -. ry) (cx -. rx) in
+    let theta_deg = (theta_cursor -. theta_press) *. 180.0 /. Float.pi in
+    if shift then
+      Float.round (theta_deg /. 45.0) *. 45.0
+    else theta_deg
+  in
+
+  let drag_to_shear_params ~px ~py ~cx ~cy ~rx ~ry ~shift =
+    let dx = cx -. px and dy = cy -. py in
+    if shift then begin
+      if abs_float dx >= abs_float dy then
+        let denom = max (abs_float (py -. ry)) 1e-9 in
+        let k = dx /. denom in
+        (atan k *. 180.0 /. Float.pi, "horizontal", 0.0)
+      else
+        let denom = max (abs_float (px -. rx)) 1e-9 in
+        let k = dy /. denom in
+        (atan k *. 180.0 /. Float.pi, "vertical", 0.0)
+    end else begin
+      let ax = px -. rx and ay = py -. ry in
+      let axis_len = max (sqrt (ax *. ax +. ay *. ay)) 1e-9 in
+      let perp_x = -. ay /. axis_len and perp_y = ax /. axis_len in
+      let perp_dist = (cx -. px) *. perp_x +. (cy -. py) *. perp_y in
+      let k = perp_dist /. axis_len in
+      let axis_angle_deg = atan2 ay ax *. 180.0 /. Float.pi in
+      (atan k *. 180.0 /. Float.pi, "custom", axis_angle_deg)
+    end
+  in
+
+  (* Apply [matrix] to every element selected, pre-multiplied onto
+     the existing transform. Returns the new document. *)
+  let apply_matrix_to_selection (matrix : Element.transform) =
+    let doc = ctrl#document in
+    let new_doc = ref doc in
+    Document.PathMap.iter (fun path _ ->
+      if is_valid_path !new_doc path then begin
+        let elem = Document.get_element !new_doc path in
+        let new_elem = Element.with_transform_premultiplied matrix elem in
+        new_doc := Document.replace_element !new_doc path new_elem
+      end
+    ) doc.selection;
+    ctrl#set_document !new_doc
+  in
+
+  let scale_apply_args store ctx args copy : unit =
+    let lookup k = List.assoc_opt k args in
+    let (sx, sy) =
+      if List.mem_assoc "sx" args then
+        (eval_number (lookup "sx") store ctx,
+         eval_number (lookup "sy") store ctx)
+      else
+        let (rx, ry) = resolve_reference_point store ctx in
+        let px = eval_number (lookup "press_x") store ctx in
+        let py = eval_number (lookup "press_y") store ctx in
+        let cx = eval_number (lookup "cursor_x") store ctx in
+        let cy = eval_number (lookup "cursor_y") store ctx in
+        let shift = eval_bool (lookup "shift") store ctx in
+        drag_to_scale_factors ~px ~py ~cx ~cy ~rx ~ry ~shift
+    in
+    if abs_float (sx -. 1.0) < 1e-9 && abs_float (sy -. 1.0) < 1e-9 then ()
+    else begin
+      if copy then ctrl#copy_selection 0.0 0.0;
+      let (rx, ry) = resolve_reference_point store ctx in
+      let matrix = Transform_apply.scale_matrix ~sx ~sy ~rx ~ry in
+      apply_matrix_to_selection matrix
+      (* Stroke-width and corner adjustments deferred — see the Rust
+         side for the full scaffold; the matrix-only apply is what
+         matters for visible behavior. *)
+    end
+  in
+
+  let rotate_apply_args store ctx args copy : unit =
+    let lookup k = List.assoc_opt k args in
+    let theta_deg =
+      if List.mem_assoc "angle" args then
+        eval_number (lookup "angle") store ctx
+      else
+        let (rx, ry) = resolve_reference_point store ctx in
+        let px = eval_number (lookup "press_x") store ctx in
+        let py = eval_number (lookup "press_y") store ctx in
+        let cx = eval_number (lookup "cursor_x") store ctx in
+        let cy = eval_number (lookup "cursor_y") store ctx in
+        let shift = eval_bool (lookup "shift") store ctx in
+        drag_to_rotate_angle ~px ~py ~cx ~cy ~rx ~ry ~shift
+    in
+    if abs_float theta_deg < 1e-9 then ()
+    else begin
+      if copy then ctrl#copy_selection 0.0 0.0;
+      let (rx, ry) = resolve_reference_point store ctx in
+      apply_matrix_to_selection
+        (Transform_apply.rotate_matrix ~theta_deg ~rx ~ry)
+    end
+  in
+
+  let shear_apply_args store ctx args copy : unit =
+    let lookup k = List.assoc_opt k args in
+    let (angle_deg, axis, axis_angle_deg) =
+      if List.mem_assoc "angle" args && List.mem_assoc "axis" args then
+        let a = eval_number (lookup "angle") store ctx in
+        let ax = eval_string_value (lookup "axis") store ctx in
+        let aa = eval_number (lookup "axis_angle") store ctx in
+        (a, ax, aa)
+      else
+        let (rx, ry) = resolve_reference_point store ctx in
+        let px = eval_number (lookup "press_x") store ctx in
+        let py = eval_number (lookup "press_y") store ctx in
+        let cx = eval_number (lookup "cursor_x") store ctx in
+        let cy = eval_number (lookup "cursor_y") store ctx in
+        let shift = eval_bool (lookup "shift") store ctx in
+        drag_to_shear_params ~px ~py ~cx ~cy ~rx ~ry ~shift
+    in
+    if abs_float angle_deg < 1e-9 then ()
+    else begin
+      if copy then ctrl#copy_selection 0.0 0.0;
+      let (rx, ry) = resolve_reference_point store ctx in
+      apply_matrix_to_selection
+        (Transform_apply.shear_matrix
+           ~angle_deg ~axis ~axis_angle_deg ~rx ~ry)
+    end
+  in
+
+  let doc_scale_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let copy = eval_bool (List.assoc_opt "copy" args) store ctx in
+       scale_apply_args store ctx args copy
+     | _ -> ());
+    `Null
+  in
+  let doc_rotate_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let copy = eval_bool (List.assoc_opt "copy" args) store ctx in
+       rotate_apply_args store ctx args copy
+     | _ -> ());
+    `Null
+  in
+  let doc_shear_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let copy = eval_bool (List.assoc_opt "copy" args) store ctx in
+       shear_apply_args store ctx args copy
+     | _ -> ());
+    `Null
+  in
+
+  let doc_preview_capture _ _ _ =
+    ctrl#model#capture_preview_snapshot;
+    `Null
+  in
+  let doc_preview_restore _ _ _ =
+    ctrl#model#restore_preview_snapshot;
+    `Null
+  in
+  let doc_preview_clear _ _ _ =
+    ctrl#model#clear_preview_snapshot;
+    `Null
+  in
+
   (* ── Probe / commit anchor + partial selection ─────────── *)
 
   let encode_path (path : int list) : Yojson.Safe.t =
@@ -2352,6 +2560,14 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.path.erase_at_rect", doc_path_erase_at_rect);
     ("doc.path.smooth_at_cursor", doc_path_smooth_at_cursor);
     ("doc.magic_wand.apply", doc_magic_wand_apply);
+    (* Transform tools — Scale / Rotate / Shear apply + preview snapshot.
+       See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md \167 Apply behavior. *)
+    ("doc.scale.apply", doc_scale_apply);
+    ("doc.rotate.apply", doc_rotate_apply);
+    ("doc.shear.apply", doc_shear_apply);
+    ("doc.preview.capture", doc_preview_capture);
+    ("doc.preview.restore", doc_preview_restore);
+    ("doc.preview.clear", doc_preview_clear);
     ("doc.paintbrush.edit_start", doc_paintbrush_edit_start);
     ("doc.paintbrush.edit_commit", doc_paintbrush_edit_commit);
     ("doc.blob_brush.commit_painting", doc_blob_brush_commit_painting);
