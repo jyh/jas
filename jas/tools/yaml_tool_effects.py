@@ -11,6 +11,7 @@ infrastructure lands.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, Callable, Sequence
 
 from algorithms.fit_curve import fit_curve
@@ -39,6 +40,7 @@ from geometry.element import (
     Polygon,
     Rect as RectElem,
     Stroke,
+    Transform,
     control_point_count,
     control_points,
     convert_corner_to_smooth,
@@ -1648,6 +1650,201 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             controller.set_selection(new_set)
         return None
 
+    # ── Transform tools (Scale / Rotate / Shear) ────────────
+    # See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md
+    # §Apply behavior.
+
+    def _eval_number_arg(arg, store, ctx) -> float:
+        if arg is None:
+            return 0.0
+        if isinstance(arg, (int, float)) and not isinstance(arg, bool):
+            return float(arg)
+        if isinstance(arg, str):
+            v = _eval_value(arg, store, ctx)
+            if v.type == ValueType.NUMBER:
+                return float(v.value)
+        return 0.0
+
+    def _eval_bool_arg(arg, store, ctx) -> bool:
+        if arg is None:
+            return False
+        if isinstance(arg, bool):
+            return arg
+        if isinstance(arg, str):
+            v = _eval_value(arg, store, ctx)
+            if v.type == ValueType.BOOL:
+                return bool(v.value)
+        return False
+
+    def _resolve_reference_point(store, ctx) -> tuple[float, float]:
+        """state.transform_reference_point as a list of two numbers,
+        else fall back to selection union bbox center."""
+        v = _eval_value("state.transform_reference_point", store, ctx)
+        if v.type == ValueType.LIST and len(v.value) >= 2:
+            try:
+                rx = float(v.value[0])
+                ry = float(v.value[1])
+                return (rx, ry)
+            except (TypeError, ValueError):
+                pass
+        from jas.algorithms.align import union_bounds, geometric_bounds
+        doc = controller.document
+        elements = []
+        for es in doc.selection:
+            try:
+                elements.append(doc.get_element(es.path))
+            except Exception:
+                pass
+        if not elements:
+            return (0.0, 0.0)
+        x, y, w, h = union_bounds(elements, geometric_bounds)
+        return (x + w / 2, y + h / 2)
+
+    def _drag_to_scale_factors(px, py, cx, cy, rx, ry, shift):
+        denom_x = px - rx
+        denom_y = py - ry
+        sx = 1.0 if abs(denom_x) < 1e-9 else (cx - rx) / denom_x
+        sy = 1.0 if abs(denom_y) < 1e-9 else (cy - ry) / denom_y
+        if shift:
+            prod = sx * sy
+            sign = 1.0 if prod >= 0 else -1.0
+            s = sign * (abs(prod) ** 0.5)
+            return (s, s)
+        return (sx, sy)
+
+    def _drag_to_rotate_angle(px, py, cx, cy, rx, ry, shift):
+        import math
+        theta_press = math.atan2(py - ry, px - rx)
+        theta_cursor = math.atan2(cy - ry, cx - rx)
+        theta_deg = math.degrees(theta_cursor - theta_press)
+        if shift:
+            theta_deg = round(theta_deg / 45.0) * 45.0
+        return theta_deg
+
+    def _drag_to_shear_params(px, py, cx, cy, rx, ry, shift):
+        import math
+        dx = cx - px
+        dy = cy - py
+        if shift:
+            if abs(dx) >= abs(dy):
+                denom = max(abs(py - ry), 1e-9)
+                k = dx / denom
+                return (math.degrees(math.atan(k)), "horizontal", 0.0)
+            denom = max(abs(px - rx), 1e-9)
+            k = dy / denom
+            return (math.degrees(math.atan(k)), "vertical", 0.0)
+        ax = px - rx
+        ay = py - ry
+        axis_len = max((ax * ax + ay * ay) ** 0.5, 1e-9)
+        perp_x = -ay / axis_len
+        perp_y = ax / axis_len
+        perp_dist = (cx - px) * perp_x + (cy - py) * perp_y
+        k = perp_dist / axis_len
+        axis_angle_deg = math.degrees(math.atan2(ay, ax))
+        return (math.degrees(math.atan(k)), "custom", axis_angle_deg)
+
+    def _apply_matrix_to_selection(matrix) -> None:
+        """Pre-multiply matrix onto every selected element's
+        transform via dataclasses.replace."""
+        doc = controller.document
+        new_doc = doc
+        for es in doc.selection:
+            try:
+                elem = new_doc.get_element(es.path)
+            except Exception:
+                continue
+            current = getattr(elem, "transform", None) or Transform()
+            new_t = matrix.multiply(current)
+            new_elem = dataclasses.replace(elem, transform=new_t)
+            new_doc = new_doc.replace_element(es.path, new_elem)
+        controller.set_document(new_doc)
+
+    def doc_scale_apply(spec, ctx, store):
+        from jas.algorithms.transform_apply import scale_matrix
+        if not isinstance(spec, dict):
+            return None
+        copy = _eval_bool_arg(spec.get("copy"), store, ctx)
+        if "sx" in spec:
+            sx = _eval_number_arg(spec.get("sx"), store, ctx)
+            sy = _eval_number_arg(spec.get("sy"), store, ctx)
+        else:
+            rx, ry = _resolve_reference_point(store, ctx)
+            px = _eval_number_arg(spec.get("press_x"), store, ctx)
+            py = _eval_number_arg(spec.get("press_y"), store, ctx)
+            cx = _eval_number_arg(spec.get("cursor_x"), store, ctx)
+            cy = _eval_number_arg(spec.get("cursor_y"), store, ctx)
+            shift = _eval_bool_arg(spec.get("shift"), store, ctx)
+            sx, sy = _drag_to_scale_factors(px, py, cx, cy, rx, ry, shift)
+        if abs(sx - 1.0) < 1e-9 and abs(sy - 1.0) < 1e-9:
+            return None
+        if copy:
+            controller.copy_selection(0.0, 0.0)
+        rx, ry = _resolve_reference_point(store, ctx)
+        _apply_matrix_to_selection(scale_matrix(sx, sy, rx, ry))
+        return None
+
+    def doc_rotate_apply(spec, ctx, store):
+        from jas.algorithms.transform_apply import rotate_matrix
+        if not isinstance(spec, dict):
+            return None
+        copy = _eval_bool_arg(spec.get("copy"), store, ctx)
+        if "angle" in spec:
+            theta_deg = _eval_number_arg(spec.get("angle"), store, ctx)
+        else:
+            rx, ry = _resolve_reference_point(store, ctx)
+            px = _eval_number_arg(spec.get("press_x"), store, ctx)
+            py = _eval_number_arg(spec.get("press_y"), store, ctx)
+            cx = _eval_number_arg(spec.get("cursor_x"), store, ctx)
+            cy = _eval_number_arg(spec.get("cursor_y"), store, ctx)
+            shift = _eval_bool_arg(spec.get("shift"), store, ctx)
+            theta_deg = _drag_to_rotate_angle(px, py, cx, cy, rx, ry, shift)
+        if abs(theta_deg) < 1e-9:
+            return None
+        if copy:
+            controller.copy_selection(0.0, 0.0)
+        rx, ry = _resolve_reference_point(store, ctx)
+        _apply_matrix_to_selection(rotate_matrix(theta_deg, rx, ry))
+        return None
+
+    def doc_shear_apply(spec, ctx, store):
+        from jas.algorithms.transform_apply import shear_matrix
+        if not isinstance(spec, dict):
+            return None
+        copy = _eval_bool_arg(spec.get("copy"), store, ctx)
+        if "angle" in spec and "axis" in spec:
+            angle_deg = _eval_number_arg(spec.get("angle"), store, ctx)
+            axis = _eval_string_value(spec.get("axis"), store, ctx)
+            axis_angle_deg = _eval_number_arg(spec.get("axis_angle"), store, ctx)
+        else:
+            rx, ry = _resolve_reference_point(store, ctx)
+            px = _eval_number_arg(spec.get("press_x"), store, ctx)
+            py = _eval_number_arg(spec.get("press_y"), store, ctx)
+            cx = _eval_number_arg(spec.get("cursor_x"), store, ctx)
+            cy = _eval_number_arg(spec.get("cursor_y"), store, ctx)
+            shift = _eval_bool_arg(spec.get("shift"), store, ctx)
+            angle_deg, axis, axis_angle_deg = _drag_to_shear_params(
+                px, py, cx, cy, rx, ry, shift)
+        if abs(angle_deg) < 1e-9:
+            return None
+        if copy:
+            controller.copy_selection(0.0, 0.0)
+        rx, ry = _resolve_reference_point(store, ctx)
+        _apply_matrix_to_selection(
+            shear_matrix(angle_deg, axis, axis_angle_deg, rx, ry))
+        return None
+
+    def doc_preview_capture(spec, ctx, store):
+        controller.model.capture_preview_snapshot()
+        return None
+
+    def doc_preview_restore(spec, ctx, store):
+        controller.model.restore_preview_snapshot()
+        return None
+
+    def doc_preview_clear(spec, ctx, store):
+        controller.model.clear_preview_snapshot()
+        return None
+
     def _encode_path(path) -> dict:
         return {"__path__": list(path)}
 
@@ -1956,6 +2153,12 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.path.erase_at_rect"] = doc_path_erase_at_rect
     effects["doc.path.smooth_at_cursor"] = doc_path_smooth_at_cursor
     effects["doc.magic_wand.apply"] = doc_magic_wand_apply
+    effects["doc.scale.apply"] = doc_scale_apply
+    effects["doc.rotate.apply"] = doc_rotate_apply
+    effects["doc.shear.apply"] = doc_shear_apply
+    effects["doc.preview.capture"] = doc_preview_capture
+    effects["doc.preview.restore"] = doc_preview_restore
+    effects["doc.preview.clear"] = doc_preview_clear
     effects["doc.paintbrush.edit_start"] = doc_paintbrush_edit_start
     effects["doc.paintbrush.edit_commit"] = doc_paintbrush_edit_commit
     effects["doc.blob_brush.commit_painting"] = doc_blob_brush_commit_painting
