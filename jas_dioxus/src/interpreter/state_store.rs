@@ -26,6 +26,17 @@ pub struct StateStore {
     /// `preview_targets`. Restored on close_dialog unless first cleared
     /// by the `clear_dialog_snapshot` effect (used by OK actions).
     dialog_snapshot: Option<HashMap<String, serde_json::Value>>,
+    /// Action name fired by the post-run hook in `run_effects` when
+    /// the dialog mutates. Set by `open_dialog` from the dialog
+    /// spec's `on_change` field. Cleared on `close_dialog`.
+    dialog_on_change: Option<String>,
+    /// Set by every `set_dialog` write; consumed by the post-run hook
+    /// to decide whether to fire the dialog's `on_change` action.
+    dialog_dirty: bool,
+    /// Re-entrancy guard: true while the post-run hook is dispatching
+    /// the on_change action. Prevents the action's own `set` effects
+    /// (or any nested run_effects calls) from re-triggering the hook.
+    dialog_firing_on_change: bool,
     /// Workspace-loaded reference data (swatch_libraries,
     /// brush_libraries, etc.). Mirrors the JS-side `data` namespace
     /// from jas_flask/static/js/engine/store.mjs. Mutated by the
@@ -44,6 +55,9 @@ impl StateStore {
             dialog_id: None,
             dialog_params: None,
             dialog_snapshot: None,
+            dialog_on_change: None,
+            dialog_dirty: false,
+            dialog_firing_on_change: false,
             data: serde_json::Value::Object(serde_json::Map::new()),
         }
     }
@@ -159,7 +173,35 @@ impl StateStore {
     pub fn set_dialog(&mut self, key: &str, value: serde_json::Value) {
         if let Some(ref mut d) = self.dialog {
             d.insert(key.to_string(), value);
+            self.dialog_dirty = true;
         }
+    }
+
+    /// Set the dialog's on_change action name. Called by the
+    /// open_dialog effect when the dialog spec declares an
+    /// on_change field.
+    pub fn set_dialog_on_change(&mut self, action: Option<String>) {
+        self.dialog_on_change = action;
+    }
+
+    pub fn dialog_on_change(&self) -> Option<&str> {
+        self.dialog_on_change.as_deref()
+    }
+
+    /// Take the dirty flag, leaving it false. Used by the post-run
+    /// hook in run_effects to decide whether to fire on_change.
+    pub fn take_dialog_dirty(&mut self) -> bool {
+        let was = self.dialog_dirty;
+        self.dialog_dirty = false;
+        was
+    }
+
+    pub fn is_firing_on_change(&self) -> bool {
+        self.dialog_firing_on_change
+    }
+
+    pub fn set_firing_on_change(&mut self, firing: bool) {
+        self.dialog_firing_on_change = firing;
     }
 
     pub fn dialog_id(&self) -> Option<&str> {
@@ -174,6 +216,12 @@ impl StateStore {
         self.dialog_id = None;
         self.dialog = None;
         self.dialog_params = None;
+        self.dialog_on_change = None;
+        self.dialog_dirty = false;
+        // dialog_firing_on_change is intentionally NOT cleared here —
+        // close_dialog can be invoked from inside an on_change-fired
+        // chain, and the guard must remain set until run_effects
+        // unwinds.
     }
 
     /// Capture the current value of every state key referenced by a
