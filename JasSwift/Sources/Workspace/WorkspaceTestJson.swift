@@ -87,6 +87,7 @@ private func panelKindStr(_ k: PanelKind) -> String {
     case .align: return "align"
     case .boolean: return "boolean"
     case .opacity: return "opacity"
+    case .magicWand: return "magic_wand"
     }
 }
 
@@ -546,6 +547,8 @@ private func parsePanelKind(_ v: Any?) -> PanelKind {
     case "artboards": return .artboards
     case "align": return .align
     case "boolean": return .boolean
+    case "opacity": return .opacity
+    case "magic_wand": return .magicWand
     default: return .layers
     }
 }

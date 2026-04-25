@@ -28,6 +28,7 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     case .align: return AlignPanel.menuItems()
     case .boolean: return BooleanPanel.menuItems()
     case .opacity: return OpacityPanel.menuItems()
+    case .magicWand: return MagicWandPanel.menuItems()
     }
 }
 
@@ -45,6 +46,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .align: AlignPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .boolean: BooleanPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .opacity: OpacityPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
+    case .magicWand: MagicWandPanel.dispatch(cmd, addr: addr, layout: &layout)
     }
 }
 
@@ -62,5 +64,6 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String, layout: WorkspaceLayo
     case .align: return AlignPanel.isChecked(cmd, layout: layout)
     case .boolean: return BooleanPanel.isChecked(cmd, layout: layout)
     case .opacity: return OpacityPanel.isChecked(cmd, layout: layout)
+    case .magicWand: return MagicWandPanel.isChecked(cmd, layout: layout)
     }
 }
