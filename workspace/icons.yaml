@@ -156,6 +156,19 @@ icons:
         fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round"/>
 
+  # Artboard: a page rectangle with the upper-right corner folded
+  # forward, suggesting "boundary, not content." Stroke-only design
+  # matching the other tool icons. Per ARTBOARD_TOOL.md §Tool icon.
+  artboard:
+    viewbox: "0 0 28 28"
+    svg: >
+      <path d="M5,6 L18,6 L23,11 L23,23 L5,23 Z"
+        fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linejoin="miter"/>
+      <polyline points="18,6 18,11 23,11"
+        fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linejoin="miter"/>
+
   # Magic Wand: a wand at ~45° with a sparkle / star at the tip.
   # Diagonal handle (lower-left → upper-right) + 4-point sparkle
   # at the tip + two small accent stars near the tip. Matches the

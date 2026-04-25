@@ -94,8 +94,12 @@ distortion) is phase-1 deferred.
   the theme canvas color is painted over every region not inside the union of
   artboard bounds. Elements outside render faded; the canvas background is
   unchanged underneath. When off, elements render at full opacity everywhere.
-- `update_while_dragging` (default on) — phase-1 no-op (no canvas artboard drag
-  exists yet). Persisted for the Artboard Tool.
+- `update_while_dragging` (default on) — when on, the Artboard Tool re-renders
+  the dragged artboard, any contained elements (per the Move/Copy Artwork
+  rule), and the fade region continuously during a drag. When off, only an
+  outline-preview rectangle updates and the artboard snaps to its new
+  geometry on mouseup. See ARTBOARD_TOOL.md §Update while dragging for the
+  per-state rendering contract.
 
 Elements' visibility modes (preview / outline / invisible) and layer lock state
 are orthogonal to artboards and don't affect artboard rendering.
@@ -633,15 +637,11 @@ alignment modes, Rearrange-based list reordering.
 
 ## Phase-1 deferrals summary
 
-- **Artboard Tool** — canvas-side create, click-to-activate, drag-to-move,
-  drag-to-resize.
 - **Convert to Artboards** — menu and context-menu entry grayed with
   `Coming soon` tooltip.
 - **Rearrange Dialogue** — menu entry and footer `REARRANGE_BUTTON` grayed
   with `Coming soon` tooltip. The blue-dot flag begins firing on first list
   change; since the Dialogue never opens in phase 1, the dot remains lit.
-- **`update_while_dragging`** — persisted but has no observable effect (no
-  canvas artboard drag yet).
 - **`video_ruler_pixel_aspect_ratio` visual effect** — value persists and
   round-trips; no non-square-pixel distortion in canvas rendering.
 - **Printing** — semantics pinned in the Printing forward-reference

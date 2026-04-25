@@ -279,6 +279,12 @@ final class YamlTool: CanvasTool {
                 drawBBoxGhost(cgCtx, render, evalCtx, model: ctx.model)
             case "marquee_rect":
                 drawMarqueeRectOverlay(cgCtx, render, evalCtx)
+            case "artboard_resize_handles":
+                drawArtboardResizeHandles(cgCtx, render, evalCtx,
+                                          model: ctx.model)
+            case "artboard_outline_preview":
+                drawArtboardOutlinePreview(cgCtx, render, evalCtx,
+                                           model: ctx.model)
             default: break
             }
         }
@@ -403,6 +409,88 @@ private func applyOverlayStyle(_ cgCtx: CGContext, _ style: OverlayStyle) {
 /// Marquee zoom rectangle: thin dashed stroke between (x1, y1) and
 /// (x2, y2). Used by the Zoom tool's drag overlay when scrubby_zoom
 /// is off. Per ZOOM_TOOL.md §Drag — marquee zoom.
+/// Draw the 8 resize handles on the single panel-selected artboard
+/// per ARTBOARD_TOOL.md §Drag-to-resize. Mirrors the Rust
+/// draw_artboard_resize_handles. Handles are 8 px screen-space
+/// squares; coordinates transform from document to viewport via
+/// model.zoomLevel + view_offset.
+private func drawArtboardResizeHandles(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any],
+    model: Model
+) {
+    let idValue = evalExprString(spec["artboard_id"], ctx)
+    guard !idValue.isEmpty,
+          let ab = model.document.artboards.first(where: { $0.id == idValue })
+    else { return }
+    let zoom = model.zoomLevel
+    let offx = model.viewOffsetX
+    let offy = model.viewOffsetY
+    let cx = ab.x + ab.width / 2.0
+    let cy = ab.y + ab.height / 2.0
+    let positions: [(Double, Double)] = [
+        (ab.x, ab.y),
+        (cx, ab.y),
+        (ab.x + ab.width, ab.y),
+        (ab.x + ab.width, cy),
+        (ab.x + ab.width, ab.y + ab.height),
+        (cx, ab.y + ab.height),
+        (ab.x, ab.y + ab.height),
+        (ab.x, cy),
+    ]
+    let handleSize: CGFloat = 8.0
+    let half = handleSize / 2.0
+    cgCtx.saveGState()
+    cgCtx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    cgCtx.setStrokeColor(CGColor(red: 0, green: 120/255.0, blue: 1, alpha: 1))
+    cgCtx.setLineWidth(1.5)
+    for (dx, dy) in positions {
+        let vx = CGFloat(dx * zoom + offx)
+        let vy = CGFloat(dy * zoom + offy)
+        let rect = CGRect(x: vx - half, y: vy - half,
+                          width: handleSize, height: handleSize)
+        cgCtx.fill(rect)
+        cgCtx.stroke(rect)
+    }
+    cgCtx.restoreGState()
+}
+
+/// Draw the outline-preview rectangle for in-flight move / resize /
+/// duplicate gestures when update_while_dragging is false. Phase 1
+/// implementation: simple stroked rectangle around the artboard's
+/// current bounds (post-restore_preview_snapshot, the in-flight
+/// values are already on the model).
+private func drawArtboardOutlinePreview(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any],
+    model: Model
+) {
+    let idValue = evalExprString(spec["artboard_id"], ctx)
+    guard !idValue.isEmpty,
+          let ab = model.document.artboards.first(where: { $0.id == idValue })
+    else { return }
+    let zoom = model.zoomLevel
+    let offx = model.viewOffsetX
+    let offy = model.viewOffsetY
+    let vx = CGFloat(ab.x * zoom + offx)
+    let vy = CGFloat(ab.y * zoom + offy)
+    let vw = CGFloat(ab.width * zoom)
+    let vh = CGFloat(ab.height * zoom)
+    cgCtx.saveGState()
+    cgCtx.setStrokeColor(CGColor(red: 0, green: 120/255.0, blue: 1, alpha: 1))
+    cgCtx.setLineWidth(1.0)
+    cgCtx.stroke(CGRect(x: vx, y: vy, width: vw, height: vh))
+    cgCtx.restoreGState()
+}
+
+/// Evaluate a render-spec field as a string (handles bare strings,
+/// expression strings, and Value results).
+private func evalExprString(_ arg: Any?, _ ctx: [String: Any]) -> String {
+    guard let s = arg as? String else { return "" }
+    let v = evaluate(s, context: ctx)
+    if case .string(let result) = v { return result }
+    // Fallback: treat as literal.
+    return s
+}
+
 private func drawMarqueeRectOverlay(
     _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
 ) {

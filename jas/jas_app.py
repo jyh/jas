@@ -961,6 +961,7 @@ class MainWindow(QMainWindow):
         Tool.SCALE: "scale",
         Tool.ROTATE: "rotate",
         Tool.SHEAR: "shear",
+        Tool.ARTBOARD: "artboard",
     }
 
     # Map a tool yaml's tool_options_panel id to a PanelKind.

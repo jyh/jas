@@ -124,5 +124,10 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
         // ZOOM_TOOL.md §Tool icon.
         ToolKind::Zoom => format!(
             r#"<circle cx="11" cy="11" r="6.5" fill="none" stroke="{c}" stroke-width="2"/><line x1="15.5" y1="15.5" x2="22.5" y2="22.5" stroke="{c}" stroke-width="2.5" stroke-linecap="round"/>"#),
+        // Artboard — page rectangle with the upper-right corner
+        // folded forward, suggesting "boundary, not content." See
+        // ARTBOARD_TOOL.md §Tool icon.
+        ToolKind::Artboard => format!(
+            r#"<path d="M5,6 L18,6 L23,11 L23,23 L5,23 Z" fill="none" stroke="{c}" stroke-width="2" stroke-linejoin="miter"/><polyline points="18,6 18,11 23,11" fill="none" stroke="{c}" stroke-width="2" stroke-linejoin="miter"/>"#),
     }
 }
