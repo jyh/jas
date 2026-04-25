@@ -1118,9 +1118,10 @@ fn run_doc_effect(
                     .unwrap_or_default();
                 let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
                 let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
-                let _shift_held = eval_bool(args.get("shift_held"), store, ctx);
-                let _alt_held = eval_bool(args.get("alt_held"), store, ctx);
-                artboard_resize_apply(model, store, &handle_pos, cursor_x, cursor_y);
+                let shift_held = eval_bool(args.get("shift_held"), store, ctx);
+                let alt_held = eval_bool(args.get("alt_held"), store, ctx);
+                artboard_resize_apply(model, store, &handle_pos,
+                    cursor_x, cursor_y, shift_held, alt_held);
             }
         }
         "doc.artboard.resize_commit" => {
@@ -2874,12 +2875,14 @@ fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
 }
 
 /// Compute new (x, y, w, h) for a resize gesture given the handle
-/// position, the original (pre-drag) bounds, and the cursor in
-/// document coords. The opposite handle (or opposite edge for edge
-/// handles) stays anchored. Each dimension is clamped to a 1 pt
-/// minimum per ARTBOARD_TOOL.md §Drag-to-resize. Modifiers (Shift =
-/// lock proportion, Alt = resize from center) are P1.3e work; this
-/// helper handles the unmodified case.
+/// position, the original (pre-drag) bounds, the cursor in document
+/// coords, and the modifier state. The opposite handle (or opposite
+/// edge for edge handles) stays anchored by default; Alt centers
+/// the resize on the artboard's geometric center; Shift locks the
+/// W/H ratio to its original value. Each dimension is clamped to a
+/// 1 pt minimum per ARTBOARD_TOOL.md §Drag-to-resize. Per spec,
+/// flip-during-drag is deferred to phase 2 — drags past the
+/// opposite handle hard-stop at the clamp.
 fn artboard_resize_compute(
     handle_pos: &str,
     orig_x: f64,
@@ -2888,50 +2891,185 @@ fn artboard_resize_compute(
     orig_h: f64,
     cursor_x: f64,
     cursor_y: f64,
+    shift_held: bool,
+    alt_held: bool,
 ) -> (f64, f64, f64, f64) {
+    let orig_cx = orig_x + orig_w / 2.0;
+    let orig_cy = orig_y + orig_h / 2.0;
+    let orig_ratio = if orig_h > 0.0 { orig_w / orig_h } else { 1.0 };
+
+    let is_corner = matches!(handle_pos, "nw" | "ne" | "se" | "sw");
+    let is_edge = matches!(handle_pos, "n" | "e" | "s" | "w");
+
+    // Helper closures for picking the dominant cursor axis when
+    // shift-locking proportion on a corner handle.
+    let dominant_w_from_corner = |dx: f64, dy: f64| -> (f64, f64) {
+        // Returns (w, h) such that w / h == orig_ratio. dx and dy
+        // are the absolute distances from the anchor on each axis.
+        if dy <= 0.0 {
+            (dx.max(1.0), (dx / orig_ratio).max(1.0))
+        } else if dx / orig_w > dy / orig_h {
+            let w = dx.max(1.0);
+            (w, (w / orig_ratio).max(1.0))
+        } else {
+            let h = dy.max(1.0);
+            ((h * orig_ratio).max(1.0), h)
+        }
+    };
+
+    // ── Centered (Alt) variants ──────────────────────────────────
+    if alt_held && is_corner {
+        // Corner from center: opposite corner reflects through the
+        // center. Half-extents come from the cursor's distance from
+        // the center; Shift forces them into the orig_ratio.
+        let mut hw = (cursor_x - orig_cx).abs();
+        let mut hh = (cursor_y - orig_cy).abs();
+        if shift_held {
+            // dominant_w_from_corner expects full distances (its
+            // proportional-comparison normalizes by orig_w / orig_h,
+            // which are full dimensions). Pass doubled half-extents,
+            // halve the returned full dims back to half-extents.
+            let (rw, rh) = dominant_w_from_corner(2.0 * hw, 2.0 * hh);
+            hw = rw / 2.0;
+            hh = rh / 2.0;
+        }
+        let new_w = (2.0 * hw).max(1.0);
+        let new_h = (2.0 * hh).max(1.0);
+        return (orig_cx - new_w / 2.0, orig_cy - new_h / 2.0, new_w, new_h);
+    }
+    if alt_held && is_edge {
+        // Edge from center: the dragged axis expands symmetrically
+        // around center; the cross axis stays unchanged unless
+        // Shift locks it to the ratio (also centered).
+        let (mut new_x, mut new_y, mut new_w, mut new_h) =
+            (orig_x, orig_y, orig_w, orig_h);
+        match handle_pos {
+            "e" | "w" => {
+                let half_w = (cursor_x - orig_cx).abs().max(0.5);
+                new_w = 2.0 * half_w;
+                new_x = orig_cx - half_w;
+                if shift_held {
+                    new_h = (new_w / orig_ratio).max(1.0);
+                    new_y = orig_cy - new_h / 2.0;
+                }
+            }
+            "n" | "s" => {
+                let half_h = (cursor_y - orig_cy).abs().max(0.5);
+                new_h = 2.0 * half_h;
+                new_y = orig_cy - half_h;
+                if shift_held {
+                    new_w = (new_h * orig_ratio).max(1.0);
+                    new_x = orig_cx - new_w / 2.0;
+                }
+            }
+            _ => {}
+        }
+        return (new_x, new_y, new_w.max(1.0), new_h.max(1.0));
+    }
+
+    // ── Shift-only (corner): lock proportion anchored at opposite ──
+    if shift_held && is_corner {
+        let right = orig_x + orig_w;
+        let bottom = orig_y + orig_h;
+        match handle_pos {
+            "se" => {
+                let dx = (cursor_x - orig_x).max(1.0);
+                let dy = (cursor_y - orig_y).max(1.0);
+                let (nw, nh) = dominant_w_from_corner(dx, dy);
+                return (orig_x, orig_y, nw, nh);
+            }
+            "sw" => {
+                let dx = (right - cursor_x).max(1.0);
+                let dy = (cursor_y - orig_y).max(1.0);
+                let (nw, nh) = dominant_w_from_corner(dx, dy);
+                return (right - nw, orig_y, nw, nh);
+            }
+            "ne" => {
+                let dx = (cursor_x - orig_x).max(1.0);
+                let dy = (bottom - cursor_y).max(1.0);
+                let (nw, nh) = dominant_w_from_corner(dx, dy);
+                return (orig_x, bottom - nh, nw, nh);
+            }
+            "nw" => {
+                let dx = (right - cursor_x).max(1.0);
+                let dy = (bottom - cursor_y).max(1.0);
+                let (nw, nh) = dominant_w_from_corner(dx, dy);
+                return (right - nw, bottom - nh, nw, nh);
+            }
+            _ => {}
+        }
+    }
+
+    // ── Shift-only (edge): proportion-from-cross-center ──────────
+    if shift_held && is_edge {
+        let (mut new_x, mut new_y, mut new_w, mut new_h) =
+            (orig_x, orig_y, orig_w, orig_h);
+        match handle_pos {
+            "e" => {
+                new_w = (cursor_x - orig_x).max(1.0);
+                new_h = (new_w / orig_ratio).max(1.0);
+                new_y = orig_cy - new_h / 2.0;
+            }
+            "w" => {
+                let right = orig_x + orig_w;
+                new_w = (right - cursor_x).max(1.0);
+                new_x = right - new_w;
+                new_h = (new_w / orig_ratio).max(1.0);
+                new_y = orig_cy - new_h / 2.0;
+            }
+            "s" => {
+                new_h = (cursor_y - orig_y).max(1.0);
+                new_w = (new_h * orig_ratio).max(1.0);
+                new_x = orig_cx - new_w / 2.0;
+            }
+            "n" => {
+                let bottom = orig_y + orig_h;
+                new_h = (bottom - cursor_y).max(1.0);
+                new_y = bottom - new_h;
+                new_w = (new_h * orig_ratio).max(1.0);
+                new_x = orig_cx - new_w / 2.0;
+            }
+            _ => {}
+        }
+        return (new_x, new_y, new_w, new_h);
+    }
+
+    // ── Unmodified path ──────────────────────────────────────────
     let (mut new_x, mut new_y, mut new_w, mut new_h) = (orig_x, orig_y, orig_w, orig_h);
     let right = orig_x + orig_w;
     let bottom = orig_y + orig_h;
     match handle_pos {
         "nw" => {
-            // SE corner stays anchored.
             new_x = cursor_x.min(right - 1.0);
             new_y = cursor_y.min(bottom - 1.0);
             new_w = right - new_x;
             new_h = bottom - new_y;
         }
         "n" => {
-            // Bottom edge stays; top moves to cursor_y.
             new_y = cursor_y.min(bottom - 1.0);
             new_h = bottom - new_y;
         }
         "ne" => {
-            // SW corner stays anchored at (orig_x, bottom).
             new_y = cursor_y.min(bottom - 1.0);
             new_w = (cursor_x - orig_x).max(1.0);
             new_h = bottom - new_y;
         }
         "e" => {
-            // Left edge stays; right moves to cursor_x.
             new_w = (cursor_x - orig_x).max(1.0);
         }
         "se" => {
-            // NW corner stays anchored at (orig_x, orig_y).
             new_w = (cursor_x - orig_x).max(1.0);
             new_h = (cursor_y - orig_y).max(1.0);
         }
         "s" => {
-            // Top edge stays; bottom moves to cursor_y.
             new_h = (cursor_y - orig_y).max(1.0);
         }
         "sw" => {
-            // NE corner stays anchored at (right, orig_y).
             new_x = cursor_x.min(right - 1.0);
             new_w = right - new_x;
             new_h = (cursor_y - orig_y).max(1.0);
         }
         "w" => {
-            // Right edge stays; left moves to cursor_x.
             new_x = cursor_x.min(right - 1.0);
             new_w = right - new_x;
         }
@@ -2948,11 +3086,12 @@ fn artboard_resize_apply(
     handle_pos: &str,
     cursor_x: f64,
     cursor_y: f64,
+    shift_held: bool,
+    alt_held: bool,
 ) {
     if !model.has_preview_snapshot() {
         return;
     }
-    // Resize target is the artboard whose handle was hit at mousedown.
     let target = store
         .eval_context()
         .get("tool")
@@ -2965,8 +3104,10 @@ fn artboard_resize_apply(
     model.restore_preview_snapshot();
     let mut new_doc = model.document().clone();
     if let Some(ab) = new_doc.artboards.iter_mut().find(|a| a.id == target_id) {
-        let (nx, ny, nw, nh) =
-            artboard_resize_compute(handle_pos, ab.x, ab.y, ab.width, ab.height, cursor_x, cursor_y);
+        let (nx, ny, nw, nh) = artboard_resize_compute(
+            handle_pos, ab.x, ab.y, ab.width, ab.height,
+            cursor_x, cursor_y, shift_held, alt_held,
+        );
         ab.x = nx;
         ab.y = ny;
         ab.width = nw;
@@ -2984,8 +3125,13 @@ fn artboard_resize_commit(model: &mut Model, store: &mut StateStore) {
     let read_num = |k: &str| -> f64 {
         t.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0)
     };
+    let read_bool = |k: &str| -> bool {
+        t.get(k).and_then(|v| v.as_bool()).unwrap_or(false)
+    };
     let cursor_x = read_num("cursor_x");
     let cursor_y = read_num("cursor_y");
+    let shift_held = read_bool("shift_held");
+    let alt_held = read_bool("alt_held");
     let handle_pos = t
         .get("hit_handle_pos")
         .and_then(|v| v.as_str())
@@ -3005,11 +3151,10 @@ fn artboard_resize_commit(model: &mut Model, store: &mut StateStore) {
     model.restore_preview_snapshot();
     let mut new_doc = model.document().clone();
     if let Some(ab) = new_doc.artboards.iter_mut().find(|a| a.id == target_id) {
-        let (nx, ny, nw, nh) =
-            artboard_resize_compute(&handle_pos, ab.x, ab.y, ab.width, ab.height, cursor_x, cursor_y);
-        // Integer-pt rounding at commit per ARTBOARD_TOOL.md §Common
-        // rules. Clamp w / h to >= 1 after rounding so a near-zero
-        // drag doesn't round to zero.
+        let (nx, ny, nw, nh) = artboard_resize_compute(
+            &handle_pos, ab.x, ab.y, ab.width, ab.height,
+            cursor_x, cursor_y, shift_held, alt_held,
+        );
         ab.x = nx.round();
         ab.y = ny.round();
         ab.width = nw.round().max(1.0);
@@ -6888,6 +7033,63 @@ mod tests {
     }
 
     #[test]
+    fn test_artboard_resize_compute_alt_centers_corner() {
+        // SE corner with Alt: center (50, 50) stays; cursor at
+        // (90, 80) → half-extents (40, 30) → dimensions (80, 60),
+        // bounds (10, 20, 80, 60).
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("se", 0.0, 0.0, 100.0, 100.0, 90.0, 80.0, false, true);
+        assert_eq!((nx, ny, nw, nh), (10.0, 20.0, 80.0, 60.0));
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_alt_centers_edge() {
+        // E edge with Alt: horizontal center stays; cursor at x=70
+        // (orig center x=50) → half-w=20 → new_w=40, x=30, h
+        // unchanged.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("e", 0.0, 0.0, 100.0, 50.0, 70.0, 999.0, false, true);
+        assert_eq!((nx, ny, nw, nh), (30.0, 0.0, 40.0, 50.0));
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_shift_locks_ratio_corner() {
+        // SE corner with Shift, original 100x50 (ratio 2:1). Cursor
+        // (200, 80): dx=200, dy=80. dx / orig_w = 2, dy / orig_h =
+        // 1.6 — width dominates → new_w=200, new_h=200/2=100. NW
+        // anchor (0, 0) stays.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("se", 0.0, 0.0, 100.0, 50.0, 200.0, 80.0, true, false);
+        assert_eq!((nx, ny), (0.0, 0.0));
+        assert_eq!(nw, 200.0);
+        assert_eq!(nh, 100.0);
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_shift_alt_centers_and_locks() {
+        // SE + Shift + Alt, original 100x50 (ratio 2:1) at (0,0).
+        // Center (50, 25). Cursor at (150, 50): half_w=100,
+        // half_h=25 — width dominates → half_w=100, half_h=100/2=50.
+        // dimensions (200, 100), centered → (-50, -25, 200, 100).
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("se", 0.0, 0.0, 100.0, 50.0, 150.0, 50.0, true, true);
+        assert_eq!((nx, ny, nw, nh), (-50.0, -25.0, 200.0, 100.0));
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_shift_edge_centers_cross_axis() {
+        // E edge with Shift, original 100x50 at (0, 20). Ratio 2:1.
+        // Cursor (200, 999): new_w=200, new_h=100, vertical center
+        // (orig_cy=45) stays → new_y=45-50=-5.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("e", 0.0, 20.0, 100.0, 50.0, 200.0, 999.0, true, false);
+        assert_eq!(nx, 0.0);
+        assert_eq!(ny, -5.0);
+        assert_eq!(nw, 200.0);
+        assert_eq!(nh, 100.0);
+    }
+
+    #[test]
     fn test_doc_artboard_move_apply_translates_panel_selected() {
         // Single-target fallback path: with no panel-selection, the
         // tool's hit_artboard_id (set by probe_hit) is the move
@@ -7002,7 +7204,7 @@ mod tests {
         // cursor at (200, 150) with original (0, 0, 100, 100):
         // new w = 200, new h = 150.
         let (nx, ny, nw, nh) =
-            artboard_resize_compute("se", 0.0, 0.0, 100.0, 100.0, 200.0, 150.0);
+            artboard_resize_compute("se", 0.0, 0.0, 100.0, 100.0, 200.0, 150.0, false, false);
         assert_eq!((nx, ny, nw, nh), (0.0, 0.0, 200.0, 150.0));
     }
 
@@ -7012,7 +7214,7 @@ mod tests {
         // anchored. Original (10, 10, 100, 100), cursor at (60, 30):
         // new x = 60, new y = 30, new w = 50, new h = 80.
         let (nx, ny, nw, nh) =
-            artboard_resize_compute("nw", 10.0, 10.0, 100.0, 100.0, 60.0, 30.0);
+            artboard_resize_compute("nw", 10.0, 10.0, 100.0, 100.0, 60.0, 30.0, false, false);
         assert_eq!((nx, ny, nw, nh), (60.0, 30.0, 50.0, 80.0));
     }
 
@@ -7020,7 +7222,7 @@ mod tests {
     fn test_artboard_resize_compute_e_edge_only_w() {
         // E edge drag: only width changes; y / height stay.
         let (nx, ny, nw, nh) =
-            artboard_resize_compute("e", 10.0, 20.0, 100.0, 50.0, 200.0, 999.0);
+            artboard_resize_compute("e", 10.0, 20.0, 100.0, 50.0, 200.0, 999.0, false, false);
         assert_eq!((nx, ny, nw, nh), (10.0, 20.0, 190.0, 50.0));
     }
 
@@ -7028,7 +7230,7 @@ mod tests {
     fn test_artboard_resize_compute_n_edge_only_h() {
         // N edge drag: only y / height change.
         let (nx, ny, nw, nh) =
-            artboard_resize_compute("n", 10.0, 100.0, 50.0, 100.0, 999.0, 80.0);
+            artboard_resize_compute("n", 10.0, 100.0, 50.0, 100.0, 999.0, 80.0, false, false);
         assert_eq!((nx, ny, nw, nh), (10.0, 80.0, 50.0, 120.0));
     }
 
@@ -7037,7 +7239,7 @@ mod tests {
         // SE corner dragged past the opposite NW corner — width and
         // height clamp at 1 pt min, anchored at NW.
         let (nx, ny, nw, nh) =
-            artboard_resize_compute("se", 100.0, 100.0, 50.0, 50.0, 50.0, 50.0);
+            artboard_resize_compute("se", 100.0, 100.0, 50.0, 50.0, 50.0, 50.0, false, false);
         assert_eq!((nx, ny), (100.0, 100.0));
         assert_eq!(nw, 1.0);
         assert_eq!(nh, 1.0);
@@ -7048,7 +7250,7 @@ mod tests {
         // NW corner dragged past SE — x clamps to right - 1, y to
         // bottom - 1 so the anchored opposite corner stays in place.
         let (nx, ny, nw, nh) =
-            artboard_resize_compute("nw", 0.0, 0.0, 50.0, 50.0, 200.0, 200.0);
+            artboard_resize_compute("nw", 0.0, 0.0, 50.0, 50.0, 200.0, 200.0, false, false);
         // right = 50, so nx clamps to 49 (right - 1).
         assert_eq!(nx, 49.0);
         assert_eq!(ny, 49.0);
