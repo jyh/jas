@@ -130,6 +130,39 @@ impl Model {
         }
     }
 
+    /// Center the canvas view on the current artboard using the
+    /// stored viewport_w / viewport_h. Per ZOOM_TOOL.md
+    /// §Document-open behavior: at zoom_level == 1.0 if the artboard
+    /// fits, the artboard's bounding box is centered in the
+    /// viewport. Computes pan only — leaves zoom_level alone (the
+    /// caller should pre-set it). Used at TabState construction and
+    /// the first time the canvas reports its real viewport size.
+    pub fn center_view_on_current_artboard(&mut self) {
+        let Some(ab) = self.document.artboards.first() else { return; };
+        if self.viewport_w <= 0.0 || self.viewport_h <= 0.0 { return; }
+        let z = self.zoom_level;
+        // Fit-or-center: if artboard fits at current zoom, center
+        // it; otherwise apply fit_active_artboard semantics.
+        let fits = ab.width * z <= self.viewport_w && ab.height * z <= self.viewport_h;
+        if fits {
+            self.view_offset_x = self.viewport_w / 2.0 - (ab.x + ab.width / 2.0) * z;
+            self.view_offset_y = self.viewport_h / 2.0 - (ab.y + ab.height / 2.0) * z;
+        } else {
+            // fit-inside with default fit_padding_px (20).
+            let pad = 20.0;
+            let avail_w = self.viewport_w - 2.0 * pad;
+            let avail_h = self.viewport_h - 2.0 * pad;
+            if avail_w > 0.0 && avail_h > 0.0 {
+                let z_fit = (avail_w / ab.width).min(avail_h / ab.height).clamp(0.1, 64.0);
+                self.zoom_level = z_fit;
+                self.view_offset_x = self.viewport_w / 2.0
+                    - (ab.x + ab.width / 2.0) * z_fit;
+                self.view_offset_y = self.viewport_h / 2.0
+                    - (ab.y + ab.height / 2.0) * z_fit;
+            }
+        }
+    }
+
     /// Borrow the current document. The returned reference is invalidated
     /// by any subsequent mutating call on this model.
     pub fn document(&self) -> &Document {
@@ -380,5 +413,49 @@ mod tests {
         model.undo();
         // After undo, generation differs from saved — still modified
         assert!(model.is_modified());
+    }
+
+    #[test]
+    fn center_view_on_artboard_centers_letter_in_default_viewport() {
+        // Default Letter artboard is 612x792 at (0, 0). Default
+        // viewport is 888x900. At zoom 1.0 the artboard fits
+        // (612 ≤ 888, 792 ≤ 900). Pan should center it:
+        //   offset_x = 444 - 306 = 138
+        //   offset_y = 450 - 396 = 54
+        let mut model = Model::default();
+        model.center_view_on_current_artboard();
+        assert_eq!(model.zoom_level, 1.0);
+        assert_eq!(model.view_offset_x, 138.0);
+        assert_eq!(model.view_offset_y, 54.0);
+    }
+
+    #[test]
+    fn center_view_on_artboard_fits_when_too_large() {
+        // Artificially shrink viewport so the default Letter
+        // artboard doesn't fit at 1.0. Should fall through to
+        // fit_active_artboard semantics.
+        let mut model = Model::default();
+        model.viewport_w = 400.0;
+        model.viewport_h = 400.0;
+        model.center_view_on_current_artboard();
+        // zoom is fit-inside with 20px padding:
+        // avail = 360, zoom = min(360/612, 360/792) = 0.4545...
+        assert!(model.zoom_level < 1.0);
+        assert!((model.zoom_level - 360.0/792.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn center_view_on_artboard_skips_with_zero_viewport() {
+        let mut model = Model::default();
+        model.viewport_w = 0.0;
+        model.viewport_h = 0.0;
+        model.zoom_level = 2.0;
+        model.view_offset_x = 100.0;
+        model.view_offset_y = 50.0;
+        model.center_view_on_current_artboard();
+        // No-op: pre-existing values preserved.
+        assert_eq!(model.zoom_level, 2.0);
+        assert_eq!(model.view_offset_x, 100.0);
+        assert_eq!(model.view_offset_y, 50.0);
     }
 }

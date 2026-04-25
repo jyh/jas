@@ -98,6 +98,13 @@ impl TabState {
         tools.insert(ToolKind::Lasso, yaml_tool("lasso"));
         tools.insert(ToolKind::Hand, yaml_tool("hand"));
         tools.insert(ToolKind::Zoom, yaml_tool("zoom"));
+        let mut model = model;
+        // Initial centering at construction time uses Model's default
+        // viewport (888x900 from layout.yaml). The first call to
+        // AppState::sync_viewport_dimensions re-runs centering with
+        // the actual canvas size. Per ZOOM_TOOL.md §Document-open
+        // behavior.
+        model.center_view_on_current_artboard();
         Self {
             model,
             tools,
@@ -1333,8 +1340,17 @@ impl AppState {
         let ch = canvas.client_height() as f64;
         if cw <= 0.0 || ch <= 0.0 { return; }
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            let was_default = (tab.model.viewport_w - 888.0).abs() < 0.5
+                && (tab.model.viewport_h - 900.0).abs() < 0.5;
             tab.model.viewport_w = cw;
             tab.model.viewport_h = ch;
+            // If we were using the construction-time default
+            // viewport, re-center the document on the real canvas
+            // size now that we know it. Per ZOOM_TOOL.md
+            // §Document-open behavior.
+            if was_default {
+                tab.model.center_view_on_current_artboard();
+            }
         }
     }
 
