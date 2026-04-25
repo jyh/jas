@@ -2860,8 +2860,180 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
-  (* Artboard tool effects per ARTBOARD_TOOL.md.
-     doc.artboard.create_commit — drag-to-create commit. Builds a
+  (* Artboard tool helpers per ARTBOARD_TOOL.md. *)
+  let artboard_panel_selection_ids store =
+    let ctx = State_store.eval_context store in
+    let active = Yojson.Safe.Util.member "active_document" ctx in
+    let raw = Yojson.Safe.Util.member "artboards_panel_selection_ids" active in
+    match raw with
+    | `List items ->
+      List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> []
+  in
+
+  let artboard_panel_anchor store =
+    let ctx = State_store.eval_context store in
+    let active = Yojson.Safe.Util.member "active_document" ctx in
+    match Yojson.Safe.Util.member "artboards_panel_anchor" active with
+    | `String s -> Some s
+    | _ -> None
+  in
+
+  (* Hit-test handles on the panel-selected artboard; returns
+     Some (id, pos) if hit, None otherwise. *)
+  let artboard_handle_hit (doc : Document.document) sel_ids x y =
+    if List.length sel_ids <> 1 then None
+    else
+      let id = List.hd sel_ids in
+      match List.find_opt (fun (a : Artboard.artboard) -> a.id = id)
+              doc.artboards with
+      | None -> None
+      | Some ab ->
+        let r = 8.0 in
+        let cx = ab.x +. ab.width /. 2.0 in
+        let cy = ab.y +. ab.height /. 2.0 in
+        let candidates = [
+          ("nw", ab.x, ab.y);
+          ("n",  cx, ab.y);
+          ("ne", ab.x +. ab.width, ab.y);
+          ("e",  ab.x +. ab.width, cy);
+          ("se", ab.x +. ab.width, ab.y +. ab.height);
+          ("s",  cx, ab.y +. ab.height);
+          ("sw", ab.x, ab.y +. ab.height);
+          ("w",  ab.x, cy);
+        ] in
+        List.find_map (fun (pos, hx, hy) ->
+          if Float.abs (x -. hx) <= r && Float.abs (y -. hy) <= r
+          then Some (ab.id, pos) else None
+        ) candidates
+  in
+
+  (* Hit-test interior; iterates in reverse for top-most-first. *)
+  let artboard_interior_hit (doc : Document.document) x y =
+    let rec walk = function
+      | [] -> None
+      | (ab : Artboard.artboard) :: rest ->
+        match walk rest with
+        | Some _ as found -> found
+        | None ->
+          if x >= ab.x && x <= ab.x +. ab.width
+             && y >= ab.y && y <= ab.y +. ab.height
+          then Some ab.id else None
+    in
+    walk doc.artboards
+  in
+
+  (* doc.artboard.probe_hit per ARTBOARD_TOOL.md §Mousedown
+     disambiguation order. Sets tool state and writes panel-
+     selection per the click rules. *)
+  let doc_artboard_probe_hit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let shift = eval_bool (lookup "shift") store ctx in
+       let cmd = eval_bool (lookup "cmd") store ctx in
+       let alt = eval_bool (lookup "alt") store ctx in
+       State_store.set_tool store "artboard" "hit_artboard_id" `Null;
+       State_store.set_tool store "artboard" "hit_handle_pos" `Null;
+       let doc = ctrl#document in
+       let sel_ids = artboard_panel_selection_ids store in
+       (match artboard_handle_hit doc sel_ids x y with
+        | Some (id, pos) ->
+          State_store.set_tool store "artboard" "mode" (`String "resizing");
+          State_store.set_tool store "artboard" "hit_artboard_id"
+            (`String id);
+          State_store.set_tool store "artboard" "hit_handle_pos"
+            (`String pos)
+        | None ->
+          match artboard_interior_hit doc x y with
+          | Some hit_id ->
+            let mode = if alt then "duplicating_pending"
+                       else "moving_pending" in
+            State_store.set_tool store "artboard" "mode" (`String mode);
+            State_store.set_tool store "artboard" "hit_artboard_id"
+              (`String hit_id);
+            (* Click-rule panel-selection writes. *)
+            if shift then begin
+              let ids = List.map (fun (a : Artboard.artboard) -> a.id)
+                          doc.artboards in
+              match artboard_panel_anchor store with
+              | Some a ->
+                let idx_of v = match List.find_index ((=) v) ids with
+                  | Some i -> i | None -> -1 in
+                let ai = idx_of a in
+                let ti = idx_of hit_id in
+                if ai >= 0 && ti >= 0 then begin
+                  let lo = min ai ti and hi = max ai ti in
+                  let range = List.filteri (fun i _ ->
+                    i >= lo && i <= hi) ids in
+                  State_store.set_panel store "artboards"
+                    "artboards_panel_selection"
+                    (`List (List.map (fun s -> `String s) range))
+                end else begin
+                  State_store.set_panel store "artboards"
+                    "artboards_panel_selection"
+                    (`List [`String hit_id]);
+                  State_store.set_panel store "artboards"
+                    "panel_selection_anchor" (`String hit_id)
+                end
+              | None ->
+                State_store.set_panel store "artboards"
+                  "artboards_panel_selection"
+                  (`List [`String hit_id]);
+                State_store.set_panel store "artboards"
+                  "panel_selection_anchor" (`String hit_id)
+            end else if cmd then begin
+              let current = artboard_panel_selection_ids store in
+              let new_sel = if List.mem hit_id current
+                then List.filter ((<>) hit_id) current
+                else current @ [hit_id] in
+              State_store.set_panel store "artboards"
+                "artboards_panel_selection"
+                (`List (List.map (fun s -> `String s) new_sel))
+            end else begin
+              State_store.set_panel store "artboards"
+                "artboards_panel_selection"
+                (`List [`String hit_id]);
+              State_store.set_panel store "artboards"
+                "panel_selection_anchor" (`String hit_id)
+            end
+          | None ->
+            (* Empty canvas. *)
+            State_store.set_tool store "artboard" "mode" (`String "creating");
+            State_store.set_panel store "artboards"
+              "artboards_panel_selection" (`List []);
+            State_store.set_panel store "artboards"
+              "panel_selection_anchor" `Null)
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.probe_hover — read-only hover classification for
+     the dynamic cursor. *)
+  let doc_artboard_probe_hover spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let x = eval_number (lookup "x") store ctx in
+       let y = eval_number (lookup "y") store ctx in
+       let doc = ctrl#document in
+       let sel_ids = artboard_panel_selection_ids store in
+       let kind =
+         match artboard_handle_hit doc sel_ids x y with
+         | Some (_, pos) -> Printf.sprintf "handle:%s" pos
+         | None ->
+           match artboard_interior_hit doc x y with
+           | Some _ -> "interior"
+           | None -> "empty"
+       in
+       State_store.set_tool store "artboard" "hover_kind" (`String kind)
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.create_commit — drag-to-create commit. Builds a
      rect from (x1, y1)-(x2, y2), rounds to integer pt, clamps each
      dimension to >= 1 pt, mints a fresh id (collision-retry against
      existing artboards), picks the next "Artboard N" name, and
@@ -2904,6 +3076,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
   in
 
   [ ("doc.snapshot", doc_snapshot);
+    ("doc.artboard.probe_hit", doc_artboard_probe_hit);
+    ("doc.artboard.probe_hover", doc_artboard_probe_hover);
     ("doc.artboard.create_commit", doc_artboard_create_commit);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
