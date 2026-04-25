@@ -1971,7 +1971,32 @@ class CanvasWidget(QWidget):
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Z-layer 1: canvas background. Filled in screen-space
+        # before the view transform so it covers the viewport
+        # regardless of zoom and pan. Per ZOOM_TOOL.md §Anchor
+        # and clamp math (rendering pipeline).
         painter.fillRect(self.rect(), QColor("white"))
+        # Sync model viewport size with canvas widget bounds. First-
+        # time syncs re-center on the active artboard (the
+        # construction-time default 888x900 is replaced).
+        cw = float(self.width())
+        ch = float(self.height())
+        if cw > 0 and ch > 0:
+            was_default = (abs(self._model.viewport_w - 888.0) < 0.5
+                           and abs(self._model.viewport_h - 900.0) < 0.5)
+            self._model.viewport_w = cw
+            self._model.viewport_h = ch
+            if was_default:
+                self._model.center_view_on_current_artboard()
+        # Apply view transform: zoom + pan. Z-layers 2-9 draw in
+        # document coordinates; QPainter translates them to screen
+        # pixels. Tool overlay is drawn AFTER restoring identity
+        # transform because tool-state coords are already in
+        # screen-pixel space.
+        painter.save()
+        painter.translate(self._model.view_offset_x,
+                          self._model.view_offset_y)
+        painter.scale(self._model.zoom_level, self._model.zoom_level)
         doc = self._model.document
         # Z-layer 2: per-artboard fills.
         _draw_artboard_fills(painter, doc)
@@ -1998,7 +2023,9 @@ class CanvasWidget(QWidget):
         _draw_artboard_accent(painter, doc, self._artboards_panel_selection)
         _draw_artboard_labels(painter, doc)
         _draw_artboard_display_marks(painter, doc)
-        # Z-layer 9: selection overlays, then tool overlay.
+        # Z-layer 9: selection overlays.
         _draw_selection_overlays(painter, doc)
+        painter.restore()
+        # Tool overlay (screen-space, post-transform).
         self._active_tool.draw_overlay(self._tool_ctx, painter)
         painter.end()

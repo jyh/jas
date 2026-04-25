@@ -2,7 +2,7 @@ from enum import Enum, auto
 
 from tools.tool import LONG_PRESS_MS
 
-from PySide6.QtCore import Qt, Signal, QTimer, QPoint
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QPointF, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QToolButton, QButtonGroup,
@@ -164,9 +164,48 @@ class ToolButton(QToolButton):
             self._draw_rotate_tool(painter)
         elif self.tool == Tool.SHEAR:
             self._draw_shear_tool(painter)
+        elif self.tool == Tool.HAND:
+            self._draw_hand_tool(painter)
+        elif self.tool == Tool.ZOOM:
+            self._draw_zoom_tool(painter)
 
         if self.has_alternates:
             self._draw_alternate_triangle(painter)
+
+    def _draw_hand_tool(self, painter):
+        """Open palm with four fingers extended. Per HAND_TOOL.md
+        §Tool icon."""
+        pen = QPen(_icon_color(), 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        for x, tip in [(10, 5), (13, 3), (16, 4), (19, 6)]:
+            painter.drawLine(x, 14, x, tip)
+        # Palm + thumb.
+        path = QPainterPath()
+        path.moveTo(9, 14)
+        path.lineTo(4, 18)
+        path.lineTo(4, 22)
+        path.quadTo(5, 25, 9, 25)
+        path.lineTo(19, 25)
+        path.quadTo(22, 25, 22, 22)
+        path.lineTo(22, 14)
+        pen2 = QPen(_icon_color(), 2.0)
+        pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen2.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen2)
+        painter.drawPath(path)
+
+    def _draw_zoom_tool(self, painter):
+        """Magnifying glass: circular lens + ~45° handle.
+        Per ZOOM_TOOL.md §Tool icon."""
+        painter.setPen(QPen(_icon_color(), 2.0))
+        # Lens circle at (11, 11) radius 6.5.
+        painter.drawEllipse(QRectF(4.5, 4.5, 13.0, 13.0))
+        # Handle line from (15.5, 15.5) to (22.5, 22.5).
+        pen = QPen(_icon_color(), 2.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(15.5, 15.5), QPointF(22.5, 22.5))
 
     def _draw_scale_tool(self, painter):
         """Small square + larger square (extrusion iconography). See
