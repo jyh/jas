@@ -323,7 +323,49 @@ impl CanvasTool for YamlTool {
     }
 
     fn cursor_css_override(&self) -> Option<String> {
-        self.spec.cursor.clone()
+        // Tool-specific dynamic cursor handling. Hand flips between
+        // "grab" (idle) and "grabbing" (during drag). Zoom flips
+        // between "zoom-in" (idle) and "zoom-out" (Alt held during
+        // drag). Phase 1 reads tool state for the in-flight bits;
+        // Alt-during-idle flipping (no drag) is deferred since it
+        // requires keyboard handling outside the tool. Per
+        // HAND_TOOL.md §Cursor states and ZOOM_TOOL.md §Cursor
+        // states.
+        match self.spec.id.as_str() {
+            "hand" => {
+                let mode = self.store.eval_context()
+                    .get("tool")
+                    .and_then(|t| t.get("hand"))
+                    .and_then(|h| h.get("mode"))
+                    .and_then(|m| m.as_str())
+                    .map(String::from)
+                    .unwrap_or_default();
+                if mode == "panning" {
+                    Some("grabbing".into())
+                } else {
+                    self.spec.cursor.clone()
+                }
+            }
+            "zoom" => {
+                let ctx = self.store.eval_context();
+                let mode = ctx.get("tool")
+                    .and_then(|t| t.get("zoom"))
+                    .and_then(|z| z.get("mode"))
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("");
+                let alt_held = ctx.get("tool")
+                    .and_then(|t| t.get("zoom"))
+                    .and_then(|z| z.get("alt_held"))
+                    .and_then(|a| a.as_bool())
+                    .unwrap_or(false);
+                if mode == "dragging" && alt_held {
+                    Some("zoom-out".into())
+                } else {
+                    self.spec.cursor.clone()
+                }
+            }
+            _ => self.spec.cursor.clone(),
+        }
     }
 
     fn on_double_click(&mut self, model: &mut Model, x: f64, y: f64) {
