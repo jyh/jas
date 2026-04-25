@@ -3678,6 +3678,156 @@
         }
       ]
     },
+    "eyedropper_tool_options_confirm": {
+      "description": "Commit the Eyedropper Tool Options dialog. Writes the 25 per-document toggles to state.eyedropper_* and closes the dialog. See EYEDROPPER_TOOL.md \u00a7Tool Options dialog.\n",
+      "category": "tools",
+      "params": {
+        "fill": {
+          "type": "bool"
+        },
+        "stroke": {
+          "type": "bool"
+        },
+        "stroke_color": {
+          "type": "bool"
+        },
+        "stroke_weight": {
+          "type": "bool"
+        },
+        "stroke_cap_join": {
+          "type": "bool"
+        },
+        "stroke_align": {
+          "type": "bool"
+        },
+        "stroke_dash": {
+          "type": "bool"
+        },
+        "stroke_arrowheads": {
+          "type": "bool"
+        },
+        "stroke_profile": {
+          "type": "bool"
+        },
+        "stroke_brush": {
+          "type": "bool"
+        },
+        "opacity": {
+          "type": "bool"
+        },
+        "opacity_alpha": {
+          "type": "bool"
+        },
+        "opacity_blend": {
+          "type": "bool"
+        },
+        "character": {
+          "type": "bool"
+        },
+        "character_font": {
+          "type": "bool"
+        },
+        "character_size": {
+          "type": "bool"
+        },
+        "character_leading": {
+          "type": "bool"
+        },
+        "character_kerning": {
+          "type": "bool"
+        },
+        "character_tracking": {
+          "type": "bool"
+        },
+        "character_color": {
+          "type": "bool"
+        },
+        "paragraph": {
+          "type": "bool"
+        },
+        "paragraph_align": {
+          "type": "bool"
+        },
+        "paragraph_indent": {
+          "type": "bool"
+        },
+        "paragraph_space": {
+          "type": "bool"
+        },
+        "paragraph_hyphenate": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        {
+          "set": {
+            "eyedropper_fill": "param.fill",
+            "eyedropper_stroke": "param.stroke",
+            "eyedropper_stroke_color": "param.stroke_color",
+            "eyedropper_stroke_weight": "param.stroke_weight",
+            "eyedropper_stroke_cap_join": "param.stroke_cap_join",
+            "eyedropper_stroke_align": "param.stroke_align",
+            "eyedropper_stroke_dash": "param.stroke_dash",
+            "eyedropper_stroke_arrowheads": "param.stroke_arrowheads",
+            "eyedropper_stroke_profile": "param.stroke_profile",
+            "eyedropper_stroke_brush": "param.stroke_brush",
+            "eyedropper_opacity": "param.opacity",
+            "eyedropper_opacity_alpha": "param.opacity_alpha",
+            "eyedropper_opacity_blend": "param.opacity_blend",
+            "eyedropper_character": "param.character",
+            "eyedropper_character_font": "param.character_font",
+            "eyedropper_character_size": "param.character_size",
+            "eyedropper_character_leading": "param.character_leading",
+            "eyedropper_character_kerning": "param.character_kerning",
+            "eyedropper_character_tracking": "param.character_tracking",
+            "eyedropper_character_color": "param.character_color",
+            "eyedropper_paragraph": "param.paragraph",
+            "eyedropper_paragraph_align": "param.paragraph_align",
+            "eyedropper_paragraph_indent": "param.paragraph_indent",
+            "eyedropper_paragraph_space": "param.paragraph_space",
+            "eyedropper_paragraph_hyphenate": "param.paragraph_hyphenate"
+          }
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "eyedropper_tool_options_reset": {
+      "description": "Restore the Eyedropper Tool Options dialog to factory defaults (all 25 toggles true) without committing. Writes defaults into dialog state; the user must still click OK for the values to persist to state.eyedropper_*. Defaults per EYEDROPPER_TOOL.md \u00a7State persistence.\n",
+      "category": "tools",
+      "effects": [
+        {
+          "set": {
+            "dialog.fill": true,
+            "dialog.stroke": true,
+            "dialog.stroke_color": true,
+            "dialog.stroke_weight": true,
+            "dialog.stroke_cap_join": true,
+            "dialog.stroke_align": true,
+            "dialog.stroke_dash": true,
+            "dialog.stroke_arrowheads": true,
+            "dialog.stroke_profile": true,
+            "dialog.stroke_brush": true,
+            "dialog.opacity": true,
+            "dialog.opacity_alpha": true,
+            "dialog.opacity_blend": true,
+            "dialog.character": true,
+            "dialog.character_font": true,
+            "dialog.character_size": true,
+            "dialog.character_leading": true,
+            "dialog.character_kerning": true,
+            "dialog.character_tracking": true,
+            "dialog.character_color": true,
+            "dialog.paragraph": true,
+            "dialog.paragraph_align": true,
+            "dialog.paragraph_indent": true,
+            "dialog.paragraph_space": true,
+            "dialog.paragraph_hyphenate": true
+          }
+        }
+      ]
+    },
     "scale_options_confirm": {
       "description": "Commit the Scale Options dialog. Writes the seven per-document options to state.scale_* and runs doc.scale.apply on the selection. When param.copy is true, the transformation is applied to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate) instead of mutating the original. Closes the dialog either way. See SCALE_TOOL.md \u00a7Tool Options dialog.\ndoc.preview.restore is run first so the document is reset to its pre-dialog state before the final apply (otherwise an OK after typing-time previews would compound). doc.preview.clear is run before close_dialog so the close handler does not restore the snapshot.\n",
       "category": "transform",
