@@ -2860,7 +2860,51 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* Artboard tool effects per ARTBOARD_TOOL.md.
+     doc.artboard.create_commit — drag-to-create commit. Builds a
+     rect from (x1, y1)-(x2, y2), rounds to integer pt, clamps each
+     dimension to >= 1 pt, mints a fresh id (collision-retry against
+     existing artboards), picks the next "Artboard N" name, and
+     appends to document.artboards. Mirrors Rust P1.3a / Swift
+     P2.2a. *)
+  let doc_artboard_create_commit spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let x1 = eval_number (List.assoc_opt "x1" args) store ctx in
+       let y1 = eval_number (List.assoc_opt "y1" args) store ctx in
+       let x2 = eval_number (List.assoc_opt "x2" args) store ctx in
+       let y2 = eval_number (List.assoc_opt "y2" args) store ctx in
+       let raw_x = Float.round (Float.min x1 x2) in
+       let raw_y = Float.round (Float.min y1 y2) in
+       let raw_w = Float.max (Float.round (Float.abs (x1 -. x2))) 1.0 in
+       let raw_h = Float.max (Float.round (Float.abs (y1 -. y2))) 1.0 in
+       let doc = ctrl#document in
+       let existing = List.map (fun (a : Artboard.artboard) -> a.id)
+                        doc.artboards in
+       let rec mint n =
+         if n <= 0 then None
+         else
+           let cand = Artboard.generate_id () in
+           if List.mem cand existing then mint (n - 1) else Some cand
+       in
+       (match mint 100 with
+        | None -> ()
+        | Some new_id ->
+          let new_name = Artboard.next_name doc.artboards in
+          let ab : Artboard.artboard = {
+            (Artboard.default_with_id new_id) with
+            name = new_name;
+            x = raw_x; y = raw_y;
+            width = raw_w; height = raw_h;
+          } in
+          let new_doc = { doc with artboards = doc.artboards @ [ab] } in
+          ctrl#set_document new_doc)
+     | _ -> ());
+    `Null
+  in
+
   [ ("doc.snapshot", doc_snapshot);
+    ("doc.artboard.create_commit", doc_artboard_create_commit);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
     ("doc.add_to_selection", doc_add_to_selection);
