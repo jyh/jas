@@ -343,6 +343,188 @@ state:
       categorical. Default false (the reference design ships
       this checkbox unchecked).
 
+  # ── Eyedropper tool options ───────────────────────────────────
+  # Per-document persistence for the Eyedropper Tool Options
+  # dialog. 25 boolean toggles gating which attribute groups and
+  # sub-attributes the Eyedropper samples and applies, plus a
+  # nullable cache holding the most recently sampled appearance.
+  # See transcripts/EYEDROPPER_TOOL.md §State persistence.
+
+  eyedropper_fill:
+    type: bool
+    default: true
+    description: "Master toggle for the Fill attribute group."
+
+  eyedropper_stroke:
+    type: bool
+    default: true
+    description: "Master toggle for the Stroke attribute group."
+
+  eyedropper_stroke_color:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies the source's
+      stroke color (solid / none / gradient / pattern).
+
+  eyedropper_stroke_weight:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies stroke-width.
+
+  eyedropper_stroke_cap_join:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies
+      stroke-linecap, stroke-linejoin, and stroke-miterlimit.
+
+  eyedropper_stroke_align:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies stroke-align
+      (center / inside / outside).
+
+  eyedropper_stroke_dash:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies the dashed
+      flag and the six dash/gap values.
+
+  eyedropper_stroke_arrowheads:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies start/end
+      arrowhead shapes, scales, scale-link, and arrow-align.
+
+  eyedropper_stroke_profile:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies the
+      variable-width profile and its flipped flag.
+
+  eyedropper_stroke_brush:
+    type: bool
+    default: true
+    description: >
+      When true (and Stroke master is true), copies
+      jas:stroke-brush.
+
+  eyedropper_opacity:
+    type: bool
+    default: true
+    description: "Master toggle for the Opacity attribute group."
+
+  eyedropper_opacity_alpha:
+    type: bool
+    default: true
+    description: >
+      When true (and Opacity master is true), copies
+      element.opacity.
+
+  eyedropper_opacity_blend:
+    type: bool
+    default: true
+    description: >
+      When true (and Opacity master is true), copies element.mode
+      (blend mode).
+
+  eyedropper_character:
+    type: bool
+    default: true
+    description: >
+      Master toggle for the Character attribute group. Sub-toggles
+      are no-ops when the source or target isn't a text element.
+
+  eyedropper_character_font:
+    type: bool
+    default: true
+    description: >
+      When true (and Character master is true), copies font family
+      and style (font-weight + font-style).
+
+  eyedropper_character_size:
+    type: bool
+    default: true
+    description: >
+      When true (and Character master is true), copies font size.
+
+  eyedropper_character_leading:
+    type: bool
+    default: true
+    description: >
+      When true (and Character master is true), copies leading.
+
+  eyedropper_character_kerning:
+    type: bool
+    default: true
+    description: >
+      When true (and Character master is true), copies kerning.
+
+  eyedropper_character_tracking:
+    type: bool
+    default: true
+    description: >
+      When true (and Character master is true), copies tracking.
+
+  eyedropper_character_color:
+    type: bool
+    default: true
+    description: >
+      When true (and Character master is true), copies character
+      color.
+
+  eyedropper_paragraph:
+    type: bool
+    default: true
+    description: >
+      Master toggle for the Paragraph attribute group. Sub-toggles
+      are no-ops when the source or target isn't a text element.
+
+  eyedropper_paragraph_align:
+    type: bool
+    default: true
+    description: >
+      When true (and Paragraph master is true), copies paragraph
+      alignment.
+
+  eyedropper_paragraph_indent:
+    type: bool
+    default: true
+    description: >
+      When true (and Paragraph master is true), copies left,
+      right, and first-line indents.
+
+  eyedropper_paragraph_space:
+    type: bool
+    default: true
+    description: >
+      When true (and Paragraph master is true), copies space
+      before and space after.
+
+  eyedropper_paragraph_hyphenate:
+    type: bool
+    default: true
+    description: >
+      When true (and Paragraph master is true), copies the
+      hyphenate flag.
+
+  eyedropper_cache:
+    type: object
+    default: null
+    nullable: true
+    description: >
+      Most recently sampled appearance, or null. Plain click on an
+      eligible source writes here; Alt+click reads here to apply
+      to a target. Persists with the document so a non-null cache
+      survives save/load. Cleared by Escape (or replaced by a
+      fresh sample).
+
   # ── Transform tools (Scale / Rotate / Shear) ─────────────────
   # Per-document persistence for the three transformation tools.
   # transform_reference_point is shared across all three; the
