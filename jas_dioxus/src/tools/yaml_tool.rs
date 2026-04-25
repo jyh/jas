@@ -323,7 +323,49 @@ impl CanvasTool for YamlTool {
     }
 
     fn cursor_css_override(&self) -> Option<String> {
-        self.spec.cursor.clone()
+        // Tool-specific dynamic cursor handling. Hand flips between
+        // "grab" (idle) and "grabbing" (during drag). Zoom flips
+        // between "zoom-in" (idle) and "zoom-out" (Alt held during
+        // drag). Phase 1 reads tool state for the in-flight bits;
+        // Alt-during-idle flipping (no drag) is deferred since it
+        // requires keyboard handling outside the tool. Per
+        // HAND_TOOL.md §Cursor states and ZOOM_TOOL.md §Cursor
+        // states.
+        match self.spec.id.as_str() {
+            "hand" => {
+                let mode = self.store.eval_context()
+                    .get("tool")
+                    .and_then(|t| t.get("hand"))
+                    .and_then(|h| h.get("mode"))
+                    .and_then(|m| m.as_str())
+                    .map(String::from)
+                    .unwrap_or_default();
+                if mode == "panning" {
+                    Some("grabbing".into())
+                } else {
+                    self.spec.cursor.clone()
+                }
+            }
+            "zoom" => {
+                let ctx = self.store.eval_context();
+                let mode = ctx.get("tool")
+                    .and_then(|t| t.get("zoom"))
+                    .and_then(|z| z.get("mode"))
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("");
+                let alt_held = ctx.get("tool")
+                    .and_then(|t| t.get("zoom"))
+                    .and_then(|z| z.get("alt_held"))
+                    .and_then(|a| a.as_bool())
+                    .unwrap_or(false);
+                if mode == "dragging" && alt_held {
+                    Some("zoom-out".into())
+                } else {
+                    self.spec.cursor.clone()
+                }
+            }
+            _ => self.spec.cursor.clone(),
+        }
     }
 
     fn on_double_click(&mut self, model: &mut Model, x: f64, y: f64) {
@@ -417,6 +459,9 @@ impl CanvasTool for YamlTool {
                 "bbox_ghost" => {
                     draw_bbox_ghost(ctx, render, &eval_ctx, model);
                 }
+                "marquee_rect" => {
+                    draw_marquee_rect_overlay(ctx, render, &eval_ctx);
+                }
                 _ => {
                     // Unrecognized type — skip silently, matching the
                     // lenient-mode convention used elsewhere.
@@ -492,6 +537,35 @@ pub(crate) fn parse_style(s: &str) -> OverlayStyle {
         }
     }
     style
+}
+
+/// Marquee zoom rectangle: thin dashed stroke between (x1, y1) and
+/// (x2, y2). Used by the Zoom tool's drag overlay when scrubby_zoom
+/// is off. Per ZOOM_TOOL.md §Drag — marquee zoom.
+fn draw_marquee_rect_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let x = x1.min(x2);
+    let y = y1.min(y2);
+    let w = (x1 - x2).abs();
+    let h = (y1 - y2).abs();
+    if w <= 0.0 || h <= 0.0 { return; }
+    ctx.set_stroke_style_str("#666");
+    ctx.set_line_width(1.0);
+    let dash = js_sys::Array::new();
+    dash.push(&wasm_bindgen::JsValue::from_f64(4.0));
+    dash.push(&wasm_bindgen::JsValue::from_f64(2.0));
+    let _ = ctx.set_line_dash(&dash);
+    ctx.stroke_rect(x, y, w, h);
+    // Reset dash so subsequent overlays draw solid.
+    let empty = js_sys::Array::new();
+    let _ = ctx.set_line_dash(&empty);
 }
 
 fn draw_rect_overlay(

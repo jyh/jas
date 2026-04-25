@@ -1743,6 +1743,10 @@ class CanvasNSView: NSView {
     var onToolRead: (() -> Tool)?
     var onToolChange: ((Tool) -> Void)?
     var onFocus: (() -> Void)?
+    /// Tool to restore when spacebar pass-through to Hand
+    /// releases. nil when no Space-held pass-through is active. Per
+    /// HAND_TOOL.md §Spacebar pass-through.
+    var priorToolForSpacebar: Tool? = nil
 
     // Tool system
     let tools: [Tool: CanvasTool] = createTools()
@@ -1823,6 +1827,24 @@ class CanvasNSView: NSView {
             return makeTypeCursor()
         case .typeOnPath:
             return makeTypeOnPathCursor()
+        case .hand:
+            // Open vs closed hand depends on whether a Hand-tool
+            // pan is in flight. Per HAND_TOOL.md §Cursor states.
+            // The tool's mode is stored in tool.hand.mode in the
+            // Model's StateStore.
+            if let model = controller?.model {
+                let toolCtx = model.stateStore.evalContext()["tool"] as? [String: Any]
+                let handCtx = toolCtx?["hand"] as? [String: Any]
+                let mode = handCtx?["mode"] as? String ?? ""
+                if mode == "panning" { return NSCursor.closedHand }
+            }
+            return NSCursor.openHand
+        case .zoom:
+            // Zoom cursor stays the standard crosshair-with-plus
+            // visual; AppKit doesn't have a native zoom-in cursor,
+            // so crosshair is the closest match. Alt-flip to a
+            // minus-decorated variant is deferred.
+            return NSCursor.crosshair
         default:
             return NSCursor.crosshair
         }
@@ -1970,9 +1992,40 @@ class CanvasNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        // Layer 1: canvas background (white).
+        // Layer 1: canvas background (white). Filled in screen-space
+        // before the view transform so it covers the viewport
+        // regardless of zoom and pan. Per ZOOM_TOOL.md §Anchor and
+        // clamp math (rendering pipeline).
         ctx.setFillColor(.white)
         ctx.fill(bounds)
+        // Sync model viewport size with the current canvas bounds.
+        // First-time viewport syncs re-center on the active artboard
+        // (the construction-time default 888x900 is replaced).
+        if let model = controller?.model {
+            let cw = Double(bounds.width)
+            let ch = Double(bounds.height)
+            if cw > 0 && ch > 0 {
+                let wasDefault = abs(model.viewportW - 888.0) < 0.5
+                    && abs(model.viewportH - 900.0) < 0.5
+                model.viewportW = cw
+                model.viewportH = ch
+                if wasDefault {
+                    model.centerViewOnCurrentArtboard()
+                }
+            }
+        }
+        // Apply view transform: zoom + pan. Layers 2-9 draw in
+        // document coordinates; the canvas context translates them
+        // into screen pixels. Tool overlay is drawn AFTER restoring
+        // the identity transform because tool-state coords are
+        // already in screen-pixel space.
+        ctx.saveGState()
+        if let model = controller?.model {
+            ctx.translateBy(x: CGFloat(model.viewOffsetX),
+                            y: CGFloat(model.viewOffsetY))
+            ctx.scaleBy(x: CGFloat(model.zoomLevel),
+                        y: CGFloat(model.zoomLevel))
+        }
         // Layer 2: artboard fills (list order, later wins overlaps).
         drawArtboardFills(ctx, document)
         // Layer 3: document element tree. In mask-isolation mode
@@ -2000,7 +2053,8 @@ class CanvasNSView: NSView {
         drawArtboardDisplayMarks(ctx, document)
         // Layer 9: selection overlays.
         drawSelectionOverlays(ctx, document)
-        // Active tool overlay (drawn above everything).
+        ctx.restoreGState()
+        // Active tool overlay (screen-space, post-transform).
         if let toolCtx = toolContext {
             activeTool.drawOverlay(toolCtx, ctx)
         }
@@ -2198,6 +2252,28 @@ class CanvasNSView: NSView {
                     super.keyDown(with: event)
                 }
             default:
+                // View shortcuts (Cmd+0/Alt+0/1, Cmd+=, Cmd+-).
+                // Per ZOOM_TOOL.md §Keyboard shortcuts and actions.
+                if hasCmd {
+                    switch chars {
+                    case "0":
+                        let hasAlt = event.modifierFlags.contains(.option)
+                        runViewAction(hasAlt ? "fit_all_artboards"
+                                             : "fit_active_artboard")
+                        return
+                    case "1":
+                        runViewAction("zoom_to_actual_size")
+                        return
+                    case "=", "+":
+                        runViewAction("zoom_in")
+                        return
+                    case "-", "_":
+                        runViewAction("zoom_out")
+                        return
+                    default:
+                        break
+                    }
+                }
                 switch chars.lowercased() {
                 case "v": onToolChange?(.selection)
                 case "a": onToolChange?(.partialSelection)
@@ -2206,15 +2282,108 @@ class CanvasNSView: NSView {
                 case "\\": onToolChange?(.line)
                 case "m": onToolChange?(.rect)
                 case "q": onToolChange?(.lasso)
+                case "h": onToolChange?(.hand)
+                case "z": onToolChange?(.zoom)
                 case "=", "+": onToolChange?(.addAnchorPoint)
                 case "-", "_": onToolChange?(.deleteAnchorPoint)
+                case " ":
+                    // Spacebar pass-through to Hand. Save the
+                    // current tool to priorToolForSpacebar and
+                    // switch to Hand. Per HAND_TOOL.md §Spacebar
+                    // pass-through. The matching keyup is in
+                    // keyUp(with:).
+                    if currentTool != .hand && priorToolForSpacebar == nil {
+                        priorToolForSpacebar = currentTool
+                        onToolChange?(.hand)
+                    }
                 default: super.keyDown(with: event)
                 }
             }
         }
     }
 
+    /// Apply the named View action directly. Each action mutates
+    /// view state on Model and triggers a redraw via @Published.
+    /// Mirrors the Rust dispatch_action path for these specific
+    /// actions; we don't invoke the full effect pipeline because
+    /// the actions read preferences.viewport.* which are loaded
+    /// from workspace.json at evaluation time.
+    private func runViewAction(_ name: String) {
+        guard let model = controller?.model else { return }
+        let zoomStep = readPrefNumber("zoom_step", default: 1.2)
+        let minZoom = readPrefNumber("min_zoom", default: 0.1)
+        let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+        let padding = readPrefNumber("fit_padding_px", default: 20.0)
+        switch name {
+        case "zoom_in":
+            // Anchor at viewport center for keyboard invocations.
+            applyZoomAnchored(model: model, factor: zoomStep,
+                              ax: model.viewportW / 2.0,
+                              ay: model.viewportH / 2.0,
+                              minZoom: minZoom, maxZoom: maxZoom)
+        case "zoom_out":
+            applyZoomAnchored(model: model, factor: 1.0 / zoomStep,
+                              ax: model.viewportW / 2.0,
+                              ay: model.viewportH / 2.0,
+                              minZoom: minZoom, maxZoom: maxZoom)
+        case "zoom_to_actual_size":
+            model.zoomLevel = min(max(1.0, minZoom), maxZoom)
+        case "fit_active_artboard":
+            if let ab = model.document.artboards.first {
+                fitRectIntoViewport(model: model,
+                                    x: Double(ab.x), y: Double(ab.y),
+                                    w: Double(ab.width),
+                                    h: Double(ab.height),
+                                    padding: padding)
+            }
+        case "fit_all_artboards":
+            let abs = model.document.artboards
+            guard !abs.isEmpty else { return }
+            var minX = Double.infinity, minY = Double.infinity
+            var maxX = -Double.infinity, maxY = -Double.infinity
+            for ab in abs {
+                minX = min(minX, Double(ab.x))
+                minY = min(minY, Double(ab.y))
+                maxX = max(maxX, Double(ab.x + ab.width))
+                maxY = max(maxY, Double(ab.y + ab.height))
+            }
+            fitRectIntoViewport(model: model, x: minX, y: minY,
+                                w: maxX - minX, h: maxY - minY,
+                                padding: padding)
+        default:
+            break
+        }
+        needsDisplay = true
+    }
+
+    /// Apply a zoom factor anchored at (ax, ay) in viewport pixels.
+    /// Mirrors doc.zoom.apply but called directly from the keyboard
+    /// handler with viewport-center defaults.
+    private func applyZoomAnchored(
+        model: Model, factor: Double, ax: Double, ay: Double,
+        minZoom: Double, maxZoom: Double
+    ) {
+        let z = model.zoomLevel
+        let px = model.viewOffsetX
+        let py = model.viewOffsetY
+        let docAx = (ax - px) / z
+        let docAy = (ay - py) / z
+        let zNew = min(max(z * factor, minZoom), maxZoom)
+        model.zoomLevel = zNew
+        model.viewOffsetX = ax - docAx * zNew
+        model.viewOffsetY = ay - docAy * zNew
+    }
+
     override func keyUp(with event: NSEvent) {
+        // Spacebar pass-through restore: if we're holding a prior
+        // tool from a Space-down, restore it on Space-up. Per
+        // HAND_TOOL.md §Spacebar pass-through.
+        if event.charactersIgnoringModifiers == " ",
+           let prior = priorToolForSpacebar {
+            priorToolForSpacebar = nil
+            onToolChange?(prior)
+            return
+        }
         if let ctx = toolContext, activeTool.onKeyUp(ctx, keyCode: event.keyCode) {
             return
         }

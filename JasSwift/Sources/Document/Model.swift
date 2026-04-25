@@ -60,6 +60,19 @@ public class Model: ObservableObject {
     /// exited by Alt-clicking MASK_PREVIEW again (or Escape in a
     /// future increment). OPACITY.md §Preview interactions.
     @Published public var maskIsolationPath: [Int]? = nil
+    /// Per-document view state (per ZOOM_TOOL.md §State persistence).
+    /// Persists across tab switches within a session; reset to
+    /// defaults on document open. Not serialized to disk in Phase 1.
+    @Published public var zoomLevel: Double = 1.0
+    @Published public var viewOffsetX: Double = 0.0
+    @Published public var viewOffsetY: Double = 0.0
+    /// Canvas viewport dimensions in screen-space pixels. Updated by
+    /// the canvas widget on layout / resize. Read by doc.zoom.fit_*
+    /// effects to compute the new zoom factor that fits a rect into
+    /// the visible canvas area. Defaults match
+    /// workspace/layout.yaml's canvas_pane default_position.
+    @Published public var viewportW: Double = 888.0
+    @Published public var viewportH: Double = 900.0
     /// Live reference to the active in-place text-editing session, if
     /// any. TypeTool and TypeOnPathTool publish their session here
     /// while editing so the Character-panel write pipeline can route
@@ -78,6 +91,42 @@ public class Model: ObservableObject {
         self.document = document
         self.savedDocument = document
         self.filename = filename ?? freshFilename()
+        // Center the current artboard in the default viewport at
+        // construction time. Per ZOOM_TOOL.md §Document-open
+        // behavior. The first canvas-size sync re-centers using the
+        // real viewport dimensions.
+        self.centerViewOnCurrentArtboard()
+    }
+
+    /// Center the canvas view on the current artboard using the
+    /// stored viewportW / viewportH. If the artboard fits at the
+    /// current zoom, set pan to center it; otherwise apply
+    /// fit-inside semantics with 20px screen-space padding.
+    /// Per ZOOM_TOOL.md §Document-open behavior.
+    public func centerViewOnCurrentArtboard() {
+        guard let ab = document.artboards.first else { return }
+        guard viewportW > 0, viewportH > 0 else { return }
+        let abW = Double(ab.width)
+        let abH = Double(ab.height)
+        let abX = Double(ab.x)
+        let abY = Double(ab.y)
+        let fits = abW * zoomLevel <= viewportW
+            && abH * zoomLevel <= viewportH
+        if fits {
+            viewOffsetX = viewportW / 2.0 - (abX + abW / 2.0) * zoomLevel
+            viewOffsetY = viewportH / 2.0 - (abY + abH / 2.0) * zoomLevel
+        } else {
+            let pad = 20.0
+            let availW = viewportW - 2.0 * pad
+            let availH = viewportH - 2.0 * pad
+            if availW > 0, availH > 0 {
+                let zFit = min(availW / abW, availH / abH)
+                let zClamped = min(max(zFit, 0.1), 64.0)
+                zoomLevel = zClamped
+                viewOffsetX = viewportW / 2.0 - (abX + abW / 2.0) * zClamped
+                viewOffsetY = viewportH / 2.0 - (abY + abH / 2.0) * zClamped
+            }
+        }
     }
 
     public func markSaved() {

@@ -50,6 +50,17 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   method set_editing_target : editing_target -> unit
   method mask_isolation_path : int list option
   method set_mask_isolation_path : int list option -> unit
+  method zoom_level : float
+  method set_zoom_level : float -> unit
+  method view_offset_x : float
+  method set_view_offset_x : float -> unit
+  method view_offset_y : float
+  method set_view_offset_y : float -> unit
+  method viewport_w : float
+  method set_viewport_w : float -> unit
+  method viewport_h : float
+  method set_viewport_h : float -> unit
+  method center_view_on_current_artboard : unit
 end
 
 val create : ?document:Document.document -> ?filename:string -> unit -> model

@@ -69,3 +69,6 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Scale -> (load_yaml_tool_or_fail "scale" :> Canvas_tool.canvas_tool)
   | Toolbar.Rotate -> (load_yaml_tool_or_fail "rotate" :> Canvas_tool.canvas_tool)
   | Toolbar.Shear -> (load_yaml_tool_or_fail "shear" :> Canvas_tool.canvas_tool)
+  (* Navigation-tool family — see HAND_TOOL.md / ZOOM_TOOL.md *)
+  | Toolbar.Hand -> (load_yaml_tool_or_fail "hand" :> Canvas_tool.canvas_tool)
+  | Toolbar.Zoom -> (load_yaml_tool_or_fail "zoom" :> Canvas_tool.canvas_tool)

@@ -219,6 +219,43 @@ shape_alternates:
               - set: { active_tool: '"star"' }
               - close_dialog: null
 
+hand_alternates:
+  summary: "Navigation Tools"
+  description: >
+    Tool-alternate flyout menu shown on long-press (250ms) of the
+    Hand tool button (row 4 col 0 of the tool grid). Lists the two
+    navigation tools: Hand (pan the canvas by drag; spacebar
+    pass-through) and Zoom (step / scrubby / marquee zoom).
+    Clicking an item selects that tool and closes the dialog. Hand
+    is the slot's primary; Zoom is the alternate. See HAND_TOOL.md
+    and ZOOM_TOOL.md.
+  modal: false
+  content:
+    type: container
+    layout: column
+    style: { padding: 4, gap: 2 }
+    children:
+      - type: icon_button
+        icon: "hand"
+        label: "Hand"
+        summary: "Pan the canvas by click-and-drag"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"hand"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "zoom"
+        label: "Zoom"
+        summary: "Zoom in by click, drag, or marquee"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"zoom"' }
+              - close_dialog: null
+
 scale_alternates:
   summary: "Transform Tools"
   description: >

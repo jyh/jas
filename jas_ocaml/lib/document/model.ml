@@ -61,6 +61,19 @@ class model ?(document = Document.default_document ()) ?filename () =
        MASK_PREVIEW; exited by Alt-clicking again.
        OPACITY.md \167Preview interactions. *)
     val mutable mask_isolation_path : int list option = None
+    (* Per-document view state per ZOOM_TOOL.md State persistence.
+       Persists across tab switches within a session; reset to
+       defaults on document open. Not serialized to disk in
+       Phase 1. *)
+    val mutable zoom_level : float = 1.0
+    val mutable view_offset_x : float = 0.0
+    val mutable view_offset_y : float = 0.0
+    (* Canvas viewport dimensions in screen-space pixels. Updated
+       by the canvas widget on layout / resize. Read by
+       doc.zoom.fit_* effects. Defaults match
+       workspace/layout.yaml canvas_pane default_position. *)
+    val mutable viewport_w : float = 888.0
+    val mutable viewport_h : float = 900.0
 
     method document = doc
 
@@ -153,6 +166,56 @@ class model ?(document = Document.default_document ()) ?filename () =
     method mask_isolation_path = mask_isolation_path
     method set_mask_isolation_path (p : int list option) =
       mask_isolation_path <- p
+
+    (* View state accessors per ZOOM_TOOL.md State persistence. *)
+    method zoom_level = zoom_level
+    method set_zoom_level (z : float) = zoom_level <- z
+    method view_offset_x = view_offset_x
+    method set_view_offset_x (x : float) = view_offset_x <- x
+    method view_offset_y = view_offset_y
+    method set_view_offset_y (y : float) = view_offset_y <- y
+    method viewport_w = viewport_w
+    method set_viewport_w (w : float) = viewport_w <- w
+    method viewport_h = viewport_h
+    method set_viewport_h (h : float) = viewport_h <- h
+
+    (* Center the canvas view on the current artboard using the
+       stored viewport_w / viewport_h. If the artboard fits at the
+       current zoom, set pan to center it; otherwise apply
+       fit-inside semantics with 20px screen-space padding.
+       Per ZOOM_TOOL.md Document-open behavior. *)
+    method center_view_on_current_artboard =
+      let abs_list = doc.Document.artboards in
+      if abs_list <> [] && viewport_w > 0.0 && viewport_h > 0.0 then begin
+        let ab = List.hd abs_list in
+        let abw = ab.Artboard.width in
+        let abh = ab.Artboard.height in
+        let abx = ab.Artboard.x in
+        let aby = ab.Artboard.y in
+        let fits =
+          abw *. zoom_level <= viewport_w
+          && abh *. zoom_level <= viewport_h
+        in
+        if fits then begin
+          view_offset_x <-
+            viewport_w /. 2.0 -. (abx +. abw /. 2.0) *. zoom_level;
+          view_offset_y <-
+            viewport_h /. 2.0 -. (aby +. abh /. 2.0) *. zoom_level
+        end else begin
+          let pad = 20.0 in
+          let avail_w = viewport_w -. 2.0 *. pad in
+          let avail_h = viewport_h -. 2.0 *. pad in
+          if avail_w > 0.0 && avail_h > 0.0 then begin
+            let z_fit = min (avail_w /. abw) (avail_h /. abh) in
+            let z_clamped = max 0.1 (min 64.0 z_fit) in
+            zoom_level <- z_clamped;
+            view_offset_x <-
+              viewport_w /. 2.0 -. (abx +. abw /. 2.0) *. z_clamped;
+            view_offset_y <-
+              viewport_h /. 2.0 -. (aby +. abh /. 2.0) *. z_clamped
+          end
+        end
+      end
   end
 
 let create ?document ?filename () = new model ?document ?filename ()

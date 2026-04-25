@@ -283,18 +283,53 @@ pub(crate) fn make_keydown_handler(
                     }));
                 }
             }
-            // --- View shortcuts (Ctrl+=/-, Ctrl+0) ---
+            // --- View shortcuts (Ctrl+=/-, Ctrl+0, Ctrl+Alt+0, Ctrl+1)
+            // ---
+            // Per ZOOM_TOOL.md §Keyboard shortcuts and actions.
             Key::Character(ref c) if (c == "=" || c == "+") && cmd => {
                 evt.prevent_default();
-                log::info!("[action] zoom_in (tier 3 stub)");
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    let empty = serde_json::Map::new();
+                    crate::interpreter::renderer::dispatch_action(
+                        "zoom_in", &empty, st,
+                    );
+                }));
             }
             Key::Character(ref c) if (c == "-" || c == "_") && cmd => {
                 evt.prevent_default();
-                log::info!("[action] zoom_out (tier 3 stub)");
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    let empty = serde_json::Map::new();
+                    crate::interpreter::renderer::dispatch_action(
+                        "zoom_out", &empty, st,
+                    );
+                }));
             }
             Key::Character(ref c) if c == "0" && cmd => {
                 evt.prevent_default();
-                log::info!("[action] fit_in_window (tier 3 stub)");
+                if mods.alt() {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let empty = serde_json::Map::new();
+                        crate::interpreter::renderer::dispatch_action(
+                            "fit_all_artboards", &empty, st,
+                        );
+                    }));
+                } else {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let empty = serde_json::Map::new();
+                        crate::interpreter::renderer::dispatch_action(
+                            "fit_active_artboard", &empty, st,
+                        );
+                    }));
+                }
+            }
+            Key::Character(ref c) if c == "1" && cmd => {
+                evt.prevent_default();
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    let empty = serde_json::Map::new();
+                    crate::interpreter::renderer::dispatch_action(
+                        "zoom_to_actual_size", &empty, st,
+                    );
+                }));
             }
             // --- Tool shortcuts (bare keys, no modifier) ---
             Key::Character(ref c) if c == "v" || c == "V" => {
@@ -352,6 +387,31 @@ pub(crate) fn make_keydown_handler(
             Key::Character(ref c) if c == "m" || c == "M" => {
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
                     st.set_tool(ToolKind::Rect);
+                }));
+            }
+            Key::Character(ref c) if c == "h" || c == "H" => {
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    st.set_tool(ToolKind::Hand);
+                }));
+            }
+            Key::Character(ref c) if c == "z" || c == "Z" => {
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    st.set_tool(ToolKind::Zoom);
+                }));
+            }
+            // --- Spacebar pass-through to Hand (HAND_TOOL.md
+            // §Spacebar pass-through) ---
+            // On Space-down, if Hand isn't already active, save the
+            // current tool to prior_tool_for_spacebar and switch to
+            // Hand. Suppressed when a text input has focus (handled
+            // earlier in this function via event_targets_input). The
+            // matching keyup is in make_keyup_handler.
+            Key::Character(ref c) if c == " " => {
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    if st.active_tool == ToolKind::Hand { return; }
+                    if st.prior_tool_for_spacebar.is_some() { return; }
+                    st.prior_tool_for_spacebar = Some(st.active_tool);
+                    st.set_tool(ToolKind::Hand);
                 }));
             }
             Key::Escape | Key::Enter => {
@@ -415,6 +475,14 @@ pub(crate) fn make_keyup_handler(
         match key {
             Key::Character(ref c) if c == " " => {
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    // Spacebar pass-through restore: if a prior tool
+                    // was saved on Space-down, restore it on
+                    // Space-up. Per HAND_TOOL.md §Spacebar
+                    // pass-through.
+                    if let Some(prior) = st.prior_tool_for_spacebar.take() {
+                        st.set_tool(prior);
+                        return;
+                    }
                     let kind = st.active_tool;
                     if let Some(tab) = st.tab_mut()
                         && let Some(tool) = tab.tools.get_mut(&kind) {

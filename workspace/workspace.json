@@ -341,35 +341,108 @@
       ]
     },
     "zoom_in": {
-      "description": "Zoom the canvas in by one step (e.g. 150% -> 200%). Zoom is centered on the current viewport center. The zoom level is reflected in active_document.zoom_level.\n",
+      "description": "Zoom the canvas in by preferences.viewport.zoom_step (e.g. 100% -> 120%). When invoked from the keyboard or menu with no anchor params, the zoom centers on the viewport center. The Zoom tool's click and wheel handlers pass cursor coordinates so the zoom centers on the cursor instead. The zoom level is reflected in active_document.zoom_level and clamped to [preferences.viewport.min_zoom, preferences.viewport.max_zoom].\n",
       "category": "view",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
+      "params": {
+        "anchor_x": {
+          "type": "number",
+          "default": -1
+        },
+        "anchor_y": {
+          "type": "number",
+          "default": -1
+        }
+      },
       "effects": [
         {
-          "log": "zoom_in"
+          "doc.zoom.apply": {
+            "factor": "preferences.viewport.zoom_step",
+            "anchor_x": "param.anchor_x",
+            "anchor_y": "param.anchor_y"
+          }
         }
       ]
     },
     "zoom_out": {
-      "description": "Zoom the canvas out by one step (e.g. 200% -> 150%). Zoom is centered on the current viewport center.\n",
+      "description": "Zoom the canvas out by 1 / preferences.viewport.zoom_step (e.g. 120% -> 100%). Anchor and centering rules match zoom_in: viewport center for keyboard/menu invocations; cursor for tool invocations.\n",
+      "category": "view",
+      "tier": 3,
+      "enabled_when": "state.tab_count > 0",
+      "params": {
+        "anchor_x": {
+          "type": "number",
+          "default": -1
+        },
+        "anchor_y": {
+          "type": "number",
+          "default": -1
+        }
+      },
+      "effects": [
+        {
+          "doc.zoom.apply": {
+            "factor": "1.0 / preferences.viewport.zoom_step",
+            "anchor_x": "param.anchor_x",
+            "anchor_y": "param.anchor_y"
+          }
+        }
+      ]
+    },
+    "zoom_to_actual_size": {
+      "description": "Set zoom to 1.0 (100%); leave pan unchanged. Bound to Ctrl+1 and to double-click on the Zoom tool toolbar icon.\n",
       "category": "view",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
       "effects": [
         {
-          "log": "zoom_out"
+          "doc.zoom.set": {
+            "level": 1.0
+          }
         }
       ]
     },
     "fit_in_window": {
-      "description": "Adjust zoom and scroll so the bounding box of all objects in the document fits within the visible canvas area with a small margin. If the document is empty, resets to 100% zoom centered on the artboard origin.\n",
+      "description": "Adjust zoom and pan so the bounding box of all elements in the document fits within the visible canvas area with preferences.viewport.fit_padding_px screen-space padding. If the document is empty, resets to 100% zoom centered on the document origin. Distinct from fit_active_artboard (fits the current artboard's rectangle) and fit_all_artboards (fits the union of all artboard rectangles).\n",
       "category": "view",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
       "effects": [
         {
-          "log": "fit_in_window"
+          "doc.zoom.fit_elements": {
+            "padding": "preferences.viewport.fit_padding_px"
+          }
+        }
+      ]
+    },
+    "fit_active_artboard": {
+      "description": "Adjust zoom and pan so the current artboard's rectangle fits the visible canvas area with preferences.viewport.fit_padding_px screen-space padding. The current artboard is the topmost panel-selected artboard, else the artboard at position 1; per ARTBOARDS.md \u00a7Selection semantics, the at-least-one-artboard invariant guarantees a target exists. Bound to Ctrl+0 and to double-click on the Hand tool toolbar icon.\n",
+      "category": "view",
+      "tier": 3,
+      "enabled_when": "state.tab_count > 0",
+      "effects": [
+        {
+          "doc.zoom.fit_rect": {
+            "rect_x": "active_document.current_artboard.x",
+            "rect_y": "active_document.current_artboard.y",
+            "rect_w": "active_document.current_artboard.width",
+            "rect_h": "active_document.current_artboard.height",
+            "padding": "preferences.viewport.fit_padding_px"
+          }
+        }
+      ]
+    },
+    "fit_all_artboards": {
+      "description": "Adjust zoom and pan so the union of all artboard rectangles fits the visible canvas area with preferences.viewport.fit_padding_px screen-space padding. Bound to Ctrl+Alt+0.\n",
+      "category": "view",
+      "tier": 3,
+      "enabled_when": "state.tab_count > 0",
+      "effects": [
+        {
+          "doc.zoom.fit_all_artboards": {
+            "padding": "preferences.viewport.fit_padding_px"
+          }
         }
       ]
     },
@@ -4406,6 +4479,14 @@
       "viewbox": "0 0 28 28",
       "svg": "<path d=\"M14,5 C6,5 3,10 3,14 C3,20 8,24 14,22 C20,20 22,16 20,12 C18,8 12,9 12,13 C12,16 16,17 17,15\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>\n"
     },
+    "zoom": {
+      "viewbox": "0 0 28 28",
+      "svg": "<circle cx=\"11\" cy=\"11\" r=\"6.5\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"2\"/>\n<line x1=\"15.5\" y1=\"15.5\" x2=\"22.5\" y2=\"22.5\"\n  stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\"/>\n"
+    },
+    "hand": {
+      "viewbox": "0 0 28 28",
+      "svg": "<line x1=\"10\" y1=\"14\" x2=\"10\" y2=\"5\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"13\" y1=\"14\" x2=\"13\" y2=\"3\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"16\" y1=\"14\" x2=\"16\" y2=\"4\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"19\" y1=\"14\" x2=\"19\" y2=\"6\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<path d=\"M9,14 L4,18 L4,22 Q5,25 9,25 L19,25 Q22,25 22,22 L22,14\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"
+    },
     "magic_wand": {
       "viewbox": "0 0 28 28",
       "svg": "<line x1=\"4\" y1=\"22\" x2=\"18\" y2=\"8\" stroke=\"currentColor\"\n  stroke-width=\"2\" stroke-linecap=\"round\"/>\n<polygon fill=\"currentColor\"\n  points=\"20,3 21,7 25,8 21,9 20,13 19,9 15,8 19,7\"/>\n<polygon fill=\"currentColor\"\n  points=\"24,12 24.7,13.5 26.5,14 24.7,14.5 24,16 23.3,14.5 21.5,14 23.3,13.5\"/>\n"
@@ -5528,6 +5609,79 @@
                   "bind": {
                     "checked": "state.active_tool == \"lasso\""
                   }
+                },
+                {
+                  "id": "btn_hand_slot",
+                  "type": "icon_button",
+                  "summary": "Hand (H)",
+                  "description": "Pan the canvas by click-and-drag. Spacebar held while another tool is active temporarily switches to Hand. Long-press (250ms) opens a menu to switch between Hand and Zoom tools (the navigation tool pair). Double-click the icon to invoke fit_active_artboard. The button shows checked state when either tool in this slot is active. See HAND_TOOL.md and ZOOM_TOOL.md.\n",
+                  "icon": "hand",
+                  "grid": {
+                    "row": 4,
+                    "col": 0
+                  },
+                  "style": {
+                    "size": "{{theme.sizes.tool_button}}",
+                    "checked_bg": "{{theme.colors.button_checked}}",
+                    "hover": {
+                      "background": "{{theme.colors.button_checked}}"
+                    }
+                  },
+                  "behavior": [
+                    {
+                      "event": "mouse_down",
+                      "effects": [
+                        {
+                          "start_timer": {
+                            "id": "long_press_btn_hand_slot",
+                            "delay_ms": 250,
+                            "effects": [
+                              {
+                                "open_dialog": {
+                                  "id": "hand_alternates"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "event": "mouse_up",
+                      "effects": [
+                        {
+                          "cancel_timer": "long_press_btn_hand_slot"
+                        }
+                      ]
+                    },
+                    {
+                      "event": "click",
+                      "action": "select_tool",
+                      "params": {
+                        "tool": "hand"
+                      }
+                    }
+                  ],
+                  "bind": {
+                    "checked": "mem(state.active_tool, [\"hand\", \"zoom\"])"
+                  },
+                  "alternates": {
+                    "menu_id": "hand_alternates",
+                    "items": [
+                      {
+                        "id": "hand",
+                        "label": "Hand (H)",
+                        "icon": "hand",
+                        "description": "Pan the canvas by click-and-drag"
+                      },
+                      {
+                        "id": "zoom",
+                        "label": "Zoom (Z)",
+                        "icon": "zoom",
+                        "description": "Zoom in by click; Alt-click to zoom out; drag for scrubby or marquee zoom; Ctrl+wheel for stepped zoom\n"
+                      }
+                    ]
+                  }
                 }
               ]
             },
@@ -6158,10 +6312,30 @@
           "enabled_when": "state.tab_count > 0"
         },
         {
+          "id": "menu_zoom_actual_size",
+          "label": "Actual &Size",
+          "action": "zoom_to_actual_size",
+          "shortcut": "Ctrl+1",
+          "enabled_when": "state.tab_count > 0"
+        },
+        {
+          "id": "menu_fit_artboard",
+          "label": "Fit &Artboard in Window",
+          "action": "fit_active_artboard",
+          "shortcut": "Ctrl+0",
+          "enabled_when": "state.tab_count > 0"
+        },
+        {
+          "id": "menu_fit_all_artboards",
+          "label": "Fit A&ll in Window",
+          "action": "fit_all_artboards",
+          "shortcut": "Ctrl+Alt+0",
+          "enabled_when": "state.tab_count > 0"
+        },
+        {
           "id": "menu_fit",
           "label": "&Fit in Window",
           "action": "fit_in_window",
-          "shortcut": "Ctrl+0",
           "enabled_when": "state.tab_count > 0"
         }
       ]
@@ -6331,7 +6505,9 @@
       "zoom_step": 1.2,
       "min_zoom": 0.1,
       "max_zoom": 64.0,
-      "fit_padding_px": 20
+      "fit_padding_px": 20,
+      "scrubby_zoom": true,
+      "scrubby_zoom_gain": 144
     },
     "brushes": {
       "persistent_libraries": [
@@ -6352,6 +6528,8 @@
         "can_undo": false,
         "can_redo": false,
         "zoom_level": 1.0,
+        "view_offset_x": 0.0,
+        "view_offset_y": 0.0,
         "layers_panel_selection_count": 0,
         "layers_panel_selection_is_container": false,
         "layers_panel_selection_has_group": false,
@@ -6393,7 +6571,15 @@
         },
         "zoom_level": {
           "type": "number",
-          "description": "Current zoom factor (1.0 = 100%)"
+          "description": "Current zoom factor (1.0 = 100%). Per-document; not serialized to disk. Clamped at the producer side to [preferences.viewport.min_zoom, preferences.viewport.max_zoom].\n"
+        },
+        "view_offset_x": {
+          "type": "number",
+          "description": "Pan: screen-space pixel coordinate of the document's (0,0) point within the canvas widget. Positive moves the document origin rightward in the viewport. Per-document; not serialized.\n"
+        },
+        "view_offset_y": {
+          "type": "number",
+          "description": "Pan: screen-space pixel coordinate of the document's (0,0) point within the canvas widget. Positive moves the document origin downward. Per-document; not serialized.\n"
         },
         "layers_panel_selection_count": {
           "type": "number",
@@ -6689,7 +6875,15 @@
     },
     {
       "key": "Ctrl+0",
-      "action": "fit_in_window"
+      "action": "fit_active_artboard"
+    },
+    {
+      "key": "Ctrl+Alt+0",
+      "action": "fit_all_artboards"
+    },
+    {
+      "key": "Ctrl+1",
+      "action": "zoom_to_actual_size"
     },
     {
       "key": "V",
@@ -6766,6 +6960,20 @@
       "action": "select_tool",
       "params": {
         "tool": "lasso"
+      }
+    },
+    {
+      "key": "Z",
+      "action": "select_tool",
+      "params": {
+        "tool": "zoom"
+      }
+    },
+    {
+      "key": "H",
+      "action": "select_tool",
+      "params": {
+        "tool": "hand"
       }
     },
     {
@@ -17639,6 +17847,120 @@
         ]
       }
     },
+    "hand": {
+      "id": "hand",
+      "cursor": "open_hand",
+      "menu_label": "Hand Tool",
+      "shortcut": "H",
+      "tool_options_action": "fit_active_artboard",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "panning"
+          ]
+        },
+        "press_x": {
+          "default": 0.0
+        },
+        "press_y": {
+          "default": 0.0
+        },
+        "initial_offx": {
+          "default": 0.0
+        },
+        "initial_offy": {
+          "default": 0.0
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.hand.mode": "'idle'"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.hand.mode": "'idle'"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "set": {
+              "tool.hand.press_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.hand.press_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.hand.initial_offx": "active_document.view_offset_x"
+            }
+          },
+          {
+            "set": {
+              "tool.hand.initial_offy": "active_document.view_offset_y"
+            }
+          },
+          {
+            "set": {
+              "tool.hand.mode": "'panning'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.hand.mode == 'panning'",
+            "then": [
+              {
+                "doc.pan.apply": {
+                  "press_x": "tool.hand.press_x",
+                  "press_y": "tool.hand.press_y",
+                  "cursor_x": "event.x",
+                  "cursor_y": "event.y",
+                  "initial_offx": "tool.hand.initial_offx",
+                  "initial_offy": "tool.hand.initial_offy"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "set": {
+              "tool.hand.mode": "'idle'"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape' && tool.hand.mode == 'panning'",
+            "then": [
+              {
+                "doc.zoom.set_full": {
+                  "zoom": "active_document.zoom_level",
+                  "offset_x": "tool.hand.initial_offx",
+                  "offset_y": "tool.hand.initial_offy"
+                }
+              },
+              {
+                "set": {
+                  "tool.hand.mode": "'idle'"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
     "interior_selection": {
       "id": "interior_selection",
       "cursor": "arrow",
@@ -20752,6 +21074,312 @@
           "style": "stroke: rgb(100,100,100); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
         }
       }
+    },
+    "zoom": {
+      "id": "zoom",
+      "cursor": "zoom_in",
+      "menu_label": "Zoom Tool",
+      "shortcut": "Z",
+      "tool_options_action": "zoom_to_actual_size",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "dragging"
+          ]
+        },
+        "press_x": {
+          "default": 0.0
+        },
+        "press_y": {
+          "default": 0.0
+        },
+        "cursor_x": {
+          "default": 0.0
+        },
+        "cursor_y": {
+          "default": 0.0
+        },
+        "alt_at_press": {
+          "default": false
+        },
+        "alt_held": {
+          "default": false
+        },
+        "initial_zoom": {
+          "default": 1.0
+        },
+        "initial_offx": {
+          "default": 0.0
+        },
+        "initial_offy": {
+          "default": 0.0
+        },
+        "moved": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.zoom.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.moved": "false"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.zoom.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.moved": "false"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "set": {
+              "tool.zoom.press_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.press_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.cursor_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.cursor_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.alt_at_press": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.initial_zoom": "active_document.zoom_level"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.initial_offx": "active_document.view_offset_x"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.initial_offy": "active_document.view_offset_y"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.moved": "false"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.mode": "'dragging'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.zoom.mode == 'dragging'",
+            "then": [
+              {
+                "set": {
+                  "tool.zoom.cursor_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.zoom.cursor_y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.zoom.alt_held": "event.modifiers.alt"
+                }
+              },
+              {
+                "if": "abs(event.x - tool.zoom.press_x) > 4 || abs(event.y - tool.zoom.press_y) > 4",
+                "then": [
+                  {
+                    "set": {
+                      "tool.zoom.moved": "true"
+                    }
+                  },
+                  {
+                    "if": "preferences.viewport.scrubby_zoom",
+                    "then": [
+                      {
+                        "doc.zoom.scrubby": {
+                          "press_x": "tool.zoom.press_x",
+                          "press_y": "tool.zoom.press_y",
+                          "cursor_x": "event.x",
+                          "cursor_y": "event.y",
+                          "alt_held": "event.modifiers.alt",
+                          "alt_at_press": "tool.zoom.alt_at_press"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.zoom.mode == 'dragging'",
+            "then": [
+              {
+                "if": "tool.zoom.moved",
+                "then": [
+                  {
+                    "if": "not preferences.viewport.scrubby_zoom",
+                    "then": [
+                      {
+                        "doc.zoom.fit_marquee": {
+                          "press_x": "tool.zoom.press_x",
+                          "press_y": "tool.zoom.press_y",
+                          "cursor_x": "event.x",
+                          "cursor_y": "event.y"
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "else": [
+                  {
+                    "if": "tool.zoom.alt_at_press",
+                    "then": [
+                      {
+                        "dispatch": {
+                          "action": "zoom_out",
+                          "params": {
+                            "anchor_x": "event.x",
+                            "anchor_y": "event.y"
+                          }
+                        }
+                      }
+                    ],
+                    "else": [
+                      {
+                        "dispatch": {
+                          "action": "zoom_in",
+                          "params": {
+                            "anchor_x": "event.x",
+                            "anchor_y": "event.y"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.zoom.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.zoom.moved": "false"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape' && tool.zoom.mode == 'dragging'",
+            "then": [
+              {
+                "doc.zoom.set_full": {
+                  "zoom": "tool.zoom.initial_zoom",
+                  "offset_x": "tool.zoom.initial_offx",
+                  "offset_y": "tool.zoom.initial_offy"
+                }
+              },
+              {
+                "set": {
+                  "tool.zoom.mode": "'idle'"
+                }
+              },
+              {
+                "set": {
+                  "tool.zoom.moved": "false"
+                }
+              }
+            ]
+          }
+        ],
+        "on_wheel": [
+          {
+            "if": "event.modifiers.ctrl",
+            "then": [
+              {
+                "if": "event.delta_y > 0",
+                "then": [
+                  {
+                    "dispatch": {
+                      "action": "zoom_out",
+                      "params": {
+                        "anchor_x": "event.x",
+                        "anchor_y": "event.y"
+                      }
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "dispatch": {
+                      "action": "zoom_in",
+                      "params": {
+                        "anchor_x": "event.x",
+                        "anchor_y": "event.y"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": [
+        {
+          "if": "tool.zoom.mode == 'dragging' && tool.zoom.moved && not preferences.viewport.scrubby_zoom",
+          "render": {
+            "type": "marquee_rect",
+            "x1": "tool.zoom.press_x",
+            "y1": "tool.zoom.press_y",
+            "x2": "tool.zoom.cursor_x",
+            "y2": "tool.zoom.cursor_y"
+          }
+        }
+      ]
     }
   },
   "dialogs": {
@@ -27658,6 +28286,75 @@
                   {
                     "set": {
                       "active_tool": "\"star\""
+                    }
+                  },
+                  {
+                    "close_dialog": null
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "hand_alternates": {
+      "summary": "Navigation Tools",
+      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the Hand tool button (row 4 col 0 of the tool grid). Lists the two navigation tools: Hand (pan the canvas by drag; spacebar pass-through) and Zoom (step / scrubby / marquee zoom). Clicking an item selects that tool and closes the dialog. Hand is the slot's primary; Zoom is the alternate. See HAND_TOOL.md and ZOOM_TOOL.md.\n",
+      "modal": false,
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 2
+        },
+        "children": [
+          {
+            "type": "icon_button",
+            "icon": "hand",
+            "label": "Hand",
+            "summary": "Pan the canvas by click-and-drag",
+            "style": {
+              "width": "100%",
+              "justify": "start",
+              "gap": 8,
+              "padding": "4 8"
+            },
+            "behavior": [
+              {
+                "event": "click",
+                "effects": [
+                  {
+                    "set": {
+                      "active_tool": "\"hand\""
+                    }
+                  },
+                  {
+                    "close_dialog": null
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "icon_button",
+            "icon": "zoom",
+            "label": "Zoom",
+            "summary": "Zoom in by click, drag, or marquee",
+            "style": {
+              "width": "100%",
+              "justify": "start",
+              "gap": 8,
+              "padding": "4 8"
+            },
+            "behavior": [
+              {
+                "event": "click",
+                "effects": [
+                  {
+                    "set": {
+                      "active_tool": "\"zoom\""
                     }
                   },
                   {

@@ -342,6 +342,29 @@ let build_rounded_rect_path (cr : Cairo.context)
 
 (* ── Render handlers ────────────────────────────────────── *)
 
+(* Marquee zoom rectangle: thin dashed stroke between (x1, y1) and
+   (x2, y2). Used by the Zoom tool drag overlay when scrubby_zoom
+   is off. Per ZOOM_TOOL.md Drag - marquee zoom. *)
+let draw_marquee_rect_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
+    (eval_ctx : Yojson.Safe.t) : unit =
+  let x1 = eval_number_field eval_ctx (render_get render "x1") in
+  let y1 = eval_number_field eval_ctx (render_get render "y1") in
+  let x2 = eval_number_field eval_ctx (render_get render "x2") in
+  let y2 = eval_number_field eval_ctx (render_get render "y2") in
+  let x = min x1 x2 in
+  let y = min y1 y2 in
+  let w = abs_float (x1 -. x2) in
+  let h = abs_float (y1 -. y2) in
+  if w > 0.0 && h > 0.0 then begin
+    Cairo.save cr;
+    Cairo.set_source_rgb cr 0.4 0.4 0.4;
+    Cairo.set_line_width cr 1.0;
+    Cairo.set_dash cr [| 4.0; 2.0 |];
+    Cairo.rectangle cr x y ~w ~h;
+    Cairo.stroke cr;
+    Cairo.restore cr
+  end
+
 let draw_rect_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
     (eval_ctx : Yojson.Safe.t) : unit =
   let x = eval_number_field eval_ctx (render_get render "x") in
@@ -1063,6 +1086,8 @@ class yaml_tool (spec : tool_spec) = object (_self)
         | "bbox_ghost" ->
           draw_bbox_ghost cr overlay.render eval_ctx
             ctx.controller#document
+        | "marquee_rect" ->
+          draw_marquee_rect_overlay cr overlay.render eval_ctx
         | _ -> ()
       end
     ) spec.overlay;

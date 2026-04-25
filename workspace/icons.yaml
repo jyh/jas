@@ -127,6 +127,35 @@ icons:
       <path d="M14,5 C6,5 3,10 3,14 C3,20 8,24 14,22 C20,20 22,16 20,12 C18,8 12,9 12,13 C12,16 16,17 17,15"
         fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 
+  # Zoom: a magnifying glass — circular lens upper-left, short ~45°
+  # handle exiting at lower-right. No interior glyph; the plus / minus
+  # symbols are rendered at cursor time, not baked into the icon.
+  zoom:
+    viewbox: "0 0 28 28"
+    svg: >
+      <circle cx="11" cy="11" r="6.5" fill="none"
+        stroke="currentColor" stroke-width="2"/>
+      <line x1="15.5" y1="15.5" x2="22.5" y2="22.5"
+        stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+
+  # Hand: stylized open palm with four fingers extended and a thumb at
+  # the lower-left. Stroke-only design matching the other tool icons.
+  # Visual polish may be refined during per-app implementation.
+  hand:
+    viewbox: "0 0 28 28"
+    svg: >
+      <line x1="10" y1="14" x2="10" y2="5"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="13" y1="14" x2="13" y2="3"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="16" y1="14" x2="16" y2="4"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="19" y1="14" x2="19" y2="6"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <path d="M9,14 L4,18 L4,22 Q5,25 9,25 L19,25 Q22,25 22,22 L22,14"
+        fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
   # Magic Wand: a wand at ~45° with a sparkle / star at the tip.
   # Diagonal handle (lower-left → upper-right) + 4-point sparkle
   # at the tip + two small accent stars near the tip. Matches the

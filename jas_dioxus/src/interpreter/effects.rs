@@ -1303,6 +1303,223 @@ fn run_doc_effect(
                 shear_apply(model, store, ctx, angle_deg, &axis, axis_angle_deg, copy);
             }
         }
+        "doc.zoom.apply" => {
+            // Apply a multiplicative zoom factor anchored at
+            // (anchor_x, anchor_y) in viewport-local pixels. The
+            // document point under the anchor stays under the anchor
+            // after the zoom. Clamped to
+            // [preferences.viewport.min_zoom, max_zoom]; the actual
+            // applied factor (post-clamp) is used for the pan
+            // recompute so the anchor stays glued to its document
+            // point at the boundary. Per ZOOM_TOOL.md §Anchor and
+            // clamp math.
+            //
+            // anchor_x / anchor_y default to -1, which means
+            // "viewport center" for keyboard / menu invocations.
+            // The Zoom tool's click and wheel handlers pass real
+            // cursor coords. When viewport size isn't available
+            // (effects run without canvas size yet), -1 falls
+            // through to (0, 0) — corrected by viewport plumbing
+            // in a follow-up commit.
+            if let serde_json::Value::Object(args) = spec {
+                let factor = eval_number(args.get("factor"), store, ctx);
+                let anchor_x_raw = eval_number(args.get("anchor_x"), store, ctx);
+                let anchor_y_raw = eval_number(args.get("anchor_y"), store, ctx);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                let z = model.zoom_level;
+                let px = model.view_offset_x;
+                let py = model.view_offset_y;
+                // Default-anchor convention: -1 means viewport center
+                // (no viewport size available here, so fall back to
+                // current anchor at (0,0) — the doc origin's screen
+                // position — which preserves the document origin's
+                // place. See followup commit for proper viewport
+                // plumbing.
+                let ax = if anchor_x_raw < 0.0 { px } else { anchor_x_raw };
+                let ay = if anchor_y_raw < 0.0 { py } else { anchor_y_raw };
+                let doc_ax = (ax - px) / z;
+                let doc_ay = (ay - py) / z;
+                let z_new = (z * factor).clamp(min_zoom, max_zoom);
+                let px_new = ax - doc_ax * z_new;
+                let py_new = ay - doc_ay * z_new;
+                model.zoom_level = z_new;
+                model.view_offset_x = px_new;
+                model.view_offset_y = py_new;
+            }
+        }
+        "doc.zoom.set" => {
+            // Set zoom_level absolutely; pan unchanged. Used by
+            // zoom_to_actual_size (level: 1.0). Clamps to
+            // [min_zoom, max_zoom].
+            if let serde_json::Value::Object(args) = spec {
+                let level = eval_number(args.get("level"), store, ctx);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                model.zoom_level = level.clamp(min_zoom, max_zoom);
+            }
+        }
+        "doc.zoom.set_full" => {
+            // Set zoom_level + view_offset_x + view_offset_y in one
+            // atomic write. Used by Zoom-tool Escape-cancel to
+            // restore the pre-drag snapshot.
+            if let serde_json::Value::Object(args) = spec {
+                let zoom = eval_number(args.get("zoom"), store, ctx);
+                let offset_x = eval_number(args.get("offset_x"), store, ctx);
+                let offset_y = eval_number(args.get("offset_y"), store, ctx);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                model.zoom_level = zoom.clamp(min_zoom, max_zoom);
+                model.view_offset_x = offset_x;
+                model.view_offset_y = offset_y;
+            }
+        }
+        "doc.zoom.scrubby" => {
+            // Continuous scrubby zoom during a drag. Reads tool
+            // state for initial zoom + offsets at mousedown plus
+            // press / cursor coords + alt modifier. Computes new
+            // zoom factor as exp(dx_px / scrubby_zoom_gain) — or
+            // its reciprocal if Alt is held (alt_at_press XOR
+            // alt_held). Anchors the document point under
+            // (press_x, press_y) so the cursor stays glued to its
+            // document position. Per ZOOM_TOOL.md §Drag — scrubby
+            // zoom.
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let _cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let alt_held = eval_bool(args.get("alt_held"), store, ctx);
+                let alt_at_press = eval_bool(args.get("alt_at_press"), store, ctx);
+                let gain = read_pref_number(ctx, "scrubby_zoom_gain", 144.0);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                let initial_zoom = read_tool_zoom_state(ctx, "initial_zoom", 1.0);
+                let initial_offx = read_tool_zoom_state(ctx, "initial_offx", 0.0);
+                let initial_offy = read_tool_zoom_state(ctx, "initial_offy", 0.0);
+                let dx = cursor_x - press_x;
+                let direction = if alt_at_press ^ alt_held { -1.0 } else { 1.0 };
+                let factor = (dx * direction / gain).exp();
+                let z_new = (initial_zoom * factor).clamp(min_zoom, max_zoom);
+                // Anchor at press point: document point under press
+                // stays under press at the new zoom. doc_ax / doc_ay
+                // computed from the *initial* zoom + offsets (before
+                // any scrubby application).
+                let doc_ax = (press_x - initial_offx) / initial_zoom;
+                let doc_ay = (press_y - initial_offy) / initial_zoom;
+                model.zoom_level = z_new;
+                model.view_offset_x = press_x - doc_ax * z_new;
+                model.view_offset_y = press_y - doc_ay * z_new;
+            }
+        }
+        "doc.pan.apply" => {
+            // Hand tool pan during a drag. Computes new offsets as
+            // initial offset + cursor-press delta so the document
+            // point under the cursor at mousedown stays under the
+            // cursor for the entire drag. Idempotent — recomputes
+            // from press + initial each call rather than
+            // accumulating per-mousemove deltas. Per HAND_TOOL.md
+            // §Drag — pan.
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let initial_offx = eval_number(args.get("initial_offx"), store, ctx);
+                let initial_offy = eval_number(args.get("initial_offy"), store, ctx);
+                model.view_offset_x = initial_offx + (cursor_x - press_x);
+                model.view_offset_y = initial_offy + (cursor_y - press_y);
+            }
+        }
+        "doc.zoom.fit_rect" => {
+            // Fit a document-coordinate rectangle into the visible
+            // canvas area with a screen-space padding. Used by
+            // fit_active_artboard. Per ZOOM_TOOL.md §Anchor and
+            // clamp math (`algorithms/zoom_fit_rect`).
+            if let serde_json::Value::Object(args) = spec {
+                let rect_x = eval_number(args.get("rect_x"), store, ctx);
+                let rect_y = eval_number(args.get("rect_y"), store, ctx);
+                let rect_w = eval_number(args.get("rect_w"), store, ctx);
+                let rect_h = eval_number(args.get("rect_h"), store, ctx);
+                let padding = eval_number(args.get("padding"), store, ctx);
+                fit_rect_into_viewport(model, rect_x, rect_y, rect_w, rect_h, padding);
+            }
+        }
+        "doc.zoom.fit_marquee" => {
+            // Fit a marquee rectangle (drawn from press to cursor in
+            // viewport-local pixels) into the canvas. Exact fit
+            // (zero padding) per ZOOM_TOOL.md §Drag — marquee zoom.
+            // Below the 10 px minimum-marquee threshold, treated as
+            // a click and falls through to no-op (the tool's
+            // mouseup handler dispatches step zoom in that case;
+            // marquee fit is only invoked above threshold).
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let mx = press_x.min(cursor_x);
+                let my = press_y.min(cursor_y);
+                let mw = (press_x - cursor_x).abs();
+                let mh = (press_y - cursor_y).abs();
+                if mw < 10.0 || mh < 10.0 { return; }
+                // Convert the marquee from viewport-local pixels to
+                // document coordinates using the *current* zoom and
+                // pan, then fit_rect that document rectangle.
+                let z = model.zoom_level;
+                let px = model.view_offset_x;
+                let py = model.view_offset_y;
+                let doc_x = (mx - px) / z;
+                let doc_y = (my - py) / z;
+                let doc_w = mw / z;
+                let doc_h = mh / z;
+                fit_rect_into_viewport(model, doc_x, doc_y, doc_w, doc_h, 0.0);
+            }
+        }
+        "doc.zoom.fit_elements" => {
+            // Fit the bounding box of all elements in the document
+            // into the visible canvas area with padding. If the
+            // document is empty, reset to 100% zoom centered on
+            // the document origin. Used by fit_in_window.
+            if let serde_json::Value::Object(args) = spec {
+                let padding = eval_number(args.get("padding"), store, ctx);
+                let bounds = model.document().bounds();
+                if bounds.2 <= 0.0 || bounds.3 <= 0.0 {
+                    // Empty document → 100% centered on document
+                    // origin (0, 0).
+                    model.zoom_level = 1.0;
+                    model.view_offset_x = model.viewport_w / 2.0;
+                    model.view_offset_y = model.viewport_h / 2.0;
+                } else {
+                    fit_rect_into_viewport(
+                        model, bounds.0, bounds.1, bounds.2, bounds.3, padding,
+                    );
+                }
+            }
+        }
+        "doc.zoom.fit_all_artboards" => {
+            // Fit the union of all artboard rectangles into the
+            // visible canvas area with padding. The
+            // at-least-one-artboard invariant guarantees a target.
+            if let serde_json::Value::Object(args) = spec {
+                let padding = eval_number(args.get("padding"), store, ctx);
+                let doc = model.document();
+                if doc.artboards.is_empty() { return; }
+                let mut min_x = f64::INFINITY;
+                let mut min_y = f64::INFINITY;
+                let mut max_x = f64::NEG_INFINITY;
+                let mut max_y = f64::NEG_INFINITY;
+                for ab in &doc.artboards {
+                    min_x = min_x.min(ab.x);
+                    min_y = min_y.min(ab.y);
+                    max_x = max_x.max(ab.x + ab.width);
+                    max_y = max_y.max(ab.y + ab.height);
+                }
+                fit_rect_into_viewport(
+                    model, min_x, min_y, max_x - min_x, max_y - min_y, padding,
+                );
+            }
+        }
         "doc.magic_wand.apply" => {
             // Magic Wand selection per MAGIC_WAND_TOOL.md §Predicate.
             // Reads the seed path + mode (replace / add / subtract)
@@ -1760,6 +1977,74 @@ fn brush_options_confirm_dispatch(store: &mut StateStore, model: &mut Model) {
         }
         _ => {}
     }
+}
+
+/// Compute and write a fit-to-viewport zoom + pan that places the
+/// given document-space rectangle inside the canvas viewport with
+/// `padding` screen-space pixels of breathing room on each side.
+/// Uses fit-inside (letterbox) aspect-ratio resolution: the rect
+/// is fully visible; there's slack on one axis. Centers the rect
+/// in the viewport. Clamps to [min_zoom, max_zoom].
+///
+/// Skips the write if the input rectangle is empty, the viewport
+/// is degenerate, or the post-padding viewport is non-positive.
+/// In those cases the existing view state stays unchanged.
+fn fit_rect_into_viewport(
+    model: &mut Model,
+    rect_x: f64,
+    rect_y: f64,
+    rect_w: f64,
+    rect_h: f64,
+    padding: f64,
+) {
+    if rect_w <= 0.0 || rect_h <= 0.0 { return; }
+    let vw = model.viewport_w;
+    let vh = model.viewport_h;
+    if vw <= 0.0 || vh <= 0.0 { return; }
+    let avail_w = vw - 2.0 * padding;
+    let avail_h = vh - 2.0 * padding;
+    if avail_w <= 0.0 || avail_h <= 0.0 { return; }
+    let min_zoom = read_pref_number(&serde_json::Value::Null, "min_zoom", 0.1);
+    let max_zoom = read_pref_number(&serde_json::Value::Null, "max_zoom", 64.0);
+    let z = (avail_w / rect_w).min(avail_h / rect_h).clamp(min_zoom, max_zoom);
+    // Center the rect in the viewport.
+    let rect_cx = rect_x + rect_w / 2.0;
+    let rect_cy = rect_y + rect_h / 2.0;
+    let viewport_cx = vw / 2.0;
+    let viewport_cy = vh / 2.0;
+    model.zoom_level = z;
+    model.view_offset_x = viewport_cx - rect_cx * z;
+    model.view_offset_y = viewport_cy - rect_cy * z;
+}
+
+/// Read a numeric viewport preference from workspace.json. Returns
+/// the provided default if the workspace can't be loaded or the
+/// field isn't a number. Used by doc.zoom.* effects that need
+/// min_zoom / max_zoom / scrubby_zoom_gain from
+/// preferences.viewport.* — the runtime expression evaluator
+/// doesn't currently resolve preferences.* identifiers, so these
+/// effects bypass it and read the workspace data directly.
+fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
+    use crate::interpreter::workspace::Workspace;
+    let Some(ws) = Workspace::load() else { return default; };
+    ws.data()
+        .get("preferences")
+        .and_then(|p| p.get("viewport"))
+        .and_then(|v| v.get(key))
+        .and_then(|n| n.as_f64())
+        .unwrap_or(default)
+}
+
+/// Read a numeric tool.zoom.<key> from the eval context. Used by
+/// doc.zoom.scrubby to recover the zoom + offset snapshot taken at
+/// mousedown so the continuous-drag zoom is computed idempotently
+/// from the press position, not accumulated per-event.
+fn read_tool_zoom_state(ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
+    ctx.get("tool")
+        .and_then(|t| t.get("zoom"))
+        .and_then(|z| z.get(key))
+        .and_then(|n| n.as_f64())
+        .unwrap_or(default)
 }
 
 fn eval_number(
@@ -5649,5 +5934,274 @@ mod tests {
             .selection.iter().map(|es| es.path.clone()).collect();
         assert_eq!(paths.len(), 1);
         assert!(paths.contains(&vec![0, 0]));
+    }
+
+    // ─── Zoom + Pan effects ────────────────────────────────────
+
+    #[test]
+    fn test_doc_zoom_set() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 2.5;
+        model.view_offset_x = 100.0;
+        model.view_offset_y = 50.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.set": { "level": "1.0" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 1.0);
+        // Pan unchanged.
+        assert_eq!(model.view_offset_x, 100.0);
+        assert_eq!(model.view_offset_y, 50.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_set_clamps_to_min_max() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        let effects = vec![serde_json::json!({
+            "doc.zoom.set": { "level": "1000.0" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Clamped to max_zoom (default 64.0 from preferences.yaml).
+        assert_eq!(model.zoom_level, 64.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_set_full() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        let effects = vec![serde_json::json!({
+            "doc.zoom.set_full": {
+                "zoom":     "2.0",
+                "offset_x": "150.0",
+                "offset_y": "75.0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 2.0);
+        assert_eq!(model.view_offset_x, 150.0);
+        assert_eq!(model.view_offset_y, 75.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_apply_anchors_at_cursor() {
+        // Document point under cursor at (200, 150) before zoom
+        // should be under cursor at (200, 150) after zoom.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 1.0;
+        model.view_offset_x = 0.0;
+        model.view_offset_y = 0.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.apply": {
+                "factor":   "2.0",
+                "anchor_x": "200",
+                "anchor_y": "150",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 2.0);
+        // Anchor invariant: doc point (200, 150) was at screen
+        // (200, 150) before; should still be at screen (200, 150).
+        // screen = offset + zoom * doc; doc was 200/1 = 200 (same
+        // since offset=0). So offset_new = 200 - 200*2 = -200.
+        assert_eq!(model.view_offset_x, -200.0);
+        assert_eq!(model.view_offset_y, -150.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_apply_clamps_at_max() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 32.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.apply": {
+                "factor":   "10.0",   // would push to 320
+                "anchor_x": "100",
+                "anchor_y": "100",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Clamped to 64.0 (default max_zoom).
+        assert_eq!(model.zoom_level, 64.0);
+    }
+
+    #[test]
+    fn test_doc_pan_apply_translates_by_drag_delta() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        let effects = vec![serde_json::json!({
+            "doc.pan.apply": {
+                "press_x":      "100",
+                "press_y":      "50",
+                "cursor_x":     "150",
+                "cursor_y":     "120",
+                "initial_offx": "0",
+                "initial_offy": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // delta = (50, 70); initial = (0, 0); result = (50, 70).
+        assert_eq!(model.view_offset_x, 50.0);
+        assert_eq!(model.view_offset_y, 70.0);
+        // Zoom unchanged.
+        assert_eq!(model.zoom_level, 1.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_rect_centers_and_scales() {
+        // 200x100 rect at (0, 0) should be centered in a 800x600
+        // viewport. Padding 20 → available 760x560. Zoom = min(760/200,
+        // 560/100) = min(3.8, 5.6) = 3.8.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_rect": {
+                "rect_x":  "0", "rect_y":  "0",
+                "rect_w":  "200", "rect_h": "100",
+                "padding": "20",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert!((model.zoom_level - 3.8).abs() < 1e-9, "z = {}", model.zoom_level);
+        // Rect center (100, 50) at zoom 3.8 → screen (380, 190).
+        // Viewport center (400, 300). offset = 400 - 380 = 20; 300 - 190 = 110.
+        assert!((model.view_offset_x - 20.0).abs() < 1e-9);
+        assert!((model.view_offset_y - 110.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_rect_clamps_to_max_zoom() {
+        // Tiny rect would push zoom past max_zoom (64.0); should clamp.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_rect": {
+                "rect_x":  "0", "rect_y":  "0",
+                "rect_w":  "1", "rect_h":  "1",
+                "padding": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 64.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_rect_skips_when_viewport_unset() {
+        // viewport defaults to 888x900 in Model::default(); set to 0
+        // here to verify fit_rect doesn't divide-by-zero or write
+        // garbage.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 1.5;
+        model.view_offset_x = 100.0;
+        model.view_offset_y = 50.0;
+        model.viewport_w = 0.0;
+        model.viewport_h = 0.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_rect": {
+                "rect_x":  "0", "rect_y":  "0",
+                "rect_w":  "100", "rect_h": "100",
+                "padding": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // No-op: pre-existing view state preserved.
+        assert_eq!(model.zoom_level, 1.5);
+        assert_eq!(model.view_offset_x, 100.0);
+        assert_eq!(model.view_offset_y, 50.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_marquee_below_threshold_is_noop() {
+        // Below 10 px in either dimension → ignored.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_marquee": {
+                "press_x":  "100", "press_y": "100",
+                "cursor_x": "105", "cursor_y": "150",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // No-op: Model defaults preserved.
+        assert_eq!(model.zoom_level, 1.0);
+        assert_eq!(model.view_offset_x, 0.0);
+        assert_eq!(model.view_offset_y, 0.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_all_artboards_unions_rectangles() {
+        // Two artboards: A at (0, 0, 100, 100) and B at (200, 50, 100,
+        // 100). Union: (0, 0, 300, 150). Fit into 600x300 viewport with
+        // 0 padding. Zoom = min(600/300, 300/150) = 2.0.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("a".into());
+        a.name = "A".into();
+        a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        let mut b = Artboard::default_with_id("b".into());
+        b.name = "B".into();
+        b.x = 200.0; b.y = 50.0;
+        b.width = 100.0; b.height = 100.0;
+        doc.artboards.push(b);
+        let mut model = Model::new(doc, None);
+        model.viewport_w = 600.0;
+        model.viewport_h = 300.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_all_artboards": { "padding": "0" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert!((model.zoom_level - 2.0).abs() < 1e-9, "z = {}", model.zoom_level);
+    }
+
+    #[test]
+    fn test_doc_pan_apply_is_idempotent() {
+        // Calling pan.apply twice with the same press / cursor /
+        // initial values gives the same result — the effect uses
+        // cumulative delta from press, not per-event delta.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.view_offset_x = 0.0;
+        model.view_offset_y = 0.0;
+        let effects = vec![serde_json::json!({
+            "doc.pan.apply": {
+                "press_x":      "100",
+                "press_y":      "50",
+                "cursor_x":     "150",
+                "cursor_y":     "120",
+                "initial_offx": "0",
+                "initial_offy": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let after_first = (model.view_offset_x, model.view_offset_y);
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let after_second = (model.view_offset_x, model.view_offset_y);
+        assert_eq!(after_first, after_second);
     }
 }

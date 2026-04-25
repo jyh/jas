@@ -2149,6 +2149,225 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         store.set_tool("partial_selection", "mode", "marquee")
         return None
 
+    # ── doc.zoom.* and doc.pan.apply — view-state effects per
+    #    ZOOM_TOOL.md and HAND_TOOL.md. None of these modify document
+    #    content; they only update the per-tab view state on
+    #    Model: zoom_level, view_offset_x, view_offset_y.
+
+    def _read_pref_number(key: str, default: float) -> float:
+        """Read preferences.viewport.<key> from workspace.json."""
+        try:
+            from interpreter.workspace_loader import load_workspace
+            ws = load_workspace()
+            if ws is None:
+                return default
+            prefs = ws.get("preferences", {})
+            viewport = prefs.get("viewport", {})
+            value = viewport.get(key, default)
+            return float(value)
+        except Exception:
+            return default
+
+    def _read_tool_zoom_state(ctx: dict, key: str, default: float) -> float:
+        try:
+            return float(ctx.get("tool", {}).get("zoom", {}).get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _fit_rect_into_viewport(
+        x: float, y: float, w: float, h: float, padding: float
+    ) -> None:
+        """Compute and write the fit-to-viewport zoom + pan."""
+        if w <= 0 or h <= 0:
+            return
+        m = controller.model
+        vw, vh = m.viewport_w, m.viewport_h
+        if vw <= 0 or vh <= 0:
+            return
+        avail_w = vw - 2.0 * padding
+        avail_h = vh - 2.0 * padding
+        if avail_w <= 0 or avail_h <= 0:
+            return
+        min_zoom = _read_pref_number("min_zoom", 0.1)
+        max_zoom = _read_pref_number("max_zoom", 64.0)
+        z = max(min_zoom, min(max_zoom, min(avail_w / w, avail_h / h)))
+        rect_cx = x + w / 2.0
+        rect_cy = y + h / 2.0
+        m.zoom_level = z
+        m.view_offset_x = vw / 2.0 - rect_cx * z
+        m.view_offset_y = vh / 2.0 - rect_cy * z
+
+    def _document_bounds(doc) -> tuple[float, float, float, float]:
+        if not doc.layers:
+            return (0.0, 0.0, 0.0, 0.0)
+        from geometry.element import bounds as elem_bounds
+        min_x = float("inf")
+        min_y = float("inf")
+        max_x = float("-inf")
+        max_y = float("-inf")
+        for layer in doc.layers:
+            bx, by, bw, bh = elem_bounds(layer)
+            if bx < min_x:
+                min_x = bx
+            if by < min_y:
+                min_y = by
+            if bx + bw > max_x:
+                max_x = bx + bw
+            if by + bh > max_y:
+                max_y = by + bh
+        if min_x == float("inf"):
+            return (0.0, 0.0, 0.0, 0.0)
+        return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+    def doc_zoom_apply(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        factor = eval_number(spec.get("factor"), store, ctx)
+        ax_raw = eval_number(spec.get("anchor_x"), store, ctx)
+        ay_raw = eval_number(spec.get("anchor_y"), store, ctx)
+        min_zoom = _read_pref_number("min_zoom", 0.1)
+        max_zoom = _read_pref_number("max_zoom", 64.0)
+        m = controller.model
+        z, px, py = m.zoom_level, m.view_offset_x, m.view_offset_y
+        ax = px if ax_raw < 0 else ax_raw
+        ay = py if ay_raw < 0 else ay_raw
+        doc_ax = (ax - px) / z
+        doc_ay = (ay - py) / z
+        z_new = max(min_zoom, min(max_zoom, z * factor))
+        m.zoom_level = z_new
+        m.view_offset_x = ax - doc_ax * z_new
+        m.view_offset_y = ay - doc_ay * z_new
+        return None
+
+    def doc_zoom_set(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        level = eval_number(spec.get("level"), store, ctx)
+        min_zoom = _read_pref_number("min_zoom", 0.1)
+        max_zoom = _read_pref_number("max_zoom", 64.0)
+        controller.model.zoom_level = max(min_zoom, min(max_zoom, level))
+        return None
+
+    def doc_zoom_set_full(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        zoom = eval_number(spec.get("zoom"), store, ctx)
+        offx = eval_number(spec.get("offset_x"), store, ctx)
+        offy = eval_number(spec.get("offset_y"), store, ctx)
+        min_zoom = _read_pref_number("min_zoom", 0.1)
+        max_zoom = _read_pref_number("max_zoom", 64.0)
+        m = controller.model
+        m.zoom_level = max(min_zoom, min(max_zoom, zoom))
+        m.view_offset_x = offx
+        m.view_offset_y = offy
+        return None
+
+    def doc_zoom_scrubby(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        from math import exp
+        press_x = eval_number(spec.get("press_x"), store, ctx)
+        press_y = eval_number(spec.get("press_y"), store, ctx)
+        cursor_x = eval_number(spec.get("cursor_x"), store, ctx)
+        _ = eval_number(spec.get("cursor_y"), store, ctx)
+        alt_held = eval_bool(spec.get("alt_held"), store, ctx)
+        alt_at_press = eval_bool(spec.get("alt_at_press"), store, ctx)
+        gain = _read_pref_number("scrubby_zoom_gain", 144.0)
+        min_zoom = _read_pref_number("min_zoom", 0.1)
+        max_zoom = _read_pref_number("max_zoom", 64.0)
+        initial_zoom = _read_tool_zoom_state(ctx, "initial_zoom", 1.0)
+        initial_offx = _read_tool_zoom_state(ctx, "initial_offx", 0.0)
+        initial_offy = _read_tool_zoom_state(ctx, "initial_offy", 0.0)
+        dx = cursor_x - press_x
+        direction = -1.0 if alt_at_press != alt_held else 1.0
+        factor = exp(dx * direction / gain)
+        z_new = max(min_zoom, min(max_zoom, initial_zoom * factor))
+        doc_ax = (press_x - initial_offx) / initial_zoom
+        doc_ay = (press_y - initial_offy) / initial_zoom
+        m = controller.model
+        m.zoom_level = z_new
+        m.view_offset_x = press_x - doc_ax * z_new
+        m.view_offset_y = press_y - doc_ay * z_new
+        return None
+
+    def doc_pan_apply(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        press_x = eval_number(spec.get("press_x"), store, ctx)
+        press_y = eval_number(spec.get("press_y"), store, ctx)
+        cursor_x = eval_number(spec.get("cursor_x"), store, ctx)
+        cursor_y = eval_number(spec.get("cursor_y"), store, ctx)
+        initial_offx = eval_number(spec.get("initial_offx"), store, ctx)
+        initial_offy = eval_number(spec.get("initial_offy"), store, ctx)
+        m = controller.model
+        m.view_offset_x = initial_offx + (cursor_x - press_x)
+        m.view_offset_y = initial_offy + (cursor_y - press_y)
+        return None
+
+    def doc_zoom_fit_rect(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        rx = eval_number(spec.get("rect_x"), store, ctx)
+        ry = eval_number(spec.get("rect_y"), store, ctx)
+        rw = eval_number(spec.get("rect_w"), store, ctx)
+        rh = eval_number(spec.get("rect_h"), store, ctx)
+        padding = eval_number(spec.get("padding"), store, ctx)
+        _fit_rect_into_viewport(rx, ry, rw, rh, padding)
+        return None
+
+    def doc_zoom_fit_marquee(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        press_x = eval_number(spec.get("press_x"), store, ctx)
+        press_y = eval_number(spec.get("press_y"), store, ctx)
+        cursor_x = eval_number(spec.get("cursor_x"), store, ctx)
+        cursor_y = eval_number(spec.get("cursor_y"), store, ctx)
+        mx = min(press_x, cursor_x)
+        my = min(press_y, cursor_y)
+        mw = abs(press_x - cursor_x)
+        mh = abs(press_y - cursor_y)
+        if mw < 10 or mh < 10:
+            return None
+        m = controller.model
+        z, px, py = m.zoom_level, m.view_offset_x, m.view_offset_y
+        _fit_rect_into_viewport((mx - px) / z, (my - py) / z,
+                                mw / z, mh / z, 0.0)
+        return None
+
+    def doc_zoom_fit_elements(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        padding = eval_number(spec.get("padding"), store, ctx)
+        m = controller.model
+        bx, by, bw, bh = _document_bounds(m._document)
+        if bw <= 0 or bh <= 0:
+            m.zoom_level = 1.0
+            m.view_offset_x = m.viewport_w / 2.0
+            m.view_offset_y = m.viewport_h / 2.0
+        else:
+            _fit_rect_into_viewport(bx, by, bw, bh, padding)
+        return None
+
+    def doc_zoom_fit_all_artboards(spec, ctx, store):
+        if not isinstance(spec, dict):
+            return None
+        padding = eval_number(spec.get("padding"), store, ctx)
+        abs_list = list(controller.document.artboards)
+        if not abs_list:
+            return None
+        min_x = float("inf")
+        min_y = float("inf")
+        max_x = float("-inf")
+        max_y = float("-inf")
+        for ab in abs_list:
+            min_x = min(min_x, float(ab.x))
+            min_y = min(min_y, float(ab.y))
+            max_x = max(max_x, float(ab.x + ab.width))
+            max_y = max(max_y, float(ab.y + ab.height))
+        _fit_rect_into_viewport(
+            min_x, min_y, max_x - min_x, max_y - min_y, padding)
+        return None
+
     effects["doc.snapshot"] = doc_snapshot
     effects["doc.clear_selection"] = doc_clear_selection
     effects["doc.set_selection"] = doc_set_selection
@@ -2199,4 +2418,14 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.move_path_handle"] = doc_move_path_handle
     effects["doc.path.commit_partial_marquee"] = doc_path_commit_partial_marquee
     effects["doc.path.probe_partial_hit"] = doc_path_probe_partial_hit
+    # View-state effects per ZOOM_TOOL.md and HAND_TOOL.md.
+    effects["doc.zoom.apply"] = doc_zoom_apply
+    effects["doc.zoom.set"] = doc_zoom_set
+    effects["doc.zoom.set_full"] = doc_zoom_set_full
+    effects["doc.zoom.scrubby"] = doc_zoom_scrubby
+    effects["doc.pan.apply"] = doc_pan_apply
+    effects["doc.zoom.fit_rect"] = doc_zoom_fit_rect
+    effects["doc.zoom.fit_marquee"] = doc_zoom_fit_marquee
+    effects["doc.zoom.fit_elements"] = doc_zoom_fit_elements
+    effects["doc.zoom.fit_all_artboards"] = doc_zoom_fit_all_artboards
     return effects
