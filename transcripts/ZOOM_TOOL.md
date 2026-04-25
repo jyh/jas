@@ -21,10 +21,11 @@ eye, matching the existing per-app icon convention).
 **Toolbar slot:** Row 4, Col 0 of the tool grid, shared with the Hand
 tool. Hand is the slot's primary; long-press (250ms) opens the
 Navigation Tools flyout listing Hand and Zoom. The slot's checked
-state lights up when either tool is active. See HAND_TOOL.md for the
-slot-button definition and the `hand_alternates` flyout — whichever
-of the Zoom / Hand specs is rewritten first owns those workspace
-artifacts and the other references them.
+state lights up when either tool is active. The slot's workspace
+artifacts (`btn_hand_slot` in `workspace/layout.yaml`,
+`hand_alternates` in `workspace/dialogs/tool_alternates.yaml`) are
+owned by HAND_TOOL.md; this spec only adds the Zoom entry to the
+existing alternates list and references the slot.
 
 **Double-click toolbar icon:** invokes `zoom_to_actual_size` (jumps
 to 100% zoom, pan unchanged). Distinct from the Hand-icon dblclick,
@@ -303,9 +304,8 @@ when a document is reopened from disk.
   `zoom_to_actual_size`).
 - Toolbar slot wiring (`btn_hand_slot` in `workspace/layout.yaml` row
   4 col 0, `hand_alternates` in `workspace/dialogs/tool_alternates.yaml`)
-  is the responsibility of whichever of Zoom / Hand specs lands first.
-  The other spec references the existing slot; both append themselves
-  to the alternates list.
+  is owned by HAND_TOOL.md. This spec only appends the Zoom entry to
+  the existing `hand_alternates` list; it does not redeclare the slot.
 
 ## Phase 1 / Phase 2 split
 
