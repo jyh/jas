@@ -29,6 +29,13 @@ scale_options:
   modal: true
   width: 460
   params: {}
+  # Live-preview wiring: opening the dialog captures a doc snapshot;
+  # any change to dialog state fires scale_options_preview which
+  # restores the snapshot and re-applies with the current dialog
+  # values. OK clears the snapshot (so close_dialog does not revert);
+  # Cancel falls through to close_dialog which restores + clears.
+  doc_preview: true
+  on_change: scale_options_preview
   state:
     uniform:
       type: bool

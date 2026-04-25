@@ -3606,7 +3606,7 @@
       ]
     },
     "scale_options_confirm": {
-      "description": "Commit the Scale Options dialog. Writes the seven per-document options to state.scale_* and runs doc.scale.apply on the selection. When param.copy is true, the transformation is applied to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate) instead of mutating the original. Closes the dialog either way. See SCALE_TOOL.md \u00a7Tool Options dialog.\n",
+      "description": "Commit the Scale Options dialog. Writes the seven per-document options to state.scale_* and runs doc.scale.apply on the selection. When param.copy is true, the transformation is applied to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate) instead of mutating the original. Closes the dialog either way. See SCALE_TOOL.md \u00a7Tool Options dialog.\ndoc.preview.restore is run first so the document is reset to its pre-dialog state before the final apply (otherwise an OK after typing-time previews would compound). doc.preview.clear is run before close_dialog so the close handler does not restore the snapshot.\n",
       "category": "transform",
       "params": {
         "uniform": {
@@ -3636,6 +3636,9 @@
       },
       "effects": [
         {
+          "doc.preview.restore": {}
+        },
+        {
           "set": {
             "scale_uniform": "param.uniform",
             "scale_uniform_pct": "param.uniform_pct",
@@ -3654,7 +3657,26 @@
           }
         },
         {
+          "doc.preview.clear": {}
+        },
+        {
           "close_dialog": "None"
+        }
+      ]
+    },
+    "scale_options_preview": {
+      "description": "Live-preview action fired by the Scale Options dialog's on_change hook. Restores the captured doc snapshot and re-applies the scale with the dialog's current values (copy=false). Per-frame debounced by the runtime. See SCALE_TOOL.md \u00a7Preview.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "doc.scale.apply": {
+            "sx": "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.horizontal_pct / 100.0",
+            "sy": "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.vertical_pct / 100.0",
+            "copy": "false"
+          }
         }
       ]
     },
@@ -3676,7 +3698,7 @@
       ]
     },
     "rotate_options_confirm": {
-      "description": "Commit the Rotate Options dialog. Writes the two per-document options to state.rotate_* and runs doc.rotate.apply on the selection. When param.copy is true, the rotation is applied to a duplicate of the selection. Closes the dialog. See ROTATE_TOOL.md \u00a7Tool Options dialog.\n",
+      "description": "Commit the Rotate Options dialog. Writes the two per-document options to state.rotate_* and runs doc.rotate.apply on the selection. When param.copy is true, the rotation is applied to a duplicate of the selection. Closes the dialog. See ROTATE_TOOL.md \u00a7Tool Options dialog.\ndoc.preview.restore + doc.preview.clear bracket the apply so typing-time preview frames do not compound the final commit.\n",
       "category": "transform",
       "params": {
         "angle": {
@@ -3691,6 +3713,9 @@
       },
       "effects": [
         {
+          "doc.preview.restore": {}
+        },
+        {
           "set": {
             "rotate_angle": "param.angle",
             "rotate_preview": "param.preview"
@@ -3703,7 +3728,25 @@
           }
         },
         {
+          "doc.preview.clear": {}
+        },
+        {
           "close_dialog": "None"
+        }
+      ]
+    },
+    "rotate_options_preview": {
+      "description": "Live-preview action fired by the Rotate Options dialog's on_change hook. See ROTATE_TOOL.md \u00a7Preview.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "doc.rotate.apply": {
+            "angle": "dialog.angle",
+            "copy": "false"
+          }
         }
       ]
     },
@@ -3720,7 +3763,7 @@
       ]
     },
     "shear_options_confirm": {
-      "description": "Commit the Shear Options dialog. Writes the four per-document options to state.shear_* and runs doc.shear.apply on the selection. When param.copy is true, the shear is applied to a duplicate of the selection. Closes the dialog. See SHEAR_TOOL.md \u00a7Tool Options dialog.\n",
+      "description": "Commit the Shear Options dialog. Writes the four per-document options to state.shear_* and runs doc.shear.apply on the selection. When param.copy is true, the shear is applied to a duplicate of the selection. Closes the dialog. See SHEAR_TOOL.md \u00a7Tool Options dialog.\ndoc.preview.restore + doc.preview.clear bracket the apply so typing-time preview frames do not compound the final commit.\n",
       "category": "transform",
       "params": {
         "angle": {
@@ -3741,6 +3784,9 @@
       },
       "effects": [
         {
+          "doc.preview.restore": {}
+        },
+        {
           "set": {
             "shear_angle": "param.angle",
             "shear_axis": "param.axis",
@@ -3757,7 +3803,27 @@
           }
         },
         {
+          "doc.preview.clear": {}
+        },
+        {
           "close_dialog": "None"
+        }
+      ]
+    },
+    "shear_options_preview": {
+      "description": "Live-preview action fired by the Shear Options dialog's on_change hook. See SHEAR_TOOL.md \u00a7Preview.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "doc.shear.apply": {
+            "angle": "dialog.angle",
+            "axis": "dialog.axis",
+            "axis_angle": "dialog.axis_angle",
+            "copy": "false"
+          }
         }
       ]
     },
@@ -25071,6 +25137,8 @@
       "modal": true,
       "width": 360,
       "params": {},
+      "doc_preview": true,
+      "on_change": "rotate_options_preview",
       "state": {
         "angle": {
           "type": "number",
@@ -25296,6 +25364,8 @@
       "modal": true,
       "width": 460,
       "params": {},
+      "doc_preview": true,
+      "on_change": "scale_options_preview",
       "state": {
         "uniform": {
           "type": "bool",
@@ -25630,6 +25700,8 @@
       "modal": true,
       "width": 420,
       "params": {},
+      "doc_preview": true,
+      "on_change": "shear_options_preview",
       "state": {
         "angle": {
           "type": "number",

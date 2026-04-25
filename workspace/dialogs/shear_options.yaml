@@ -27,6 +27,8 @@ shear_options:
   modal: true
   width: 420
   params: {}
+  doc_preview: true
+  on_change: shear_options_preview
   state:
     angle:
       type: number
