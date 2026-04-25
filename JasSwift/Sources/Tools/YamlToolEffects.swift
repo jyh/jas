@@ -1094,6 +1094,43 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.artboard.duplicate_init — Alt-drag duplicate setup. Runs
+    // once at the threshold-latch (just before doc.preview.capture)
+    // so the preview baseline includes the duplicate. Deep-copies
+    // the source artboard at its current position, deep-copies any
+    // top-level element fully contained in the source, appends the
+    // copies to the same layer, and updates
+    // tool.artboard.hit_artboard_id + duplicated_paths so
+    // subsequent move_apply translates the duplicate + its element
+    // copies as a unit. Per ARTBOARD_TOOL.md §Alt-drag duplicate.
+    effects["doc.artboard.duplicate_init"] = { _, _, store in
+        artboardDuplicateInit(model: model, store: store)
+        return nil
+    }
+
+    // doc.artboard.duplicate_apply — translation alias for the
+    // duplicate's drag (hit_artboard_id was retargeted to the
+    // duplicate by duplicate_init).
+    effects["doc.artboard.duplicate_apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let pressX = evalNumber(args["press_x"], store: store, ctx: ctx)
+        let pressY = evalNumber(args["press_y"], store: store, ctx: ctx)
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        artboardMoveApply(
+            model: model, store: store,
+            pressX: pressX, pressY: pressY,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: false)
+        return nil
+    }
+
+    // doc.artboard.duplicate_commit — same path as move_commit.
+    effects["doc.artboard.duplicate_commit"] = { _, _, store in
+        artboardMoveCommit(model: model, store: store)
+        return nil
+    }
+
     // doc.artboard.resize_apply — live drag-to-resize per
     // ARTBOARD_TOOL.md §Drag-to-resize. Idempotent via the preview
     // snapshot. Targets tool.artboard.hit_artboard_id (set by
@@ -3611,6 +3648,82 @@ private func artboardResizeCommit(model: Model, store: StateStore) {
         layers: doc.layers, selectedLayer: doc.selectedLayer,
         selection: doc.selection, artboards: newAbs,
         artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.duplicate_init implementation per
+/// ARTBOARD_TOOL.md §Alt-drag duplicate. Deep-copies the source
+/// artboard + its contained elements (Move/Copy Artwork hard-coded
+/// on per spec), appends to the document, and updates tool state
+/// so subsequent translate ops target the duplicate + its element
+/// copies.
+private func artboardDuplicateInit(model: Model, store: StateStore) {
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    let abCtx = toolCtx?["artboard"] as? [String: Any]
+    guard let sourceId = abCtx?["hit_artboard_id"] as? String,
+          let source = model.document.artboards.first(where: { $0.id == sourceId })
+    else { return }
+
+    let doc = model.document
+    let artboardBounds: [(String, (Double, Double, Double, Double))] =
+        doc.artboards.map {
+            ($0.id, ($0.x, $0.y, $0.width, $0.height))
+        }
+
+    // Deep-copy source-contained elements; track new paths.
+    var duplicatedPaths: [[Int]] = []
+    var newLayers: [Layer] = []
+    for (li, layer) in doc.layers.enumerated() {
+        var newChildren = layer.children
+        let originalCount = layer.children.count
+        var appended = 0
+        for child in layer.children {
+            let bb = child.bounds
+            var containers: [String] = []
+            for (id, ab) in artboardBounds {
+                if artboardContainsBounds(ab, bb) { containers.append(id) }
+            }
+            if containers.count == 1 && containers[0] == sourceId {
+                // Element value semantics — appending creates a
+                // distinct value. Mirrors Rust's Rc::new((**child).clone()).
+                newChildren.append(child)
+                duplicatedPaths.append([li, originalCount + appended])
+                appended += 1
+            }
+        }
+        newLayers.append(Layer(
+            name: layer.name, children: newChildren,
+            opacity: layer.opacity, transform: layer.transform,
+            locked: layer.locked))
+    }
+
+    // Mint duplicate artboard (collision-retry id).
+    let existing: Set<String> = Set(doc.artboards.map { $0.id })
+    var newId = ""
+    for _ in 0..<100 {
+        let candidate = generateArtboardId()
+        if !existing.contains(candidate) { newId = candidate; break }
+    }
+    guard !newId.isEmpty else { return }
+    let dup = Artboard(
+        id: newId,
+        name: nextArtboardName(doc.artboards),
+        x: source.x, y: source.y,
+        width: source.width, height: source.height,
+        fill: source.fill,
+        showCenterMark: source.showCenterMark,
+        showCrossHairs: source.showCrossHairs,
+        showVideoSafeAreas: source.showVideoSafeAreas,
+        videoRulerPixelAspectRatio: source.videoRulerPixelAspectRatio)
+    let newAbs = doc.artboards + [dup]
+
+    model.document = Document(
+        layers: newLayers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+
+    // Retarget tool state.
+    store.setTool("artboard", "hit_artboard_id", newId)
+    store.setTool("artboard", "duplicated_paths", duplicatedPaths)
 }
 
 /// doc.artboard.delete_panel_selected — at-least-one invariant
