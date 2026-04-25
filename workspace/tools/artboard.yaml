@@ -64,6 +64,13 @@ state:
   #   "interior"     — over an artboard interior (move / copy cursor)
   #   "empty"        — over empty canvas (crosshair)
   hover_kind:      { default: "empty" }
+  # Element paths deep-copied by doc.artboard.duplicate_init for an
+  # in-flight Alt-drag duplicate. Each path is [layer_idx, child_idx]
+  # within document.layers. doc.artboard.move_apply translates these
+  # in-place so the deep-copied elements follow the duplicate. Reset
+  # to empty on every on_mousedown so subsequent gestures start
+  # fresh.
+  duplicated_paths: { default: [] }
 
 handlers:
 
@@ -100,6 +107,7 @@ handlers:
     - set: { tool.artboard.shift_held:   "event.modifiers.shift" }
     - set: { tool.artboard.moved:        "false" }
     - set: { tool.artboard.snapshotted:  "false" }
+    - set: { tool.artboard.duplicated_paths: "[]" }
 
   on_mousemove:
     - set: { tool.artboard.cursor_x:   "event.x" }
