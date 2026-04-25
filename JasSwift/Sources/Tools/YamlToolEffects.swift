@@ -1027,6 +1027,47 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // ── Artboard tool effects (ARTBOARD_TOOL.md) ────────────────
+
+    // doc.artboard.create_commit — drag-to-create commit. Builds a
+    // rect from (x1,y1)-(x2,y2), rounds to integer pt, clamps each
+    // dimension to >= 1 pt, mints a fresh id (collision-retry),
+    // picks the next "Artboard N" name, and appends to
+    // document.artboards. Per ARTBOARD_TOOL.md §Drag-to-create.
+    effects["doc.artboard.create_commit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x1 = evalNumber(args["x1"], store: store, ctx: ctx)
+        let y1 = evalNumber(args["y1"], store: store, ctx: ctx)
+        let x2 = evalNumber(args["x2"], store: store, ctx: ctx)
+        let y2 = evalNumber(args["y2"], store: store, ctx: ctx)
+
+        let rawX = (min(x1, x2)).rounded()
+        let rawY = (min(y1, y2)).rounded()
+        let rawW = max(abs(x1 - x2).rounded(), 1.0)
+        let rawH = max(abs(y1 - y2).rounded(), 1.0)
+
+        let doc = model.document
+        let existing: Set<String> = Set(doc.artboards.map { $0.id })
+        var newId = ""
+        for _ in 0..<100 {
+            let candidate = generateArtboardId()
+            if !existing.contains(candidate) { newId = candidate; break }
+        }
+        guard !newId.isEmpty else { return nil }
+        let newName = nextArtboardName(doc.artboards)
+        let ab = Artboard(
+            id: newId, name: newName,
+            x: rawX, y: rawY, width: rawW, height: rawH)
+        let newAbs = doc.artboards + [ab]
+        model.document = Document(
+            layers: doc.layers,
+            selectedLayer: doc.selectedLayer,
+            selection: doc.selection,
+            artboards: newAbs,
+            artboardOptions: doc.artboardOptions)
+        return nil
+    }
+
     return effects
 }
 
