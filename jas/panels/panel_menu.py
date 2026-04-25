@@ -124,6 +124,7 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.ALIGN: "Align",
     PanelKind.BOOLEAN: "Boolean",
     PanelKind.OPACITY: "Opacity",
+    PanelKind.MAGIC_WAND: "Magic Wand",
 }
 
 
@@ -238,6 +239,12 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.toggle("Page Knockout Group", "toggle_page_knockout_group"),
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Opacity", "close_panel"),
+        ]
+    if kind == PanelKind.MAGIC_WAND:
+        return [
+            PanelMenuItem.action("Reset Magic Wand", "reset_magic_wand_panel"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Magic Wand", "close_panel"),
         ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 

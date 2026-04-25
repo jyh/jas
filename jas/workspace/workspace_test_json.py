@@ -96,6 +96,8 @@ def _panel_kind_str(k: PanelKind) -> str:
         PanelKind.ARTBOARDS: "artboards",
         PanelKind.ALIGN: "align",
         PanelKind.BOOLEAN: "boolean",
+        PanelKind.OPACITY: "opacity",
+        PanelKind.MAGIC_WAND: "magic_wand",
     }[k]
 
 
@@ -330,6 +332,7 @@ MENU_BAR = [
         ("Properties", "toggle_panel_properties", ""),
         ("Character", "toggle_panel_character", ""),
         ("Paragraph", "toggle_panel_paragraph", ""),
+        ("Magic Wand", "toggle_panel_magic_wand", ""),
     ]),
 ]
 
@@ -573,6 +576,8 @@ def _parse_panel_kind(v) -> PanelKind:
         "artboards": PanelKind.ARTBOARDS,
         "align": PanelKind.ALIGN,
         "boolean": PanelKind.BOOLEAN,
+        "opacity": PanelKind.OPACITY,
+        "magic_wand": PanelKind.MAGIC_WAND,
     }.get(v, PanelKind.LAYERS)
 
 
