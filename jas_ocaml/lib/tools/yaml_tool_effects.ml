@@ -3033,6 +3033,208 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* Translate an element by (dx, dy). Recurses into Group / Layer
+     children. Mirrors Rust's translate_element / Swift's
+     artboardTranslateElement. For leaf elements, uses
+     move_control_points with all CPs (the is_all flag preserves
+     Rect/Circle/Ellipse identity). *)
+  let rec artboard_translate_element (elem : Element.element) dx dy =
+    if dx = 0.0 && dy = 0.0 then elem
+    else match elem with
+      | Element.Group g ->
+        Element.Group { g with children =
+          Array.map (fun c -> artboard_translate_element c dx dy)
+            g.children }
+      | Element.Layer l ->
+        Element.Layer { l with children =
+          Array.map (fun c -> artboard_translate_element c dx dy)
+            l.children }
+      | _ ->
+        let n = Element.control_point_count elem in
+        Element.move_control_points ~is_all:true elem
+          (List.init n Fun.id) dx dy
+  in
+
+  (* True iff [inner] (an element bbox) is fully contained in
+     [outer] (an artboard bounds). Closed-edge ≤ comparison. *)
+  let artboard_contains_bounds outer inner =
+    let (ox, oy, ow, oh) = outer in
+    let (ix, iy, iw, ih) = inner in
+    ix >= ox && iy >= oy
+      && ix +. iw <= ox +. ow && iy +. ih <= oy +. oh
+  in
+
+  (* Read tool.artboard.duplicated_paths as a list of (li, ci)
+     pairs. Empty when no Alt-drag duplicate is in flight. *)
+  let read_duplicated_paths store =
+    let ctx = State_store.eval_context store in
+    let tool = Yojson.Safe.Util.member "tool" ctx in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    match Yojson.Safe.Util.member "duplicated_paths" ab with
+    | `List items ->
+      List.filter_map (function
+        | `List [ `Int li; `Int ci ] -> Some (li, ci)
+        | `List [ a; b ] ->
+          let f = function
+            | `Int n -> Some n
+            | `Float f -> Some (int_of_float f)
+            | _ -> None
+          in
+          (match f a, f b with
+           | Some li, Some ci -> Some (li, ci)
+           | _ -> None)
+        | _ -> None) items
+    | _ -> []
+  in
+
+  (* Apply (dx, dy) translation: restore preview snapshot, translate
+     contained elements per the containment rule, translate moving
+     artboards, translate explicit-path elements. Mirrors the Rust /
+     Swift artboard_translate_from_preview. *)
+  let artboard_translate_from_preview model store target_ids dx dy =
+    if not model#has_preview_snapshot then ()
+    else begin
+      model#restore_preview_snapshot;
+      let doc = ctrl#document in
+      (* Pre-op artboard bounds. *)
+      let artboard_bounds = List.map (fun (a : Artboard.artboard) ->
+        (a.id, (a.x, a.y, a.width, a.height))
+      ) doc.artboards in
+
+      let translate_layer_children layer =
+        match layer with
+        | Element.Layer l ->
+          let new_children = Array.map (fun child ->
+            let bb = Element.bounds child in
+            let containers = List.filter_map (fun (id, ab) ->
+              if artboard_contains_bounds ab bb then Some id else None
+            ) artboard_bounds in
+            let in_one = List.length containers = 1 in
+            let is_moving = in_one
+              && List.mem (List.hd containers) target_ids in
+            if is_moving
+            then artboard_translate_element child dx dy
+            else child
+          ) l.children in
+          Element.Layer { l with children = new_children }
+        | other -> other
+      in
+
+      let new_layers = if dx = 0.0 && dy = 0.0
+        then doc.layers
+        else Array.map translate_layer_children doc.layers in
+
+      (* Translate moving artboards. *)
+      let new_artboards = List.map (fun (a : Artboard.artboard) ->
+        if List.mem a.id target_ids
+        then { a with x = a.x +. dx; y = a.y +. dy }
+        else a
+      ) doc.artboards in
+
+      (* Explicit-path translation (for duplicate). *)
+      let new_layers =
+        if dx = 0.0 && dy = 0.0 then new_layers
+        else
+          let dup_paths = read_duplicated_paths store in
+          if dup_paths = [] then new_layers
+          else
+            Array.mapi (fun li layer ->
+              let layer_dup_idxs = List.filter_map (fun (l, c) ->
+                if l = li then Some c else None
+              ) dup_paths in
+              if layer_dup_idxs = [] then layer
+              else match layer with
+                | Element.Layer l ->
+                  let new_children = Array.mapi (fun ci child ->
+                    if List.mem ci layer_dup_idxs
+                    then artboard_translate_element child dx dy
+                    else child
+                  ) l.children in
+                  Element.Layer { l with children = new_children }
+                | other -> other
+            ) new_layers
+      in
+
+      ctrl#set_document { doc with
+        layers = new_layers;
+        artboards = new_artboards }
+    end
+  in
+
+  (* doc.artboard.move_apply — live drag-to-move. Per-artboard
+     fallback to hit_artboard_id when panel-selection empty. *)
+  let doc_artboard_move_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let press_x = eval_number (lookup "press_x") store ctx in
+       let press_y = eval_number (lookup "press_y") store ctx in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let shift = eval_bool (lookup "shift_held") store ctx in
+       let dx0 = cursor_x -. press_x in
+       let dy0 = cursor_y -. press_y in
+       let (dx, dy) = if not shift then (dx0, dy0)
+         else if Float.abs dx0 > Float.abs dy0 then (dx0, 0.0)
+         else (0.0, dy0) in
+       let target_ids =
+         let panel_ids = artboard_panel_selection_ids store in
+         if panel_ids <> [] then panel_ids
+         else
+           let tool = Yojson.Safe.Util.member "tool"
+                        (State_store.eval_context store) in
+           let ab = Yojson.Safe.Util.member "artboard" tool in
+           match Yojson.Safe.Util.member "hit_artboard_id" ab with
+           | `String s -> [s]
+           | _ -> []
+       in
+       if target_ids <> [] then
+         artboard_translate_from_preview ctrl#model store target_ids dx dy
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.move_commit — re-applies translate with integer-pt
+     rounded displacement vector. *)
+  let doc_artboard_move_commit _ _ store =
+    let tool = Yojson.Safe.Util.member "tool"
+                 (State_store.eval_context store) in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    let read_num k =
+      match Yojson.Safe.Util.member k ab with
+      | `Float f -> f
+      | `Int i -> float_of_int i
+      | _ -> 0.0
+    in
+    let read_bool k =
+      match Yojson.Safe.Util.member k ab with
+      | `Bool b -> b | _ -> false
+    in
+    let press_x = read_num "press_x" in
+    let press_y = read_num "press_y" in
+    let cursor_x = read_num "cursor_x" in
+    let cursor_y = read_num "cursor_y" in
+    let shift = read_bool "shift_held" in
+    let dx0 = cursor_x -. press_x in
+    let dy0 = cursor_y -. press_y in
+    let (dx, dy) = if not shift then (dx0, dy0)
+      else if Float.abs dx0 > Float.abs dy0 then (dx0, 0.0)
+      else (0.0, dy0) in
+    let dx = Float.round dx in
+    let dy = Float.round dy in
+    let target_ids =
+      let panel_ids = artboard_panel_selection_ids store in
+      if panel_ids <> [] then panel_ids
+      else
+        match Yojson.Safe.Util.member "hit_artboard_id" ab with
+        | `String s -> [s]
+        | _ -> []
+    in
+    if target_ids <> [] then
+      artboard_translate_from_preview ctrl#model store target_ids dx dy;
+    `Null
+  in
+
   (* doc.artboard.create_commit — drag-to-create commit. Builds a
      rect from (x1, y1)-(x2, y2), rounds to integer pt, clamps each
      dimension to >= 1 pt, mints a fresh id (collision-retry against
@@ -3079,6 +3281,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.artboard.probe_hit", doc_artboard_probe_hit);
     ("doc.artboard.probe_hover", doc_artboard_probe_hover);
     ("doc.artboard.create_commit", doc_artboard_create_commit);
+    ("doc.artboard.move_apply", doc_artboard_move_apply);
+    ("doc.artboard.move_commit", doc_artboard_move_commit);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
     ("doc.add_to_selection", doc_add_to_selection);
