@@ -83,4 +83,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.POLYGON: _yaml_tool("polygon"),
         Tool.STAR: _yaml_tool("star"),
         Tool.LASSO: _yaml_tool("lasso"),
+        Tool.SCALE: _yaml_tool("scale"),
+        Tool.ROTATE: _yaml_tool("rotate"),
+        Tool.SHEAR: _yaml_tool("shear"),
     }
