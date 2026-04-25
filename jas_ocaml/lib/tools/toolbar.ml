@@ -61,8 +61,10 @@ class toolbar ~title:(_title : string) ~x ~y
   let frame = GBin.frame ~shadow_type:`NONE () in
   let vbox = GPack.vbox ~packing:frame#add () in
 
-  (* Toolbar grid *)
-  let grid = GPack.table ~rows:4 ~columns:2
+  (* Toolbar grid — 5 rows × 2 cols. Row 4 hosts the transform-tool
+     family: Scale (with Shear as long-press alternate) and Rotate.
+     See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md. *)
+  let grid = GPack.table ~rows:5 ~columns:2
     ~row_spacings:2 ~col_spacings:2
     ~packing:(vbox#pack ~expand:false) () in
   let selection_btn = GMisc.drawing_area () in
@@ -73,6 +75,8 @@ class toolbar ~title:(_title : string) ~x ~y
   let line_btn = GMisc.drawing_area () in
   let shape_btn = GMisc.drawing_area () in
   let lasso_btn = GMisc.drawing_area () in
+  let scale_btn = GMisc.drawing_area () in
+  let rotate_btn = GMisc.drawing_area () in
   let () =
     selection_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     direct_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
@@ -82,6 +86,8 @@ class toolbar ~title:(_title : string) ~x ~y
     line_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     shape_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     lasso_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    scale_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    rotate_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     grid#attach ~left:0 ~top:0 selection_btn#coerce;
     grid#attach ~left:1 ~top:0 direct_btn#coerce;
     grid#attach ~left:0 ~top:1 pen_btn#coerce;
@@ -89,7 +95,9 @@ class toolbar ~title:(_title : string) ~x ~y
     grid#attach ~left:0 ~top:2 text_btn#coerce;
     grid#attach ~left:1 ~top:2 line_btn#coerce;
     grid#attach ~left:0 ~top:3 shape_btn#coerce;
-    grid#attach ~left:1 ~top:3 lasso_btn#coerce
+    grid#attach ~left:1 ~top:3 lasso_btn#coerce;
+    grid#attach ~left:0 ~top:4 scale_btn#coerce;
+    grid#attach ~left:1 ~top:4 rotate_btn#coerce
   in
 
   (* Fill/stroke indicator widget *)
@@ -109,6 +117,7 @@ class toolbar ~title:(_title : string) ~x ~y
     val mutable pencil_slot_tool = Pencil
     val mutable text_slot_tool = Type_tool
     val mutable shape_slot_tool = Rect
+    val mutable transform_slot_tool = Scale
     val mutable dragging = false
     val mutable drag_offset_x = 0.0
     val mutable drag_offset_y = 0.0
@@ -117,6 +126,7 @@ class toolbar ~title:(_title : string) ~x ~y
     val mutable pencil_long_press_timer : GMain.Timeout.id option = None
     val mutable text_long_press_timer : GMain.Timeout.id option = None
     val mutable shape_long_press_timer : GMain.Timeout.id option = None
+    val mutable transform_long_press_timer : GMain.Timeout.id option = None
     val mutable fill_on_top = true
 
     method current_tool = current_tool
@@ -177,6 +187,8 @@ class toolbar ~title:(_title : string) ~x ~y
          text_slot_tool <- t
        | Rect | Rounded_rect | Polygon | Star ->
          shape_slot_tool <- t
+       | Scale | Shear ->
+         transform_slot_tool <- t
        | _ -> ());
       self#redraw_all
 
@@ -189,6 +201,8 @@ class toolbar ~title:(_title : string) ~x ~y
       line_btn#misc#queue_draw ();
       shape_btn#misc#queue_draw ();
       lasso_btn#misc#queue_draw ();
+      scale_btn#misc#queue_draw ();
+      rotate_btn#misc#queue_draw ();
       fs_area#misc#queue_draw ()
 
     initializer
@@ -426,6 +440,57 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.curve_to cr (ox +. 20.0) (oy +. 20.0) (ox +. 22.0) (oy +. 16.0) (ox +. 20.0) (oy +. 12.0);
         Cairo.curve_to cr (ox +. 18.0) (oy +. 8.0) (ox +. 12.0) (oy +. 9.0) (ox +. 12.0) (oy +. 13.0);
         Cairo.curve_to cr (ox +. 12.0) (oy +. 16.0) (ox +. 16.0) (oy +. 17.0) (ox +. 17.0) (oy +. 15.0);
+        Cairo.stroke cr
+      in
+
+      (* Scale — small square + larger square (extrusion). See
+         SCALE_TOOL.md \167 Tool icon. *)
+      let draw_scale_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
+        Cairo.set_line_width cr 1.5;
+        Cairo.rectangle cr (ox +. 3.0) (oy +. 13.0) ~w:10.0 ~h:11.0;
+        Cairo.stroke cr;
+        Cairo.rectangle cr (ox +. 13.0) (oy +. 3.0) ~w:12.0 ~h:13.0;
+        Cairo.stroke cr
+      in
+
+      (* Rotate — 270 deg arc with arrowhead. See ROTATE_TOOL.md
+         \167 Tool icon. *)
+      let draw_rotate_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
+        Cairo.set_line_width cr 1.5;
+        Cairo.set_line_cap cr Cairo.ROUND;
+        let cx = ox +. 14.0 and cy = oy +. 14.0 in
+        Cairo.arc cr cx cy ~r:9.0 ~a1:(-. Float.pi /. 2.0) ~a2:Float.pi;
+        Cairo.stroke cr;
+        Cairo.move_to cr (ox +. 11.0) (oy +. 2.0);
+        Cairo.line_to cr (ox +. 14.0) (oy +. 5.0);
+        Cairo.line_to cr (ox +. 11.0) (oy +. 8.0);
+        Cairo.stroke cr
+      in
+
+      (* Shear — right-leaning parallelogram. See SHEAR_TOOL.md
+         \167 Tool icon. *)
+      let draw_shear_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
+        Cairo.set_line_width cr 1.5;
+        Cairo.move_to cr (ox +. 9.0)  (oy +. 4.0);
+        Cairo.line_to cr (ox +. 26.0) (oy +. 4.0);
+        Cairo.line_to cr (ox +. 19.0) (oy +. 24.0);
+        Cairo.line_to cr (ox +. 2.0)  (oy +. 24.0);
+        Cairo.Path.close cr;
         Cairo.stroke cr
       in
 
@@ -1223,6 +1288,64 @@ class toolbar ~title:(_title : string) ~x ~y
       connect_click line_btn Line;
       draw_tool_button lasso_btn Lasso draw_lasso_icon;
       connect_click lasso_btn Lasso;
+      (* Rotate button — own slot, simple click selects. *)
+      draw_tool_button rotate_btn Rotate draw_rotate_icon;
+      connect_click rotate_btn Rotate;
+      (* Scale slot — long-press exposes the Shear alternate, mirroring
+         the shape slot pattern. Custom draw shows whichever of
+         Scale / Shear is the current slot tool. *)
+      scale_btn#misc#connect#draw ~callback:(fun cr ->
+        let alloc = scale_btn#misc#allocation in
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        if current_tool = transform_slot_tool then begin
+          let (ar, ag, ab) = active_bg_rgb () in
+          Cairo.set_source_rgb cr ar ag ab;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end else begin
+          let (ir, ig, ib) = inactive_bg_rgb () in
+          Cairo.set_source_rgb cr ir ig ib;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end;
+        (match transform_slot_tool with
+         | Scale -> draw_scale_icon cr ~alloc
+         | Shear -> draw_shear_icon cr ~alloc
+         | _ -> ());
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 5.0 in
+        Cairo.move_to cr (ox +. 28.0) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
+        Cairo.Path.close cr;
+        let (fr, fg, fb) = icon_rgb () in
+        Cairo.set_source_rgb cr fr fg fb;
+        Cairo.fill cr;
+        true
+      ) |> ignore;
+      scale_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
+      scale_btn#event#connect#button_press ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          transform_long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
+            transform_long_press_timer <- None;
+            self#show_transform_slot_menu;
+            false
+          ));
+          true
+        end else false
+      ) |> ignore;
+      scale_btn#event#connect#button_release ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          (match transform_long_press_timer with
+           | Some id -> GMain.Timeout.remove id; transform_long_press_timer <- None
+           | None -> ());
+          current_tool <- transform_slot_tool;
+          self#redraw_all;
+          true
+        end else false
+      ) |> ignore;
 
       (* Arrow slot: click selects, long press shows menu *)
       direct_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
@@ -1656,6 +1779,21 @@ class toolbar ~title:(_title : string) ~x ~y
       add_item "Rounded Rectangle" Rounded_rect;
       add_item "Polygon" Polygon;
       add_item "Star" Star;
+      menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
+
+    method private show_transform_slot_menu =
+      let menu = GMenu.menu () in
+      let add_item label tool =
+        let item = GMenu.check_menu_item ~label ~packing:menu#append () in
+        item#set_active (transform_slot_tool = tool);
+        item#connect#activate ~callback:(fun () ->
+          transform_slot_tool <- tool;
+          current_tool <- tool;
+          self#redraw_all
+        ) |> ignore
+      in
+      add_item "Scale" Scale;
+      add_item "Shear" Shear;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
   end
 
