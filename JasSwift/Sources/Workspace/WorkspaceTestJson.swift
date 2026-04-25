@@ -322,6 +322,7 @@ public let menuBar: [(String, [MenuItem])] = [
         ("Properties", "toggle_panel_properties", ""),
         ("Character", "toggle_panel_character", ""),
         ("Paragraph", "toggle_panel_paragraph", ""),
+        ("Magic Wand", "toggle_panel_magic_wand", ""),
     ]),
 ]
 
