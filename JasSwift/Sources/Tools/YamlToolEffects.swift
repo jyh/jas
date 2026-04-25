@@ -1029,6 +1029,39 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
 
     // ── Artboard tool effects (ARTBOARD_TOOL.md) ────────────────
 
+    // doc.artboard.probe_hit — press-time hit-test classifier per
+    // ARTBOARD_TOOL.md §Mousedown disambiguation order. Sets
+    // tool.artboard.{mode, hit_artboard_id, hit_handle_pos} and
+    // (for interior / empty hits) writes panel-selection per the
+    // click rules from ARTBOARDS.md §Selection semantics. Swift's
+    // StateStore is the panel-state authority — store.setPanel
+    // updates the panel UI directly (no separate AppState plumbing
+    // needed, unlike Rust which has a pending-writes buffer).
+    effects["doc.artboard.probe_hit"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let shift = evalBool(args["shift"], store: store, ctx: ctx)
+        let cmd = evalBool(args["cmd"], store: store, ctx: ctx)
+        let alt = evalBool(args["alt"], store: store, ctx: ctx)
+        artboardProbeHit(model: model, store: store,
+                         x: x, y: y,
+                         shiftHeld: shift, cmdHeld: cmd, altHeld: alt)
+        return nil
+    }
+
+    // doc.artboard.probe_hover — read-only hover classification for
+    // dynamic cursor. Mirrors probe_hit's hit-test priority but only
+    // writes tool.artboard.hover_kind. Per ARTBOARD_TOOL.md
+    // §Cursor states.
+    effects["doc.artboard.probe_hover"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        artboardProbeHover(model: model, store: store, x: x, y: y)
+        return nil
+    }
+
     // doc.artboard.create_commit — drag-to-create commit. Builds a
     // rect from (x1,y1)-(x2,y2), rounds to integer pt, clamps each
     // dimension to >= 1 pt, mints a fresh id (collision-retry),
@@ -2950,4 +2983,156 @@ private func walkEligibleIn(
     default:
         visit(cur, elem)
     }
+}
+
+// MARK: - Artboard tool helpers (ARTBOARD_TOOL.md)
+
+/// Implementation of doc.artboard.probe_hit per
+/// ARTBOARD_TOOL.md §Mousedown disambiguation order. Mirrors the
+/// Rust artboard_probe_hit. Sets tool state and writes panel-
+/// selection per the click rules. (x, y) are in document coordinates
+/// — the canvas widget transforms viewport pixels before passing.
+private func artboardProbeHit(
+    model: Model, store: StateStore,
+    x: Double, y: Double,
+    shiftHeld: Bool, cmdHeld: Bool, altHeld: Bool
+) {
+    // Reset hit-state defaults.
+    store.setTool("artboard", "hit_artboard_id", nil)
+    store.setTool("artboard", "hit_handle_pos", nil)
+
+    let doc = model.document
+
+    // 1. Resize handle of the single panel-selected artboard.
+    let active = store.evalContext()["active_document"] as? [String: Any]
+    let selIds = (active?["artboards_panel_selection_ids"] as? [Any])?
+        .compactMap { $0 as? String } ?? []
+    if selIds.count == 1,
+       let ab = doc.artboards.first(where: { $0.id == selIds[0] })
+    {
+        let r: Double = 8.0  // handle hit radius (document coords; phase 1 const)
+        let cx = ab.x + ab.width / 2.0
+        let cy = ab.y + ab.height / 2.0
+        let candidates: [(String, Double, Double)] = [
+            ("nw", ab.x, ab.y),
+            ("n",  cx, ab.y),
+            ("ne", ab.x + ab.width, ab.y),
+            ("e",  ab.x + ab.width, cy),
+            ("se", ab.x + ab.width, ab.y + ab.height),
+            ("s",  cx, ab.y + ab.height),
+            ("sw", ab.x, ab.y + ab.height),
+            ("w",  ab.x, cy),
+        ]
+        for (pos, hx, hy) in candidates {
+            if abs(x - hx) <= r && abs(y - hy) <= r {
+                store.setTool("artboard", "mode", "resizing")
+                store.setTool("artboard", "hit_artboard_id", ab.id)
+                store.setTool("artboard", "hit_handle_pos", pos)
+                return
+            }
+        }
+    }
+
+    // 2. Artboard interior (highest position wins on overlap —
+    //    iterate in reverse for top-most-first hit).
+    if let hit = doc.artboards.reversed().first(where: { ab in
+        x >= ab.x && x <= ab.x + ab.width
+            && y >= ab.y && y <= ab.y + ab.height
+    }) {
+        let mode = altHeld ? "duplicating_pending" : "moving_pending"
+        store.setTool("artboard", "mode", mode)
+        store.setTool("artboard", "hit_artboard_id", hit.id)
+
+        // Panel-selection write per click rules.
+        let currentSel = (active?["artboards_panel_selection_ids"] as? [Any])?
+            .compactMap { $0 as? String } ?? []
+        let anchor = active?["artboards_panel_anchor"] as? String
+
+        if shiftHeld {
+            // Range from anchor to hit, using document.artboards order.
+            let ids = doc.artboards.map { $0.id }
+            if let a = anchor, let ai = ids.firstIndex(of: a),
+               let ti = ids.firstIndex(of: hit.id) {
+                let lo = min(ai, ti); let hi = max(ai, ti)
+                store.setPanel("artboards", "artboards_panel_selection",
+                               Array(ids[lo...hi]))
+                // Anchor unchanged.
+            } else {
+                // No anchor — fall back to plain replace.
+                store.setPanel("artboards", "artboards_panel_selection", [hit.id])
+                store.setPanel("artboards", "panel_selection_anchor", hit.id)
+            }
+        } else if cmdHeld {
+            var newSel = currentSel
+            if let pos = newSel.firstIndex(of: hit.id) {
+                newSel.remove(at: pos)
+            } else {
+                newSel.append(hit.id)
+            }
+            store.setPanel("artboards", "artboards_panel_selection", newSel)
+            // Anchor unchanged.
+        } else {
+            // Plain — replace, set anchor.
+            store.setPanel("artboards", "artboards_panel_selection", [hit.id])
+            store.setPanel("artboards", "panel_selection_anchor", hit.id)
+        }
+        return
+    }
+
+    // 3. Empty canvas — drag-to-create on threshold; click clears
+    //    panel-selection.
+    store.setTool("artboard", "mode", "creating")
+    store.setPanel("artboards", "artboards_panel_selection", [String]())
+    store.setPanel("artboards", "panel_selection_anchor", nil)
+}
+
+/// Implementation of doc.artboard.probe_hover per
+/// ARTBOARD_TOOL.md §Cursor states. Read-only hover classification
+/// for the dynamic cursor — sets tool.artboard.hover_kind to one of
+/// "handle:<dir>" / "interior" / "empty".
+private func artboardProbeHover(
+    model: Model, store: StateStore, x: Double, y: Double
+) {
+    let doc = model.document
+    let active = store.evalContext()["active_document"] as? [String: Any]
+    let selIds = (active?["artboards_panel_selection_ids"] as? [Any])?
+        .compactMap { $0 as? String } ?? []
+
+    // 1. Resize handle on the single panel-selected artboard.
+    if selIds.count == 1,
+       let ab = doc.artboards.first(where: { $0.id == selIds[0] })
+    {
+        let r: Double = 8.0
+        let cx = ab.x + ab.width / 2.0
+        let cy = ab.y + ab.height / 2.0
+        let candidates: [(String, Double, Double)] = [
+            ("nw", ab.x, ab.y),
+            ("n",  cx, ab.y),
+            ("ne", ab.x + ab.width, ab.y),
+            ("e",  ab.x + ab.width, cy),
+            ("se", ab.x + ab.width, ab.y + ab.height),
+            ("s",  cx, ab.y + ab.height),
+            ("sw", ab.x, ab.y + ab.height),
+            ("w",  ab.x, cy),
+        ]
+        for (pos, hx, hy) in candidates {
+            if abs(x - hx) <= r && abs(y - hy) <= r {
+                store.setTool("artboard", "hover_kind", "handle:\(pos)")
+                return
+            }
+        }
+    }
+
+    // 2. Interior.
+    for ab in doc.artboards.reversed() {
+        if x >= ab.x && x <= ab.x + ab.width
+            && y >= ab.y && y <= ab.y + ab.height
+        {
+            store.setTool("artboard", "hover_kind", "interior")
+            return
+        }
+    }
+
+    // 3. Empty canvas.
+    store.setTool("artboard", "hover_kind", "empty")
 }
