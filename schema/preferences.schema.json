@@ -51,7 +51,9 @@
             "zoom_step": { "type": "number", "minimum": 1 },
             "min_zoom": { "type": "number", "minimum": 0 },
             "max_zoom": { "type": "number", "minimum": 0 },
-            "fit_padding_px": { "type": "number", "minimum": 0 }
+            "fit_padding_px": { "type": "number", "minimum": 0 },
+            "scrubby_zoom": { "type": "boolean" },
+            "scrubby_zoom_gain": { "type": "number", "exclusiveMinimum": 0 }
           }
         }
       }

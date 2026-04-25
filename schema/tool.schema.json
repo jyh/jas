@@ -39,6 +39,11 @@
       "pattern": "^[a-z][a-z0-9_]*$",
       "description": "Id of a panel in workspace/panels/ that the toolbar shows / focuses when the user double-clicks this tool's icon. Parallel to tool_options_dialog: dialog destinations are modal (Reset / Cancel / OK), panel destinations are persistent. Use one or the other, not both."
     },
+    "tool_options_action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Id of an action in workspace/actions.yaml that the toolbar invokes when the user double-clicks this tool's icon. Used by tools whose dblclick destination is a one-shot action rather than a dialog or panel — e.g. the Hand tool's fit_active_artboard and the Zoom tool's zoom_to_actual_size. Mutually exclusive with tool_options_dialog and tool_options_panel."
+    },
     "tool_options_dialog_on_alt_click": {
       "type": "boolean",
       "description": "When true, an Alt-click on canvas opens the dialog referenced by tool_options_dialog. Used by the transform-tool family (Scale, Rotate, Shear) — the same click also writes state.transform_reference_point. Per SCALE_TOOL.md §Tool Options dialog."

@@ -277,34 +277,95 @@ actions:
   # ── View ──────────────────────────────────────────────────
   zoom_in:
     description: >
-      Zoom the canvas in by one step (e.g. 150% -> 200%). Zoom is centered
-      on the current viewport center. The zoom level is reflected in
-      active_document.zoom_level.
+      Zoom the canvas in by preferences.viewport.zoom_step (e.g.
+      100% -> 120%). When invoked from the keyboard or menu with no
+      anchor params, the zoom centers on the viewport center. The
+      Zoom tool's click and wheel handlers pass cursor coordinates
+      so the zoom centers on the cursor instead. The zoom level is
+      reflected in active_document.zoom_level and clamped to
+      [preferences.viewport.min_zoom, preferences.viewport.max_zoom].
     category: view
     tier: 3
     enabled_when: "state.tab_count > 0"
+    params:
+      anchor_x: { type: number, default: -1 }
+      anchor_y: { type: number, default: -1 }
     effects:
-      - log: "zoom_in"
+      - "doc.zoom.apply":
+          factor: "preferences.viewport.zoom_step"
+          anchor_x: "param.anchor_x"
+          anchor_y: "param.anchor_y"
   zoom_out:
     description: >
-      Zoom the canvas out by one step (e.g. 200% -> 150%). Zoom is centered
-      on the current viewport center.
+      Zoom the canvas out by 1 / preferences.viewport.zoom_step (e.g.
+      120% -> 100%). Anchor and centering rules match zoom_in: viewport
+      center for keyboard/menu invocations; cursor for tool invocations.
+    category: view
+    tier: 3
+    enabled_when: "state.tab_count > 0"
+    params:
+      anchor_x: { type: number, default: -1 }
+      anchor_y: { type: number, default: -1 }
+    effects:
+      - "doc.zoom.apply":
+          factor: "1.0 / preferences.viewport.zoom_step"
+          anchor_x: "param.anchor_x"
+          anchor_y: "param.anchor_y"
+  zoom_to_actual_size:
+    description: >
+      Set zoom to 1.0 (100%); leave pan unchanged. Bound to Ctrl+1 and
+      to double-click on the Zoom tool toolbar icon.
     category: view
     tier: 3
     enabled_when: "state.tab_count > 0"
     effects:
-      - log: "zoom_out"
+      - "doc.zoom.set":
+          level: 1.0
   fit_in_window:
     description: >
-      Adjust zoom and scroll so the bounding box of all objects in the
-      document fits within the visible canvas area with a small margin.
-      If the document is empty, resets to 100% zoom centered on the
-      artboard origin.
+      Adjust zoom and pan so the bounding box of all elements in the
+      document fits within the visible canvas area with
+      preferences.viewport.fit_padding_px screen-space padding. If the
+      document is empty, resets to 100% zoom centered on the document
+      origin. Distinct from fit_active_artboard (fits the current
+      artboard's rectangle) and fit_all_artboards (fits the union of
+      all artboard rectangles).
     category: view
     tier: 3
     enabled_when: "state.tab_count > 0"
     effects:
-      - log: "fit_in_window"
+      - "doc.zoom.fit_elements":
+          padding: "preferences.viewport.fit_padding_px"
+  fit_active_artboard:
+    description: >
+      Adjust zoom and pan so the current artboard's rectangle fits the
+      visible canvas area with preferences.viewport.fit_padding_px
+      screen-space padding. The current artboard is the topmost
+      panel-selected artboard, else the artboard at position 1; per
+      ARTBOARDS.md §Selection semantics, the at-least-one-artboard
+      invariant guarantees a target exists. Bound to Ctrl+0 and to
+      double-click on the Hand tool toolbar icon.
+    category: view
+    tier: 3
+    enabled_when: "state.tab_count > 0"
+    effects:
+      - "doc.zoom.fit_rect":
+          rect_x: "active_document.current_artboard.x"
+          rect_y: "active_document.current_artboard.y"
+          rect_w: "active_document.current_artboard.width"
+          rect_h: "active_document.current_artboard.height"
+          padding: "preferences.viewport.fit_padding_px"
+  fit_all_artboards:
+    description: >
+      Adjust zoom and pan so the union of all artboard rectangles fits
+      the visible canvas area with preferences.viewport.fit_padding_px
+      screen-space padding. Bound to Ctrl+Alt+0.
+    category: view
+    tier: 3
+    enabled_when: "state.tab_count > 0"
+    effects:
+      - "doc.zoom.fit_all_artboards":
+          padding: "preferences.viewport.fit_padding_px"
 
   # ── Tool ──────────────────────────────────────────────────
   select_tool:
