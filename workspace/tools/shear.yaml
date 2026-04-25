@@ -99,7 +99,7 @@ handlers:
 #   2. bbox_ghost (transform_kind = 'shear') — drawn during drag;
 #      the post-shear union bbox is a parallelogram.
 overlay:
-  - if: "selection_exists()"
+  - if: "not selection_empty()"
     render:
       type: reference_point_cross
       ref_point: "state.transform_reference_point"
