@@ -564,6 +564,35 @@ class Transform:
             f=(self.b * self.e - self.a * self.f) * inv_det,
         )
 
+    @staticmethod
+    def shear(kx: float, ky: float) -> "Transform":
+        """Shear matrix with horizontal factor kx (x ← x + kx·y) and
+        vertical factor ky (y ← y + ky·x)."""
+        return Transform(a=1.0, b=ky, c=kx, d=1.0)
+
+    def multiply(self, other: "Transform") -> "Transform":
+        """Return self * other — applies other first, then self."""
+        return Transform(
+            a=self.a * other.a + self.c * other.b,
+            b=self.b * other.a + self.d * other.b,
+            c=self.a * other.c + self.c * other.d,
+            d=self.b * other.c + self.d * other.d,
+            e=self.a * other.e + self.c * other.f + self.e,
+            f=self.b * other.e + self.d * other.f + self.f,
+        )
+
+    def around_point(self, rx: float, ry: float) -> "Transform":
+        """Conjugate self around (rx, ry): T(rx, ry) · self · T(-rx, -ry).
+
+        The result, applied to any point, behaves as if self were
+        applied with (rx, ry) as the origin. Used by the transform-
+        tool family (Scale / Rotate / Shear) to pivot a base
+        transform around the user-set reference point.
+        """
+        pre = Transform.translate(-rx, -ry)
+        post = Transform.translate(rx, ry)
+        return post.multiply(self).multiply(pre)
+
 
 # SVG path commands (the 'd' attribute)
 

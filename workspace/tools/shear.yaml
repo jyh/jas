@@ -1,0 +1,115 @@
+# Shear tool — slants the selection along a configurable axis,
+# around a configurable reference point. The shear angle and axis
+# are set by an interactive drag on canvas or by typing values
+# into the Shear Options dialog.
+#
+# Gestures per SHEAR_TOOL.md §Gestures:
+#   plain click  → set transform_reference_point at click coord
+#   Alt+click    → set ref + open Shear Options dialog
+#   drag         → apply shear; press defines the axis (ref→press),
+#                  perpendicular drag yields k =
+#                  ((cursor−press)·axis_perp) / |press−ref|;
+#                  Shift constrains the axis to horizontal/vertical
+#   Escape       → cancel in-progress drag; revert
+#   dblclick toolbar icon → open Shear Options dialog
+#
+# Shared with Scale and Rotate: state.transform_reference_point
+# (cleared on selection change); reference_point_cross overlay;
+# tool_options_dialog_on_alt_click toolbar dispatcher.
+
+id: shear
+cursor: crosshair
+menu_label: "Shear Tool"
+# No shortcut — Shear is the toolbar alternate of Scale.
+tool_options_dialog: "shear_options"
+tool_options_dialog_on_alt_click: true
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, shearing]
+  press_x:    { default: 0.0 }
+  press_y:    { default: 0.0 }
+  cursor_x:   { default: 0.0 }
+  cursor_y:   { default: 0.0 }
+  alt_held:   { default: false }
+  shift_held: { default: false }
+  moved:      { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.shear.mode: "'idle'" }
+    - set: { tool.shear.moved: "false" }
+
+  on_leave:
+    - set: { tool.shear.mode: "'idle'" }
+    - set: { tool.shear.moved: "false" }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - set: { tool.shear.press_x:    "event.x" }
+    - set: { tool.shear.press_y:    "event.y" }
+    - set: { tool.shear.cursor_x:   "event.x" }
+    - set: { tool.shear.cursor_y:   "event.y" }
+    - set: { tool.shear.alt_held:   "event.modifiers.alt" }
+    - set: { tool.shear.shift_held: "event.modifiers.shift" }
+    - set: { tool.shear.moved:      "false" }
+    - set: { tool.shear.mode:       "'shearing'" }
+
+  on_mousemove:
+    - if: "tool.shear.mode == 'shearing'"
+      then:
+        - set: { tool.shear.cursor_x:   "event.x" }
+        - set: { tool.shear.cursor_y:   "event.y" }
+        - set: { tool.shear.shift_held: "event.modifiers.shift" }
+        - if: "abs(event.x - tool.shear.press_x) > 2 || abs(event.y - tool.shear.press_y) > 2"
+          then:
+            - set: { tool.shear.moved: "true" }
+
+  on_mouseup:
+    - if: "tool.shear.mode == 'shearing'"
+      then:
+        - if: "tool.shear.moved"
+          then:
+            - "doc.shear.apply":
+                press_x: "tool.shear.press_x"
+                press_y: "tool.shear.press_y"
+                cursor_x: "event.x"
+                cursor_y: "event.y"
+                shift:   "event.modifiers.shift"
+                copy:    "false"
+          else:
+            - set: { transform_reference_point: "[event.x, event.y]" }
+            - if: "tool.shear.alt_held"
+              then:
+                - "open_dialog": { id: "shear_options" }
+    - set: { tool.shear.mode:  "'idle'" }
+    - set: { tool.shear.moved: "false" }
+
+  on_keydown:
+    - if: "event.key == 'Escape' && tool.shear.mode == 'shearing'"
+      then:
+        - "doc.snapshot.restore": {}
+        - set: { tool.shear.mode:  "'idle'" }
+        - set: { tool.shear.moved: "false" }
+
+# Two overlays as a list (same shape as scale.yaml):
+#   1. reference_point_cross — drawn whenever a selection exists.
+#   2. bbox_ghost (transform_kind = 'shear') — drawn during drag;
+#      the post-shear union bbox is a parallelogram.
+overlay:
+  - if: "not selection_empty()"
+    render:
+      type: reference_point_cross
+      ref_point: "state.transform_reference_point"
+  - if: "tool.shear.mode == 'shearing' && tool.shear.moved"
+    render:
+      type: bbox_ghost
+      transform_kind: "'shear'"
+      ref_point:  "state.transform_reference_point"
+      press_x:    "tool.shear.press_x"
+      press_y:    "tool.shear.press_y"
+      cursor_x:   "tool.shear.cursor_x"
+      cursor_y:   "tool.shear.cursor_y"
+      shift_held: "tool.shear.shift_held"

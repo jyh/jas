@@ -3605,6 +3605,242 @@
         }
       ]
     },
+    "scale_options_confirm": {
+      "description": "Commit the Scale Options dialog. Writes the seven per-document options to state.scale_* and runs doc.scale.apply on the selection. When param.copy is true, the transformation is applied to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate) instead of mutating the original. Closes the dialog either way. See SCALE_TOOL.md \u00a7Tool Options dialog.\ndoc.preview.restore is run first so the document is reset to its pre-dialog state before the final apply (otherwise an OK after typing-time previews would compound). doc.preview.clear is run before close_dialog so the close handler does not restore the snapshot.\n",
+      "category": "transform",
+      "params": {
+        "uniform": {
+          "type": "bool"
+        },
+        "uniform_pct": {
+          "type": "number"
+        },
+        "horizontal_pct": {
+          "type": "number"
+        },
+        "vertical_pct": {
+          "type": "number"
+        },
+        "scale_strokes": {
+          "type": "bool"
+        },
+        "scale_corners": {
+          "type": "bool"
+        },
+        "preview": {
+          "type": "bool"
+        },
+        "copy": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "set": {
+            "scale_uniform": "param.uniform",
+            "scale_uniform_pct": "param.uniform_pct",
+            "scale_horizontal_pct": "param.horizontal_pct",
+            "scale_vertical_pct": "param.vertical_pct",
+            "scale_strokes": "param.scale_strokes",
+            "scale_corners": "param.scale_corners",
+            "scale_preview": "param.preview"
+          }
+        },
+        {
+          "doc.scale.apply": {
+            "sx": "if param.uniform then param.uniform_pct / 100.0 else param.horizontal_pct / 100.0",
+            "sy": "if param.uniform then param.uniform_pct / 100.0 else param.vertical_pct / 100.0",
+            "copy": "param.copy"
+          }
+        },
+        {
+          "doc.preview.clear": {}
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "scale_options_preview": {
+      "description": "Live-preview action fired by the Scale Options dialog's on_change hook. Restores the captured doc snapshot and re-applies the scale with the dialog's current values (copy=false). Per-frame debounced by the runtime. See SCALE_TOOL.md \u00a7Preview.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "doc.scale.apply": {
+            "sx": "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.horizontal_pct / 100.0",
+            "sy": "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.vertical_pct / 100.0",
+            "copy": "false"
+          }
+        }
+      ]
+    },
+    "scale_options_reset": {
+      "description": "Restore the Scale Options dialog to factory defaults without committing. Writes defaults into dialog state; the user must still click OK for the values to persist to state.scale_*. Defaults per SCALE_TOOL.md \u00a7Tool Options dialog.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "set": {
+            "dialog.uniform": true,
+            "dialog.uniform_pct": 100.0,
+            "dialog.horizontal_pct": 100.0,
+            "dialog.vertical_pct": 100.0,
+            "dialog.scale_strokes": true,
+            "dialog.scale_corners": false,
+            "dialog.preview": true
+          }
+        }
+      ]
+    },
+    "rotate_options_confirm": {
+      "description": "Commit the Rotate Options dialog. Writes the two per-document options to state.rotate_* and runs doc.rotate.apply on the selection. When param.copy is true, the rotation is applied to a duplicate of the selection. Closes the dialog. See ROTATE_TOOL.md \u00a7Tool Options dialog.\ndoc.preview.restore + doc.preview.clear bracket the apply so typing-time preview frames do not compound the final commit.\n",
+      "category": "transform",
+      "params": {
+        "angle": {
+          "type": "number"
+        },
+        "preview": {
+          "type": "bool"
+        },
+        "copy": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "set": {
+            "rotate_angle": "param.angle",
+            "rotate_preview": "param.preview"
+          }
+        },
+        {
+          "doc.rotate.apply": {
+            "angle": "param.angle",
+            "copy": "param.copy"
+          }
+        },
+        {
+          "doc.preview.clear": {}
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "rotate_options_preview": {
+      "description": "Live-preview action fired by the Rotate Options dialog's on_change hook. See ROTATE_TOOL.md \u00a7Preview.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "doc.rotate.apply": {
+            "angle": "dialog.angle",
+            "copy": "false"
+          }
+        }
+      ]
+    },
+    "rotate_options_reset": {
+      "description": "Restore the Rotate Options dialog to factory defaults without committing. Defaults per ROTATE_TOOL.md \u00a7Tool Options dialog.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "set": {
+            "dialog.angle": 0.0,
+            "dialog.preview": true
+          }
+        }
+      ]
+    },
+    "shear_options_confirm": {
+      "description": "Commit the Shear Options dialog. Writes the four per-document options to state.shear_* and runs doc.shear.apply on the selection. When param.copy is true, the shear is applied to a duplicate of the selection. Closes the dialog. See SHEAR_TOOL.md \u00a7Tool Options dialog.\ndoc.preview.restore + doc.preview.clear bracket the apply so typing-time preview frames do not compound the final commit.\n",
+      "category": "transform",
+      "params": {
+        "angle": {
+          "type": "number"
+        },
+        "axis": {
+          "type": "string"
+        },
+        "axis_angle": {
+          "type": "number"
+        },
+        "preview": {
+          "type": "bool"
+        },
+        "copy": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "set": {
+            "shear_angle": "param.angle",
+            "shear_axis": "param.axis",
+            "shear_axis_angle": "param.axis_angle",
+            "shear_preview": "param.preview"
+          }
+        },
+        {
+          "doc.shear.apply": {
+            "angle": "param.angle",
+            "axis": "param.axis",
+            "axis_angle": "param.axis_angle",
+            "copy": "param.copy"
+          }
+        },
+        {
+          "doc.preview.clear": {}
+        },
+        {
+          "close_dialog": "None"
+        }
+      ]
+    },
+    "shear_options_preview": {
+      "description": "Live-preview action fired by the Shear Options dialog's on_change hook. See SHEAR_TOOL.md \u00a7Preview.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "doc.preview.restore": {}
+        },
+        {
+          "doc.shear.apply": {
+            "angle": "dialog.angle",
+            "axis": "dialog.axis",
+            "axis_angle": "dialog.axis_angle",
+            "copy": "false"
+          }
+        }
+      ]
+    },
+    "shear_options_reset": {
+      "description": "Restore the Shear Options dialog to factory defaults without committing. Defaults per SHEAR_TOOL.md \u00a7Tool Options dialog.\n",
+      "category": "transform",
+      "effects": [
+        {
+          "set": {
+            "dialog.angle": 0.0,
+            "dialog.axis": "'horizontal'",
+            "dialog.axis_angle": 0.0,
+            "dialog.preview": true
+          }
+        }
+      ]
+    },
     "apply_brush_changes_to_strokes": {
       "description": "Apply pending brush-edits to every element whose stroke_brush references the named library/slug. The brush_options_confirm action stashes the patch on dialog state before opening the Apply to Strokes confirm dialog; this action commits via brush.update and triggers a canvas re-render. Per BRUSH_OPTIONS_DIALOG.md \u00a7Apply to Strokes.\n",
       "category": "brushes",
@@ -6566,7 +6802,10 @@
         "rounded_rect",
         "polygon",
         "star",
-        "lasso"
+        "lasso",
+        "scale",
+        "rotate",
+        "shear"
       ],
       "default": "selection",
       "description": "Currently selected drawing tool"
@@ -6859,6 +7098,83 @@
       "type": "bool",
       "default": false,
       "description": "When true, Blending Mode contributes to the wand match predicate. Compares blend_mode enum values for exact equality \u2014 there is no tolerance, blend mode is categorical. Default false (the reference design ships this checkbox unchecked).\n"
+    },
+    "transform_reference_point": {
+      "type": "list",
+      "item_type": "number",
+      "default": null,
+      "nullable": true,
+      "description": "Shared pivot for Scale / Rotate / Shear, stored as [x, y] in absolute document coordinates. null means \"use the selection's union bounding-box center.\" Resets to null on selection change. Custom values are written by a click on canvas while a transform tool is active. Visualised as a cyan-blue crosshair overlay (reference_point_cross render type) when (a) the active tool is one of scale/rotate/shear and (b) a selection exists.\n"
+    },
+    "scale_uniform": {
+      "type": "bool",
+      "default": true,
+      "description": "Uniform mode (single percentage) vs Non-Uniform (independent H/V) in the Scale Options dialog"
+    },
+    "scale_uniform_pct": {
+      "type": "number",
+      "default": 100.0,
+      "description": "Most-recent uniform-mode scale percentage entered in the Scale Options dialog"
+    },
+    "scale_horizontal_pct": {
+      "type": "number",
+      "default": 100.0,
+      "description": "Most-recent non-uniform horizontal percentage entered in the Scale Options dialog"
+    },
+    "scale_vertical_pct": {
+      "type": "number",
+      "default": 100.0,
+      "description": "Most-recent non-uniform vertical percentage entered in the Scale Options dialog"
+    },
+    "scale_strokes": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, scaling multiplies stroke-width by the unsigned geometric mean \u221a(|sx \u00b7 sy|). When false, stroke-width is preserved. Brush-stroke size overrides scale by the same factor. See SCALE_TOOL.md \u00a7Apply behavior.\n"
+    },
+    "scale_corners": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, scaling multiplies a rounded_rect's rx by |sx| and ry by |sy|. No-op on other element types. Default false matches the reference dialog. See SCALE_TOOL.md \u00a7Apply behavior.\n"
+    },
+    "scale_preview": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, the Scale Options dialog drives a live preview overlay (per-element transform-matrix override). No document mutation until OK"
+    },
+    "rotate_angle": {
+      "type": "number",
+      "default": 0.0,
+      "description": "Most-recent angle (degrees) entered in the Rotate Options dialog. Positive values rotate counter-clockwise"
+    },
+    "rotate_preview": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, the Rotate Options dialog drives a live preview overlay"
+    },
+    "shear_angle": {
+      "type": "number",
+      "default": 0.0,
+      "description": "Most-recent shear angle (degrees) entered in the Shear Options dialog"
+    },
+    "shear_axis": {
+      "type": "enum",
+      "values": [
+        "horizontal",
+        "vertical",
+        "custom"
+      ],
+      "default": "horizontal",
+      "description": "Shear axis selected in the Shear Options dialog: horizontal (x-axis fixed), vertical (y-axis fixed), or custom (use shear_axis_angle)"
+    },
+    "shear_axis_angle": {
+      "type": "number",
+      "default": 0.0,
+      "description": "Custom-axis angle (degrees from horizontal) used when shear_axis == 'custom'"
+    },
+    "shear_preview": {
+      "type": "bool",
+      "default": true,
+      "description": "When true, the Shear Options dialog drives a live preview overlay"
     },
     "align_to": {
       "type": "enum",
@@ -19143,6 +19459,238 @@
         }
       }
     },
+    "rotate": {
+      "id": "rotate",
+      "cursor": "crosshair",
+      "menu_label": "Rotate Tool",
+      "shortcut": "R",
+      "tool_options_dialog": "rotate_options",
+      "tool_options_dialog_on_alt_click": true,
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "rotating"
+          ]
+        },
+        "press_x": {
+          "default": 0.0
+        },
+        "press_y": {
+          "default": 0.0
+        },
+        "cursor_x": {
+          "default": 0.0
+        },
+        "cursor_y": {
+          "default": 0.0
+        },
+        "alt_held": {
+          "default": false
+        },
+        "shift_held": {
+          "default": false
+        },
+        "moved": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.rotate.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.moved": "false"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.rotate.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.moved": "false"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "set": {
+              "tool.rotate.press_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.press_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.cursor_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.cursor_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.shift_held": "event.modifiers.shift"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.moved": "false"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.mode": "'rotating'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.rotate.mode == 'rotating'",
+            "then": [
+              {
+                "set": {
+                  "tool.rotate.cursor_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.rotate.cursor_y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.rotate.shift_held": "event.modifiers.shift"
+                }
+              },
+              {
+                "if": "abs(event.x - tool.rotate.press_x) > 2 || abs(event.y - tool.rotate.press_y) > 2",
+                "then": [
+                  {
+                    "set": {
+                      "tool.rotate.moved": "true"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.rotate.mode == 'rotating'",
+            "then": [
+              {
+                "if": "tool.rotate.moved",
+                "then": [
+                  {
+                    "doc.rotate.apply": {
+                      "press_x": "tool.rotate.press_x",
+                      "press_y": "tool.rotate.press_y",
+                      "cursor_x": "event.x",
+                      "cursor_y": "event.y",
+                      "shift": "event.modifiers.shift",
+                      "copy": "false"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "set": {
+                      "transform_reference_point": "[event.x, event.y]"
+                    }
+                  },
+                  {
+                    "if": "tool.rotate.alt_held",
+                    "then": [
+                      {
+                        "open_dialog": {
+                          "id": "rotate_options"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.rotate.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.rotate.moved": "false"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape' && tool.rotate.mode == 'rotating'",
+            "then": [
+              {
+                "doc.snapshot.restore": {}
+              },
+              {
+                "set": {
+                  "tool.rotate.mode": "'idle'"
+                }
+              },
+              {
+                "set": {
+                  "tool.rotate.moved": "false"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": [
+        {
+          "if": "not selection_empty()",
+          "render": {
+            "type": "reference_point_cross",
+            "ref_point": "state.transform_reference_point"
+          }
+        },
+        {
+          "if": "tool.rotate.mode == 'rotating' && tool.rotate.moved",
+          "render": {
+            "type": "bbox_ghost",
+            "transform_kind": "'rotate'",
+            "ref_point": "state.transform_reference_point",
+            "press_x": "tool.rotate.press_x",
+            "press_y": "tool.rotate.press_y",
+            "cursor_x": "tool.rotate.cursor_x",
+            "cursor_y": "tool.rotate.cursor_y",
+            "shift_held": "tool.rotate.shift_held"
+          }
+        }
+      ]
+    },
     "rounded_rect": {
       "id": "rounded_rect",
       "cursor": "crosshair",
@@ -19287,6 +19835,238 @@
           "style": "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
         }
       }
+    },
+    "scale": {
+      "id": "scale",
+      "cursor": "crosshair",
+      "menu_label": "Scale Tool",
+      "shortcut": "S",
+      "tool_options_dialog": "scale_options",
+      "tool_options_dialog_on_alt_click": true,
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "scaling"
+          ]
+        },
+        "press_x": {
+          "default": 0.0
+        },
+        "press_y": {
+          "default": 0.0
+        },
+        "cursor_x": {
+          "default": 0.0
+        },
+        "cursor_y": {
+          "default": 0.0
+        },
+        "alt_held": {
+          "default": false
+        },
+        "shift_held": {
+          "default": false
+        },
+        "moved": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.scale.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.moved": "false"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.scale.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.moved": "false"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "set": {
+              "tool.scale.press_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.press_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.cursor_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.cursor_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.shift_held": "event.modifiers.shift"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.moved": "false"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.mode": "'scaling'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.scale.mode == 'scaling'",
+            "then": [
+              {
+                "set": {
+                  "tool.scale.cursor_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.scale.cursor_y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.scale.shift_held": "event.modifiers.shift"
+                }
+              },
+              {
+                "if": "abs(event.x - tool.scale.press_x) > 2 || abs(event.y - tool.scale.press_y) > 2",
+                "then": [
+                  {
+                    "set": {
+                      "tool.scale.moved": "true"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.scale.mode == 'scaling'",
+            "then": [
+              {
+                "if": "tool.scale.moved",
+                "then": [
+                  {
+                    "doc.scale.apply": {
+                      "press_x": "tool.scale.press_x",
+                      "press_y": "tool.scale.press_y",
+                      "cursor_x": "event.x",
+                      "cursor_y": "event.y",
+                      "shift": "event.modifiers.shift",
+                      "copy": "false"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "set": {
+                      "transform_reference_point": "[event.x, event.y]"
+                    }
+                  },
+                  {
+                    "if": "tool.scale.alt_held",
+                    "then": [
+                      {
+                        "open_dialog": {
+                          "id": "scale_options"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.scale.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.scale.moved": "false"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape' && tool.scale.mode == 'scaling'",
+            "then": [
+              {
+                "doc.snapshot.restore": {}
+              },
+              {
+                "set": {
+                  "tool.scale.mode": "'idle'"
+                }
+              },
+              {
+                "set": {
+                  "tool.scale.moved": "false"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": [
+        {
+          "if": "not selection_empty()",
+          "render": {
+            "type": "reference_point_cross",
+            "ref_point": "state.transform_reference_point"
+          }
+        },
+        {
+          "if": "tool.scale.mode == 'scaling' && tool.scale.moved",
+          "render": {
+            "type": "bbox_ghost",
+            "transform_kind": "'scale'",
+            "ref_point": "state.transform_reference_point",
+            "press_x": "tool.scale.press_x",
+            "press_y": "tool.scale.press_y",
+            "cursor_x": "tool.scale.cursor_x",
+            "cursor_y": "tool.scale.cursor_y",
+            "shift_held": "tool.scale.shift_held"
+          }
+        }
+      ]
     },
     "selection": {
       "id": "selection",
@@ -19537,6 +20317,237 @@
           "style": "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
         }
       }
+    },
+    "shear": {
+      "id": "shear",
+      "cursor": "crosshair",
+      "menu_label": "Shear Tool",
+      "tool_options_dialog": "shear_options",
+      "tool_options_dialog_on_alt_click": true,
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "shearing"
+          ]
+        },
+        "press_x": {
+          "default": 0.0
+        },
+        "press_y": {
+          "default": 0.0
+        },
+        "cursor_x": {
+          "default": 0.0
+        },
+        "cursor_y": {
+          "default": 0.0
+        },
+        "alt_held": {
+          "default": false
+        },
+        "shift_held": {
+          "default": false
+        },
+        "moved": {
+          "default": false
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.shear.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.moved": "false"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.shear.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.moved": "false"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.snapshot": {}
+          },
+          {
+            "set": {
+              "tool.shear.press_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.press_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.cursor_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.cursor_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.shift_held": "event.modifiers.shift"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.moved": "false"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.mode": "'shearing'"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "if": "tool.shear.mode == 'shearing'",
+            "then": [
+              {
+                "set": {
+                  "tool.shear.cursor_x": "event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.shear.cursor_y": "event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.shear.shift_held": "event.modifiers.shift"
+                }
+              },
+              {
+                "if": "abs(event.x - tool.shear.press_x) > 2 || abs(event.y - tool.shear.press_y) > 2",
+                "then": [
+                  {
+                    "set": {
+                      "tool.shear.moved": "true"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.shear.mode == 'shearing'",
+            "then": [
+              {
+                "if": "tool.shear.moved",
+                "then": [
+                  {
+                    "doc.shear.apply": {
+                      "press_x": "tool.shear.press_x",
+                      "press_y": "tool.shear.press_y",
+                      "cursor_x": "event.x",
+                      "cursor_y": "event.y",
+                      "shift": "event.modifiers.shift",
+                      "copy": "false"
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "set": {
+                      "transform_reference_point": "[event.x, event.y]"
+                    }
+                  },
+                  {
+                    "if": "tool.shear.alt_held",
+                    "then": [
+                      {
+                        "open_dialog": {
+                          "id": "shear_options"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.shear.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.shear.moved": "false"
+            }
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape' && tool.shear.mode == 'shearing'",
+            "then": [
+              {
+                "doc.snapshot.restore": {}
+              },
+              {
+                "set": {
+                  "tool.shear.mode": "'idle'"
+                }
+              },
+              {
+                "set": {
+                  "tool.shear.moved": "false"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": [
+        {
+          "if": "not selection_empty()",
+          "render": {
+            "type": "reference_point_cross",
+            "ref_point": "state.transform_reference_point"
+          }
+        },
+        {
+          "if": "tool.shear.mode == 'shearing' && tool.shear.moved",
+          "render": {
+            "type": "bbox_ghost",
+            "transform_kind": "'shear'",
+            "ref_point": "state.transform_reference_point",
+            "press_x": "tool.shear.press_x",
+            "press_y": "tool.shear.press_y",
+            "cursor_x": "tool.shear.cursor_x",
+            "cursor_y": "tool.shear.cursor_y",
+            "shift_held": "tool.shear.shift_held"
+          }
+        }
+      ]
     },
     "smooth": {
       "id": "smooth",
@@ -24120,6 +25131,135 @@
         ]
       }
     },
+    "rotate_options": {
+      "summary": "Rotate",
+      "description": "Modal dialog opened by double-clicking the Rotate icon in the toolbar OR by Alt-clicking on the canvas (which also sets the reference point at the click coordinate). Edits the per-document options that drive the Rotate tool's transformation:\n- Angle: rotation in degrees, applied around the current\n  reference point. Positive values rotate counter-clockwise.\n- Preview: when on, the canvas re-renders live with the\n  dialog's current angle applied (no document mutation\n  until OK).\n\nReset restores defaults without committing. Cancel discards edits and any preview overlay (the reference point set by an Alt-click is NOT reverted). OK writes values to state.rotate_* and runs doc.rotate.apply on the selection. Copy runs doc.rotate.apply with copy=true, applying the rotation to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate). See ROTATE_TOOL.md.\n",
+      "modal": true,
+      "width": 360,
+      "params": {},
+      "doc_preview": true,
+      "on_change": "rotate_options_preview",
+      "state": {
+        "angle": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Rotation angle in degrees (positive = CCW)"
+        },
+        "preview": {
+          "type": "bool",
+          "default": true,
+          "description": "Live-update the canvas with dialog values applied"
+        }
+      },
+      "init": {
+        "angle": "state.rotate_angle",
+        "preview": "state.rotate_preview"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 4,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Angle:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 8,
+                "children": [
+                  {
+                    "id": "ro_angle",
+                    "type": "number_input",
+                    "min": -360,
+                    "max": 360,
+                    "step": 0.1,
+                    "suffix": "\u00b0",
+                    "bind": {
+                      "value": "dialog.angle"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ro_preview",
+            "type": "toggle",
+            "label": "Preview",
+            "bind": {
+              "checked": "dialog.preview"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "space-between"
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Reset",
+                "action": "rotate_options_reset"
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 8
+                },
+                "children": [
+                  {
+                    "type": "button",
+                    "label": "Copy",
+                    "action": "rotate_options_confirm",
+                    "params": {
+                      "angle": "dialog.angle",
+                      "preview": "dialog.preview",
+                      "copy": true
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "label": "Cancel",
+                    "action": "dismiss_dialog"
+                  },
+                  {
+                    "type": "button",
+                    "label": "OK",
+                    "action": "rotate_options_confirm",
+                    "variant": "primary",
+                    "params": {
+                      "angle": "dialog.angle",
+                      "preview": "dialog.preview",
+                      "copy": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
     "save_changes_tab": {
       "summary": "Save Changes",
       "description": "Confirmation dialog shown when closing a tab with unsaved changes. Three options: Save the document, Discard changes, or Cancel.\n",
@@ -24212,6 +25352,585 @@
                 "label": "Save All",
                 "action": "save_all_and_close",
                 "variant": "primary"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "scale_options": {
+      "summary": "Scale",
+      "description": "Modal dialog opened by double-clicking the Scale icon in the toolbar OR by Alt-clicking on the canvas (which also sets the reference point at the click coordinate). Edits the per-document options that drive the Scale tool's transformation:\n- Scale mode: Uniform applies a single percentage to both axes;\n  Non-Uniform applies independent Horizontal and Vertical\n  percentages.\n- Scale Strokes: when on, stroke widths multiply by the\n  geometric mean \u221a(|sx \u00b7 sy|). When off, stroke widths are\n  preserved.\n- Scale Corners: when on, rounded_rect rx/ry scale by\n  |sx|/|sy| respectively. No-op on other element types.\n- Preview: when on, the canvas re-renders live with the\n  dialog's current values applied (no document mutation\n  until OK).\n\nReset restores defaults without committing. Cancel discards edits and any preview overlay (the reference point set by an Alt-click is NOT reverted). OK writes all values to state.scale_* and runs doc.scale.apply on the selection. Copy runs doc.scale.apply with copy=true, applying the transformation to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate). See SCALE_TOOL.md.\n",
+      "modal": true,
+      "width": 460,
+      "params": {},
+      "doc_preview": true,
+      "on_change": "scale_options_preview",
+      "state": {
+        "uniform": {
+          "type": "bool",
+          "default": true,
+          "description": "Uniform mode (single percentage) vs Non-Uniform (independent H/V)"
+        },
+        "uniform_pct": {
+          "type": "number",
+          "default": 100.0,
+          "description": "Uniform-mode scale percentage"
+        },
+        "horizontal_pct": {
+          "type": "number",
+          "default": 100.0,
+          "description": "Non-uniform horizontal percentage"
+        },
+        "vertical_pct": {
+          "type": "number",
+          "default": 100.0,
+          "description": "Non-uniform vertical percentage"
+        },
+        "scale_strokes": {
+          "type": "bool",
+          "default": true,
+          "description": "Multiply stroke widths by the geometric mean of (sx, sy)"
+        },
+        "scale_corners": {
+          "type": "bool",
+          "default": false,
+          "description": "Scale rounded_rect rx/ry along with the geometry"
+        },
+        "preview": {
+          "type": "bool",
+          "default": true,
+          "description": "Live-update the canvas with dialog values applied"
+        }
+      },
+      "init": {
+        "uniform": "state.scale_uniform",
+        "uniform_pct": "state.scale_uniform_pct",
+        "horizontal_pct": "state.scale_horizontal_pct",
+        "vertical_pct": "state.scale_vertical_pct",
+        "scale_strokes": "state.scale_strokes",
+        "scale_corners": "state.scale_corners",
+        "preview": "state.scale_preview"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "gap": 6,
+              "padding": 10,
+              "border": "1px solid panel-border"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Scale",
+                "style": {
+                  "font_size": 12,
+                  "weight": "bold"
+                }
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 5,
+                    "children": [
+                      {
+                        "id": "so_uniform_radio",
+                        "type": "radio",
+                        "label": "Uniform:",
+                        "bind": {
+                          "checked": "dialog.uniform"
+                        },
+                        "on_check": [
+                          {
+                            "set": {
+                              "dialog.uniform": true
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 5,
+                    "children": [
+                      {
+                        "id": "so_uniform_pct",
+                        "type": "number_input",
+                        "min": -100000,
+                        "max": 100000,
+                        "step": 1,
+                        "suffix": "%",
+                        "bind": {
+                          "value": "dialog.uniform_pct",
+                          "disabled": "not dialog.uniform"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 12,
+                    "children": [
+                      {
+                        "id": "so_nonuniform_radio",
+                        "type": "radio",
+                        "label": "Non-Uniform",
+                        "bind": {
+                          "checked": "not dialog.uniform"
+                        },
+                        "on_check": [
+                          {
+                            "set": {
+                              "dialog.uniform": false
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "style": {
+                  "padding": "0 0 0 24"
+                },
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 5,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Horizontal:",
+                        "style": {
+                          "font_size": 11
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 5,
+                    "children": [
+                      {
+                        "id": "so_horizontal_pct",
+                        "type": "number_input",
+                        "min": -100000,
+                        "max": 100000,
+                        "step": 1,
+                        "suffix": "%",
+                        "bind": {
+                          "value": "dialog.horizontal_pct",
+                          "disabled": "dialog.uniform"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "style": {
+                  "padding": "0 0 0 24"
+                },
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 5,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Vertical:",
+                        "style": {
+                          "font_size": 11
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 5,
+                    "children": [
+                      {
+                        "id": "so_vertical_pct",
+                        "type": "number_input",
+                        "min": -100000,
+                        "max": 100000,
+                        "step": 1,
+                        "suffix": "%",
+                        "bind": {
+                          "value": "dialog.vertical_pct",
+                          "disabled": "dialog.uniform"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "gap": 6,
+              "padding": 10,
+              "border": "1px solid panel-border"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Options",
+                "style": {
+                  "font_size": 12,
+                  "weight": "bold"
+                }
+              },
+              {
+                "id": "so_scale_strokes",
+                "type": "toggle",
+                "label": "Scale Strokes",
+                "bind": {
+                  "checked": "dialog.scale_strokes"
+                }
+              },
+              {
+                "id": "so_scale_corners",
+                "type": "toggle",
+                "label": "Scale Corners",
+                "bind": {
+                  "checked": "dialog.scale_corners"
+                }
+              }
+            ]
+          },
+          {
+            "id": "so_preview",
+            "type": "toggle",
+            "label": "Preview",
+            "bind": {
+              "checked": "dialog.preview"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "space-between"
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Reset",
+                "action": "scale_options_reset"
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 8
+                },
+                "children": [
+                  {
+                    "type": "button",
+                    "label": "Copy",
+                    "action": "scale_options_confirm",
+                    "params": {
+                      "uniform": "dialog.uniform",
+                      "uniform_pct": "dialog.uniform_pct",
+                      "horizontal_pct": "dialog.horizontal_pct",
+                      "vertical_pct": "dialog.vertical_pct",
+                      "scale_strokes": "dialog.scale_strokes",
+                      "scale_corners": "dialog.scale_corners",
+                      "preview": "dialog.preview",
+                      "copy": true
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "label": "Cancel",
+                    "action": "dismiss_dialog"
+                  },
+                  {
+                    "type": "button",
+                    "label": "OK",
+                    "action": "scale_options_confirm",
+                    "variant": "primary",
+                    "params": {
+                      "uniform": "dialog.uniform",
+                      "uniform_pct": "dialog.uniform_pct",
+                      "horizontal_pct": "dialog.horizontal_pct",
+                      "vertical_pct": "dialog.vertical_pct",
+                      "scale_strokes": "dialog.scale_strokes",
+                      "scale_corners": "dialog.scale_corners",
+                      "preview": "dialog.preview",
+                      "copy": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "shear_options": {
+      "summary": "Shear",
+      "description": "Modal dialog opened by double-clicking the Shear icon in the toolbar OR by Alt-clicking on the canvas (which also sets the reference point at the click coordinate). Edits the per-document options that drive the Shear tool's transformation:\n- Shear Angle: slant angle in degrees. Positive values shear\n  in the +axis_perp direction.\n- Axis: direction along which points slide. Horizontal (x-axis\n  fixed), Vertical (y-axis fixed), or Custom (user-specified\n  angle in degrees from horizontal). Custom Angle is enabled\n  only when Custom is selected.\n- Preview: when on, the canvas re-renders live with the\n  dialog's current angle/axis applied (no document mutation\n  until OK).\n\nReset restores defaults without committing. Cancel discards edits and any preview overlay (the reference point set by an Alt-click is NOT reverted). OK writes values to state.shear_* and runs doc.shear.apply on the selection. Copy runs doc.shear.apply with copy=true, applying the shear to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate). See SHEAR_TOOL.md.\n",
+      "modal": true,
+      "width": 420,
+      "params": {},
+      "doc_preview": true,
+      "on_change": "shear_options_preview",
+      "state": {
+        "angle": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Shear angle in degrees"
+        },
+        "axis": {
+          "type": "enum",
+          "values": [
+            "horizontal",
+            "vertical",
+            "custom"
+          ],
+          "default": "horizontal",
+          "description": "Shear axis: horizontal | vertical | custom"
+        },
+        "axis_angle": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Custom-axis angle in degrees from horizontal (used only when axis = custom)"
+        },
+        "preview": {
+          "type": "bool",
+          "default": true,
+          "description": "Live-update the canvas with dialog values applied"
+        }
+      },
+      "init": {
+        "angle": "state.shear_angle",
+        "axis": "state.shear_axis",
+        "axis_angle": "state.shear_axis_angle",
+        "preview": "state.shear_preview"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 4,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Shear Angle:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 8,
+                "children": [
+                  {
+                    "id": "sho_angle",
+                    "type": "number_input",
+                    "min": -89.9,
+                    "max": 89.9,
+                    "step": 0.1,
+                    "suffix": "\u00b0",
+                    "bind": {
+                      "value": "dialog.angle"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "gap": 6,
+              "padding": 10,
+              "border": "1px solid panel-border"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Axis",
+                "style": {
+                  "font_size": 12,
+                  "weight": "bold"
+                }
+              },
+              {
+                "id": "sho_axis_horizontal",
+                "type": "radio",
+                "label": "Horizontal",
+                "bind": {
+                  "checked": "dialog.axis == 'horizontal'"
+                },
+                "on_check": [
+                  {
+                    "set": {
+                      "dialog.axis": "'horizontal'"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "sho_axis_vertical",
+                "type": "radio",
+                "label": "Vertical",
+                "bind": {
+                  "checked": "dialog.axis == 'vertical'"
+                },
+                "on_check": [
+                  {
+                    "set": {
+                      "dialog.axis": "'vertical'"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 5,
+                    "children": [
+                      {
+                        "id": "sho_axis_custom",
+                        "type": "radio",
+                        "label": "Custom",
+                        "bind": {
+                          "checked": "dialog.axis == 'custom'"
+                        },
+                        "on_check": [
+                          {
+                            "set": {
+                              "dialog.axis": "'custom'"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 7,
+                    "children": [
+                      {
+                        "id": "sho_axis_angle",
+                        "type": "number_input",
+                        "min": -180,
+                        "max": 180,
+                        "step": 0.1,
+                        "suffix": "\u00b0",
+                        "bind": {
+                          "value": "dialog.axis_angle",
+                          "disabled": "dialog.axis != 'custom'"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "sho_preview",
+            "type": "toggle",
+            "label": "Preview",
+            "bind": {
+              "checked": "dialog.preview"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "space-between"
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Reset",
+                "action": "shear_options_reset"
+              },
+              {
+                "type": "container",
+                "layout": "row",
+                "style": {
+                  "gap": 8
+                },
+                "children": [
+                  {
+                    "type": "button",
+                    "label": "Copy",
+                    "action": "shear_options_confirm",
+                    "params": {
+                      "angle": "dialog.angle",
+                      "axis": "dialog.axis",
+                      "axis_angle": "dialog.axis_angle",
+                      "preview": "dialog.preview",
+                      "copy": true
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "label": "Cancel",
+                    "action": "dismiss_dialog"
+                  },
+                  {
+                    "type": "button",
+                    "label": "OK",
+                    "action": "shear_options_confirm",
+                    "variant": "primary",
+                    "params": {
+                      "angle": "dialog.angle",
+                      "axis": "dialog.axis",
+                      "axis_angle": "dialog.axis_angle",
+                      "preview": "dialog.preview",
+                      "copy": false
+                    }
+                  }
+                ]
               }
             ]
           }
@@ -25939,6 +27658,48 @@
                   {
                     "set": {
                       "active_tool": "\"star\""
+                    }
+                  },
+                  {
+                    "close_dialog": null
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "scale_alternates": {
+      "summary": "Transform Tools",
+      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the Scale tool button. Lists the Shear tool, the toolbar alternate of Scale. Clicking selects Shear and closes the dialog. Both tools share the transform-family conventions (state.transform_reference_point, dblclick-icon and Alt-click-canvas dialog gestures); the slot's primary tool is Scale. The Rotate tool lives in its own slot. See SCALE_TOOL.md and SHEAR_TOOL.md.\n",
+      "modal": false,
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 2
+        },
+        "children": [
+          {
+            "type": "icon_button",
+            "icon": "shear",
+            "label": "Shear",
+            "summary": "Slant objects along a configurable axis",
+            "style": {
+              "width": "100%",
+              "justify": "start",
+              "gap": 8,
+              "padding": "4 8"
+            },
+            "behavior": [
+              {
+                "event": "click",
+                "effects": [
+                  {
+                    "set": {
+                      "active_tool": "\"shear\""
                     }
                   },
                   {

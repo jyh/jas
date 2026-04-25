@@ -52,6 +52,9 @@ class Tool(Enum):
     POLYGON = auto()
     STAR = auto()
     LASSO = auto()
+    SCALE = auto()
+    ROTATE = auto()
+    SHEAR = auto()
 
 
 def _draw_arrow_path() -> QPainterPath:
@@ -153,9 +156,48 @@ class ToolButton(QToolButton):
             self._draw_star_tool(painter)
         elif self.tool == Tool.LASSO:
             self._draw_lasso_tool(painter)
+        elif self.tool == Tool.SCALE:
+            self._draw_scale_tool(painter)
+        elif self.tool == Tool.ROTATE:
+            self._draw_rotate_tool(painter)
+        elif self.tool == Tool.SHEAR:
+            self._draw_shear_tool(painter)
 
         if self.has_alternates:
             self._draw_alternate_triangle(painter)
+
+    def _draw_scale_tool(self, painter):
+        """Small square + larger square (extrusion iconography). See
+        SCALE_TOOL.md §Tool icon."""
+        painter.setPen(QPen(_icon_color(), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(3, 13, 10, 11)
+        painter.drawRect(13, 3, 12, 13)
+
+    def _draw_rotate_tool(self, painter):
+        """270° arc with arrowhead. See ROTATE_TOOL.md §Tool icon."""
+        from PySide6.QtCore import QRectF
+        painter.setPen(QPen(_icon_color(), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # Arc center (14, 14), radius 9, from top (14, 5) sweeping
+        # CCW to left (5, 14). Qt drawArc start/spanAngle in 1/16°.
+        painter.drawArc(QRectF(5, 5, 18, 18),
+                        90 * 16, 270 * 16)
+        # Arrowhead at the top.
+        painter.drawLine(11, 2, 14, 5)
+        painter.drawLine(14, 5, 11, 8)
+
+    def _draw_shear_tool(self, painter):
+        """Right-leaning parallelogram. See SHEAR_TOOL.md §Tool icon."""
+        from PySide6.QtGui import QPolygonF
+        from PySide6.QtCore import QPointF
+        painter.setPen(QPen(_icon_color(), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        poly = QPolygonF([
+            QPointF(9, 4), QPointF(26, 4),
+            QPointF(19, 24), QPointF(2, 24)
+        ])
+        painter.drawPolygon(poly)
 
     def _draw_selection_arrow(self, painter):
         """Black arrow with white border."""
@@ -970,6 +1012,8 @@ _PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PAINTBRUSH, Tool.BLOB_BRUSH,
 _TEXT_SLOT_TOOLS = {Tool.TYPE, Tool.TYPE_ON_PATH}
 # Tools that share the rect/polygon slot
 _SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR}
+# Tools that share the scale/shear slot — Rotate has its own slot
+_TRANSFORM_SLOT_TOOLS = {Tool.SCALE, Tool.SHEAR}
 _LONG_PRESS_MS = LONG_PRESS_MS
 
 
@@ -1225,9 +1269,18 @@ class Toolbar(QWidget):
             (Tool.LINE, 2, 1),
             (Tool.RECT, 3, 0),
             (Tool.LASSO, 3, 1),
+            # Transform-tool family — Scale (with Shear as long-press
+            # alternate) + Rotate (own slot). All three share
+            # state.transform_reference_point and the dialog gestures.
+            # See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md.
+            (Tool.SCALE, 4, 0),
+            (Tool.ROTATE, 4, 1),
         ]
         for tool, row, col in tools:
-            has_alt = tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS or tool in _PENCIL_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
+            has_alt = (tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS
+                       or tool in _PENCIL_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS
+                       or tool in _SHAPE_SLOT_TOOLS
+                       or tool in _TRANSFORM_SLOT_TOOLS)
             btn = ToolButton(tool, has_alternates=has_alt)
             self.buttons[tool] = btn
             self.button_group.addButton(btn)
@@ -1260,6 +1313,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.PATH_ERASER])
         self.buttons[Tool.SMOOTH] = ToolButton(Tool.SMOOTH, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.SMOOTH])
+        self.buttons[Tool.SHEAR] = ToolButton(Tool.SHEAR, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.SHEAR])
 
         self.buttons[Tool.SELECTION].setChecked(True)
         self.button_group.buttonClicked.connect(self._on_button_clicked)

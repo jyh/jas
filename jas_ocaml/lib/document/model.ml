@@ -86,6 +86,28 @@ class model ?(document = Document.default_document ()) ?filename () =
         undo_stack <- List.filteri (fun i _ -> i < max_undo) undo_stack;
       redo_stack <- []
 
+    (* Out-of-band document snapshot for dialog Preview flows
+       (Scale Options, Rotate Options, Shear Options). Captured at
+       dialog open, restored on Cancel, cleared on OK. Distinct
+       from undo_stack so preview-driven applies do not pollute
+       undo history. See SCALE_TOOL.md \167 Preview. *)
+    val mutable preview_doc_snapshot : Document.document option = None
+
+    method capture_preview_snapshot =
+      preview_doc_snapshot <- Some doc
+
+    method restore_preview_snapshot =
+      (match preview_doc_snapshot with
+       | Some snap ->
+         doc <- snap;
+         List.iter (fun f -> f doc) listeners
+       | None -> ())
+
+    method clear_preview_snapshot =
+      preview_doc_snapshot <- None
+
+    method has_preview_snapshot = preview_doc_snapshot <> None
+
     method undo =
       match undo_stack with
       | [] -> ()

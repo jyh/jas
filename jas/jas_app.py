@@ -861,6 +861,9 @@ class MainWindow(QMainWindow):
         Tool.POLYGON: "polygon",
         Tool.STAR: "star",
         Tool.LASSO: "lasso",
+        Tool.SCALE: "scale",
+        Tool.ROTATE: "rotate",
+        Tool.SHEAR: "shear",
     }
 
     # Map a tool yaml's tool_options_panel id to a PanelKind.

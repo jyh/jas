@@ -5,7 +5,8 @@ state:
              pen, add_anchor, delete_anchor, anchor_point,
              pencil, path_eraser, smooth,
              type, type_on_path,
-             line, rect, rounded_rect, polygon, star, lasso]
+             line, rect, rounded_rect, polygon, star, lasso,
+             scale, rotate, shear]
     default: selection
     description: "Currently selected drawing tool"
 
@@ -341,6 +342,104 @@ state:
       equality — there is no tolerance, blend mode is
       categorical. Default false (the reference design ships
       this checkbox unchecked).
+
+  # ── Transform tools (Scale / Rotate / Shear) ─────────────────
+  # Per-document persistence for the three transformation tools.
+  # transform_reference_point is shared across all three; the
+  # tool-specific keys mirror the most-recent dialog values so
+  # re-opening the dialog (after Cancel or after a previous OK)
+  # shows the user's last entered values. See SCALE_TOOL.md /
+  # ROTATE_TOOL.md / SHEAR_TOOL.md §State persistence.
+
+  transform_reference_point:
+    type: list
+    item_type: number
+    default: null
+    nullable: true
+    description: >
+      Shared pivot for Scale / Rotate / Shear, stored as
+      [x, y] in absolute document coordinates. null means
+      "use the selection's union bounding-box center."
+      Resets to null on selection change. Custom values are
+      written by a click on canvas while a transform tool is
+      active. Visualised as a cyan-blue crosshair overlay
+      (reference_point_cross render type) when (a) the active
+      tool is one of scale/rotate/shear and (b) a selection
+      exists.
+
+  scale_uniform:
+    type: bool
+    default: true
+    description: "Uniform mode (single percentage) vs Non-Uniform (independent H/V) in the Scale Options dialog"
+
+  scale_uniform_pct:
+    type: number
+    default: 100.0
+    description: "Most-recent uniform-mode scale percentage entered in the Scale Options dialog"
+
+  scale_horizontal_pct:
+    type: number
+    default: 100.0
+    description: "Most-recent non-uniform horizontal percentage entered in the Scale Options dialog"
+
+  scale_vertical_pct:
+    type: number
+    default: 100.0
+    description: "Most-recent non-uniform vertical percentage entered in the Scale Options dialog"
+
+  scale_strokes:
+    type: bool
+    default: true
+    description: >
+      When true, scaling multiplies stroke-width by the unsigned
+      geometric mean √(|sx · sy|). When false, stroke-width is
+      preserved. Brush-stroke size overrides scale by the same
+      factor. See SCALE_TOOL.md §Apply behavior.
+
+  scale_corners:
+    type: bool
+    default: false
+    description: >
+      When true, scaling multiplies a rounded_rect's rx by |sx|
+      and ry by |sy|. No-op on other element types. Default
+      false matches the reference dialog. See SCALE_TOOL.md
+      §Apply behavior.
+
+  scale_preview:
+    type: bool
+    default: true
+    description: "When true, the Scale Options dialog drives a live preview overlay (per-element transform-matrix override). No document mutation until OK"
+
+  rotate_angle:
+    type: number
+    default: 0.0
+    description: "Most-recent angle (degrees) entered in the Rotate Options dialog. Positive values rotate counter-clockwise"
+
+  rotate_preview:
+    type: bool
+    default: true
+    description: "When true, the Rotate Options dialog drives a live preview overlay"
+
+  shear_angle:
+    type: number
+    default: 0.0
+    description: "Most-recent shear angle (degrees) entered in the Shear Options dialog"
+
+  shear_axis:
+    type: enum
+    values: [horizontal, vertical, custom]
+    default: horizontal
+    description: "Shear axis selected in the Shear Options dialog: horizontal (x-axis fixed), vertical (y-axis fixed), or custom (use shear_axis_angle)"
+
+  shear_axis_angle:
+    type: number
+    default: 0.0
+    description: "Custom-axis angle (degrees from horizontal) used when shear_axis == 'custom'"
+
+  shear_preview:
+    type: bool
+    default: true
+    description: "When true, the Shear Options dialog drives a live preview overlay"
 
   # ── Align panel ───────────────────────────────────────────────
   # Mirror state for the Align panel's four persistent fields.

@@ -109,6 +109,18 @@ class StateStore:
         # close_dialog effect) unless first cleared by the
         # clear_dialog_snapshot effect (used by OK actions).
         self._dialog_snapshot: dict | None = None
+        # Action name fired by the post-run hook in run_effects when
+        # the dialog mutates. Set by open_dialog from the dialog spec's
+        # on_change field. Cleared on close_dialog. See SCALE_TOOL.md
+        # §Preview.
+        self._dialog_on_change: str | None = None
+        # Set by every set_dialog write; consumed by the post-run hook
+        # to decide whether to fire the dialog's on_change action.
+        self._dialog_dirty: bool = False
+        # Re-entrancy guard: True while the post-run hook is dispatching
+        # the on_change action. Prevents the action's own set effects
+        # from re-triggering the hook.
+        self._dialog_firing_on_change: bool = False
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
         # Workspace-loaded reference data (swatch_libraries,
@@ -316,6 +328,7 @@ class StateStore:
     def set_dialog(self, key: str, value):
         if self._dialog_id is None:
             return
+        self._dialog_dirty = True
         prop = self._dialog_props.get(key)
         if prop and "set" in prop:
             from workspace_interpreter.expr import evaluate
@@ -366,6 +379,33 @@ class StateStore:
         self._dialog = {}
         self._dialog_params = None
         self._dialog_props = {}
+        self._dialog_on_change = None
+        self._dialog_dirty = False
+        # _dialog_firing_on_change is intentionally NOT cleared here —
+        # close_dialog can be invoked from inside an on_change-fired
+        # chain, and the guard must remain set until run_effects
+        # unwinds.
+
+    # ── Dialog on_change hook (Phase 1.7b) ─────────────────────
+
+    def set_dialog_on_change(self, action: str | None) -> None:
+        self._dialog_on_change = action
+
+    def get_dialog_on_change(self) -> str | None:
+        return self._dialog_on_change
+
+    def take_dialog_dirty(self) -> bool:
+        """Take the dirty flag, leaving it False. Used by the post-run
+        hook in run_effects to decide whether to fire on_change."""
+        was = self._dialog_dirty
+        self._dialog_dirty = False
+        return was
+
+    def is_firing_on_change(self) -> bool:
+        return self._dialog_firing_on_change
+
+    def set_firing_on_change(self, firing: bool) -> None:
+        self._dialog_firing_on_change = firing
 
     # ── Dialog preview snapshot/restore (Phase 0) ──────────────
 

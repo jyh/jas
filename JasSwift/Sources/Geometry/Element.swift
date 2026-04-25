@@ -591,6 +591,35 @@ public struct Transform: Equatable, Hashable {
             f: (b * e - a * f) * invDet
         )
     }
+
+    /// Shear matrix with horizontal shear factor `kx` (x ← x + kx·y)
+    /// and vertical shear factor `ky` (y ← y + ky·x).
+    public static func shear(_ kx: Double, _ ky: Double) -> Transform {
+        Transform(a: 1, b: ky, c: kx, d: 1)
+    }
+
+    /// Return `self * other` — the matrix that applies `other` first,
+    /// then `self`. Equivalent to (self ∘ other)(p) for any point p.
+    public func multiply(_ other: Transform) -> Transform {
+        Transform(
+            a: a * other.a + c * other.b,
+            b: b * other.a + d * other.b,
+            c: a * other.c + c * other.d,
+            d: b * other.c + d * other.d,
+            e: a * other.e + c * other.f + e,
+            f: b * other.e + d * other.f + f
+        )
+    }
+
+    /// Conjugate this transform around `(rx, ry)` —
+    /// `T(rx, ry) * self * T(-rx, -ry)`. The result, when applied to
+    /// any point, behaves as if `self` were applied with `(rx, ry)`
+    /// as the origin.
+    public func aroundPoint(_ rx: Double, _ ry: Double) -> Transform {
+        let pre = Transform.translate(-rx, -ry)
+        let post = Transform.translate(rx, ry)
+        return post.multiply(self).multiply(pre)
+    }
 }
 
 // MARK: - SVG path commands
@@ -1244,6 +1273,23 @@ public enum Element: Equatable {
     /// to move elements without disturbing existing rotation / scale.
     public func withTransformTranslated(dx: Double, dy: Double) -> Element {
         let t = (transform ?? .identity).translated(dx, dy)
+        return withTransformSet(t)
+    }
+
+    /// Return a copy of this element with `matrix` pre-multiplied
+    /// onto its existing transform. Used by the transform-tool
+    /// family (Scale / Rotate / Shear) to compose a per-frame
+    /// matrix on top of any existing transform without disturbing
+    /// the element's geometry. See SCALE_TOOL.md §Apply behavior.
+    public func withTransformPremultiplied(_ matrix: Transform) -> Element {
+        let t = matrix.multiply(transform ?? .identity)
+        return withTransformSet(t)
+    }
+
+    /// Internal: replace the element's transform with `t`,
+    /// preserving every other field. Shared by
+    /// `withTransformTranslated` and `withTransformPremultiplied`.
+    private func withTransformSet(_ t: Transform) -> Element {
         switch self {
         case .line(let v):
             return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,

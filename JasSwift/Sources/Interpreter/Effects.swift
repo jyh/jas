@@ -133,6 +133,22 @@ func runEffects(
                dialogs: dialogs, platformEffects: platformEffects,
                schema: schema, diagnostics: &diagnostics)
     }
+    // Dialog on_change post-batch hook. Fires the action declared on
+    // the open dialog's on_change field whenever this batch mutated
+    // dialog state. Per-batch debounced (one fire per UI tick batch).
+    // Re-entrancy guarded so the action's effects do not re-fire.
+    // See SCALE_TOOL.md §Preview.
+    if !store.isFiringOnChange() && store.takeDialogDirty() {
+        if let actionName = store.getDialogOnChange() {
+            store.setFiringOnChange(true)
+            let dispatchEffect: [String: Any] = ["dispatch": actionName]
+            runOne(dispatchEffect, ctx: threadedCtx, store: store,
+                   actions: actions, dialogs: dialogs,
+                   platformEffects: platformEffects,
+                   schema: schema, diagnostics: &diagnostics)
+            store.setFiringOnChange(false)
+        }
+    }
 }
 
 /// Convenience overload for callers that don't need diagnostics.
@@ -501,6 +517,21 @@ private func runOne(
             }
             store.captureDialogSnapshot(targets)
         }
+        // Document-level preview snapshot for transform-tool dialogs
+        // (Scale Options / Rotate Options / Shear Options). Fired
+        // through the doc.preview.capture platform effect to avoid
+        // a direct Model handle in the interpreter.
+        // See SCALE_TOOL.md §Preview.
+        if let docPreview = dlgDef["doc_preview"] as? Bool, docPreview {
+            if let cap = platformEffects["doc.preview.capture"] {
+                _ = cap([:], ctx, store)
+            }
+        }
+        // Wire the dialog's on_change action — fired by runEffects
+        // after any batch that mutated dialog state.
+        store.setDialogOnChange(dlgDef["on_change"] as? String)
+        // Clear any leftover dirty flag from prior dialog sessions.
+        _ = store.takeDialogDirty()
         return
     }
 
@@ -516,6 +547,15 @@ private func runOne(
                 }
             }
             store.clearDialogSnapshot()
+        }
+        // Document-level preview restore (Cancel path). Fired through
+        // platform effects; the platform side is responsible for
+        // checking has_preview_snapshot before doing work.
+        if let restore = platformEffects["doc.preview.restore"] {
+            _ = restore([:], ctx, store)
+        }
+        if let clear = platformEffects["doc.preview.clear"] {
+            _ = clear([:], ctx, store)
         }
         store.closeDialog()
         return

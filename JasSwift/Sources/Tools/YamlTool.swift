@@ -29,8 +29,11 @@ struct ToolSpec {
     /// on_mouseup, on_enter, on_leave, on_dblclick, on_keydown). Each
     /// value is the raw effect list.
     let handlers: [String: [Any]]
-    /// Optional overlay declaration.
-    let overlay: OverlaySpec?
+    /// Overlay declarations. Most tools have zero or one entry; the
+    /// transform-tool family (Scale / Rotate / Shear) uses multiple
+    /// to layer the reference-point cross over the drag-time bbox
+    /// ghost. Each entry's `guardExpr` is evaluated independently.
+    let overlay: [OverlaySpec]
 
     /// Parse a workspace tool dict, typically from `workspace.json`
     /// under `tools.<id>`. Returns nil if required `id` is missing.
@@ -87,10 +90,22 @@ private func parseHandlers(_ val: Any?) -> [String: [Any]] {
     return out
 }
 
-private func parseOverlay(_ val: Any?) -> OverlaySpec? {
-    guard let obj = val as? [String: Any] else { return nil }
+private func parseOverlayEntry(_ obj: [String: Any]) -> OverlaySpec? {
     guard let render = obj["render"] as? [String: Any] else { return nil }
     return OverlaySpec(guardExpr: obj["if"] as? String, render: render)
+}
+
+private func parseOverlay(_ val: Any?) -> [OverlaySpec] {
+    // Accept either a single {if, render} object (most tools) or a
+    // list of such objects (transform-tool family). Both produce
+    // the same [OverlaySpec] downstream.
+    if let obj = val as? [String: Any] {
+        return parseOverlayEntry(obj).map { [$0] } ?? []
+    }
+    if let arr = val as? [Any] {
+        return arr.compactMap { ($0 as? [String: Any]).flatMap(parseOverlayEntry) }
+    }
+    return []
 }
 
 // MARK: - YamlTool
@@ -232,29 +247,38 @@ final class YamlTool: CanvasTool {
     }
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
-        guard let overlay = spec.overlay else { return }
+        if spec.overlay.isEmpty { return }
         let _reg = registerDocument(ctx.model.document)
         let evalCtx = store.evalContext()
-        // Guard evaluates in the same scope the handler used.
-        if let guardExpr = overlay.guardExpr {
-            if !evaluate(guardExpr, context: evalCtx).toBool() { return }
-        }
-        let render = overlay.render
-        let type = render["type"] as? String ?? ""
-        switch type {
-        case "rect": drawRectOverlay(cgCtx, render, evalCtx)
-        case "line": drawLineOverlay(cgCtx, render, evalCtx)
-        case "polygon": drawPolygonOverlay(cgCtx, render, evalCtx)
-        case "star": drawStarOverlay(cgCtx, render, evalCtx)
-        case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
-        case "buffer_polyline": drawBufferPolylineOverlay(cgCtx, render, evalCtx)
-        case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx)
-        case "partial_selection_overlay":
-            drawPartialSelectionOverlay(cgCtx, render, evalCtx,
+        for overlay in spec.overlay {
+            // Guard evaluates in the same scope the handler used.
+            if let guardExpr = overlay.guardExpr,
+               !evaluate(guardExpr, context: evalCtx).toBool() {
+                continue
+            }
+            let render = overlay.render
+            let type = render["type"] as? String ?? ""
+            switch type {
+            case "rect": drawRectOverlay(cgCtx, render, evalCtx)
+            case "line": drawLineOverlay(cgCtx, render, evalCtx)
+            case "polygon": drawPolygonOverlay(cgCtx, render, evalCtx)
+            case "star": drawStarOverlay(cgCtx, render, evalCtx)
+            case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
+            case "buffer_polyline":
+                drawBufferPolylineOverlay(cgCtx, render, evalCtx)
+            case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx)
+            case "partial_selection_overlay":
+                drawPartialSelectionOverlay(cgCtx, render, evalCtx,
+                                             model: ctx.model)
+            case "oval_cursor":
+                drawOvalCursorOverlay(cgCtx, render, evalCtx)
+            case "reference_point_cross":
+                drawReferencePointCross(cgCtx, render, evalCtx,
                                          model: ctx.model)
-        case "oval_cursor":
-            drawOvalCursorOverlay(cgCtx, render, evalCtx)
-        default: break
+            case "bbox_ghost":
+                drawBBoxGhost(cgCtx, render, evalCtx, model: ctx.model)
+            default: break
+            }
         }
         _ = _reg
     }
@@ -831,4 +855,168 @@ private func addOvalPath(
         }
     }
     cgCtx.closePath()
+}
+
+// MARK: - Transform-tool overlays
+
+/// Resolve the reference-point coordinate for a transform-tool
+/// overlay. Reads the `ref_point` field (typically the expression
+/// `state.transform_reference_point`) — a Value.list of two
+/// numbers when set, else falls back to the selection union bbox
+/// center. Returns nil when there is no selection (overlay hides).
+private func resolveOverlayRefPoint(
+    _ render: [String: Any],
+    _ evalCtx: [String: Any],
+    model: Model
+) -> (Double, Double)? {
+    if let expr = render["ref_point"] as? String {
+        let v = evaluate(expr, context: evalCtx)
+        if case .list(let items) = v, items.count >= 2 {
+            let rx = (items[0].value as? NSNumber)?.doubleValue ?? Double.nan
+            let ry = (items[1].value as? NSNumber)?.doubleValue ?? Double.nan
+            if !rx.isNaN && !ry.isNaN { return (rx, ry) }
+        }
+    }
+    let doc = model.document
+    let elements: [Element] = doc.selection.compactMap { es in
+        isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
+    }
+    if elements.isEmpty { return nil }
+    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    return (bb.x + bb.width / 2, bb.y + bb.height / 2)
+}
+
+/// Draw the cyan-blue reference-point cross overlay used by Scale,
+/// Rotate, Shear. 12 px crosshair + 2 px dot, color #4A9EFF. See
+/// SCALE_TOOL.md §Reference-point cross overlay.
+private func drawReferencePointCross(
+    _ cgCtx: CGContext, _ render: [String: Any],
+    _ evalCtx: [String: Any], model: Model
+) {
+    guard let (rx, ry) = resolveOverlayRefPoint(render, evalCtx, model: model)
+    else { return }
+    let color = CGColor(red: 0x4A / 255.0, green: 0x9E / 255.0,
+                        blue: 0xFF / 255.0, alpha: 1)
+    cgCtx.setStrokeColor(color)
+    cgCtx.setLineWidth(1.0)
+    let arm: CGFloat = 6.0
+    cgCtx.beginPath()
+    cgCtx.move(to: CGPoint(x: rx - arm, y: ry))
+    cgCtx.addLine(to: CGPoint(x: rx + arm, y: ry))
+    cgCtx.strokePath()
+    cgCtx.beginPath()
+    cgCtx.move(to: CGPoint(x: rx, y: ry - arm))
+    cgCtx.addLine(to: CGPoint(x: rx, y: ry + arm))
+    cgCtx.strokePath()
+    cgCtx.setFillColor(color)
+    cgCtx.beginPath()
+    cgCtx.addArc(center: CGPoint(x: rx, y: ry), radius: 2,
+                 startAngle: 0, endAngle: 2 * .pi, clockwise: false)
+    cgCtx.fillPath()
+}
+
+/// Draw the dashed post-transform bounding-box ghost during a drag.
+/// Reads transform_kind ("scale" / "rotate" / "shear"), press +
+/// cursor + shift_held, composes the matrix via TransformApply and
+/// renders the union bbox of the selection under that matrix.
+private func drawBBoxGhost(
+    _ cgCtx: CGContext, _ render: [String: Any],
+    _ evalCtx: [String: Any], model: Model
+) {
+    guard let (rx, ry) = resolveOverlayRefPoint(render, evalCtx, model: model)
+    else { return }
+    let kindExpr = (render["transform_kind"] as? String) ?? "''"
+    let kind: String = {
+        if case .string(let s) = evaluate(kindExpr, context: evalCtx) { return s }
+        return ""
+    }()
+    let px = evalOverlayNumber(render["press_x"], evalCtx)
+    let py = evalOverlayNumber(render["press_y"], evalCtx)
+    let cx = evalOverlayNumber(render["cursor_x"], evalCtx)
+    let cy = evalOverlayNumber(render["cursor_y"], evalCtx)
+    let shift: Bool = {
+        if let s = render["shift_held"] as? String,
+           case .bool(let b) = evaluate(s, context: evalCtx) { return b }
+        return false
+    }()
+
+    let matrix: Transform = {
+        switch kind {
+        case "scale":
+            let denomX = px - rx
+            let denomY = py - ry
+            var sx = abs(denomX) < 1e-9 ? 1.0 : (cx - rx) / denomX
+            var sy = abs(denomY) < 1e-9 ? 1.0 : (cy - ry) / denomY
+            if shift {
+                let prod = sx * sy
+                let sign: Double = prod >= 0 ? 1.0 : -1.0
+                let s = sign * sqrt(abs(prod))
+                sx = s; sy = s
+            }
+            return TransformApply.scaleMatrix(sx: sx, sy: sy, rx: rx, ry: ry)
+        case "rotate":
+            let tp = atan2(py - ry, px - rx)
+            let tc = atan2(cy - ry, cx - rx)
+            var theta = (tc - tp) * 180.0 / .pi
+            if shift { theta = (theta / 45.0).rounded() * 45.0 }
+            return TransformApply.rotateMatrix(thetaDeg: theta, rx: rx, ry: ry)
+        case "shear":
+            let dx = cx - px
+            let dy = cy - py
+            if shift {
+                if abs(dx) >= abs(dy) {
+                    let denom = max(abs(py - ry), 1e-9)
+                    let k = dx / denom
+                    return TransformApply.shearMatrix(
+                        angleDeg: atan(k) * 180.0 / .pi,
+                        axis: "horizontal", axisAngleDeg: 0, rx: rx, ry: ry)
+                } else {
+                    let denom = max(abs(px - rx), 1e-9)
+                    let k = dy / denom
+                    return TransformApply.shearMatrix(
+                        angleDeg: atan(k) * 180.0 / .pi,
+                        axis: "vertical", axisAngleDeg: 0, rx: rx, ry: ry)
+                }
+            }
+            let ax = px - rx
+            let ay = py - ry
+            let axisLen = max(sqrt(ax * ax + ay * ay), 1e-9)
+            let perpX = -ay / axisLen
+            let perpY = ax / axisLen
+            let perpDist = (cx - px) * perpX + (cy - py) * perpY
+            let k = perpDist / axisLen
+            let axisAngleDeg = atan2(ay, ax) * 180.0 / .pi
+            return TransformApply.shearMatrix(
+                angleDeg: atan(k) * 180.0 / .pi,
+                axis: "custom", axisAngleDeg: axisAngleDeg,
+                rx: rx, ry: ry)
+        default:
+            return Transform.identity
+        }
+    }()
+
+    let doc = model.document
+    let elements: [Element] = doc.selection.compactMap { es in
+        isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
+    }
+    if elements.isEmpty { return }
+    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    let corners = [
+        matrix.applyPoint(bb.x,             bb.y),
+        matrix.applyPoint(bb.x + bb.width,  bb.y),
+        matrix.applyPoint(bb.x + bb.width,  bb.y + bb.height),
+        matrix.applyPoint(bb.x,             bb.y + bb.height),
+    ]
+    cgCtx.setStrokeColor(CGColor(red: 0x4A / 255.0, green: 0x9E / 255.0,
+                                  blue: 0xFF / 255.0, alpha: 1))
+    cgCtx.setLineWidth(1.0)
+    cgCtx.setLineDash(phase: 0, lengths: [4, 2])
+    cgCtx.beginPath()
+    cgCtx.move(to: CGPoint(x: corners[0].0, y: corners[0].1))
+    for c in corners.dropFirst() {
+        cgCtx.addLine(to: CGPoint(x: c.0, y: c.1))
+    }
+    cgCtx.closePath()
+    cgCtx.strokePath()
+    cgCtx.setLineDash(phase: 0, lengths: []) // reset
 }

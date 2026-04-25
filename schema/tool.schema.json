@@ -39,6 +39,10 @@
       "pattern": "^[a-z][a-z0-9_]*$",
       "description": "Id of a panel in workspace/panels/ that the toolbar shows / focuses when the user double-clicks this tool's icon. Parallel to tool_options_dialog: dialog destinations are modal (Reset / Cancel / OK), panel destinations are persistent. Use one or the other, not both."
     },
+    "tool_options_dialog_on_alt_click": {
+      "type": "boolean",
+      "description": "When true, an Alt-click on canvas opens the dialog referenced by tool_options_dialog. Used by the transform-tool family (Scale, Rotate, Shear) — the same click also writes state.transform_reference_point. Per SCALE_TOOL.md §Tool Options dialog."
+    },
     "state": {
       "type": "object",
       "description": "Tool-local state slots. Namespaced as $tool.<id>.* in expressions.",
@@ -75,20 +79,42 @@
       }
     },
     "overlay": {
-      "type": "object",
-      "description": "Tool overlay drawn into the canvas overlay layer each frame the `if:` guard is truthy.",
-      "required": ["render"],
-      "additionalProperties": false,
-      "properties": {
-        "if": {
-          "type": "string",
-          "description": "Expression evaluated each frame; overlay renders when truthy."
-        },
-        "render": {
+      "description": "Tool overlay drawn into the canvas overlay layer each frame. Either a single {if, render} object (most tools) or a list of such objects evaluated in order (transform tools, which compose the reference-point cross with the drag-time bbox ghost). Each entry's `if` expression gates that entry independently.",
+      "oneOf": [
+        {
           "type": "object",
-          "description": "Render spec — element type + attributes. Any expression-valued field is evaluated per frame."
+          "required": ["render"],
+          "additionalProperties": false,
+          "properties": {
+            "if": {
+              "type": "string",
+              "description": "Expression evaluated each frame; overlay renders when truthy."
+            },
+            "render": {
+              "type": "object",
+              "description": "Render spec — element type + attributes. Any expression-valued field is evaluated per frame."
+            }
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["render"],
+            "additionalProperties": false,
+            "properties": {
+              "if": {
+                "type": "string",
+                "description": "Expression evaluated each frame; this overlay layer renders when truthy."
+              },
+              "render": {
+                "type": "object",
+                "description": "Render spec for this overlay layer."
+              }
+            }
+          }
         }
-      }
+      ]
     }
   },
   "$defs": {

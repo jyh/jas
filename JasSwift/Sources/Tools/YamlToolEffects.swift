@@ -486,6 +486,99 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.scale.apply / doc.rotate.apply / doc.shear.apply.
+    // Each accepts both calling conventions:
+    //   - drag: press_x/y + cursor_x/y + shift + copy (from
+    //     workspace/tools/<tool>.yaml on_mouseup)
+    //   - dialog: tool-specific direct params (sx/sy, angle,
+    //     axis, axis_angle) + copy (from workspace/actions.yaml
+    //     <tool>_options_confirm)
+    // Reference point comes from state.transform_reference_point
+    // when set, else falls back to the selection's union bbox
+    // center. See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md
+    // §Apply behavior.
+    effects["doc.scale.apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let copy = evalBool(args["copy"], store: store, ctx: ctx)
+        let (sx, sy): (Double, Double) = {
+            if args["sx"] != nil {
+                return (evalNumber(args["sx"], store: store, ctx: ctx),
+                        evalNumber(args["sy"], store: store, ctx: ctx))
+            }
+            let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+            let px = evalNumber(args["press_x"],  store: store, ctx: ctx)
+            let py = evalNumber(args["press_y"],  store: store, ctx: ctx)
+            let cx = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+            let cy = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+            let shift = evalBool(args["shift"], store: store, ctx: ctx)
+            return dragToScaleFactors(px: px, py: py, cx: cx, cy: cy,
+                                      rx: rx, ry: ry, shift: shift)
+        }()
+        scaleApply(model: model, store: store, ctx: ctx,
+                   sx: sx, sy: sy, copy: copy)
+        return nil
+    }
+    effects["doc.rotate.apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let copy = evalBool(args["copy"], store: store, ctx: ctx)
+        let thetaDeg: Double = {
+            if args["angle"] != nil {
+                return evalNumber(args["angle"], store: store, ctx: ctx)
+            }
+            let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+            let px = evalNumber(args["press_x"],  store: store, ctx: ctx)
+            let py = evalNumber(args["press_y"],  store: store, ctx: ctx)
+            let cx = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+            let cy = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+            let shift = evalBool(args["shift"], store: store, ctx: ctx)
+            return dragToRotateAngle(px: px, py: py, cx: cx, cy: cy,
+                                     rx: rx, ry: ry, shift: shift)
+        }()
+        rotateApply(model: model, store: store, ctx: ctx,
+                    thetaDeg: thetaDeg, copy: copy)
+        return nil
+    }
+    effects["doc.shear.apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let copy = evalBool(args["copy"], store: store, ctx: ctx)
+        let (angleDeg, axis, axisAngleDeg): (Double, String, Double) = {
+            if args["angle"] != nil && args["axis"] != nil {
+                let a = evalNumber(args["angle"], store: store, ctx: ctx)
+                let ax = evalStringValue(args["axis"], store: store, ctx: ctx)
+                let aa = evalNumber(args["axis_angle"], store: store, ctx: ctx)
+                return (a, ax, aa)
+            }
+            let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+            let px = evalNumber(args["press_x"],  store: store, ctx: ctx)
+            let py = evalNumber(args["press_y"],  store: store, ctx: ctx)
+            let cx = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+            let cy = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+            let shift = evalBool(args["shift"], store: store, ctx: ctx)
+            return dragToShearParams(px: px, py: py, cx: cx, cy: cy,
+                                     rx: rx, ry: ry, shift: shift)
+        }()
+        shearApply(model: model, store: store, ctx: ctx,
+                   angleDeg: angleDeg, axis: axis,
+                   axisAngleDeg: axisAngleDeg, copy: copy)
+        return nil
+    }
+
+    // doc.preview.capture / restore / clear — out-of-band document
+    // snapshot for dialog Preview flows (Scale / Rotate / Shear).
+    // See SCALE_TOOL.md §Preview.
+    effects["doc.preview.capture"] = { _, _, _ in
+        model.capturePreviewSnapshot()
+        return nil
+    }
+    effects["doc.preview.restore"] = { _, _, _ in
+        model.restorePreviewSnapshot()
+        return nil
+    }
+    effects["doc.preview.clear"] = { _, _, _ in
+        model.clearPreviewSnapshot()
+        return nil
+    }
+
     // doc.magic_wand.apply — { seed, mode? }.
     // Magic Wand selection per MAGIC_WAND_TOOL.md §Predicate.
     // Reads the seed path + mode (replace / add / subtract) from
@@ -1971,8 +2064,9 @@ private func blobBrushInsertAt(
 /// True when `path` references an existing element in `doc`.
 /// Document's `getElement(_:)` fatalErrors on invalid input, so this
 /// helper does a defensive walk instead. `childrenOf` in Document is
-/// private, so we inline the switch.
-private func isValidPath(_ doc: Document, _ path: ElementPath) -> Bool {
+/// private, so we inline the switch. `internal` so the transform-tool
+/// overlay code in YamlTool.swift can reuse it.
+internal func isValidPath(_ doc: Document, _ path: ElementPath) -> Bool {
     guard !path.isEmpty else { return false }
     guard path[0] >= 0 && path[0] < doc.layers.count else { return false }
     var node: Element = .layer(doc.layers[path[0]])
@@ -1993,6 +2087,212 @@ private func isValidPath(_ doc: Document, _ path: ElementPath) -> Bool {
 
 /// Evaluate a dx/dy/x1/... argument that may be a number literal, a
 /// numeric string expression, or a JSON number. Missing → 0.
+// ──────────────────────────────────────────────────────────────────
+// Transform tools (Scale / Rotate / Shear) apply effects.
+// See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md §Apply behavior.
+// ──────────────────────────────────────────────────────────────────
+
+/// Resolve the active reference point for a transform-tool apply.
+/// Reads state.transform_reference_point — when it's a list of two
+/// numbers, returns those as (rx, ry). Otherwise falls back to the
+/// union bounding-box center of the current selection.
+private func resolveReferencePoint(
+    model: Model, store: StateStore, ctx: [String: Any]
+) -> (Double, Double) {
+    // Custom reference point.
+    let evalCtx = store.evalContext(extra: ctx)
+    let v = evaluate("state.transform_reference_point", context: evalCtx)
+    if case .list(let items) = v, items.count >= 2 {
+        let rx = (items[0].value as? NSNumber)?.doubleValue ?? Double.nan
+        let ry = (items[1].value as? NSNumber)?.doubleValue ?? Double.nan
+        if !rx.isNaN && !ry.isNaN { return (rx, ry) }
+    }
+    // Fallback: selection union bbox center.
+    let doc = model.document
+    let elements: [Element] = doc.selection.compactMap { es in
+        isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
+    }
+    if elements.isEmpty { return (0, 0) }
+    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    return (bb.x + bb.width / 2, bb.y + bb.height / 2)
+}
+
+/// Convert drag inputs (press, cursor, ref) to scale factors per
+/// SCALE_TOOL.md §Gestures: sx = (cx-rx)/(px-rx), sy = (cy-ry)/(py-ry).
+/// Shift forces signed geometric mean onto both axes.
+private func dragToScaleFactors(
+    px: Double, py: Double, cx: Double, cy: Double,
+    rx: Double, ry: Double, shift: Bool
+) -> (Double, Double) {
+    let denomX = px - rx
+    let denomY = py - ry
+    let sx = abs(denomX) < 1e-9 ? 1.0 : (cx - rx) / denomX
+    let sy = abs(denomY) < 1e-9 ? 1.0 : (cy - ry) / denomY
+    if shift {
+        let prod = sx * sy
+        let sign: Double = prod >= 0 ? 1.0 : -1.0
+        let s = sign * sqrt(abs(prod))
+        return (s, s)
+    }
+    return (sx, sy)
+}
+
+/// Convert drag inputs to a rotation angle (degrees) per
+/// ROTATE_TOOL.md §Gestures. Shift snaps to nearest 45 deg.
+private func dragToRotateAngle(
+    px: Double, py: Double, cx: Double, cy: Double,
+    rx: Double, ry: Double, shift: Bool
+) -> Double {
+    let thetaPress  = atan2(py - ry, px - rx)
+    let thetaCursor = atan2(cy - ry, cx - rx)
+    var thetaDeg = (thetaCursor - thetaPress) * 180.0 / .pi
+    if shift { thetaDeg = (thetaDeg / 45.0).rounded() * 45.0 }
+    return thetaDeg
+}
+
+/// Convert drag inputs to (angle_deg, axis, axis_angle_deg) per
+/// SHEAR_TOOL.md §Gestures.
+private func dragToShearParams(
+    px: Double, py: Double, cx: Double, cy: Double,
+    rx: Double, ry: Double, shift: Bool
+) -> (Double, String, Double) {
+    let dx = cx - px
+    let dy = cy - py
+    if shift {
+        if abs(dx) >= abs(dy) {
+            let denom = max(abs(py - ry), 1e-9)
+            let k = dx / denom
+            return (atan(k) * 180.0 / .pi, "horizontal", 0)
+        } else {
+            let denom = max(abs(px - rx), 1e-9)
+            let k = dy / denom
+            return (atan(k) * 180.0 / .pi, "vertical", 0)
+        }
+    }
+    let ax = px - rx
+    let ay = py - ry
+    let axisLen = max(sqrt(ax * ax + ay * ay), 1e-9)
+    let perpX = -ay / axisLen
+    let perpY = ax / axisLen
+    let perpDist = (cx - px) * perpX + (cy - py) * perpY
+    let k = perpDist / axisLen
+    let axisAngleDeg = atan2(ay, ax) * 180.0 / .pi
+    return (atan(k) * 180.0 / .pi, "custom", axisAngleDeg)
+}
+
+/// Scale apply implementation. Pre-multiplies each selected
+/// element's existing transform with the scale matrix. Honors
+/// state.scale_strokes (geometric mean of |sx|, |sy|) and
+/// state.scale_corners (rounded_rect rx/ry, axis-independent).
+/// When copy is true, duplicates the selection first then applies
+/// the matrix to the duplicates.
+private func scaleApply(
+    model: Model, store: StateStore, ctx: [String: Any],
+    sx: Double, sy: Double, copy: Bool
+) {
+    if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
+    if copy { Controller(model: model).copySelection(dx: 0, dy: 0) }
+    let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+    let matrix = TransformApply.scaleMatrix(sx: sx, sy: sy, rx: rx, ry: ry)
+
+    let evalCtx = store.evalContext(extra: ctx)
+    let scaleStrokes: Bool = {
+        if case .bool(let b) = evaluate("state.scale_strokes", context: evalCtx) { return b }
+        return true
+    }()
+    let scaleCorners: Bool = {
+        if case .bool(let b) = evaluate("state.scale_corners", context: evalCtx) { return b }
+        return false
+    }()
+    let strokeFactor = TransformApply.strokeWidthFactor(sx: sx, sy: sy)
+
+    var newDoc = model.document
+    for es in newDoc.selection {
+        guard isValidPath(newDoc, es.path) else { continue }
+        let elem = newDoc.getElement(es.path)
+        var newElem = elem.withTransformPremultiplied(matrix)
+        if scaleStrokes {
+            newElem = scaleElementStrokeWidth(newElem, factor: strokeFactor)
+        }
+        if scaleCorners {
+            newElem = scaleElementCorners(newElem, sxAbs: abs(sx), syAbs: abs(sy))
+        }
+        newDoc = newDoc.replaceElement(es.path, with: newElem)
+    }
+    model.document = newDoc
+}
+
+/// Rotate apply. Rigid transform — no stroke / corner options.
+private func rotateApply(
+    model: Model, store: StateStore, ctx: [String: Any],
+    thetaDeg: Double, copy: Bool
+) {
+    if abs(thetaDeg) < 1e-9 { return }
+    if copy { Controller(model: model).copySelection(dx: 0, dy: 0) }
+    let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+    let matrix = TransformApply.rotateMatrix(thetaDeg: thetaDeg, rx: rx, ry: ry)
+
+    var newDoc = model.document
+    for es in newDoc.selection {
+        guard isValidPath(newDoc, es.path) else { continue }
+        let elem = newDoc.getElement(es.path)
+        let newElem = elem.withTransformPremultiplied(matrix)
+        newDoc = newDoc.replaceElement(es.path, with: newElem)
+    }
+    model.document = newDoc
+}
+
+/// Shear apply. Pure shear has determinant 1 — strokes preserved
+/// naturally; no stroke / corner options.
+private func shearApply(
+    model: Model, store: StateStore, ctx: [String: Any],
+    angleDeg: Double, axis: String, axisAngleDeg: Double, copy: Bool
+) {
+    if abs(angleDeg) < 1e-9 { return }
+    if copy { Controller(model: model).copySelection(dx: 0, dy: 0) }
+    let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+    let matrix = TransformApply.shearMatrix(
+        angleDeg: angleDeg, axis: axis,
+        axisAngleDeg: axisAngleDeg, rx: rx, ry: ry)
+
+    var newDoc = model.document
+    for es in newDoc.selection {
+        guard isValidPath(newDoc, es.path) else { continue }
+        let elem = newDoc.getElement(es.path)
+        let newElem = elem.withTransformPremultiplied(matrix)
+        newDoc = newDoc.replaceElement(es.path, with: newElem)
+    }
+    model.document = newDoc
+}
+
+/// Multiply the element's stroke-width by `factor` if present.
+private func scaleElementStrokeWidth(_ elem: Element, factor: Double) -> Element {
+    guard let stroke = elem.stroke else { return elem }
+    let newStroke = Stroke(
+        color: stroke.color, width: stroke.width * factor,
+        linecap: stroke.linecap, linejoin: stroke.linejoin,
+        miterLimit: stroke.miterLimit, align: stroke.align,
+        dashPattern: stroke.dashPattern,
+        startArrow: stroke.startArrow, endArrow: stroke.endArrow,
+        startArrowScale: stroke.startArrowScale,
+        endArrowScale: stroke.endArrowScale,
+        arrowAlign: stroke.arrowAlign, opacity: stroke.opacity)
+    return withStroke(elem, stroke: newStroke)
+}
+
+/// Scale a rounded_rect's rx / ry by (sxAbs, syAbs). No-op on
+/// other element types — corner radii are only modeled on Rect.
+private func scaleElementCorners(_ elem: Element, sxAbs: Double, syAbs: Double) -> Element {
+    if case .rect(let r) = elem {
+        return .rect(Rect(
+            x: r.x, y: r.y, width: r.width, height: r.height,
+            rx: r.rx * sxAbs, ry: r.ry * syAbs,
+            fill: r.fill, stroke: r.stroke, opacity: r.opacity,
+            transform: r.transform, locked: r.locked, visibility: r.visibility))
+    }
+    return elem
+}
+
 private func evalNumber(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> Double {
     if arg == nil { return 0 }
     if let n = arg as? NSNumber { return n.doubleValue }

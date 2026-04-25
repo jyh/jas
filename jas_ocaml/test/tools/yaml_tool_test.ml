@@ -107,12 +107,12 @@ let tool_spec_tests = [
     ]) with
     | Some s ->
       (match s.overlay with
-       | Some ov ->
+       | [ov] ->
          assert (ov.guard = Some "tool.foo.show");
          (match ov.render with
           | `Assoc r -> assert (List.assoc "type" r = `String "rect")
           | _ -> assert false)
-       | None -> assert false)
+       | _ -> assert false)
     | None -> assert false);
 ]
 
