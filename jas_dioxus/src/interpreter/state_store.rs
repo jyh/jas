@@ -42,6 +42,16 @@ pub struct StateStore {
     /// from jas_flask/static/js/engine/store.mjs. Mutated by the
     /// data.* and brush.* effect handlers.
     data: serde_json::Value,
+    /// Pending writes from canvas-tool effects to the workspace's
+    /// AppState (panel-state fields). Effect handlers can't reach
+    /// AppState directly, so they push (panel_id, key, value) tuples
+    /// here and the canvas event-routing code in workspace/app.rs
+    /// drains and applies them after each tool dispatch via
+    /// `apply_artboards_panel_field` (or panel-equivalent).
+    /// Used by the Artboard tool's doc.artboard.probe_hit to update
+    /// the artboards panel-selection on canvas click. See
+    /// ARTBOARD_TOOL.md §Selection coupling.
+    pending_panel_state_writes: Vec<(String, String, serde_json::Value)>,
 }
 
 impl StateStore {
@@ -59,7 +69,33 @@ impl StateStore {
             dialog_dirty: false,
             dialog_firing_on_change: false,
             data: serde_json::Value::Object(serde_json::Map::new()),
+            pending_panel_state_writes: Vec::new(),
         }
+    }
+
+    /// Queue a panel-state write for the canvas event-routing code
+    /// to apply against AppState. Used by canvas-tool effects that
+    /// need to mutate panel state (e.g. the Artboard tool writing
+    /// the artboards panel-selection on click-to-activate).
+    pub fn push_panel_state_write(
+        &mut self,
+        panel_id: &str,
+        key: &str,
+        value: serde_json::Value,
+    ) {
+        self.pending_panel_state_writes.push((
+            panel_id.to_string(),
+            key.to_string(),
+            value,
+        ));
+    }
+
+    /// Drain all queued panel-state writes. Returns owned tuples;
+    /// the buffer is left empty.
+    pub fn drain_panel_state_writes(
+        &mut self,
+    ) -> Vec<(String, String, serde_json::Value)> {
+        std::mem::take(&mut self.pending_panel_state_writes)
     }
 
     /// Initialise the data namespace from a JSON object. Replaces

@@ -469,6 +469,16 @@ impl CanvasTool for YamlTool {
             }
         }
     }
+
+    fn drain_pending_panel_writes(
+        &mut self,
+    ) -> Vec<(String, String, serde_json::Value)> {
+        // YAML-driven tools' effect handlers (e.g. doc.artboard.probe_hit)
+        // queue panel-state writes on self.store; the canvas event
+        // routing in workspace/app.rs drains and applies them after
+        // each event dispatch. See ARTBOARD_TOOL.md §Selection coupling.
+        self.store.drain_panel_state_writes()
+    }
 }
 
 /// Evaluate an overlay geometry field — accepts a string expression
