@@ -1078,6 +1078,59 @@ fn run_doc_effect(
                 path_commit_anchor_edit(model, store, origin_x, origin_y, target_x, target_y);
             }
         }
+        "doc.artboard.resize_apply" => {
+            // Live drag-to-resize per ARTBOARD_TOOL.md §Drag-to-resize.
+            // Idempotent — restores from the preview snapshot taken
+            // at the threshold latch, then re-applies the resize.
+            //
+            // Phase 1.3d ships basic resize with the opposite handle
+            // as the anchor. Modifiers (Shift = lock proportion,
+            // Alt = resize from center) land in P1.3e — today they
+            // are read but ignored.
+            //
+            // Resize targets the artboard whose handle was hit at
+            // mousedown (tool.artboard.hit_artboard_id). Multi-select
+            // resize is deferred per spec — handles render only when
+            // exactly one artboard is panel-selected.
+            if let serde_json::Value::Object(args) = spec {
+                let handle_pos = args
+                    .get("handle_pos")
+                    .and_then(|v| {
+                        if let Some(s) = v.as_str() {
+                            // Literal string → look up in tool state
+                            // unless it already names a handle.
+                            if matches!(
+                                s,
+                                "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w"
+                            ) {
+                                Some(s.to_string())
+                            } else {
+                                let val = eval_expr(s, store, ctx);
+                                match val {
+                                    Value::Str(t) => Some(t),
+                                    _ => None,
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let _shift_held = eval_bool(args.get("shift_held"), store, ctx);
+                let _alt_held = eval_bool(args.get("alt_held"), store, ctx);
+                artboard_resize_apply(model, store, &handle_pos, cursor_x, cursor_y);
+            }
+        }
+        "doc.artboard.resize_commit" => {
+            // Drag-to-resize commit. Re-applies the resize with
+            // integer-pt rounding on the final bounds per
+            // ARTBOARD_TOOL.md §Common rules. The dragged handle's
+            // anchor mapping is preserved so the resize anchor
+            // doesn't shift on rounding.
+            artboard_resize_commit(model, store);
+        }
         "doc.artboard.move_apply" => {
             // Live drag-to-move per ARTBOARD_TOOL.md §Drag-to-move.
             // Runs on every mousemove during a drag; idempotent
@@ -2818,6 +2871,151 @@ fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
         return;
     }
     artboard_translate_from_preview(model, &target_ids, dx, dy);
+}
+
+/// Compute new (x, y, w, h) for a resize gesture given the handle
+/// position, the original (pre-drag) bounds, and the cursor in
+/// document coords. The opposite handle (or opposite edge for edge
+/// handles) stays anchored. Each dimension is clamped to a 1 pt
+/// minimum per ARTBOARD_TOOL.md §Drag-to-resize. Modifiers (Shift =
+/// lock proportion, Alt = resize from center) are P1.3e work; this
+/// helper handles the unmodified case.
+fn artboard_resize_compute(
+    handle_pos: &str,
+    orig_x: f64,
+    orig_y: f64,
+    orig_w: f64,
+    orig_h: f64,
+    cursor_x: f64,
+    cursor_y: f64,
+) -> (f64, f64, f64, f64) {
+    let (mut new_x, mut new_y, mut new_w, mut new_h) = (orig_x, orig_y, orig_w, orig_h);
+    let right = orig_x + orig_w;
+    let bottom = orig_y + orig_h;
+    match handle_pos {
+        "nw" => {
+            // SE corner stays anchored.
+            new_x = cursor_x.min(right - 1.0);
+            new_y = cursor_y.min(bottom - 1.0);
+            new_w = right - new_x;
+            new_h = bottom - new_y;
+        }
+        "n" => {
+            // Bottom edge stays; top moves to cursor_y.
+            new_y = cursor_y.min(bottom - 1.0);
+            new_h = bottom - new_y;
+        }
+        "ne" => {
+            // SW corner stays anchored at (orig_x, bottom).
+            new_y = cursor_y.min(bottom - 1.0);
+            new_w = (cursor_x - orig_x).max(1.0);
+            new_h = bottom - new_y;
+        }
+        "e" => {
+            // Left edge stays; right moves to cursor_x.
+            new_w = (cursor_x - orig_x).max(1.0);
+        }
+        "se" => {
+            // NW corner stays anchored at (orig_x, orig_y).
+            new_w = (cursor_x - orig_x).max(1.0);
+            new_h = (cursor_y - orig_y).max(1.0);
+        }
+        "s" => {
+            // Top edge stays; bottom moves to cursor_y.
+            new_h = (cursor_y - orig_y).max(1.0);
+        }
+        "sw" => {
+            // NE corner stays anchored at (right, orig_y).
+            new_x = cursor_x.min(right - 1.0);
+            new_w = right - new_x;
+            new_h = (cursor_y - orig_y).max(1.0);
+        }
+        "w" => {
+            // Right edge stays; left moves to cursor_x.
+            new_x = cursor_x.min(right - 1.0);
+            new_w = right - new_x;
+        }
+        _ => {}
+    }
+    (new_x, new_y, new_w, new_h)
+}
+
+/// Apply a resize to the single target artboard, restoring from the
+/// preview snapshot first so repeated calls are idempotent.
+fn artboard_resize_apply(
+    model: &mut Model,
+    store: &mut StateStore,
+    handle_pos: &str,
+    cursor_x: f64,
+    cursor_y: f64,
+) {
+    if !model.has_preview_snapshot() {
+        return;
+    }
+    // Resize target is the artboard whose handle was hit at mousedown.
+    let target = store
+        .eval_context()
+        .get("tool")
+        .and_then(|t| t.get("artboard"))
+        .and_then(|a| a.get("hit_artboard_id"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let Some(target_id) = target else { return; };
+
+    model.restore_preview_snapshot();
+    let mut new_doc = model.document().clone();
+    if let Some(ab) = new_doc.artboards.iter_mut().find(|a| a.id == target_id) {
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute(handle_pos, ab.x, ab.y, ab.width, ab.height, cursor_x, cursor_y);
+        ab.x = nx;
+        ab.y = ny;
+        ab.width = nw;
+        ab.height = nh;
+    }
+    model.set_document(new_doc);
+}
+
+/// Drag-to-resize commit. Re-applies the resize with integer-pt
+/// rounding on the final bounds.
+fn artboard_resize_commit(model: &mut Model, store: &mut StateStore) {
+    let ctx = store.eval_context();
+    let tool = ctx.get("tool").and_then(|t| t.get("artboard"));
+    let Some(t) = tool else { return; };
+    let read_num = |k: &str| -> f64 {
+        t.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0)
+    };
+    let cursor_x = read_num("cursor_x");
+    let cursor_y = read_num("cursor_y");
+    let handle_pos = t
+        .get("hit_handle_pos")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_default();
+    let target_id = t
+        .get("hit_artboard_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let Some(target_id) = target_id else { return; };
+    if handle_pos.is_empty() {
+        return;
+    }
+    if !model.has_preview_snapshot() {
+        return;
+    }
+    model.restore_preview_snapshot();
+    let mut new_doc = model.document().clone();
+    if let Some(ab) = new_doc.artboards.iter_mut().find(|a| a.id == target_id) {
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute(&handle_pos, ab.x, ab.y, ab.width, ab.height, cursor_x, cursor_y);
+        // Integer-pt rounding at commit per ARTBOARD_TOOL.md §Common
+        // rules. Clamp w / h to >= 1 after rounding so a near-zero
+        // drag doesn't round to zero.
+        ab.x = nx.round();
+        ab.y = ny.round();
+        ab.width = nw.round().max(1.0);
+        ab.height = nh.round().max(1.0);
+    }
+    model.set_document(new_doc);
 }
 
 /// Implementation of doc.artboard.create_commit per ARTBOARD_TOOL.md
@@ -6796,6 +6994,66 @@ mod tests {
             Some(&mut model), None, None);
         assert_eq!(model.document().artboards[0].x, 180.0);
         assert_eq!(model.document().artboards[0].y, 100.0);
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_se_corner() {
+        // SE corner drag: NW (orig_x, orig_y) stays anchored.
+        // cursor at (200, 150) with original (0, 0, 100, 100):
+        // new w = 200, new h = 150.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("se", 0.0, 0.0, 100.0, 100.0, 200.0, 150.0);
+        assert_eq!((nx, ny, nw, nh), (0.0, 0.0, 200.0, 150.0));
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_nw_corner() {
+        // NW corner drag: SE (orig_x + orig_w, orig_y + orig_h) stays
+        // anchored. Original (10, 10, 100, 100), cursor at (60, 30):
+        // new x = 60, new y = 30, new w = 50, new h = 80.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("nw", 10.0, 10.0, 100.0, 100.0, 60.0, 30.0);
+        assert_eq!((nx, ny, nw, nh), (60.0, 30.0, 50.0, 80.0));
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_e_edge_only_w() {
+        // E edge drag: only width changes; y / height stay.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("e", 10.0, 20.0, 100.0, 50.0, 200.0, 999.0);
+        assert_eq!((nx, ny, nw, nh), (10.0, 20.0, 190.0, 50.0));
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_n_edge_only_h() {
+        // N edge drag: only y / height change.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("n", 10.0, 100.0, 50.0, 100.0, 999.0, 80.0);
+        assert_eq!((nx, ny, nw, nh), (10.0, 80.0, 50.0, 120.0));
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_clamps_at_min() {
+        // SE corner dragged past the opposite NW corner — width and
+        // height clamp at 1 pt min, anchored at NW.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("se", 100.0, 100.0, 50.0, 50.0, 50.0, 50.0);
+        assert_eq!((nx, ny), (100.0, 100.0));
+        assert_eq!(nw, 1.0);
+        assert_eq!(nh, 1.0);
+    }
+
+    #[test]
+    fn test_artboard_resize_compute_nw_clamps_against_se() {
+        // NW corner dragged past SE — x clamps to right - 1, y to
+        // bottom - 1 so the anchored opposite corner stays in place.
+        let (nx, ny, nw, nh) =
+            artboard_resize_compute("nw", 0.0, 0.0, 50.0, 50.0, 200.0, 200.0);
+        // right = 50, so nx clamps to 49 (right - 1).
+        assert_eq!(nx, 49.0);
+        assert_eq!(ny, 49.0);
+        assert_eq!(nw, 1.0);
+        assert_eq!(nh, 1.0);
     }
 
     #[test]
