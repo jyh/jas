@@ -1,0 +1,97 @@
+rotate_options:
+  summary: "Rotate"
+  description: >
+    Modal dialog opened by double-clicking the Rotate icon in the
+    toolbar OR by Alt-clicking on the canvas (which also sets the
+    reference point at the click coordinate). Edits the per-document
+    options that drive the Rotate tool's transformation:
+
+    - Angle: rotation in degrees, applied around the current
+      reference point. Positive values rotate counter-clockwise.
+    - Preview: when on, the canvas re-renders live with the
+      dialog's current angle applied (no document mutation
+      until OK).
+
+    Reset restores defaults without committing. Cancel discards
+    edits and any preview overlay (the reference point set by an
+    Alt-click is NOT reverted). OK writes values to state.rotate_*
+    and runs doc.rotate.apply on the selection. Copy runs
+    doc.rotate.apply with copy=true, applying the rotation to a
+    duplicate of the selection (placed immediately above the
+    original in z-order; selection moves to the duplicate). See
+    ROTATE_TOOL.md.
+  modal: true
+  width: 360
+  params: {}
+  state:
+    angle:
+      type: number
+      default: 0.0
+      description: "Rotation angle in degrees (positive = CCW)"
+    preview:
+      type: bool
+      default: true
+      description: "Live-update the canvas with dialog values applied"
+  init:
+    angle:   "state.rotate_angle"
+    preview: "state.rotate_preview"
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+
+      # ── Angle ──
+      - type: row
+        children:
+          - type: col
+            col: 4
+            children:
+              - { type: text, content: "Angle:", style: { font_size: 11 } }
+          - type: col
+            col: 8
+            children:
+              - id: ro_angle
+                type: number_input
+                min: -360
+                max: 360
+                step: 0.1
+                suffix: "°"
+                bind:
+                  value: "dialog.angle"
+
+      # ── Preview ──
+      - id: ro_preview
+        type: toggle
+        label: "Preview"
+        bind:
+          checked: "dialog.preview"
+
+      # ── Reset + Copy + Cancel + OK ──
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: space-between }
+        children:
+          - type: button
+            label: "Reset"
+            action: rotate_options_reset
+          - type: container
+            layout: row
+            style: { gap: 8 }
+            children:
+              - type: button
+                label: "Copy"
+                action: rotate_options_confirm
+                params:
+                  angle:   "dialog.angle"
+                  preview: "dialog.preview"
+                  copy:    true
+              - { type: button, label: "Cancel", action: dismiss_dialog }
+              - type: button
+                label: "OK"
+                action: rotate_options_confirm
+                variant: primary
+                params:
+                  angle:   "dialog.angle"
+                  preview: "dialog.preview"
+                  copy:    false
