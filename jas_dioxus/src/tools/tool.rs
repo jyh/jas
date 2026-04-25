@@ -49,6 +49,7 @@ pub enum ToolKind {
     Shear,
     Hand,
     Zoom,
+    Artboard,
 }
 
 impl ToolKind {
@@ -80,6 +81,7 @@ impl ToolKind {
             ToolKind::Shear => "Shear",
             ToolKind::Hand => "Hand (H)",
             ToolKind::Zoom => "Zoom (Z)",
+            ToolKind::Artboard => "Artboard (Shift+O)",
         }
     }
 
@@ -153,6 +155,7 @@ impl ToolKind {
             ToolKind::Shear => None,
             ToolKind::Hand => Some("h"),
             ToolKind::Zoom => Some("z"),
+            ToolKind::Artboard => Some("O"), // Shift+O
             _ => None,
         }
     }
@@ -247,8 +250,9 @@ mod tests {
             ToolKind::Shear,
             ToolKind::Hand,
             ToolKind::Zoom,
+            ToolKind::Artboard,
         ];
-        assert_eq!(all.len(), 26);
+        assert_eq!(all.len(), 27);
     }
 
     #[test]
@@ -286,12 +290,12 @@ mod tests {
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
             ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
-            ToolKind::Hand, ToolKind::Zoom,
+            ToolKind::Hand, ToolKind::Zoom, ToolKind::Artboard,
         ];
         for t in &all {
             set.insert(*t);
         }
-        assert_eq!(set.len(), 26);
+        assert_eq!(set.len(), 27);
     }
 
     #[test]
@@ -306,11 +310,21 @@ mod tests {
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
             ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
-            ToolKind::Hand, ToolKind::Zoom,
+            ToolKind::Hand, ToolKind::Zoom, ToolKind::Artboard,
         ];
         for t in &all {
             assert!(!t.label().is_empty(), "{:?} has empty label", t);
         }
+    }
+
+    #[test]
+    fn artboard_label_and_shortcut() {
+        assert_eq!(ToolKind::Artboard.label(), "Artboard (Shift+O)");
+        // Per ARTBOARD_TOOL.md §Shortcut: Shift+O canonical, O alias.
+        // Rust ToolKind::shortcut returns the uppercase letter to
+        // signify the Shift-modifier binding (matches BlobBrush /
+        // PathEraser convention).
+        assert_eq!(ToolKind::Artboard.shortcut(), Some("O"));
     }
 
     #[test]

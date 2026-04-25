@@ -39,6 +39,7 @@ fn tool_yaml_id(kind: ToolKind) -> Option<&'static str> {
         ToolKind::Shear => "shear",
         ToolKind::Hand => "hand",
         ToolKind::Zoom => "zoom",
+        ToolKind::Artboard => "artboard",
         ToolKind::Type | ToolKind::TypeOnPath => return None,
     })
 }
