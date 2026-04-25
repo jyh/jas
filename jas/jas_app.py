@@ -342,6 +342,21 @@ class MainWindow(QMainWindow):
                   lambda: self.toolbar.select_tool(Tool.PATH_ERASER))
         QShortcut(QKeySequence("Q"), self,
                   lambda: self.toolbar.select_tool(Tool.LASSO))
+        # Navigation tools (HAND_TOOL.md / ZOOM_TOOL.md).
+        QShortcut(QKeySequence("H"), self,
+                  lambda: self.toolbar.select_tool(Tool.HAND))
+        QShortcut(QKeySequence("Z"), self,
+                  lambda: self.toolbar.select_tool(Tool.ZOOM))
+        # View shortcuts (per ZOOM_TOOL.md §Keyboard shortcuts).
+        QShortcut(QKeySequence("Ctrl+0"), self,
+                  self._fit_active_artboard)
+        QShortcut(QKeySequence("Ctrl+Alt+0"), self,
+                  self._fit_all_artboards)
+        QShortcut(QKeySequence("Ctrl+1"), self,
+                  self._zoom_to_actual_size)
+        QShortcut(QKeySequence("Ctrl+="), self, self._zoom_in)
+        QShortcut(QKeySequence("Ctrl++"), self, self._zoom_in)
+        QShortcut(QKeySequence("Ctrl+-"), self, self._zoom_out)
         QShortcut(QKeySequence(Qt.Key_Delete), self, self._delete_selection)
         QShortcut(QKeySequence(Qt.Key_Backspace), self, self._delete_selection)
         QShortcut(QKeySequence.StandardKey.Undo, self, self._undo)
@@ -768,6 +783,85 @@ class MainWindow(QMainWindow):
         if doc.selection:
             m.snapshot()
             m.document = doc.delete_selection()
+
+    def _zoom_in(self):
+        """Zoom in by zoom_step centered at viewport center.
+        Per ZOOM_TOOL.md §Keyboard shortcuts and actions."""
+        m = self.active_model()
+        if not m:
+            return
+        self._apply_zoom_anchored(m, 1.2,
+                                   m.viewport_w / 2.0, m.viewport_h / 2.0)
+
+    def _zoom_out(self):
+        m = self.active_model()
+        if not m:
+            return
+        self._apply_zoom_anchored(m, 1.0 / 1.2,
+                                   m.viewport_w / 2.0, m.viewport_h / 2.0)
+
+    def _zoom_to_actual_size(self):
+        m = self.active_model()
+        if not m:
+            return
+        m.zoom_level = 1.0
+        self.canvas.update()
+
+    def _fit_active_artboard(self):
+        m = self.active_model()
+        if not m:
+            return
+        artboards = list(m.document.artboards)
+        if not artboards:
+            return
+        ab = artboards[0]
+        self._fit_rect(m, float(ab.x), float(ab.y),
+                        float(ab.width), float(ab.height), 20.0)
+
+    def _fit_all_artboards(self):
+        m = self.active_model()
+        if not m:
+            return
+        artboards = list(m.document.artboards)
+        if not artboards:
+            return
+        min_x = min(float(ab.x) for ab in artboards)
+        min_y = min(float(ab.y) for ab in artboards)
+        max_x = max(float(ab.x + ab.width) for ab in artboards)
+        max_y = max(float(ab.y + ab.height) for ab in artboards)
+        self._fit_rect(m, min_x, min_y,
+                        max_x - min_x, max_y - min_y, 20.0)
+
+    def _apply_zoom_anchored(self, m, factor: float,
+                              ax: float, ay: float) -> None:
+        z = m.zoom_level
+        px, py = m.view_offset_x, m.view_offset_y
+        doc_ax = (ax - px) / z
+        doc_ay = (ay - py) / z
+        z_new = max(0.1, min(64.0, z * factor))
+        m.zoom_level = z_new
+        m.view_offset_x = ax - doc_ax * z_new
+        m.view_offset_y = ay - doc_ay * z_new
+        self.canvas.update()
+
+    def _fit_rect(self, m, x: float, y: float, w: float, h: float,
+                  padding: float) -> None:
+        if w <= 0 or h <= 0:
+            return
+        vw, vh = m.viewport_w, m.viewport_h
+        if vw <= 0 or vh <= 0:
+            return
+        avail_w = vw - 2.0 * padding
+        avail_h = vh - 2.0 * padding
+        if avail_w <= 0 or avail_h <= 0:
+            return
+        z = max(0.1, min(64.0, min(avail_w / w, avail_h / h)))
+        rect_cx = x + w / 2.0
+        rect_cy = y + h / 2.0
+        m.zoom_level = z
+        m.view_offset_x = vw / 2.0 - rect_cx * z
+        m.view_offset_y = vh / 2.0 - rect_cy * z
+        self.canvas.update()
 
     def _reset_fill_stroke_defaults(self):
         """Reset fill/stroke to defaults (white fill, 1pt black stroke)."""
