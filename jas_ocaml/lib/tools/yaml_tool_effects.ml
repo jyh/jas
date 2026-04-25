@@ -3487,6 +3487,122 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* doc.artboard.duplicate_init — Alt-drag duplicate setup. Runs
+     once at the threshold latch (just before doc.preview.capture).
+     Deep-copies the source artboard at its current position;
+     Move/Copy Artwork (hard-coded on per spec) deep-copies every
+     top-level layer child fully contained in the source artboard,
+     appends the copies to the same layer, and tracks new paths in
+     tool.artboard.duplicated_paths. Updates hit_artboard_id to the
+     duplicate so subsequent move ops target it. *)
+  let doc_artboard_duplicate_init _ _ store =
+    let tool = Yojson.Safe.Util.member "tool"
+                 (State_store.eval_context store) in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    (match Yojson.Safe.Util.member "hit_artboard_id" ab with
+     | `String source_id ->
+       let doc = ctrl#document in
+       (match List.find_opt (fun (a : Artboard.artboard) ->
+          a.id = source_id) doc.artboards with
+        | None -> ()
+        | Some source ->
+          let artboard_bounds = List.map (fun (a : Artboard.artboard) ->
+            (a.id, (a.x, a.y, a.width, a.height))
+          ) doc.artboards in
+          (* Deep-copy source-contained elements; track new paths. *)
+          let dup_paths = ref [] in
+          let new_layers = Array.mapi (fun li layer ->
+            match layer with
+            | Element.Layer l ->
+              let original_count = Array.length l.children in
+              let extras = ref [] in
+              let appended = ref 0 in
+              Array.iter (fun child ->
+                let bb = Element.bounds child in
+                let containers = List.filter_map (fun (id, ab) ->
+                  if artboard_contains_bounds ab bb then Some id else None
+                ) artboard_bounds in
+                if List.length containers = 1
+                   && List.hd containers = source_id then begin
+                  (* Element values in OCaml — append as-is gives a
+                     distinct entry. *)
+                  extras := child :: !extras;
+                  dup_paths := (li, original_count + !appended)
+                                 :: !dup_paths;
+                  incr appended
+                end
+              ) l.children;
+              let extras_arr = Array.of_list (List.rev !extras) in
+              Element.Layer { l with children =
+                Array.append l.children extras_arr }
+            | other -> other
+          ) doc.layers in
+          let dup_paths = List.rev !dup_paths in
+
+          (* Mint duplicate artboard (collision-retry). *)
+          let existing = List.map (fun (a : Artboard.artboard) -> a.id)
+                           doc.artboards in
+          let rec mint n =
+            if n <= 0 then None
+            else
+              let cand = Artboard.generate_id () in
+              if List.mem cand existing then mint (n - 1) else Some cand
+          in
+          (match mint 100 with
+           | None -> ()
+           | Some new_id ->
+             let dup : Artboard.artboard = {
+               source with
+               id = new_id;
+               name = Artboard.next_name doc.artboards
+             } in
+             let new_artboards = doc.artboards @ [dup] in
+             ctrl#set_document { doc with
+               layers = new_layers;
+               artboards = new_artboards };
+             State_store.set_tool store "artboard" "hit_artboard_id"
+               (`String new_id);
+             let paths_json = `List (List.map (fun (li, ci) ->
+               `List [`Int li; `Int ci]) dup_paths) in
+             State_store.set_tool store "artboard" "duplicated_paths"
+               paths_json))
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.duplicate_apply — translation alias for the
+     duplicate's drag (hit_artboard_id was retargeted by
+     duplicate_init). *)
+  let doc_artboard_duplicate_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let press_x = eval_number (lookup "press_x") store ctx in
+       let press_y = eval_number (lookup "press_y") store ctx in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let dx = cursor_x -. press_x in
+       let dy = cursor_y -. press_y in
+       let target_ids =
+         let panel_ids = artboard_panel_selection_ids store in
+         if panel_ids <> [] then panel_ids
+         else
+           let tool = Yojson.Safe.Util.member "tool"
+                        (State_store.eval_context store) in
+           let ab = Yojson.Safe.Util.member "artboard" tool in
+           match Yojson.Safe.Util.member "hit_artboard_id" ab with
+           | `String s -> [s]
+           | _ -> []
+       in
+       if target_ids <> [] then
+         artboard_translate_from_preview ctrl#model store target_ids dx dy
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.duplicate_commit — same path as move_commit. *)
+  let doc_artboard_duplicate_commit = doc_artboard_move_commit in
+
   (* doc.artboard.create_commit — drag-to-create commit. Builds a
      rect from (x1, y1)-(x2, y2), rounds to integer pt, clamps each
      dimension to >= 1 pt, mints a fresh id (collision-retry against
@@ -3538,6 +3654,9 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.artboard.resize_apply", doc_artboard_resize_apply);
     ("doc.artboard.resize_commit", doc_artboard_resize_commit);
     ("doc.artboard.delete_panel_selected", doc_artboard_delete_panel_selected);
+    ("doc.artboard.duplicate_init", doc_artboard_duplicate_init);
+    ("doc.artboard.duplicate_apply", doc_artboard_duplicate_apply);
+    ("doc.artboard.duplicate_commit", doc_artboard_duplicate_commit);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
     ("doc.add_to_selection", doc_add_to_selection);
