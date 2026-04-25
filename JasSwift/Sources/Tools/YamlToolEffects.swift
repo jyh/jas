@@ -1062,6 +1062,38 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.artboard.move_apply — live drag-to-move per
+    // ARTBOARD_TOOL.md §Drag-to-move. Idempotent — restores from
+    // doc.preview.capture (taken at the threshold latch) before
+    // applying the cumulative (cursor - press) displacement. Per-
+    // artboard fallback to tool.artboard.hit_artboard_id when
+    // panel-selection is empty so single-artboard drags work end-
+    // to-end. Move/Copy Artwork (hard-coded on per spec) translates
+    // top-level elements per the containment rule from
+    // ARTBOARDS.md §Rearrange Dialogue Move-artwork semantics.
+    effects["doc.artboard.move_apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let pressX = evalNumber(args["press_x"], store: store, ctx: ctx)
+        let pressY = evalNumber(args["press_y"], store: store, ctx: ctx)
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        let shiftHeld = evalBool(args["shift_held"], store: store, ctx: ctx)
+        artboardMoveApply(
+            model: model, store: store,
+            pressX: pressX, pressY: pressY,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld)
+        return nil
+    }
+
+    // doc.artboard.move_commit — drag-to-move commit with integer-pt
+    // rounded displacement (preserves multi-select relative spacing
+    // per ARTBOARD_TOOL.md §Common rules).
+    effects["doc.artboard.move_commit"] = { _, _, store in
+        artboardMoveCommit(model: model, store: store)
+        return nil
+    }
+
     // doc.artboard.create_commit — drag-to-create commit. Builds a
     // rect from (x1,y1)-(x2,y2), rounds to integer pt, clamps each
     // dimension to >= 1 pt, mints a fresh id (collision-retry),
@@ -3135,4 +3167,222 @@ private func artboardProbeHover(
 
     // 3. Empty canvas.
     store.setTool("artboard", "hover_kind", "empty")
+}
+
+/// Read the panel-selected artboard ids from the eval context.
+private func readArtboardPanelSelection(_ store: StateStore) -> [String] {
+    let active = store.evalContext()["active_document"] as? [String: Any]
+    return (active?["artboards_panel_selection_ids"] as? [Any])?
+        .compactMap { $0 as? String } ?? []
+}
+
+/// True iff `inner` (an element's bbox) is fully contained in
+/// `outer` (an artboard's bounds). ≤ comparison so elements
+/// touching the artboard edge count as contained.
+private func artboardContainsBounds(
+    _ outer: (Double, Double, Double, Double),
+    _ inner: BBox
+) -> Bool {
+    let (ox, oy, ow, oh) = outer
+    let (ix, iy, iw, ih) = inner
+    return ix >= ox && iy >= oy
+        && ix + iw <= ox + ow && iy + ih <= oy + oh
+}
+
+/// Local element translator — file-private port of the helper in
+/// JasCommands.swift. Mirrors Rust's translate_element from
+/// geometry/element.rs. Recurses into Group / Layer children.
+private func artboardTranslateElement(
+    _ elem: Element, dx: Double, dy: Double
+) -> Element {
+    if dx == 0 && dy == 0 { return elem }
+    switch elem {
+    case .group(let g):
+        return .group(Group(
+            children: g.children.map {
+                artboardTranslateElement($0, dx: dx, dy: dy)
+            },
+            opacity: g.opacity, transform: g.transform, locked: g.locked))
+    case .layer(let l):
+        return .layer(Layer(
+            name: l.name,
+            children: l.children.map {
+                artboardTranslateElement($0, dx: dx, dy: dy)
+            },
+            opacity: l.opacity, transform: l.transform, locked: l.locked))
+    default:
+        return elem.moveControlPoints(.all, dx: dx, dy: dy)
+    }
+}
+
+/// Apply a (dx, dy) displacement to every artboard in `targetIds`,
+/// using restorePreviewSnapshot as the idempotent base. Live-drag
+/// effects call this on every mousemove; commit effects call once
+/// with the final (rounded) delta and then drop the preview
+/// snapshot. Move/Copy Artwork hard-coded on (phase 1): top-level
+/// elements fully contained in exactly one artboard (which must be
+/// in targetIds) translate by the same delta. Explicit-path
+/// elements (set by duplicate_init) also translate — bypasses the
+/// containment rule for the duplicate case where source and
+/// duplicate overlap.
+private func artboardTranslateFromPreview(
+    model: Model, store: StateStore,
+    targetIds: [String], dx: Double, dy: Double
+) {
+    guard model.hasPreviewSnapshot else { return }
+    model.restorePreviewSnapshot()
+    let doc = model.document
+
+    // Pre-op artboard bounds (read before any translation).
+    let artboardBounds: [(String, (Double, Double, Double, Double))] =
+        doc.artboards.map {
+            ($0.id, ($0.x, $0.y, $0.width, $0.height))
+        }
+
+    var newLayers: [Layer] = doc.layers
+
+    // Containment-based element translation (top-level layer
+    // children). Each layer's children are walked; matching
+    // children translate by (dx, dy).
+    if dx != 0 || dy != 0 {
+        newLayers = newLayers.map { layer -> Layer in
+            let newChildren: [Element] = layer.children.map { child in
+                let bb = child.bounds
+                var containers: [String] = []
+                for (id, ab) in artboardBounds {
+                    if artboardContainsBounds(ab, bb) {
+                        containers.append(id)
+                    }
+                }
+                let inOne = containers.count == 1
+                let isMoving = inOne && targetIds.contains(containers[0])
+                if isMoving {
+                    return artboardTranslateElement(child, dx: dx, dy: dy)
+                }
+                return child
+            }
+            return Layer(
+                name: layer.name, children: newChildren,
+                opacity: layer.opacity, transform: layer.transform,
+                locked: layer.locked)
+        }
+    }
+
+    // Translate moving artboards.
+    let newAbs: [Artboard] = doc.artboards.map { ab in
+        if targetIds.contains(ab.id) {
+            return ab.with(x: ab.x + dx, y: ab.y + dy)
+        }
+        return ab
+    }
+
+    // Explicit-path translation (for duplicate's deep-copies).
+    if dx != 0 || dy != 0 {
+        let toolCtx = store.evalContext()["tool"] as? [String: Any]
+        let abCtx = toolCtx?["artboard"] as? [String: Any]
+        let rawDupPaths = abCtx?["duplicated_paths"] as? [Any] ?? []
+        var dupPaths: [[Int]] = []
+        for raw in rawDupPaths {
+            guard let inner = raw as? [Any] else { continue }
+            var path: [Int] = []
+            for v in inner {
+                if let i = v as? Int { path.append(i) }
+                else if let d = v as? Double { path.append(Int(d)) }
+            }
+            if path.count == 2 { dupPaths.append(path) }
+        }
+        if !dupPaths.isEmpty {
+            var rebuilt: [Layer] = []
+            for (li, layer) in newLayers.enumerated() {
+                let layerDupChildIdxs = dupPaths
+                    .filter { $0[0] == li }
+                    .map { $0[1] }
+                if layerDupChildIdxs.isEmpty {
+                    rebuilt.append(layer)
+                    continue
+                }
+                let newChildren: [Element] = layer.children
+                    .enumerated()
+                    .map { (ci, child) in
+                        if layerDupChildIdxs.contains(ci) {
+                            return artboardTranslateElement(child, dx: dx, dy: dy)
+                        }
+                        return child
+                    }
+                rebuilt.append(Layer(
+                    name: layer.name, children: newChildren,
+                    opacity: layer.opacity, transform: layer.transform,
+                    locked: layer.locked))
+            }
+            newLayers = rebuilt
+        }
+    }
+
+    model.document = Document(
+        layers: newLayers,
+        selectedLayer: doc.selectedLayer,
+        selection: doc.selection,
+        artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.move_apply implementation per ARTBOARD_TOOL.md
+/// §Drag-to-move.
+private func artboardMoveApply(
+    model: Model, store: StateStore,
+    pressX: Double, pressY: Double,
+    cursorX: Double, cursorY: Double,
+    shiftHeld: Bool
+) {
+    var dx = cursorX - pressX
+    var dy = cursorY - pressY
+    if shiftHeld {
+        if abs(dx) > abs(dy) { dy = 0 } else { dx = 0 }
+    }
+    var targetIds = readArtboardPanelSelection(store)
+    if targetIds.isEmpty {
+        // Single-artboard fallback to hit_artboard_id (set by
+        // probe_hit). Same shape as Rust.
+        let toolCtx = store.evalContext()["tool"] as? [String: Any]
+        let abCtx = toolCtx?["artboard"] as? [String: Any]
+        if let id = abCtx?["hit_artboard_id"] as? String {
+            targetIds = [id]
+        }
+    }
+    if targetIds.isEmpty { return }
+    artboardTranslateFromPreview(
+        model: model, store: store,
+        targetIds: targetIds, dx: dx, dy: dy)
+}
+
+/// doc.artboard.move_commit — re-applies translate with integer-pt
+/// rounded displacement vector (preserves multi-select relative
+/// spacing).
+private func artboardMoveCommit(model: Model, store: StateStore) {
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    guard let abCtx = toolCtx?["artboard"] as? [String: Any] else { return }
+    let pressX = (abCtx["press_x"] as? Double) ?? 0
+    let pressY = (abCtx["press_y"] as? Double) ?? 0
+    let cursorX = (abCtx["cursor_x"] as? Double) ?? 0
+    let cursorY = (abCtx["cursor_y"] as? Double) ?? 0
+    let shiftHeld = (abCtx["shift_held"] as? Bool) ?? false
+
+    var dx = cursorX - pressX
+    var dy = cursorY - pressY
+    if shiftHeld {
+        if abs(dx) > abs(dy) { dy = 0 } else { dx = 0 }
+    }
+    dx = dx.rounded()
+    dy = dy.rounded()
+
+    var targetIds = readArtboardPanelSelection(store)
+    if targetIds.isEmpty {
+        if let id = abCtx["hit_artboard_id"] as? String {
+            targetIds = [id]
+        }
+    }
+    if targetIds.isEmpty { return }
+    artboardTranslateFromPreview(
+        model: model, store: store,
+        targetIds: targetIds, dx: dx, dy: dy)
 }
