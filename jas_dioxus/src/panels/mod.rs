@@ -202,6 +202,7 @@ mod tests {
             tabs: vec![],
             active_tab: 0,
             active_tool: crate::tools::tool::ToolKind::Selection,
+            prior_tool_for_spacebar: None,
             app_config: crate::workspace::workspace::AppConfig::default(),
             workspace_layout: layout,
             fill_on_top: true,
