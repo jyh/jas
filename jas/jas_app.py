@@ -658,6 +658,9 @@ class MainWindow(QMainWindow):
         controller = Controller(model=model)
         canvas = CanvasWidget(model=model, controller=controller)
         self.toolbar.tool_changed.connect(canvas.set_tool)
+        # Spacebar pass-through routes through the toolbar so its UI
+        # stays in sync. Per HAND_TOOL.md §Spacebar pass-through.
+        canvas.on_request_tool_change = self.toolbar.select_tool
 
         def tab_label(_=None):
             title = model.filename
