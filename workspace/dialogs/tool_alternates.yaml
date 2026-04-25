@@ -218,3 +218,31 @@ shape_alternates:
             effects:
               - set: { active_tool: '"star"' }
               - close_dialog: null
+
+scale_alternates:
+  summary: "Transform Tools"
+  description: >
+    Tool-alternate flyout menu shown on long-press (250ms) of the
+    Scale tool button. Lists the Shear tool, the toolbar alternate
+    of Scale. Clicking selects Shear and closes the dialog. Both
+    tools share the transform-family conventions
+    (state.transform_reference_point, dblclick-icon and
+    Alt-click-canvas dialog gestures); the slot's primary tool is
+    Scale. The Rotate tool lives in its own slot. See
+    SCALE_TOOL.md and SHEAR_TOOL.md.
+  modal: false
+  content:
+    type: container
+    layout: column
+    style: { padding: 4, gap: 2 }
+    children:
+      - type: icon_button
+        icon: "shear"
+        label: "Shear"
+        summary: "Slant objects along a configurable axis"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"shear"' }
+              - close_dialog: null

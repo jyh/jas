@@ -1,0 +1,232 @@
+scale_options:
+  summary: "Scale"
+  description: >
+    Modal dialog opened by double-clicking the Scale icon in the
+    toolbar OR by Alt-clicking on the canvas (which also sets the
+    reference point at the click coordinate). Edits the per-document
+    options that drive the Scale tool's transformation:
+
+    - Scale mode: Uniform applies a single percentage to both axes;
+      Non-Uniform applies independent Horizontal and Vertical
+      percentages.
+    - Scale Strokes: when on, stroke widths multiply by the
+      geometric mean √(|sx · sy|). When off, stroke widths are
+      preserved.
+    - Scale Corners: when on, rounded_rect rx/ry scale by
+      |sx|/|sy| respectively. No-op on other element types.
+    - Preview: when on, the canvas re-renders live with the
+      dialog's current values applied (no document mutation
+      until OK).
+
+    Reset restores defaults without committing. Cancel discards
+    edits and any preview overlay (the reference point set by an
+    Alt-click is NOT reverted). OK writes all values to
+    state.scale_* and runs doc.scale.apply on the selection. Copy
+    runs doc.scale.apply with copy=true, applying the
+    transformation to a duplicate of the selection (placed
+    immediately above the original in z-order; selection moves to
+    the duplicate). See SCALE_TOOL.md.
+  modal: true
+  width: 460
+  params: {}
+  # Live-preview wiring: opening the dialog captures a doc snapshot;
+  # any change to dialog state fires scale_options_preview which
+  # restores the snapshot and re-applies with the current dialog
+  # values. OK clears the snapshot (so close_dialog does not revert);
+  # Cancel falls through to close_dialog which restores + clears.
+  doc_preview: true
+  on_change: scale_options_preview
+  state:
+    uniform:
+      type: bool
+      default: true
+      description: "Uniform mode (single percentage) vs Non-Uniform (independent H/V)"
+    uniform_pct:
+      type: number
+      default: 100.0
+      description: "Uniform-mode scale percentage"
+    horizontal_pct:
+      type: number
+      default: 100.0
+      description: "Non-uniform horizontal percentage"
+    vertical_pct:
+      type: number
+      default: 100.0
+      description: "Non-uniform vertical percentage"
+    scale_strokes:
+      type: bool
+      default: true
+      description: "Multiply stroke widths by the geometric mean of (sx, sy)"
+    scale_corners:
+      type: bool
+      default: false
+      description: "Scale rounded_rect rx/ry along with the geometry"
+    preview:
+      type: bool
+      default: true
+      description: "Live-update the canvas with dialog values applied"
+  init:
+    uniform:        "state.scale_uniform"
+    uniform_pct:    "state.scale_uniform_pct"
+    horizontal_pct: "state.scale_horizontal_pct"
+    vertical_pct:   "state.scale_vertical_pct"
+    scale_strokes:  "state.scale_strokes"
+    scale_corners:  "state.scale_corners"
+    preview:        "state.scale_preview"
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+
+      # ── Scale group ──
+      - type: container
+        layout: column
+        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        children:
+          - { type: text, content: "Scale", style: { font_size: 12, weight: bold } }
+
+          # Uniform radio + percentage
+          - type: row
+            children:
+              - type: col
+                col: 5
+                children:
+                  - id: so_uniform_radio
+                    type: radio
+                    label: "Uniform:"
+                    bind:
+                      checked: "dialog.uniform"
+                    on_check:
+                      - set: { dialog.uniform: true }
+              - type: col
+                col: 5
+                children:
+                  - id: so_uniform_pct
+                    type: number_input
+                    min: -100000
+                    max: 100000
+                    step: 1
+                    suffix: "%"
+                    bind:
+                      value: "dialog.uniform_pct"
+                      disabled: "not dialog.uniform"
+
+          # Non-Uniform radio + (indented) Horizontal / Vertical
+          - type: row
+            children:
+              - type: col
+                col: 12
+                children:
+                  - id: so_nonuniform_radio
+                    type: radio
+                    label: "Non-Uniform"
+                    bind:
+                      checked: "not dialog.uniform"
+                    on_check:
+                      - set: { dialog.uniform: false }
+
+          - type: row
+            style: { padding: "0 0 0 24" }
+            children:
+              - type: col
+                col: 5
+                children:
+                  - { type: text, content: "Horizontal:", style: { font_size: 11 } }
+              - type: col
+                col: 5
+                children:
+                  - id: so_horizontal_pct
+                    type: number_input
+                    min: -100000
+                    max: 100000
+                    step: 1
+                    suffix: "%"
+                    bind:
+                      value: "dialog.horizontal_pct"
+                      disabled: "dialog.uniform"
+
+          - type: row
+            style: { padding: "0 0 0 24" }
+            children:
+              - type: col
+                col: 5
+                children:
+                  - { type: text, content: "Vertical:", style: { font_size: 11 } }
+              - type: col
+                col: 5
+                children:
+                  - id: so_vertical_pct
+                    type: number_input
+                    min: -100000
+                    max: 100000
+                    step: 1
+                    suffix: "%"
+                    bind:
+                      value: "dialog.vertical_pct"
+                      disabled: "dialog.uniform"
+
+      # ── Options group ──
+      - type: container
+        layout: column
+        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        children:
+          - { type: text, content: "Options", style: { font_size: 12, weight: bold } }
+
+          - id: so_scale_strokes
+            type: toggle
+            label: "Scale Strokes"
+            bind:
+              checked: "dialog.scale_strokes"
+
+          - id: so_scale_corners
+            type: toggle
+            label: "Scale Corners"
+            bind:
+              checked: "dialog.scale_corners"
+
+      # ── Preview ──
+      - id: so_preview
+        type: toggle
+        label: "Preview"
+        bind:
+          checked: "dialog.preview"
+
+      # ── Reset + Copy + Cancel + OK ──
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: space-between }
+        children:
+          - type: button
+            label: "Reset"
+            action: scale_options_reset
+          - type: container
+            layout: row
+            style: { gap: 8 }
+            children:
+              - type: button
+                label: "Copy"
+                action: scale_options_confirm
+                params:
+                  uniform:        "dialog.uniform"
+                  uniform_pct:    "dialog.uniform_pct"
+                  horizontal_pct: "dialog.horizontal_pct"
+                  vertical_pct:   "dialog.vertical_pct"
+                  scale_strokes:  "dialog.scale_strokes"
+                  scale_corners:  "dialog.scale_corners"
+                  preview:        "dialog.preview"
+                  copy:           true
+              - { type: button, label: "Cancel", action: dismiss_dialog }
+              - type: button
+                label: "OK"
+                action: scale_options_confirm
+                variant: primary
+                params:
+                  uniform:        "dialog.uniform"
+                  uniform_pct:    "dialog.uniform_pct"
+                  horizontal_pct: "dialog.horizontal_pct"
+                  vertical_pct:   "dialog.vertical_pct"
+                  scale_strokes:  "dialog.scale_strokes"
+                  scale_corners:  "dialog.scale_corners"
+                  preview:        "dialog.preview"
+                  copy:           false

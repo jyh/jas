@@ -1,0 +1,166 @@
+shear_options:
+  summary: "Shear"
+  description: >
+    Modal dialog opened by double-clicking the Shear icon in the
+    toolbar OR by Alt-clicking on the canvas (which also sets the
+    reference point at the click coordinate). Edits the per-document
+    options that drive the Shear tool's transformation:
+
+    - Shear Angle: slant angle in degrees. Positive values shear
+      in the +axis_perp direction.
+    - Axis: direction along which points slide. Horizontal (x-axis
+      fixed), Vertical (y-axis fixed), or Custom (user-specified
+      angle in degrees from horizontal). Custom Angle is enabled
+      only when Custom is selected.
+    - Preview: when on, the canvas re-renders live with the
+      dialog's current angle/axis applied (no document mutation
+      until OK).
+
+    Reset restores defaults without committing. Cancel discards
+    edits and any preview overlay (the reference point set by an
+    Alt-click is NOT reverted). OK writes values to state.shear_*
+    and runs doc.shear.apply on the selection. Copy runs
+    doc.shear.apply with copy=true, applying the shear to a
+    duplicate of the selection (placed immediately above the
+    original in z-order; selection moves to the duplicate). See
+    SHEAR_TOOL.md.
+  modal: true
+  width: 420
+  params: {}
+  doc_preview: true
+  on_change: shear_options_preview
+  state:
+    angle:
+      type: number
+      default: 0.0
+      description: "Shear angle in degrees"
+    axis:
+      type: enum
+      values: [horizontal, vertical, custom]
+      default: horizontal
+      description: "Shear axis: horizontal | vertical | custom"
+    axis_angle:
+      type: number
+      default: 0.0
+      description: "Custom-axis angle in degrees from horizontal (used only when axis = custom)"
+    preview:
+      type: bool
+      default: true
+      description: "Live-update the canvas with dialog values applied"
+  init:
+    angle:      "state.shear_angle"
+    axis:       "state.shear_axis"
+    axis_angle: "state.shear_axis_angle"
+    preview:    "state.shear_preview"
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+
+      # ── Shear Angle ──
+      - type: row
+        children:
+          - type: col
+            col: 4
+            children:
+              - { type: text, content: "Shear Angle:", style: { font_size: 11 } }
+          - type: col
+            col: 8
+            children:
+              - id: sho_angle
+                type: number_input
+                min: -89.9
+                max: 89.9
+                step: 0.1
+                suffix: "°"
+                bind:
+                  value: "dialog.angle"
+
+      # ── Axis group ──
+      - type: container
+        layout: column
+        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        children:
+          - { type: text, content: "Axis", style: { font_size: 12, weight: bold } }
+
+          - id: sho_axis_horizontal
+            type: radio
+            label: "Horizontal"
+            bind:
+              checked: "dialog.axis == 'horizontal'"
+            on_check:
+              - set: { dialog.axis: "'horizontal'" }
+
+          - id: sho_axis_vertical
+            type: radio
+            label: "Vertical"
+            bind:
+              checked: "dialog.axis == 'vertical'"
+            on_check:
+              - set: { dialog.axis: "'vertical'" }
+
+          - type: row
+            children:
+              - type: col
+                col: 5
+                children:
+                  - id: sho_axis_custom
+                    type: radio
+                    label: "Custom"
+                    bind:
+                      checked: "dialog.axis == 'custom'"
+                    on_check:
+                      - set: { dialog.axis: "'custom'" }
+              - type: col
+                col: 7
+                children:
+                  - id: sho_axis_angle
+                    type: number_input
+                    min: -180
+                    max: 180
+                    step: 0.1
+                    suffix: "°"
+                    bind:
+                      value: "dialog.axis_angle"
+                      disabled: "dialog.axis != 'custom'"
+
+      # ── Preview ──
+      - id: sho_preview
+        type: toggle
+        label: "Preview"
+        bind:
+          checked: "dialog.preview"
+
+      # ── Reset + Copy + Cancel + OK ──
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: space-between }
+        children:
+          - type: button
+            label: "Reset"
+            action: shear_options_reset
+          - type: container
+            layout: row
+            style: { gap: 8 }
+            children:
+              - type: button
+                label: "Copy"
+                action: shear_options_confirm
+                params:
+                  angle:      "dialog.angle"
+                  axis:       "dialog.axis"
+                  axis_angle: "dialog.axis_angle"
+                  preview:    "dialog.preview"
+                  copy:       true
+              - { type: button, label: "Cancel", action: dismiss_dialog }
+              - type: button
+                label: "OK"
+                action: shear_options_confirm
+                variant: primary
+                params:
+                  angle:      "dialog.angle"
+                  axis:       "dialog.axis"
+                  axis_angle: "dialog.axis_angle"
+                  preview:    "dialog.preview"
+                  copy:       false

@@ -93,6 +93,21 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
             if as_name is not None and return_value is not None:
                 ctx = {**ctx, as_name: return_value}
 
+    # Dialog on_change post-batch hook. Fires the action declared on
+    # the open dialog's on_change field whenever this batch mutated
+    # dialog state. Per-batch debounced (one fire per UI tick batch).
+    # Re-entrancy guarded so the action's effects do not re-fire.
+    # See SCALE_TOOL.md §Preview.
+    if not store.is_firing_on_change() and store.take_dialog_dirty():
+        action_name = store.get_dialog_on_change()
+        if action_name:
+            store.set_firing_on_change(True)
+            try:
+                _run_one({"dispatch": action_name}, ctx, store, actions,
+                         platform_effects, dialogs, schema, diagnostics)
+            finally:
+                store.set_firing_on_change(False)
+
 
 def _eval(expr, store: StateStore, ctx: dict):
     """Evaluate an expression against the store's current state + ctx."""
@@ -847,6 +862,22 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.capture_dialog_snapshot({
                 k: v for k, v in targets.items() if isinstance(v, str)
             })
+        # Document-level preview snapshot for transform-tool dialogs
+        # (Scale Options / Rotate Options / Shear Options). Fired
+        # through the doc.preview.capture platform effect — see
+        # SCALE_TOOL.md §Preview.
+        if dlg_def.get("doc_preview") is True and platform_effects:
+            handler = platform_effects.get("doc.preview.capture")
+            if handler:
+                handler(None, ctx, store)
+        # Wire the dialog's on_change action — fired by the post-run
+        # hook in run_effects after any batch that mutated dialog
+        # state.
+        on_change = dlg_def.get("on_change")
+        store.set_dialog_on_change(on_change if isinstance(on_change, str) else None)
+        # Clear any leftover dirty flag from prior dialog sessions so
+        # the very-first init does not immediately fire on_change.
+        store.take_dialog_dirty()
         return
 
     # close_dialog: null or dialog_id
@@ -860,6 +891,12 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 if "." not in key:
                     store.set(key, value)
             store.clear_dialog_snapshot()
+        # Document-level preview restore (Cancel path).
+        if platform_effects:
+            for name in ("doc.preview.restore", "doc.preview.clear"):
+                handler = platform_effects.get(name)
+                if handler:
+                    handler(None, ctx, store)
         store.close_dialog()
         return
 

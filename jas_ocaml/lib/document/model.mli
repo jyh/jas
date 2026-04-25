@@ -28,6 +28,10 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   method on_document_changed : (Document.document -> unit) -> unit
   method on_filename_changed : (string -> unit) -> unit
   method snapshot : unit
+  method capture_preview_snapshot : unit
+  method restore_preview_snapshot : unit
+  method clear_preview_snapshot : unit
+  method has_preview_snapshot : bool
   method undo : unit
   method redo : unit
   method is_modified : bool

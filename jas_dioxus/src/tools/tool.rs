@@ -44,6 +44,9 @@ pub enum ToolKind {
     Polygon,
     Star,
     Lasso,
+    Scale,
+    Rotate,
+    Shear,
 }
 
 impl ToolKind {
@@ -70,6 +73,9 @@ impl ToolKind {
             ToolKind::Polygon => "Polygon",
             ToolKind::Star => "Star",
             ToolKind::Lasso => "Lasso (Q)",
+            ToolKind::Scale => "Scale (S)",
+            ToolKind::Rotate => "Rotate (R)",
+            ToolKind::Shear => "Shear",
         }
     }
 
@@ -130,6 +136,9 @@ impl ToolKind {
             ToolKind::PathEraser => Some("E"),
             ToolKind::Lasso => Some("q"),
             ToolKind::Smooth => None,
+            ToolKind::Scale => Some("s"),
+            ToolKind::Rotate => Some("r"),
+            ToolKind::Shear => None,
             _ => None,
         }
     }
@@ -196,16 +205,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_kind_has_eighteen_variants() {
+    fn tool_kind_variant_count() {
         let all = [
             ToolKind::Selection,
             ToolKind::PartialSelection,
             ToolKind::InteriorSelection,
+            ToolKind::MagicWand,
             ToolKind::Pen,
             ToolKind::AddAnchorPoint,
             ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint,
             ToolKind::Pencil,
+            ToolKind::Paintbrush,
+            ToolKind::BlobBrush,
             ToolKind::PathEraser,
             ToolKind::Smooth,
             ToolKind::Type,
@@ -216,8 +228,11 @@ mod tests {
             ToolKind::Polygon,
             ToolKind::Star,
             ToolKind::Lasso,
+            ToolKind::Scale,
+            ToolKind::Rotate,
+            ToolKind::Shear,
         ];
-        assert_eq!(all.len(), 18);
+        assert_eq!(all.len(), 24);
     }
 
     #[test]
@@ -247,27 +262,33 @@ mod tests {
         let mut set = HashSet::new();
         let all = [
             ToolKind::Selection, ToolKind::PartialSelection, ToolKind::InteriorSelection,
+            ToolKind::MagicWand,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
-            ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
+            ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::Paintbrush,
+            ToolKind::BlobBrush, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
+            ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
         ];
         for t in &all {
             set.insert(*t);
         }
-        assert_eq!(set.len(), 18);
+        assert_eq!(set.len(), 24);
     }
 
     #[test]
     fn labels_all_non_empty() {
         let all = [
             ToolKind::Selection, ToolKind::PartialSelection, ToolKind::InteriorSelection,
+            ToolKind::MagicWand,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
-            ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
+            ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::Paintbrush,
+            ToolKind::BlobBrush, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
+            ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
         ];
         for t in &all {
             assert!(!t.label().is_empty(), "{:?} has empty label", t);
@@ -352,6 +373,9 @@ mod tests {
         assert_eq!(ToolKind::Type.shortcut(), Some("t"));
         assert_eq!(ToolKind::Line.shortcut(), Some("l"));
         assert_eq!(ToolKind::Rect.shortcut(), Some("m"));
+        assert_eq!(ToolKind::Scale.shortcut(), Some("s"));
+        assert_eq!(ToolKind::Rotate.shortcut(), Some("r"));
+        assert_eq!(ToolKind::Shear.shortcut(), None);
     }
 
     #[test]
@@ -429,38 +453,10 @@ mod tests {
         assert_eq!(alternates.len(), 3);
     }
 
-    #[test]
-    fn toolbar_grid_layout() {
-        // 4 rows x 2 columns, 8 slots total
-        let slots: &[(usize, usize, &[ToolKind])] = &[
-            (0, 0, &[ToolKind::Selection]),
-            (0, 1, &[ToolKind::PartialSelection, ToolKind::InteriorSelection]),
-            (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
-            (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
-            (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
-            (2, 1, &[ToolKind::Line]),
-            (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
-            (3, 1, &[ToolKind::Lasso]),
-        ];
-        assert_eq!(slots.len(), 8);
-
-        // Verify max row is 3 (4 rows)
-        let max_row = slots.iter().map(|(r, _, _)| *r).max().unwrap();
-        assert_eq!(max_row, 3);
-
-        // Verify max col is 1 (2 columns)
-        let max_col = slots.iter().map(|(_, c, _)| *c).max().unwrap();
-        assert_eq!(max_col, 1);
-
-        // Count shared slots (len > 1)
-        let shared = slots.iter().filter(|(_, _, tools)| tools.len() > 1).count();
-        assert_eq!(shared, 5);
-
-        // All 18 tools appear exactly once
-        let mut all_tools: Vec<ToolKind> = slots.iter()
-            .flat_map(|(_, _, tools)| tools.iter().copied())
-            .collect();
-        all_tools.sort_by_key(|t| format!("{:?}", t));
-        assert_eq!(all_tools.len(), 18);
-    }
+    // Removed: toolbar_grid_layout — hardcoded the row/col positions
+    // of every tool slot, so it had to be rewritten every time a tool
+    // was added (Magic Wand merge already left it stale; Scale / Rotate
+    // / Shear would compound the staleness). Per
+    // feedback_layout_tests.md, layout-bound tests with hardcoded
+    // indices are deleted, not shifted, when layouts change.
 }

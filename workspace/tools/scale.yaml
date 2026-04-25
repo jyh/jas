@@ -1,0 +1,126 @@
+# Scale tool — resizes the selection around a configurable reference
+# point. The scale factors are set by an interactive drag on canvas
+# or by typing percentages into the Scale Options dialog.
+#
+# Gestures per SCALE_TOOL.md §Gestures:
+#   plain click  → set transform_reference_point at click coord
+#   Alt+click    → set ref + open Scale Options dialog
+#   drag         → apply scale; press anchors, factor =
+#                  |cursor−ref|/|press−ref|; Shift = uniform aspect
+#   Escape       → cancel in-progress drag; revert
+#   dblclick toolbar icon → open Scale Options dialog (handled by
+#                           toolbar dispatcher via tool_options_dialog)
+#
+# Shared with Rotate and Shear: state.transform_reference_point
+# (cleared on selection change); reference_point_cross overlay;
+# tool_options_dialog_on_alt_click toolbar dispatcher.
+
+id: scale
+cursor: crosshair
+menu_label: "Scale Tool"
+shortcut: "S"
+tool_options_dialog: "scale_options"
+tool_options_dialog_on_alt_click: true
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, scaling]
+  # Press anchors the drag — does NOT relocate the reference point.
+  # Apply consumes (press, cursor, ref) on release per § Gestures.
+  press_x:    { default: 0.0 }
+  press_y:    { default: 0.0 }
+  cursor_x:   { default: 0.0 }
+  cursor_y:   { default: 0.0 }
+  alt_held:   { default: false }
+  shift_held: { default: false }
+  # Latched at first significant cursor motion. Distinguishes a
+  # press+release click (sets ref point) from a drag (commits scale).
+  moved:      { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.scale.mode: "'idle'" }
+    - set: { tool.scale.moved: "false" }
+
+  on_leave:
+    - set: { tool.scale.mode: "'idle'" }
+    - set: { tool.scale.moved: "false" }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - set: { tool.scale.press_x:    "event.x" }
+    - set: { tool.scale.press_y:    "event.y" }
+    - set: { tool.scale.cursor_x:   "event.x" }
+    - set: { tool.scale.cursor_y:   "event.y" }
+    - set: { tool.scale.alt_held:   "event.modifiers.alt" }
+    - set: { tool.scale.shift_held: "event.modifiers.shift" }
+    - set: { tool.scale.moved:      "false" }
+    - set: { tool.scale.mode:       "'scaling'" }
+
+  on_mousemove:
+    - if: "tool.scale.mode == 'scaling'"
+      then:
+        - set: { tool.scale.cursor_x:   "event.x" }
+        - set: { tool.scale.cursor_y:   "event.y" }
+        - set: { tool.scale.shift_held: "event.modifiers.shift" }
+        - if: "abs(event.x - tool.scale.press_x) > 2 || abs(event.y - tool.scale.press_y) > 2"
+          then:
+            - set: { tool.scale.moved: "true" }
+
+  on_mouseup:
+    - if: "tool.scale.mode == 'scaling'"
+      then:
+        - if: "tool.scale.moved"
+          then:
+            # Drag — commit scale around current reference point.
+            # The native effect resolves ref to selection-bounds
+            # center when state.transform_reference_point is null.
+            - "doc.scale.apply":
+                press_x: "tool.scale.press_x"
+                press_y: "tool.scale.press_y"
+                cursor_x: "event.x"
+                cursor_y: "event.y"
+                shift:   "event.modifiers.shift"
+                copy:    "false"
+          else:
+            # Click without drag — set reference point, optionally
+            # open dialog when Alt was held at press.
+            - set: { transform_reference_point: "[event.x, event.y]" }
+            - if: "tool.scale.alt_held"
+              then:
+                - "open_dialog": { id: "scale_options" }
+    - set: { tool.scale.mode:  "'idle'" }
+    - set: { tool.scale.moved: "false" }
+
+  on_keydown:
+    - if: "event.key == 'Escape' && tool.scale.mode == 'scaling'"
+      then:
+        - "doc.snapshot.restore": {}
+        - set: { tool.scale.mode:  "'idle'" }
+        - set: { tool.scale.moved: "false" }
+
+# Two overlays composed as a list:
+#   1. reference_point_cross — drawn whenever a selection exists,
+#      regardless of drag state. The native renderer falls back to
+#      the selection-bounds center when transform_reference_point
+#      is null per SCALE_TOOL.md §Reference point.
+#   2. bbox_ghost — drawn only during an active drag once the cursor
+#      has moved significantly. Native renderer composes the
+#      transform matrix from (press, cursor, ref, shift_held).
+overlay:
+  - if: "not selection_empty()"
+    render:
+      type: reference_point_cross
+      ref_point: "state.transform_reference_point"
+  - if: "tool.scale.mode == 'scaling' && tool.scale.moved"
+    render:
+      type: bbox_ghost
+      transform_kind: "'scale'"
+      ref_point:  "state.transform_reference_point"
+      press_x:    "tool.scale.press_x"
+      press_y:    "tool.scale.press_y"
+      cursor_x:   "tool.scale.cursor_x"
+      cursor_y:   "tool.scale.cursor_y"
+      shift_held: "tool.scale.shift_held"

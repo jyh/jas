@@ -1191,6 +1191,9 @@ fn build_appstate_ctx(
         ToolKind::Polygon => "polygon",
         ToolKind::Star => "star",
         ToolKind::Lasso => "lasso",
+        ToolKind::Scale => "scale",
+        ToolKind::Rotate => "rotate",
+        ToolKind::Shear => "shear",
     };
     let fill_color = match st.app_default_fill {
         None => serde_json::Value::Null,
@@ -2547,6 +2550,9 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
                 ToolKind::Polygon => "polygon",
                 ToolKind::Star => "star",
                 ToolKind::Lasso => "lasso",
+                ToolKind::Scale => "scale",
+                ToolKind::Rotate => "rotate",
+                ToolKind::Shear => "shear",
             };
             serde_json::Value::String(name.to_string())
         }

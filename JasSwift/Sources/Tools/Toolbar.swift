@@ -894,6 +894,47 @@ public struct ToolbarView {
                               control1: CGPoint(x: ox + 12, y: oy + 16),
                               control2: CGPoint(x: ox + 16, y: oy + 17))
                 context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+
+            case .scale:
+                // Scale — small square being extruded into a larger one
+                // (per SCALE_TOOL.md §Tool icon).
+                var small = SwiftUI.Path()
+                small.addRect(CGRect(x: ox + 3, y: oy + 13, width: 10, height: 11))
+                context.stroke(small, with: .color(color), lineWidth: 1.5)
+                var large = SwiftUI.Path()
+                large.addRect(CGRect(x: ox + 13, y: oy + 3, width: 12, height: 13))
+                context.stroke(large, with: .color(color), lineWidth: 1.5)
+
+            case .rotate:
+                // Rotate — 270 deg arc with arrowhead (per
+                // ROTATE_TOOL.md §Tool icon). Arc center (14, 14),
+                // radius 9, from top (14, 5) sweeping CCW to left
+                // (5, 14).
+                var arc = SwiftUI.Path()
+                arc.addArc(center: CGPoint(x: ox + 14, y: oy + 14),
+                           radius: 9,
+                           startAngle: .degrees(-90),
+                           endAngle: .degrees(180),
+                           clockwise: false)
+                context.stroke(arc, with: .color(color),
+                               style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                var head = SwiftUI.Path()
+                head.move(to: CGPoint(x: ox + 11, y: oy + 2))
+                head.addLine(to: CGPoint(x: ox + 14, y: oy + 5))
+                head.addLine(to: CGPoint(x: ox + 11, y: oy + 8))
+                context.stroke(head, with: .color(color),
+                               style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+
+            case .shear:
+                // Shear — right-leaning parallelogram (per
+                // SHEAR_TOOL.md §Tool icon).
+                var path = SwiftUI.Path()
+                path.move(to: CGPoint(x: ox + 9,  y: oy + 4))
+                path.addLine(to: CGPoint(x: ox + 26, y: oy + 4))
+                path.addLine(to: CGPoint(x: ox + 19, y: oy + 24))
+                path.addLine(to: CGPoint(x: ox + 2,  y: oy + 24))
+                path.closeSubpath()
+                context.stroke(path, with: .color(color), lineWidth: 1.5)
             }
         }
     }
@@ -1006,6 +1047,9 @@ private struct ArrowSlotButton: View {
         case .polygon: return "Polygon"
         case .star: return "Star"
         case .lasso: return "Lasso"
+        case .scale: return "Scale"
+        case .rotate: return "Rotate"
+        case .shear: return "Shear"
         default: return tool.rawValue
         }
     }

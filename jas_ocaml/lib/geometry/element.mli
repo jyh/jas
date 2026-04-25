@@ -573,6 +573,9 @@ val make_scale : float -> float -> transform
 val make_rotate : float -> transform
 val apply_point : transform -> float -> float -> float * float
 val inverse : transform -> transform option
+val make_shear : float -> float -> transform
+val multiply : transform -> transform -> transform
+val around_point : transform -> float -> float -> transform
 val transform_of : element -> transform option
 val make_line : ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_rect : ?rx:float -> ?ry:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
@@ -613,6 +616,7 @@ val get_transform : element -> transform option
 val set_transform : transform option -> element -> element
 val translate_transform : float -> float -> transform option -> transform option
 val with_transform_translated : dx:float -> dy:float -> element -> element
+val with_transform_premultiplied : transform -> element -> element
 
 (** {2 Fill and stroke} *)
 

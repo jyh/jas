@@ -14,7 +14,12 @@ type tool_spec = {
   shortcut : string option;
   state_defaults : (string * Yojson.Safe.t) list;
   handlers : (string * Yojson.Safe.t list) list;
-  overlay : overlay_spec option;
+  overlay : overlay_spec list;
+  (** Overlay declarations. Most tools have zero or one entry;
+      the transform-tool family (Scale / Rotate / Shear) uses
+      multiple to layer the reference-point cross over the
+      drag-time bbox ghost. Each entry's guard is evaluated
+      independently. *)
 }
 
 (** Parse a workspace tool spec, typically from workspace.json

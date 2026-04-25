@@ -83,9 +83,9 @@ class TestToolSpec:
             },
         })
         assert spec is not None
-        assert spec.overlay is not None
-        assert spec.overlay.guard == "tool.foo.show"
-        assert spec.overlay.render["type"] == "rect"
+        assert len(spec.overlay) == 1
+        assert spec.overlay[0].guard == "tool.foo.show"
+        assert spec.overlay[0].render["type"] == "rect"
 
 
 # ── Helpers ────────────────────────────────────────────

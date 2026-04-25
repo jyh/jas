@@ -624,6 +624,47 @@ impl Transform {
             f: (self.b * self.e - self.a * self.f) * inv_det,
         })
     }
+
+    /// Shear matrix with horizontal shear factor `kx` (x ← x + kx·y)
+    /// and vertical shear factor `ky` (y ← y + ky·x).
+    pub fn shear(kx: f64, ky: f64) -> Self {
+        Self {
+            a: 1.0,
+            b: ky,
+            c: kx,
+            d: 1.0,
+            e: 0.0,
+            f: 0.0,
+        }
+    }
+
+    /// Return `self * other` — the matrix that applies `other` first,
+    /// then `self`. Equivalent to: for any point p,
+    /// `self.then(other).apply_point(p) == self.apply_point(other.apply_point(p))`
+    /// when read as `composed = self ∘ other`.
+    pub fn multiply(&self, other: &Self) -> Self {
+        Self {
+            a: self.a * other.a + self.c * other.b,
+            b: self.b * other.a + self.d * other.b,
+            c: self.a * other.c + self.c * other.d,
+            d: self.b * other.c + self.d * other.d,
+            e: self.a * other.e + self.c * other.f + self.e,
+            f: self.b * other.e + self.d * other.f + self.f,
+        }
+    }
+
+    /// Conjugate this transform around the point `(rx, ry)` —
+    /// returns `T(rx, ry) * self * T(-rx, -ry)`. The result, when
+    /// applied to any point, behaves as if `self` were applied with
+    /// `(rx, ry)` as the origin.
+    ///
+    /// Used by the transform-tool family (Scale, Rotate, Shear) to
+    /// pivot a base transform around the user-set reference point.
+    pub fn around_point(&self, rx: f64, ry: f64) -> Self {
+        let pre = Self::translate(-rx, -ry);
+        let post = Self::translate(rx, ry);
+        post.multiply(self).multiply(&pre)
+    }
 }
 
 // ---------------------------------------------------------------------------

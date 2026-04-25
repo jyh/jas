@@ -108,6 +108,13 @@ val get_dialog_snapshot : t -> (string * Yojson.Safe.t) list option
 val clear_dialog_snapshot : t -> unit
 val has_dialog_snapshot : t -> bool
 
+(* Dialog on_change hook — see SCALE_TOOL.md \167 Preview. *)
+val set_dialog_on_change : t -> string option -> unit
+val get_dialog_on_change : t -> string option
+val take_dialog_dirty : t -> bool
+val is_firing_on_change : t -> bool
+val set_firing_on_change : t -> bool -> unit
+
 (* ── Evaluation context ──────────────────────────────────── *)
 
 (** Build a [`Assoc] context suitable for [Expr_eval.evaluate].
