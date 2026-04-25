@@ -542,6 +542,26 @@ fn run_doc_effect(
         "doc.snapshot" => {
             model.snapshot();
         }
+        "doc.preview.capture" => {
+            // Out-of-band document snapshot for dialog Preview flows
+            // (Scale / Rotate / Shear). Captures the document state at
+            // dialog open so apply-on-change can run during dialog
+            // editing without polluting the undo stack.
+            // See SCALE_TOOL.md §Preview.
+            model.capture_preview_snapshot();
+        }
+        "doc.preview.restore" => {
+            // Restore the captured preview snapshot. Used by Cancel
+            // flows; also called before each preview re-apply so
+            // repeated dialog changes don't compound.
+            model.restore_preview_snapshot();
+        }
+        "doc.preview.clear" => {
+            // Drop the preview snapshot without restoring. OK actions
+            // call this so the close_dialog flow doesn't revert the
+            // committed transform.
+            model.clear_preview_snapshot();
+        }
         "doc.clear_selection" => {
             Controller::clear_selection(model);
         }
