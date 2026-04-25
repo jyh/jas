@@ -598,6 +598,197 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // ──────────────────────────────────────────────────────────
+    // doc.zoom.* and doc.pan.apply — view-state effects per
+    // ZOOM_TOOL.md and HAND_TOOL.md. None of these modify document
+    // content; they only update the per-tab view state on Model:
+    // zoomLevel, viewOffsetX, viewOffsetY.
+    // ──────────────────────────────────────────────────────────
+
+    // doc.zoom.apply — apply a multiplicative factor anchored at
+    // (anchor_x, anchor_y) in viewport-local pixels. Document
+    // point under the anchor stays under the anchor after the
+    // zoom. Clamps to [min_zoom, max_zoom]; the *actual* applied
+    // factor (post-clamp) is used for pan recompute so the anchor
+    // stays glued at the boundary. anchor_x / anchor_y default to
+    // -1, meaning "viewport center" for keyboard / menu callers.
+    effects["doc.zoom.apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let factor = evalNumber(args["factor"], store: store, ctx: ctx)
+        let anchorXRaw = evalNumber(args["anchor_x"], store: store, ctx: ctx)
+        let anchorYRaw = evalNumber(args["anchor_y"], store: store, ctx: ctx)
+        let minZoom = readPrefNumber("min_zoom", default: 0.1)
+        let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+        let z = model.zoomLevel
+        let px = model.viewOffsetX
+        let py = model.viewOffsetY
+        let ax = anchorXRaw < 0 ? px : anchorXRaw
+        let ay = anchorYRaw < 0 ? py : anchorYRaw
+        let docAx = (ax - px) / z
+        let docAy = (ay - py) / z
+        let zNew = min(max(z * factor, minZoom), maxZoom)
+        model.zoomLevel = zNew
+        model.viewOffsetX = ax - docAx * zNew
+        model.viewOffsetY = ay - docAy * zNew
+        return nil
+    }
+
+    // doc.zoom.set — absolute zoom_level; pan unchanged. Used by
+    // zoom_to_actual_size (level: 1.0).
+    effects["doc.zoom.set"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let level = evalNumber(args["level"], store: store, ctx: ctx)
+        let minZoom = readPrefNumber("min_zoom", default: 0.1)
+        let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+        model.zoomLevel = min(max(level, minZoom), maxZoom)
+        return nil
+    }
+
+    // doc.zoom.set_full — atomic write of zoom_level + offsets.
+    // Used by Zoom-tool Escape-cancel to restore the press snapshot.
+    effects["doc.zoom.set_full"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let zoom = evalNumber(args["zoom"], store: store, ctx: ctx)
+        let offsetX = evalNumber(args["offset_x"], store: store, ctx: ctx)
+        let offsetY = evalNumber(args["offset_y"], store: store, ctx: ctx)
+        let minZoom = readPrefNumber("min_zoom", default: 0.1)
+        let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+        model.zoomLevel = min(max(zoom, minZoom), maxZoom)
+        model.viewOffsetX = offsetX
+        model.viewOffsetY = offsetY
+        return nil
+    }
+
+    // doc.zoom.scrubby — continuous scrubby zoom from press
+    // snapshot. exp-gain factor from cumulative drag distance with
+    // Alt-flip semantics. Anchored at the press point.
+    effects["doc.zoom.scrubby"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let pressX = evalNumber(args["press_x"], store: store, ctx: ctx)
+        let pressY = evalNumber(args["press_y"], store: store, ctx: ctx)
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        _ = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        let altHeld = evalBool(args["alt_held"], store: store, ctx: ctx)
+        let altAtPress = evalBool(args["alt_at_press"], store: store, ctx: ctx)
+        let gain = readPrefNumber("scrubby_zoom_gain", default: 144.0)
+        let minZoom = readPrefNumber("min_zoom", default: 0.1)
+        let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+        let initialZoom = readToolZoomState(ctx, "initial_zoom", default: 1.0)
+        let initialOffx = readToolZoomState(ctx, "initial_offx", default: 0.0)
+        let initialOffy = readToolZoomState(ctx, "initial_offy", default: 0.0)
+        let dx = cursorX - pressX
+        let direction = (altAtPress != altHeld) ? -1.0 : 1.0
+        let factor = exp(dx * direction / gain)
+        let zNew = min(max(initialZoom * factor, minZoom), maxZoom)
+        let docAx = (pressX - initialOffx) / initialZoom
+        let docAy = (pressY - initialOffy) / initialZoom
+        model.zoomLevel = zNew
+        model.viewOffsetX = pressX - docAx * zNew
+        model.viewOffsetY = pressY - docAy * zNew
+        return nil
+    }
+
+    // doc.pan.apply — Hand-tool drag pan. Idempotent: recomputes
+    // from press + initial offset each call rather than
+    // accumulating per-event deltas.
+    effects["doc.pan.apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let pressX = evalNumber(args["press_x"], store: store, ctx: ctx)
+        let pressY = evalNumber(args["press_y"], store: store, ctx: ctx)
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        let initialOffx = evalNumber(args["initial_offx"], store: store, ctx: ctx)
+        let initialOffy = evalNumber(args["initial_offy"], store: store, ctx: ctx)
+        model.viewOffsetX = initialOffx + (cursorX - pressX)
+        model.viewOffsetY = initialOffy + (cursorY - pressY)
+        return nil
+    }
+
+    // doc.zoom.fit_rect — fit a document-coordinate rectangle into
+    // the visible canvas with screen-space padding. Used by
+    // fit_active_artboard.
+    effects["doc.zoom.fit_rect"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let rectX = evalNumber(args["rect_x"], store: store, ctx: ctx)
+        let rectY = evalNumber(args["rect_y"], store: store, ctx: ctx)
+        let rectW = evalNumber(args["rect_w"], store: store, ctx: ctx)
+        let rectH = evalNumber(args["rect_h"], store: store, ctx: ctx)
+        let padding = evalNumber(args["padding"], store: store, ctx: ctx)
+        fitRectIntoViewport(model: model, x: rectX, y: rectY,
+                            w: rectW, h: rectH, padding: padding)
+        return nil
+    }
+
+    // doc.zoom.fit_marquee — fit a viewport-pixel marquee
+    // (press → cursor) into the canvas. Exact fit. Below 10px in
+    // either dimension is a no-op.
+    effects["doc.zoom.fit_marquee"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let pressX = evalNumber(args["press_x"], store: store, ctx: ctx)
+        let pressY = evalNumber(args["press_y"], store: store, ctx: ctx)
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        let mx = min(pressX, cursorX)
+        let my = min(pressY, cursorY)
+        let mw = abs(pressX - cursorX)
+        let mh = abs(pressY - cursorY)
+        if mw < 10 || mh < 10 { return nil }
+        let z = model.zoomLevel
+        let px = model.viewOffsetX
+        let py = model.viewOffsetY
+        let docX = (mx - px) / z
+        let docY = (my - py) / z
+        let docW = mw / z
+        let docH = mh / z
+        fitRectIntoViewport(model: model, x: docX, y: docY,
+                            w: docW, h: docH, padding: 0)
+        return nil
+    }
+
+    // doc.zoom.fit_elements — fit the bounding box of all elements
+    // with padding. Empty document → 100% centered on origin.
+    effects["doc.zoom.fit_elements"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let padding = evalNumber(args["padding"], store: store, ctx: ctx)
+        let bounds = documentBounds(model.document)
+        if bounds.w <= 0 || bounds.h <= 0 {
+            model.zoomLevel = 1.0
+            model.viewOffsetX = model.viewportW / 2.0
+            model.viewOffsetY = model.viewportH / 2.0
+        } else {
+            fitRectIntoViewport(model: model,
+                                x: bounds.x, y: bounds.y,
+                                w: bounds.w, h: bounds.h,
+                                padding: padding)
+        }
+        return nil
+    }
+
+    // doc.zoom.fit_all_artboards — fit the union of all artboard
+    // rectangles with padding.
+    effects["doc.zoom.fit_all_artboards"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let padding = evalNumber(args["padding"], store: store, ctx: ctx)
+        let abs = model.document.artboards
+        guard !abs.isEmpty else { return nil }
+        var minX = Double.infinity
+        var minY = Double.infinity
+        var maxX = -Double.infinity
+        var maxY = -Double.infinity
+        for ab in abs {
+            let x = Double(ab.x), y = Double(ab.y)
+            let w = Double(ab.width), h = Double(ab.height)
+            minX = min(minX, x)
+            minY = min(minY, y)
+            maxX = max(maxX, x + w)
+            maxY = max(maxY, y + h)
+        }
+        fitRectIntoViewport(model: model, x: minX, y: minY,
+                            w: maxX - minX, h: maxY - minY,
+                            padding: padding)
+        return nil
+    }
+
     // doc.path.smooth_at_cursor — { x, y, radius?, fit_error? }.
     // Iterates selected unlocked Paths, finds the contiguous flat
     // range within `radius` of (x, y), re-fits it via fitCurve with
@@ -2304,6 +2495,81 @@ private func evalNumber(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> D
         if case .number(let n) = v { return n }
     }
     return 0
+}
+
+/// Read a numeric viewport preference from workspace.json. Returns
+/// the provided default if the workspace can't be loaded or the
+/// field isn't a number. Used by doc.zoom.* effects that need
+/// min_zoom / max_zoom / scrubby_zoom_gain from
+/// preferences.viewport.* — mirrors read_pref_number in
+/// jas_dioxus/src/interpreter/effects.rs.
+internal func readPrefNumber(_ key: String, default defaultValue: Double) -> Double {
+    guard let ws = WorkspaceData.load() else { return defaultValue }
+    if let prefs = ws.data["preferences"] as? [String: Any],
+       let viewport = prefs["viewport"] as? [String: Any],
+       let n = viewport[key] as? NSNumber {
+        return n.doubleValue
+    }
+    return defaultValue
+}
+
+/// Read a numeric tool.zoom.<key> from the eval context. Used by
+/// doc.zoom.scrubby to recover the zoom + offset snapshot taken at
+/// mousedown.
+internal func readToolZoomState(_ ctx: [String: Any], _ key: String, default defaultValue: Double) -> Double {
+    if let tool = ctx["tool"] as? [String: Any],
+       let zoom = tool["zoom"] as? [String: Any],
+       let n = zoom[key] as? NSNumber {
+        return n.doubleValue
+    }
+    return defaultValue
+}
+
+/// Compute fit-to-viewport zoom + pan that places the document
+/// rectangle (x, y, w, h) inside the viewport with `padding`
+/// screen-space pixels of breathing room. Letterbox aspect-ratio
+/// resolution; centered. No-op when inputs are degenerate.
+internal func fitRectIntoViewport(model: Model, x: Double, y: Double,
+                                  w: Double, h: Double, padding: Double) {
+    if w <= 0 || h <= 0 { return }
+    let vw = model.viewportW
+    let vh = model.viewportH
+    if vw <= 0 || vh <= 0 { return }
+    let availW = vw - 2.0 * padding
+    let availH = vh - 2.0 * padding
+    if availW <= 0 || availH <= 0 { return }
+    let minZoom = readPrefNumber("min_zoom", default: 0.1)
+    let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+    let z = min(max(min(availW / w, availH / h), minZoom), maxZoom)
+    let rectCx = x + w / 2.0
+    let rectCy = y + h / 2.0
+    model.zoomLevel = z
+    model.viewOffsetX = vw / 2.0 - rectCx * z
+    model.viewOffsetY = vh / 2.0 - rectCy * z
+}
+
+/// Document bounding box: union of all top-level layer bounds.
+/// Returns (0, 0, 0, 0) for an empty document. Mirrors
+/// Document::bounds() in Rust.
+internal func documentBounds(_ doc: Document) -> (x: Double, y: Double, w: Double, h: Double) {
+    if doc.layers.isEmpty {
+        return (0, 0, 0, 0)
+    }
+    var minX = Double.infinity
+    var minY = Double.infinity
+    var maxX = -Double.infinity
+    var maxY = -Double.infinity
+    for layer in doc.layers {
+        let b = layer.bounds
+        let bx = Double(b.x), by = Double(b.y)
+        let bw = Double(b.width), bh = Double(b.height)
+        minX = min(minX, bx)
+        minY = min(minY, by)
+        maxX = max(maxX, bx + bw)
+        maxY = max(maxY, by + bh)
+    }
+    if minX.isInfinite || minY.isInfinite { return (0, 0, 0, 0) }
+    return (minX, minY, maxX - minX, maxY - minY)
 }
 
 private func evalBool(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> Bool {
