@@ -28,7 +28,12 @@ type tool_spec = {
   shortcut : string option;
   state_defaults : (string * Yojson.Safe.t) list;
   handlers : (string * Yojson.Safe.t list) list;
-  overlay : overlay_spec option;
+  overlay : overlay_spec list;
+  (** Overlay declarations. Most tools have zero or one entry;
+      the transform-tool family (Scale / Rotate / Shear) uses
+      multiple to layer the reference-point cross over the
+      drag-time bbox ghost. Each entry's guard is evaluated
+      independently. *)
 }
 
 let parse_state_defaults (val_ : Yojson.Safe.t option)
@@ -56,18 +61,32 @@ let parse_handlers (val_ : Yojson.Safe.t option)
     ) pairs
   | _ -> []
 
-let parse_overlay (val_ : Yojson.Safe.t option) : overlay_spec option =
+let parse_overlay_entry (pairs : (string * Yojson.Safe.t) list)
+  : overlay_spec option =
+  match List.assoc_opt "render" pairs with
+  | Some render ->
+    let guard = match List.assoc_opt "if" pairs with
+      | Some (`String s) -> Some s
+      | _ -> None
+    in
+    Some { guard; render }
+  | None -> None
+
+(** Accept either a single [{if, render}] dict (most tools) or a
+    list of such dicts (transform-tool family). Both produce the
+    same [overlay_spec list] downstream. *)
+let parse_overlay (val_ : Yojson.Safe.t option) : overlay_spec list =
   match val_ with
   | Some (`Assoc pairs) ->
-    (match List.assoc_opt "render" pairs with
-     | Some render ->
-       let guard = match List.assoc_opt "if" pairs with
-         | Some (`String s) -> Some s
-         | _ -> None
-       in
-       Some { guard; render }
-     | None -> None)
-  | _ -> None
+    (match parse_overlay_entry pairs with
+     | Some o -> [o]
+     | None -> [])
+  | Some (`List items) ->
+    List.filter_map (function
+      | `Assoc pairs -> parse_overlay_entry pairs
+      | _ -> None
+    ) items
+  | _ -> []
 
 (** Parse a single tool spec, typically loaded from workspace.json
     under [tools.<id>]. Returns [None] if the spec is missing its
@@ -634,26 +653,175 @@ let add_oval_path (cr : Cairo.context)
   done;
   Cairo.Path.close cr
 
-(** Blob Brush oval cursor + drag preview.
-    BLOB_BRUSH_TOOL.md Overlay.
+(* Blob Brush oval cursor + drag preview.
+   See BLOB_BRUSH_TOOL.md Overlay.
 
-    Two responsibilities:
-    1. Hover cursor — oval outline at (x, y) using the effective tip
-       shape (size / angle / roundness). When [dashed] is truthy, the
-       stroke is dashed to signal erase mode.
-    2. Drag preview — when [mode != "idle"] and a buffer is named,
-       each buffered pointer sample gets an ellipse. Painting mode
-       fills semi-transparent; erasing mode strokes dashed outlines.
+   The two transform-tool overlay helpers below are inserted between
+   the comment and the function definition; the docstring marker has
+   been demoted to a plain comment to avoid the warning-50 unattached
+   documentation comment error. *)
 
-    Fields (all optional unless noted):
-      x, y              current pointer position (required)
-      default_size      tip diameter in pt
-      default_angle     tip rotation in degrees
-      default_roundness tip aspect percent
-      stroke_color      outline color (defaults ``#000000``)
-      dashed            boolean; erase-mode visual
-      buffer            point-buffer name (for drag preview)
-      mode              string tool mode (idle / painting / erasing) *)
+(** Resolve the reference-point coordinate for a transform-tool
+    overlay. Reads the [ref_point] field (typically the expression
+    [state.transform_reference_point]) — when it's a list of two
+    numbers, returns those. Otherwise falls back to the selection
+    union bbox center. Returns [None] when there is no selection. *)
+let resolve_overlay_ref_point (render : Yojson.Safe.t)
+    (eval_ctx : Yojson.Safe.t) (doc : Document.document)
+  : (float * float) option =
+  let custom = match render_get render "ref_point" with
+    | Some (`String expr) ->
+      (match Expr_eval.evaluate expr eval_ctx with
+       | Expr_eval.List items when List.length items >= 2 ->
+         let to_f = function
+           | `Int i -> Some (float_of_int i)
+           | `Float f -> Some f | _ -> None
+         in
+         (match to_f (List.nth items 0), to_f (List.nth items 1) with
+          | Some rx, Some ry -> Some (rx, ry) | _ -> None)
+       | _ -> None)
+    | _ -> None
+  in
+  match custom with
+  | Some _ -> custom
+  | None ->
+    let elements = Document.PathMap.bindings doc.selection
+                   |> List.filter_map (fun (path, _) ->
+                     try Some (Document.get_element doc path)
+                     with _ -> None)
+    in
+    if elements = [] then None
+    else
+      let (x, y, w, h) =
+        Align.union_bounds elements Align.geometric_bounds in
+      Some (x +. w /. 2.0, y +. h /. 2.0)
+
+(** Draw the cyan-blue reference-point cross used by Scale, Rotate,
+    Shear. 12 px crosshair + 2 px dot, color [#4A9EFF]. Hidden when
+    there is no selection. See [SCALE_TOOL.md] \167 Reference-point
+    cross overlay. *)
+let draw_reference_point_cross (cr : Cairo.context)
+    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t)
+    (doc : Document.document) : unit =
+  match resolve_overlay_ref_point render eval_ctx doc with
+  | None -> ()
+  | Some (rx, ry) ->
+    let r = float_of_int 0x4A /. 255.0
+    and g = float_of_int 0x9E /. 255.0
+    and b = float_of_int 0xFF /. 255.0 in
+    Cairo.set_source_rgba cr r g b 1.0;
+    Cairo.set_line_width cr 1.0;
+    let arm = 6.0 in
+    Cairo.move_to cr (rx -. arm) ry;
+    Cairo.line_to cr (rx +. arm) ry;
+    Cairo.stroke cr;
+    Cairo.move_to cr rx (ry -. arm);
+    Cairo.line_to cr rx (ry +. arm);
+    Cairo.stroke cr;
+    Cairo.arc cr rx ry ~r:2.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.fill cr
+
+(** Draw the dashed post-transform bounding-box ghost during a drag.
+    Reads [transform_kind] ("scale" / "rotate" / "shear"), press +
+    cursor + shift_held, composes the matrix via [Transform_apply]
+    and renders the union bbox of the selection under that matrix. *)
+let draw_bbox_ghost (cr : Cairo.context) (render : Yojson.Safe.t)
+    (eval_ctx : Yojson.Safe.t) (doc : Document.document) : unit =
+  match resolve_overlay_ref_point render eval_ctx doc with
+  | None -> ()
+  | Some (rx, ry) ->
+    let kind =
+      match render_get render "transform_kind" with
+      | Some (`String s) ->
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str v -> v
+         | _ -> "")
+      | _ -> ""
+    in
+    let px = eval_number_field eval_ctx (render_get render "press_x") in
+    let py = eval_number_field eval_ctx (render_get render "press_y") in
+    let cx = eval_number_field eval_ctx (render_get render "cursor_x") in
+    let cy = eval_number_field eval_ctx (render_get render "cursor_y") in
+    let shift = eval_bool_field eval_ctx (render_get render "shift_held") in
+    let matrix = match kind with
+      | "scale" ->
+        let denom_x = px -. rx and denom_y = py -. ry in
+        let sx = if abs_float denom_x < 1e-9 then 1.0
+                 else (cx -. rx) /. denom_x in
+        let sy = if abs_float denom_y < 1e-9 then 1.0
+                 else (cy -. ry) /. denom_y in
+        let (sx, sy) = if shift then
+          let prod = sx *. sy in
+          let sign = if prod >= 0.0 then 1.0 else -. 1.0 in
+          let s = sign *. sqrt (abs_float prod) in
+          (s, s)
+        else (sx, sy)
+        in
+        Transform_apply.scale_matrix ~sx ~sy ~rx ~ry
+      | "rotate" ->
+        let tp = atan2 (py -. ry) (px -. rx) in
+        let tc = atan2 (cy -. ry) (cx -. rx) in
+        let theta_deg = (tc -. tp) *. 180.0 /. Float.pi in
+        let theta_deg = if shift
+          then Float.round (theta_deg /. 45.0) *. 45.0
+          else theta_deg in
+        Transform_apply.rotate_matrix ~theta_deg ~rx ~ry
+      | "shear" ->
+        let dx = cx -. px and dy = cy -. py in
+        if shift then begin
+          if abs_float dx >= abs_float dy then
+            let denom = max (abs_float (py -. ry)) 1e-9 in
+            let k = dx /. denom in
+            Transform_apply.shear_matrix
+              ~angle_deg:(atan k *. 180.0 /. Float.pi)
+              ~axis:"horizontal" ~axis_angle_deg:0.0 ~rx ~ry
+          else
+            let denom = max (abs_float (px -. rx)) 1e-9 in
+            let k = dy /. denom in
+            Transform_apply.shear_matrix
+              ~angle_deg:(atan k *. 180.0 /. Float.pi)
+              ~axis:"vertical" ~axis_angle_deg:0.0 ~rx ~ry
+        end else begin
+          let ax = px -. rx and ay = py -. ry in
+          let axis_len = max (sqrt (ax *. ax +. ay *. ay)) 1e-9 in
+          let perp_x = -. ay /. axis_len and perp_y = ax /. axis_len in
+          let perp_dist = (cx -. px) *. perp_x +. (cy -. py) *. perp_y in
+          let k = perp_dist /. axis_len in
+          let axis_angle_deg = atan2 ay ax *. 180.0 /. Float.pi in
+          Transform_apply.shear_matrix
+            ~angle_deg:(atan k *. 180.0 /. Float.pi)
+            ~axis:"custom" ~axis_angle_deg ~rx ~ry
+        end
+      | _ -> Element.identity_transform
+    in
+    let elements = Document.PathMap.bindings doc.selection
+                   |> List.filter_map (fun (path, _) ->
+                     try Some (Document.get_element doc path)
+                     with _ -> None)
+    in
+    if elements = [] then () else begin
+      let (bx, by, bw, bh) =
+        Align.union_bounds elements Align.geometric_bounds in
+      let p = Element.apply_point matrix in
+      let c0 = p bx by in
+      let c1 = p (bx +. bw) by in
+      let c2 = p (bx +. bw) (by +. bh) in
+      let c3 = p bx (by +. bh) in
+      let r = float_of_int 0x4A /. 255.0
+    and g = float_of_int 0x9E /. 255.0
+    and b = float_of_int 0xFF /. 255.0 in
+      Cairo.set_source_rgba cr r g b 1.0;
+      Cairo.set_line_width cr 1.0;
+      Cairo.set_dash cr [| 4.0; 2.0 |];
+      Cairo.move_to cr (fst c0) (snd c0);
+      Cairo.line_to cr (fst c1) (snd c1);
+      Cairo.line_to cr (fst c2) (snd c2);
+      Cairo.line_to cr (fst c3) (snd c3);
+      Cairo.Path.close cr;
+      Cairo.stroke cr;
+      Cairo.set_dash cr [||]
+    end
+
 let draw_oval_cursor_overlay (cr : Cairo.context)
     (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t) : unit =
   let cx = eval_number_field eval_ctx (render_get render "x") in
@@ -858,40 +1026,47 @@ class yaml_tool (spec : tool_spec) = object (_self)
 
   method draw_overlay (ctx : Canvas_tool.tool_context) (cr : Cairo.context)
     : unit =
-    match spec.overlay with
-    | None -> ()
-    | Some overlay ->
-      let eval_ctx = State_store.eval_context store in
+    if spec.overlay = [] then () else
+    let eval_ctx = State_store.eval_context store in
+    let guard_handle = Doc_primitives.register_document ctx.controller#document in
+    List.iter (fun overlay ->
       let guard_ok = match overlay.guard with
         | None -> true
         | Some g ->
           (match Expr_eval.evaluate g eval_ctx with
            | v -> Expr_eval.to_bool v)
       in
-      if guard_ok then
-        let guard = Doc_primitives.register_document ctx.controller#document in
+      if guard_ok then begin
         let render_type = match overlay.render with
           | `Assoc pairs ->
             (match List.assoc_opt "type" pairs with
              | Some (`String s) -> s | _ -> "")
           | _ -> ""
         in
-        (match render_type with
-         | "rect" -> draw_rect_overlay cr overlay.render eval_ctx
-         | "line" -> draw_line_overlay cr overlay.render eval_ctx
-         | "polygon" -> draw_regular_polygon_overlay cr overlay.render eval_ctx
-         | "star" -> draw_star_overlay cr overlay.render eval_ctx
-         | "buffer_polygon" -> draw_buffer_polygon_overlay cr overlay.render
-         | "buffer_polyline" ->
-           draw_buffer_polyline_overlay cr overlay.render eval_ctx
-         | "pen_overlay" -> draw_pen_overlay cr overlay.render eval_ctx
-         | "partial_selection_overlay" ->
-           draw_partial_selection_overlay cr overlay.render eval_ctx
-             ctx.controller#document
-         | "oval_cursor" ->
-           draw_oval_cursor_overlay cr overlay.render eval_ctx
-         | _ -> ());
-        guard.restore ()
+        match render_type with
+        | "rect" -> draw_rect_overlay cr overlay.render eval_ctx
+        | "line" -> draw_line_overlay cr overlay.render eval_ctx
+        | "polygon" -> draw_regular_polygon_overlay cr overlay.render eval_ctx
+        | "star" -> draw_star_overlay cr overlay.render eval_ctx
+        | "buffer_polygon" -> draw_buffer_polygon_overlay cr overlay.render
+        | "buffer_polyline" ->
+          draw_buffer_polyline_overlay cr overlay.render eval_ctx
+        | "pen_overlay" -> draw_pen_overlay cr overlay.render eval_ctx
+        | "partial_selection_overlay" ->
+          draw_partial_selection_overlay cr overlay.render eval_ctx
+            ctx.controller#document
+        | "oval_cursor" ->
+          draw_oval_cursor_overlay cr overlay.render eval_ctx
+        | "reference_point_cross" ->
+          draw_reference_point_cross cr overlay.render eval_ctx
+            ctx.controller#document
+        | "bbox_ghost" ->
+          draw_bbox_ghost cr overlay.render eval_ctx
+            ctx.controller#document
+        | _ -> ()
+      end
+    ) spec.overlay;
+    guard_handle.restore ()
 end
 
 (** Convenience: parse the workspace tool dict and construct a
