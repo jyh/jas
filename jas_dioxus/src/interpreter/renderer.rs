@@ -1262,6 +1262,9 @@ fn build_active_document_view(
             "current_artboard_id": serde_json::Value::Null,
             "current_artboard": {},
             "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+            "zoom_level": 1.0,
+            "view_offset_x": 0.0,
+            "view_offset_y": 0.0,
         });
     };
     let mut top_level_layers = Vec::new();
@@ -1394,6 +1397,9 @@ fn build_active_document_view(
         "current_artboard_id": current_id,
         "current_artboard": current_artboard_json,
         "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+        "zoom_level": tab.zoom_level,
+        "view_offset_x": tab.view_offset_x,
+        "view_offset_y": tab.view_offset_y,
     })
 }
 
