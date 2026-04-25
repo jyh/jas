@@ -1078,6 +1078,29 @@ fn run_doc_effect(
                 path_commit_anchor_edit(model, store, origin_x, origin_y, target_x, target_y);
             }
         }
+        "doc.artboard.create_commit" => {
+            // Drag-to-create commit per ARTBOARD_TOOL.md §Drag-to-create.
+            // Builds a rect from the (x1, y1) - (x2, y2) drag, rounds
+            // to integer pt, clamps each dimension to a 1 pt minimum,
+            // mints a fresh id, picks the next "Artboard N" name, and
+            // appends to document.artboards. Defaults: transparent
+            // fill, all per-artboard display toggles off. The new
+            // artboard becomes the visually-on-top artboard for any
+            // overlap region (highest position in the list).
+            //
+            // Note: panel-selection is NOT updated here yet; that
+            // requires an AppState write path which lands in the
+            // Phase 1.3 panel-selection plumbing pass. Until then,
+            // the new artboard exists but the panel UI doesn't
+            // auto-select it.
+            if let serde_json::Value::Object(args) = spec {
+                let x1 = eval_number(args.get("x1"), store, ctx);
+                let y1 = eval_number(args.get("y1"), store, ctx);
+                let x2 = eval_number(args.get("x2"), store, ctx);
+                let y2 = eval_number(args.get("y2"), store, ctx);
+                artboard_create_commit(model, x1, y1, x2, y2);
+            }
+        }
         "doc.artboard.probe_hit" => {
             // Artboard tool's press-time dispatcher per ARTBOARD_TOOL.md
             // §Mousedown disambiguation order:
@@ -2618,6 +2641,50 @@ fn path_commit_anchor_edit(
         }
         _ => {}
     }
+}
+
+/// Implementation of doc.artboard.create_commit per ARTBOARD_TOOL.md
+/// §Drag-to-create. Rounds the in-flight rect to integer pt, clamps
+/// each dimension to >= 1 pt, mints a fresh id, picks the next
+/// "Artboard N" name, and appends to document.artboards.
+fn artboard_create_commit(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64) {
+    use crate::document::artboard::{generate_artboard_id, next_artboard_name, Artboard};
+
+    // Build rect; integer-pt round at commit per §Common rules.
+    let raw_x = x1.min(x2).round();
+    let raw_y = y1.min(y2).round();
+    let raw_w = (x1 - x2).abs().round().max(1.0);
+    let raw_h = (y1 - y2).abs().round().max(1.0);
+
+    let mut new_doc = model.document().clone();
+
+    // Collision-retry id mint (matches the doc.create_artboard pattern
+    // in renderer.rs).
+    let existing_ids: std::collections::HashSet<String> =
+        new_doc.artboards.iter().map(|a| a.id.clone()).collect();
+    let mut id = String::new();
+    for _ in 0..100 {
+        let candidate = generate_artboard_id(None);
+        if !existing_ids.contains(&candidate) {
+            id = candidate;
+            break;
+        }
+    }
+    if id.is_empty() {
+        return;
+    }
+
+    let mut ab = Artboard::default_with_id(id);
+    ab.name = next_artboard_name(&new_doc.artboards);
+    ab.x = raw_x;
+    ab.y = raw_y;
+    ab.width = raw_w;
+    ab.height = raw_h;
+    // Defaults from Artboard::default_with_id already cover fill =
+    // Transparent and all display toggles off.
+
+    new_doc.artboards.push(ab);
+    model.set_document(new_doc);
 }
 
 /// Implementation of doc.artboard.probe_hit per ARTBOARD_TOOL.md
@@ -6338,6 +6405,111 @@ mod tests {
         run_effects(&effects, &serde_json::json!({}), &mut store,
             Some(&mut model), None, None);
         assert!((model.zoom_level - 2.0).abs() < 1e-9, "z = {}", model.zoom_level);
+    }
+
+    #[test]
+    fn test_doc_artboard_create_commit_basic() {
+        // Drag from (10, 20) to (110, 120) creates an artboard at
+        // (10, 20) sized 100 x 100. Integer pt; appended to the list.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut existing = Artboard::default_with_id("seed0001".into());
+        existing.name = "Artboard 1".into();
+        doc.artboards.push(existing);
+        let mut model = Model::new(doc, None);
+        let effects = vec![serde_json::json!({
+            "doc.artboard.create_commit": {
+                "x1": "10", "y1": "20", "x2": "110", "y2": "120"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let abs = &model.document().artboards;
+        assert_eq!(abs.len(), 2);
+        let new_ab = &abs[1];
+        assert_eq!(new_ab.x, 10.0);
+        assert_eq!(new_ab.y, 20.0);
+        assert_eq!(new_ab.width, 100.0);
+        assert_eq!(new_ab.height, 100.0);
+        // Default name is "Artboard 2" (smallest unused N).
+        assert_eq!(new_ab.name, "Artboard 2");
+    }
+
+    #[test]
+    fn test_doc_artboard_create_commit_negative_drag() {
+        // Drag from (110, 120) to (10, 20) — same rect as the basic
+        // case but cursor went up-left. Result is identical.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        doc.artboards.push(Artboard::default_with_id("seed0001".into()));
+        let mut model = Model::new(doc, None);
+        let effects = vec![serde_json::json!({
+            "doc.artboard.create_commit": {
+                "x1": "110", "y1": "120", "x2": "10", "y2": "20"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let new_ab = &model.document().artboards[1];
+        assert_eq!(new_ab.x, 10.0);
+        assert_eq!(new_ab.y, 20.0);
+        assert_eq!(new_ab.width, 100.0);
+        assert_eq!(new_ab.height, 100.0);
+    }
+
+    #[test]
+    fn test_doc_artboard_create_commit_clamps_min_size() {
+        // Tiny drag (essentially zero rect) clamps to 1 x 1 pt min.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        doc.artboards.push(Artboard::default_with_id("seed0001".into()));
+        let mut model = Model::new(doc, None);
+        let effects = vec![serde_json::json!({
+            "doc.artboard.create_commit": {
+                "x1": "50", "y1": "50", "x2": "50.4", "y2": "50.4"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let new_ab = &model.document().artboards[1];
+        assert_eq!(new_ab.width, 1.0);
+        assert_eq!(new_ab.height, 1.0);
+    }
+
+    #[test]
+    fn test_doc_artboard_create_commit_rounds_to_integer_pt() {
+        // Fractional drag rounds to nearest integer pt at commit per
+        // ARTBOARD_TOOL.md §Common rules.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        doc.artboards.push(Artboard::default_with_id("seed0001".into()));
+        let mut model = Model::new(doc, None);
+        let effects = vec![serde_json::json!({
+            "doc.artboard.create_commit": {
+                "x1": "10.4", "y1": "20.6", "x2": "110.6", "y2": "120.4"
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let new_ab = &model.document().artboards[1];
+        assert_eq!(new_ab.x, 10.0);  // 10.4 rounds down
+        assert_eq!(new_ab.y, 21.0);  // 20.6 rounds up
+        // width = abs(10.4 - 110.6).round() = 100.2.round() = 100
+        assert_eq!(new_ab.width, 100.0);
+        // height = abs(20.6 - 120.4).round() = 99.8.round() = 100
+        assert_eq!(new_ab.height, 100.0);
     }
 
     #[test]
