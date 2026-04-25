@@ -37,6 +37,8 @@ fn tool_yaml_id(kind: ToolKind) -> Option<&'static str> {
         ToolKind::Scale => "scale",
         ToolKind::Rotate => "rotate",
         ToolKind::Shear => "shear",
+        ToolKind::Hand => "hand",
+        ToolKind::Zoom => "zoom",
         ToolKind::Type | ToolKind::TypeOnPath => return None,
     })
 }
@@ -75,6 +77,24 @@ fn tool_options_panel_id(kind: ToolKind) -> Option<String> {
         .map(String::from)
 }
 
+/// Look up a tool's `tool_options_action` field in workspace.json.
+/// Returns the action id when present, None otherwise. Used by tools
+/// whose dblclick destination is a one-shot action rather than a
+/// dialog or panel — Hand → fit_active_artboard, Zoom →
+/// zoom_to_actual_size. Mutually exclusive with the dialog and
+/// panel variants. See HAND_TOOL.md / ZOOM_TOOL.md.
+fn tool_options_action_id(kind: ToolKind) -> Option<String> {
+    use crate::interpreter::workspace::Workspace;
+    let yaml_id = tool_yaml_id(kind)?;
+    let ws = Workspace::load()?;
+    ws.data()
+        .get("tools")?
+        .get(yaml_id)?
+        .get("tool_options_action")?
+        .as_str()
+        .map(String::from)
+}
+
 /// Map a YAML panel id (the value of `tool_options_panel`) to the
 /// corresponding PanelKind. Returns None when the id doesn't match
 /// any known panel — the toolbar dblclick is silently a no-op in
@@ -107,6 +127,11 @@ pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     // SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md.
     (4, 0, &[ToolKind::Scale, ToolKind::Shear]),
     (4, 1, &[ToolKind::Rotate]),
+    // Navigation-tool family: Hand (primary, with spacebar pass-through)
+    // and Zoom (long-press alternate). Hand-icon dblclick →
+    // fit_active_artboard; Zoom-icon dblclick → zoom_to_actual_size.
+    // See HAND_TOOL.md / ZOOM_TOOL.md.
+    (5, 0, &[ToolKind::Hand, ToolKind::Zoom]),
 ];
 
 /// Long-press threshold in milliseconds (matches theme.sizes.long_press_ms).
@@ -209,16 +234,31 @@ pub(crate) fn ToolbarGrid(
                         let mut dlg_sig = yaml_dialog_sig;
                         move |evt: Event<MouseData>| {
                             evt.stop_propagation();
-                            // Prefer panel-style tool options (Magic
-                            // Wand) over dialog-style (Paintbrush /
-                            // Blob Brush). A tool yaml uses one or
-                            // the other, not both.
+                            // Three mutually-exclusive dispatch
+                            // paths in priority order:
+                            //   1. tool_options_panel  → show panel
+                            //      (Magic Wand)
+                            //   2. tool_options_action → invoke
+                            //      action (Hand → fit_active_artboard,
+                            //      Zoom → zoom_to_actual_size)
+                            //   3. tool_options_dialog → open modal
+                            //      dialog (Paintbrush / Blob Brush /
+                            //      Scale / Rotate / Shear)
                             if let Some(panel_id) = tool_options_panel_id(kind) {
                                 if let Some(panel_kind) = panel_id_to_kind(&panel_id) {
                                     (act_dbl.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                                         st.workspace_layout.show_panel(panel_kind);
                                     }));
                                 }
+                                return;
+                            }
+                            if let Some(action_id) = tool_options_action_id(kind) {
+                                (act_dbl.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    let empty = serde_json::Map::new();
+                                    crate::interpreter::renderer::dispatch_action(
+                                        &action_id, &empty, st,
+                                    );
+                                }));
                                 return;
                             }
                             let Some(dlg_id) = tool_options_dialog_id(kind) else { return; };

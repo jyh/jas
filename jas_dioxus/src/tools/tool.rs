@@ -47,6 +47,8 @@ pub enum ToolKind {
     Scale,
     Rotate,
     Shear,
+    Hand,
+    Zoom,
 }
 
 impl ToolKind {
@@ -76,6 +78,8 @@ impl ToolKind {
             ToolKind::Scale => "Scale (S)",
             ToolKind::Rotate => "Rotate (R)",
             ToolKind::Shear => "Shear",
+            ToolKind::Hand => "Hand (H)",
+            ToolKind::Zoom => "Zoom (Z)",
         }
     }
 
@@ -139,6 +143,8 @@ impl ToolKind {
             ToolKind::Scale => Some("s"),
             ToolKind::Rotate => Some("r"),
             ToolKind::Shear => None,
+            ToolKind::Hand => Some("h"),
+            ToolKind::Zoom => Some("z"),
             _ => None,
         }
     }
@@ -231,8 +237,10 @@ mod tests {
             ToolKind::Scale,
             ToolKind::Rotate,
             ToolKind::Shear,
+            ToolKind::Hand,
+            ToolKind::Zoom,
         ];
-        assert_eq!(all.len(), 24);
+        assert_eq!(all.len(), 26);
     }
 
     #[test]
@@ -270,11 +278,12 @@ mod tests {
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
             ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
+            ToolKind::Hand, ToolKind::Zoom,
         ];
         for t in &all {
             set.insert(*t);
         }
-        assert_eq!(set.len(), 24);
+        assert_eq!(set.len(), 26);
     }
 
     #[test]
@@ -289,6 +298,7 @@ mod tests {
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
             ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
+            ToolKind::Hand, ToolKind::Zoom,
         ];
         for t in &all {
             assert!(!t.label().is_empty(), "{:?} has empty label", t);
