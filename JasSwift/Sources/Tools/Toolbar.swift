@@ -978,6 +978,24 @@ public struct ToolbarView {
                 context.stroke(
                     handle, with: .color(color),
                     style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+
+            case .artboard:
+                // Artboard — page rectangle with the upper-right
+                // corner folded forward. Per ARTBOARD_TOOL.md §Tool
+                // icon.
+                var page = SwiftUI.Path()
+                page.move(to: CGPoint(x: ox + 5, y: oy + 6))
+                page.addLine(to: CGPoint(x: ox + 18, y: oy + 6))
+                page.addLine(to: CGPoint(x: ox + 23, y: oy + 11))
+                page.addLine(to: CGPoint(x: ox + 23, y: oy + 23))
+                page.addLine(to: CGPoint(x: ox + 5,  y: oy + 23))
+                page.closeSubpath()
+                context.stroke(page, with: .color(color), lineWidth: 2.0)
+                var fold = SwiftUI.Path()
+                fold.move(to: CGPoint(x: ox + 18, y: oy + 6))
+                fold.addLine(to: CGPoint(x: ox + 18, y: oy + 11))
+                fold.addLine(to: CGPoint(x: ox + 23, y: oy + 11))
+                context.stroke(fold, with: .color(color), lineWidth: 2.0)
             }
         }
     }
@@ -1095,6 +1113,7 @@ private struct ArrowSlotButton: View {
         case .shear: return "Shear"
         case .hand: return "Hand"
         case .zoom: return "Zoom"
+        case .artboard: return "Artboard"
         default: return tool.rawValue
         }
     }

@@ -1845,6 +1845,60 @@ class CanvasNSView: NSView {
             // so crosshair is the closest match. Alt-flip to a
             // minus-decorated variant is deferred.
             return NSCursor.crosshair
+        case .artboard:
+            // Artboard cursor is dynamic per ARTBOARD_TOOL.md
+            // §Cursor states — varies based on hover_kind / mode /
+            // alt_held. Phase 2.1 returns the idle crosshair as the
+            // baseline; the dynamic move / copy / 8-direction
+            // resize cursor logic lands in a focused follow-up that
+            // mirrors the Rust cursor_css_override implementation.
+            if let model = controller?.model {
+                let toolCtx = model.stateStore.evalContext()["tool"] as? [String: Any]
+                let abCtx = toolCtx?["artboard"] as? [String: Any]
+                let mode = abCtx?["mode"] as? String ?? ""
+                let altHeld = abCtx?["alt_held"] as? Bool ?? false
+                let hitHandle = abCtx?["hit_handle_pos"] as? String ?? ""
+                let hover = abCtx?["hover_kind"] as? String ?? ""
+                func resizeCursor(_ pos: String) -> NSCursor {
+                    // AppKit lacks ns/ew/nesw/nwse-resize stocks at
+                    // the public API level; return resize-row /
+                    // resize-column variants as the closest match
+                    // and defer 8-direction custom cursors to a
+                    // follow-up.
+                    switch pos {
+                    case "n", "s": return NSCursor.resizeUpDown
+                    case "e", "w": return NSCursor.resizeLeftRight
+                    default: return NSCursor.crosshair
+                    }
+                }
+                // During drag — reflect the gesture.
+                switch mode {
+                case "moving", "moving_pending":
+                    return NSCursor.openHand
+                case "duplicating", "duplicating_pending":
+                    return NSCursor.dragCopy
+                case "resizing":
+                    return resizeCursor(hitHandle)
+                case "creating":
+                    return NSCursor.crosshair
+                default:
+                    break
+                }
+                // Idle — reflect what's under the pointer.
+                if hover.hasPrefix("handle:") {
+                    let pos = String(hover.dropFirst("handle:".count))
+                    return resizeCursor(pos)
+                }
+                switch hover {
+                case "interior":
+                    return altHeld ? NSCursor.dragCopy : NSCursor.openHand
+                case "empty":
+                    return NSCursor.crosshair
+                default:
+                    return NSCursor.crosshair
+                }
+            }
+            return NSCursor.crosshair
         default:
             return NSCursor.crosshair
         }
