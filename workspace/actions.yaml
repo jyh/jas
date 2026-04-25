@@ -2626,6 +2626,12 @@ actions:
       above the original in z-order; selection moves to the
       duplicate) instead of mutating the original. Closes the dialog
       either way. See SCALE_TOOL.md §Tool Options dialog.
+
+      doc.preview.restore is run first so the document is reset to
+      its pre-dialog state before the final apply (otherwise an
+      OK after typing-time previews would compound). doc.preview.clear
+      is run before close_dialog so the close handler does not
+      restore the snapshot.
     category: transform
     params:
       uniform:        { type: bool }
@@ -2637,6 +2643,7 @@ actions:
       preview:        { type: bool }
       copy:           { type: bool }
     effects:
+      - "doc.preview.restore": {}
       - set:
           scale_uniform:        "param.uniform"
           scale_uniform_pct:    "param.uniform_pct"
@@ -2649,7 +2656,23 @@ actions:
           sx:   "if param.uniform then param.uniform_pct / 100.0 else param.horizontal_pct / 100.0"
           sy:   "if param.uniform then param.uniform_pct / 100.0 else param.vertical_pct / 100.0"
           copy: "param.copy"
+      - "doc.preview.clear": {}
       - close_dialog: None
+
+  scale_options_preview:
+    description: >
+      Live-preview action fired by the Scale Options dialog's
+      on_change hook. Restores the captured doc snapshot and
+      re-applies the scale with the dialog's current values
+      (copy=false). Per-frame debounced by the runtime.
+      See SCALE_TOOL.md §Preview.
+    category: transform
+    effects:
+      - "doc.preview.restore": {}
+      - "doc.scale.apply":
+          sx:   "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.horizontal_pct / 100.0"
+          sy:   "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.vertical_pct / 100.0"
+          copy: "false"
 
   scale_options_reset:
     description: >
@@ -2675,19 +2698,35 @@ actions:
       selection. When param.copy is true, the rotation is applied
       to a duplicate of the selection. Closes the dialog. See
       ROTATE_TOOL.md §Tool Options dialog.
+
+      doc.preview.restore + doc.preview.clear bracket the apply so
+      typing-time preview frames do not compound the final commit.
     category: transform
     params:
       angle:   { type: number }
       preview: { type: bool }
       copy:    { type: bool }
     effects:
+      - "doc.preview.restore": {}
       - set:
           rotate_angle:   "param.angle"
           rotate_preview: "param.preview"
       - "doc.rotate.apply":
           angle: "param.angle"
           copy:  "param.copy"
+      - "doc.preview.clear": {}
       - close_dialog: None
+
+  rotate_options_preview:
+    description: >
+      Live-preview action fired by the Rotate Options dialog's
+      on_change hook. See ROTATE_TOOL.md §Preview.
+    category: transform
+    effects:
+      - "doc.preview.restore": {}
+      - "doc.rotate.apply":
+          angle: "dialog.angle"
+          copy:  "false"
 
   rotate_options_reset:
     description: >
@@ -2707,6 +2746,9 @@ actions:
       selection. When param.copy is true, the shear is applied to
       a duplicate of the selection. Closes the dialog. See
       SHEAR_TOOL.md §Tool Options dialog.
+
+      doc.preview.restore + doc.preview.clear bracket the apply so
+      typing-time preview frames do not compound the final commit.
     category: transform
     params:
       angle:      { type: number }
@@ -2715,6 +2757,7 @@ actions:
       preview:    { type: bool }
       copy:       { type: bool }
     effects:
+      - "doc.preview.restore": {}
       - set:
           shear_angle:      "param.angle"
           shear_axis:       "param.axis"
@@ -2725,7 +2768,21 @@ actions:
           axis:       "param.axis"
           axis_angle: "param.axis_angle"
           copy:       "param.copy"
+      - "doc.preview.clear": {}
       - close_dialog: None
+
+  shear_options_preview:
+    description: >
+      Live-preview action fired by the Shear Options dialog's
+      on_change hook. See SHEAR_TOOL.md §Preview.
+    category: transform
+    effects:
+      - "doc.preview.restore": {}
+      - "doc.shear.apply":
+          angle:      "dialog.angle"
+          axis:       "dialog.axis"
+          axis_angle: "dialog.axis_angle"
+          copy:       "false"
 
   shear_options_reset:
     description: >

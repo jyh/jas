@@ -23,6 +23,8 @@ rotate_options:
   modal: true
   width: 360
   params: {}
+  doc_preview: true
+  on_change: rotate_options_preview
   state:
     angle:
       type: number
