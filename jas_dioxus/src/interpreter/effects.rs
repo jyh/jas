@@ -1303,6 +1303,148 @@ fn run_doc_effect(
                 shear_apply(model, store, ctx, angle_deg, &axis, axis_angle_deg, copy);
             }
         }
+        "doc.zoom.apply" => {
+            // Apply a multiplicative zoom factor anchored at
+            // (anchor_x, anchor_y) in viewport-local pixels. The
+            // document point under the anchor stays under the anchor
+            // after the zoom. Clamped to
+            // [preferences.viewport.min_zoom, max_zoom]; the actual
+            // applied factor (post-clamp) is used for the pan
+            // recompute so the anchor stays glued to its document
+            // point at the boundary. Per ZOOM_TOOL.md §Anchor and
+            // clamp math.
+            //
+            // anchor_x / anchor_y default to -1, which means
+            // "viewport center" for keyboard / menu invocations.
+            // The Zoom tool's click and wheel handlers pass real
+            // cursor coords. When viewport size isn't available
+            // (effects run without canvas size yet), -1 falls
+            // through to (0, 0) — corrected by viewport plumbing
+            // in a follow-up commit.
+            if let serde_json::Value::Object(args) = spec {
+                let factor = eval_number(args.get("factor"), store, ctx);
+                let anchor_x_raw = eval_number(args.get("anchor_x"), store, ctx);
+                let anchor_y_raw = eval_number(args.get("anchor_y"), store, ctx);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                let z = model.zoom_level;
+                let px = model.view_offset_x;
+                let py = model.view_offset_y;
+                // Default-anchor convention: -1 means viewport center
+                // (no viewport size available here, so fall back to
+                // current anchor at (0,0) — the doc origin's screen
+                // position — which preserves the document origin's
+                // place. See followup commit for proper viewport
+                // plumbing.
+                let ax = if anchor_x_raw < 0.0 { px } else { anchor_x_raw };
+                let ay = if anchor_y_raw < 0.0 { py } else { anchor_y_raw };
+                let doc_ax = (ax - px) / z;
+                let doc_ay = (ay - py) / z;
+                let z_new = (z * factor).clamp(min_zoom, max_zoom);
+                let px_new = ax - doc_ax * z_new;
+                let py_new = ay - doc_ay * z_new;
+                model.zoom_level = z_new;
+                model.view_offset_x = px_new;
+                model.view_offset_y = py_new;
+            }
+        }
+        "doc.zoom.set" => {
+            // Set zoom_level absolutely; pan unchanged. Used by
+            // zoom_to_actual_size (level: 1.0). Clamps to
+            // [min_zoom, max_zoom].
+            if let serde_json::Value::Object(args) = spec {
+                let level = eval_number(args.get("level"), store, ctx);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                model.zoom_level = level.clamp(min_zoom, max_zoom);
+            }
+        }
+        "doc.zoom.set_full" => {
+            // Set zoom_level + view_offset_x + view_offset_y in one
+            // atomic write. Used by Zoom-tool Escape-cancel to
+            // restore the pre-drag snapshot.
+            if let serde_json::Value::Object(args) = spec {
+                let zoom = eval_number(args.get("zoom"), store, ctx);
+                let offset_x = eval_number(args.get("offset_x"), store, ctx);
+                let offset_y = eval_number(args.get("offset_y"), store, ctx);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                model.zoom_level = zoom.clamp(min_zoom, max_zoom);
+                model.view_offset_x = offset_x;
+                model.view_offset_y = offset_y;
+            }
+        }
+        "doc.zoom.scrubby" => {
+            // Continuous scrubby zoom during a drag. Reads tool
+            // state for initial zoom + offsets at mousedown plus
+            // press / cursor coords + alt modifier. Computes new
+            // zoom factor as exp(dx_px / scrubby_zoom_gain) — or
+            // its reciprocal if Alt is held (alt_at_press XOR
+            // alt_held). Anchors the document point under
+            // (press_x, press_y) so the cursor stays glued to its
+            // document position. Per ZOOM_TOOL.md §Drag — scrubby
+            // zoom.
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let _cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let alt_held = eval_bool(args.get("alt_held"), store, ctx);
+                let alt_at_press = eval_bool(args.get("alt_at_press"), store, ctx);
+                let gain = read_pref_number(ctx, "scrubby_zoom_gain", 144.0);
+                let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
+                let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
+                let initial_zoom = read_tool_zoom_state(ctx, "initial_zoom", 1.0);
+                let initial_offx = read_tool_zoom_state(ctx, "initial_offx", 0.0);
+                let initial_offy = read_tool_zoom_state(ctx, "initial_offy", 0.0);
+                let dx = cursor_x - press_x;
+                let direction = if alt_at_press ^ alt_held { -1.0 } else { 1.0 };
+                let factor = (dx * direction / gain).exp();
+                let z_new = (initial_zoom * factor).clamp(min_zoom, max_zoom);
+                // Anchor at press point: document point under press
+                // stays under press at the new zoom. doc_ax / doc_ay
+                // computed from the *initial* zoom + offsets (before
+                // any scrubby application).
+                let doc_ax = (press_x - initial_offx) / initial_zoom;
+                let doc_ay = (press_y - initial_offy) / initial_zoom;
+                model.zoom_level = z_new;
+                model.view_offset_x = press_x - doc_ax * z_new;
+                model.view_offset_y = press_y - doc_ay * z_new;
+            }
+        }
+        "doc.pan.apply" => {
+            // Hand tool pan during a drag. Computes new offsets as
+            // initial offset + cursor-press delta so the document
+            // point under the cursor at mousedown stays under the
+            // cursor for the entire drag. Idempotent — recomputes
+            // from press + initial each call rather than
+            // accumulating per-mousemove deltas. Per HAND_TOOL.md
+            // §Drag — pan.
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let initial_offx = eval_number(args.get("initial_offx"), store, ctx);
+                let initial_offy = eval_number(args.get("initial_offy"), store, ctx);
+                model.view_offset_x = initial_offx + (cursor_x - press_x);
+                model.view_offset_y = initial_offy + (cursor_y - press_y);
+            }
+        }
+        "doc.zoom.fit_rect"
+        | "doc.zoom.fit_marquee"
+        | "doc.zoom.fit_elements"
+        | "doc.zoom.fit_all_artboards" => {
+            // Fit-* effects need the canvas viewport width and
+            // height to compute the new zoom factor. Viewport
+            // plumbing through to effects is a follow-up commit;
+            // for now these are no-ops so the dispatch path
+            // doesn't error. ZOOM_TOOL.md §Keyboard shortcuts
+            // and actions, HAND_TOOL.md §Hand-icon dblclick.
+            let _ = spec;
+            let _ = store;
+            let _ = ctx;
+        }
         "doc.magic_wand.apply" => {
             // Magic Wand selection per MAGIC_WAND_TOOL.md §Predicate.
             // Reads the seed path + mode (replace / add / subtract)
@@ -1760,6 +1902,36 @@ fn brush_options_confirm_dispatch(store: &mut StateStore, model: &mut Model) {
         }
         _ => {}
     }
+}
+
+/// Read a numeric viewport preference from workspace.json. Returns
+/// the provided default if the workspace can't be loaded or the
+/// field isn't a number. Used by doc.zoom.* effects that need
+/// min_zoom / max_zoom / scrubby_zoom_gain from
+/// preferences.viewport.* — the runtime expression evaluator
+/// doesn't currently resolve preferences.* identifiers, so these
+/// effects bypass it and read the workspace data directly.
+fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
+    use crate::interpreter::workspace::Workspace;
+    let Some(ws) = Workspace::load() else { return default; };
+    ws.data()
+        .get("preferences")
+        .and_then(|p| p.get("viewport"))
+        .and_then(|v| v.get(key))
+        .and_then(|n| n.as_f64())
+        .unwrap_or(default)
+}
+
+/// Read a numeric tool.zoom.<key> from the eval context. Used by
+/// doc.zoom.scrubby to recover the zoom + offset snapshot taken at
+/// mousedown so the continuous-drag zoom is computed idempotently
+/// from the press position, not accumulated per-event.
+fn read_tool_zoom_state(ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
+    ctx.get("tool")
+        .and_then(|t| t.get("zoom"))
+        .and_then(|z| z.get(key))
+        .and_then(|n| n.as_f64())
+        .unwrap_or(default)
 }
 
 fn eval_number(
@@ -5649,5 +5821,152 @@ mod tests {
             .selection.iter().map(|es| es.path.clone()).collect();
         assert_eq!(paths.len(), 1);
         assert!(paths.contains(&vec![0, 0]));
+    }
+
+    // ─── Zoom + Pan effects ────────────────────────────────────
+
+    #[test]
+    fn test_doc_zoom_set() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 2.5;
+        model.view_offset_x = 100.0;
+        model.view_offset_y = 50.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.set": { "level": "1.0" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 1.0);
+        // Pan unchanged.
+        assert_eq!(model.view_offset_x, 100.0);
+        assert_eq!(model.view_offset_y, 50.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_set_clamps_to_min_max() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        let effects = vec![serde_json::json!({
+            "doc.zoom.set": { "level": "1000.0" }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Clamped to max_zoom (default 64.0 from preferences.yaml).
+        assert_eq!(model.zoom_level, 64.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_set_full() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        let effects = vec![serde_json::json!({
+            "doc.zoom.set_full": {
+                "zoom":     "2.0",
+                "offset_x": "150.0",
+                "offset_y": "75.0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 2.0);
+        assert_eq!(model.view_offset_x, 150.0);
+        assert_eq!(model.view_offset_y, 75.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_apply_anchors_at_cursor() {
+        // Document point under cursor at (200, 150) before zoom
+        // should be under cursor at (200, 150) after zoom.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 1.0;
+        model.view_offset_x = 0.0;
+        model.view_offset_y = 0.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.apply": {
+                "factor":   "2.0",
+                "anchor_x": "200",
+                "anchor_y": "150",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 2.0);
+        // Anchor invariant: doc point (200, 150) was at screen
+        // (200, 150) before; should still be at screen (200, 150).
+        // screen = offset + zoom * doc; doc was 200/1 = 200 (same
+        // since offset=0). So offset_new = 200 - 200*2 = -200.
+        assert_eq!(model.view_offset_x, -200.0);
+        assert_eq!(model.view_offset_y, -150.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_apply_clamps_at_max() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level = 32.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.apply": {
+                "factor":   "10.0",   // would push to 320
+                "anchor_x": "100",
+                "anchor_y": "100",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Clamped to 64.0 (default max_zoom).
+        assert_eq!(model.zoom_level, 64.0);
+    }
+
+    #[test]
+    fn test_doc_pan_apply_translates_by_drag_delta() {
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        let effects = vec![serde_json::json!({
+            "doc.pan.apply": {
+                "press_x":      "100",
+                "press_y":      "50",
+                "cursor_x":     "150",
+                "cursor_y":     "120",
+                "initial_offx": "0",
+                "initial_offy": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // delta = (50, 70); initial = (0, 0); result = (50, 70).
+        assert_eq!(model.view_offset_x, 50.0);
+        assert_eq!(model.view_offset_y, 70.0);
+        // Zoom unchanged.
+        assert_eq!(model.zoom_level, 1.0);
+    }
+
+    #[test]
+    fn test_doc_pan_apply_is_idempotent() {
+        // Calling pan.apply twice with the same press / cursor /
+        // initial values gives the same result — the effect uses
+        // cumulative delta from press, not per-event delta.
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.view_offset_x = 0.0;
+        model.view_offset_y = 0.0;
+        let effects = vec![serde_json::json!({
+            "doc.pan.apply": {
+                "press_x":      "100",
+                "press_y":      "50",
+                "cursor_x":     "150",
+                "cursor_y":     "120",
+                "initial_offx": "0",
+                "initial_offy": "0",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let after_first = (model.view_offset_x, model.view_offset_y);
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let after_second = (model.view_offset_x, model.view_offset_y);
+        assert_eq!(after_first, after_second);
     }
 }
