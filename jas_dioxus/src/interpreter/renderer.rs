@@ -1226,6 +1226,14 @@ fn build_appstate_ctx(
     ctx.insert("state".to_string(), state);
     ctx.insert("panel".to_string(), panel);
     ctx.insert("active_document".to_string(), build_active_document_view(st));
+    // Expose preferences.* so YAML expressions like
+    // preferences.viewport.zoom_step resolve against the workspace
+    // YAML defaults. Used by the View actions (zoom_in, fit_*, etc.)
+    // and the Zoom tool's gesture handlers.
+    let prefs = crate::interpreter::workspace::Workspace::load()
+        .and_then(|ws| ws.data().get("preferences").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    ctx.insert("preferences".to_string(), prefs);
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
     }
