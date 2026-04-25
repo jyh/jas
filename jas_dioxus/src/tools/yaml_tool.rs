@@ -417,6 +417,9 @@ impl CanvasTool for YamlTool {
                 "bbox_ghost" => {
                     draw_bbox_ghost(ctx, render, &eval_ctx, model);
                 }
+                "marquee_rect" => {
+                    draw_marquee_rect_overlay(ctx, render, &eval_ctx);
+                }
                 _ => {
                     // Unrecognized type — skip silently, matching the
                     // lenient-mode convention used elsewhere.
@@ -492,6 +495,35 @@ pub(crate) fn parse_style(s: &str) -> OverlayStyle {
         }
     }
     style
+}
+
+/// Marquee zoom rectangle: thin dashed stroke between (x1, y1) and
+/// (x2, y2). Used by the Zoom tool's drag overlay when scrubby_zoom
+/// is off. Per ZOOM_TOOL.md §Drag — marquee zoom.
+fn draw_marquee_rect_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let x1 = eval_number_field(eval_ctx, render.get("x1"));
+    let y1 = eval_number_field(eval_ctx, render.get("y1"));
+    let x2 = eval_number_field(eval_ctx, render.get("x2"));
+    let y2 = eval_number_field(eval_ctx, render.get("y2"));
+    let x = x1.min(x2);
+    let y = y1.min(y2);
+    let w = (x1 - x2).abs();
+    let h = (y1 - y2).abs();
+    if w <= 0.0 || h <= 0.0 { return; }
+    ctx.set_stroke_style_str("#666");
+    ctx.set_line_width(1.0);
+    let dash = js_sys::Array::new();
+    dash.push(&wasm_bindgen::JsValue::from_f64(4.0));
+    dash.push(&wasm_bindgen::JsValue::from_f64(2.0));
+    let _ = ctx.set_line_dash(&dash);
+    ctx.stroke_rect(x, y, w, h);
+    // Reset dash so subsequent overlays draw solid.
+    let empty = js_sys::Array::new();
+    let _ = ctx.set_line_dash(&empty);
 }
 
 fn draw_rect_overlay(
