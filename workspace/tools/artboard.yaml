@@ -100,14 +100,17 @@ handlers:
     - set: { tool.artboard.alt_held:   "event.modifiers.alt" }
     - set: { tool.artboard.shift_held: "event.modifiers.shift" }
 
-    # Threshold latch — once exceeded, snapshot for cancel and promote
-    # the *_pending modes to their active counterparts.
+    # Threshold latch — once exceeded, snapshot for undo + capture a
+    # preview snapshot the live-update effects restore from on each
+    # mousemove (so move / resize / duplicate are idempotent on press
+    # + cursor + initial state). Promote *_pending → active modes.
     - if: "not tool.artboard.moved && (abs(event.x - tool.artboard.press_x) > 4 || abs(event.y - tool.artboard.press_y) > 4)"
       then:
         - set: { tool.artboard.moved: "true" }
         - if: "not tool.artboard.snapshotted"
           then:
             - "doc.snapshot": {}
+            - "doc.preview.capture": {}
             - set: { tool.artboard.snapshotted: "true" }
         - if: "tool.artboard.mode == 'moving_pending'"
           then:
@@ -166,9 +169,11 @@ handlers:
     - if: "tool.artboard.mode == 'moving' && tool.artboard.moved"
       then:
         - "doc.artboard.move_commit": {}
+        - "doc.preview.clear": {}
     - if: "tool.artboard.mode == 'resizing' && tool.artboard.moved"
       then:
         - "doc.artboard.resize_commit": {}
+        - "doc.preview.clear": {}
     - if: "tool.artboard.mode == 'duplicating' && tool.artboard.moved"
       then:
         - "doc.artboard.duplicate_commit":
@@ -176,6 +181,7 @@ handlers:
             press_y:  "tool.artboard.press_y"
             cursor_x: "event.x"
             cursor_y: "event.y"
+        - "doc.preview.clear": {}
     - set: { tool.artboard.mode:  "'idle'" }
     - set: { tool.artboard.moved: "false" }
 
@@ -198,10 +204,18 @@ handlers:
             params: { artboard_id: "tool.artboard.hit_artboard_id" }
 
   on_keydown:
-    # Escape cancels any in-progress drag.
+    # Escape cancels any in-progress drag — restore the preview
+    # snapshot (which holds the pre-drag state captured at the
+    # threshold latch), then reset tool state. Note: doc.snapshot was
+    # also called at the threshold latch, pushing an undo entry; we
+    # leave that entry in place so the user could in principle redo
+    # back into the cancelled drag's mid-state. (Matches scale.yaml's
+    # behavior — undo-stack pruning on cancel is a wider engine
+    # concern, deferred.)
     - if: "event.key == 'Escape' && tool.artboard.mode != 'idle' && tool.artboard.snapshotted"
       then:
-        - "doc.snapshot.restore": {}
+        - "doc.preview.restore": {}
+        - "doc.preview.clear": {}
         - set: { tool.artboard.mode:        "'idle'" }
         - set: { tool.artboard.moved:       "false" }
         - set: { tool.artboard.snapshotted: "false" }

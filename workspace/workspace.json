@@ -17704,6 +17704,9 @@
                     "doc.snapshot": {}
                   },
                   {
+                    "doc.preview.capture": {}
+                  },
+                  {
                     "set": {
                       "tool.artboard.snapshotted": "true"
                     }
@@ -17795,6 +17798,9 @@
             "then": [
               {
                 "doc.artboard.move_commit": {}
+              },
+              {
+                "doc.preview.clear": {}
               }
             ]
           },
@@ -17803,6 +17809,9 @@
             "then": [
               {
                 "doc.artboard.resize_commit": {}
+              },
+              {
+                "doc.preview.clear": {}
               }
             ]
           },
@@ -17816,6 +17825,9 @@
                   "cursor_x": "event.x",
                   "cursor_y": "event.y"
                 }
+              },
+              {
+                "doc.preview.clear": {}
               }
             ]
           },
@@ -17859,7 +17871,10 @@
             "if": "event.key == 'Escape' && tool.artboard.mode != 'idle' && tool.artboard.snapshotted",
             "then": [
               {
-                "doc.snapshot.restore": {}
+                "doc.preview.restore": {}
+              },
+              {
+                "doc.preview.clear": {}
               },
               {
                 "set": {
