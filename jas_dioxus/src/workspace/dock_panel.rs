@@ -44,6 +44,8 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
         ToolKind::Scale => "scale",
         ToolKind::Rotate => "rotate",
         ToolKind::Shear => "shear",
+        ToolKind::Hand => "hand",
+        ToolKind::Zoom => "zoom",
     }
 }
 

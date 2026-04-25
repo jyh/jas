@@ -467,7 +467,7 @@ pub(crate) struct HyphenationDialogValues {
 /// through to the YAML actions catalog for open_dialog, dispatch, etc.
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
-fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     // Phase 4: open_layer_options is now pure YAML. It resolves the
     // target layer via element_at(path_from_id(param.layer_id)) and
     // packs its current state as open_dialog params.
@@ -1194,6 +1194,8 @@ fn build_appstate_ctx(
         ToolKind::Scale => "scale",
         ToolKind::Rotate => "rotate",
         ToolKind::Shear => "shear",
+        ToolKind::Hand => "hand",
+        ToolKind::Zoom => "zoom",
     };
     let fill_color = match st.app_default_fill {
         None => serde_json::Value::Null,
@@ -2553,6 +2555,8 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
                 ToolKind::Scale => "scale",
                 ToolKind::Rotate => "rotate",
                 ToolKind::Shear => "shear",
+                ToolKind::Hand => "hand",
+                ToolKind::Zoom => "zoom",
             };
             serde_json::Value::String(name.to_string())
         }

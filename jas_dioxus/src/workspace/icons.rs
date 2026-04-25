@@ -114,5 +114,15 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
         // SHEAR_TOOL.md §Tool icon).
         ToolKind::Shear => format!(
             r#"<polygon points="9,4 26,4 19,24 2,24" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
+        // Hand — open palm with four fingers extended and a stubby
+        // base for the thumb / palm. See HAND_TOOL.md §Tool icon.
+        ToolKind::Hand => format!(
+            r#"<line x1="10" y1="14" x2="10" y2="5" stroke="{c}" stroke-width="2" stroke-linecap="round"/><line x1="13" y1="14" x2="13" y2="3" stroke="{c}" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="14" x2="16" y2="4" stroke="{c}" stroke-width="2" stroke-linecap="round"/><line x1="19" y1="14" x2="19" y2="6" stroke="{c}" stroke-width="2" stroke-linecap="round"/><path d="M9,14 L4,18 L4,22 Q5,25 9,25 L19,25 Q22,25 22,22 L22,14" fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>"#),
+        // Zoom — circular lens with a short diagonal handle exiting
+        // at lower-right. No interior glyph; the plus / minus appear
+        // in the cursor at use time, not the toolbar icon. See
+        // ZOOM_TOOL.md §Tool icon.
+        ToolKind::Zoom => format!(
+            r#"<circle cx="11" cy="11" r="6.5" fill="none" stroke="{c}" stroke-width="2"/><line x1="15.5" y1="15.5" x2="22.5" y2="22.5" stroke="{c}" stroke-width="2.5" stroke-linecap="round"/>"#),
     }
 }
