@@ -598,6 +598,33 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.eyedropper.sample — { source }.
+    // Snapshot source's attrs into state.eyedropper_cache; if
+    // selection ≠ ∅, also apply to every eligible target in the
+    // selection. See EYEDROPPER_TOOL.md §Gestures.
+    effects["doc.eyedropper.sample"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let sourcePath = extractPath(args["source"],
+                                           store: store, ctx: ctx)
+        else { return nil }
+        eyedropperSample(model: model, store: store, ctx: ctx,
+                         sourcePath: sourcePath)
+        return nil
+    }
+
+    // doc.eyedropper.apply_loaded — { target }.
+    // Apply state.eyedropper_cache to the clicked target. Falls
+    // through to plain-sample when the cache is null.
+    effects["doc.eyedropper.apply_loaded"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let targetPath = extractPath(args["target"],
+                                           store: store, ctx: ctx)
+        else { return nil }
+        eyedropperApplyLoaded(model: model, store: store, ctx: ctx,
+                              targetPath: targetPath)
+        return nil
+    }
+
     // ──────────────────────────────────────────────────────────
     // doc.zoom.* and doc.pan.apply — view-state effects per
     // ZOOM_TOOL.md and HAND_TOOL.md. None of these modify document
@@ -3099,6 +3126,139 @@ private func walkEligibleIn(
     default:
         visit(cur, elem)
     }
+}
+
+// MARK: - Eyedropper effects
+
+/// Implementation of doc.eyedropper.sample. See
+/// EYEDROPPER_TOOL.md §Gestures.
+private func eyedropperSample(
+    model: Model, store: StateStore, ctx: [String: Any],
+    sourcePath: ElementPath
+) {
+    let doc = model.document
+    guard isValidPath(doc, sourcePath) else { return }
+    let source = doc.getElement(sourcePath)
+    guard isSourceEligible(source) else { return }
+
+    let appearance = extractEyedropperAppearance(source)
+    // StateStore.set takes the bare key (no `state.` prefix); the
+    // eval-context layer is what surfaces it as state.eyedropper_cache.
+    store.set("eyedropper_cache", appearance.toDict())
+
+    if !doc.selection.isEmpty {
+        let cfg = readEyedropperConfig(store: store, ctx: ctx)
+        var newDoc = doc
+        for es in doc.selection {
+            newDoc = applyToTargetRecursive(
+                doc: newDoc, path: es.path,
+                appearance: appearance, config: cfg)
+        }
+        model.document = newDoc
+    }
+}
+
+/// Implementation of doc.eyedropper.apply_loaded. See
+/// EYEDROPPER_TOOL.md §Gestures.
+private func eyedropperApplyLoaded(
+    model: Model, store: StateStore, ctx: [String: Any],
+    targetPath: ElementPath
+) {
+    let cacheAny = store.get("eyedropper_cache")
+    guard let cacheDict = cacheAny as? [String: Any],
+          let appearance = EyedropperAppearance(dict: cacheDict)
+    else {
+        // Empty / unparseable cache → fall through to plain sample.
+        eyedropperSample(model: model, store: store, ctx: ctx,
+                         sourcePath: targetPath)
+        return
+    }
+    let cfg = readEyedropperConfig(store: store, ctx: ctx)
+    let doc = model.document
+    let newDoc = applyToTargetRecursive(
+        doc: doc, path: targetPath,
+        appearance: appearance, config: cfg)
+    model.document = newDoc
+}
+
+/// Walk the document at `path`. If the element is a Group or Layer,
+/// recurse into each child. Otherwise apply the appearance when the
+/// element is target-eligible.
+private func applyToTargetRecursive(
+    doc: Document, path: ElementPath,
+    appearance: EyedropperAppearance,
+    config: EyedropperConfig
+) -> Document {
+    guard isValidPath(doc, path) else { return doc }
+    let elem = doc.getElement(path)
+    switch elem {
+    case .group(let g):
+        var acc = doc
+        for i in 0..<g.children.count {
+            var childPath = path
+            childPath.append(i)
+            acc = applyToTargetRecursive(
+                doc: acc, path: childPath,
+                appearance: appearance, config: config)
+        }
+        return acc
+    case .layer(let l):
+        var acc = doc
+        for i in 0..<l.children.count {
+            var childPath = path
+            childPath.append(i)
+            acc = applyToTargetRecursive(
+                doc: acc, path: childPath,
+                appearance: appearance, config: config)
+        }
+        return acc
+    default:
+        if !isTargetEligible(elem) {
+            return doc
+        }
+        let newElem = applyEyedropperAppearance(
+            elem, appearance: appearance, config: config)
+        return doc.replaceElement(path, with: newElem)
+    }
+}
+
+/// Read the 25 state.eyedropper_* keys into an EyedropperConfig.
+private func readEyedropperConfig(
+    store: StateStore, ctx: [String: Any]
+) -> EyedropperConfig {
+    var cfg = EyedropperConfig()
+    let boolAt = { (key: String, fallback: Bool) -> Bool in
+        switch evalExprAsValue("state.\(key)", store: store, ctx: ctx) {
+        case .bool(let b): return b
+        default: return fallback
+        }
+    }
+    cfg.fill                  = boolAt("eyedropper_fill",                  cfg.fill)
+    cfg.stroke                = boolAt("eyedropper_stroke",                cfg.stroke)
+    cfg.strokeColor           = boolAt("eyedropper_stroke_color",          cfg.strokeColor)
+    cfg.strokeWeight          = boolAt("eyedropper_stroke_weight",         cfg.strokeWeight)
+    cfg.strokeCapJoin         = boolAt("eyedropper_stroke_cap_join",       cfg.strokeCapJoin)
+    cfg.strokeAlign           = boolAt("eyedropper_stroke_align",          cfg.strokeAlign)
+    cfg.strokeDash            = boolAt("eyedropper_stroke_dash",           cfg.strokeDash)
+    cfg.strokeArrowheads      = boolAt("eyedropper_stroke_arrowheads",     cfg.strokeArrowheads)
+    cfg.strokeProfile         = boolAt("eyedropper_stroke_profile",        cfg.strokeProfile)
+    cfg.strokeBrush           = boolAt("eyedropper_stroke_brush",          cfg.strokeBrush)
+    cfg.opacity               = boolAt("eyedropper_opacity",               cfg.opacity)
+    cfg.opacityAlpha          = boolAt("eyedropper_opacity_alpha",         cfg.opacityAlpha)
+    cfg.opacityBlend          = boolAt("eyedropper_opacity_blend",         cfg.opacityBlend)
+    cfg.character             = boolAt("eyedropper_character",             cfg.character)
+    cfg.characterFont         = boolAt("eyedropper_character_font",        cfg.characterFont)
+    cfg.characterSize         = boolAt("eyedropper_character_size",        cfg.characterSize)
+    cfg.characterLeading      = boolAt("eyedropper_character_leading",     cfg.characterLeading)
+    cfg.characterKerning      = boolAt("eyedropper_character_kerning",     cfg.characterKerning)
+    cfg.characterTracking     = boolAt("eyedropper_character_tracking",    cfg.characterTracking)
+    cfg.characterColor        = boolAt("eyedropper_character_color",       cfg.characterColor)
+    cfg.paragraph             = boolAt("eyedropper_paragraph",             cfg.paragraph)
+    cfg.paragraphAlign        = boolAt("eyedropper_paragraph_align",       cfg.paragraphAlign)
+    cfg.paragraphIndent       = boolAt("eyedropper_paragraph_indent",      cfg.paragraphIndent)
+    cfg.paragraphSpace        = boolAt("eyedropper_paragraph_space",       cfg.paragraphSpace)
+    cfg.paragraphHyphenate    = boolAt("eyedropper_paragraph_hyphenate",   cfg.paragraphHyphenate)
+    return cfg
 }
 
 // MARK: - Artboard tool helpers (ARTBOARD_TOOL.md)
