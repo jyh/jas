@@ -1773,6 +1773,17 @@ class CanvasWidget(QWidget):
             return _make_type_cursor()
         elif tool == Tool.TYPE_ON_PATH:
             return _make_type_on_path_cursor()
+        elif tool == Tool.HAND:
+            # Open vs closed hand cursor depends on whether a Hand
+            # drag is in flight. The default (idle) is open hand;
+            # _update_cursor_for_tool flips to closed during pan.
+            # Per HAND_TOOL.md §Cursor states.
+            return QCursor(Qt.CursorShape.OpenHandCursor)
+        elif tool == Tool.ZOOM:
+            # AppKit and Qt don't have a native zoom-in cursor with
+            # a plus glyph; CrossCursor is the closest match. Per
+            # ZOOM_TOOL.md §Cursor states.
+            return QCursor(Qt.CursorShape.CrossCursor)
         else:
             return QCursor(Qt.CursorShape.CrossCursor)
 
