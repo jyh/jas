@@ -1158,6 +1158,81 @@ fn run_doc_effect(
                     model, store, ctx, &buffer, epsilon);
             }
         }
+        "doc.scale.apply" => {
+            // Scale tool apply per SCALE_TOOL.md §Apply behavior.
+            // Two calling conventions:
+            //   - drag path (from scale.yaml on_mouseup): press_x/y +
+            //     cursor_x/y + shift → derive (sx, sy)
+            //   - dialog path (from scale_options_confirm action):
+            //     sx + sy directly
+            // Reference point comes from state.transform_reference_point
+            // (when set) or the selection's union bbox center.
+            if let serde_json::Value::Object(args) = spec {
+                let copy = eval_bool(args.get("copy"), store, ctx);
+                let (sx, sy) = if args.contains_key("sx") {
+                    let sx = eval_number(args.get("sx"), store, ctx);
+                    let sy = eval_number(args.get("sy"), store, ctx);
+                    (sx, sy)
+                } else {
+                    let (rx, ry) = resolve_reference_point(model, store, ctx);
+                    let px = eval_number(args.get("press_x"), store, ctx);
+                    let py = eval_number(args.get("press_y"), store, ctx);
+                    let cx = eval_number(args.get("cursor_x"), store, ctx);
+                    let cy = eval_number(args.get("cursor_y"), store, ctx);
+                    let shift = eval_bool(args.get("shift"), store, ctx);
+                    drag_to_scale_factors(px, py, cx, cy, rx, ry, shift)
+                };
+                scale_apply(model, store, ctx, sx, sy, copy);
+            }
+        }
+        "doc.rotate.apply" => {
+            // Rotate tool apply per ROTATE_TOOL.md §Apply behavior.
+            // Two calling conventions:
+            //   - drag path: press_x/y + cursor_x/y + shift → derive θ
+            //   - dialog path: angle directly
+            if let serde_json::Value::Object(args) = spec {
+                let copy = eval_bool(args.get("copy"), store, ctx);
+                let theta_deg = if args.contains_key("angle") {
+                    eval_number(args.get("angle"), store, ctx)
+                } else {
+                    let (rx, ry) = resolve_reference_point(model, store, ctx);
+                    let px = eval_number(args.get("press_x"), store, ctx);
+                    let py = eval_number(args.get("press_y"), store, ctx);
+                    let cx = eval_number(args.get("cursor_x"), store, ctx);
+                    let cy = eval_number(args.get("cursor_y"), store, ctx);
+                    let shift = eval_bool(args.get("shift"), store, ctx);
+                    drag_to_rotate_angle(px, py, cx, cy, rx, ry, shift)
+                };
+                rotate_apply(model, store, ctx, theta_deg, copy);
+            }
+        }
+        "doc.shear.apply" => {
+            // Shear tool apply per SHEAR_TOOL.md §Apply behavior.
+            // Two calling conventions:
+            //   - drag path: press_x/y + cursor_x/y + shift → derive
+            //     (angle, axis, axis_angle)
+            //   - dialog path: angle + axis + axis_angle directly
+            if let serde_json::Value::Object(args) = spec {
+                let copy = eval_bool(args.get("copy"), store, ctx);
+                let (angle_deg, axis, axis_angle_deg) =
+                    if args.contains_key("angle") && args.contains_key("axis")
+                {
+                    let a = eval_number(args.get("angle"), store, ctx);
+                    let ax = eval_string(args.get("axis"), store, ctx);
+                    let aa = eval_number(args.get("axis_angle"), store, ctx);
+                    (a, ax, aa)
+                } else {
+                    let (rx, ry) = resolve_reference_point(model, store, ctx);
+                    let px = eval_number(args.get("press_x"), store, ctx);
+                    let py = eval_number(args.get("press_y"), store, ctx);
+                    let cx = eval_number(args.get("cursor_x"), store, ctx);
+                    let cy = eval_number(args.get("cursor_y"), store, ctx);
+                    let shift = eval_bool(args.get("shift"), store, ctx);
+                    drag_to_shear_params(px, py, cx, cy, rx, ry, shift)
+                };
+                shear_apply(model, store, ctx, angle_deg, &axis, axis_angle_deg, copy);
+            }
+        }
         "doc.magic_wand.apply" => {
             // Magic Wand selection per MAGIC_WAND_TOOL.md §Predicate.
             // Reads the seed path + mode (replace / add / subtract)
@@ -3453,6 +3528,280 @@ fn extract_path_list(
         }
     }
     out
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Transform tools (Scale / Rotate / Shear) apply effects.
+// See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md §Apply behavior.
+// ──────────────────────────────────────────────────────────────────
+
+/// Resolve the active reference point for a transform-tool apply.
+///
+/// Reads `state.transform_reference_point` — when it's a list of
+/// two numbers, returns those as `(rx, ry)`. Otherwise falls back
+/// to the union bounding-box center of the current selection.
+fn resolve_reference_point(
+    model: &Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> (f64, f64) {
+    use crate::algorithms::align;
+    // Custom reference point — Value::List wraps a Vec<serde_json::Value>.
+    if let Value::List(items) = eval_expr("state.transform_reference_point", store, ctx) {
+        if items.len() >= 2 {
+            if let (Some(rx), Some(ry)) = (items[0].as_f64(), items[1].as_f64()) {
+                return (rx, ry);
+            }
+        }
+    }
+    // Fallback: selection union bbox center.
+    let doc = model.document();
+    let elements: Vec<&crate::geometry::element::Element> = doc.selection.iter()
+        .filter_map(|es| doc.get_element(&es.path))
+        .collect();
+    if elements.is_empty() {
+        return (0.0, 0.0);
+    }
+    let (x, y, w, h) = align::union_bounds(&elements, align::geometric_bounds);
+    (x + w / 2.0, y + h / 2.0)
+}
+
+/// Convert drag inputs (press, cursor, ref) to scale factors per
+/// SCALE_TOOL.md §Gestures: `sx = (cx-rx)/(px-rx)`,
+/// `sy = (cy-ry)/(py-ry)`. Shift forces the signed geometric mean
+/// onto both axes (uniform).
+fn drag_to_scale_factors(
+    px: f64, py: f64, cx: f64, cy: f64, rx: f64, ry: f64, shift: bool,
+) -> (f64, f64) {
+    let denom_x = px - rx;
+    let denom_y = py - ry;
+    let sx = if denom_x.abs() < 1e-9 { 1.0 } else { (cx - rx) / denom_x };
+    let sy = if denom_y.abs() < 1e-9 { 1.0 } else { (cy - ry) / denom_y };
+    if shift {
+        let prod = sx * sy;
+        let sign = if prod >= 0.0 { 1.0 } else { -1.0 };
+        let mag = prod.abs().sqrt();
+        let s = sign * mag;
+        (s, s)
+    } else {
+        (sx, sy)
+    }
+}
+
+/// Convert drag inputs to a rotation angle in degrees per
+/// ROTATE_TOOL.md §Gestures: `θ = atan2(c−ref) − atan2(p−ref)`.
+/// Shift snaps to the nearest 45° tick.
+fn drag_to_rotate_angle(
+    px: f64, py: f64, cx: f64, cy: f64, rx: f64, ry: f64, shift: bool,
+) -> f64 {
+    let theta_press = (py - ry).atan2(px - rx);
+    let theta_cursor = (cy - ry).atan2(cx - rx);
+    let mut theta_deg = (theta_cursor - theta_press).to_degrees();
+    if shift {
+        theta_deg = (theta_deg / 45.0).round() * 45.0;
+    }
+    theta_deg
+}
+
+/// Convert drag inputs to (angle_deg, axis, axis_angle_deg) for
+/// the Shear tool per SHEAR_TOOL.md §Gestures.
+///
+/// The press point and reference point together define the shear
+/// axis (vector `press − ref`); cursor displacement perpendicular
+/// to that axis sets the shear factor `k`. The shear angle in
+/// degrees is then `atan(k)`.
+///
+/// When Shift is held, the axis is constrained to whichever of
+/// horizontal / vertical the press → cursor motion is closer to;
+/// the axis_angle is unused for those two cases.
+fn drag_to_shear_params(
+    px: f64, py: f64, cx: f64, cy: f64, rx: f64, ry: f64, shift: bool,
+) -> (f64, String, f64) {
+    let dx = cx - px;
+    let dy = cy - py;
+
+    if shift {
+        // Constrain to horizontal or vertical based on dominant
+        // motion. Horizontal shear: cursor moves predominantly
+        // along x; the shear factor is dx / |press_y − ref_y|.
+        if dx.abs() >= dy.abs() {
+            let denom = (py - ry).abs().max(1e-9);
+            let k = dx / denom;
+            return (k.atan().to_degrees(), "horizontal".to_string(), 0.0);
+        } else {
+            let denom = (px - rx).abs().max(1e-9);
+            let k = dy / denom;
+            return (k.atan().to_degrees(), "vertical".to_string(), 0.0);
+        }
+    }
+
+    // Custom-axis: axis = press − ref.
+    let ax = px - rx;
+    let ay = py - ry;
+    let axis_len = (ax * ax + ay * ay).sqrt().max(1e-9);
+    let axis_unit_x = ax / axis_len;
+    let axis_unit_y = ay / axis_len;
+    // Perpendicular (rotated +90°): (-y, x).
+    let perp_x = -axis_unit_y;
+    let perp_y = axis_unit_x;
+    let perp_dist = (cx - px) * perp_x + (cy - py) * perp_y;
+    let k = perp_dist / axis_len;
+    let axis_angle_deg = ay.atan2(ax).to_degrees();
+    (k.atan().to_degrees(), "custom".to_string(), axis_angle_deg)
+}
+
+/// Scale apply implementation. Walks the selection (deduped by
+/// tree-path identity) and pre-multiplies each element's existing
+/// transform with the scale matrix. Honors `state.scale_strokes`
+/// (multiplies stroke-width by the geometric mean) and
+/// `state.scale_corners` (scales rounded_rect rx / ry).
+///
+/// `copy: true` is not yet wired (Phase 1.4b); for now the
+/// transformation is applied to the original selection regardless.
+fn scale_apply(
+    model: &mut Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    sx: f64,
+    sy: f64,
+    _copy: bool,
+) {
+    use crate::algorithms::transform_apply;
+    if (sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9 {
+        return; // Identity — nothing to do.
+    }
+    let (rx, ry) = resolve_reference_point(model, store, ctx);
+    let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
+
+    let scale_strokes = match eval_expr("state.scale_strokes", store, ctx) {
+        Value::Bool(b) => b, _ => true,
+    };
+    let scale_corners = match eval_expr("state.scale_corners", store, ctx) {
+        Value::Bool(b) => b, _ => false,
+    };
+    let stroke_factor = transform_apply::stroke_width_factor(sx, sy);
+
+    let paths: Vec<Vec<usize>> = model.document().selection.iter()
+        .map(|es| es.path.clone()).collect();
+    let mut new_doc = model.document().clone();
+    for path in &paths {
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            // Compose: new_matrix * existing.
+            let current = elem.common().transform.unwrap_or_default();
+            elem.common_mut().transform = Some(matrix.multiply(&current));
+            // Stroke width — applied to the in-place stroke field.
+            if scale_strokes {
+                scale_element_stroke_width(elem, stroke_factor);
+            }
+            // Rounded-rect corners — only meaningful for RoundedRect-
+            // shaped Rect variants (rx / ry on RectElem).
+            if scale_corners {
+                scale_element_corners(elem, sx.abs(), sy.abs());
+            }
+        }
+    }
+    model.set_document(new_doc);
+}
+
+/// Rotate apply implementation. Mirrors scale_apply with a rotation
+/// matrix; rotation is rigid so there are no stroke / corner
+/// options.
+fn rotate_apply(
+    model: &mut Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    theta_deg: f64,
+    _copy: bool,
+) {
+    use crate::algorithms::transform_apply;
+    if theta_deg.abs() < 1e-9 {
+        return;
+    }
+    let (rx, ry) = resolve_reference_point(model, store, ctx);
+    let matrix = transform_apply::rotate_matrix(theta_deg, rx, ry);
+
+    let paths: Vec<Vec<usize>> = model.document().selection.iter()
+        .map(|es| es.path.clone()).collect();
+    let mut new_doc = model.document().clone();
+    for path in &paths {
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            let current = elem.common().transform.unwrap_or_default();
+            elem.common_mut().transform = Some(matrix.multiply(&current));
+        }
+    }
+    model.set_document(new_doc);
+}
+
+/// Shear apply implementation. Pure shear has determinant 1 so
+/// strokes are preserved naturally; there are no stroke or corner
+/// options.
+fn shear_apply(
+    model: &mut Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    angle_deg: f64,
+    axis: &str,
+    axis_angle_deg: f64,
+    _copy: bool,
+) {
+    use crate::algorithms::transform_apply;
+    if angle_deg.abs() < 1e-9 {
+        return;
+    }
+    let (rx, ry) = resolve_reference_point(model, store, ctx);
+    let matrix = transform_apply::shear_matrix(angle_deg, axis, axis_angle_deg, rx, ry);
+
+    let paths: Vec<Vec<usize>> = model.document().selection.iter()
+        .map(|es| es.path.clone()).collect();
+    let mut new_doc = model.document().clone();
+    for path in &paths {
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            let current = elem.common().transform.unwrap_or_default();
+            elem.common_mut().transform = Some(matrix.multiply(&current));
+        }
+    }
+    model.set_document(new_doc);
+}
+
+/// Multiply the element's stroke-width by `factor` in place.
+/// No-op on elements without a stroke.
+fn scale_element_stroke_width(
+    elem: &mut crate::geometry::element::Element,
+    factor: f64,
+) {
+    use crate::geometry::element::Element;
+    let strokes = match elem {
+        Element::Line(e) => e.stroke.as_mut(),
+        Element::Rect(e) => e.stroke.as_mut(),
+        Element::Circle(e) => e.stroke.as_mut(),
+        Element::Ellipse(e) => e.stroke.as_mut(),
+        Element::Polyline(e) => e.stroke.as_mut(),
+        Element::Polygon(e) => e.stroke.as_mut(),
+        Element::Path(e) => e.stroke.as_mut(),
+        Element::Text(e) => e.stroke.as_mut(),
+        Element::TextPath(e) => e.stroke.as_mut(),
+        _ => None,
+    };
+    if let Some(s) = strokes {
+        s.width *= factor;
+    }
+}
+
+/// Scale a rounded_rect's rx / ry by `(sx_abs, sy_abs)`. No-op on
+/// other element types — corner radii are only modeled on the
+/// RectElem variant via its rx/ry fields. Per SCALE_TOOL.md
+/// §Apply behavior, scale_corners is axis-independent (rx scales
+/// by |sx|, ry scales by |sy|).
+fn scale_element_corners(
+    elem: &mut crate::geometry::element::Element,
+    sx_abs: f64,
+    sy_abs: f64,
+) {
+    use crate::geometry::element::Element;
+    if let Element::Rect(e) = elem {
+        e.rx *= sx_abs;
+        e.ry *= sy_abs;
+    }
 }
 
 #[cfg(test)]
