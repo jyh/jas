@@ -996,6 +996,52 @@ public struct ToolbarView {
                 fold.addLine(to: CGPoint(x: ox + 18, y: oy + 11))
                 fold.addLine(to: CGPoint(x: ox + 23, y: oy + 11))
                 context.stroke(fold, with: .color(color), lineWidth: 2.0)
+
+            case .eyedropper:
+                // Eyedropper — squeeze cap (with grip lines) at upper
+                // right, glass tube descending at ~45° to a sharp tip
+                // at lower left. Source path is the 16x16 Bootstrap
+                // eyedropper, scaled 1.75x to fill the 28x28 viewBox.
+                // See EYEDROPPER_TOOL.md §Tool icon.
+                let s: CGFloat = 1.75
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                var dropper = SwiftUI.Path()
+                // Outer shell + tube + tip — single subpath traced
+                // from the SVG `d` attribute.
+                dropper.move(to: CGPoint(x: 13.354, y: 2.646))
+                dropper.addCurve(to: CGPoint(x: 10.354, y: 2.646),
+                    control1: CGPoint(x: 13.354 - 0.0, y: 2.646),
+                    control2: CGPoint(x: 12.354, y: 1.646))
+                dropper.addLine(to: CGPoint(x: 8.854, y: 4.146))
+                dropper.addLine(to: CGPoint(x: 8.146, y: 3.438))
+                dropper.addCurve(to: CGPoint(x: 7.439, y: 4.146),
+                    control1: CGPoint(x: 7.939, y: 3.231),
+                    control2: CGPoint(x: 7.439, y: 3.731))
+                dropper.addLine(to: CGPoint(x: 7.792, y: 4.499))
+                dropper.addLine(to: CGPoint(x: 2.646, y: 9.645))
+                dropper.addCurve(to: CGPoint(x: 2.2, y: 10.5),
+                    control1: CGPoint(x: 2.354, y: 9.937),
+                    control2: CGPoint(x: 2.2, y: 10.0))
+                dropper.addLine(to: CGPoint(x: 1.5, y: 14.0))
+                dropper.addCurve(to: CGPoint(x: 2.1, y: 14.6),
+                    control1: CGPoint(x: 1.4, y: 14.4),
+                    control2: CGPoint(x: 1.7, y: 14.7))
+                dropper.addLine(to: CGPoint(x: 5.6, y: 13.9))
+                dropper.addCurve(to: CGPoint(x: 6.454, y: 13.46),
+                    control1: CGPoint(x: 6.0, y: 13.8),
+                    control2: CGPoint(x: 6.2, y: 13.7))
+                dropper.addLine(to: CGPoint(x: 11.6, y: 8.314))
+                dropper.addLine(to: CGPoint(x: 11.954, y: 8.668))
+                dropper.addCurve(to: CGPoint(x: 12.661, y: 7.961),
+                    control1: CGPoint(x: 12.161, y: 8.875),
+                    control2: CGPoint(x: 12.661, y: 8.461))
+                dropper.addLine(to: CGPoint(x: 11.954, y: 7.254))
+                dropper.addLine(to: CGPoint(x: 13.454, y: 5.754))
+                dropper.addCurve(to: CGPoint(x: 13.354, y: 2.753),
+                    control1: CGPoint(x: 14.0, y: 5.0),
+                    control2: CGPoint(x: 14.0, y: 3.5))
+                dropper.closeSubpath()
+                context.fill(dropper.applying(transform), with: .color(color))
             }
         }
     }
