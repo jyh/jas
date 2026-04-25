@@ -471,6 +471,138 @@ let magic_wand_apply_tests = [
     assert (Document.PathMap.mem [0; 0] sel));
 ]
 
+(* ── doc.artboard.* effects (ARTBOARD_TOOL.md) ──────── *)
+
+let artboard_model abs_list =
+  let layer = Element.Layer {
+    name = "L"; children = [||];
+    transform = None; locked = false; opacity = 1.0;
+    visibility = Preview; blend_mode = Normal; mask = None;
+    isolated_blending = false; knockout_group = false;
+  } in
+  let doc = Document.make_document
+    ~artboards:abs_list [| layer |] in
+  let m = Model.create () in
+  m#set_document doc;
+  m
+
+let artboard_create_tests = [
+  Alcotest.test_case "create_commit_appends_with_rounded_bounds" `Quick (fun () ->
+    let seed = { (Artboard.default_with_id "seed00001") with name = "Artboard 1" } in
+    let m = artboard_model [seed] in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    run_with_effects store [`Assoc [("doc.artboard.create_commit",
+      `Assoc [("x1", `String "10"); ("y1", `String "20");
+              ("x2", `String "110"); ("y2", `String "120")])]] ctrl;
+    Alcotest.(check int) "two artboards" 2
+      (List.length m#document.artboards);
+    let new_ab = List.nth m#document.artboards 1 in
+    Alcotest.(check (float 0.001)) "x" 10.0 new_ab.x;
+    Alcotest.(check (float 0.001)) "y" 20.0 new_ab.y;
+    Alcotest.(check (float 0.001)) "w" 100.0 new_ab.width;
+    Alcotest.(check (float 0.001)) "h" 100.0 new_ab.height;
+    Alcotest.(check string) "name" "Artboard 2" new_ab.name);
+
+  Alcotest.test_case "create_commit_clamps_at_min" `Quick (fun () ->
+    let seed = { (Artboard.default_with_id "seed00001") with name = "Artboard 1" } in
+    let m = artboard_model [seed] in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    run_with_effects store [`Assoc [("doc.artboard.create_commit",
+      `Assoc [("x1", `String "50"); ("y1", `String "50");
+              ("x2", `String "50.4"); ("y2", `String "50.4")])]] ctrl;
+    let new_ab = List.nth m#document.artboards 1 in
+    Alcotest.(check (float 0.001)) "w clamped" 1.0 new_ab.width;
+    Alcotest.(check (float 0.001)) "h clamped" 1.0 new_ab.height);
+]
+
+let artboard_probe_hit_tests = [
+  Alcotest.test_case "probe_hit_interior_sets_tool_state" `Quick (fun () ->
+    (* Verifies tool state — panel-selection write requires
+       active_document scope plumbing covered by the manual test
+       suite. *)
+    let ab = { (Artboard.default_with_id "aaa00001") with
+               name = "Artboard 1";
+               x = 0.0; y = 0.0; width = 100.0; height = 100.0 } in
+    let m = artboard_model [ab] in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    run_with_effects store [`Assoc [("doc.artboard.probe_hit",
+      `Assoc [("x", `String "50"); ("y", `String "50");
+              ("shift", `String "false");
+              ("cmd", `String "false");
+              ("alt", `String "false")])]] ctrl;
+    let ctx = State_store.eval_context store in
+    let tool = Yojson.Safe.Util.member "tool" ctx in
+    let ab_state = Yojson.Safe.Util.member "artboard" tool in
+    let mode = Yojson.Safe.Util.member "mode" ab_state in
+    let hit = Yojson.Safe.Util.member "hit_artboard_id" ab_state in
+    Alcotest.(check string) "mode" "moving_pending"
+      (match mode with `String s -> s | _ -> "");
+    Alcotest.(check string) "hit id" "aaa00001"
+      (match hit with `String s -> s | _ -> ""));
+
+  Alcotest.test_case "probe_hit_empty_canvas_sets_creating" `Quick (fun () ->
+    let ab = { (Artboard.default_with_id "aaa00001") with
+               name = "Artboard 1";
+               x = 0.0; y = 0.0; width = 100.0; height = 100.0 } in
+    let m = artboard_model [ab] in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    run_with_effects store [`Assoc [("doc.artboard.probe_hit",
+      `Assoc [("x", `String "999"); ("y", `String "999");
+              ("shift", `String "false");
+              ("cmd", `String "false");
+              ("alt", `String "false")])]] ctrl;
+    let mode = Yojson.Safe.Util.(
+      member "mode" (member "artboard"
+        (member "tool" (State_store.eval_context store)))) in
+    Alcotest.(check string) "mode" "creating"
+      (match mode with `String s -> s | _ -> ""));
+]
+
+let artboard_probe_hover_tests = [
+  Alcotest.test_case "probe_hover_classifies_position" `Quick (fun () ->
+    let ab = { (Artboard.default_with_id "aaa00001") with
+               name = "Artboard 1";
+               x = 0.0; y = 0.0; width = 100.0; height = 100.0 } in
+    let m = artboard_model [ab] in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    let read_hover () = Yojson.Safe.Util.(
+      member "hover_kind" (member "artboard"
+        (member "tool" (State_store.eval_context store)))) in
+    run_with_effects store [`Assoc [("doc.artboard.probe_hover",
+      `Assoc [("x", `String "50"); ("y", `String "50")])]] ctrl;
+    Alcotest.(check string) "interior" "interior"
+      (match read_hover () with `String s -> s | _ -> "");
+    run_with_effects store [`Assoc [("doc.artboard.probe_hover",
+      `Assoc [("x", `String "999"); ("y", `String "999")])]] ctrl;
+    Alcotest.(check string) "empty" "empty"
+      (match read_hover () with `String s -> s | _ -> ""));
+]
+
+let artboard_move_tests = [
+  Alcotest.test_case "move_apply_translates_via_hit_fallback" `Quick (fun () ->
+    let ab = { (Artboard.default_with_id "aaa00001") with
+               name = "Artboard 1";
+               x = 100.0; y = 100.0; width = 200.0; height = 200.0 } in
+    let m = artboard_model [ab] in
+    m#capture_preview_snapshot;
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    State_store.set_tool store "artboard" "hit_artboard_id"
+      (`String "aaa00001");
+    run_with_effects store [`Assoc [("doc.artboard.move_apply",
+      `Assoc [("press_x", `String "100"); ("press_y", `String "100");
+              ("cursor_x", `String "150"); ("cursor_y", `String "70");
+              ("shift_held", `String "false")])]] ctrl;
+    let result = List.hd m#document.artboards in
+    Alcotest.(check (float 0.001)) "x" 150.0 result.x;
+    Alcotest.(check (float 0.001)) "y" 70.0 result.y);
+]
+
 let () =
   Alcotest.run "Yaml_tool_effects" [
     "doc.snapshot", snapshot_tests;
@@ -483,4 +615,8 @@ let () =
     "Path extraction", path_extract_tests;
     "Blob Brush commit", blob_brush_commit_tests;
     "doc.magic_wand.apply", magic_wand_apply_tests;
+    "doc.artboard.create_commit", artboard_create_tests;
+    "doc.artboard.probe_hit", artboard_probe_hit_tests;
+    "doc.artboard.probe_hover", artboard_probe_hover_tests;
+    "doc.artboard.move_apply", artboard_move_tests;
   ]
