@@ -1560,6 +1560,94 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             controller.set_document(doc)
         return None
 
+    # ── Magic Wand effect ─────────────────────────────────────
+    # See MAGIC_WAND_TOOL.md §Predicate + §Eligibility filter.
+
+    def _read_magic_wand_config(s, c):
+        from algorithms.magic_wand import MagicWandConfig
+        d = MagicWandConfig()
+
+        def bool_at(key: str, fallback: bool) -> bool:
+            v = _eval_value(f"state.{key}", s, c)
+            return bool(v.value) if v.type == ValueType.BOOL else fallback
+
+        def num_at(key: str, fallback: float) -> float:
+            v = _eval_value(f"state.{key}", s, c)
+            return float(v.value) if v.type == ValueType.NUMBER else fallback
+
+        return MagicWandConfig(
+            fill_color=bool_at("magic_wand_fill_color", d.fill_color),
+            fill_tolerance=num_at("magic_wand_fill_tolerance", d.fill_tolerance),
+            stroke_color=bool_at("magic_wand_stroke_color", d.stroke_color),
+            stroke_tolerance=num_at("magic_wand_stroke_tolerance", d.stroke_tolerance),
+            stroke_weight=bool_at("magic_wand_stroke_weight", d.stroke_weight),
+            stroke_weight_tolerance=num_at(
+                "magic_wand_stroke_weight_tolerance", d.stroke_weight_tolerance),
+            opacity=bool_at("magic_wand_opacity", d.opacity),
+            opacity_tolerance=num_at(
+                "magic_wand_opacity_tolerance", d.opacity_tolerance),
+            blending_mode=bool_at("magic_wand_blending_mode", d.blending_mode),
+        )
+
+    def _walk_eligible(doc):
+        """Yield (path, element) for every leaf element that passes the
+        §Eligibility filter — locked / hidden are skipped, Group / Layer
+        descend into their children rather than acting as candidates."""
+        from geometry.element import Group, Visibility
+
+        def walk(elem, cur_path):
+            if elem.locked:
+                return
+            if elem.visibility == Visibility.INVISIBLE:
+                return
+            if isinstance(elem, Group):
+                for i, child in enumerate(elem.children):
+                    yield from walk(child, cur_path + (i,))
+            else:
+                yield (cur_path, elem)
+
+        for li, layer in enumerate(doc.layers):
+            yield from walk(layer, (li,))
+
+    def doc_magic_wand_apply(spec, ctx, store):
+        from algorithms.magic_wand import magic_wand_match
+
+        if not isinstance(spec, dict):
+            return None
+        seed_path = extract_path(spec.get("seed"), store, ctx)
+        if seed_path is None:
+            return None
+        mode_raw = _eval_string_value(spec.get("mode"), store, ctx)
+        mode = mode_raw if mode_raw else "replace"
+
+        doc = controller.document
+        try:
+            seed_elem = doc.get_element(seed_path)
+        except Exception:
+            return None
+        cfg = _read_magic_wand_config(store, ctx)
+
+        matches: list[ElementPath] = []
+        for path, candidate in _walk_eligible(doc):
+            if path == seed_path:
+                matches.append(path)
+            elif magic_wand_match(seed_elem, candidate, cfg):
+                matches.append(path)
+
+        new_set = frozenset(ElementSelection.all(p) for p in matches)
+        new_paths = {es.path for es in new_set}
+
+        if mode == "add":
+            existing = set(doc.selection)
+            existing.update(new_set)
+            controller.set_selection(frozenset(existing))
+        elif mode == "subtract":
+            kept = {es for es in doc.selection if es.path not in new_paths}
+            controller.set_selection(frozenset(kept))
+        else:  # replace (default)
+            controller.set_selection(new_set)
+        return None
+
     def _encode_path(path) -> dict:
         return {"__path__": list(path)}
 
@@ -1867,6 +1955,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.path.insert_anchor_on_segment_near"] = doc_path_insert_anchor_on_segment_near
     effects["doc.path.erase_at_rect"] = doc_path_erase_at_rect
     effects["doc.path.smooth_at_cursor"] = doc_path_smooth_at_cursor
+    effects["doc.magic_wand.apply"] = doc_magic_wand_apply
     effects["doc.paintbrush.edit_start"] = doc_paintbrush_edit_start
     effects["doc.paintbrush.edit_commit"] = doc_paintbrush_edit_commit
     effects["doc.blob_brush.commit_painting"] = doc_blob_brush_commit_painting

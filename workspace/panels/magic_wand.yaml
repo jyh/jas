@@ -1,0 +1,309 @@
+id: magic_wand_panel_content
+type: panel
+summary: "Magic Wand"
+description: >
+  Magic Wand Panel — configures the five criteria the Magic Wand
+  Tool uses when matching candidate elements against a clicked
+  seed: Fill Color, Stroke Color, Stroke Weight, Opacity, and
+  Blending Mode. Each criterion is independently enabled by a
+  checkbox; tolerances apply only when the corresponding
+  checkbox is on.
+
+  Layout (top to bottom, matching the visual grouping in the
+  reference design):
+
+  Row 1 — Fill Color checkbox + Tolerance: numeric (0–255).
+  Row 2 — Stroke Color checkbox + Tolerance: numeric (0–255).
+  Row 3 — Stroke Weight checkbox + Tolerance: numeric (pt).
+  Row 4 — spacer (visual separator between the appearance group
+    above and the compositing group below).
+  Row 5 — Opacity checkbox + Tolerance: numeric (%).
+  Row 6 — Blending Mode checkbox (no tolerance — blend mode is a
+    categorical enum, exact match only).
+
+  Defaults:
+  - Fill / Stroke / Stroke Weight / Opacity: enabled.
+  - Blending Mode: disabled.
+  - Tolerances: 32 / 32 / 5.0 pt / 5%.
+
+  See transcripts/MAGIC_WAND_TOOL.md for the predicate and
+  gesture semantics. The actual matching happens inside
+  doc.magic_wand.apply (declared in workspace/actions.yaml or
+  registered as a doc.* effect by each native app).
+
+state:
+  fill_color:
+    type: bool
+    default: true
+    description: "Mirrors state.magic_wand_fill_color."
+  fill_tolerance:
+    type: number
+    default: 32
+    description: "Mirrors state.magic_wand_fill_tolerance (0–255)."
+  stroke_color:
+    type: bool
+    default: true
+    description: "Mirrors state.magic_wand_stroke_color."
+  stroke_tolerance:
+    type: number
+    default: 32
+    description: "Mirrors state.magic_wand_stroke_tolerance (0–255)."
+  stroke_weight:
+    type: bool
+    default: true
+    description: "Mirrors state.magic_wand_stroke_weight."
+  stroke_weight_tolerance:
+    type: number
+    default: 5.0
+    description: "Mirrors state.magic_wand_stroke_weight_tolerance (pt)."
+  opacity:
+    type: bool
+    default: true
+    description: "Mirrors state.magic_wand_opacity."
+  opacity_tolerance:
+    type: number
+    default: 5
+    description: "Mirrors state.magic_wand_opacity_tolerance (percent)."
+  blending_mode:
+    type: bool
+    default: false
+    description: "Mirrors state.magic_wand_blending_mode."
+
+# When the panel opens, hydrate panel-local state from the
+# corresponding state.magic_wand_* keys (per-document persistence).
+# Widget bindings then read from panel.<key>; commits write back
+# to both panel.<key> and state.magic_wand_<key> so changes
+# persist across panel close / re-open.
+init:
+  fill_color: "state.magic_wand_fill_color"
+  fill_tolerance: "state.magic_wand_fill_tolerance"
+  stroke_color: "state.magic_wand_stroke_color"
+  stroke_tolerance: "state.magic_wand_stroke_tolerance"
+  stroke_weight: "state.magic_wand_stroke_weight"
+  stroke_weight_tolerance: "state.magic_wand_stroke_weight_tolerance"
+  opacity: "state.magic_wand_opacity"
+  opacity_tolerance: "state.magic_wand_opacity_tolerance"
+  blending_mode: "state.magic_wand_blending_mode"
+
+menu:
+  - label: "Reset"
+    action: reset_magic_wand_panel
+  - separator
+  - label: "Close Magic Wand"
+    action: close_panel
+
+content:
+  type: container
+  id: magic_wand_content
+  layout: column
+  style: { padding: 8, gap: 8 }
+  children:
+
+    # ── Row 1: Fill Color + Tolerance ───────────────────────
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - type: container
+          col: 5
+          children:
+            - id: mwp_fill_color
+              type: toggle
+              label: "Fill Color"
+              bind:
+                checked: "panel.fill_color"
+              behavior:
+                - event: change
+                  effects:
+                    - set_panel_state:
+                        key: fill_color
+                        value: "not panel.fill_color"
+                    - set:
+                        magic_wand_fill_color: "not state.magic_wand_fill_color"
+        - type: container
+          col: 7
+          layout: row
+          style: { gap: 4, alignment: center }
+          children:
+            - { type: text, content: "Tolerance:",
+                style: { font_size: 11 } }
+            - id: mwp_fill_tolerance
+              type: number
+              min: 0
+              max: 255
+              step: 1
+              bind:
+                value: "panel.fill_tolerance"
+                disabled: "not panel.fill_color"
+              behavior:
+                - event: commit
+                  effects:
+                    - set_panel_state:
+                        key: fill_tolerance
+                        value: "event.value"
+                    - set:
+                        magic_wand_fill_tolerance: "event.value"
+
+    # ── Row 2: Stroke Color + Tolerance ─────────────────────
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - type: container
+          col: 5
+          children:
+            - id: mwp_stroke_color
+              type: toggle
+              label: "Stroke Color"
+              bind:
+                checked: "panel.stroke_color"
+              behavior:
+                - event: change
+                  effects:
+                    - set_panel_state:
+                        key: stroke_color
+                        value: "not panel.stroke_color"
+                    - set:
+                        magic_wand_stroke_color: "not state.magic_wand_stroke_color"
+        - type: container
+          col: 7
+          layout: row
+          style: { gap: 4, alignment: center }
+          children:
+            - { type: text, content: "Tolerance:",
+                style: { font_size: 11 } }
+            - id: mwp_stroke_tolerance
+              type: number
+              min: 0
+              max: 255
+              step: 1
+              bind:
+                value: "panel.stroke_tolerance"
+                disabled: "not panel.stroke_color"
+              behavior:
+                - event: commit
+                  effects:
+                    - set_panel_state:
+                        key: stroke_tolerance
+                        value: "event.value"
+                    - set:
+                        magic_wand_stroke_tolerance: "event.value"
+
+    # ── Row 3: Stroke Weight + Tolerance ────────────────────
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - type: container
+          col: 5
+          children:
+            - id: mwp_stroke_weight
+              type: toggle
+              label: "Stroke Weight"
+              bind:
+                checked: "panel.stroke_weight"
+              behavior:
+                - event: change
+                  effects:
+                    - set_panel_state:
+                        key: stroke_weight
+                        value: "not panel.stroke_weight"
+                    - set:
+                        magic_wand_stroke_weight: "not state.magic_wand_stroke_weight"
+        - type: container
+          col: 7
+          layout: row
+          style: { gap: 4, alignment: center }
+          children:
+            - { type: text, content: "Tolerance:",
+                style: { font_size: 11 } }
+            - id: mwp_stroke_weight_tolerance
+              type: number
+              min: 0
+              max: 100
+              step: 0.1
+              unit: "pt"
+              bind:
+                value: "panel.stroke_weight_tolerance"
+                disabled: "not panel.stroke_weight"
+              behavior:
+                - event: commit
+                  effects:
+                    - set_panel_state:
+                        key: stroke_weight_tolerance
+                        value: "event.value"
+                    - set:
+                        magic_wand_stroke_weight_tolerance: "event.value"
+
+    # ── Spacer between appearance group above and compositing
+    # group below. Matches the visual gap in the reference. ──
+    - type: container
+      style: { height: 8 }
+
+    # ── Row 5: Opacity + Tolerance ──────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - type: container
+          col: 5
+          children:
+            - id: mwp_opacity
+              type: toggle
+              label: "Opacity"
+              bind:
+                checked: "panel.opacity"
+              behavior:
+                - event: change
+                  effects:
+                    - set_panel_state:
+                        key: opacity
+                        value: "not panel.opacity"
+                    - set:
+                        magic_wand_opacity: "not state.magic_wand_opacity"
+        - type: container
+          col: 7
+          layout: row
+          style: { gap: 4, alignment: center }
+          children:
+            - { type: text, content: "Tolerance:",
+                style: { font_size: 11 } }
+            - id: mwp_opacity_tolerance
+              type: number
+              min: 0
+              max: 100
+              step: 1
+              unit: "%"
+              bind:
+                value: "panel.opacity_tolerance"
+                disabled: "not panel.opacity"
+              behavior:
+                - event: commit
+                  effects:
+                    - set_panel_state:
+                        key: opacity_tolerance
+                        value: "event.value"
+                    - set:
+                        magic_wand_opacity_tolerance: "event.value"
+
+    # ── Row 6: Blending Mode (checkbox only — no tolerance) ─
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - type: container
+          col: 5
+          children:
+            - id: mwp_blending_mode
+              type: toggle
+              label: "Blending Mode"
+              bind:
+                checked: "panel.blending_mode"
+              behavior:
+                - event: change
+                  effects:
+                    - set_panel_state:
+                        key: blending_mode
+                        value: "not panel.blending_mode"
+                    - set:
+                        magic_wand_blending_mode: "not state.magic_wand_blending_mode"

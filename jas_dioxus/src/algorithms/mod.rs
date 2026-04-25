@@ -14,3 +14,4 @@ pub mod text_layout_paragraph;
 pub mod offset_path;
 pub mod hyphenator;
 pub mod knuth_plass;
+pub mod magic_wand;

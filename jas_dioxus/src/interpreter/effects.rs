@@ -1158,6 +1158,23 @@ fn run_doc_effect(
                     model, store, ctx, &buffer, epsilon);
             }
         }
+        "doc.magic_wand.apply" => {
+            // Magic Wand selection per MAGIC_WAND_TOOL.md §Predicate.
+            // Reads the seed path + mode (replace / add / subtract)
+            // from the spec, walks the document, applies the
+            // eligibility filter and the AND-of-enabled-criteria
+            // predicate, mutates the selection accordingly.
+            if let serde_json::Value::Object(args) = spec {
+                let Some(seed_path) =
+                    args.get("seed").and_then(|v| extract_path(v, store, ctx))
+                else { return; };
+                let mode_raw = eval_string(args.get("mode"), store, ctx);
+                let mode = if mode_raw.is_empty() {
+                    "replace".to_string()
+                } else { mode_raw };
+                magic_wand_apply(model, store, ctx, &seed_path, &mode);
+            }
+        }
         "doc.path.smooth_at_cursor" => {
             // Iterates *selected* unlocked Path elements, finds the
             // contiguous flat-polyline range within `radius` of (x, y),
@@ -2985,6 +3002,162 @@ fn blob_brush_commit_erasing(
         }
     }
     model.set_document(new_doc);
+}
+
+// ── Magic Wand effect ─────────────────────────────────────
+
+/// Implementation of doc.magic_wand.apply. See
+/// MAGIC_WAND_TOOL.md §Predicate + §Eligibility filter.
+fn magic_wand_apply(
+    model: &mut Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    seed_path: &[usize],
+    mode: &str,
+) {
+    use crate::algorithms::magic_wand::{magic_wand_match, MagicWandConfig};
+    use crate::document::controller::Controller;
+    use crate::document::document::ElementSelection;
+
+    // Resolve the seed element. If the path doesn't resolve we
+    // bail — defensive against stale paths from a now-changed
+    // document.
+    let doc = model.document().clone();
+    let seed_path_vec_for_get = seed_path.to_vec();
+    let Some(seed_elem) = doc.get_element(&seed_path_vec_for_get)
+        .map(|e| (*e).clone())
+    else { return; };
+
+    // Read the nine state.magic_wand_* keys into a config.
+    let cfg = read_magic_wand_config(store, ctx);
+
+    // Walk the document and collect every element path that is
+    // (a) eligible per §Eligibility filter, and (b) similar to
+    // the seed under cfg.
+    let mut matches: Vec<Vec<usize>> = Vec::new();
+    let seed_path_vec = seed_path.to_vec();
+    walk_eligible(&doc, &mut Vec::new(), &mut |path, candidate| {
+        // The seed itself is always part of its own wand result,
+        // regardless of self-match (e.g. Fill enabled at tol 0
+        // on a None-fill seed).
+        if path == seed_path_vec.as_slice() {
+            matches.push(path.to_vec());
+            return;
+        }
+        if magic_wand_match(&seed_elem, candidate, &cfg) {
+            matches.push(path.to_vec());
+        }
+    });
+
+    let new_set: Vec<ElementSelection> = matches.into_iter()
+        .map(ElementSelection::all)
+        .collect();
+
+    match mode {
+        "add" => {
+            let mut existing = doc.selection.clone();
+            for es in &new_set {
+                if !existing.iter().any(|x| x.path == es.path) {
+                    existing.push(es.clone());
+                }
+            }
+            Controller::set_selection(model, existing);
+        }
+        "subtract" => {
+            let to_remove: std::collections::HashSet<Vec<usize>> =
+                new_set.iter().map(|es| es.path.clone()).collect();
+            let kept: Vec<ElementSelection> = doc.selection.iter()
+                .filter(|es| !to_remove.contains(&es.path))
+                .cloned()
+                .collect();
+            Controller::set_selection(model, kept);
+        }
+        _ => {
+            // "replace" (default).
+            Controller::set_selection(model, new_set);
+        }
+    }
+}
+
+/// Read the nine `state.magic_wand_*` keys into a MagicWandConfig.
+/// Falls back to the spec defaults when a key is missing.
+fn read_magic_wand_config(
+    store: &StateStore, ctx: &serde_json::Value,
+) -> crate::algorithms::magic_wand::MagicWandConfig {
+    use crate::algorithms::magic_wand::MagicWandConfig;
+    let mut cfg = MagicWandConfig::default();
+    let bool_at = |key: &str, fallback: bool| -> bool {
+        match eval_expr(&format!("state.{}", key), store, ctx) {
+            Value::Bool(b) => b, _ => fallback,
+        }
+    };
+    let num_at = |key: &str, fallback: f64| -> f64 {
+        match eval_expr(&format!("state.{}", key), store, ctx) {
+            Value::Number(n) => n, _ => fallback,
+        }
+    };
+    cfg.fill_color = bool_at("magic_wand_fill_color", cfg.fill_color);
+    cfg.fill_tolerance = num_at("magic_wand_fill_tolerance", cfg.fill_tolerance);
+    cfg.stroke_color = bool_at("magic_wand_stroke_color", cfg.stroke_color);
+    cfg.stroke_tolerance = num_at("magic_wand_stroke_tolerance", cfg.stroke_tolerance);
+    cfg.stroke_weight = bool_at("magic_wand_stroke_weight", cfg.stroke_weight);
+    cfg.stroke_weight_tolerance =
+        num_at("magic_wand_stroke_weight_tolerance", cfg.stroke_weight_tolerance);
+    cfg.opacity = bool_at("magic_wand_opacity", cfg.opacity);
+    cfg.opacity_tolerance = num_at("magic_wand_opacity_tolerance", cfg.opacity_tolerance);
+    cfg.blending_mode = bool_at("magic_wand_blending_mode", cfg.blending_mode);
+    cfg
+}
+
+/// Walk the document and invoke `visit(path, element)` for every
+/// leaf element that passes the §Eligibility filter — locked /
+/// hidden / mask-subtree / Compound Shape operands / containers
+/// (Group / Layer themselves) are skipped. Containers descend
+/// into their children.
+fn walk_eligible<F: FnMut(&[usize], &Element)>(
+    doc: &crate::document::document::Document,
+    cur_path: &mut Vec<usize>,
+    visit: &mut F,
+) {
+    for (li, layer) in doc.layers.iter().enumerate() {
+        cur_path.push(li);
+        walk_eligible_in(layer, cur_path, visit);
+        cur_path.pop();
+    }
+}
+
+fn walk_eligible_in<F: FnMut(&[usize], &Element)>(
+    elem: &Element, cur_path: &mut Vec<usize>, visit: &mut F,
+) {
+    use crate::geometry::element::Visibility;
+    if elem.locked() { return; }
+    if elem.visibility() == Visibility::Invisible { return; }
+    match elem {
+        Element::Group(g) => {
+            for (i, child) in g.children.iter().enumerate() {
+                cur_path.push(i);
+                walk_eligible_in(child, cur_path, visit);
+                cur_path.pop();
+            }
+        }
+        Element::Layer(l) => {
+            for (i, child) in l.children.iter().enumerate() {
+                cur_path.push(i);
+                walk_eligible_in(child, cur_path, visit);
+                cur_path.pop();
+            }
+        }
+        // Mask-subtree elements aren't reachable through
+        // doc.layers iteration — masks are stored on common.mask
+        // and never appear as document children. CompoundShape
+        // operands likewise live inside the live-element field
+        // and aren't iterated as candidates here. So the implicit
+        // policy is: a leaf reachable through doc.layers is
+        // eligible.
+        _ => {
+            visit(cur_path, elem);
+        }
+    }
 }
 
 /// Implementation of doc.path.smooth_at_cursor.
@@ -4859,5 +5032,187 @@ mod tests {
         // Element lacks jas:tool-origin → erase skips it entirely.
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1, "erasing must not touch non-blob-brush elements");
+    }
+
+    // ── doc.magic_wand.apply ─────────────────────────────────────
+
+    /// Build a model with three rects in one layer:
+    ///   - rect 0: red fill
+    ///   - rect 1: red fill (matches rect 0 by color)
+    ///   - rect 2: blue fill
+    fn make_model_three_rects_red_red_blue() -> Model {
+        use crate::geometry::element::Stroke;
+        let red_fill = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        let blue_fill = Fill::new(Color::rgb(0.0, 0.0, 1.0));
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let make = |fill: Fill, x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(fill),
+            stroke: Some(stroke.clone()),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![
+                std::rc::Rc::new(make(red_fill.clone(), 0.0)),
+                std::rc::Rc::new(make(red_fill, 20.0)),
+                std::rc::Rc::new(make(blue_fill, 40.0)),
+            ],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    fn magic_wand_state_defaults(store: &mut StateStore) {
+        store.set("magic_wand_fill_color", serde_json::json!(true));
+        store.set("magic_wand_fill_tolerance", serde_json::json!(32));
+        store.set("magic_wand_stroke_color", serde_json::json!(true));
+        store.set("magic_wand_stroke_tolerance", serde_json::json!(32));
+        store.set("magic_wand_stroke_weight", serde_json::json!(true));
+        store.set("magic_wand_stroke_weight_tolerance", serde_json::json!(5.0));
+        store.set("magic_wand_opacity", serde_json::json!(true));
+        store.set("magic_wand_opacity_tolerance", serde_json::json!(5));
+        store.set("magic_wand_blending_mode", serde_json::json!(false));
+    }
+
+    #[test]
+    fn magic_wand_replace_selects_seed_plus_similar() {
+        let mut model = make_model_three_rects_red_red_blue();
+        let mut store = StateStore::new();
+        magic_wand_state_defaults(&mut store);
+        // Seed = rect 0 (red). Expected: rects 0 and 1 selected;
+        // rect 2 (blue) excluded.
+        let effects = vec![serde_json::json!({
+            "doc.magic_wand.apply": {
+                "seed": [0, 0],
+                "mode": "'replace'",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let paths: std::collections::HashSet<Vec<usize>> = model.document()
+            .selection.iter().map(|es| es.path.clone()).collect();
+        assert!(paths.contains(&vec![0, 0]), "seed always included");
+        assert!(paths.contains(&vec![0, 1]), "matching candidate included");
+        assert!(!paths.contains(&vec![0, 2]),
+                "non-matching candidate excluded");
+        assert_eq!(paths.len(), 2);
+    }
+
+    #[test]
+    fn magic_wand_add_unions_with_existing_selection() {
+        let mut model = make_model_three_rects_red_red_blue();
+        let mut store = StateStore::new();
+        magic_wand_state_defaults(&mut store);
+        // Pre-select rect 2 (blue). Wand-add from rect 0 (red).
+        // Expected: {2} ∪ {0, 1} = {0, 1, 2}.
+        crate::document::controller::Controller::set_selection(
+            &mut model, vec![ElementSelection::all(vec![0, 2])]);
+        let effects = vec![serde_json::json!({
+            "doc.magic_wand.apply": {
+                "seed": [0, 0],
+                "mode": "'add'",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let paths: std::collections::HashSet<Vec<usize>> = model.document()
+            .selection.iter().map(|es| es.path.clone()).collect();
+        assert_eq!(paths.len(), 3);
+        assert!(paths.contains(&vec![0, 0]));
+        assert!(paths.contains(&vec![0, 1]));
+        assert!(paths.contains(&vec![0, 2]));
+    }
+
+    #[test]
+    fn magic_wand_subtract_removes_wand_result_from_selection() {
+        let mut model = make_model_three_rects_red_red_blue();
+        let mut store = StateStore::new();
+        magic_wand_state_defaults(&mut store);
+        // Pre-select all three. Wand-subtract from rect 0 (red).
+        // Wand result = {0, 1}. Expected post: {0,1,2} \ {0,1} = {2}.
+        crate::document::controller::Controller::set_selection(
+            &mut model, vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+                ElementSelection::all(vec![0, 2]),
+            ]);
+        let effects = vec![serde_json::json!({
+            "doc.magic_wand.apply": {
+                "seed": [0, 0],
+                "mode": "'subtract'",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let paths: std::collections::HashSet<Vec<usize>> = model.document()
+            .selection.iter().map(|es| es.path.clone()).collect();
+        assert_eq!(paths.len(), 1);
+        assert!(paths.contains(&vec![0, 2]));
+    }
+
+    #[test]
+    fn magic_wand_skips_locked_and_hidden_elements() {
+        use crate::geometry::element::{Stroke, Visibility};
+        // Three red rects: index 0 normal (seed), 1 locked, 2 hidden.
+        // Expected wand result on a replace from index 0: only {0}
+        // (the seed itself is always included; 1 and 2 filter out).
+        let red_fill = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let make = |x: f64, locked: bool, vis: Visibility| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(red_fill.clone()),
+            stroke: Some(stroke.clone()),
+            common: CommonProps {
+                locked, visibility: vis,
+                ..CommonProps::default()
+            },
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![
+                std::rc::Rc::new(make(0.0, false, Visibility::Preview)),
+                std::rc::Rc::new(make(20.0, true, Visibility::Preview)),
+                std::rc::Rc::new(make(40.0, false, Visibility::Invisible)),
+            ],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        magic_wand_state_defaults(&mut store);
+        let effects = vec![serde_json::json!({
+            "doc.magic_wand.apply": {
+                "seed": [0, 0],
+                "mode": "'replace'",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let paths: std::collections::HashSet<Vec<usize>> = model.document()
+            .selection.iter().map(|es| es.path.clone()).collect();
+        assert_eq!(paths.len(), 1);
+        assert!(paths.contains(&vec![0, 0]));
     }
 }

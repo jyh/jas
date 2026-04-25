@@ -262,6 +262,86 @@ state:
       narrower oval). Consulted only when no Calligraphic brush
       is active.
 
+  # ── Magic Wand tool ───────────────────────────────────────────
+  # Per-document persistence for the Magic Wand Panel's five
+  # criteria (Fill Color, Stroke Color, Stroke Weight, Opacity,
+  # Blending Mode) plus tolerances. See
+  # transcripts/MAGIC_WAND_TOOL.md §State persistence.
+
+  magic_wand_fill_color:
+    type: bool
+    default: true
+    description: >
+      When true, Fill Color contributes to the wand match
+      predicate. The criterion compares Euclidean distance in
+      0–255 sRGB space against magic_wand_fill_tolerance.
+
+  magic_wand_fill_tolerance:
+    type: number
+    default: 32
+    description: >
+      Maximum Euclidean RGB distance (0–255 scale) at which two
+      solid fills are considered similar. Integer 0–255. Default
+      32 matches the reference design.
+
+  magic_wand_stroke_color:
+    type: bool
+    default: true
+    description: >
+      When true, Stroke Color contributes to the wand match
+      predicate. Same Euclidean / 0–255 sRGB rule as Fill Color
+      against magic_wand_stroke_tolerance.
+
+  magic_wand_stroke_tolerance:
+    type: number
+    default: 32
+    description: >
+      Maximum Euclidean RGB distance (0–255 scale) at which two
+      solid strokes are considered similar. Integer 0–255.
+
+  magic_wand_stroke_weight:
+    type: bool
+    default: true
+    description: >
+      When true, Stroke Weight contributes to the wand match
+      predicate. Compares |candidate.width − seed.width| against
+      magic_wand_stroke_weight_tolerance (in pt).
+
+  magic_wand_stroke_weight_tolerance:
+    type: number
+    default: 5.0
+    description: >
+      Maximum stroke-weight delta in points at which two strokes
+      are considered similar. Float ≥ 0. Default 5.0.
+
+  magic_wand_opacity:
+    type: bool
+    default: true
+    description: >
+      When true, Opacity contributes to the wand match predicate.
+      Compares |candidate.opacity − seed.opacity| × 100 against
+      magic_wand_opacity_tolerance (in percentage points).
+
+  magic_wand_opacity_tolerance:
+    type: number
+    default: 5
+    description: >
+      Maximum opacity delta in percentage points at which two
+      elements are considered similar. Integer 0–100. The
+      document model stores opacity in [0.0, 1.0]; the predicate
+      multiplies by 100 so the user-facing tolerance is in
+      percentage points.
+
+  magic_wand_blending_mode:
+    type: bool
+    default: false
+    description: >
+      When true, Blending Mode contributes to the wand match
+      predicate. Compares blend_mode enum values for exact
+      equality — there is no tolerance, blend mode is
+      categorical. Default false (the reference design ships
+      this checkbox unchecked).
+
   # ── Align panel ───────────────────────────────────────────────
   # Mirror state for the Align panel's four persistent fields.
   # See transcripts/ALIGN.md §Panel state.

@@ -1840,6 +1840,37 @@ actions:
       - set_panel_state: { key: use_preview_bounds, value: "false" }
       - set: { align_use_preview_bounds: "false" }
 
+  # ── Magic Wand panel ──────────────────────────────────────────
+
+  reset_magic_wand_panel:
+    description: >
+      Reset every Magic Wand Panel control to its declared default
+      per MAGIC_WAND_TOOL.md §State persistence: four "obvious"
+      criteria checkboxes on (Fill / Stroke / Stroke Weight /
+      Opacity), Blending Mode off, tolerances 32 / 32 / 5.0 pt /
+      5%. Writes both panel.<key> (immediate visual update) and
+      state.magic_wand_<key> (per-document persistence).
+    category: magic_wand
+    effects:
+      - set_panel_state: { key: fill_color, value: "true" }
+      - set: { magic_wand_fill_color: "true" }
+      - set_panel_state: { key: fill_tolerance, value: "32" }
+      - set: { magic_wand_fill_tolerance: "32" }
+      - set_panel_state: { key: stroke_color, value: "true" }
+      - set: { magic_wand_stroke_color: "true" }
+      - set_panel_state: { key: stroke_tolerance, value: "32" }
+      - set: { magic_wand_stroke_tolerance: "32" }
+      - set_panel_state: { key: stroke_weight, value: "true" }
+      - set: { magic_wand_stroke_weight: "true" }
+      - set_panel_state: { key: stroke_weight_tolerance, value: "5.0" }
+      - set: { magic_wand_stroke_weight_tolerance: "5.0" }
+      - set_panel_state: { key: opacity, value: "true" }
+      - set: { magic_wand_opacity: "true" }
+      - set_panel_state: { key: opacity_tolerance, value: "5" }
+      - set: { magic_wand_opacity_tolerance: "5" }
+      - set_panel_state: { key: blending_mode, value: "false" }
+      - set: { magic_wand_blending_mode: "false" }
+
   # ── Boolean panel ─────────────────────────────────────────────
 
   boolean_union:

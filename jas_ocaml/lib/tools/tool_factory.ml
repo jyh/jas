@@ -33,6 +33,8 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Interior_selection -> (load_yaml_tool_or_fail "interior_selection" :> Canvas_tool.canvas_tool)
   (* Phase 7.14 — PartialSelection migrated *)
   | Toolbar.Partial_selection -> (load_yaml_tool_or_fail "partial_selection" :> Canvas_tool.canvas_tool)
+  (* Magic Wand — YAML-driven selection-modifier tool. *)
+  | Toolbar.Magic_wand -> (load_yaml_tool_or_fail "magic_wand" :> Canvas_tool.canvas_tool)
   (* Phase 7.3 — Line migrated to YamlTool *)
   | Toolbar.Line -> (load_yaml_tool_or_fail "line" :> Canvas_tool.canvas_tool)
   (* Phase 7.1 — Rect migrated to YamlTool *)

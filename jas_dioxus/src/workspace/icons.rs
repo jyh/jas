@@ -15,6 +15,11 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
         ToolKind::PartialSelection => r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/>"#.to_string(),
         // White arrow with black border + plus badge
         ToolKind::InteriorSelection => r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/><line x1="20" y1="20" x2="27" y2="20" stroke="black" stroke-width="1.5"/><line x1="23.5" y1="16.5" x2="23.5" y2="23.5" stroke="black" stroke-width="1.5"/>"#.to_string(),
+        // Magic Wand — diagonal handle (lower-left → upper-right) + 4-point
+        // sparkle at the tip + a small accent star. Matches the PNG reference
+        // at examples/magic-wand.png.
+        ToolKind::MagicWand => format!(
+            r#"<line x1="4" y1="22" x2="18" y2="8" stroke="{c}" stroke-width="2" stroke-linecap="round"/><polygon fill="{c}" points="20,3 21,7 25,8 21,9 20,13 19,9 15,8 19,7"/><polygon fill="{c}" points="24,12 24.7,13.5 26.5,14 24.7,14.5 24,16 23.3,14.5 21.5,14 23.3,13.5"/>"#),
         // Pen nib (from SVG, scaled from 256x256 viewBox to 28x28)
         ToolKind::Pen => {
             let _c = c;

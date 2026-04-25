@@ -15,6 +15,7 @@ pub mod boolean_panel;
 pub mod character_panel;
 pub mod color_panel;
 pub mod layers_panel;
+pub mod magic_wand_panel;
 pub mod opacity_panel;
 pub mod paragraph_panel;
 pub mod properties_panel;
@@ -51,6 +52,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Align => align_panel::menu_items(),
         PanelKind::Boolean => boolean_panel::menu_items(),
         PanelKind::Opacity => opacity_panel::menu_items(),
+        PanelKind::MagicWand => magic_wand_panel::menu_items(),
     }
 }
 
@@ -73,6 +75,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Align => align_panel::dispatch(cmd, addr, state),
         PanelKind::Boolean => boolean_panel::dispatch(cmd, addr, state),
         PanelKind::Opacity => opacity_panel::dispatch(cmd, addr, state),
+        PanelKind::MagicWand => magic_wand_panel::dispatch(cmd, addr, state),
     }
 }
 
@@ -90,6 +93,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Align => align_panel::is_checked(cmd, state),
         PanelKind::Boolean => boolean_panel::is_checked(cmd, state),
         PanelKind::Opacity => opacity_panel::is_checked(cmd, state),
+        PanelKind::MagicWand => magic_wand_panel::is_checked(cmd, state),
     }
 }
 

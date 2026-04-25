@@ -95,6 +95,7 @@ let panel_kind_str = function
   | Align -> "align"
   | Boolean -> "boolean"
   | Opacity -> "opacity"
+  | Magic_wand -> "magic_wand"
 
 let pane_kind_str = function
   | Toolbar -> "toolbar"
@@ -298,6 +299,7 @@ let menu_bar = [
     ("Properties", "toggle_panel_properties", "");
     ("Character", "toggle_panel_character", "");
     ("Paragraph", "toggle_panel_paragraph", "");
+    ("Magic Wand", "toggle_panel_magic_wand", "");
   ]);
 ]
 
@@ -497,6 +499,8 @@ let parse_panel_kind_str s =
   | "artboards" -> Artboards
   | "align" -> Align
   | "boolean" -> Boolean
+  | "opacity" -> Opacity
+  | "magic_wand" -> Magic_wand
   | _ -> Layers
 
 let parse_panel_kind j = parse_panel_kind_str (to_string j)

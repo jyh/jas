@@ -845,6 +845,7 @@ class MainWindow(QMainWindow):
         Tool.SELECTION: "selection",
         Tool.PARTIAL_SELECTION: "partial_selection",
         Tool.INTERIOR_SELECTION: "interior_selection",
+        Tool.MAGIC_WAND: "magic_wand",
         Tool.PEN: "pen",
         Tool.ADD_ANCHOR_POINT: "add_anchor_point",
         Tool.DELETE_ANCHOR_POINT: "delete_anchor_point",
@@ -862,11 +863,21 @@ class MainWindow(QMainWindow):
         Tool.LASSO: "lasso",
     }
 
+    # Map a tool yaml's tool_options_panel id to a PanelKind.
+    @staticmethod
+    def _panel_id_to_kind(panel_id: str):
+        from workspace.workspace_layout import PanelKind
+        return {
+            "magic_wand": PanelKind.MAGIC_WAND,
+        }.get(panel_id)
+
     def _open_tool_options_dialog(self, tool):
-        """Handler for Toolbar.tool_options_requested. Looks up the
-        tool's tool_options_dialog field in workspace.json; if set,
-        dispatches open_dialog and shows the dialog. See
-        PAINTBRUSH_TOOL.md §Tool options."""
+        """Handler for Toolbar.tool_options_requested.
+
+        Prefers ``tool_options_panel`` (Magic Wand) over
+        ``tool_options_dialog`` (Paintbrush, Blob Brush). A tool yaml
+        uses one or the other, not both. See MAGIC_WAND_TOOL.md §Panel
+        and PAINTBRUSH_TOOL.md §Tool options."""
         from workspace_interpreter.effects import run_effects
         from workspace_interpreter.loader import load_workspace
 
@@ -877,6 +888,14 @@ class MainWindow(QMainWindow):
         if not ws:
             return
         tool_spec = (ws.get("tools") or {}).get(yaml_id) or {}
+        panel_id = tool_spec.get("tool_options_panel")
+        if panel_id:
+            kind = self._panel_id_to_kind(panel_id)
+            if kind is not None:
+                self.workspace_layout.show_panel(kind)
+                if hasattr(self, "dock_panel"):
+                    self.dock_panel.rebuild_all()
+                return
         dialog_id = tool_spec.get("tool_options_dialog")
         if not dialog_id:
             return

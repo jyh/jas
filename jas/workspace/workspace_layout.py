@@ -51,12 +51,14 @@ class PanelKind(Enum):
     ALIGN = auto()
     BOOLEAN = auto()
     OPACITY = auto()
+    MAGIC_WAND = auto()
 
 ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
     PanelKind.ALIGN, PanelKind.BOOLEAN, PanelKind.OPACITY,
+    PanelKind.MAGIC_WAND,
 ]
 
 @dataclass
@@ -465,6 +467,8 @@ class WorkspaceLayout:
             PanelKind.ARTBOARDS: "Artboards",
             PanelKind.ALIGN: "Align",
             PanelKind.BOOLEAN: "Boolean",
+            PanelKind.OPACITY: "Opacity",
+            PanelKind.MAGIC_WAND: "Magic Wand",
         }[kind]
 
     # -- Close / show panels --
