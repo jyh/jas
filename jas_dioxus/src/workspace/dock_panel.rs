@@ -47,6 +47,7 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
         ToolKind::Hand => "hand",
         ToolKind::Zoom => "zoom",
         ToolKind::Artboard => "artboard",
+        ToolKind::Eyedropper => "eyedropper",
     }
 }
 
