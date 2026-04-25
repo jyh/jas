@@ -100,24 +100,29 @@ handlers:
     - set: { tool.artboard.alt_held:   "event.modifiers.alt" }
     - set: { tool.artboard.shift_held: "event.modifiers.shift" }
 
-    # Threshold latch — once exceeded, snapshot for undo + capture a
-    # preview snapshot the live-update effects restore from on each
-    # mousemove (so move / resize / duplicate are idempotent on press
-    # + cursor + initial state). Promote *_pending → active modes.
+    # Threshold latch — once exceeded, snapshot for undo, promote
+    # *_pending → active modes (which for 'duplicating_pending' also
+    # creates the duplicate at the source position via
+    # doc.artboard.duplicate_init), and finally capture the preview
+    # snapshot the live-update effects restore from on each mousemove.
+    # The capture has to run AFTER duplicate_init so the preview
+    # baseline includes the duplicate; otherwise move_apply's
+    # restore-then-translate would remove it.
     - if: "not tool.artboard.moved && (abs(event.x - tool.artboard.press_x) > 4 || abs(event.y - tool.artboard.press_y) > 4)"
       then:
         - set: { tool.artboard.moved: "true" }
         - if: "not tool.artboard.snapshotted"
           then:
             - "doc.snapshot": {}
-            - "doc.preview.capture": {}
             - set: { tool.artboard.snapshotted: "true" }
+        - if: "tool.artboard.mode == 'duplicating_pending'"
+          then:
+            - "doc.artboard.duplicate_init": {}
+            - set: { tool.artboard.mode: "'duplicating'" }
         - if: "tool.artboard.mode == 'moving_pending'"
           then:
             - set: { tool.artboard.mode: "'moving'" }
-        - if: "tool.artboard.mode == 'duplicating_pending'"
-          then:
-            - set: { tool.artboard.mode: "'duplicating'" }
+        - "doc.preview.capture": {}
 
     # In-flight effect dispatch per active mode. The effects update
     # in-flight bounds; final commit + integer-pt rounding happens at
