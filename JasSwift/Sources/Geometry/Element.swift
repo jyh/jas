@@ -591,6 +591,35 @@ public struct Transform: Equatable, Hashable {
             f: (b * e - a * f) * invDet
         )
     }
+
+    /// Shear matrix with horizontal shear factor `kx` (x ← x + kx·y)
+    /// and vertical shear factor `ky` (y ← y + ky·x).
+    public static func shear(_ kx: Double, _ ky: Double) -> Transform {
+        Transform(a: 1, b: ky, c: kx, d: 1)
+    }
+
+    /// Return `self * other` — the matrix that applies `other` first,
+    /// then `self`. Equivalent to (self ∘ other)(p) for any point p.
+    public func multiply(_ other: Transform) -> Transform {
+        Transform(
+            a: a * other.a + c * other.b,
+            b: b * other.a + d * other.b,
+            c: a * other.c + c * other.d,
+            d: b * other.c + d * other.d,
+            e: a * other.e + c * other.f + e,
+            f: b * other.e + d * other.f + f
+        )
+    }
+
+    /// Conjugate this transform around `(rx, ry)` —
+    /// `T(rx, ry) * self * T(-rx, -ry)`. The result, when applied to
+    /// any point, behaves as if `self` were applied with `(rx, ry)`
+    /// as the origin.
+    public func aroundPoint(_ rx: Double, _ ry: Double) -> Transform {
+        let pre = Transform.translate(-rx, -ry)
+        let post = Transform.translate(rx, ry)
+        return post.multiply(self).multiply(pre)
+    }
 }
 
 // MARK: - SVG path commands
