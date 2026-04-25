@@ -40,6 +40,25 @@ pub fn run_effects(
             run_one(map, ctx, store, model.as_deref_mut(), actions, dialogs);
         }
     }
+    // Dialog on_change post-run hook. Fires the action declared on the
+    // currently-open dialog's on_change field whenever this batch
+    // mutated dialog state. Per-batch debounce (≈ per-frame in
+    // practice — UI events deliver one batch per user interaction
+    // tick). Re-entrancy guarded so the action's own effects do not
+    // re-fire the hook. See SCALE_TOOL.md §Preview.
+    if !store.is_firing_on_change() && store.take_dialog_dirty() {
+        if let Some(action_name) = store.dialog_on_change().map(String::from) {
+            store.set_firing_on_change(true);
+            let dispatch_effect = serde_json::json!({
+                "dispatch": action_name,
+            });
+            if let serde_json::Value::Object(map) = &dispatch_effect {
+                run_one(map, ctx, store, model.as_deref_mut(),
+                        actions, dialogs);
+            }
+            store.set_firing_on_change(false);
+        }
+    }
 }
 
 fn eval_expr(expr: &str, store: &StateStore, ctx: &serde_json::Value) -> Value {
@@ -381,6 +400,27 @@ fn run_one(
             }
             store.capture_dialog_snapshot(&targets);
         }
+        // Document-level preview snapshot for transform-tool dialogs
+        // (Scale Options / Rotate Options / Shear Options). When the
+        // dialog yaml sets `doc_preview: true`, capture the document
+        // so the on_change-fired apply effects can restore-and-reapply
+        // without polluting undo history. See SCALE_TOOL.md §Preview.
+        if let Some(serde_json::Value::Bool(true)) = dlg_def.get("doc_preview") {
+            if let Some(m) = model.as_deref_mut() {
+                m.capture_preview_snapshot();
+            }
+        }
+        // Wire the dialog's on_change action — fired by run_effects
+        // after any batch that mutated dialog state.
+        if let Some(serde_json::Value::String(s)) = dlg_def.get("on_change") {
+            store.set_dialog_on_change(Some(s.clone()));
+        } else {
+            store.set_dialog_on_change(None);
+        }
+        // Clear any leftover dirty flag from prior dialog sessions so
+        // the very-first init of dialog state does not immediately fire
+        // on_change.
+        store.take_dialog_dirty();
         return;
     }
 
@@ -397,6 +437,16 @@ fn run_one(
                 }
             }
             store.clear_dialog_snapshot();
+        }
+        // Document-level preview restore: if the dialog captured a doc
+        // snapshot at open and the OK path did not call doc.preview.clear,
+        // this is the Cancel path — revert the document and drop the
+        // snapshot. See SCALE_TOOL.md §Preview.
+        if let Some(m) = model.as_deref_mut() {
+            if m.has_preview_snapshot() {
+                m.restore_preview_snapshot();
+                m.clear_preview_snapshot();
+            }
         }
         store.close_dialog();
         return;
