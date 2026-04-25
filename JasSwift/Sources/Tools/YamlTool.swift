@@ -272,6 +272,8 @@ final class YamlTool: CanvasTool {
                                              model: ctx.model)
             case "oval_cursor":
                 drawOvalCursorOverlay(cgCtx, render, evalCtx)
+            case "cursor_color_chip":
+                drawCursorColorChipOverlay(cgCtx, render, evalCtx)
             case "reference_point_cross":
                 drawReferencePointCross(cgCtx, render, evalCtx,
                                          model: ctx.model)
@@ -945,6 +947,104 @@ private func drawOvalCursorOverlay(
     cgCtx.move(to: CGPoint(x: cx, y: cy - 3))
     cgCtx.addLine(to: CGPoint(x: cx, y: cy + 3))
     cgCtx.strokePath()
+}
+
+/// `cursor_color_chip` render type — a 12×12 px filled rectangle at
+/// offset (+12, +12) from the cursor showing the cached
+/// state.eyedropper_cache appearance. Visible only when the cache
+/// is non-null and the eyedropper has seen the cursor at least once
+/// (per the tool yaml's `if:` guard). See EYEDROPPER_TOOL.md
+/// §Overlay.
+///
+/// Render fields:
+///   x, y    cursor position (required, expression-evaluated).
+///   cache   the cached Appearance dict (expression yielding
+///           state.eyedropper_cache).
+private func drawCursorColorChipOverlay(
+    _ cgCtx: CGContext,
+    _ render: [String: Any],
+    _ evalCtx: [String: Any]
+) {
+    let cx = evalOverlayNumber(render["x"], evalCtx)
+    let cy = evalOverlayNumber(render["y"], evalCtx)
+
+    // Resolve cache. Accept either an inline dictionary or an
+    // expression string referring to state.eyedropper_cache. Read
+    // straight from evalCtx since the expr evaluator's Value type
+    // doesn't carry full JSON objects.
+    let cacheValue: [String: Any]?
+    if let expr = render["cache"] as? String {
+        let trimmed = expr.trimmingCharacters(in: .whitespaces)
+        let key = trimmed.hasPrefix("state.")
+            ? String(trimmed.dropFirst("state.".count))
+            : trimmed
+        let state = (evalCtx["state"] as? [String: Any]) ?? [:]
+        cacheValue = state[key] as? [String: Any]
+    } else {
+        cacheValue = render["cache"] as? [String: Any]
+    }
+    guard let cache = cacheValue else { return }
+
+    let chipX = cx + 12
+    let chipY = cy + 12
+    let chipW: CGFloat = 12
+    let chipH: CGFloat = 12
+
+    // Fill: cache.fill.color when present (solid). Otherwise render
+    // the standard none-glyph (white background with a red diagonal).
+    let fillEntry = cache["fill"] as? [String: Any]
+    let fillColor = fillEntry?["color"]
+    if let f = fillColor, let cgColor = cgColorFromAny(f) {
+        cgCtx.setFillColor(cgColor)
+        cgCtx.fill(CGRect(x: chipX, y: chipY, width: chipW, height: chipH))
+    } else {
+        cgCtx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        cgCtx.fill(CGRect(x: chipX, y: chipY, width: chipW, height: chipH))
+        cgCtx.setStrokeColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        cgCtx.setLineWidth(1.5)
+        cgCtx.beginPath()
+        cgCtx.move(to: CGPoint(x: chipX, y: chipY + chipH))
+        cgCtx.addLine(to: CGPoint(x: chipX + chipW, y: chipY))
+        cgCtx.strokePath()
+    }
+
+    // Border: 1 px outline from cache.stroke.color when solid;
+    // otherwise neutral gray fallback.
+    let strokeEntry = cache["stroke"] as? [String: Any]
+    let strokeColor = strokeEntry?["color"]
+    let borderCG: CGColor = {
+        if let s = strokeColor, let cg = cgColorFromAny(s) { return cg }
+        return CGColor(red: 0.53, green: 0.53, blue: 0.53, alpha: 1)
+    }()
+    cgCtx.setStrokeColor(borderCG)
+    cgCtx.setLineWidth(1)
+    cgCtx.stroke(CGRect(x: chipX + 0.5, y: chipY + 0.5,
+                         width: chipW - 1, height: chipH - 1))
+}
+
+/// Convert a serialized color JSON value (hex string, [r,g,b] array,
+/// or {r,g,b} dict) to a CGColor. Returns nil on parse failure.
+private func cgColorFromAny(_ v: Any) -> CGColor? {
+    if let s = v as? String, let c = Color.fromHex(s) {
+        if case let .rgb(r, g, b, a) = c {
+            return CGColor(red: CGFloat(r), green: CGFloat(g),
+                           blue: CGFloat(b), alpha: CGFloat(a))
+        }
+    }
+    if let arr = v as? [Double], arr.count >= 3 {
+        return CGColor(red: CGFloat(arr[0]), green: CGFloat(arr[1]),
+                       blue: CGFloat(arr[2]),
+                       alpha: arr.count >= 4 ? CGFloat(arr[3]) : 1)
+    }
+    if let d = v as? [String: Any],
+       let r = d["r"] as? Double,
+       let g = d["g"] as? Double,
+       let b = d["b"] as? Double {
+        return CGColor(red: CGFloat(r), green: CGFloat(g),
+                       blue: CGFloat(b),
+                       alpha: CGFloat((d["a"] as? Double) ?? 1))
+    }
+    return nil
 }
 
 /// Add a 24-segment rotated-ellipse path to `cgCtx`. Caller fills or
