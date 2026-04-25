@@ -1827,6 +1827,24 @@ class CanvasNSView: NSView {
             return makeTypeCursor()
         case .typeOnPath:
             return makeTypeOnPathCursor()
+        case .hand:
+            // Open vs closed hand depends on whether a Hand-tool
+            // pan is in flight. Per HAND_TOOL.md §Cursor states.
+            // The tool's mode is stored in tool.hand.mode in the
+            // Model's StateStore.
+            if let model = controller?.model {
+                let toolCtx = model.stateStore.evalContext()["tool"] as? [String: Any]
+                let handCtx = toolCtx?["hand"] as? [String: Any]
+                let mode = handCtx?["mode"] as? String ?? ""
+                if mode == "panning" { return NSCursor.closedHand }
+            }
+            return NSCursor.openHand
+        case .zoom:
+            // Zoom cursor stays the standard crosshair-with-plus
+            // visual; AppKit doesn't have a native zoom-in cursor,
+            // so crosshair is the closest match. Alt-flip to a
+            // minus-decorated variant is deferred.
+            return NSCursor.crosshair
         default:
             return NSCursor.crosshair
         }
