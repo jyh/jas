@@ -1,0 +1,262 @@
+# Artboard tool — creates, activates, moves, resizes, and duplicates
+# artboards on the canvas. Writes to document.artboards and to
+# panel.artboards.selection (per ARTBOARDS.md §Selection semantics).
+# The full behavioral contract is in ARTBOARD_TOOL.md.
+#
+# State machine:
+#   idle                  — waiting for input
+#   creating              — drag-to-create rectangle from empty canvas
+#   moving_pending        — pressed on artboard interior; below 4 px
+#                           threshold (sub-threshold mouseup is a click,
+#                           which the probe_hit already handled)
+#   moving                — translating panel-selected artboards
+#   resizing              — dragging a handle on the single panel-selected
+#                           artboard
+#   duplicating_pending   — Alt+pressed on artboard interior; below
+#                           threshold
+#   duplicating           — Alt-drag past threshold; in-progress duplicate
+#
+# on_mousedown dispatches doc.artboard.probe_hit which performs the
+# hit-test per ARTBOARD_TOOL.md §Mousedown disambiguation order
+# (resize handle > artboard interior with topmost-in-list-wins on
+# overlap > empty canvas), writes panel-selection if the click was on
+# an interior, and sets tool.artboard.mode + hit_* state. Subsequent
+# on_mousemove dispatches the in-flight effect for the active mode;
+# on_mouseup commits with integer-pt rounding.
+#
+# Move/Copy Artwork is hard-coded on in phase 1 (no toggle UI). The
+# per-app move/duplicate effects translate or copy contained elements
+# per the containment rule in ARTBOARDS.md §Rearrange Dialogue
+# Move-artwork semantics. Drag-to-resize never transforms elements
+# regardless of toggle.
+#
+# Validated against schema/tool.schema.json.
+
+id: artboard
+cursor: crosshair
+menu_label: "Artboard Tool"
+shortcut: "Shift+O"
+tool_options_action: "fit_all_artboards"
+
+state:
+  mode:
+    default: "idle"
+    enum: [idle, creating, moving_pending, moving, resizing, duplicating_pending, duplicating]
+  press_x:        { default: 0.0 }
+  press_y:        { default: 0.0 }
+  cursor_x:       { default: 0.0 }
+  cursor_y:       { default: 0.0 }
+  alt_at_press:   { default: false }
+  alt_held:       { default: false }
+  shift_held:     { default: false }
+  # Latched at first significant cursor motion (4 px in either dim).
+  moved:          { default: false }
+  # True once doc.snapshot has been called for the current gesture.
+  snapshotted:    { default: false }
+  # Hit-test result, latched by doc.artboard.probe_hit at mousedown.
+  hit_artboard_id: { default: null }
+  # One of "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w", or null.
+  hit_handle_pos:  { default: null }
+
+handlers:
+
+  on_enter:
+    - set: { tool.artboard.mode:  "'idle'" }
+    - set: { tool.artboard.moved: "false" }
+
+  on_leave:
+    - set: { tool.artboard.mode:  "'idle'" }
+    - set: { tool.artboard.moved: "false" }
+
+  on_mousedown:
+    # Per-app probe_hit examines coords + modifiers, classifies the
+    # hit (handle vs interior vs empty per the disambiguation order),
+    # writes panel-selection for an interior-click using the
+    # plain/Shift/Cmd rules from ARTBOARDS.md §Selection semantics,
+    # and sets:
+    #   tool.artboard.mode (creating | moving_pending | resizing |
+    #                       duplicating_pending)
+    #   tool.artboard.hit_artboard_id
+    #   tool.artboard.hit_handle_pos
+    - "doc.artboard.probe_hit":
+        x:     "event.x"
+        y:     "event.y"
+        shift: "event.modifiers.shift"
+        cmd:   "event.modifiers.cmd"
+        alt:   "event.modifiers.alt"
+    - set: { tool.artboard.press_x:      "event.x" }
+    - set: { tool.artboard.press_y:      "event.y" }
+    - set: { tool.artboard.cursor_x:     "event.x" }
+    - set: { tool.artboard.cursor_y:     "event.y" }
+    - set: { tool.artboard.alt_at_press: "event.modifiers.alt" }
+    - set: { tool.artboard.alt_held:     "event.modifiers.alt" }
+    - set: { tool.artboard.shift_held:   "event.modifiers.shift" }
+    - set: { tool.artboard.moved:        "false" }
+    - set: { tool.artboard.snapshotted:  "false" }
+
+  on_mousemove:
+    - set: { tool.artboard.cursor_x:   "event.x" }
+    - set: { tool.artboard.cursor_y:   "event.y" }
+    - set: { tool.artboard.alt_held:   "event.modifiers.alt" }
+    - set: { tool.artboard.shift_held: "event.modifiers.shift" }
+
+    # Threshold latch — once exceeded, snapshot for cancel and promote
+    # the *_pending modes to their active counterparts.
+    - if: "not tool.artboard.moved && (abs(event.x - tool.artboard.press_x) > 4 || abs(event.y - tool.artboard.press_y) > 4)"
+      then:
+        - set: { tool.artboard.moved: "true" }
+        - if: "not tool.artboard.snapshotted"
+          then:
+            - "doc.snapshot": {}
+            - set: { tool.artboard.snapshotted: "true" }
+        - if: "tool.artboard.mode == 'moving_pending'"
+          then:
+            - set: { tool.artboard.mode: "'moving'" }
+        - if: "tool.artboard.mode == 'duplicating_pending'"
+          then:
+            - set: { tool.artboard.mode: "'duplicating'" }
+
+    # In-flight effect dispatch per active mode. The effects update
+    # in-flight bounds; final commit + integer-pt rounding happens at
+    # mouseup. Live re-render vs outline-preview is gated by
+    # document.artboard_options.update_while_dragging in the per-app
+    # effect implementations and the overlay block below.
+    - if: "tool.artboard.mode == 'moving' && tool.artboard.moved"
+      then:
+        - "doc.artboard.move_apply":
+            press_x:    "tool.artboard.press_x"
+            press_y:    "tool.artboard.press_y"
+            cursor_x:   "event.x"
+            cursor_y:   "event.y"
+            shift_held: "event.modifiers.shift"
+    - if: "tool.artboard.mode == 'resizing' && tool.artboard.moved"
+      then:
+        - "doc.artboard.resize_apply":
+            handle_pos: "tool.artboard.hit_handle_pos"
+            press_x:    "tool.artboard.press_x"
+            press_y:    "tool.artboard.press_y"
+            cursor_x:   "event.x"
+            cursor_y:   "event.y"
+            shift_held: "event.modifiers.shift"
+            alt_held:   "event.modifiers.alt"
+    - if: "tool.artboard.mode == 'duplicating' && tool.artboard.moved"
+      then:
+        # Alt sampled at mousedown only — modifier state during the
+        # drag does not convert duplicate back to move per
+        # ARTBOARD_TOOL.md §Alt-drag duplicate.
+        - "doc.artboard.duplicate_apply":
+            press_x:  "tool.artboard.press_x"
+            press_y:  "tool.artboard.press_y"
+            cursor_x: "event.x"
+            cursor_y: "event.y"
+
+  on_mouseup:
+    # Drag-to-create commits a new artboard from the rubber-band rect.
+    # Sub-threshold create (moved == false) is a click on empty canvas
+    # — panel-selection was cleared by probe_hit; nothing to commit.
+    - if: "tool.artboard.mode == 'creating' && tool.artboard.moved"
+      then:
+        - "doc.artboard.create_commit":
+            x1: "tool.artboard.press_x"
+            y1: "tool.artboard.press_y"
+            x2: "event.x"
+            y2: "event.y"
+    # Move/resize/duplicate commits — apply integer-pt rounding and
+    # finalize the undoable op.
+    - if: "tool.artboard.mode == 'moving' && tool.artboard.moved"
+      then:
+        - "doc.artboard.move_commit": {}
+    - if: "tool.artboard.mode == 'resizing' && tool.artboard.moved"
+      then:
+        - "doc.artboard.resize_commit": {}
+    - if: "tool.artboard.mode == 'duplicating' && tool.artboard.moved"
+      then:
+        - "doc.artboard.duplicate_commit":
+            press_x:  "tool.artboard.press_x"
+            press_y:  "tool.artboard.press_y"
+            cursor_x: "event.x"
+            cursor_y: "event.y"
+    - set: { tool.artboard.mode:  "'idle'" }
+    - set: { tool.artboard.moved: "false" }
+
+  on_dblclick:
+    # Per-app dispatcher routes canvas dblclick to this handler.
+    # If the click is on an artboard interior or label region (not on
+    # a handle and not on empty canvas), open the Artboard Options
+    # Dialogue for that artboard. Per ARTBOARD_TOOL.md §Canvas
+    # double-click: handles no-op, empty canvas no-op.
+    - "doc.artboard.probe_hit":
+        x:     "event.x"
+        y:     "event.y"
+        shift: "false"
+        cmd:   "false"
+        alt:   "false"
+    - if: "tool.artboard.hit_artboard_id != null && tool.artboard.hit_handle_pos == null"
+      then:
+        - "open_dialog":
+            id: artboard_options
+            params: { artboard_id: "tool.artboard.hit_artboard_id" }
+
+  on_keydown:
+    # Escape cancels any in-progress drag.
+    - if: "event.key == 'Escape' && tool.artboard.mode != 'idle' && tool.artboard.snapshotted"
+      then:
+        - "doc.snapshot.restore": {}
+        - set: { tool.artboard.mode:        "'idle'" }
+        - set: { tool.artboard.moved:       "false" }
+        - set: { tool.artboard.snapshotted: "false" }
+    # Delete/Backspace fall-through within tool focus context per
+    # ARTBOARD_TOOL.md §Delete behavior:
+    #   panel-selection non-empty → delete selected artboards
+    #     (subject to at-least-one invariant; per-app effect surfaces
+    #     the standard tooltip if blocked, no fall-through on block)
+    #   else → fall through to global delete_selection
+    - if: "(event.key == 'Delete' || event.key == 'Backspace') && tool.artboard.mode == 'idle'"
+      then:
+        - if: "len(panel.artboards.selection) > 0"
+          then:
+            - "doc.artboard.delete_panel_selected": {}
+          else:
+            - dispatch:
+                action: delete_selection
+
+# Overlays composed as a list:
+#   1. artboard_resize_handles — 8 handles on the panel-selected
+#      artboard, drawn whenever exactly one artboard is panel-selected
+#      and this tool is active. Independent of drag state.
+#   2. marquee_rect — drag-to-create rectangle, drawn during the
+#      'creating' mode after threshold (reuses the marquee_rect render
+#      type from zoom.yaml).
+#   3. artboard_outline_preview — outline rectangle for move / resize
+#      / duplicate drag when document.artboard_options.update_while_dragging
+#      is false. The native renderer composes the in-flight rectangle
+#      from press + cursor coords + mode + (hit_handle_pos for resize)
+#      + modifier state. When update_while_dragging is true, the
+#      artboards re-render at their in-flight bounds and no overlay is
+#      needed.
+overlay:
+  - if: "len(panel.artboards.selection) == 1"
+    render:
+      type: artboard_resize_handles
+      artboard_id: "panel.artboards.selection[0]"
+
+  - if: "tool.artboard.mode == 'creating' && tool.artboard.moved"
+    render:
+      type: marquee_rect
+      x1: "tool.artboard.press_x"
+      y1: "tool.artboard.press_y"
+      x2: "tool.artboard.cursor_x"
+      y2: "tool.artboard.cursor_y"
+
+  - if: "tool.artboard.moved && (tool.artboard.mode == 'moving' || tool.artboard.mode == 'resizing' || tool.artboard.mode == 'duplicating') && not document.artboard_options.update_while_dragging"
+    render:
+      type: artboard_outline_preview
+      mode:        "tool.artboard.mode"
+      handle_pos:  "tool.artboard.hit_handle_pos"
+      artboard_id: "tool.artboard.hit_artboard_id"
+      press_x:     "tool.artboard.press_x"
+      press_y:     "tool.artboard.press_y"
+      cursor_x:    "tool.artboard.cursor_x"
+      cursor_y:    "tool.artboard.cursor_y"
+      shift_held:  "tool.artboard.shift_held"
+      alt_held:    "tool.artboard.alt_held"

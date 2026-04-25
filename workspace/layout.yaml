@@ -452,6 +452,38 @@ layout:
                         drag for scrubby or marquee zoom; Ctrl+wheel
                         for stepped zoom
 
+              # Row 4, Col 1: Artboard
+              - id: btn_artboard_slot
+                type: icon_button
+                summary: "Artboard (Shift+O)"
+                description: >
+                  Create, activate, move, resize, and duplicate
+                  artboards on the canvas. Drag from empty canvas to
+                  create a new artboard. Click an artboard to activate
+                  it (writes panel-selection per the panel rules).
+                  Drag an artboard interior to move it; drag a resize
+                  handle to resize it; Alt-drag to duplicate. Double-
+                  click an artboard to open the Artboard Options
+                  Dialogue. Double-click the icon to invoke
+                  fit_all_artboards. No long-press alternates.
+                  See ARTBOARD_TOOL.md.
+                icon: "artboard"
+                grid: { row: 4, col: 1 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: click
+                    action: select_tool
+                    params: { tool: artboard }
+                  # Double-click is dispatched by each app's toolbar
+                  # dispatcher reading the active tool's
+                  # tool_options_action field — see
+                  # workspace/tools/artboard.yaml.
+                bind:
+                  checked: 'state.active_tool == "artboard"'
+
           - type: spacer
             style: { height: 8 }
 
