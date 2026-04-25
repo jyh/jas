@@ -462,6 +462,12 @@ impl CanvasTool for YamlTool {
                 "marquee_rect" => {
                     draw_marquee_rect_overlay(ctx, render, &eval_ctx);
                 }
+                "artboard_resize_handles" => {
+                    draw_artboard_resize_handles(ctx, render, &eval_ctx, model);
+                }
+                "artboard_outline_preview" => {
+                    draw_artboard_outline_preview(ctx, render, &eval_ctx, model);
+                }
                 _ => {
                     // Unrecognized type — skip silently, matching the
                     // lenient-mode convention used elsewhere.
@@ -552,6 +558,113 @@ pub(crate) fn parse_style(s: &str) -> OverlayStyle {
 /// Marquee zoom rectangle: thin dashed stroke between (x1, y1) and
 /// (x2, y2). Used by the Zoom tool's drag overlay when scrubby_zoom
 /// is off. Per ZOOM_TOOL.md §Drag — marquee zoom.
+/// Draw the 8 resize handles on the single panel-selected artboard
+/// per ARTBOARD_TOOL.md §Drag-to-resize. Handles render as 8 px
+/// screen-space squares (white fill, blue border) at the four
+/// corners and four edge midpoints. Coordinates are transformed
+/// from the artboard's document-space bounds to viewport pixels via
+/// model.zoom_level + model.view_offset_*.
+fn draw_artboard_resize_handles(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    model: &crate::document::model::Model,
+) {
+    let id_expr = render
+        .get("artboard_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let id_val = crate::interpreter::expr::eval(id_expr, eval_ctx);
+    let id = match id_val {
+        crate::interpreter::expr_types::Value::Str(s) => s,
+        _ => return,
+    };
+    let doc = model.document();
+    let Some(ab) = doc.artboards.iter().find(|a| a.id == id) else { return; };
+
+    let zoom = model.zoom_level;
+    let offx = model.view_offset_x;
+    let offy = model.view_offset_y;
+    let to_vp = |dx: f64, dy: f64| -> (f64, f64) {
+        (dx * zoom + offx, dy * zoom + offy)
+    };
+    let cx = ab.x + ab.width / 2.0;
+    let cy = ab.y + ab.height / 2.0;
+    let positions: [(f64, f64); 8] = [
+        (ab.x, ab.y),                          // nw
+        (cx, ab.y),                            // n
+        (ab.x + ab.width, ab.y),               // ne
+        (ab.x + ab.width, cy),                 // e
+        (ab.x + ab.width, ab.y + ab.height),   // se
+        (cx, ab.y + ab.height),                // s
+        (ab.x, ab.y + ab.height),              // sw
+        (ab.x, cy),                            // w
+    ];
+    const HANDLE_SIZE: f64 = 8.0;
+    let half = HANDLE_SIZE / 2.0;
+    ctx.set_fill_style_str("white");
+    ctx.set_stroke_style_str("rgb(0, 120, 255)");
+    ctx.set_line_width(1.5);
+    for (dx, dy) in positions {
+        let (vx, vy) = to_vp(dx, dy);
+        ctx.fill_rect(vx - half, vy - half, HANDLE_SIZE, HANDLE_SIZE);
+        ctx.stroke_rect(vx - half, vy - half, HANDLE_SIZE, HANDLE_SIZE);
+    }
+}
+
+/// Draw the outline-preview rectangle for in-flight move / resize /
+/// duplicate gestures when document.artboard_options.update_while_dragging
+/// is false. The native renderer composes the in-flight bounds from
+/// the gesture's mode + handle position + press/cursor + modifiers.
+/// Phase 1.4 implementation: simple stroked rectangle in theme accent
+/// color; refinements (handle previews on the outline, dimension
+/// readout) are phase 2.
+fn draw_artboard_outline_preview(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    model: &crate::document::model::Model,
+) {
+    let mode_expr = render.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+    let mode = match crate::interpreter::expr::eval(mode_expr, eval_ctx) {
+        crate::interpreter::expr_types::Value::Str(s) => s,
+        _ => return,
+    };
+    let id_expr = render
+        .get("artboard_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let id_val = crate::interpreter::expr::eval(id_expr, eval_ctx);
+    let id = match id_val {
+        crate::interpreter::expr_types::Value::Str(s) => s,
+        _ => return,
+    };
+    let press_x = eval_number_field(eval_ctx, render.get("press_x"));
+    let press_y = eval_number_field(eval_ctx, render.get("press_y"));
+    let cursor_x = eval_number_field(eval_ctx, render.get("cursor_x"));
+    let cursor_y = eval_number_field(eval_ctx, render.get("cursor_y"));
+
+    let doc = model.document();
+    // The preview is drawn against the model's CURRENT document state
+    // (post-restore_preview_snapshot). For move / duplicate, the
+    // artboard with `id` already lives at its in-flight position; we
+    // draw a stroked outline around it. For resize, similar.
+    let Some(ab) = doc.artboards.iter().find(|a| a.id == id) else { return; };
+    let zoom = model.zoom_level;
+    let offx = model.view_offset_x;
+    let offy = model.view_offset_y;
+    let vx = ab.x * zoom + offx;
+    let vy = ab.y * zoom + offy;
+    let vw = ab.width * zoom;
+    let vh = ab.height * zoom;
+    ctx.set_stroke_style_str("rgb(0, 120, 255)");
+    ctx.set_line_width(1.0);
+    ctx.stroke_rect(vx, vy, vw, vh);
+    // Suppress unused warnings — these would be consumed by the
+    // phase-2 refinements (handle previews, dimension readout).
+    let _ = (press_x, press_y, cursor_x, cursor_y, mode);
+}
+
 fn draw_marquee_rect_overlay(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
