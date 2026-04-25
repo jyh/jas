@@ -1151,3 +1151,107 @@ private func magicWandStateDefaults(_ store: StateStore) {
                ctx: [:], store: store, platformEffects: effects)
     #expect(abs(model.zoomLevel - 2.0) < 1e-9)
 }
+
+// MARK: - doc.artboard.* effects (ARTBOARD_TOOL.md)
+
+private func artboardModel(_ artboards: [Artboard]) -> Model {
+    Model(document: Document(
+        layers: [Layer(name: "Layer 1", children: [])],
+        selectedLayer: 0, selection: [],
+        artboards: artboards))
+}
+
+@Test func docArtboardCreateCommitAppendsArtboard() {
+    let seed = Artboard(id: "seed00001", name: "Artboard 1")
+    let model = artboardModel([seed])
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.artboard.create_commit": [
+        "x1": "10", "y1": "20", "x2": "110", "y2": "120"
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    #expect(model.document.artboards.count == 2)
+    let new = model.document.artboards[1]
+    #expect(new.x == 10.0)
+    #expect(new.y == 20.0)
+    #expect(new.width == 100.0)
+    #expect(new.height == 100.0)
+    #expect(new.name == "Artboard 2")
+}
+
+@Test func docArtboardCreateCommitClampsAtMin() {
+    let seed = Artboard(id: "seed00001", name: "Artboard 1")
+    let model = artboardModel([seed])
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.artboard.create_commit": [
+        "x1": "50", "y1": "50", "x2": "50.4", "y2": "50.4"
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    #expect(model.document.artboards[1].width == 1.0)
+    #expect(model.document.artboards[1].height == 1.0)
+}
+
+@Test func docArtboardProbeHitInteriorSetsToolState() {
+    // Probe_hit on an artboard interior sets tool state. The
+    // panel-selection write also happens but verifying it requires
+    // the renderer's active_document scope plumbing (per-tab); this
+    // test covers the tool-state side, which is verified directly
+    // via the eval context.
+    let ab = Artboard(id: "aaa00001", name: "Artboard 1",
+                      x: 0, y: 0, width: 100, height: 100)
+    let model = artboardModel([ab])
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.artboard.probe_hit": [
+        "x": "50", "y": "50",
+        "shift": "false", "cmd": "false", "alt": "false"
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    let mode = (store.evalContext()["tool"] as? [String: Any])?["artboard"]
+        as? [String: Any]
+    #expect((mode?["mode"] as? String) == "moving_pending")
+    #expect((mode?["hit_artboard_id"] as? String) == "aaa00001")
+}
+
+@Test func docArtboardProbeHoverClassifiesPosition() {
+    let ab = Artboard(id: "aaa00001", name: "Artboard 1",
+                      x: 0, y: 0, width: 100, height: 100)
+    let model = artboardModel([ab])
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.artboard.probe_hover":
+                 ["x": "50", "y": "50"]]],
+               ctx: [:], store: store, platformEffects: effects)
+    let ab_state = (store.evalContext()["tool"] as? [String: Any])?["artboard"]
+        as? [String: Any]
+    #expect((ab_state?["hover_kind"] as? String) == "interior")
+    runEffects([["doc.artboard.probe_hover":
+                 ["x": "999", "y": "999"]]],
+               ctx: [:], store: store, platformEffects: effects)
+    let ab_state2 = (store.evalContext()["tool"] as? [String: Any])?["artboard"]
+        as? [String: Any]
+    #expect((ab_state2?["hover_kind"] as? String) == "empty")
+}
+
+@Test func docArtboardMoveApplyTranslatesViaHitFallback() {
+    let ab = Artboard(id: "aaa00001", name: "Artboard 1",
+                      x: 100, y: 100, width: 200, height: 200)
+    let model = artboardModel([ab])
+    model.capturePreviewSnapshot()
+    let store = StateStore()
+    store.setTool("artboard", "hit_artboard_id", "aaa00001")
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.artboard.move_apply": [
+        "press_x": "100", "press_y": "100",
+        "cursor_x": "150", "cursor_y": "70",
+        "shift_held": "false"
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    let result = model.document.artboards[0]
+    #expect(result.x == 150.0)
+    #expect(result.y == 70.0)
+}
+
+// Note: doc.artboard.delete_panel_selected reads target ids from
+// active_document.artboards_panel_selection_ids, which is built by
+// the renderer per-tab. Unit-testing the delete path requires the
+// active_document scope plumbing — covered indirectly by the
+// run-time behavior verified by the manual test suite
+// (ARTBOARD_TOOL_TESTS.md §Session G).
