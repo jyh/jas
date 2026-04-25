@@ -58,6 +58,12 @@ pub struct Model {
     /// Alt/Option-clicking MASK_PREVIEW. OPACITY.md §Preview
     /// interactions.
     pub mask_isolation_path: Option<Vec<usize>>,
+    /// Out-of-band document snapshot used by dialog Preview flows
+    /// (Scale Options, Rotate Options, Shear Options) — captured at
+    /// dialog open, restored on Cancel, cleared on OK. Distinct from
+    /// `undo_stack` so preview-driven applies don't pollute undo
+    /// history. See SCALE_TOOL.md §Preview.
+    preview_doc_snapshot: Option<Document>,
 }
 
 impl Default for Model {
@@ -74,6 +80,7 @@ impl Default for Model {
             recent_colors: Vec::new(),
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
+            preview_doc_snapshot: None,
         }
     }
 }
@@ -96,6 +103,7 @@ impl Model {
             recent_colors: Vec::new(),
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
+            preview_doc_snapshot: None,
         }
     }
 
@@ -125,6 +133,37 @@ impl Model {
     pub fn set_document(&mut self, doc: Document) {
         self.document = doc;
         self.generation += 1;
+    }
+
+    /// Capture the current document into the preview snapshot slot,
+    /// independently of the undo stack. Used by dialog Preview flows
+    /// (Scale / Rotate / Shear) to enable apply-on-change without
+    /// polluting undo history. Idempotent — overwrites any prior
+    /// preview snapshot.
+    pub fn capture_preview_snapshot(&mut self) {
+        self.preview_doc_snapshot = Some(self.document.clone());
+    }
+
+    /// Restore the preview snapshot if present. The captured document
+    /// replaces the current one (no undo entry is pushed); the snapshot
+    /// is left in place so subsequent restore calls remain idempotent.
+    /// No-op when no snapshot is captured.
+    pub fn restore_preview_snapshot(&mut self) {
+        if let Some(doc) = self.preview_doc_snapshot.clone() {
+            self.document = doc;
+            self.generation += 1;
+        }
+    }
+
+    /// Drop the preview snapshot without restoring. OK actions call
+    /// this so subsequent close_dialog flows do not revert.
+    pub fn clear_preview_snapshot(&mut self) {
+        self.preview_doc_snapshot = None;
+    }
+
+    /// True iff a preview snapshot is currently captured.
+    pub fn has_preview_snapshot(&self) -> bool {
+        self.preview_doc_snapshot.is_some()
     }
 
     /// Push the current document onto the undo stack and clear the redo
