@@ -55,6 +55,8 @@ class Tool(Enum):
     SCALE = auto()
     ROTATE = auto()
     SHEAR = auto()
+    HAND = auto()
+    ZOOM = auto()
 
 
 def _draw_arrow_path() -> QPainterPath:
@@ -1275,6 +1277,12 @@ class Toolbar(QWidget):
             # See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md.
             (Tool.SCALE, 4, 0),
             (Tool.ROTATE, 4, 1),
+            # Navigation-tool family — Hand (primary, with Zoom as
+            # long-press alternate). Hand-icon dblclick →
+            # fit_active_artboard; Zoom-icon dblclick →
+            # zoom_to_actual_size, both via tool_options_action.
+            # See HAND_TOOL.md / ZOOM_TOOL.md.
+            (Tool.HAND, 5, 0),
         ]
         for tool, row, col in tools:
             has_alt = (tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS
@@ -1315,6 +1323,10 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.SMOOTH])
         self.buttons[Tool.SHEAR] = ToolButton(Tool.SHEAR, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.SHEAR])
+        # Navigation slot's hidden alternate. Zoom is registered for
+        # button-bag completeness; the visible slot icon is Hand.
+        self.buttons[Tool.ZOOM] = ToolButton(Tool.ZOOM, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.ZOOM])
 
         self.buttons[Tool.SELECTION].setChecked(True)
         self.button_group.buttonClicked.connect(self._on_button_clicked)

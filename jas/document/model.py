@@ -89,6 +89,58 @@ class Model:
         # MASK_PREVIEW; exited by Alt-clicking again.
         # OPACITY.md §Preview interactions.
         self.mask_isolation_path: tuple[int, ...] | None = None
+        # Per-document view state (per ZOOM_TOOL.md §State persistence).
+        # Persists across tab switches within a session; reset to
+        # defaults on document open. Not serialized to disk in Phase 1.
+        self.zoom_level: float = 1.0
+        self.view_offset_x: float = 0.0
+        self.view_offset_y: float = 0.0
+        # Canvas viewport dimensions in screen-space pixels. Updated
+        # by the canvas widget on layout / resize. Read by
+        # doc.zoom.fit_* effects to compute the new zoom factor.
+        # Defaults match workspace/layout.yaml canvas_pane
+        # default_position.
+        self.viewport_w: float = 888.0
+        self.viewport_h: float = 900.0
+        # Center the canvas view on the current artboard at
+        # construction time using the default viewport. The first
+        # canvas paint with the real viewport will re-center.
+        self.center_view_on_current_artboard()
+
+    def center_view_on_current_artboard(self) -> None:
+        """Center the canvas view on the current artboard using the
+        stored ``viewport_w`` / ``viewport_h``. If the artboard
+        fits at the current zoom, set pan to center it; otherwise
+        apply fit-inside semantics with 20px screen-space padding.
+        Per ZOOM_TOOL.md §Document-open behavior.
+        """
+        artboards = list(self._document.artboards)
+        if not artboards or self.viewport_w <= 0 or self.viewport_h <= 0:
+            return
+        ab = artboards[0]
+        ab_w = float(ab.width)
+        ab_h = float(ab.height)
+        ab_x = float(ab.x)
+        ab_y = float(ab.y)
+        fits = (ab_w * self.zoom_level <= self.viewport_w
+                and ab_h * self.zoom_level <= self.viewport_h)
+        if fits:
+            self.view_offset_x = (
+                self.viewport_w / 2.0 - (ab_x + ab_w / 2.0) * self.zoom_level)
+            self.view_offset_y = (
+                self.viewport_h / 2.0 - (ab_y + ab_h / 2.0) * self.zoom_level)
+        else:
+            pad = 20.0
+            avail_w = self.viewport_w - 2.0 * pad
+            avail_h = self.viewport_h - 2.0 * pad
+            if avail_w > 0 and avail_h > 0:
+                z_fit = min(avail_w / ab_w, avail_h / ab_h)
+                z_clamped = max(0.1, min(64.0, z_fit))
+                self.zoom_level = z_clamped
+                self.view_offset_x = (
+                    self.viewport_w / 2.0 - (ab_x + ab_w / 2.0) * z_clamped)
+                self.view_offset_y = (
+                    self.viewport_h / 2.0 - (ab_y + ab_h / 2.0) * z_clamped)
 
     @property
     def filename(self) -> str:
