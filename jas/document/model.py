@@ -116,6 +116,29 @@ class Model:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 
+    # ── Preview snapshot (dialog Preview flows) ────────────────
+    # Out-of-band snapshot used by the Scale / Rotate / Shear
+    # Options dialogs. Captured at dialog open, restored on
+    # Cancel, cleared on OK. Distinct from _undo_stack so
+    # preview-driven applies do not pollute undo history.
+    # See SCALE_TOOL.md §Preview.
+
+    def capture_preview_snapshot(self) -> None:
+        self._preview_doc_snapshot: Document | None = self._document
+
+    def restore_preview_snapshot(self) -> None:
+        snap = getattr(self, "_preview_doc_snapshot", None)
+        if snap is not None:
+            self._document = snap
+            self._notify()
+
+    def clear_preview_snapshot(self) -> None:
+        self._preview_doc_snapshot = None
+
+    @property
+    def has_preview_snapshot(self) -> bool:
+        return getattr(self, "_preview_doc_snapshot", None) is not None
+
     def undo(self) -> None:
         """Restore the previous document state."""
         if not self._undo_stack:
