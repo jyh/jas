@@ -2064,8 +2064,9 @@ private func blobBrushInsertAt(
 /// True when `path` references an existing element in `doc`.
 /// Document's `getElement(_:)` fatalErrors on invalid input, so this
 /// helper does a defensive walk instead. `childrenOf` in Document is
-/// private, so we inline the switch.
-private func isValidPath(_ doc: Document, _ path: ElementPath) -> Bool {
+/// private, so we inline the switch. `internal` so the transform-tool
+/// overlay code in YamlTool.swift can reuse it.
+internal func isValidPath(_ doc: Document, _ path: ElementPath) -> Bool {
     guard !path.isEmpty else { return false }
     guard path[0] >= 0 && path[0] < doc.layers.count else { return false }
     var node: Element = .layer(doc.layers[path[0]])
