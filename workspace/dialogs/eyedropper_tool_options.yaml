@@ -1,0 +1,217 @@
+eyedropper_tool_options:
+  summary: "Eyedropper Tool Options"
+  description: >
+    Modal dialog opened by double-clicking the Eyedropper icon in the
+    toolbar. Edits 25 per-document toggles that gate which attribute
+    groups and sub-attributes the Eyedropper samples and applies.
+
+    Five master groups (Fill, Stroke, Opacity, Character, Paragraph)
+    each have a master toggle; Stroke / Opacity / Character /
+    Paragraph also have sub-toggles for finer control. Master OFF
+    skips the entire group regardless of sub-toggles. Master ON +
+    sub OFF skips that sub-attribute. Both must be ON for an
+    attribute to be copied.
+
+    When the source element lacks an attribute (e.g. a Path being
+    sampled has no character data) or the target can't receive it
+    (e.g. applying character attrs to a Path), the corresponding
+    sub-toggles are no-ops at apply time. No warning, no error.
+
+    Reset restores all toggles to their declared defaults (all true)
+    without committing. Cancel discards edits. OK writes every
+    working-copy value to the corresponding state.eyedropper_* key.
+
+    See transcripts/EYEDROPPER_TOOL.md.
+  modal: true
+  width: 360
+  params: {}
+  state:
+    fill:                  { type: bool, default: true, description: "Master toggle for Fill group" }
+    stroke:                { type: bool, default: true, description: "Master toggle for Stroke group" }
+    stroke_color:          { type: bool, default: true, description: "Stroke color (solid / none / gradient / pattern)" }
+    stroke_weight:         { type: bool, default: true, description: "stroke-width" }
+    stroke_cap_join:       { type: bool, default: true, description: "stroke-linecap, stroke-linejoin, stroke-miterlimit" }
+    stroke_align:          { type: bool, default: true, description: "stroke-align" }
+    stroke_dash:           { type: bool, default: true, description: "stroke-dashed + the six dash/gap values" }
+    stroke_arrowheads:     { type: bool, default: true, description: "start/end shape, scales, scale-link, arrow-align" }
+    stroke_profile:        { type: bool, default: true, description: "profile + flipped" }
+    stroke_brush:          { type: bool, default: true, description: "jas:stroke-brush" }
+    opacity:               { type: bool, default: true, description: "Master toggle for Opacity group" }
+    opacity_alpha:         { type: bool, default: true, description: "element.opacity" }
+    opacity_blend:         { type: bool, default: true, description: "element.mode (blend mode)" }
+    character:             { type: bool, default: true, description: "Master toggle for Character group" }
+    character_font:        { type: bool, default: true, description: "font family + style" }
+    character_size:        { type: bool, default: true, description: "font size" }
+    character_leading:     { type: bool, default: true, description: "leading" }
+    character_kerning:     { type: bool, default: true, description: "kerning" }
+    character_tracking:    { type: bool, default: true, description: "tracking" }
+    character_color:       { type: bool, default: true, description: "character color" }
+    paragraph:             { type: bool, default: true, description: "Master toggle for Paragraph group" }
+    paragraph_align:       { type: bool, default: true, description: "paragraph alignment" }
+    paragraph_indent:      { type: bool, default: true, description: "left / right / first-line indents" }
+    paragraph_space:       { type: bool, default: true, description: "space before / after" }
+    paragraph_hyphenate:   { type: bool, default: true, description: "hyphenate flag" }
+  init:
+    fill:                  "state.eyedropper_fill"
+    stroke:                "state.eyedropper_stroke"
+    stroke_color:          "state.eyedropper_stroke_color"
+    stroke_weight:         "state.eyedropper_stroke_weight"
+    stroke_cap_join:       "state.eyedropper_stroke_cap_join"
+    stroke_align:          "state.eyedropper_stroke_align"
+    stroke_dash:           "state.eyedropper_stroke_dash"
+    stroke_arrowheads:     "state.eyedropper_stroke_arrowheads"
+    stroke_profile:        "state.eyedropper_stroke_profile"
+    stroke_brush:          "state.eyedropper_stroke_brush"
+    opacity:               "state.eyedropper_opacity"
+    opacity_alpha:         "state.eyedropper_opacity_alpha"
+    opacity_blend:         "state.eyedropper_opacity_blend"
+    character:             "state.eyedropper_character"
+    character_font:        "state.eyedropper_character_font"
+    character_size:        "state.eyedropper_character_size"
+    character_leading:     "state.eyedropper_character_leading"
+    character_kerning:     "state.eyedropper_character_kerning"
+    character_tracking:    "state.eyedropper_character_tracking"
+    character_color:       "state.eyedropper_character_color"
+    paragraph:             "state.eyedropper_paragraph"
+    paragraph_align:       "state.eyedropper_paragraph_align"
+    paragraph_indent:      "state.eyedropper_paragraph_indent"
+    paragraph_space:       "state.eyedropper_paragraph_space"
+    paragraph_hyphenate:   "state.eyedropper_paragraph_hyphenate"
+  content:
+    type: container
+    layout: column
+    style: { gap: 8, padding: 16 }
+    children:
+
+      - { type: text, content: "Sample and apply:", style: { font_size: 12, weight: bold } }
+
+      # ── Fill ──
+      - id: eto_fill
+        type: toggle
+        label: "Fill"
+        bind:
+          checked: "dialog.fill"
+
+      # ── Stroke (master + 8 sub-toggles) ──
+      - type: container
+        layout: column
+        style: { gap: 4 }
+        children:
+          - id: eto_stroke
+            type: toggle
+            label: "Stroke"
+            bind:
+              checked: "dialog.stroke"
+          - type: container
+            layout: column
+            style: { gap: 2, padding_left: 20 }
+            children:
+              - { id: eto_stroke_color,       type: toggle, label: "Color",                bind: { checked: "dialog.stroke_color",       disabled: "not dialog.stroke" } }
+              - { id: eto_stroke_weight,      type: toggle, label: "Weight",               bind: { checked: "dialog.stroke_weight",      disabled: "not dialog.stroke" } }
+              - { id: eto_stroke_cap_join,    type: toggle, label: "Cap / Join / Miter",   bind: { checked: "dialog.stroke_cap_join",    disabled: "not dialog.stroke" } }
+              - { id: eto_stroke_align,       type: toggle, label: "Align",                bind: { checked: "dialog.stroke_align",       disabled: "not dialog.stroke" } }
+              - { id: eto_stroke_dash,        type: toggle, label: "Dash pattern",         bind: { checked: "dialog.stroke_dash",        disabled: "not dialog.stroke" } }
+              - { id: eto_stroke_arrowheads,  type: toggle, label: "Arrowheads",           bind: { checked: "dialog.stroke_arrowheads",  disabled: "not dialog.stroke" } }
+              - { id: eto_stroke_profile,     type: toggle, label: "Profile",              bind: { checked: "dialog.stroke_profile",     disabled: "not dialog.stroke" } }
+              - { id: eto_stroke_brush,       type: toggle, label: "Brush",                bind: { checked: "dialog.stroke_brush",       disabled: "not dialog.stroke" } }
+
+      # ── Opacity (master + 2 sub-toggles) ──
+      - type: container
+        layout: column
+        style: { gap: 4 }
+        children:
+          - id: eto_opacity
+            type: toggle
+            label: "Opacity"
+            bind:
+              checked: "dialog.opacity"
+          - type: container
+            layout: column
+            style: { gap: 2, padding_left: 20 }
+            children:
+              - { id: eto_opacity_alpha,      type: toggle, label: "Opacity %",             bind: { checked: "dialog.opacity_alpha",      disabled: "not dialog.opacity" } }
+              - { id: eto_opacity_blend,      type: toggle, label: "Blend mode",            bind: { checked: "dialog.opacity_blend",      disabled: "not dialog.opacity" } }
+
+      # ── Character (master + 6 sub-toggles) ──
+      - type: container
+        layout: column
+        style: { gap: 4 }
+        children:
+          - id: eto_character
+            type: toggle
+            label: "Character"
+            bind:
+              checked: "dialog.character"
+          - type: container
+            layout: column
+            style: { gap: 2, padding_left: 20 }
+            children:
+              - { id: eto_character_font,     type: toggle, label: "Font",                  bind: { checked: "dialog.character_font",     disabled: "not dialog.character" } }
+              - { id: eto_character_size,     type: toggle, label: "Size",                  bind: { checked: "dialog.character_size",     disabled: "not dialog.character" } }
+              - { id: eto_character_leading,  type: toggle, label: "Leading",               bind: { checked: "dialog.character_leading",  disabled: "not dialog.character" } }
+              - { id: eto_character_kerning,  type: toggle, label: "Kerning",               bind: { checked: "dialog.character_kerning",  disabled: "not dialog.character" } }
+              - { id: eto_character_tracking, type: toggle, label: "Tracking",              bind: { checked: "dialog.character_tracking", disabled: "not dialog.character" } }
+              - { id: eto_character_color,    type: toggle, label: "Color",                 bind: { checked: "dialog.character_color",    disabled: "not dialog.character" } }
+
+      # ── Paragraph (master + 4 sub-toggles) ──
+      - type: container
+        layout: column
+        style: { gap: 4 }
+        children:
+          - id: eto_paragraph
+            type: toggle
+            label: "Paragraph"
+            bind:
+              checked: "dialog.paragraph"
+          - type: container
+            layout: column
+            style: { gap: 2, padding_left: 20 }
+            children:
+              - { id: eto_paragraph_align,     type: toggle, label: "Alignment",            bind: { checked: "dialog.paragraph_align",     disabled: "not dialog.paragraph" } }
+              - { id: eto_paragraph_indent,    type: toggle, label: "Indents",              bind: { checked: "dialog.paragraph_indent",    disabled: "not dialog.paragraph" } }
+              - { id: eto_paragraph_space,     type: toggle, label: "Space before / after", bind: { checked: "dialog.paragraph_space",     disabled: "not dialog.paragraph" } }
+              - { id: eto_paragraph_hyphenate, type: toggle, label: "Hyphenate",            bind: { checked: "dialog.paragraph_hyphenate", disabled: "not dialog.paragraph" } }
+
+      # ── Reset + Cancel + OK ──
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: space-between }
+        children:
+          - type: button
+            label: "Reset"
+            action: eyedropper_tool_options_reset
+          - type: container
+            layout: row
+            style: { gap: 8 }
+            children:
+              - { type: button, label: "Cancel", action: dismiss_dialog }
+              - type: button
+                label: "OK"
+                action: eyedropper_tool_options_confirm
+                variant: primary
+                params:
+                  fill:                  "dialog.fill"
+                  stroke:                "dialog.stroke"
+                  stroke_color:          "dialog.stroke_color"
+                  stroke_weight:         "dialog.stroke_weight"
+                  stroke_cap_join:       "dialog.stroke_cap_join"
+                  stroke_align:          "dialog.stroke_align"
+                  stroke_dash:           "dialog.stroke_dash"
+                  stroke_arrowheads:     "dialog.stroke_arrowheads"
+                  stroke_profile:        "dialog.stroke_profile"
+                  stroke_brush:          "dialog.stroke_brush"
+                  opacity:               "dialog.opacity"
+                  opacity_alpha:         "dialog.opacity_alpha"
+                  opacity_blend:         "dialog.opacity_blend"
+                  character:             "dialog.character"
+                  character_font:        "dialog.character_font"
+                  character_size:        "dialog.character_size"
+                  character_leading:     "dialog.character_leading"
+                  character_kerning:     "dialog.character_kerning"
+                  character_tracking:    "dialog.character_tracking"
+                  character_color:       "dialog.character_color"
+                  paragraph:             "dialog.paragraph"
+                  paragraph_align:       "dialog.paragraph_align"
+                  paragraph_indent:      "dialog.paragraph_indent"
+                  paragraph_space:       "dialog.paragraph_space"
+                  paragraph_hyphenate:   "dialog.paragraph_hyphenate"
