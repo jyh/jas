@@ -337,6 +337,140 @@ let blob_brush_commit_tests = [
       (Array.length children));
 ]
 
+(* Magic Wand effect *)
+
+let red_filled_rect x y =
+  Element.Rect {
+    x; y; width = 10.0; height = 10.0;
+    rx = 0.0; ry = 0.0;
+    fill = Some (Element.make_fill (Element.color_rgb 1.0 0.0 0.0));
+    stroke = None;
+    opacity = 1.0; transform = None; locked = false;
+    visibility = Preview; blend_mode = Normal; mask = None;
+    fill_gradient = None; stroke_gradient = None;
+  }
+
+let blue_filled_rect x y =
+  Element.Rect {
+    x; y; width = 10.0; height = 10.0;
+    rx = 0.0; ry = 0.0;
+    fill = Some (Element.make_fill (Element.color_rgb 0.0 0.0 1.0));
+    stroke = None;
+    opacity = 1.0; transform = None; locked = false;
+    visibility = Preview; blend_mode = Normal; mask = None;
+    fill_gradient = None; stroke_gradient = None;
+  }
+
+let magic_wand_state_defaults (store : State_store.t) =
+  State_store.set store "magic_wand_fill_color" (`Bool true);
+  State_store.set store "magic_wand_fill_tolerance" (`Float 32.0);
+  State_store.set store "magic_wand_stroke_color" (`Bool true);
+  State_store.set store "magic_wand_stroke_tolerance" (`Float 32.0);
+  State_store.set store "magic_wand_stroke_weight" (`Bool true);
+  State_store.set store "magic_wand_stroke_weight_tolerance" (`Float 5.0);
+  State_store.set store "magic_wand_opacity" (`Bool true);
+  State_store.set store "magic_wand_opacity_tolerance" (`Float 5.0);
+  State_store.set store "magic_wand_blending_mode" (`Bool false)
+
+let three_rect_model () =
+  let layer = Element.Layer {
+    name = "L";
+    children = [| red_filled_rect 0.0 0.0;
+                  red_filled_rect 50.0 0.0;
+                  blue_filled_rect 100.0 0.0 |];
+    transform = None; locked = false; opacity = 1.0;
+    visibility = Preview; blend_mode = Normal; mask = None;
+    isolated_blending = false; knockout_group = false;
+  } in
+  let doc = Document.make_document [| layer |] in
+  let m = Model.create () in
+  m#set_document doc;
+  m
+
+let path_arg path =
+  `Assoc [("__path__", `List (List.map (fun i -> `Int i) path))]
+
+let magic_wand_apply_tests = [
+  Alcotest.test_case "replace_selects_all_red_rects" `Quick (fun () ->
+    let m = three_rect_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    magic_wand_state_defaults store;
+    run_with_effects store
+      [`Assoc [("doc.magic_wand.apply",
+                `Assoc [("seed", path_arg [0; 0]);
+                        ("mode", `String "'replace'")])]]
+      ctrl;
+    let sel = m#document.selection in
+    Alcotest.(check int) "two reds selected" 2 (Document.PathMap.cardinal sel);
+    assert (Document.PathMap.mem [0; 0] sel);
+    assert (Document.PathMap.mem [0; 1] sel);
+    assert (not (Document.PathMap.mem [0; 2] sel)));
+
+  Alcotest.test_case "add_extends_existing_selection" `Quick (fun () ->
+    let m = three_rect_model () in
+    let ctrl = make_ctrl_with m in
+    ctrl#set_selection (Document.PathMap.singleton [0; 2]
+      (Document.element_selection_all [0; 2]));
+    let store = State_store.create () in
+    magic_wand_state_defaults store;
+    run_with_effects store
+      [`Assoc [("doc.magic_wand.apply",
+                `Assoc [("seed", path_arg [0; 0]);
+                        ("mode", `String "'add'")])]]
+      ctrl;
+    let sel = m#document.selection in
+    Alcotest.(check int) "all three selected" 3
+      (Document.PathMap.cardinal sel));
+
+  Alcotest.test_case "subtract_removes_matches_only" `Quick (fun () ->
+    let m = three_rect_model () in
+    let ctrl = make_ctrl_with m in
+    let all_three = List.fold_left (fun acc p ->
+      Document.PathMap.add p (Document.element_selection_all p) acc
+    ) Document.PathMap.empty [[0; 0]; [0; 1]; [0; 2]] in
+    ctrl#set_selection all_three;
+    let store = State_store.create () in
+    magic_wand_state_defaults store;
+    run_with_effects store
+      [`Assoc [("doc.magic_wand.apply",
+                `Assoc [("seed", path_arg [0; 0]);
+                        ("mode", `String "'subtract'")])]]
+      ctrl;
+    let sel = m#document.selection in
+    Alcotest.(check int) "only blue remains" 1 (Document.PathMap.cardinal sel);
+    assert (Document.PathMap.mem [0; 2] sel));
+
+  Alcotest.test_case "skips_locked_and_hidden_elements" `Quick (fun () ->
+    let r0 = red_filled_rect 0.0 0.0 in
+    let r1_locked = match red_filled_rect 50.0 0.0 with
+      | Element.Rect r -> Element.Rect { r with locked = true }
+      | e -> e in
+    let r2_hidden = match red_filled_rect 100.0 0.0 with
+      | Element.Rect r -> Element.Rect { r with visibility = Element.Invisible }
+      | e -> e in
+    let layer = Element.Layer {
+      name = "L"; children = [| r0; r1_locked; r2_hidden |];
+      transform = None; locked = false; opacity = 1.0;
+      visibility = Preview; blend_mode = Normal; mask = None;
+      isolated_blending = false; knockout_group = false;
+    } in
+    let doc = Document.make_document [| layer |] in
+    let m = Model.create () in
+    m#set_document doc;
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    magic_wand_state_defaults store;
+    run_with_effects store
+      [`Assoc [("doc.magic_wand.apply",
+                `Assoc [("seed", path_arg [0; 0]);
+                        ("mode", `String "'replace'")])]]
+      ctrl;
+    let sel = m#document.selection in
+    Alcotest.(check int) "only seed selected" 1 (Document.PathMap.cardinal sel);
+    assert (Document.PathMap.mem [0; 0] sel));
+]
+
 let () =
   Alcotest.run "Yaml_tool_effects" [
     "doc.snapshot", snapshot_tests;
@@ -348,4 +482,5 @@ let () =
     "doc.select_in_rect", select_in_rect_tests;
     "Path extraction", path_extract_tests;
     "Blob Brush commit", blob_brush_commit_tests;
+    "doc.magic_wand.apply", magic_wand_apply_tests;
   ]

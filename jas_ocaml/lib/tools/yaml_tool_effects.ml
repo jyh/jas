@@ -1795,6 +1795,116 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* ── Magic Wand effect ─────────────────────────────────────
+     See MAGIC_WAND_TOOL.md §Predicate + §Eligibility filter. *)
+
+  let read_magic_wand_config store ctx : Magic_wand.config =
+    let bool_at key fallback =
+      match eval_expr_as_value (Some (`String ("state." ^ key))) store ctx with
+      | Expr_eval.Bool b -> b
+      | _ -> fallback
+    in
+    let num_at key fallback =
+      match eval_expr_as_value (Some (`String ("state." ^ key))) store ctx with
+      | Expr_eval.Number n -> n
+      | _ -> fallback
+    in
+    let d = Magic_wand.default_config in
+    {
+      Magic_wand.fill_color = bool_at "magic_wand_fill_color" d.fill_color;
+      fill_tolerance = num_at "magic_wand_fill_tolerance" d.fill_tolerance;
+      stroke_color = bool_at "magic_wand_stroke_color" d.stroke_color;
+      stroke_tolerance = num_at "magic_wand_stroke_tolerance" d.stroke_tolerance;
+      stroke_weight = bool_at "magic_wand_stroke_weight" d.stroke_weight;
+      stroke_weight_tolerance =
+        num_at "magic_wand_stroke_weight_tolerance" d.stroke_weight_tolerance;
+      opacity = bool_at "magic_wand_opacity" d.opacity;
+      opacity_tolerance =
+        num_at "magic_wand_opacity_tolerance" d.opacity_tolerance;
+      blending_mode = bool_at "magic_wand_blending_mode" d.blending_mode;
+    }
+  in
+
+  (* Walk the document and invoke [visit path elem] for every leaf
+     element that passes the §Eligibility filter — locked / hidden
+     elements are skipped, and Group / Layer containers descend into
+     their children rather than acting as candidates themselves. *)
+  let rec walk_eligible_in (elem : Element.element)
+      (cur_path : int list)
+      (visit : int list -> Element.element -> unit) : unit =
+    if Element.is_locked elem then ()
+    else if Element.get_visibility elem = Element.Invisible then ()
+    else
+      match elem with
+      | Element.Group { children; _ } ->
+        Array.iteri (fun i child ->
+          walk_eligible_in child (cur_path @ [i]) visit
+        ) children
+      | Element.Layer { children; _ } ->
+        Array.iteri (fun i child ->
+          walk_eligible_in child (cur_path @ [i]) visit
+        ) children
+      | _ -> visit cur_path elem
+  in
+
+  let walk_eligible (doc : Document.document)
+      (visit : int list -> Element.element -> unit) : unit =
+    Array.iteri (fun li layer ->
+      walk_eligible_in layer [li] visit
+    ) doc.layers
+  in
+
+  let doc_magic_wand_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       (match extract_path (Option.value (lookup "seed") ~default:`Null)
+                store ctx with
+        | None -> ()
+        | Some seed_path ->
+          let mode_raw =
+            match eval_expr_as_value (lookup "mode") store ctx with
+            | Expr_eval.Str s -> s
+            | _ -> ""
+          in
+          let mode = if mode_raw = "" then "replace" else mode_raw in
+          let doc = ctrl#document in
+          if not (is_valid_path doc seed_path) then ()
+          else begin
+            let seed_elem = Document.get_element doc seed_path in
+            let cfg = read_magic_wand_config store ctx in
+            let matches = ref [] in
+            walk_eligible doc (fun path candidate ->
+              if path = seed_path then
+                matches := path :: !matches
+              else if Magic_wand.magic_wand_match seed_elem candidate cfg then
+                matches := path :: !matches
+            );
+            let matched = List.rev !matches in
+            let new_set =
+              List.fold_left (fun acc path ->
+                Document.PathMap.add path
+                  (Document.element_selection_all path) acc
+              ) Document.PathMap.empty matched
+            in
+            (match mode with
+             | "add" ->
+               let merged = Document.PathMap.union
+                 (fun _ a _ -> Some a) doc.selection new_set in
+               ctrl#set_selection merged
+             | "subtract" ->
+               let kept = Document.PathMap.filter (fun path _ ->
+                 not (Document.PathMap.mem path new_set)
+               ) doc.selection in
+               ctrl#set_selection kept
+             | _ ->
+               (* replace (default) *)
+               ctrl#set_selection new_set)
+          end)
+     | _ -> ());
+    `Null
+  in
+
   (* ── Probe / commit anchor + partial selection ─────────── *)
 
   let encode_path (path : int list) : Yojson.Safe.t =
@@ -2241,6 +2351,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      doc_path_insert_anchor_on_segment_near);
     ("doc.path.erase_at_rect", doc_path_erase_at_rect);
     ("doc.path.smooth_at_cursor", doc_path_smooth_at_cursor);
+    ("doc.magic_wand.apply", doc_magic_wand_apply);
     ("doc.paintbrush.edit_start", doc_paintbrush_edit_start);
     ("doc.paintbrush.edit_commit", doc_paintbrush_edit_commit);
     ("doc.blob_brush.commit_painting", doc_blob_brush_commit_painting);
