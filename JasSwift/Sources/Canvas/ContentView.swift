@@ -29,6 +29,8 @@ public enum Tool: String, CaseIterable {
     case scale
     case rotate
     case shear
+    case hand
+    case zoom
 }
 
 /// Map a Tool enum case to the matching workspace/tools/*.yaml
@@ -60,6 +62,8 @@ func toolYamlId(_ tool: Tool) -> String? {
     case .scale: return "scale"
     case .rotate: return "rotate"
     case .shear: return "shear"
+    case .hand: return "hand"
+    case .zoom: return "zoom"
     case .typeTool, .typeOnPath: return nil
     }
 }

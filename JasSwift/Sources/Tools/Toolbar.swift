@@ -935,6 +935,49 @@ public struct ToolbarView {
                 path.addLine(to: CGPoint(x: ox + 2,  y: oy + 24))
                 path.closeSubpath()
                 context.stroke(path, with: .color(color), lineWidth: 1.5)
+
+            case .hand:
+                // Hand — open palm with four fingers extended and a
+                // stubby base. Per HAND_TOOL.md §Tool icon.
+                let strokeStyle = StrokeStyle(lineWidth: 2.0, lineCap: .round)
+                for (x1, y1) in [(10.0, 14.0), (13.0, 14.0), (16.0, 14.0), (19.0, 14.0)] {
+                    let yTip = [10.0: 5.0, 13.0: 3.0, 16.0: 4.0, 19.0: 6.0][x1] ?? 5.0
+                    var p = SwiftUI.Path()
+                    p.move(to: CGPoint(x: ox + x1, y: oy + y1))
+                    p.addLine(to: CGPoint(x: ox + x1, y: oy + yTip))
+                    context.stroke(p, with: .color(color), style: strokeStyle)
+                }
+                var palm = SwiftUI.Path()
+                palm.move(to: CGPoint(x: ox + 9,  y: oy + 14))
+                palm.addLine(to: CGPoint(x: ox + 4,  y: oy + 18))
+                palm.addLine(to: CGPoint(x: ox + 4,  y: oy + 22))
+                palm.addQuadCurve(
+                    to: CGPoint(x: ox + 9, y: oy + 25),
+                    control: CGPoint(x: ox + 5, y: oy + 25))
+                palm.addLine(to: CGPoint(x: ox + 19, y: oy + 25))
+                palm.addQuadCurve(
+                    to: CGPoint(x: ox + 22, y: oy + 22),
+                    control: CGPoint(x: ox + 22, y: oy + 25))
+                palm.addLine(to: CGPoint(x: ox + 22, y: oy + 14))
+                context.stroke(
+                    palm, with: .color(color),
+                    style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
+
+            case .zoom:
+                // Zoom — circular lens with short ~45° handle at
+                // lower-right. No interior glyph; plus / minus
+                // appear in the cursor at use time. Per
+                // ZOOM_TOOL.md §Tool icon.
+                let lens = SwiftUI.Path(ellipseIn: CGRect(
+                    x: ox + 11 - 6.5, y: oy + 11 - 6.5,
+                    width: 13, height: 13))
+                context.stroke(lens, with: .color(color), lineWidth: 2.0)
+                var handle = SwiftUI.Path()
+                handle.move(to: CGPoint(x: ox + 15.5, y: oy + 15.5))
+                handle.addLine(to: CGPoint(x: ox + 22.5, y: oy + 22.5))
+                context.stroke(
+                    handle, with: .color(color),
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
             }
         }
     }
@@ -1050,6 +1093,8 @@ private struct ArrowSlotButton: View {
         case .scale: return "Scale"
         case .rotate: return "Rotate"
         case .shear: return "Shear"
+        case .hand: return "Hand"
+        case .zoom: return "Zoom"
         default: return tool.rawValue
         }
     }
