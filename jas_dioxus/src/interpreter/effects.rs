@@ -1078,6 +1078,41 @@ fn run_doc_effect(
                 path_commit_anchor_edit(model, store, origin_x, origin_y, target_x, target_y);
             }
         }
+        "doc.artboard.move_apply" => {
+            // Live drag-to-move per ARTBOARD_TOOL.md §Drag-to-move.
+            // Runs on every mousemove during a drag; idempotent
+            // because it restores from doc.preview.capture (taken at
+            // the threshold latch) before applying the cumulative
+            // (cursor - press) displacement.
+            //
+            // Multi-select: all panel-selected artboards translate by
+            // the same delta. Shift constrains the displacement to
+            // the dominant axis (horizontal or vertical).
+            //
+            // Move/Copy Artwork element translation is hard-coded on
+            // per ARTBOARD_TOOL.md §Move/Copy Artwork; element
+            // translation lands in Phase 1.3c. Today: only the
+            // artboards translate; contained elements stay put.
+            if let serde_json::Value::Object(args) = spec {
+                let press_x = eval_number(args.get("press_x"), store, ctx);
+                let press_y = eval_number(args.get("press_y"), store, ctx);
+                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let shift_held = eval_bool(args.get("shift_held"), store, ctx);
+                artboard_move_apply(model, store, press_x, press_y,
+                    cursor_x, cursor_y, shift_held);
+            }
+        }
+        "doc.artboard.move_commit" => {
+            // Drag-to-move commit. The live-update path has already
+            // written final positions to model; this effect rounds
+            // the displacement vector once more to integer pt to
+            // pin the commit to whole-pt coords (per
+            // ARTBOARD_TOOL.md §Common rules — multi-select rounds
+            // the displacement vector ONCE so relative spacing is
+            // preserved). Tool state cleanup happens in YAML.
+            artboard_move_commit(model, store);
+        }
         "doc.artboard.create_commit" => {
             // Drag-to-create commit per ARTBOARD_TOOL.md §Drag-to-create.
             // Builds a rect from the (x1, y1) - (x2, y2) drag, rounds
@@ -2641,6 +2676,148 @@ fn path_commit_anchor_edit(
         }
         _ => {}
     }
+}
+
+/// Read the panel-selected artboard ids from the eval context. Used
+/// by canvas-side artboard effects that operate on the selection
+/// (move, resize, duplicate, delete). Empty when no artboards are
+/// panel-selected.
+fn read_artboard_panel_selection(store: &StateStore) -> Vec<String> {
+    store
+        .eval_context()
+        .get("active_document")
+        .and_then(|d| d.get("artboards_panel_selection_ids"))
+        .and_then(|v| v.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Apply a (dx, dy) displacement to every artboard in `target_ids`,
+/// using `restore_preview_snapshot` as the idempotent base. Live-
+/// drag effects call this on every mousemove; commit effects call
+/// once with the final (rounded) delta and then drop the preview
+/// snapshot.
+fn artboard_translate_from_preview(model: &mut Model, target_ids: &[String], dx: f64, dy: f64) {
+    if !model.has_preview_snapshot() {
+        // Defensive: if the threshold-latch handler missed capturing,
+        // skip rather than apply against a moving target. The drag
+        // will have no visible effect; mouseup commits whatever the
+        // model currently is.
+        return;
+    }
+    model.restore_preview_snapshot();
+    let mut new_doc = model.document().clone();
+    for ab in new_doc.artboards.iter_mut() {
+        if target_ids.iter().any(|id| id == &ab.id) {
+            ab.x += dx;
+            ab.y += dy;
+        }
+    }
+    model.set_document(new_doc);
+}
+
+/// Implementation of doc.artboard.move_apply per ARTBOARD_TOOL.md
+/// §Drag-to-move. Translates panel-selected artboards by the
+/// cumulative (cursor - press) displacement. Shift constrains to the
+/// dominant axis. Idempotent — restores the preview snapshot first
+/// so repeated calls with the same press / cursor produce the same
+/// result.
+fn artboard_move_apply(
+    model: &mut Model,
+    store: &mut StateStore,
+    press_x: f64,
+    press_y: f64,
+    cursor_x: f64,
+    cursor_y: f64,
+    shift_held: bool,
+) {
+    let mut dx = cursor_x - press_x;
+    let mut dy = cursor_y - press_y;
+    if shift_held {
+        if dx.abs() > dy.abs() {
+            dy = 0.0;
+        } else {
+            dx = 0.0;
+        }
+    }
+    let target_ids = read_artboard_panel_selection(store);
+    if target_ids.is_empty() {
+        // Click-to-activate hadn't established a selection yet (the
+        // panel-selection write path lands in a follow-up phase). Use
+        // the hit_artboard_id from probe_hit as a single-target
+        // fallback so single-artboard drags work end-to-end.
+        let hit_id = store
+            .eval_context()
+            .get("tool")
+            .and_then(|t| t.get("artboard"))
+            .and_then(|a| a.get("hit_artboard_id"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        if let Some(id) = hit_id {
+            artboard_translate_from_preview(model, &[id], dx, dy);
+        }
+        return;
+    }
+    artboard_translate_from_preview(model, &target_ids, dx, dy);
+}
+
+/// Implementation of doc.artboard.move_commit. Re-applies the final
+/// displacement with integer-pt rounding so the committed state has
+/// whole-pt artboard positions. Multi-select rounds the displacement
+/// vector ONCE before applying so relative spacing between selected
+/// artboards is preserved per ARTBOARD_TOOL.md §Common rules.
+fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
+    // Read press / cursor from tool state to compute the final
+    // displacement; the YAML state machine doesn't pass them to
+    // commit because the live-update path already wrote them.
+    let ctx = store.eval_context();
+    let tool = ctx.get("tool").and_then(|t| t.get("artboard"));
+    let Some(t) = tool else { return; };
+    let read_num = |k: &str| -> f64 {
+        t.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0)
+    };
+    let read_bool = |k: &str| -> bool {
+        t.get(k).and_then(|v| v.as_bool()).unwrap_or(false)
+    };
+    let press_x = read_num("press_x");
+    let press_y = read_num("press_y");
+    let cursor_x = read_num("cursor_x");
+    let cursor_y = read_num("cursor_y");
+    let shift_held = read_bool("shift_held");
+
+    let mut dx = cursor_x - press_x;
+    let mut dy = cursor_y - press_y;
+    if shift_held {
+        if dx.abs() > dy.abs() {
+            dy = 0.0;
+        } else {
+            dx = 0.0;
+        }
+    }
+    // Round the displacement vector once — preserves relative
+    // spacing for multi-select per the spec.
+    dx = dx.round();
+    dy = dy.round();
+
+    let mut target_ids = read_artboard_panel_selection(store);
+    if target_ids.is_empty() {
+        // Same single-artboard fallback as move_apply.
+        let hit_id = t
+            .get("hit_artboard_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        if let Some(id) = hit_id {
+            target_ids.push(id);
+        }
+    }
+    if target_ids.is_empty() {
+        return;
+    }
+    artboard_translate_from_preview(model, &target_ids, dx, dy);
 }
 
 /// Implementation of doc.artboard.create_commit per ARTBOARD_TOOL.md
@@ -6510,6 +6687,115 @@ mod tests {
         assert_eq!(new_ab.width, 100.0);
         // height = abs(20.6 - 120.4).round() = 99.8.round() = 100
         assert_eq!(new_ab.height, 100.0);
+    }
+
+    #[test]
+    fn test_doc_artboard_move_apply_translates_panel_selected() {
+        // Single-target fallback path: with no panel-selection, the
+        // tool's hit_artboard_id (set by probe_hit) is the move
+        // target.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("aaa00001".into());
+        a.x = 100.0; a.y = 100.0; a.width = 200.0; a.height = 200.0;
+        doc.artboards.push(a);
+        let mut model = Model::new(doc, None);
+        // Capture preview snapshot (matches what the threshold-latch
+        // YAML handler does).
+        model.capture_preview_snapshot();
+        // Tool state — hit_artboard_id from probe_hit.
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("aaa00001"));
+        // Drag delta (50, -30).
+        let effects = vec![serde_json::json!({
+            "doc.artboard.move_apply": {
+                "press_x":    "100", "press_y": "100",
+                "cursor_x":   "150", "cursor_y": "70",
+                "shift_held": "false",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let ab = &model.document().artboards[0];
+        assert_eq!(ab.x, 150.0);
+        assert_eq!(ab.y, 70.0);
+        assert_eq!(ab.width, 200.0);
+        assert_eq!(ab.height, 200.0);
+    }
+
+    #[test]
+    fn test_doc_artboard_move_apply_is_idempotent() {
+        // Two consecutive move_apply calls with the same press +
+        // cursor produce the same final state — the preview snapshot
+        // restore makes the operation idempotent regardless of how
+        // many mousemove events fire.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("aaa00001".into());
+        a.x = 100.0; a.y = 100.0; a.width = 200.0; a.height = 200.0;
+        doc.artboards.push(a);
+        let mut model = Model::new(doc, None);
+        model.capture_preview_snapshot();
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("aaa00001"));
+        let effects = vec![serde_json::json!({
+            "doc.artboard.move_apply": {
+                "press_x":    "100", "press_y": "100",
+                "cursor_x":   "175", "cursor_y": "125",
+                "shift_held": "false",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let after_first = (
+            model.document().artboards[0].x,
+            model.document().artboards[0].y,
+        );
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let after_second = (
+            model.document().artboards[0].x,
+            model.document().artboards[0].y,
+        );
+        assert_eq!(after_first, after_second);
+        assert_eq!(after_first, (175.0, 125.0));
+    }
+
+    #[test]
+    fn test_doc_artboard_move_apply_shift_constrains_axis() {
+        // Shift held — dx > dy in magnitude → Y locked to 0; dy > dx
+        // → X locked to 0. Constraint applied per-event so the user
+        // can flip axis mid-drag by changing the dominant direction.
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("aaa00001".into());
+        a.x = 100.0; a.y = 100.0; a.width = 200.0; a.height = 200.0;
+        doc.artboards.push(a);
+        let mut model = Model::new(doc, None);
+        model.capture_preview_snapshot();
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("aaa00001"));
+        // dx = 80, dy = 30 → dx dominates → Y locked.
+        let effects = vec![serde_json::json!({
+            "doc.artboard.move_apply": {
+                "press_x":    "100", "press_y": "100",
+                "cursor_x":   "180", "cursor_y": "130",
+                "shift_held": "true",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.document().artboards[0].x, 180.0);
+        assert_eq!(model.document().artboards[0].y, 100.0);
     }
 
     #[test]
