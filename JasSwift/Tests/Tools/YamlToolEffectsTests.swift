@@ -840,3 +840,127 @@ private func blobBrushStateDefaults(_ store: StateStore) {
     #expect(children.count == 1,
             "erasing must not touch non-blob-brush elements")
 }
+
+// MARK: - doc.magic_wand.apply
+
+private func threeRectsRedRedBlueModel() -> Model {
+    let red = Fill(color: Color(r: 1.0, g: 0, b: 0))
+    let blue = Fill(color: Color(r: 0, g: 0, b: 1.0))
+    let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)
+    func rect(_ fill: Fill, _ x: Double) -> Element {
+        .rect(Rect(x: x, y: 0, width: 10, height: 10,
+                   rx: 0, ry: 0,
+                   fill: fill, stroke: stroke,
+                   opacity: 1.0, transform: nil,
+                   locked: false, visibility: .preview))
+    }
+    return Model(document: Document(
+        layers: [Layer(children: [
+            rect(red, 0),
+            rect(red, 20),
+            rect(blue, 40),
+        ])],
+        selectedLayer: 0, selection: []))
+}
+
+private func magicWandStateDefaults(_ store: StateStore) {
+    store.set("magic_wand_fill_color", true)
+    store.set("magic_wand_fill_tolerance", 32.0)
+    store.set("magic_wand_stroke_color", true)
+    store.set("magic_wand_stroke_tolerance", 32.0)
+    store.set("magic_wand_stroke_weight", true)
+    store.set("magic_wand_stroke_weight_tolerance", 5.0)
+    store.set("magic_wand_opacity", true)
+    store.set("magic_wand_opacity_tolerance", 5.0)
+    store.set("magic_wand_blending_mode", false)
+}
+
+@Test func magicWandReplaceSelectsSeedPlusSimilar() {
+    let model = threeRectsRedRedBlueModel()
+    let store = StateStore()
+    magicWandStateDefaults(store)
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.magic_wand.apply": [
+            "seed": [0, 0],
+            "mode": "'replace'",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let paths = Set(model.document.selection.map { $0.path })
+    #expect(paths.contains([0, 0]))
+    #expect(paths.contains([0, 1]))
+    #expect(!paths.contains([0, 2]))
+    #expect(paths.count == 2)
+}
+
+@Test func magicWandAddUnionsWithExistingSelection() {
+    let model = threeRectsRedRedBlueModel()
+    let store = StateStore()
+    magicWandStateDefaults(store)
+    Controller(model: model).setSelection([ElementSelection.all([0, 2])])
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.magic_wand.apply": [
+            "seed": [0, 0],
+            "mode": "'add'",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let paths = Set(model.document.selection.map { $0.path })
+    #expect(paths.count == 3)
+}
+
+@Test func magicWandSubtractRemovesWandResult() {
+    let model = threeRectsRedRedBlueModel()
+    let store = StateStore()
+    magicWandStateDefaults(store)
+    Controller(model: model).setSelection([
+        ElementSelection.all([0, 0]),
+        ElementSelection.all([0, 1]),
+        ElementSelection.all([0, 2]),
+    ])
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.magic_wand.apply": [
+            "seed": [0, 0],
+            "mode": "'subtract'",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let paths = Set(model.document.selection.map { $0.path })
+    #expect(paths.count == 1)
+    #expect(paths.contains([0, 2]))
+}
+
+@Test func magicWandSkipsLockedAndHiddenElements() {
+    let red = Fill(color: Color(r: 1.0, g: 0, b: 0))
+    let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)
+    func rect(_ x: Double, locked: Bool, vis: Visibility) -> Element {
+        .rect(Rect(x: x, y: 0, width: 10, height: 10,
+                   rx: 0, ry: 0,
+                   fill: red, stroke: stroke,
+                   opacity: 1.0, transform: nil,
+                   locked: locked, visibility: vis))
+    }
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            rect(0,  locked: false, vis: .preview),
+            rect(20, locked: true,  vis: .preview),
+            rect(40, locked: false, vis: .invisible),
+        ])],
+        selectedLayer: 0, selection: []))
+    let store = StateStore()
+    magicWandStateDefaults(store)
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.magic_wand.apply": [
+            "seed": [0, 0],
+            "mode": "'replace'",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let paths = Set(model.document.selection.map { $0.path })
+    #expect(paths.count == 1)
+    #expect(paths.contains([0, 0]))
+}
