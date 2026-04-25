@@ -486,6 +486,25 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.magic_wand.apply — { seed, mode? }.
+    // Magic Wand selection per MAGIC_WAND_TOOL.md §Predicate.
+    // Reads the seed path + mode (replace / add / subtract) from
+    // the spec, walks the document, applies the eligibility filter
+    // and the AND-of-enabled-criteria predicate, mutates the
+    // selection accordingly.
+    effects["doc.magic_wand.apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let seedPath = extractPath(args["seed"],
+                                         store: store, ctx: ctx)
+        else { return nil }
+        let modeRaw = evalStringValue(args["mode"], store: store, ctx: ctx)
+        let mode = modeRaw.isEmpty ? "replace" : modeRaw
+        magicWandApply(
+            model: model, store: store, ctx: ctx,
+            seedPath: seedPath, mode: mode)
+        return nil
+    }
+
     // doc.path.smooth_at_cursor — { x, y, radius?, fit_error? }.
     // Iterates selected unlocked Paths, finds the contiguous flat
     // range within `radius` of (x, y), re-fits it via fitCurve with
@@ -2203,4 +2222,125 @@ private func brushUpdateInLibrary(store: StateStore, libId: String, slug: String
 private func syncCanvasBrushes(store: StateStore) {
     let libs = (store.getDataPath("brush_libraries") as? [String: Any]) ?? [:]
     setCanvasBrushLibraries(libs)
+}
+
+// MARK: - Magic Wand effect
+
+/// Implementation of doc.magic_wand.apply. See
+/// MAGIC_WAND_TOOL.md §Predicate + §Eligibility filter.
+private func magicWandApply(
+    model: Model, store: StateStore, ctx: [String: Any],
+    seedPath: ElementPath, mode: String
+) {
+    // Resolve the seed Element. Stale paths bail silently.
+    let doc = model.document
+    guard isValidPath(doc, seedPath) else { return }
+    let seed = doc.getElement(seedPath)
+
+    // Read state.magic_wand_* keys into a config.
+    let cfg = readMagicWandConfig(store: store, ctx: ctx)
+
+    // Walk the document and collect every leaf path that is (a)
+    // eligible per §Eligibility filter and (b) similar to the
+    // seed under cfg. The seed itself is always included
+    // regardless of self-match.
+    var matches: [ElementPath] = []
+    var cur: ElementPath = []
+    walkEligible(doc: doc, cur: &cur) { path, candidate in
+        if path == seedPath {
+            matches.append(path)
+            return
+        }
+        if magicWandMatch(seed: seed, candidate: candidate, config: cfg) {
+            matches.append(path)
+        }
+    }
+
+    let newEntries = matches.map { ElementSelection.all($0) }
+    switch mode {
+    case "add":
+        var existing = doc.selection
+        for es in newEntries where !existing.contains(where: { $0.path == es.path }) {
+            existing.insert(es)
+        }
+        Controller(model: model).setSelection(existing)
+    case "subtract":
+        let toRemove = Set(newEntries.map { $0.path })
+        let kept = doc.selection.filter { !toRemove.contains($0.path) }
+        Controller(model: model).setSelection(Set(kept))
+    default:
+        // "replace"
+        Controller(model: model).setSelection(Set(newEntries))
+    }
+}
+
+/// Read the nine state.magic_wand_* keys into a MagicWandConfig.
+private func readMagicWandConfig(
+    store: StateStore, ctx: [String: Any]
+) -> MagicWandConfig {
+    var cfg = MagicWandConfig()
+    let boolAt = { (key: String, fallback: Bool) -> Bool in
+        switch evalExprAsValue("state.\(key)", store: store, ctx: ctx) {
+        case .bool(let b): return b
+        default: return fallback
+        }
+    }
+    let numAt = { (key: String, fallback: Double) -> Double in
+        switch evalExprAsValue("state.\(key)", store: store, ctx: ctx) {
+        case .number(let n): return n
+        default: return fallback
+        }
+    }
+    cfg.fillColor = boolAt("magic_wand_fill_color", cfg.fillColor)
+    cfg.fillTolerance = numAt("magic_wand_fill_tolerance", cfg.fillTolerance)
+    cfg.strokeColor = boolAt("magic_wand_stroke_color", cfg.strokeColor)
+    cfg.strokeTolerance = numAt("magic_wand_stroke_tolerance",
+                                cfg.strokeTolerance)
+    cfg.strokeWeight = boolAt("magic_wand_stroke_weight", cfg.strokeWeight)
+    cfg.strokeWeightTolerance = numAt(
+        "magic_wand_stroke_weight_tolerance", cfg.strokeWeightTolerance)
+    cfg.opacity = boolAt("magic_wand_opacity", cfg.opacity)
+    cfg.opacityTolerance = numAt("magic_wand_opacity_tolerance",
+                                 cfg.opacityTolerance)
+    cfg.blendingMode = boolAt("magic_wand_blending_mode", cfg.blendingMode)
+    return cfg
+}
+
+/// Walk the document tree, invoking visit(path, element) for every
+/// leaf element that passes the §Eligibility filter — locked /
+/// hidden elements skipped; Group / Layer containers descend into
+/// children but are not themselves candidates.
+private func walkEligible(
+    doc: Document, cur: inout ElementPath,
+    visit: (ElementPath, Element) -> Void
+) {
+    for (li, layer) in doc.layers.enumerated() {
+        cur.append(li)
+        walkEligibleIn(.layer(layer), cur: &cur, visit: visit)
+        cur.removeLast()
+    }
+}
+
+private func walkEligibleIn(
+    _ elem: Element, cur: inout ElementPath,
+    visit: (ElementPath, Element) -> Void
+) {
+    if elem.isLocked { return }
+    if elem.visibility == .invisible { return }
+    switch elem {
+    case .group(let g):
+        for (i, child) in g.children.enumerated() {
+            cur.append(i)
+            walkEligibleIn(child, cur: &cur, visit: visit)
+            cur.removeLast()
+        }
+    case .layer(let l):
+        for (i, child) in l.children.enumerated() {
+            cur.append(i)
+            walkEligibleIn(child, cur: &cur, visit: visit)
+            cur.removeLast()
+        }
+    default:
+        visit(cur, elem)
+    }
 }
