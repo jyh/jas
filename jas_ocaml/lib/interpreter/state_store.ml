@@ -33,6 +33,19 @@ type t = {
       close_dialog effect) unless first cleared by the
       clear_dialog_snapshot effect (used by OK actions). *)
   mutable dialog_snapshot : (string * Yojson.Safe.t) list option;
+  (** Action name fired by the post-run hook in [run_effects]
+      when the dialog mutates. Set by [open_dialog] from the
+      dialog spec's [on_change] field. Cleared on
+      [close_dialog]. *)
+  mutable dialog_on_change : string option;
+  (** Set by every [set_dialog] write; consumed by the post-run
+      hook to decide whether to fire the dialog's [on_change]
+      action. *)
+  mutable dialog_dirty : bool;
+  (** Re-entrancy guard: true while the post-run hook is
+      dispatching the on_change action. Prevents the action's
+      own [set] effects from re-triggering the hook. *)
+  mutable dialog_firing_on_change : bool;
   mutable panel_subscribers : (string * panel_subscriber list) list;
   mutable global_subscribers : global_subscriber list;
   (** Workspace-loaded reference data (swatch_libraries,
@@ -52,6 +65,9 @@ let create ?(defaults = []) () : t =
     dialog_params = None;
     dialog_props = [];
     dialog_snapshot = None;
+    dialog_on_change = None;
+    dialog_dirty = false;
+    dialog_firing_on_change = false;
     panel_subscribers = [];
     global_subscribers = [];
     data = `Assoc [] }
@@ -232,6 +248,7 @@ let set_dialog (store : t) (key : string) (value : Yojson.Safe.t) : unit =
   match store.dialog_id with
   | None -> ()
   | Some _ ->
+    store.dialog_dirty <- true;
     (match List.assoc_opt key store.dialog_props with
      | Some prop when prop.prop_set <> None ->
        (* Evaluate setter as a lambda expression, then apply with the value *)
@@ -269,7 +286,31 @@ let close_dialog (store : t) : unit =
   store.dialog_id <- None;
   store.dialog <- [];
   store.dialog_params <- None;
-  store.dialog_props <- []
+  store.dialog_props <- [];
+  store.dialog_on_change <- None;
+  store.dialog_dirty <- false
+  (* dialog_firing_on_change is intentionally NOT cleared — the
+     close can be invoked from inside an on_change-fired chain
+     and the guard must remain set until run_effects unwinds. *)
+
+let set_dialog_on_change (store : t) (action : string option) : unit =
+  store.dialog_on_change <- action
+
+let get_dialog_on_change (store : t) : string option =
+  store.dialog_on_change
+
+(** Take the dirty flag, leaving it [false]. Used by the post-run
+    hook in [run_effects] to decide whether to fire on_change. *)
+let take_dialog_dirty (store : t) : bool =
+  let was = store.dialog_dirty in
+  store.dialog_dirty <- false;
+  was
+
+let is_firing_on_change (store : t) : bool =
+  store.dialog_firing_on_change
+
+let set_firing_on_change (store : t) (firing : bool) : unit =
+  store.dialog_firing_on_change <- firing
 
 (** Capture the current value of every state key referenced by a
     dialog's preview_targets. Phase 0 supports only top-level state

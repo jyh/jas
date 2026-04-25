@@ -178,7 +178,23 @@ let rec run_effects_inner
       (* Bare-string effects — platform handlers may catch snapshot etc. *)
       ignore (try_platform eff)
     | _ -> ()
-  ) effects
+  ) effects;
+  (* Dialog on_change post-batch hook. Fires the action declared on
+     the open dialog's [on_change] field whenever this batch
+     mutated dialog state. Per-batch debounced (one fire per UI
+     tick batch). Re-entrancy guarded so the action's own effects
+     do not re-fire. See SCALE_TOOL.md \167 Preview. *)
+  if not (State_store.is_firing_on_change store)
+     && State_store.take_dialog_dirty store then begin
+    match State_store.get_dialog_on_change store with
+    | None -> ()
+    | Some action_name ->
+      State_store.set_firing_on_change store true;
+      let dispatch_eff = `Assoc [("dispatch", `String action_name)] in
+      run_one dispatch_eff !ctx_ref store actions dialogs
+        ~platform_effects ~schema diagnostics;
+      State_store.set_firing_on_change store false
+  end
 
 and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t)
@@ -414,7 +430,28 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
                match v with `String s -> Some (k, s) | _ -> None
              ) targets_obj in
              State_store.capture_dialog_snapshot store targets
-           | _ -> ())
+           | _ -> ());
+          (* Document-level preview snapshot for transform-tool
+             dialogs (Scale Options / Rotate Options / Shear
+             Options). Fired through the doc.preview.capture
+             platform effect to avoid a direct Model handle here.
+             See SCALE_TOOL.md \167 Preview. *)
+          (match List.assoc_opt "doc_preview" dlg_def with
+           | Some (`Bool true) ->
+             (match List.assoc_opt "doc.preview.capture" platform_effects with
+              | Some handler -> ignore (handler `Null ctx store)
+              | None -> ())
+           | _ -> ());
+          (* Wire the dialog's on_change action — fired by the
+             post-run hook in run_effects after any batch that
+             mutated dialog state. *)
+          (match List.assoc_opt "on_change" dlg_def with
+           | Some (`String s) -> State_store.set_dialog_on_change store (Some s)
+           | _ -> State_store.set_dialog_on_change store None);
+          (* Clear any leftover dirty flag from prior dialog
+             sessions so the very-first init does not immediately
+             fire on_change. *)
+          let _ = State_store.take_dialog_dirty store in ()
         | _ -> ())
      | _ -> ())
   | _ ->
@@ -432,6 +469,13 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
            State_store.set store key value
        ) snapshot;
        State_store.clear_dialog_snapshot store
+     | None -> ());
+    (* Document-level preview restore (Cancel path). *)
+    (match List.assoc_opt "doc.preview.restore" platform_effects with
+     | Some handler -> ignore (handler `Null ctx store)
+     | None -> ());
+    (match List.assoc_opt "doc.preview.clear" platform_effects with
+     | Some handler -> ignore (handler `Null ctx store)
      | None -> ());
     State_store.close_dialog store
   | None ->
