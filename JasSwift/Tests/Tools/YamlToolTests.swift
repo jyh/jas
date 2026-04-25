@@ -81,9 +81,9 @@ private func simpleSpec(_ id: String, _ handlers: [String: [Any]],
             "render": ["type": "rect", "x": 0, "y": 0],
         ],
     ])!
-    #expect(spec.overlay != nil)
-    #expect(spec.overlay?.guardExpr == "tool.foo.show")
-    #expect((spec.overlay?.render["type"] as? String) == "rect")
+    #expect(spec.overlay.count == 1)
+    #expect(spec.overlay.first?.guardExpr == "tool.foo.show")
+    #expect((spec.overlay.first?.render["type"] as? String) == "rect")
 }
 
 // MARK: - YamlTool dispatch
