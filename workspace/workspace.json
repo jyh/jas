@@ -17882,7 +17882,7 @@
             "if": "(event.key == 'Delete' || event.key == 'Backspace') && tool.artboard.mode == 'idle'",
             "then": [
               {
-                "if": "len(panel.artboards.selection) > 0",
+                "if": "len(active_document.artboards_panel_selection_ids) > 0",
                 "then": [
                   {
                     "doc.artboard.delete_panel_selected": {}
@@ -17902,10 +17902,10 @@
       },
       "overlay": [
         {
-          "if": "len(panel.artboards.selection) == 1",
+          "if": "len(active_document.artboards_panel_selection_ids) == 1",
           "render": {
             "type": "artboard_resize_handles",
-            "artboard_id": "panel.artboards.selection[0]"
+            "artboard_id": "active_document.artboards_panel_selection_ids[0]"
           }
         },
         {
@@ -17919,7 +17919,7 @@
           }
         },
         {
-          "if": "tool.artboard.moved && (tool.artboard.mode == 'moving' || tool.artboard.mode == 'resizing' || tool.artboard.mode == 'duplicating') && not document.artboard_options.update_while_dragging",
+          "if": "tool.artboard.moved && (tool.artboard.mode == 'moving' || tool.artboard.mode == 'resizing' || tool.artboard.mode == 'duplicating') && not active_document.artboard_options.update_while_dragging",
           "render": {
             "type": "artboard_outline_preview",
             "mode": "tool.artboard.mode",

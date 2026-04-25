@@ -1,6 +1,6 @@
 # Artboard tool — creates, activates, moves, resizes, and duplicates
 # artboards on the canvas. Writes to document.artboards and to
-# panel.artboards.selection (per ARTBOARDS.md §Selection semantics).
+# active_document.artboards_panel_selection_ids (per ARTBOARDS.md §Selection semantics).
 # The full behavioral contract is in ARTBOARD_TOOL.md.
 #
 # State machine:
@@ -119,7 +119,7 @@ handlers:
     # In-flight effect dispatch per active mode. The effects update
     # in-flight bounds; final commit + integer-pt rounding happens at
     # mouseup. Live re-render vs outline-preview is gated by
-    # document.artboard_options.update_while_dragging in the per-app
+    # active_document.artboard_options.update_while_dragging in the per-app
     # effect implementations and the overlay block below.
     - if: "tool.artboard.mode == 'moving' && tool.artboard.moved"
       then:
@@ -213,7 +213,7 @@ handlers:
     #   else → fall through to global delete_selection
     - if: "(event.key == 'Delete' || event.key == 'Backspace') && tool.artboard.mode == 'idle'"
       then:
-        - if: "len(panel.artboards.selection) > 0"
+        - if: "len(active_document.artboards_panel_selection_ids) > 0"
           then:
             - "doc.artboard.delete_panel_selected": {}
           else:
@@ -228,17 +228,17 @@ handlers:
 #      'creating' mode after threshold (reuses the marquee_rect render
 #      type from zoom.yaml).
 #   3. artboard_outline_preview — outline rectangle for move / resize
-#      / duplicate drag when document.artboard_options.update_while_dragging
+#      / duplicate drag when active_document.artboard_options.update_while_dragging
 #      is false. The native renderer composes the in-flight rectangle
 #      from press + cursor coords + mode + (hit_handle_pos for resize)
 #      + modifier state. When update_while_dragging is true, the
 #      artboards re-render at their in-flight bounds and no overlay is
 #      needed.
 overlay:
-  - if: "len(panel.artboards.selection) == 1"
+  - if: "len(active_document.artboards_panel_selection_ids) == 1"
     render:
       type: artboard_resize_handles
-      artboard_id: "panel.artboards.selection[0]"
+      artboard_id: "active_document.artboards_panel_selection_ids[0]"
 
   - if: "tool.artboard.mode == 'creating' && tool.artboard.moved"
     render:
@@ -248,7 +248,7 @@ overlay:
       x2: "tool.artboard.cursor_x"
       y2: "tool.artboard.cursor_y"
 
-  - if: "tool.artboard.moved && (tool.artboard.mode == 'moving' || tool.artboard.mode == 'resizing' || tool.artboard.mode == 'duplicating') && not document.artboard_options.update_while_dragging"
+  - if: "tool.artboard.moved && (tool.artboard.mode == 'moving' || tool.artboard.mode == 'resizing' || tool.artboard.mode == 'duplicating') && not active_document.artboard_options.update_while_dragging"
     render:
       type: artboard_outline_preview
       mode:        "tool.artboard.mode"

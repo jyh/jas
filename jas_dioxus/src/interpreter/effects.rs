@@ -1078,6 +1078,42 @@ fn run_doc_effect(
                 path_commit_anchor_edit(model, store, origin_x, origin_y, target_x, target_y);
             }
         }
+        "doc.artboard.probe_hit" => {
+            // Artboard tool's press-time dispatcher per ARTBOARD_TOOL.md
+            // §Mousedown disambiguation order:
+            //   1. Resize handle of the single panel-selected artboard
+            //      → mode = "resizing", latches hit_handle_pos.
+            //   2. Artboard interior (highest position in
+            //      document.artboards wins on overlap; the visually-on-
+            //      top artboard receives the click) → writes panel-
+            //      selection per the click rules from
+            //      ARTBOARDS.md §Selection semantics, then sets
+            //      mode = "moving_pending" (or "duplicating_pending"
+            //      when Alt is held).
+            //   3. Empty canvas → clears panel-selection, sets
+            //      mode = "creating".
+            //
+            // x, y are the mousedown coords in viewport-local pixels;
+            // converted to document coords via the canvas zoom + pan.
+            // shift / cmd / alt are the modifier state at mousedown.
+            //
+            // Phase 1.2 implements the hit-test math + tool-state
+            // writes; panel-selection AppState writes land in Phase
+            // 1.3 (the canvas → AppState write path requires routing
+            // through apply_artboards_panel_field, which lives outside
+            // run_doc_effect's reach today). Until then, a hit on an
+            // artboard interior still sets the tool mode, but the
+            // panel UI doesn't update visually until the next
+            // panel-side click.
+            if let serde_json::Value::Object(args) = spec {
+                let vp_x = eval_number(args.get("x"), store, ctx);
+                let vp_y = eval_number(args.get("y"), store, ctx);
+                let _shift = eval_bool(args.get("shift"), store, ctx);
+                let _cmd = eval_bool(args.get("cmd"), store, ctx);
+                let alt = eval_bool(args.get("alt"), store, ctx);
+                artboard_probe_hit(model, store, vp_x, vp_y, alt);
+            }
+        }
         "doc.path.probe_partial_hit" => {
             // Partial Selection tool's press-time dispatcher. Hit-test
             // priority:
@@ -2582,6 +2618,133 @@ fn path_commit_anchor_edit(
         }
         _ => {}
     }
+}
+
+/// Implementation of doc.artboard.probe_hit per ARTBOARD_TOOL.md
+/// §Mousedown disambiguation order. Input `(x, y)` is in document
+/// coordinates (the YAML hands the same coords other canvas tools
+/// receive in their on_press handlers). Sets the tool state for the
+/// YAML state machine to dispatch the correct gesture in
+/// on_mousemove / on_mouseup.
+///
+/// Phase 1.2 scope: hit-test math and tool-state writes. Panel-
+/// selection writes (which require AppState mutation outside
+/// run_doc_effect's reach) are deferred to Phase 1.3 — the panel UI
+/// is unaffected by this handler today, but the gesture state
+/// machine transitions correctly so move / resize / duplicate
+/// dispatch in subsequent phases.
+fn artboard_probe_hit(
+    model: &mut Model,
+    store: &mut StateStore,
+    x: f64,
+    y: f64,
+    alt_held: bool,
+) {
+    // Reset hit-state defaults; specific arms below override.
+    store.set_tool("artboard", "hit_artboard_id", serde_json::Value::Null);
+    store.set_tool("artboard", "hit_handle_pos", serde_json::Value::Null);
+
+    let doc = model.document();
+
+    // 1. Resize handle of the single panel-selected artboard.
+    //    Handles render in the tool-overlay Z-band (above all
+    //    artboard fills) and always win against any artboard interior
+    //    at the same cursor position.
+    //
+    //    Phase 1.2 reads panel-selection from the model's view of
+    //    artboards via store.eval_context (the `panel.<key>` and
+    //    `active_document.<key>` namespaces are populated at render
+    //    time). Until panel-selection writes land in Phase 1.3, this
+    //    branch fires only for selections established by the
+    //    Artboards Panel.
+    let sel = store
+        .eval_context()
+        .get("active_document")
+        .and_then(|d| d.get("artboards_panel_selection_ids"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![]));
+    let sel_ids: Vec<String> = sel
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if sel_ids.len() == 1 {
+        if let Some(ab) = doc.artboards.iter().find(|a| a.id == sel_ids[0]) {
+            // Handle hit radius — viewport pixels divided by zoom for
+            // document-space comparison. Phase 1.2 uses a constant
+            // (no live zoom plumbing yet); refined in Phase 1.3.
+            const HANDLE_HIT_RADIUS_DOC: f64 = 8.0;
+            let cx = ab.x + ab.width / 2.0;
+            let cy = ab.y + ab.height / 2.0;
+            let candidates = [
+                ("nw", ab.x, ab.y),
+                ("n", cx, ab.y),
+                ("ne", ab.x + ab.width, ab.y),
+                ("e", ab.x + ab.width, cy),
+                ("se", ab.x + ab.width, ab.y + ab.height),
+                ("s", cx, ab.y + ab.height),
+                ("sw", ab.x, ab.y + ab.height),
+                ("w", ab.x, cy),
+            ];
+            for (pos, hx, hy) in candidates {
+                if (x - hx).abs() <= HANDLE_HIT_RADIUS_DOC
+                    && (y - hy).abs() <= HANDLE_HIT_RADIUS_DOC
+                {
+                    store.set_tool(
+                        "artboard",
+                        "mode",
+                        serde_json::Value::String("resizing".into()),
+                    );
+                    store.set_tool(
+                        "artboard",
+                        "hit_artboard_id",
+                        serde_json::Value::String(ab.id.clone()),
+                    );
+                    store.set_tool(
+                        "artboard",
+                        "hit_handle_pos",
+                        serde_json::Value::String(pos.into()),
+                    );
+                    return;
+                }
+            }
+        }
+    }
+
+    // 2. Artboard interior — highest position in document.artboards
+    //    wins on overlap (matches the fill-stacking rule from
+    //    ARTBOARDS.md §Canvas appearance). Iterate in reverse for
+    //    top-most-first hit.
+    for ab in doc.artboards.iter().rev() {
+        if x >= ab.x && x <= ab.x + ab.width && y >= ab.y && y <= ab.y + ab.height {
+            let mode = if alt_held {
+                "duplicating_pending"
+            } else {
+                "moving_pending"
+            };
+            store.set_tool("artboard", "mode", serde_json::Value::String(mode.into()));
+            store.set_tool(
+                "artboard",
+                "hit_artboard_id",
+                serde_json::Value::String(ab.id.clone()),
+            );
+            // Panel-selection write is Phase 1.3 — see function doc
+            // comment.
+            return;
+        }
+    }
+
+    // 3. Empty canvas → drag-to-create on threshold (mode = creating);
+    //    sub-threshold mouseup is a click-on-empty which clears panel-
+    //    selection. Phase 1.3 handles the panel-selection clear.
+    store.set_tool(
+        "artboard",
+        "mode",
+        serde_json::Value::String("creating".into()),
+    );
 }
 
 /// Implementation of doc.path.probe_partial_hit.
