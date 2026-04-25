@@ -1385,6 +1385,22 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
+        // Layer 1: canvas background. Filled in screen-space here
+        // so it covers the viewport regardless of the view
+        // transform applied below. Per ZOOM_TOOL.md §Anchor and
+        // clamp math (rendering pipeline).
+        ctx.set_fill_style_str("white");
+        ctx.fill_rect(0.0, 0.0, w, h);
+
+        // Apply view transform: zoom + pan. The renderer draws in
+        // document coordinates; the canvas context transforms them
+        // into screen pixels. Tool overlays are drawn AFTER
+        // restoring the identity transform because their tool-state
+        // coordinates (press_x, cursor_x, etc.) are already in
+        // viewport-local pixel space.
+        ctx.save();
+        ctx.translate(tab.model.view_offset_x, tab.model.view_offset_y).ok();
+        ctx.scale(tab.model.zoom_level, tab.model.zoom_level).ok();
         render::render(
             &ctx,
             w,
@@ -1395,8 +1411,9 @@ impl AppState {
             tab.model.mask_isolation_path.as_deref(),
             &self.brush_libraries,
         );
+        ctx.restore();
 
-        // Draw tool overlay
+        // Draw tool overlay (in screen-space, post-transform).
         if let Some(tool) = tab.tools.get(&self.active_tool) {
             tool.draw_overlay(&tab.model, &ctx);
         }
