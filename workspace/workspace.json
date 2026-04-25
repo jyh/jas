@@ -18618,7 +18618,49 @@
       "menu_label": "Eyedropper Tool",
       "shortcut": "I",
       "tool_options_dialog": "eyedropper_tool_options",
+      "state": {
+        "hover_x": {
+          "default": 0
+        },
+        "hover_y": {
+          "default": 0
+        },
+        "has_hovered": {
+          "default": false
+        }
+      },
       "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.eyedropper.has_hovered": "false"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.eyedropper.has_hovered": "false"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "set": {
+              "tool.eyedropper.hover_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.eyedropper.hover_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.eyedropper.has_hovered": "true"
+            }
+          }
+        ],
         "on_mousedown": [
           {
             "doc.snapshot": {}
@@ -18673,9 +18715,11 @@
         ]
       },
       "overlay": {
-        "if": "state.eyedropper_cache != null",
+        "if": "state.eyedropper_cache != null and tool.eyedropper.has_hovered",
         "render": {
           "type": "cursor_color_chip",
+          "x": "tool.eyedropper.hover_x",
+          "y": "tool.eyedropper.hover_y",
           "cache": "state.eyedropper_cache"
         }
       }
