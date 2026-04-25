@@ -35,6 +35,17 @@ public class StateStore {
     /// effect) unless first cleared by the clear_dialog_snapshot effect
     /// (used by OK actions).
     private var dialogSnapshot: [String: Any]?
+    /// Action name fired by the post-run hook in runEffects when the
+    /// dialog mutates. Set by openDialog from the dialog spec's
+    /// on_change field. Cleared on closeDialog.
+    private var dialogOnChange: String?
+    /// Set by every setDialog write; consumed by the post-run hook
+    /// to decide whether to fire the dialog's on_change action.
+    private var dialogDirty: Bool = false
+    /// Re-entrancy guard: true while the post-run hook is dispatching
+    /// the on_change action. Prevents the action's own set effects
+    /// from re-triggering the hook.
+    private var dialogFiringOnChange: Bool = false
 
     // MARK: - Data namespace
     //
@@ -234,6 +245,7 @@ public class StateStore {
     /// ``outer`` gives the setter access to cross-scope bindings.
     public func setDialogWithOuter(_ key: String, _ value: Any?, outer: [String: Any]) {
         guard dialogId != nil else { return }
+        dialogDirty = true
         if let prop = dialogProps[key] {
             if let setExpr = prop["set"] as? String {
                 // Parse the setter as a lambda and apply with the value
@@ -282,7 +294,30 @@ public class StateStore {
         dialog = [:]
         dialogParams = nil
         dialogProps = [:]
+        dialogOnChange = nil
+        dialogDirty = false
+        // dialogFiringOnChange is intentionally NOT cleared here —
+        // closeDialog can be invoked from inside an on_change-fired
+        // chain, and the guard must remain set until runEffects
+        // unwinds.
     }
+
+    public func setDialogOnChange(_ action: String?) {
+        dialogOnChange = action
+    }
+
+    public func getDialogOnChange() -> String? { dialogOnChange }
+
+    /// Take the dirty flag, leaving it false. Used by the post-run
+    /// hook in runEffects to decide whether to fire on_change.
+    public func takeDialogDirty() -> Bool {
+        let was = dialogDirty
+        dialogDirty = false
+        return was
+    }
+
+    public func isFiringOnChange() -> Bool { dialogFiringOnChange }
+    public func setFiringOnChange(_ firing: Bool) { dialogFiringOnChange = firing }
 
     /// Capture the current value of every state key referenced by a
     /// dialog's preview_targets. Phase 0 supports only top-level state
