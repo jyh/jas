@@ -97,6 +97,31 @@ public class Model: ObservableObject {
         redoStack.removeAll()
     }
 
+    /// Out-of-band document snapshot used by dialog Preview flows
+    /// (Scale Options, Rotate Options, Shear Options). Captured at
+    /// dialog open, restored on Cancel, cleared on OK. Distinct
+    /// from the undo stack so preview-driven applies do not
+    /// pollute undo history. See SCALE_TOOL.md §Preview.
+    private var previewDocSnapshot: Document?
+
+    public func capturePreviewSnapshot() {
+        previewDocSnapshot = document
+    }
+
+    public func restorePreviewSnapshot() {
+        if let snap = previewDocSnapshot {
+            document = snap
+            notify()
+            objectWillChange.send()
+        }
+    }
+
+    public func clearPreviewSnapshot() {
+        previewDocSnapshot = nil
+    }
+
+    public var hasPreviewSnapshot: Bool { previewDocSnapshot != nil }
+
     public func undo() {
         guard let prev = undoStack.popLast() else { return }
         redoStack.append(document)
