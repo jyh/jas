@@ -8,6 +8,7 @@ public enum Tool: String, CaseIterable {
     case selection
     case partialSelection
     case interiorSelection
+    case magicWand
     case pen
     case addAnchorPoint
     case deleteAnchorPoint
@@ -37,6 +38,7 @@ func toolYamlId(_ tool: Tool) -> String? {
     case .selection: return "selection"
     case .partialSelection: return "partial_selection"
     case .interiorSelection: return "interior_selection"
+    case .magicWand: return "magic_wand"
     case .pen: return "pen"
     case .addAnchorPoint: return "add_anchor_point"
     case .deleteAnchorPoint: return "delete_anchor_point"
@@ -549,7 +551,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $arrowSlotTool,
-                        alternates: [.partialSelection, .interiorSelection],
+                        alternates: [.partialSelection, .interiorSelection, .magicWand],
                         onRequestOptions: onOpenToolOptions
                     )
                 }

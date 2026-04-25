@@ -77,6 +77,39 @@ public struct ToolbarView {
                 plus.addLine(to: CGPoint(x: ox + 23.5, y: oy + 23.5))
                 context.stroke(plus, with: .color(.black), lineWidth: 1.5)
 
+            case .magicWand:
+                // Diagonal handle (lower-left → upper-right) +
+                // 4-point sparkle at the tip + small accent star.
+                // Matches workspace/icons.yaml magic_wand entry and
+                // examples/magic-wand.png.
+                var handle = SwiftUI.Path()
+                handle.move(to: CGPoint(x: ox + 4, y: oy + 22))
+                handle.addLine(to: CGPoint(x: ox + 18, y: oy + 8))
+                context.stroke(handle, with: .color(color),
+                               style: .init(lineWidth: 2, lineCap: .round))
+                var sparkle = SwiftUI.Path()
+                sparkle.move(to: CGPoint(x: ox + 20, y: oy + 3))
+                sparkle.addLine(to: CGPoint(x: ox + 21, y: oy + 7))
+                sparkle.addLine(to: CGPoint(x: ox + 25, y: oy + 8))
+                sparkle.addLine(to: CGPoint(x: ox + 21, y: oy + 9))
+                sparkle.addLine(to: CGPoint(x: ox + 20, y: oy + 13))
+                sparkle.addLine(to: CGPoint(x: ox + 19, y: oy + 9))
+                sparkle.addLine(to: CGPoint(x: ox + 15, y: oy + 8))
+                sparkle.addLine(to: CGPoint(x: ox + 19, y: oy + 7))
+                sparkle.closeSubpath()
+                context.fill(sparkle, with: .color(color))
+                var accent = SwiftUI.Path()
+                accent.move(to: CGPoint(x: ox + 24, y: oy + 12))
+                accent.addLine(to: CGPoint(x: ox + 24.7, y: oy + 13.5))
+                accent.addLine(to: CGPoint(x: ox + 26.5, y: oy + 14))
+                accent.addLine(to: CGPoint(x: ox + 24.7, y: oy + 14.5))
+                accent.addLine(to: CGPoint(x: ox + 24, y: oy + 16))
+                accent.addLine(to: CGPoint(x: ox + 23.3, y: oy + 14.5))
+                accent.addLine(to: CGPoint(x: ox + 21.5, y: oy + 14))
+                accent.addLine(to: CGPoint(x: ox + 23.3, y: oy + 13.5))
+                accent.closeSubpath()
+                context.fill(accent, with: .color(color))
+
             case .pen:
                 // Pen icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28
                 let s: CGFloat = 28.0 / 256.0
@@ -956,6 +989,7 @@ private struct ArrowSlotButton: View {
         switch tool {
         case .partialSelection: return "Partial Selection"
         case .interiorSelection: return "Interior Selection"
+        case .magicWand: return "Magic Wand"
         case .pen: return "Pen"
         case .addAnchorPoint: return "Add Anchor Point"
         case .deleteAnchorPoint: return "Delete Anchor Point"
