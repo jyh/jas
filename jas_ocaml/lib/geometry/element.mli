@@ -616,6 +616,7 @@ val get_transform : element -> transform option
 val set_transform : transform option -> element -> element
 val translate_transform : float -> float -> transform option -> transform option
 val with_transform_translated : dx:float -> dy:float -> element -> element
+val with_transform_premultiplied : transform -> element -> element
 
 (** {2 Fill and stroke} *)
 

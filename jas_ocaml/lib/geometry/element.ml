@@ -1287,6 +1287,18 @@ let translate_transform dx dy t_opt =
 let with_transform_translated ~dx ~dy elem =
   set_transform (translate_transform dx dy (get_transform elem)) elem
 
+(** Return a copy of [elem] with [matrix] pre-multiplied onto its
+    existing transform. Used by the transform-tool family
+    (Scale / Rotate / Shear) to compose a per-frame matrix on top
+    of any existing transform without disturbing the element's
+    geometry. See [SCALE_TOOL.md] \167 Apply behavior. *)
+let with_transform_premultiplied matrix elem =
+  let cur = match get_transform elem with
+    | Some t -> t
+    | None -> identity_transform
+  in
+  set_transform (Some (multiply matrix cur)) elem
+
 let with_fill elem f =
   match elem with
   | Rect r -> Rect { r with fill = f }
