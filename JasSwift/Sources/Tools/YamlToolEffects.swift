@@ -1094,6 +1094,53 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.artboard.resize_apply — live drag-to-resize per
+    // ARTBOARD_TOOL.md §Drag-to-resize. Idempotent via the preview
+    // snapshot. Targets tool.artboard.hit_artboard_id (set by
+    // probe_hit). Modifiers: Shift = lock proportion, Alt =
+    // resize from center, Shift+Alt = both.
+    effects["doc.artboard.resize_apply"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        var handlePos = ""
+        if let raw = args["handle_pos"] as? String {
+            // Pass-through if the arg is already a handle name; else
+            // evaluate as an expression.
+            if ["nw","n","ne","e","se","s","sw","w"].contains(raw) {
+                handlePos = raw
+            } else {
+                let v = evalExprAsValue(args["handle_pos"],
+                                        store: store, ctx: ctx)
+                if case .string(let s) = v { handlePos = s }
+            }
+        }
+        let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
+        let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
+        let shiftHeld = evalBool(args["shift_held"], store: store, ctx: ctx)
+        let altHeld = evalBool(args["alt_held"], store: store, ctx: ctx)
+        artboardResizeApply(
+            model: model, store: store,
+            handlePos: handlePos, cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld, altHeld: altHeld)
+        return nil
+    }
+
+    // doc.artboard.resize_commit — re-applies the resize with
+    // integer-pt rounding on the final bounds.
+    effects["doc.artboard.resize_commit"] = { _, _, store in
+        artboardResizeCommit(model: model, store: store)
+        return nil
+    }
+
+    // doc.artboard.delete_panel_selected — deletes panel-selected
+    // artboards subject to the at-least-one invariant from
+    // ARTBOARDS.md §At-least-one-artboard invariant. Snapshots for
+    // undo. Silent no-op when selection spans every artboard
+    // (tooltip surface deferred per spec).
+    effects["doc.artboard.delete_panel_selected"] = { _, _, store in
+        artboardDeletePanelSelected(model: model, store: store)
+        return nil
+    }
+
     // doc.artboard.create_commit — drag-to-create commit. Builds a
     // rect from (x1,y1)-(x2,y2), rounds to integer pt, clamps each
     // dimension to >= 1 pt, mints a fresh id (collision-retry),
@@ -3353,6 +3400,233 @@ private func artboardMoveApply(
     artboardTranslateFromPreview(
         model: model, store: store,
         targetIds: targetIds, dx: dx, dy: dy)
+}
+
+/// Compute new (x, y, w, h) for a resize gesture. Mirrors Rust's
+/// artboard_resize_compute. See ARTBOARD_TOOL.md §Drag-to-resize
+/// for the full modifier matrix; comments inline below.
+private func artboardResizeCompute(
+    handlePos: String,
+    origX: Double, origY: Double, origW: Double, origH: Double,
+    cursorX: Double, cursorY: Double,
+    shiftHeld: Bool, altHeld: Bool
+) -> (Double, Double, Double, Double) {
+    let origCx = origX + origW / 2.0
+    let origCy = origY + origH / 2.0
+    let origRatio = origH > 0 ? origW / origH : 1.0
+
+    let isCorner = ["nw","ne","se","sw"].contains(handlePos)
+    let isEdge = ["n","e","s","w"].contains(handlePos)
+
+    func dominantWFromCorner(_ dx: Double, _ dy: Double) -> (Double, Double) {
+        if dy <= 0 { return (max(dx, 1.0), max(dx / origRatio, 1.0)) }
+        if dx / origW > dy / origH {
+            let w = max(dx, 1.0)
+            return (w, max(w / origRatio, 1.0))
+        } else {
+            let h = max(dy, 1.0)
+            return (max(h * origRatio, 1.0), h)
+        }
+    }
+
+    if altHeld && isCorner {
+        var hw = abs(cursorX - origCx)
+        var hh = abs(cursorY - origCy)
+        if shiftHeld {
+            let (rw, rh) = dominantWFromCorner(2.0 * hw, 2.0 * hh)
+            hw = rw / 2.0; hh = rh / 2.0
+        }
+        let nw = max(2.0 * hw, 1.0)
+        let nh = max(2.0 * hh, 1.0)
+        return (origCx - nw / 2.0, origCy - nh / 2.0, nw, nh)
+    }
+    if altHeld && isEdge {
+        var nx = origX, ny = origY, nw = origW, nh = origH
+        switch handlePos {
+        case "e", "w":
+            let halfW = max(abs(cursorX - origCx), 0.5)
+            nw = 2.0 * halfW
+            nx = origCx - halfW
+            if shiftHeld {
+                nh = max(nw / origRatio, 1.0)
+                ny = origCy - nh / 2.0
+            }
+        case "n", "s":
+            let halfH = max(abs(cursorY - origCy), 0.5)
+            nh = 2.0 * halfH
+            ny = origCy - halfH
+            if shiftHeld {
+                nw = max(nh * origRatio, 1.0)
+                nx = origCx - nw / 2.0
+            }
+        default: break
+        }
+        return (nx, ny, max(nw, 1.0), max(nh, 1.0))
+    }
+
+    if shiftHeld && isCorner {
+        let right = origX + origW
+        let bottom = origY + origH
+        switch handlePos {
+        case "se":
+            let dx = max(cursorX - origX, 1.0)
+            let dy = max(cursorY - origY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (origX, origY, nw, nh)
+        case "sw":
+            let dx = max(right - cursorX, 1.0)
+            let dy = max(cursorY - origY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (right - nw, origY, nw, nh)
+        case "ne":
+            let dx = max(cursorX - origX, 1.0)
+            let dy = max(bottom - cursorY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (origX, bottom - nh, nw, nh)
+        case "nw":
+            let dx = max(right - cursorX, 1.0)
+            let dy = max(bottom - cursorY, 1.0)
+            let (nw, nh) = dominantWFromCorner(dx, dy)
+            return (right - nw, bottom - nh, nw, nh)
+        default: break
+        }
+    }
+
+    if shiftHeld && isEdge {
+        var nx = origX, ny = origY, nw = origW, nh = origH
+        switch handlePos {
+        case "e":
+            nw = max(cursorX - origX, 1.0)
+            nh = max(nw / origRatio, 1.0)
+            ny = origCy - nh / 2.0
+        case "w":
+            let right = origX + origW
+            nw = max(right - cursorX, 1.0)
+            nx = right - nw
+            nh = max(nw / origRatio, 1.0)
+            ny = origCy - nh / 2.0
+        case "s":
+            nh = max(cursorY - origY, 1.0)
+            nw = max(nh * origRatio, 1.0)
+            nx = origCx - nw / 2.0
+        case "n":
+            let bottom = origY + origH
+            nh = max(bottom - cursorY, 1.0)
+            ny = bottom - nh
+            nw = max(nh * origRatio, 1.0)
+            nx = origCx - nw / 2.0
+        default: break
+        }
+        return (nx, ny, nw, nh)
+    }
+
+    // Unmodified path.
+    var nx = origX, ny = origY, nw = origW, nh = origH
+    let right = origX + origW
+    let bottom = origY + origH
+    switch handlePos {
+    case "nw":
+        nx = min(cursorX, right - 1.0); ny = min(cursorY, bottom - 1.0)
+        nw = right - nx; nh = bottom - ny
+    case "n":
+        ny = min(cursorY, bottom - 1.0); nh = bottom - ny
+    case "ne":
+        ny = min(cursorY, bottom - 1.0)
+        nw = max(cursorX - origX, 1.0); nh = bottom - ny
+    case "e":
+        nw = max(cursorX - origX, 1.0)
+    case "se":
+        nw = max(cursorX - origX, 1.0); nh = max(cursorY - origY, 1.0)
+    case "s":
+        nh = max(cursorY - origY, 1.0)
+    case "sw":
+        nx = min(cursorX, right - 1.0); nw = right - nx
+        nh = max(cursorY - origY, 1.0)
+    case "w":
+        nx = min(cursorX, right - 1.0); nw = right - nx
+    default: break
+    }
+    return (nx, ny, nw, nh)
+}
+
+/// doc.artboard.resize_apply implementation per ARTBOARD_TOOL.md
+/// §Drag-to-resize.
+private func artboardResizeApply(
+    model: Model, store: StateStore,
+    handlePos: String, cursorX: Double, cursorY: Double,
+    shiftHeld: Bool, altHeld: Bool
+) {
+    guard model.hasPreviewSnapshot else { return }
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    let abCtx = toolCtx?["artboard"] as? [String: Any]
+    guard let targetId = abCtx?["hit_artboard_id"] as? String
+    else { return }
+
+    model.restorePreviewSnapshot()
+    let doc = model.document
+    let newAbs: [Artboard] = doc.artboards.map { ab in
+        if ab.id != targetId { return ab }
+        let (nx, ny, nw, nh) = artboardResizeCompute(
+            handlePos: handlePos,
+            origX: ab.x, origY: ab.y, origW: ab.width, origH: ab.height,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld, altHeld: altHeld)
+        return ab.with(x: nx, y: ny, width: nw, height: nh)
+    }
+    model.document = Document(
+        layers: doc.layers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.resize_commit — integer-pt rounded final bounds.
+private func artboardResizeCommit(model: Model, store: StateStore) {
+    let toolCtx = store.evalContext()["tool"] as? [String: Any]
+    guard let abCtx = toolCtx?["artboard"] as? [String: Any] else { return }
+    let cursorX = (abCtx["cursor_x"] as? Double) ?? 0
+    let cursorY = (abCtx["cursor_y"] as? Double) ?? 0
+    let shiftHeld = (abCtx["shift_held"] as? Bool) ?? false
+    let altHeld = (abCtx["alt_held"] as? Bool) ?? false
+    let handlePos = (abCtx["hit_handle_pos"] as? String) ?? ""
+    guard let targetId = abCtx["hit_artboard_id"] as? String,
+          !handlePos.isEmpty,
+          model.hasPreviewSnapshot
+    else { return }
+
+    model.restorePreviewSnapshot()
+    let doc = model.document
+    let newAbs: [Artboard] = doc.artboards.map { ab in
+        if ab.id != targetId { return ab }
+        let (nx, ny, nw, nh) = artboardResizeCompute(
+            handlePos: handlePos,
+            origX: ab.x, origY: ab.y, origW: ab.width, origH: ab.height,
+            cursorX: cursorX, cursorY: cursorY,
+            shiftHeld: shiftHeld, altHeld: altHeld)
+        return ab.with(
+            x: nx.rounded(), y: ny.rounded(),
+            width: max(nw.rounded(), 1.0),
+            height: max(nh.rounded(), 1.0))
+    }
+    model.document = Document(
+        layers: doc.layers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
+}
+
+/// doc.artboard.delete_panel_selected — at-least-one invariant
+/// per ARTBOARDS.md.
+private func artboardDeletePanelSelected(model: Model, store: StateStore) {
+    let targetIds = readArtboardPanelSelection(store)
+    if targetIds.isEmpty { return }
+    let total = model.document.artboards.count
+    if targetIds.count >= total { return }  // invariant block
+    model.snapshot()
+    let doc = model.document
+    let newAbs = doc.artboards.filter { !targetIds.contains($0.id) }
+    model.document = Document(
+        layers: doc.layers, selectedLayer: doc.selectedLayer,
+        selection: doc.selection, artboards: newAbs,
+        artboardOptions: doc.artboardOptions)
 }
 
 /// doc.artboard.move_commit — re-applies translate with integer-pt
