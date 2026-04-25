@@ -2860,23 +2860,29 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
-  (* Artboard tool helpers per ARTBOARD_TOOL.md. *)
+  (* Artboard tool helpers per ARTBOARD_TOOL.md.
+     Yojson member raises on null, so we guard the active_document
+     lookup — which is null in the unit-test context where the
+     renderer doesn't build the scope. *)
   let artboard_panel_selection_ids store =
     let ctx = State_store.eval_context store in
-    let active = Yojson.Safe.Util.member "active_document" ctx in
-    let raw = Yojson.Safe.Util.member "artboards_panel_selection_ids" active in
-    match raw with
-    | `List items ->
-      List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> []
+    match Yojson.Safe.Util.member "active_document" ctx with
+    | `Null -> []
+    | active ->
+      match Yojson.Safe.Util.member "artboards_panel_selection_ids" active with
+      | `List items ->
+        List.filter_map (function `String s -> Some s | _ -> None) items
+      | _ -> []
   in
 
   let artboard_panel_anchor store =
     let ctx = State_store.eval_context store in
-    let active = Yojson.Safe.Util.member "active_document" ctx in
-    match Yojson.Safe.Util.member "artboards_panel_anchor" active with
-    | `String s -> Some s
-    | _ -> None
+    match Yojson.Safe.Util.member "active_document" ctx with
+    | `Null -> None
+    | active ->
+      match Yojson.Safe.Util.member "artboards_panel_anchor" active with
+      | `String s -> Some s
+      | _ -> None
   in
 
   (* Hit-test handles on the panel-selected artboard; returns
