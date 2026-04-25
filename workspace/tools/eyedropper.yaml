@@ -33,10 +33,28 @@ menu_label: "Eyedropper Tool"
 shortcut: "I"
 tool_options_dialog: "eyedropper_tool_options"
 
-# No tool-local state. Cache lives in state.eyedropper_cache
-# (per-document); selection lives in the document.
+# Tool-local state. The cache itself lives in state.eyedropper_cache
+# (per-document, persists across save/load); these tool-local fields
+# track the most recent cursor position so the cursor_color_chip
+# overlay can render the chip near the pointer without per-frame
+# event scope access.
+state:
+  hover_x: { default: 0 }
+  hover_y: { default: 0 }
+  has_hovered: { default: false }
 
 handlers:
+
+  on_enter:
+    - set: { tool.eyedropper.has_hovered: "false" }
+
+  on_leave:
+    - set: { tool.eyedropper.has_hovered: "false" }
+
+  on_mousemove:
+    - set: { tool.eyedropper.hover_x: "event.x" }
+    - set: { tool.eyedropper.hover_y: "event.y" }
+    - set: { tool.eyedropper.has_hovered: "true" }
 
   on_mousedown:
     - "doc.snapshot": {}
@@ -75,10 +93,13 @@ handlers:
     - {}
 
 # Overlay: a small color chip following the cursor while the cache
-# is non-null. Render type is new (joins the existing render-type
-# list); see EYEDROPPER_TOOL.md §Overlay for geometry and styling.
+# is non-null and the cursor has been seen at least once. Render
+# type is new (joins the existing render-type list); see
+# EYEDROPPER_TOOL.md §Overlay for geometry and styling.
 overlay:
-  if: "state.eyedropper_cache != null"
+  if: "state.eyedropper_cache != null and tool.eyedropper.has_hovered"
   render:
     type: cursor_color_chip
+    x: "tool.eyedropper.hover_x"
+    y: "tool.eyedropper.hover_y"
     cache: "state.eyedropper_cache"

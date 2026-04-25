@@ -512,6 +512,7 @@ impl CanvasTool for YamlTool {
                     draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
                 }
                 "oval_cursor" => draw_oval_cursor_overlay(ctx, render, &eval_ctx),
+                "cursor_color_chip" => draw_cursor_color_chip_overlay(ctx, render, &eval_ctx),
                 "reference_point_cross" => {
                     draw_reference_point_cross(ctx, render, &eval_ctx, model);
                 }
@@ -1088,6 +1089,119 @@ fn draw_oval_cursor_overlay(
     ctx.move_to(cx, cy - 3.0);
     ctx.line_to(cx, cy + 3.0);
     ctx.stroke();
+}
+
+/// `cursor_color_chip` render type — a 12×12 px filled rectangle at
+/// offset (+12, +12) from the cursor showing the cached
+/// state.eyedropper_cache appearance. Visible only when the cache
+/// is non-null and the eyedropper has seen the cursor at least once
+/// (per the tool yaml's `if:` guard). See EYEDROPPER_TOOL.md
+/// §Overlay.
+///
+/// Render fields:
+///   x, y    cursor position (required, expression-evaluated).
+///   cache   the cached Appearance JSON (expression yielding
+///           state.eyedropper_cache; the renderer parses fill /
+///           stroke from it).
+fn draw_cursor_color_chip_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let cx = eval_number_field(eval_ctx, render.get("x"));
+    let cy = eval_number_field(eval_ctx, render.get("y"));
+
+    // Resolve `cache:` — accept either an inline object or an
+    // expression string of the form `state.<key>` (since the expr
+    // evaluator returns objects as JSON strings, we read the
+    // underlying serde value out of eval_ctx directly).
+    let cache_value: serde_json::Value = match render.get("cache") {
+        Some(serde_json::Value::String(expr)) => {
+            // Strip leading `state.` and look up the key in eval_ctx.
+            let key = expr.trim().strip_prefix("state.").unwrap_or(expr);
+            eval_ctx
+                .get("state")
+                .and_then(|s| s.get(key))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        }
+        Some(v) => v.clone(),
+        None => return,
+    };
+    if cache_value.is_null() {
+        return;
+    }
+
+    // Geometry: 12×12 chip at (+12, +12) offset from the cursor.
+    let chip_x = cx + 12.0;
+    let chip_y = cy + 12.0;
+    let chip_w = 12.0;
+    let chip_h = 12.0;
+
+    // Fill: cache.fill.color when present (solid). Otherwise render
+    // the standard none-glyph (white background with a red diagonal).
+    let fill_color = cache_value
+        .get("fill")
+        .and_then(|f| f.as_object())
+        .and_then(|f| f.get("color"));
+
+    if let Some(color_val) = fill_color {
+        let css = color_value_to_css(color_val);
+        ctx.set_fill_style_str(&css);
+        ctx.fill_rect(chip_x, chip_y, chip_w, chip_h);
+    } else {
+        // None-glyph: white square with a red diagonal slash.
+        ctx.set_fill_style_str("#ffffff");
+        ctx.fill_rect(chip_x, chip_y, chip_w, chip_h);
+        ctx.set_stroke_style_str("#ff0000");
+        ctx.set_line_width(1.5);
+        ctx.begin_path();
+        ctx.move_to(chip_x, chip_y + chip_h);
+        ctx.line_to(chip_x + chip_w, chip_y);
+        ctx.stroke();
+    }
+
+    // Border: 1 px outline from cache.stroke.color when solid;
+    // otherwise a fixed neutral outline so the chip stays visible
+    // against any canvas backdrop.
+    let stroke_color = cache_value
+        .get("stroke")
+        .and_then(|s| s.as_object())
+        .and_then(|s| s.get("color"));
+    let border_css = match stroke_color {
+        Some(color_val) => color_value_to_css(color_val),
+        None => "#888888".to_string(),
+    };
+    ctx.set_stroke_style_str(&border_css);
+    ctx.set_line_width(1.0);
+    ctx.stroke_rect(chip_x + 0.5, chip_y + 0.5, chip_w - 1.0, chip_h - 1.0);
+}
+
+/// Convert a serialized `Color` JSON value (RGB(a) tuple or hex
+/// string) to a CSS color string usable by canvas2d. Falls back to
+/// solid black on parse failure.
+fn color_value_to_css(v: &serde_json::Value) -> String {
+    if let Some(s) = v.as_str() {
+        return s.to_string();
+    }
+    if let Some(arr) = v.as_array()
+        && arr.len() >= 3
+    {
+        let r = (arr[0].as_f64().unwrap_or(0.0) * 255.0).round() as u8;
+        let g = (arr[1].as_f64().unwrap_or(0.0) * 255.0).round() as u8;
+        let b = (arr[2].as_f64().unwrap_or(0.0) * 255.0).round() as u8;
+        return format!("rgb({},{},{})", r, g, b);
+    }
+    if let Some(obj) = v.as_object() {
+        let r = obj.get("r").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let g = obj.get("g").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let b = obj.get("b").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let r = (r * 255.0).round() as u8;
+        let g = (g * 255.0).round() as u8;
+        let b = (b * 255.0).round() as u8;
+        return format!("rgb({},{},{})", r, g, b);
+    }
+    "#000000".to_string()
 }
 
 /// Build a rotated ellipse path at (cx, cy) and add it to the
