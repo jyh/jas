@@ -2602,6 +2602,264 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* ── doc.zoom.* and doc.pan.apply — view-state effects per
+     ZOOM_TOOL.md and HAND_TOOL.md. None of these modify document
+     content; they only update the per-tab view state on the
+     model: zoom_level, view_offset_x, view_offset_y. *)
+
+  let read_pref_number key default_value =
+    match Workspace_loader.load () with
+    | None -> default_value
+    | Some ws ->
+      (match Workspace_loader.json_member "preferences" ws.data with
+       | Some (`Assoc prefs) ->
+         (match List.assoc_opt "viewport" prefs with
+          | Some (`Assoc viewport) ->
+            (match List.assoc_opt key viewport with
+             | Some (`Float f) -> f
+             | Some (`Int i) -> float_of_int i
+             | _ -> default_value)
+          | _ -> default_value)
+       | _ -> default_value)
+  in
+  let read_tool_zoom_state ctx key default_value =
+    match List.assoc_opt "tool" ctx with
+    | Some (`Assoc tool_obj) ->
+      (match List.assoc_opt "zoom" tool_obj with
+       | Some (`Assoc zoom_obj) ->
+         (match List.assoc_opt key zoom_obj with
+          | Some (`Float f) -> f
+          | Some (`Int i) -> float_of_int i
+          | _ -> default_value)
+       | _ -> default_value)
+    | _ -> default_value
+  in
+  let fit_rect_into_viewport rect_x rect_y rect_w rect_h padding =
+    if rect_w > 0.0 && rect_h > 0.0 then begin
+      let m = ctrl#model in
+      let vw = m#viewport_w in
+      let vh = m#viewport_h in
+      if vw > 0.0 && vh > 0.0 then begin
+        let avail_w = vw -. 2.0 *. padding in
+        let avail_h = vh -. 2.0 *. padding in
+        if avail_w > 0.0 && avail_h > 0.0 then begin
+          let min_zoom = read_pref_number "min_zoom" 0.1 in
+          let max_zoom = read_pref_number "max_zoom" 64.0 in
+          let z_fit = min (avail_w /. rect_w) (avail_h /. rect_h) in
+          let z = max min_zoom (min max_zoom z_fit) in
+          let rect_cx = rect_x +. rect_w /. 2.0 in
+          let rect_cy = rect_y +. rect_h /. 2.0 in
+          m#set_zoom_level z;
+          m#set_view_offset_x (vw /. 2.0 -. rect_cx *. z);
+          m#set_view_offset_y (vh /. 2.0 -. rect_cy *. z)
+        end
+      end
+    end
+  in
+  let document_bounds (doc : Document.document) =
+    if Array.length doc.layers = 0 then (0.0, 0.0, 0.0, 0.0)
+    else
+      let inf = infinity in
+      let neg_inf = neg_infinity in
+      let min_x = ref inf in
+      let min_y = ref inf in
+      let max_x = ref neg_inf in
+      let max_y = ref neg_inf in
+      Array.iter (fun layer ->
+        let bx, by, bw, bh = Element.bounds layer in
+        if bx < !min_x then min_x := bx;
+        if by < !min_y then min_y := by;
+        if bx +. bw > !max_x then max_x := bx +. bw;
+        if by +. bh > !max_y then max_y := by +. bh
+      ) doc.layers;
+      if !min_x = inf then (0.0, 0.0, 0.0, 0.0)
+      else (!min_x, !min_y, !max_x -. !min_x, !max_y -. !min_y)
+  in
+
+  let doc_zoom_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let factor = eval_number (lookup "factor") store ctx in
+       let anchor_x_raw = eval_number (lookup "anchor_x") store ctx in
+       let anchor_y_raw = eval_number (lookup "anchor_y") store ctx in
+       let min_zoom = read_pref_number "min_zoom" 0.1 in
+       let max_zoom = read_pref_number "max_zoom" 64.0 in
+       let m = ctrl#model in
+       let z = m#zoom_level in
+       let px = m#view_offset_x in
+       let py = m#view_offset_y in
+       let ax = if anchor_x_raw < 0.0 then px else anchor_x_raw in
+       let ay = if anchor_y_raw < 0.0 then py else anchor_y_raw in
+       let doc_ax = (ax -. px) /. z in
+       let doc_ay = (ay -. py) /. z in
+       let z_new = max min_zoom (min max_zoom (z *. factor)) in
+       m#set_zoom_level z_new;
+       m#set_view_offset_x (ax -. doc_ax *. z_new);
+       m#set_view_offset_y (ay -. doc_ay *. z_new)
+     | _ -> ());
+    `Null
+  in
+  let doc_zoom_set spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let level = eval_number (lookup "level") store ctx in
+       let min_zoom = read_pref_number "min_zoom" 0.1 in
+       let max_zoom = read_pref_number "max_zoom" 64.0 in
+       ctrl#model#set_zoom_level (max min_zoom (min max_zoom level))
+     | _ -> ());
+    `Null
+  in
+  let doc_zoom_set_full spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let zoom = eval_number (lookup "zoom") store ctx in
+       let offset_x = eval_number (lookup "offset_x") store ctx in
+       let offset_y = eval_number (lookup "offset_y") store ctx in
+       let min_zoom = read_pref_number "min_zoom" 0.1 in
+       let max_zoom = read_pref_number "max_zoom" 64.0 in
+       let m = ctrl#model in
+       m#set_zoom_level (max min_zoom (min max_zoom zoom));
+       m#set_view_offset_x offset_x;
+       m#set_view_offset_y offset_y
+     | _ -> ());
+    `Null
+  in
+  let doc_zoom_scrubby spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let press_x = eval_number (lookup "press_x") store ctx in
+       let press_y = eval_number (lookup "press_y") store ctx in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let _cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let alt_held = eval_bool (lookup "alt_held") store ctx in
+       let alt_at_press = eval_bool (lookup "alt_at_press") store ctx in
+       let gain = read_pref_number "scrubby_zoom_gain" 144.0 in
+       let min_zoom = read_pref_number "min_zoom" 0.1 in
+       let max_zoom = read_pref_number "max_zoom" 64.0 in
+       let initial_zoom = read_tool_zoom_state ctx "initial_zoom" 1.0 in
+       let initial_offx = read_tool_zoom_state ctx "initial_offx" 0.0 in
+       let initial_offy = read_tool_zoom_state ctx "initial_offy" 0.0 in
+       let dx = cursor_x -. press_x in
+       let direction =
+         if alt_at_press <> alt_held then -1.0 else 1.0
+       in
+       let factor = exp (dx *. direction /. gain) in
+       let z_new = max min_zoom (min max_zoom (initial_zoom *. factor)) in
+       let doc_ax = (press_x -. initial_offx) /. initial_zoom in
+       let doc_ay = (press_y -. initial_offy) /. initial_zoom in
+       let m = ctrl#model in
+       m#set_zoom_level z_new;
+       m#set_view_offset_x (press_x -. doc_ax *. z_new);
+       m#set_view_offset_y (press_y -. doc_ay *. z_new)
+     | _ -> ());
+    `Null
+  in
+  let doc_pan_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let press_x = eval_number (lookup "press_x") store ctx in
+       let press_y = eval_number (lookup "press_y") store ctx in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let initial_offx = eval_number (lookup "initial_offx") store ctx in
+       let initial_offy = eval_number (lookup "initial_offy") store ctx in
+       let m = ctrl#model in
+       m#set_view_offset_x (initial_offx +. (cursor_x -. press_x));
+       m#set_view_offset_y (initial_offy +. (cursor_y -. press_y))
+     | _ -> ());
+    `Null
+  in
+  let doc_zoom_fit_rect spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let rect_x = eval_number (lookup "rect_x") store ctx in
+       let rect_y = eval_number (lookup "rect_y") store ctx in
+       let rect_w = eval_number (lookup "rect_w") store ctx in
+       let rect_h = eval_number (lookup "rect_h") store ctx in
+       let padding = eval_number (lookup "padding") store ctx in
+       fit_rect_into_viewport rect_x rect_y rect_w rect_h padding
+     | _ -> ());
+    `Null
+  in
+  let doc_zoom_fit_marquee spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let press_x = eval_number (lookup "press_x") store ctx in
+       let press_y = eval_number (lookup "press_y") store ctx in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let mx = min press_x cursor_x in
+       let my = min press_y cursor_y in
+       let mw = abs_float (press_x -. cursor_x) in
+       let mh = abs_float (press_y -. cursor_y) in
+       if mw >= 10.0 && mh >= 10.0 then begin
+         let m = ctrl#model in
+         let z = m#zoom_level in
+         let px = m#view_offset_x in
+         let py = m#view_offset_y in
+         let doc_x = (mx -. px) /. z in
+         let doc_y = (my -. py) /. z in
+         let doc_w = mw /. z in
+         let doc_h = mh /. z in
+         fit_rect_into_viewport doc_x doc_y doc_w doc_h 0.0
+       end
+     | _ -> ());
+    `Null
+  in
+  let doc_zoom_fit_elements spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let padding = eval_number (lookup "padding") store ctx in
+       let m = ctrl#model in
+       let bx, by, bw, bh = document_bounds m#document in
+       if bw <= 0.0 || bh <= 0.0 then begin
+         m#set_zoom_level 1.0;
+         m#set_view_offset_x (m#viewport_w /. 2.0);
+         m#set_view_offset_y (m#viewport_h /. 2.0)
+       end else
+         fit_rect_into_viewport bx by bw bh padding
+     | _ -> ());
+    `Null
+  in
+  let doc_zoom_fit_all_artboards spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let padding = eval_number (lookup "padding") store ctx in
+       let abs_list = ctrl#document.Document.artboards in
+       (match abs_list with
+        | [] -> ()
+        | _ ->
+          let inf = infinity in
+          let neg_inf = neg_infinity in
+          let min_x = ref inf in
+          let min_y = ref inf in
+          let max_x = ref neg_inf in
+          let max_y = ref neg_inf in
+          List.iter (fun ab ->
+            let x = ab.Artboard.x in
+            let y = ab.Artboard.y in
+            let w = ab.Artboard.width in
+            let h = ab.Artboard.height in
+            if x < !min_x then min_x := x;
+            if y < !min_y then min_y := y;
+            if x +. w > !max_x then max_x := x +. w;
+            if y +. h > !max_y then max_y := y +. h
+          ) abs_list;
+          fit_rect_into_viewport !min_x !min_y
+            (!max_x -. !min_x) (!max_y -. !min_y) padding)
+     | _ -> ());
+    `Null
+  in
+
   [ ("doc.snapshot", doc_snapshot);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
@@ -2656,4 +2914,14 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.move_path_handle", doc_move_path_handle);
     ("doc.path.probe_partial_hit", doc_path_probe_partial_hit);
     ("doc.path.commit_partial_marquee", doc_path_commit_partial_marquee);
+    (* View-state effects per ZOOM_TOOL.md and HAND_TOOL.md. *)
+    ("doc.zoom.apply", doc_zoom_apply);
+    ("doc.zoom.set", doc_zoom_set);
+    ("doc.zoom.set_full", doc_zoom_set_full);
+    ("doc.zoom.scrubby", doc_zoom_scrubby);
+    ("doc.pan.apply", doc_pan_apply);
+    ("doc.zoom.fit_rect", doc_zoom_fit_rect);
+    ("doc.zoom.fit_marquee", doc_zoom_fit_marquee);
+    ("doc.zoom.fit_elements", doc_zoom_fit_elements);
+    ("doc.zoom.fit_all_artboards", doc_zoom_fit_all_artboards);
   ]
