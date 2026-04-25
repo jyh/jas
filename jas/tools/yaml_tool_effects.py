@@ -2368,6 +2368,537 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             min_x, min_y, max_x - min_x, max_y - min_y, padding)
         return None
 
+    # ── Artboard tool effects (ARTBOARD_TOOL.md) ────────────────
+
+    from document import artboard as _artboard_mod
+    from dataclasses import replace as _dc_replace
+
+    def _read_panel_selection_ids():
+        ctx_obj = store.eval_context()
+        active = ctx_obj.get("active_document", {}) if isinstance(ctx_obj, dict) else {}
+        ids = active.get("artboards_panel_selection_ids", [])
+        return [s for s in ids if isinstance(s, str)]
+
+    def _read_panel_anchor():
+        ctx_obj = store.eval_context()
+        active = ctx_obj.get("active_document", {}) if isinstance(ctx_obj, dict) else {}
+        a = active.get("artboards_panel_anchor")
+        return a if isinstance(a, str) else None
+
+    def _read_tool_artboard_field(key, default=None):
+        ctx_obj = store.eval_context()
+        tool = ctx_obj.get("tool", {}) if isinstance(ctx_obj, dict) else {}
+        ab = tool.get("artboard", {}) if isinstance(tool, dict) else {}
+        return ab.get(key, default) if isinstance(ab, dict) else default
+
+    def _artboard_handle_hit(doc, sel_ids, x, y):
+        if len(sel_ids) != 1:
+            return None
+        ab = next((a for a in doc.artboards if a.id == sel_ids[0]), None)
+        if ab is None:
+            return None
+        r = 8.0
+        cx = ab.x + ab.width / 2.0
+        cy = ab.y + ab.height / 2.0
+        candidates = [
+            ("nw", ab.x, ab.y),
+            ("n",  cx, ab.y),
+            ("ne", ab.x + ab.width, ab.y),
+            ("e",  ab.x + ab.width, cy),
+            ("se", ab.x + ab.width, ab.y + ab.height),
+            ("s",  cx, ab.y + ab.height),
+            ("sw", ab.x, ab.y + ab.height),
+            ("w",  ab.x, cy),
+        ]
+        for pos, hx, hy in candidates:
+            if abs(x - hx) <= r and abs(y - hy) <= r:
+                return (ab.id, pos)
+        return None
+
+    def _artboard_interior_hit(doc, x, y):
+        for ab in reversed(doc.artboards):
+            if ab.x <= x <= ab.x + ab.width and ab.y <= y <= ab.y + ab.height:
+                return ab.id
+        return None
+
+    def _artboard_contains_bounds(outer, inner):
+        ox, oy, ow, oh = outer
+        ix, iy, iw, ih = inner
+        return ix >= ox and iy >= oy and ix + iw <= ox + ow and iy + ih <= oy + oh
+
+    def _artboard_translate_element(elem, dx, dy):
+        """Recursive element translator. Mirrors Rust translate_element /
+        Swift artboardTranslateElement."""
+        from geometry.element import Group, Layer, move_control_points
+        from document.document import selection_kind_all
+        if dx == 0.0 and dy == 0.0:
+            return elem
+        if isinstance(elem, Layer):
+            new_children = tuple(
+                _artboard_translate_element(c, dx, dy) for c in elem.children)
+            return _dc_replace(elem, children=new_children)
+        if isinstance(elem, Group):
+            new_children = tuple(
+                _artboard_translate_element(c, dx, dy) for c in elem.children)
+            return _dc_replace(elem, children=new_children)
+        return move_control_points(elem, selection_kind_all(), dx, dy)
+
+    def _read_duplicated_paths():
+        raw = _read_tool_artboard_field("duplicated_paths", []) or []
+        out = []
+        for p in raw:
+            if isinstance(p, list) and len(p) == 2:
+                try:
+                    li = int(p[0]); ci = int(p[1])
+                    out.append((li, ci))
+                except (TypeError, ValueError):
+                    pass
+        return out
+
+    def _artboard_translate_from_preview(target_ids, dx, dy):
+        model = controller.model
+        if not getattr(model, "has_preview_snapshot", False):
+            return
+        model.restore_preview_snapshot()
+        doc = controller.document
+        artboard_bounds = [
+            (a.id, (a.x, a.y, a.width, a.height)) for a in doc.artboards
+        ]
+        new_layers = list(doc.layers)
+
+        # Containment-based element translation.
+        if dx != 0.0 or dy != 0.0:
+            updated_layers = []
+            for layer in new_layers:
+                new_children = []
+                for child in layer.children:
+                    bb = child.bounds()
+                    containers = [aid for (aid, ab) in artboard_bounds
+                                  if _artboard_contains_bounds(ab, bb)]
+                    if len(containers) == 1 and containers[0] in target_ids:
+                        new_children.append(
+                            _artboard_translate_element(child, dx, dy))
+                    else:
+                        new_children.append(child)
+                updated_layers.append(_dc_replace(
+                    layer, children=tuple(new_children)))
+            new_layers = updated_layers
+
+        # Translate moving artboards.
+        new_artboards = tuple(
+            _dc_replace(a, x=a.x + dx, y=a.y + dy) if a.id in target_ids else a
+            for a in doc.artboards)
+
+        # Explicit-path translation (for duplicate's deep-copies).
+        if dx != 0.0 or dy != 0.0:
+            dup_paths = _read_duplicated_paths()
+            if dup_paths:
+                rebuilt = []
+                for li, layer in enumerate(new_layers):
+                    layer_dup_idxs = [c for (l, c) in dup_paths if l == li]
+                    if not layer_dup_idxs:
+                        rebuilt.append(layer)
+                        continue
+                    new_children = []
+                    for ci, child in enumerate(layer.children):
+                        if ci in layer_dup_idxs:
+                            new_children.append(
+                                _artboard_translate_element(child, dx, dy))
+                        else:
+                            new_children.append(child)
+                    rebuilt.append(_dc_replace(
+                        layer, children=tuple(new_children)))
+                new_layers = rebuilt
+
+        controller.set_document(_dc_replace(
+            doc, layers=tuple(new_layers), artboards=new_artboards))
+
+    def doc_artboard_probe_hit(spec, ctx, store_arg):
+        if not isinstance(spec, dict):
+            return None
+        x = eval_number(spec.get("x"), store_arg, ctx)
+        y = eval_number(spec.get("y"), store_arg, ctx)
+        shift = eval_bool(spec.get("shift"), store_arg, ctx)
+        cmd = eval_bool(spec.get("cmd"), store_arg, ctx)
+        alt = eval_bool(spec.get("alt"), store_arg, ctx)
+        store_arg.set_tool("artboard", "hit_artboard_id", None)
+        store_arg.set_tool("artboard", "hit_handle_pos", None)
+        doc = controller.document
+        sel_ids = _read_panel_selection_ids()
+
+        handle = _artboard_handle_hit(doc, sel_ids, x, y)
+        if handle is not None:
+            ab_id, pos = handle
+            store_arg.set_tool("artboard", "mode", "resizing")
+            store_arg.set_tool("artboard", "hit_artboard_id", ab_id)
+            store_arg.set_tool("artboard", "hit_handle_pos", pos)
+            return None
+
+        hit_id = _artboard_interior_hit(doc, x, y)
+        if hit_id is not None:
+            mode = "duplicating_pending" if alt else "moving_pending"
+            store_arg.set_tool("artboard", "mode", mode)
+            store_arg.set_tool("artboard", "hit_artboard_id", hit_id)
+            current = sel_ids
+            anchor = _read_panel_anchor()
+            if shift:
+                ids = [a.id for a in doc.artboards]
+                if anchor in ids and hit_id in ids:
+                    ai = ids.index(anchor); ti = ids.index(hit_id)
+                    lo, hi = min(ai, ti), max(ai, ti)
+                    store_arg.set_panel("artboards",
+                        "artboards_panel_selection", ids[lo:hi+1])
+                else:
+                    store_arg.set_panel("artboards",
+                        "artboards_panel_selection", [hit_id])
+                    store_arg.set_panel("artboards",
+                        "panel_selection_anchor", hit_id)
+            elif cmd:
+                new_sel = list(current)
+                if hit_id in new_sel:
+                    new_sel.remove(hit_id)
+                else:
+                    new_sel.append(hit_id)
+                store_arg.set_panel("artboards",
+                    "artboards_panel_selection", new_sel)
+            else:
+                store_arg.set_panel("artboards",
+                    "artboards_panel_selection", [hit_id])
+                store_arg.set_panel("artboards",
+                    "panel_selection_anchor", hit_id)
+            return None
+
+        # Empty canvas.
+        store_arg.set_tool("artboard", "mode", "creating")
+        store_arg.set_panel("artboards", "artboards_panel_selection", [])
+        store_arg.set_panel("artboards", "panel_selection_anchor", None)
+        return None
+
+    def doc_artboard_probe_hover(spec, ctx, store_arg):
+        if not isinstance(spec, dict):
+            return None
+        x = eval_number(spec.get("x"), store_arg, ctx)
+        y = eval_number(spec.get("y"), store_arg, ctx)
+        doc = controller.document
+        sel_ids = _read_panel_selection_ids()
+        handle = _artboard_handle_hit(doc, sel_ids, x, y)
+        if handle is not None:
+            store_arg.set_tool("artboard", "hover_kind", f"handle:{handle[1]}")
+            return None
+        if _artboard_interior_hit(doc, x, y) is not None:
+            store_arg.set_tool("artboard", "hover_kind", "interior")
+            return None
+        store_arg.set_tool("artboard", "hover_kind", "empty")
+        return None
+
+    def doc_artboard_create_commit(spec, ctx, store_arg):
+        if not isinstance(spec, dict):
+            return None
+        x1 = eval_number(spec.get("x1"), store_arg, ctx)
+        y1 = eval_number(spec.get("y1"), store_arg, ctx)
+        x2 = eval_number(spec.get("x2"), store_arg, ctx)
+        y2 = eval_number(spec.get("y2"), store_arg, ctx)
+        raw_x = round(min(x1, x2))
+        raw_y = round(min(y1, y2))
+        raw_w = max(round(abs(x1 - x2)), 1.0)
+        raw_h = max(round(abs(y1 - y2)), 1.0)
+        doc = controller.document
+        existing = {a.id for a in doc.artboards}
+        new_id = ""
+        for _ in range(100):
+            cand = _artboard_mod.generate_artboard_id()
+            if cand not in existing:
+                new_id = cand; break
+        if not new_id:
+            return None
+        new_name = _artboard_mod.next_artboard_name(doc.artboards)
+        ab = _artboard_mod.Artboard(
+            id=new_id, name=new_name,
+            x=float(raw_x), y=float(raw_y),
+            width=float(raw_w), height=float(raw_h))
+        controller.set_document(_dc_replace(
+            doc, artboards=tuple(list(doc.artboards) + [ab])))
+        return None
+
+    def _move_compute_delta(press_x, press_y, cursor_x, cursor_y, shift):
+        dx = cursor_x - press_x
+        dy = cursor_y - press_y
+        if shift:
+            if abs(dx) > abs(dy): dy = 0.0
+            else: dx = 0.0
+        return dx, dy
+
+    def _resolve_target_ids():
+        ids = _read_panel_selection_ids()
+        if ids:
+            return ids
+        hit = _read_tool_artboard_field("hit_artboard_id")
+        return [hit] if isinstance(hit, str) else []
+
+    def doc_artboard_move_apply(spec, ctx, store_arg):
+        if not isinstance(spec, dict):
+            return None
+        px = eval_number(spec.get("press_x"), store_arg, ctx)
+        py = eval_number(spec.get("press_y"), store_arg, ctx)
+        cx = eval_number(spec.get("cursor_x"), store_arg, ctx)
+        cy = eval_number(spec.get("cursor_y"), store_arg, ctx)
+        shift = eval_bool(spec.get("shift_held"), store_arg, ctx)
+        dx, dy = _move_compute_delta(px, py, cx, cy, shift)
+        targets = _resolve_target_ids()
+        if targets:
+            _artboard_translate_from_preview(targets, dx, dy)
+        return None
+
+    def doc_artboard_move_commit(_spec, _ctx, store_arg):
+        ab = store.eval_context().get("tool", {}).get("artboard", {})
+        px = float(ab.get("press_x", 0))
+        py = float(ab.get("press_y", 0))
+        cx = float(ab.get("cursor_x", 0))
+        cy = float(ab.get("cursor_y", 0))
+        shift = bool(ab.get("shift_held", False))
+        dx, dy = _move_compute_delta(px, py, cx, cy, shift)
+        dx = float(round(dx)); dy = float(round(dy))
+        targets = _resolve_target_ids()
+        if targets:
+            _artboard_translate_from_preview(targets, dx, dy)
+        return None
+
+    def _artboard_resize_compute(handle_pos, ox, oy, ow, oh, cx, cy,
+                                  shift, alt):
+        cx_o = ox + ow / 2.0
+        cy_o = oy + oh / 2.0
+        ratio = ow / oh if oh > 0 else 1.0
+        is_corner = handle_pos in ("nw", "ne", "se", "sw")
+        is_edge = handle_pos in ("n", "e", "s", "w")
+
+        def dom_corner(dx, dy):
+            if dy <= 0:
+                return (max(dx, 1.0), max(dx / ratio, 1.0))
+            if dx / ow > dy / oh:
+                w = max(dx, 1.0)
+                return (w, max(w / ratio, 1.0))
+            h = max(dy, 1.0)
+            return (max(h * ratio, 1.0), h)
+
+        if alt and is_corner:
+            hw = abs(cx - cx_o); hh = abs(cy - cy_o)
+            if shift:
+                rw, rh = dom_corner(2.0 * hw, 2.0 * hh)
+                hw = rw / 2.0; hh = rh / 2.0
+            nw = max(2.0 * hw, 1.0); nh = max(2.0 * hh, 1.0)
+            return (cx_o - nw / 2.0, cy_o - nh / 2.0, nw, nh)
+        if alt and is_edge:
+            nx, ny, nw, nh = ox, oy, ow, oh
+            if handle_pos in ("e", "w"):
+                hw = max(abs(cx - cx_o), 0.5)
+                nw = 2.0 * hw; nx = cx_o - hw
+                if shift:
+                    nh = max(nw / ratio, 1.0); ny = cy_o - nh / 2.0
+            else:
+                hh = max(abs(cy - cy_o), 0.5)
+                nh = 2.0 * hh; ny = cy_o - hh
+                if shift:
+                    nw = max(nh * ratio, 1.0); nx = cx_o - nw / 2.0
+            return (nx, ny, max(nw, 1.0), max(nh, 1.0))
+        if shift and is_corner:
+            right = ox + ow; bottom = oy + oh
+            if handle_pos == "se":
+                dx = max(cx - ox, 1.0); dy = max(cy - oy, 1.0)
+                nw, nh = dom_corner(dx, dy); return (ox, oy, nw, nh)
+            if handle_pos == "sw":
+                dx = max(right - cx, 1.0); dy = max(cy - oy, 1.0)
+                nw, nh = dom_corner(dx, dy); return (right - nw, oy, nw, nh)
+            if handle_pos == "ne":
+                dx = max(cx - ox, 1.0); dy = max(bottom - cy, 1.0)
+                nw, nh = dom_corner(dx, dy); return (ox, bottom - nh, nw, nh)
+            if handle_pos == "nw":
+                dx = max(right - cx, 1.0); dy = max(bottom - cy, 1.0)
+                nw, nh = dom_corner(dx, dy); return (right - nw, bottom - nh, nw, nh)
+        if shift and is_edge:
+            nx, ny, nw, nh = ox, oy, ow, oh
+            if handle_pos == "e":
+                nw = max(cx - ox, 1.0); nh = max(nw / ratio, 1.0)
+                ny = cy_o - nh / 2.0
+            elif handle_pos == "w":
+                right = ox + ow
+                nw = max(right - cx, 1.0); nx = right - nw
+                nh = max(nw / ratio, 1.0); ny = cy_o - nh / 2.0
+            elif handle_pos == "s":
+                nh = max(cy - oy, 1.0); nw = max(nh * ratio, 1.0)
+                nx = cx_o - nw / 2.0
+            elif handle_pos == "n":
+                bottom = oy + oh
+                nh = max(bottom - cy, 1.0); ny = bottom - nh
+                nw = max(nh * ratio, 1.0); nx = cx_o - nw / 2.0
+            return (nx, ny, nw, nh)
+        # Unmodified path.
+        nx, ny, nw, nh = ox, oy, ow, oh
+        right = ox + ow; bottom = oy + oh
+        if handle_pos == "nw":
+            nx = min(cx, right - 1.0); ny = min(cy, bottom - 1.0)
+            nw = right - nx; nh = bottom - ny
+        elif handle_pos == "n":
+            ny = min(cy, bottom - 1.0); nh = bottom - ny
+        elif handle_pos == "ne":
+            ny = min(cy, bottom - 1.0)
+            nw = max(cx - ox, 1.0); nh = bottom - ny
+        elif handle_pos == "e":
+            nw = max(cx - ox, 1.0)
+        elif handle_pos == "se":
+            nw = max(cx - ox, 1.0); nh = max(cy - oy, 1.0)
+        elif handle_pos == "s":
+            nh = max(cy - oy, 1.0)
+        elif handle_pos == "sw":
+            nx = min(cx, right - 1.0); nw = right - nx
+            nh = max(cy - oy, 1.0)
+        elif handle_pos == "w":
+            nx = min(cx, right - 1.0); nw = right - nx
+        return (nx, ny, nw, nh)
+
+    def doc_artboard_resize_apply(spec, ctx, store_arg):
+        if not isinstance(spec, dict):
+            return None
+        raw_handle = spec.get("handle_pos")
+        if isinstance(raw_handle, str) and raw_handle in (
+            "nw","n","ne","e","se","s","sw","w"):
+            handle_pos = raw_handle
+        else:
+            from workspace_interpreter import expr as _expr
+            v = _expr.eval_expr(raw_handle, store_arg.eval_context(extra=ctx)) \
+                if isinstance(raw_handle, str) else None
+            handle_pos = v if isinstance(v, str) else ""
+        cx = eval_number(spec.get("cursor_x"), store_arg, ctx)
+        cy = eval_number(spec.get("cursor_y"), store_arg, ctx)
+        shift = eval_bool(spec.get("shift_held"), store_arg, ctx)
+        alt = eval_bool(spec.get("alt_held"), store_arg, ctx)
+        model = controller.model
+        if not getattr(model, "has_preview_snapshot", False):
+            return None
+        target_id = _read_tool_artboard_field("hit_artboard_id")
+        if not isinstance(target_id, str):
+            return None
+        model.restore_preview_snapshot()
+        doc = controller.document
+        new_artboards = []
+        for a in doc.artboards:
+            if a.id != target_id:
+                new_artboards.append(a)
+                continue
+            nx, ny, nw, nh = _artboard_resize_compute(
+                handle_pos, a.x, a.y, a.width, a.height, cx, cy, shift, alt)
+            new_artboards.append(_dc_replace(a, x=nx, y=ny, width=nw, height=nh))
+        controller.set_document(_dc_replace(doc, artboards=tuple(new_artboards)))
+        return None
+
+    def doc_artboard_resize_commit(_spec, _ctx, store_arg):
+        ab = store.eval_context().get("tool", {}).get("artboard", {})
+        cx = float(ab.get("cursor_x", 0))
+        cy = float(ab.get("cursor_y", 0))
+        shift = bool(ab.get("shift_held", False))
+        alt = bool(ab.get("alt_held", False))
+        handle_pos = ab.get("hit_handle_pos") or ""
+        target_id = ab.get("hit_artboard_id")
+        if not handle_pos or not isinstance(target_id, str):
+            return None
+        model = controller.model
+        if not getattr(model, "has_preview_snapshot", False):
+            return None
+        model.restore_preview_snapshot()
+        doc = controller.document
+        new_artboards = []
+        for a in doc.artboards:
+            if a.id != target_id:
+                new_artboards.append(a); continue
+            nx, ny, nw, nh = _artboard_resize_compute(
+                handle_pos, a.x, a.y, a.width, a.height, cx, cy, shift, alt)
+            new_artboards.append(_dc_replace(a,
+                x=float(round(nx)), y=float(round(ny)),
+                width=max(round(nw), 1.0), height=max(round(nh), 1.0)))
+        controller.set_document(_dc_replace(doc, artboards=tuple(new_artboards)))
+        return None
+
+    def doc_artboard_delete_panel_selected(_spec, _ctx, _store):
+        targets = _read_panel_selection_ids()
+        if not targets:
+            return None
+        doc = controller.document
+        if len(targets) >= len(doc.artboards):
+            return None  # at-least-one invariant block
+        controller.model.snapshot()
+        new_artboards = tuple(a for a in doc.artboards if a.id not in targets)
+        controller.set_document(_dc_replace(doc, artboards=new_artboards))
+        return None
+
+    def doc_artboard_duplicate_init(_spec, _ctx, store_arg):
+        source_id = _read_tool_artboard_field("hit_artboard_id")
+        if not isinstance(source_id, str):
+            return None
+        doc = controller.document
+        source = next((a for a in doc.artboards if a.id == source_id), None)
+        if source is None:
+            return None
+        artboard_bounds = [
+            (a.id, (a.x, a.y, a.width, a.height)) for a in doc.artboards]
+        dup_paths = []
+        new_layers = []
+        for li, layer in enumerate(doc.layers):
+            extras = []
+            original_count = len(layer.children)
+            for child in layer.children:
+                bb = child.bounds()
+                containers = [aid for (aid, ab) in artboard_bounds
+                              if _artboard_contains_bounds(ab, bb)]
+                if len(containers) == 1 and containers[0] == source_id:
+                    extras.append(child)
+                    dup_paths.append([li, original_count + len(extras) - 1])
+            if extras:
+                new_layers.append(_dc_replace(
+                    layer, children=tuple(list(layer.children) + extras)))
+            else:
+                new_layers.append(layer)
+        existing = {a.id for a in doc.artboards}
+        new_id = ""
+        for _ in range(100):
+            cand = _artboard_mod.generate_artboard_id()
+            if cand not in existing:
+                new_id = cand; break
+        if not new_id:
+            return None
+        dup = _dc_replace(source, id=new_id,
+                          name=_artboard_mod.next_artboard_name(doc.artboards))
+        new_artboards = tuple(list(doc.artboards) + [dup])
+        controller.set_document(_dc_replace(
+            doc, layers=tuple(new_layers), artboards=new_artboards))
+        store_arg.set_tool("artboard", "hit_artboard_id", new_id)
+        store_arg.set_tool("artboard", "duplicated_paths", dup_paths)
+        return None
+
+    def doc_artboard_duplicate_apply(spec, ctx, store_arg):
+        if not isinstance(spec, dict):
+            return None
+        px = eval_number(spec.get("press_x"), store_arg, ctx)
+        py = eval_number(spec.get("press_y"), store_arg, ctx)
+        cx = eval_number(spec.get("cursor_x"), store_arg, ctx)
+        cy = eval_number(spec.get("cursor_y"), store_arg, ctx)
+        targets = _resolve_target_ids()
+        if targets:
+            _artboard_translate_from_preview(targets, cx - px, cy - py)
+        return None
+
+    doc_artboard_duplicate_commit = doc_artboard_move_commit
+
+    effects["doc.artboard.probe_hit"] = doc_artboard_probe_hit
+    effects["doc.artboard.probe_hover"] = doc_artboard_probe_hover
+    effects["doc.artboard.create_commit"] = doc_artboard_create_commit
+    effects["doc.artboard.move_apply"] = doc_artboard_move_apply
+    effects["doc.artboard.move_commit"] = doc_artboard_move_commit
+    effects["doc.artboard.resize_apply"] = doc_artboard_resize_apply
+    effects["doc.artboard.resize_commit"] = doc_artboard_resize_commit
+    effects["doc.artboard.delete_panel_selected"] = doc_artboard_delete_panel_selected
+    effects["doc.artboard.duplicate_init"] = doc_artboard_duplicate_init
+    effects["doc.artboard.duplicate_apply"] = doc_artboard_duplicate_apply
+    effects["doc.artboard.duplicate_commit"] = doc_artboard_duplicate_commit
+
     effects["doc.snapshot"] = doc_snapshot
     effects["doc.clear_selection"] = doc_clear_selection
     effects["doc.set_selection"] = doc_set_selection
