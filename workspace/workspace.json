@@ -4487,6 +4487,10 @@
       "viewbox": "0 0 28 28",
       "svg": "<line x1=\"10\" y1=\"14\" x2=\"10\" y2=\"5\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"13\" y1=\"14\" x2=\"13\" y2=\"3\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"16\" y1=\"14\" x2=\"16\" y2=\"4\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"19\" y1=\"14\" x2=\"19\" y2=\"6\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<path d=\"M9,14 L4,18 L4,22 Q5,25 9,25 L19,25 Q22,25 22,22 L22,14\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"
     },
+    "artboard": {
+      "viewbox": "0 0 28 28",
+      "svg": "<path d=\"M5,6 L18,6 L23,11 L23,23 L5,23 Z\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linejoin=\"miter\"/>\n<polyline points=\"18,6 18,11 23,11\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linejoin=\"miter\"/>\n"
+    },
     "magic_wand": {
       "viewbox": "0 0 28 28",
       "svg": "<line x1=\"4\" y1=\"22\" x2=\"18\" y2=\"8\" stroke=\"currentColor\"\n  stroke-width=\"2\" stroke-linecap=\"round\"/>\n<polygon fill=\"currentColor\"\n  points=\"20,3 21,7 25,8 21,9 20,13 19,9 15,8 19,7\"/>\n<polygon fill=\"currentColor\"\n  points=\"24,12 24.7,13.5 26.5,14 24.7,14.5 24,16 23.3,14.5 21.5,14 23.3,13.5\"/>\n"
@@ -5681,6 +5685,36 @@
                         "description": "Zoom in by click; Alt-click to zoom out; drag for scrubby or marquee zoom; Ctrl+wheel for stepped zoom\n"
                       }
                     ]
+                  }
+                },
+                {
+                  "id": "btn_artboard_slot",
+                  "type": "icon_button",
+                  "summary": "Artboard (Shift+O)",
+                  "description": "Create, activate, move, resize, and duplicate artboards on the canvas. Drag from empty canvas to create a new artboard. Click an artboard to activate it (writes panel-selection per the panel rules). Drag an artboard interior to move it; drag a resize handle to resize it; Alt-drag to duplicate. Double- click an artboard to open the Artboard Options Dialogue. Double-click the icon to invoke fit_all_artboards. No long-press alternates. See ARTBOARD_TOOL.md.\n",
+                  "icon": "artboard",
+                  "grid": {
+                    "row": 4,
+                    "col": 1
+                  },
+                  "style": {
+                    "size": "{{theme.sizes.tool_button}}",
+                    "checked_bg": "{{theme.colors.button_checked}}",
+                    "hover": {
+                      "background": "{{theme.colors.button_checked}}"
+                    }
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "select_tool",
+                      "params": {
+                        "tool": "artboard"
+                      }
+                    }
+                  ],
+                  "bind": {
+                    "checked": "state.active_tool == \"artboard\""
                   }
                 }
               ]
@@ -6974,6 +7008,20 @@
       "action": "select_tool",
       "params": {
         "tool": "hand"
+      }
+    },
+    {
+      "key": "Shift+O",
+      "action": "select_tool",
+      "params": {
+        "tool": "artboard"
+      }
+    },
+    {
+      "key": "O",
+      "action": "select_tool",
+      "params": {
+        "tool": "artboard"
       }
     },
     {
@@ -17485,6 +17533,407 @@
           }
         ]
       }
+    },
+    "artboard": {
+      "id": "artboard",
+      "cursor": "crosshair",
+      "menu_label": "Artboard Tool",
+      "shortcut": "Shift+O",
+      "tool_options_action": "fit_all_artboards",
+      "state": {
+        "mode": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "creating",
+            "moving_pending",
+            "moving",
+            "resizing",
+            "duplicating_pending",
+            "duplicating"
+          ]
+        },
+        "press_x": {
+          "default": 0.0
+        },
+        "press_y": {
+          "default": 0.0
+        },
+        "cursor_x": {
+          "default": 0.0
+        },
+        "cursor_y": {
+          "default": 0.0
+        },
+        "alt_at_press": {
+          "default": false
+        },
+        "alt_held": {
+          "default": false
+        },
+        "shift_held": {
+          "default": false
+        },
+        "moved": {
+          "default": false
+        },
+        "snapshotted": {
+          "default": false
+        },
+        "hit_artboard_id": {
+          "default": null
+        },
+        "hit_handle_pos": {
+          "default": null
+        }
+      },
+      "handlers": {
+        "on_enter": [
+          {
+            "set": {
+              "tool.artboard.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.moved": "false"
+            }
+          }
+        ],
+        "on_leave": [
+          {
+            "set": {
+              "tool.artboard.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.moved": "false"
+            }
+          }
+        ],
+        "on_mousedown": [
+          {
+            "doc.artboard.probe_hit": {
+              "x": "event.x",
+              "y": "event.y",
+              "shift": "event.modifiers.shift",
+              "cmd": "event.modifiers.cmd",
+              "alt": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.press_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.press_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.cursor_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.cursor_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.alt_at_press": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.shift_held": "event.modifiers.shift"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.moved": "false"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.snapshotted": "false"
+            }
+          }
+        ],
+        "on_mousemove": [
+          {
+            "set": {
+              "tool.artboard.cursor_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.cursor_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.shift_held": "event.modifiers.shift"
+            }
+          },
+          {
+            "if": "not tool.artboard.moved && (abs(event.x - tool.artboard.press_x) > 4 || abs(event.y - tool.artboard.press_y) > 4)",
+            "then": [
+              {
+                "set": {
+                  "tool.artboard.moved": "true"
+                }
+              },
+              {
+                "if": "not tool.artboard.snapshotted",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "set": {
+                      "tool.artboard.snapshotted": "true"
+                    }
+                  }
+                ]
+              },
+              {
+                "if": "tool.artboard.mode == 'moving_pending'",
+                "then": [
+                  {
+                    "set": {
+                      "tool.artboard.mode": "'moving'"
+                    }
+                  }
+                ]
+              },
+              {
+                "if": "tool.artboard.mode == 'duplicating_pending'",
+                "then": [
+                  {
+                    "set": {
+                      "tool.artboard.mode": "'duplicating'"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "if": "tool.artboard.mode == 'moving' && tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.move_apply": {
+                  "press_x": "tool.artboard.press_x",
+                  "press_y": "tool.artboard.press_y",
+                  "cursor_x": "event.x",
+                  "cursor_y": "event.y",
+                  "shift_held": "event.modifiers.shift"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.artboard.mode == 'resizing' && tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.resize_apply": {
+                  "handle_pos": "tool.artboard.hit_handle_pos",
+                  "press_x": "tool.artboard.press_x",
+                  "press_y": "tool.artboard.press_y",
+                  "cursor_x": "event.x",
+                  "cursor_y": "event.y",
+                  "shift_held": "event.modifiers.shift",
+                  "alt_held": "event.modifiers.alt"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.artboard.mode == 'duplicating' && tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.duplicate_apply": {
+                  "press_x": "tool.artboard.press_x",
+                  "press_y": "tool.artboard.press_y",
+                  "cursor_x": "event.x",
+                  "cursor_y": "event.y"
+                }
+              }
+            ]
+          }
+        ],
+        "on_mouseup": [
+          {
+            "if": "tool.artboard.mode == 'creating' && tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.create_commit": {
+                  "x1": "tool.artboard.press_x",
+                  "y1": "tool.artboard.press_y",
+                  "x2": "event.x",
+                  "y2": "event.y"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.artboard.mode == 'moving' && tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.move_commit": {}
+              }
+            ]
+          },
+          {
+            "if": "tool.artboard.mode == 'resizing' && tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.resize_commit": {}
+              }
+            ]
+          },
+          {
+            "if": "tool.artboard.mode == 'duplicating' && tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.duplicate_commit": {
+                  "press_x": "tool.artboard.press_x",
+                  "press_y": "tool.artboard.press_y",
+                  "cursor_x": "event.x",
+                  "cursor_y": "event.y"
+                }
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.artboard.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.moved": "false"
+            }
+          }
+        ],
+        "on_dblclick": [
+          {
+            "doc.artboard.probe_hit": {
+              "x": "event.x",
+              "y": "event.y",
+              "shift": "false",
+              "cmd": "false",
+              "alt": "false"
+            }
+          },
+          {
+            "if": "tool.artboard.hit_artboard_id != null && tool.artboard.hit_handle_pos == null",
+            "then": [
+              {
+                "open_dialog": {
+                  "id": "artboard_options",
+                  "params": {
+                    "artboard_id": "tool.artboard.hit_artboard_id"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape' && tool.artboard.mode != 'idle' && tool.artboard.snapshotted",
+            "then": [
+              {
+                "doc.snapshot.restore": {}
+              },
+              {
+                "set": {
+                  "tool.artboard.mode": "'idle'"
+                }
+              },
+              {
+                "set": {
+                  "tool.artboard.moved": "false"
+                }
+              },
+              {
+                "set": {
+                  "tool.artboard.snapshotted": "false"
+                }
+              }
+            ]
+          },
+          {
+            "if": "(event.key == 'Delete' || event.key == 'Backspace') && tool.artboard.mode == 'idle'",
+            "then": [
+              {
+                "if": "len(panel.artboards.selection) > 0",
+                "then": [
+                  {
+                    "doc.artboard.delete_panel_selected": {}
+                  }
+                ],
+                "else": [
+                  {
+                    "dispatch": {
+                      "action": "delete_selection"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "overlay": [
+        {
+          "if": "len(panel.artboards.selection) == 1",
+          "render": {
+            "type": "artboard_resize_handles",
+            "artboard_id": "panel.artboards.selection[0]"
+          }
+        },
+        {
+          "if": "tool.artboard.mode == 'creating' && tool.artboard.moved",
+          "render": {
+            "type": "marquee_rect",
+            "x1": "tool.artboard.press_x",
+            "y1": "tool.artboard.press_y",
+            "x2": "tool.artboard.cursor_x",
+            "y2": "tool.artboard.cursor_y"
+          }
+        },
+        {
+          "if": "tool.artboard.moved && (tool.artboard.mode == 'moving' || tool.artboard.mode == 'resizing' || tool.artboard.mode == 'duplicating') && not document.artboard_options.update_while_dragging",
+          "render": {
+            "type": "artboard_outline_preview",
+            "mode": "tool.artboard.mode",
+            "handle_pos": "tool.artboard.hit_handle_pos",
+            "artboard_id": "tool.artboard.hit_artboard_id",
+            "press_x": "tool.artboard.press_x",
+            "press_y": "tool.artboard.press_y",
+            "cursor_x": "tool.artboard.cursor_x",
+            "cursor_y": "tool.artboard.cursor_y",
+            "shift_held": "tool.artboard.shift_held",
+            "alt_held": "tool.artboard.alt_held"
+          }
+        }
+      ]
     },
     "blob_brush": {
       "id": "blob_brush",

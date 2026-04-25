@@ -1196,6 +1196,7 @@ fn build_appstate_ctx(
         ToolKind::Shear => "shear",
         ToolKind::Hand => "hand",
         ToolKind::Zoom => "zoom",
+        ToolKind::Artboard => "artboard",
     };
     let fill_color = match st.app_default_fill {
         None => serde_json::Value::Null,
@@ -2571,6 +2572,7 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
                 ToolKind::Shear => "shear",
                 ToolKind::Hand => "hand",
                 ToolKind::Zoom => "zoom",
+                ToolKind::Artboard => "artboard",
             };
             serde_json::Value::String(name.to_string())
         }
@@ -2856,6 +2858,7 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
         "shear" => Some(ToolKind::Shear),
         "hand" => Some(ToolKind::Hand),
         "zoom" => Some(ToolKind::Zoom),
+        "artboard" => Some(ToolKind::Artboard),
         _ => None,
     }
 }
