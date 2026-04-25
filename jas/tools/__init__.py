@@ -65,6 +65,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.SELECTION: _yaml_tool("selection"),
         Tool.PARTIAL_SELECTION: _yaml_tool("partial_selection"),
         Tool.INTERIOR_SELECTION: _yaml_tool("interior_selection"),
+        Tool.MAGIC_WAND: _yaml_tool("magic_wand"),
         Tool.PEN: _yaml_tool("pen"),
         Tool.ADD_ANCHOR_POINT: _yaml_tool("add_anchor_point"),
         Tool.DELETE_ANCHOR_POINT: _yaml_tool("delete_anchor_point"),
