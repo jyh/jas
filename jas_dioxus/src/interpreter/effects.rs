@@ -3656,19 +3656,25 @@ fn drag_to_shear_params(
 /// (multiplies stroke-width by the geometric mean) and
 /// `state.scale_corners` (scales rounded_rect rx / ry).
 ///
-/// `copy: true` is not yet wired (Phase 1.4b); for now the
-/// transformation is applied to the original selection regardless.
+/// When `copy: true`, the selection is first duplicated (each
+/// element copied, inserted immediately above the original in
+/// z-order, selection moves to the duplicates) and the transform
+/// is then applied to those copies — the originals are untouched.
 fn scale_apply(
     model: &mut Model,
     store: &StateStore,
     ctx: &serde_json::Value,
     sx: f64,
     sy: f64,
-    _copy: bool,
+    copy: bool,
 ) {
     use crate::algorithms::transform_apply;
+    use crate::document::controller::Controller;
     if (sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9 {
         return; // Identity — nothing to do.
+    }
+    if copy {
+        Controller::copy_selection(model, 0.0, 0.0);
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
@@ -3705,17 +3711,22 @@ fn scale_apply(
 
 /// Rotate apply implementation. Mirrors scale_apply with a rotation
 /// matrix; rotation is rigid so there are no stroke / corner
-/// options.
+/// options. Honors `copy: true` by duplicating the selection
+/// before applying.
 fn rotate_apply(
     model: &mut Model,
     store: &StateStore,
     ctx: &serde_json::Value,
     theta_deg: f64,
-    _copy: bool,
+    copy: bool,
 ) {
     use crate::algorithms::transform_apply;
+    use crate::document::controller::Controller;
     if theta_deg.abs() < 1e-9 {
         return;
+    }
+    if copy {
+        Controller::copy_selection(model, 0.0, 0.0);
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::rotate_matrix(theta_deg, rx, ry);
@@ -3734,7 +3745,8 @@ fn rotate_apply(
 
 /// Shear apply implementation. Pure shear has determinant 1 so
 /// strokes are preserved naturally; there are no stroke or corner
-/// options.
+/// options. Honors `copy: true` by duplicating the selection
+/// before applying.
 fn shear_apply(
     model: &mut Model,
     store: &StateStore,
@@ -3742,11 +3754,15 @@ fn shear_apply(
     angle_deg: f64,
     axis: &str,
     axis_angle_deg: f64,
-    _copy: bool,
+    copy: bool,
 ) {
     use crate::algorithms::transform_apply;
+    use crate::document::controller::Controller;
     if angle_deg.abs() < 1e-9 {
         return;
+    }
+    if copy {
+        Controller::copy_selection(model, 0.0, 0.0);
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::shear_matrix(angle_deg, axis, axis_angle_deg, rx, ry);
