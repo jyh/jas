@@ -3235,6 +3235,258 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* Compute new (x, y, w, h) for a resize gesture. Pure function;
+     mirrors Rust artboard_resize_compute / Swift
+     artboardResizeCompute. Modifier matrix per ARTBOARD_TOOL.md
+     §Drag-to-resize. *)
+  let artboard_resize_compute handle_pos orig_x orig_y orig_w orig_h
+        cursor_x cursor_y shift_held alt_held =
+    let orig_cx = orig_x +. orig_w /. 2.0 in
+    let orig_cy = orig_y +. orig_h /. 2.0 in
+    let orig_ratio = if orig_h > 0.0 then orig_w /. orig_h else 1.0 in
+    let is_corner = List.mem handle_pos ["nw";"ne";"se";"sw"] in
+    let is_edge = List.mem handle_pos ["n";"e";"s";"w"] in
+
+    let dominant_w_from_corner dx dy =
+      if dy <= 0.0 then
+        (Float.max dx 1.0, Float.max (dx /. orig_ratio) 1.0)
+      else if dx /. orig_w > dy /. orig_h then
+        let w = Float.max dx 1.0 in
+        (w, Float.max (w /. orig_ratio) 1.0)
+      else
+        let h = Float.max dy 1.0 in
+        (Float.max (h *. orig_ratio) 1.0, h)
+    in
+
+    if alt_held && is_corner then begin
+      let hw = ref (Float.abs (cursor_x -. orig_cx)) in
+      let hh = ref (Float.abs (cursor_y -. orig_cy)) in
+      if shift_held then begin
+        let (rw, rh) = dominant_w_from_corner (2.0 *. !hw) (2.0 *. !hh) in
+        hw := rw /. 2.0; hh := rh /. 2.0
+      end;
+      let nw = Float.max (2.0 *. !hw) 1.0 in
+      let nh = Float.max (2.0 *. !hh) 1.0 in
+      (orig_cx -. nw /. 2.0, orig_cy -. nh /. 2.0, nw, nh)
+    end
+    else if alt_held && is_edge then begin
+      let nx = ref orig_x and ny = ref orig_y in
+      let nw = ref orig_w and nh = ref orig_h in
+      (match handle_pos with
+       | "e" | "w" ->
+         let half_w = Float.max (Float.abs (cursor_x -. orig_cx)) 0.5 in
+         nw := 2.0 *. half_w;
+         nx := orig_cx -. half_w;
+         if shift_held then begin
+           nh := Float.max (!nw /. orig_ratio) 1.0;
+           ny := orig_cy -. !nh /. 2.0
+         end
+       | "n" | "s" ->
+         let half_h = Float.max (Float.abs (cursor_y -. orig_cy)) 0.5 in
+         nh := 2.0 *. half_h;
+         ny := orig_cy -. half_h;
+         if shift_held then begin
+           nw := Float.max (!nh *. orig_ratio) 1.0;
+           nx := orig_cx -. !nw /. 2.0
+         end
+       | _ -> ());
+      (!nx, !ny, Float.max !nw 1.0, Float.max !nh 1.0)
+    end
+    else if shift_held && is_corner then begin
+      let right = orig_x +. orig_w in
+      let bottom = orig_y +. orig_h in
+      match handle_pos with
+      | "se" ->
+        let dx = Float.max (cursor_x -. orig_x) 1.0 in
+        let dy = Float.max (cursor_y -. orig_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (orig_x, orig_y, nw, nh)
+      | "sw" ->
+        let dx = Float.max (right -. cursor_x) 1.0 in
+        let dy = Float.max (cursor_y -. orig_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (right -. nw, orig_y, nw, nh)
+      | "ne" ->
+        let dx = Float.max (cursor_x -. orig_x) 1.0 in
+        let dy = Float.max (bottom -. cursor_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (orig_x, bottom -. nh, nw, nh)
+      | "nw" ->
+        let dx = Float.max (right -. cursor_x) 1.0 in
+        let dy = Float.max (bottom -. cursor_y) 1.0 in
+        let (nw, nh) = dominant_w_from_corner dx dy in
+        (right -. nw, bottom -. nh, nw, nh)
+      | _ -> (orig_x, orig_y, orig_w, orig_h)
+    end
+    else if shift_held && is_edge then begin
+      let nx = ref orig_x and ny = ref orig_y in
+      let nw = ref orig_w and nh = ref orig_h in
+      (match handle_pos with
+       | "e" ->
+         nw := Float.max (cursor_x -. orig_x) 1.0;
+         nh := Float.max (!nw /. orig_ratio) 1.0;
+         ny := orig_cy -. !nh /. 2.0
+       | "w" ->
+         let right = orig_x +. orig_w in
+         nw := Float.max (right -. cursor_x) 1.0;
+         nx := right -. !nw;
+         nh := Float.max (!nw /. orig_ratio) 1.0;
+         ny := orig_cy -. !nh /. 2.0
+       | "s" ->
+         nh := Float.max (cursor_y -. orig_y) 1.0;
+         nw := Float.max (!nh *. orig_ratio) 1.0;
+         nx := orig_cx -. !nw /. 2.0
+       | "n" ->
+         let bottom = orig_y +. orig_h in
+         nh := Float.max (bottom -. cursor_y) 1.0;
+         ny := bottom -. !nh;
+         nw := Float.max (!nh *. orig_ratio) 1.0;
+         nx := orig_cx -. !nw /. 2.0
+       | _ -> ());
+      (!nx, !ny, !nw, !nh)
+    end
+    else begin
+      (* Unmodified path. *)
+      let nx = ref orig_x and ny = ref orig_y in
+      let nw = ref orig_w and nh = ref orig_h in
+      let right = orig_x +. orig_w in
+      let bottom = orig_y +. orig_h in
+      (match handle_pos with
+       | "nw" ->
+         nx := Float.min cursor_x (right -. 1.0);
+         ny := Float.min cursor_y (bottom -. 1.0);
+         nw := right -. !nx; nh := bottom -. !ny
+       | "n" ->
+         ny := Float.min cursor_y (bottom -. 1.0);
+         nh := bottom -. !ny
+       | "ne" ->
+         ny := Float.min cursor_y (bottom -. 1.0);
+         nw := Float.max (cursor_x -. orig_x) 1.0;
+         nh := bottom -. !ny
+       | "e" -> nw := Float.max (cursor_x -. orig_x) 1.0
+       | "se" ->
+         nw := Float.max (cursor_x -. orig_x) 1.0;
+         nh := Float.max (cursor_y -. orig_y) 1.0
+       | "s" -> nh := Float.max (cursor_y -. orig_y) 1.0
+       | "sw" ->
+         nx := Float.min cursor_x (right -. 1.0);
+         nw := right -. !nx;
+         nh := Float.max (cursor_y -. orig_y) 1.0
+       | "w" ->
+         nx := Float.min cursor_x (right -. 1.0);
+         nw := right -. !nx
+       | _ -> ());
+      (!nx, !ny, !nw, !nh)
+    end
+  in
+
+  (* doc.artboard.resize_apply — live drag-to-resize. Targets
+     tool.artboard.hit_artboard_id (set by probe_hit). *)
+  let doc_artboard_resize_apply spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       let handle_pos = match lookup "handle_pos" with
+         | Some (`String raw) when List.mem raw
+             ["nw";"n";"ne";"e";"se";"s";"sw";"w"] -> raw
+         | Some (`String expr) ->
+           let eval_ctx = State_store.eval_context ~extra:ctx store in
+           (match Expr_eval.evaluate expr eval_ctx with
+            | Expr_eval.Str s -> s
+            | _ -> "")
+         | _ -> ""
+       in
+       let cursor_x = eval_number (lookup "cursor_x") store ctx in
+       let cursor_y = eval_number (lookup "cursor_y") store ctx in
+       let shift = eval_bool (lookup "shift_held") store ctx in
+       let alt = eval_bool (lookup "alt_held") store ctx in
+       let model = ctrl#model in
+       if model#has_preview_snapshot then begin
+         let tool = Yojson.Safe.Util.member "tool"
+                      (State_store.eval_context store) in
+         let ab = Yojson.Safe.Util.member "artboard" tool in
+         match Yojson.Safe.Util.member "hit_artboard_id" ab with
+         | `String target_id ->
+           model#restore_preview_snapshot;
+           let doc = ctrl#document in
+           let new_artboards = List.map (fun (a : Artboard.artboard) ->
+             if a.id <> target_id then a
+             else
+               let (nx, ny, nw, nh) = artboard_resize_compute
+                 handle_pos a.x a.y a.width a.height
+                 cursor_x cursor_y shift alt in
+               { a with x = nx; y = ny; width = nw; height = nh }
+           ) doc.artboards in
+           ctrl#set_document { doc with artboards = new_artboards }
+         | _ -> ()
+       end
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.artboard.resize_commit — integer-pt rounded final bounds. *)
+  let doc_artboard_resize_commit _ _ store =
+    let model = ctrl#model in
+    let tool = Yojson.Safe.Util.member "tool"
+                 (State_store.eval_context store) in
+    let ab = Yojson.Safe.Util.member "artboard" tool in
+    let read_num k =
+      match Yojson.Safe.Util.member k ab with
+      | `Float f -> f
+      | `Int i -> float_of_int i
+      | _ -> 0.0
+    in
+    let read_bool k =
+      match Yojson.Safe.Util.member k ab with
+      | `Bool b -> b | _ -> false
+    in
+    let cursor_x = read_num "cursor_x" in
+    let cursor_y = read_num "cursor_y" in
+    let shift = read_bool "shift_held" in
+    let alt = read_bool "alt_held" in
+    let handle_pos = match Yojson.Safe.Util.member "hit_handle_pos" ab with
+      | `String s -> s | _ -> "" in
+    let target_id = match Yojson.Safe.Util.member "hit_artboard_id" ab with
+      | `String s -> Some s | _ -> None in
+    (match target_id with
+     | None -> ()
+     | Some _ when handle_pos = "" -> ()
+     | Some _ when not model#has_preview_snapshot -> ()
+     | Some target_id ->
+       model#restore_preview_snapshot;
+       let doc = ctrl#document in
+       let new_artboards = List.map (fun (a : Artboard.artboard) ->
+         if a.id <> target_id then a
+         else
+           let (nx, ny, nw, nh) = artboard_resize_compute
+             handle_pos a.x a.y a.width a.height
+             cursor_x cursor_y shift alt in
+           { a with
+             x = Float.round nx; y = Float.round ny;
+             width = Float.max (Float.round nw) 1.0;
+             height = Float.max (Float.round nh) 1.0 }
+       ) doc.artboards in
+       ctrl#set_document { doc with artboards = new_artboards });
+    `Null
+  in
+
+  (* doc.artboard.delete_panel_selected — at-least-one invariant. *)
+  let doc_artboard_delete_panel_selected _ _ store =
+    let target_ids = artboard_panel_selection_ids store in
+    if target_ids <> [] then begin
+      let doc = ctrl#document in
+      let total = List.length doc.artboards in
+      if List.length target_ids < total then begin
+        ctrl#model#snapshot;
+        let new_artboards = List.filter (fun (a : Artboard.artboard) ->
+          not (List.mem a.id target_ids)
+        ) doc.artboards in
+        ctrl#set_document { doc with artboards = new_artboards }
+      end
+    end;
+    `Null
+  in
+
   (* doc.artboard.create_commit — drag-to-create commit. Builds a
      rect from (x1, y1)-(x2, y2), rounds to integer pt, clamps each
      dimension to >= 1 pt, mints a fresh id (collision-retry against
@@ -3283,6 +3535,9 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.artboard.create_commit", doc_artboard_create_commit);
     ("doc.artboard.move_apply", doc_artboard_move_apply);
     ("doc.artboard.move_commit", doc_artboard_move_commit);
+    ("doc.artboard.resize_apply", doc_artboard_resize_apply);
+    ("doc.artboard.resize_commit", doc_artboard_resize_commit);
+    ("doc.artboard.delete_panel_selected", doc_artboard_delete_panel_selected);
     ("doc.clear_selection", doc_clear_selection);
     ("doc.set_selection", doc_set_selection);
     ("doc.add_to_selection", doc_add_to_selection);
