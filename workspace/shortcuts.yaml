@@ -42,6 +42,8 @@ shortcuts:
   - { key: "Q",            action: select_tool,      params: { tool: lasso } }
   - { key: "Z",            action: select_tool,      params: { tool: zoom } }
   - { key: "H",            action: select_tool,      params: { tool: hand } }
+  - { key: "Shift+O",      action: select_tool,      params: { tool: artboard } }
+  - { key: "O",            action: select_tool,      params: { tool: artboard } }   # alias
   # Fill / Stroke
   - { key: "D",            action: reset_fill_stroke }
   - { key: "X",            action: toggle_fill_on_top }
