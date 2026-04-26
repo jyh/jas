@@ -41,7 +41,16 @@ in `workspace_interpreter/anchor_buffers_test.py` (if present).
 - Reference implementation; pen state machine + anchor-buffer +
   close-hit tests inline.
 
-**Flask — no coverage.**
+**Flask — `jas_flask/tests/js/test_anchor_buffers.mjs`,
+`tests/js/test_phase12.mjs`, `tests/js/test_canvas.mjs`** (~14 tests
+spread across files)
+- anchor_buffers module: push corner anchor, set_last_out mirroring,
+  pop, clear, closeHit semantics.
+- anchor.* effects (push / pop / clear / set_last_out) plus the
+  anchor_buffer_length / anchor_buffer_close_hit primitives.
+- doc.add_path_from_anchor_buffer (open + closed paths, M / C / Z
+  output).
+- pen_overlay rendering (path-so-far, anchor squares, close-hit ring).
 
 The manual suite below covers overlay rendering (pen_overlay render
 type with close-hit indicator, handle bars, preview curve), tool
@@ -351,6 +360,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **PEN-201** [wired] Click-and-drag places a smooth anchor with
   mirrored in-handle.
@@ -361,6 +371,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **PEN-202** [wired] Close-hit triggers when within 8 px of first
   anchor.
@@ -371,6 +382,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **PEN-203** [wired] Esc discards a 1-anchor path.
       Do: Place 1 anchor; Esc.
@@ -379,6 +391,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **PEN-204** [wired] Esc commits a 2-anchor path.
       Do: Place 2 anchors; Esc.
@@ -387,6 +400,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **PEN-205** [wired] Double-click pops the last anchor then commits.
       Do: Place 3 anchors; double-click at a 4th location.
@@ -396,6 +410,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **PEN-206** [wired] Tool deactivation auto-commits.
       Do: Place 3 anchors; press V.
@@ -404,6 +419,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 ---
 
