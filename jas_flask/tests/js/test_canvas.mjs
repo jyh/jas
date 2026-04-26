@@ -90,6 +90,53 @@ describe("renderSelectionLayer", () => {
   });
 });
 
+describe("buffer_polyline overlay (Pencil)", () => {
+  // The pencil.yaml overlay is type: buffer_polyline with `buffer:`
+  // pointing at the named point buffer and `style:` for the stroke.
+  // Renders a thin black polyline matching the raw drag — the
+  // committed path is the smoothed fit_curve output, separate.
+  const toolSpec = {
+    id: "pencil",
+    overlay: {
+      if: "tool.pencil.mode == 'drawing'",
+      render: {
+        type: "buffer_polyline",
+        buffer: "pencil_overlay_test",
+        style: "stroke: black; stroke-width: 1;",
+      },
+    },
+  };
+
+  it("emits a polyline of the buffer's points while drawing", async () => {
+    const buffers = await import("../../static/js/engine/point_buffers.mjs");
+    buffers.clear("pencil_overlay_test");
+    buffers.push("pencil_overlay_test", 10, 20);
+    buffers.push("pencil_overlay_test", 30, 40);
+    buffers.push("pencil_overlay_test", 50, 60);
+    const scope = new Scope({ tool: { pencil: { mode: "drawing" } } });
+    const svg = renderOverlayLayer(toolSpec, scope);
+    assert.match(svg, /<polyline/);
+    assert.match(svg, /points="10,20 30,40 50,60"/);
+    assert.match(svg, /fill="none"/);
+    assert.match(svg, /stroke: black/);
+  });
+
+  it("renders nothing when the guard is false", async () => {
+    const buffers = await import("../../static/js/engine/point_buffers.mjs");
+    buffers.clear("pencil_overlay_test");
+    buffers.push("pencil_overlay_test", 10, 20);
+    const scope = new Scope({ tool: { pencil: { mode: "idle" } } });
+    assert.equal(renderOverlayLayer(toolSpec, scope), "");
+  });
+
+  it("renders nothing when the buffer is empty", async () => {
+    const buffers = await import("../../static/js/engine/point_buffers.mjs");
+    buffers.clear("pencil_overlay_test");
+    const scope = new Scope({ tool: { pencil: { mode: "drawing" } } });
+    assert.equal(renderOverlayLayer(toolSpec, scope), "");
+  });
+});
+
 describe("partial_selection overlay", () => {
   // The partial_selection.yaml overlay has type "partial_selection_overlay"
   // — the Rust renderer draws path handles + a marquee rect. In Flask,

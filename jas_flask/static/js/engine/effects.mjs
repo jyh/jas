@@ -562,6 +562,11 @@ function runEffect(effect, scope, store, options) {
           }
 
           const elem = mkPath({ d: cmds, ...extra });
+          // Pencil shouldn't inherit a default fill — a freehand
+          // stroke is rarely meant to be a filled region. Use null
+          // when the spec didn't specify a fill explicitly.
+          if (!("fill" in spec)) elem.fill = null;
+          applyShapeDefaults(elem, store);
           model.mutate((d) => addElementAt(d, [0], elem));
           return;
         }

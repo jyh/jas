@@ -12,6 +12,7 @@
 import { renderDocument, renderElement } from "./renderer.mjs";
 import { elementBounds, controlPoints } from "./geometry.mjs";
 import { getElement, partialCpsForPath } from "./document.mjs";
+import * as pointBuffers from "./point_buffers.mjs";
 import { evaluate } from "./expr.mjs";
 import { Scope } from "./scope.mjs";
 import { toBool, toStringCoerce } from "./value.mjs";
@@ -253,7 +254,10 @@ function renderOverlaySpec(spec, scope) {
   // `style:`) pass through verbatim.
   const evaluated = {};
   for (const [k, v] of Object.entries(spec)) {
-    if (k === "type" || k === "style") {
+    // type / style / buffer are literal strings, not expressions —
+    // matches how the rest of the runtime reads them (effects.mjs's
+    // buffer.* effects, the per-type overlay element tag).
+    if (k === "type" || k === "style" || k === "buffer") {
       evaluated[k] = v;
       continue;
     }
@@ -269,7 +273,26 @@ function renderOverlaySpec(spec, scope) {
   if (evaluated.type === "partial_selection_overlay") {
     return renderPartialSelectionOverlay(evaluated);
   }
+  if (evaluated.type === "buffer_polyline") {
+    return renderBufferPolyline(evaluated);
+  }
   return buildOverlayElement(evaluated);
+}
+
+// Polyline preview tracking the live drag of an accumulator tool
+// (Pencil's freehand drag, etc.). Reads the named point buffer
+// directly. Returns "" for buffers with fewer than two points so
+// SVG doesn't choke on a degenerate <polyline>.
+function renderBufferPolyline(evaluated) {
+  const name = String(evaluated.buffer || "");
+  if (!name) return "";
+  const pts = pointBuffers.points(name);
+  if (pts.length < 2) return "";
+  const pointsAttr = pts.map(([x, y]) => `${num(x)},${num(y)}`).join(" ");
+  const styleAttr = evaluated.style
+    ? ` style="${String(evaluated.style).replace(/"/g, "&quot;")}"`
+    : "";
+  return `<polyline points="${pointsAttr}" fill="none"${styleAttr}/>`;
 }
 
 // Marquee rect for the Partial Selection tool. The selected-element
