@@ -1543,6 +1543,16 @@
         });
         return;
       }
+      if (actionId === "undo"
+          && typeof globalThis.JAS.undo === "function") {
+        globalThis.JAS.undo();
+        return;
+      }
+      if (actionId === "redo"
+          && typeof globalThis.JAS.redo === "function") {
+        globalThis.JAS.redo();
+        return;
+      }
     }
     var def = actions[actionId];
     if (!def) {

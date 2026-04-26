@@ -28,6 +28,7 @@ import {
 } from "/static/js/engine/canvas.mjs";
 import { saveSession, loadSession } from "/static/js/engine/session.mjs";
 import { exportSVG, importSVG } from "/static/js/engine/svg_io.mjs";
+import { setElementAttr } from "/static/js/engine/effects.mjs";
 
 const SESSION_AUTOSAVE_MS = 30000;
 
@@ -104,6 +105,10 @@ export function bootstrap() {
       URL.revokeObjectURL(url);
       model.markSaved();
     },
+    /** Edit → Undo. No-op when the undo stack is empty. */
+    undo() { model.undo(); },
+    /** Edit → Redo. No-op when the redo stack is empty. */
+    redo() { model.redo(); },
     /**
      * File → Open: replace the current document with the parsed
      * contents of a user-selected SVG file. Returns a Promise
@@ -137,6 +142,38 @@ export function bootstrap() {
         document.body.removeChild(input);
       });
     },
+  });
+
+  // ── Panel → document propagation ─────────────────────
+  //
+  // V1 panels (Color, Stroke) drive global state.fill_color /
+  // state.stroke_color etc. App.js mirrors these into the engine
+  // store; the listener below catches the writes and pushes the
+  // new value onto every currently-selected element.
+  //
+  // Per-change snapshot semantics: every state change becomes a
+  // separate undo entry. That floods the undo stack on slider
+  // drag, but keeps every change reversible without inventing a
+  // begin/end protocol the panel yamls don't speak yet. Phase 6+
+  // can add drag boundaries (`drag_start: doc.snapshot` /
+  // `drag_end: <commit>`) and de-flood here.
+  const PANEL_TO_ATTR = {
+    "state.fill_color": "fill",
+    "state.stroke_color": "stroke",
+    "state.stroke_width": "stroke-width",
+  };
+  store.addListener((path, value) => {
+    const attr = PANEL_TO_ATTR[path];
+    if (!attr) return;
+    if (!model.selection || model.selection.length === 0) return;
+    model.snapshot();
+    model.mutate((d) => {
+      let next = d;
+      for (const elemPath of d.selection) {
+        next = setElementAttr(next, elemPath, attr, value);
+      }
+      return next;
+    });
   });
 
   // ── Persistence ──────────────────────────────────────
