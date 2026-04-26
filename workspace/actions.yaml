@@ -41,7 +41,11 @@ actions:
                     stop_propagation: true
                     action: close_tab
                     params: { index: "prop.index" }
-      # Create the canvas in the drawing surface
+      # Create the canvas in the drawing surface. The canvas-stack
+      # background is the pasteboard color and inherits the active
+      # appearance's window_bg (dark gray in Dark Gray); the
+      # artboard "page" inside is rendered by the engine with the
+      # artboard's own fill (white by default for a fresh document).
       - create_child:
           parent: drawing_surface
           props:
@@ -51,7 +55,9 @@ actions:
             type: canvas
             summary: "Drawing surface"
             tier: 3
-            style: { flex: 1, background: "#ffffff" }
+            style:
+              flex: 1
+              background: "{{theme.colors.window_bg}}"
             bind:
               visible: "state.active_tab == prop.index"
       - increment: { key: tab_count, by: 1 }

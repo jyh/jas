@@ -82,7 +82,7 @@
               "tier": 3,
               "style": {
                 "flex": 1,
-                "background": "#ffffff"
+                "background": "{{theme.colors.window_bg}}"
               },
               "bind": {
                 "visible": "state.active_tab == prop.index"
