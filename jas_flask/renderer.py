@@ -121,16 +121,37 @@ def render_dialogs(dialogs: dict, theme: dict, state: dict, brand: dict | None =
                 props[sk] = p
         if props:
             data_attrs += f' data-dialog-props="{escape(json.dumps(props))}"'
-        html += (
-            f'<div class="modal fade" id="dialog-{dialog_id}" tabindex="-1"{data_attrs}>'
-            f'<div class="modal-dialog"><div class="modal-content">'
-            f'<div class="modal-header" style="display:flex;align-items:center;">'
-            f'{logo_html}'
-            f'<h5 class="modal-title">{summary}</h5>'
-            f'<button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button></div>'
-            f'<div class="modal-body">{body_html}</div>'
-            f'</div></div></div>'
-        )
+        # Yaml `modal: false` switches the dialog to popover behavior
+        # — anchored next to the trigger element (e.g. a toolbar slot
+        # button) instead of centered with a backdrop. The JS reads
+        # `data-popover="true"` to position and show it differently.
+        # Tool-alternate flyouts use this; full-feature dialogs (Tool
+        # Options, Boolean Options, etc.) keep the default modal=true.
+        is_popover = dialog.get("modal") is False
+        if is_popover:
+            data_attrs += ' data-popover="true"'
+            # Popovers omit the modal title bar — they're compact menus
+            # anchored to the trigger; the trigger context already
+            # tells the user what was pressed.
+            html += (
+                f'<div class="modal app-popover" id="dialog-{dialog_id}"'
+                f' tabindex="-1"{data_attrs}>'
+                f'<div class="modal-dialog"><div class="modal-content">'
+                f'<div class="modal-body">{body_html}</div>'
+                f'</div></div></div>'
+            )
+        else:
+            html += (
+                f'<div class="modal fade" id="dialog-{dialog_id}"'
+                f' tabindex="-1"{data_attrs}>'
+                f'<div class="modal-dialog"><div class="modal-content">'
+                f'<div class="modal-header" style="display:flex;align-items:center;">'
+                f'{logo_html}'
+                f'<h5 class="modal-title">{summary}</h5>'
+                f'<button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button></div>'
+                f'<div class="modal-body">{body_html}</div>'
+                f'</div></div></div>'
+            )
     return Markup(html)
 
 
@@ -569,7 +590,16 @@ def _render_icon_button(el, theme, state):
     if isinstance(sz, str) and "{{" in sz:
         sz = _resolve(sz, theme, state)
     pos = style.get("position", {})
-    pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;" if pos else ""
+    # When the yaml supplies an absolute pane position it takes
+    # precedence; otherwise leave positioning to .app-tool-btn in
+    # app.css (`position: relative`), which gives the triangle SVG
+    # a containing block while keeping plain and alternate-bearing
+    # buttons' inline styles identical.
+    pos_css = (
+        f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;"
+        if pos else ""
+    )
+    has_alternates = bool(el.get("alternates"))
     icon_html = ""
     icon_def = _icons.get(icon_name)
     if icon_def:
@@ -584,11 +614,51 @@ def _render_icon_button(el, theme, state):
         # Fallback: show first letter of summary or icon name
         fallback = summary[0] if summary else (icon_name[0] if icon_name else "?")
         icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:var(--app-text,#ccc)">{escape(str(fallback))}</span>'
+    # Small filled triangle in the lower-right corner indicating
+    # long-press alternates exist for this slot. Mirrors
+    # _draw_alternate_triangle in jas/tools/toolbar.py and the SVG
+    # glyph in jas_dioxus/src/workspace/icons.rs.
+    triangle_html = ""
+    extra_attrs = ""
+    if has_alternates:
+        tri_sz = 5
+        triangle_html = (
+            f'<svg class="alternate-triangle" width="{tri_sz}" height="{tri_sz}"'
+            f' viewBox="0 0 {tri_sz} {tri_sz}"'
+            f' style="position:absolute;right:0;bottom:0;pointer-events:none">'
+            f'<path d="M {tri_sz} {tri_sz} L 0 {tri_sz} L {tri_sz} 0 Z"'
+            f' fill="var(--app-text,#cccccc)"/></svg>'
+        )
+        extra_attrs = ' data-has-alternates="true"'
+        # Emit a {tool_id: icon_name} map so the JS can swap the
+        # displayed icon when state.active_tool becomes one of the
+        # alternates. Without this, selecting Rounded Rect from the
+        # long-press menu would leave the slot stuck on the Rect
+        # icon. Items missing an `icon` field are skipped.
+        alt_items = (el.get("alternates") or {}).get("items") or []
+        icon_map = {}
+        for item in alt_items:
+            if not isinstance(item, dict):
+                continue
+            tid = item.get("id")
+            icn = item.get("icon")
+            if tid and icn:
+                icon_map[tid] = icn
+        if icon_map:
+            extra_attrs += (
+                f" data-alternate-icons='{escape(json.dumps(icon_map))}'"
+            )
+    # NOTE: deliberately omit Bootstrap's `btn-outline-secondary`.
+    # That class fights with .app-tool-btn over the :hover / :focus /
+    # .active backgrounds and makes focused-but-not-active buttons
+    # look darker than their unfocused peers. `btn` alone is kept
+    # for the size + padding reset; .app-tool-btn (in app.css) owns
+    # all colour states.
     return Markup(
-        f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary app-tool-btn p-0"'
+        f'<button{_id_attr(el)} class="btn btn-sm app-tool-btn p-0"'
         f' style="{pos_css}width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
-        f' title="{summary}"{_data_attrs(el)}>'
-        f'{icon_html}</button>'
+        f' title="{summary}"{_data_attrs(el)}{extra_attrs}>'
+        f'{icon_html}{triangle_html}</button>'
     )
 
 

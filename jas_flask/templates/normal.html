@@ -2,8 +2,8 @@
 {% block title %}Normal{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/wireframe.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ range(99999) | random }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wireframe.css') }}?v={{ range(99999) | random }}">
 {% endblock %}
 
 {% block body %}

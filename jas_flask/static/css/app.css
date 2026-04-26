@@ -59,7 +59,12 @@
     padding: 4px 2px;
 }
 
+/* `position: relative` set here (not inline per-button) so plain
+   and alternate-bearing buttons share identical inline markup —
+   only the absolute-positioned triangle SVG child differs. The
+   triangle's `position: absolute` resolves against this. */
 .app-tool-btn {
+    position: relative;
     background: transparent;
     border: 1px solid transparent;
     color: var(--app-text, #ccc);
@@ -68,15 +73,59 @@
     justify-content: center;
     transition: background 0.1s;
 }
-.app-tool-btn:hover {
-    background: var(--app-button-checked, #505050);
+/* Hover gives a subtle affordance distinct from the selected state
+   so a hovered-but-not-active button doesn't read as selected.
+   Doubled selector to outrun Bootstrap's `.btn:hover` (which has
+   the same single-class specificity) on browsers that resolve
+   ties differently from source order. */
+.app-tool-btn:hover,
+button.app-tool-btn:hover {
+    background: var(--app-tab-active, #4a4a4a);
     border-color: transparent;
     color: var(--app-text, #ccc);
 }
+/* Selected (active) tool is visibly darker than every other tool
+   in the toolbar — including hover. */
 .app-tool-btn.active,
-.app-tool-btn[aria-pressed="true"] {
+.app-tool-btn[aria-pressed="true"],
+button.app-tool-btn.active {
     background: var(--app-button-checked, #505050);
     border-color: transparent;
+}
+/* Suppress Bootstrap's :focus halo / outline so a previously-clicked
+   button doesn't keep a focus ring that reads as a different shade. */
+.app-tool-btn:focus,
+.app-tool-btn:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Popover dialogs (modal: false in yaml) — anchored flyouts
+   like toolbar-slot alternate menus. Override Bootstrap's
+   .modal centering / backdrop / flex layout so JS can position
+   the .modal-dialog absolutely next to the trigger. */
+.app-popover {
+    background: transparent;
+    pointer-events: none;
+    display: none;
+}
+.app-popover.show {
+    display: block;
+    pointer-events: auto;
+}
+.app-popover .modal-dialog {
+    pointer-events: auto;
+    width: max-content;
+    min-width: 180px;
+    margin: 0;
+}
+.app-popover .modal-content {
+    background: var(--app-pane-bg, #444);
+    border: 1px solid var(--app-border, #555);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.app-popover .modal-body {
+    padding: 4px;
 }
 
 /* Color swatches */

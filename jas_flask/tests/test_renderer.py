@@ -56,6 +56,178 @@ class TestRenderButton:
         assert "btn-secondary" in html
 
 
+class TestRenderIconButton:
+    """Toolbar icon buttons with optional alternates indicator.
+
+    Buttons whose yaml carries an ``alternates:`` block show a small
+    triangle in the lower-right corner, mirroring the Rust / Swift /
+    OCaml / Python convention. Buttons without alternates render the
+    icon alone."""
+
+    def test_icon_button_without_alternates_omits_triangle(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_selection", "summary": "Selection",
+            "icon": "selection_arrow",
+            "style": {"size": 32},
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert "btn_selection" in html
+        assert "alternate-triangle" not in html
+
+    def test_icon_button_with_alternates_renders_triangle(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_arrow_slot",
+            "summary": "Partial Selection",
+            "icon": "partial_selection_arrow",
+            "style": {"size": 32},
+            "alternates": {
+                "menu_id": "arrow_alternates",
+                "items": [
+                    {"id": "partial_selection", "label": "Partial Selection",
+                     "icon": "partial_selection_arrow"},
+                    {"id": "interior_selection", "label": "Interior Selection",
+                     "icon": "interior_selection_arrow"},
+                ],
+            },
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert "alternate-triangle" in html
+
+    def test_alternates_triangle_has_data_attribute(self, theme, state):
+        """The triangle is annotated so JS / tests can target it
+        independently of the icon."""
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_pen_slot", "summary": "Pen",
+            "icon": "pen", "style": {"size": 32},
+            "alternates": {"menu_id": "pen_alternates", "items": []},
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-has-alternates="true"' in html
+
+    def test_buttons_omit_bootstrap_btn_outline_class(self, theme, state):
+        """Tool buttons should not carry ``btn-outline-secondary``.
+
+        Bootstrap's outline-secondary class fights with app.css over
+        :hover / :focus / .active backgrounds, producing inconsistent
+        shading where focused-but-not-active buttons look darker than
+        their unfocused peers. app.css's ``.app-tool-btn`` owns the
+        base + hover + active states; we just need ``btn`` for the
+        size / padding reset."""
+        from renderer import render_element
+        for el in [
+            {"type": "icon_button", "id": "a", "summary": "A", "icon": "a",
+             "style": {"size": 32}},
+            {"type": "icon_button", "id": "b", "summary": "B", "icon": "b",
+             "style": {"size": 32}, "alternates": {"items": []}},
+        ]:
+            html = render_element(el, theme, state, mode="normal")
+            assert "btn-outline-secondary" not in html, (
+                f"icon_button {el['id']!r} still carries Bootstrap "
+                f"btn-outline-secondary; remove it so app.css owns "
+                f"button shading uniformly"
+            )
+
+    def test_alternates_button_emits_alternate_icons_map(self, theme, state):
+        """Slot buttons with alternates emit a JSON map of
+        ``{tool_id: icon_name}`` so the JS can swap the displayed
+        icon when ``state.active_tool`` becomes one of the
+        alternates. Without this map the slot stays stuck on the
+        default icon (e.g. selecting Rounded Rect leaves the slot
+        showing the Rect icon)."""
+        import json, re
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_shape_slot",
+            "summary": "Rect", "icon": "rect", "style": {"size": 32},
+            "alternates": {
+                "menu_id": "shape_alternates",
+                "items": [
+                    {"id": "rect", "label": "Rect", "icon": "rect"},
+                    {"id": "rounded_rect", "label": "Rounded Rect",
+                     "icon": "rounded_rect"},
+                    {"id": "polygon", "label": "Polygon", "icon": "polygon"},
+                    {"id": "star", "label": "Star", "icon": "star"},
+                ],
+            },
+        }
+        html = render_element(el, theme, state, mode="normal")
+        m = re.search(r"data-alternate-icons='([^']*)'", html)
+        assert m is not None, (
+            "expected data-alternate-icons attribute on slot button"
+        )
+        # The renderer emits the JSON HTML-escaped (Markup-escape
+        # turns " into &#34;) — decode before parsing.
+        decoded = m.group(1).replace("&#34;", '"')
+        icons_map = json.loads(decoded)
+        assert icons_map == {
+            "rect": "rect",
+            "rounded_rect": "rounded_rect",
+            "polygon": "polygon",
+            "star": "star",
+        }
+
+    def test_plain_button_omits_alternate_icons_map(self, theme, state):
+        from renderer import render_element
+        el = {"type": "icon_button", "id": "btn_selection",
+              "summary": "Selection", "icon": "selection_arrow",
+              "style": {"size": 32}}
+        html = render_element(el, theme, state, mode="normal")
+        assert "data-alternate-icons" not in html
+
+    def test_alternates_without_icon_fields_skip_map(self, theme, state):
+        """When an alternate item omits ``icon`` (rare but legal),
+        skip it in the map rather than emitting a null entry that
+        would crash the JS lookup."""
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_partial",
+            "summary": "P", "icon": "p", "style": {"size": 32},
+            "alternates": {"items": [
+                {"id": "a", "icon": "a"},
+                {"id": "b"},  # no icon
+                {"id": "c", "icon": "c"},
+            ]},
+        }
+        html = render_element(el, theme, state, mode="normal")
+        import json, re
+        m = re.search(r"data-alternate-icons='([^']*)'", html)
+        decoded = m.group(1).replace("&#34;", '"')
+        icons_map = json.loads(decoded)
+        assert icons_map == {"a": "a", "c": "c"}
+
+    def test_alternate_and_plain_buttons_share_class_and_style(
+            self, theme, state):
+        """Tools with and without alternates must render with
+        identical class list AND identical inline style — the only
+        differences are the triangle SVG child, the
+        ``data-has-alternates`` attribute, and any yaml-driven
+        behaviors. If the inline ``style`` differs (e.g. one button
+        has ``position:relative`` and the other doesn't) browsers
+        can compute different stacking contexts and apparent
+        rendering for otherwise-identical buttons."""
+        import re
+        from renderer import render_element
+        plain = render_element(
+            {"type": "icon_button", "id": "p", "summary": "P", "icon": "p",
+             "style": {"size": 32}}, theme, state)
+        alt = render_element(
+            {"type": "icon_button", "id": "a", "summary": "A", "icon": "a",
+             "style": {"size": 32}, "alternates": {"items": []}}, theme, state)
+        plain_class = re.search(r'class="([^"]*)"', plain).group(1)
+        alt_class = re.search(r'class="([^"]*)"', alt).group(1)
+        assert plain_class == alt_class, (
+            f"class lists differ:\n  plain: {plain_class}\n  alt:   {alt_class}"
+        )
+        plain_style = re.search(r'style="([^"]*)"', plain).group(1)
+        alt_style = re.search(r'style="([^"]*)"', alt).group(1)
+        assert plain_style == alt_style, (
+            f"inline styles differ:\n  plain: {plain_style}\n  alt:   {alt_style}"
+        )
+
+
 class TestRenderPaneSystem:
     def test_position_relative(self, theme, state):
         from renderer import render_element
@@ -256,6 +428,44 @@ class TestRenderDialogs:
         assert "modal" in html
         assert "Confirm" in html
         assert "OK" in html
+
+    def test_popover_dialog_emits_data_popover(self, theme, state):
+        """Dialogs declared with ``modal: false`` (e.g. tool-alternate
+        flyouts) emit ``data-popover="true"`` and an ``app-popover``
+        class so the JS anchors them next to the trigger element
+        rather than centering them with a backdrop. They also omit
+        the modal title bar — the trigger context is the cue."""
+        from renderer import render_dialogs
+        dialogs = {
+            "shape_alternates": {
+                "summary": "Shape Tools",
+                "modal": False,
+                "content": {"type": "text", "content": "items"},
+            }
+        }
+        html = render_dialogs(dialogs, theme, state)
+        assert 'data-popover="true"' in html
+        assert "app-popover" in html
+        # No modal title bar / close button on a popover.
+        assert "modal-header" not in html
+        assert "btn-close" not in html
+
+    def test_modal_true_keeps_full_dialog_chrome(self, theme, state):
+        """``modal: true`` (or unset) preserves the standard Bootstrap
+        modal markup with title bar + close button. Verifies the
+        popover branch doesn't accidentally swallow regular dialogs."""
+        from renderer import render_dialogs
+        dialogs = {
+            "tool_options": {
+                "summary": "Tool Options",
+                "modal": True,
+                "content": {"type": "text", "content": "x"},
+            }
+        }
+        html = render_dialogs(dialogs, theme, state)
+        assert 'data-popover="true"' not in html
+        assert "modal-header" in html
+        assert "btn-close" in html
 
     def test_preview_targets_emitted(self, theme, state):
         """Dialog with preview_targets emits a data-dialog-preview-targets
