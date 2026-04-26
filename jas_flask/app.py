@@ -189,13 +189,6 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                                metrics_json=metrics_json,
                                tools_json=tools_json)
 
-    @app.route("/canvas")
-    def canvas_demo():
-        """Minimal demo of the JS engine — loads workspace.json, mounts the
-        selection tool, and shows a document with two rectangles. Uses the
-        engine modules under /static/js/engine/. See FLASK_PARITY.md §7."""
-        return render_template("canvas_demo.html")
-
     @app.route("/api/workspace")
     def workspace_json():
         """Serve the compiled workspace.json for the JS engine to load."""

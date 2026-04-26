@@ -74,6 +74,39 @@ describe("Document / getElement", () => {
     assert.equal(d.selection.length, 0);
   });
 
+  it("emptyDocument seeds one Letter-sized transparent artboard", () => {
+    // Cross-app contract: every observable document has at least one
+    // artboard (jas_dioxus/src/document/artboard.rs §invariant). The
+    // canonical default is Letter 612x792 at origin, transparent.
+    const d = emptyDocument();
+    assert.equal(d.artboards.length, 1);
+    const ab = d.artboards[0];
+    assert.equal(ab.name, "Artboard 1");
+    assert.equal(ab.x, 0);
+    assert.equal(ab.y, 0);
+    assert.equal(ab.width, 612);
+    assert.equal(ab.height, 792);
+    assert.equal(ab.fill, "transparent");
+    assert.equal(typeof ab.id, "string");
+    assert.equal(ab.id.length, 8);
+    assert.equal(ab.show_center_mark, false);
+    assert.equal(ab.show_cross_hairs, false);
+    assert.equal(ab.show_video_safe_areas, false);
+    assert.equal(ab.video_ruler_pixel_aspect_ratio, 1.0);
+  });
+
+  it("emptyDocument has artboard_options with fade on by default", () => {
+    const d = emptyDocument();
+    assert.equal(d.artboard_options.fade_region_outside_artboard, true);
+    assert.equal(d.artboard_options.update_while_dragging, true);
+  });
+
+  it("emptyDocument generates a fresh artboard id each call", () => {
+    const a = emptyDocument();
+    const b = emptyDocument();
+    assert.notEqual(a.artboards[0].id, b.artboards[0].id);
+  });
+
   it("getElement walks single-level path", () => {
     const d = emptyDocument();
     const l = getElement(d, [0]);
