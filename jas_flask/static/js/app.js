@@ -1680,19 +1680,24 @@
       }
     }
 
-    // Wire behaviors — resolve prop.* only, keep state.* reactive
+    // Wire behaviors — resolve prop.* only, keep state.* reactive.
+    // Pass through ctx.props (captured at creation time by the
+    // create_child effect) so behavior expressions like
+    // `set: { active_tab: "prop.index" }` see the right value when
+    // the click later fires.
     if (spec.behavior) {
       var resolvedBehavior = resolveProps(spec.behavior);
       el.setAttribute("data-behaviors", JSON.stringify(resolvedBehavior));
-      wireBehaviors(el);
+      wireBehaviors(el, ctx && ctx.props);
     }
 
     return el;
   }
 
-  function wireBehaviors(el) {
+  function wireBehaviors(el, props) {
     var behaviors;
     try { behaviors = JSON.parse(el.getAttribute("data-behaviors")); } catch (ex) { return; }
+    var capturedProps = props || null;
     behaviors.forEach(function (b) {
       var domEvent = eventMap[b.event];
       if (!domEvent) return;
@@ -1707,7 +1712,8 @@
             shift: e.shiftKey, alt: e.altKey,
             value: e.target.value
           },
-          self: { id: el.id, type: el.getAttribute("data-element-type") || "" }
+          self: { id: el.id, type: el.getAttribute("data-element-type") || "" },
+          props: capturedProps
         };
         if (b.condition && !evalCondition(resolve(b.condition, ctx), ctx)) return;
         if (b.prevent_default) e.preventDefault();
