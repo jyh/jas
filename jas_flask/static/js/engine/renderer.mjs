@@ -245,13 +245,22 @@ function styleAttrs(elem) {
   } else if (typeof elem.fill === "string") {
     parts.push(`fill="${esc(elem.fill)}"`);
   }
+  // Stroke supports two encodings: a flat string (the form panel
+  // writes use, paired with a separate `stroke-width` field) or a
+  // legacy {color, width} object. Plus the explicit-null sentinel
+  // for "no stroke".
   if (elem.stroke === null) {
     parts.push('stroke="none"');
+  } else if (typeof elem.stroke === "string") {
+    parts.push(`stroke="${esc(elem.stroke)}"`);
   } else if (elem.stroke && typeof elem.stroke === "object") {
     if (elem.stroke.color) parts.push(`stroke="${esc(elem.stroke.color)}"`);
     if (typeof elem.stroke.width === "number") {
       parts.push(`stroke-width="${num(elem.stroke.width)}"`);
     }
+  }
+  if (typeof elem["stroke-width"] === "number") {
+    parts.push(`stroke-width="${num(elem["stroke-width"])}"`);
   }
   if (typeof elem.opacity === "number" && elem.opacity !== 1.0) {
     parts.push(`opacity="${num(elem.opacity)}"`);

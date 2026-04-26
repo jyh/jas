@@ -80,6 +80,77 @@ describe("doc.add_element", () => {
     );
     assert.equal(model.document.layers[0].children.length, 0);
   });
+
+  it("applies state.fill_color / stroke_color defaults to a shape", () => {
+    // Drawing tools (rect.yaml etc.) intentionally omit fill / stroke
+    // from add_element so the engine fills in the active panel
+    // colors. Without this, every shape would render with the SVG
+    // default black fill regardless of what the user picked.
+    const model = new Model(emptyDocument());
+    const store = new StateStore({
+      state: { fill_color: "#ffffff", stroke_color: "#000000", stroke_width: 1 },
+    });
+    runEffects(
+      [{
+        "doc.add_element": {
+          parent: "[0]",
+          element: {
+            type: "rect", x: "10", y: "20", width: "30", height: "40",
+          },
+        },
+      }],
+      store.asContext(), store, { model },
+    );
+    const rect = model.document.layers[0].children[0];
+    assert.equal(rect.fill, "#ffffff");
+    assert.equal(rect.stroke, "#000000");
+    assert.equal(rect["stroke-width"], 1);
+  });
+
+  it("explicit fill/stroke in the spec override the state defaults", () => {
+    const model = new Model(emptyDocument());
+    const store = new StateStore({
+      state: { fill_color: "#ffffff", stroke_color: "#000000" },
+    });
+    runEffects(
+      [{
+        "doc.add_element": {
+          parent: "[0]",
+          element: {
+            type: "rect", x: "0", y: "0", width: "1", height: "1",
+            fill: "'#ff0000'",
+          },
+        },
+      }],
+      store.asContext(), store, { model },
+    );
+    const rect = model.document.layers[0].children[0];
+    assert.equal(rect.fill, "#ff0000");
+    // Stroke wasn't specified, so the state default still applies.
+    assert.equal(rect.stroke, "#000000");
+  });
+
+  it("does not apply shape defaults to non-shape types", () => {
+    // Layers / groups don't have fill/stroke; the defaults must not
+    // pollute their fields.
+    const model = new Model(emptyDocument());
+    const store = new StateStore({
+      state: { fill_color: "#ffffff", stroke_color: "#000000" },
+    });
+    runEffects(
+      [{
+        "doc.add_element": {
+          parent: "[0]",
+          element: { type: "group" },
+        },
+      }],
+      store.asContext(), store, { model },
+    );
+    const g = model.document.layers[0].children[0];
+    assert.equal(g.type, "group");
+    assert.equal(g.fill, undefined);
+    assert.equal(g.stroke, undefined);
+  });
 });
 
 describe("doc.set_attr", () => {

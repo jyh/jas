@@ -75,6 +75,24 @@ describe("renderer — styles", () => {
     assert.match(svg, /stroke-width="2"/);
   });
 
+  it("stroke as a string + stroke-width attribute → SVG stroke", () => {
+    // The Color/Stroke panels and doc.add_element's defaults write
+    // stroke as a flat string and stroke-width as a separate field
+    // (see canvas_bootstrap.mjs PANEL_TO_ATTR). The renderer needs
+    // to honour that shape, not just the legacy {color, width} obj.
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 1, height: 1,
+      stroke: "#000000", "stroke-width": 2,
+    });
+    assert.match(svg, /stroke="#000000"/);
+    assert.match(svg, /stroke-width="2"/);
+  });
+
+  it("stroke: null → stroke=\"none\"", () => {
+    const svg = renderElement(mkRect({ stroke: null }));
+    assert.match(svg, /stroke="none"/);
+  });
+
   it("opacity emits when !== 1", () => {
     const svg = renderElement(mkRect({ opacity: 0.5 }));
     assert.match(svg, /opacity="0.5"/);
