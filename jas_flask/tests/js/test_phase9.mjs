@@ -75,6 +75,132 @@ describe("doc.translate_selection", () => {
     );
     assert.equal(model.document, before); // reference equality
   });
+
+  it("partial CPs on a Path: translates only listed anchors", async () => {
+    const { mkPath, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    const path = mkPath({ d: [
+      { type: "M", x: 0, y: 0 },
+      { type: "L", x: 100, y: 0 },
+      { type: "L", x: 100, y: 80 },
+      { type: "L", x: 0, y: 80 },
+    ] });
+    const doc = setSelection({
+      layers: [mkLayer({ children: [path] })],
+      selection: [], artboards: [],
+    }, [[0, 0]]);
+    // Mark anchors 1 and 2 (the right-side corners) as partial-selected.
+    const docWithPartial = setPartialCps(doc, [0, 0], [1, 2]);
+    const model = new Model(docWithPartial);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.translate_selection": { dx: "10", dy: "5" } }],
+      store.asContext(), store, { model },
+    );
+    const after = getElement(model.document, [0, 0]);
+    // Anchor 0 unchanged.
+    assert.equal(after.d[0].x, 0);
+    assert.equal(after.d[0].y, 0);
+    // Anchors 1 and 2 shifted by (10, 5).
+    assert.equal(after.d[1].x, 110);
+    assert.equal(after.d[1].y, 5);
+    assert.equal(after.d[2].x, 110);
+    assert.equal(after.d[2].y, 85);
+    // Anchor 3 unchanged.
+    assert.equal(after.d[3].x, 0);
+    assert.equal(after.d[3].y, 80);
+  });
+
+  it("partial CPs translate the in/out handles attached to the moving anchor", async () => {
+    const { mkPath, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    // M 0,0; C 10,-10  20,-10  30,0; C 40,10  50,10  60,0
+    // Three anchors: 0, 1 (at 30,0), 2 (at 60,0). Each curve's handles
+    // belong to the adjacent anchors.
+    const path = mkPath({ d: [
+      { type: "M", x: 0, y: 0 },
+      { type: "C", x1: 10, y1: -10, x2: 20, y2: -10, x: 30, y: 0 },
+      { type: "C", x1: 40, y1: 10,  x2: 50, y2: 10,  x: 60, y: 0 },
+    ] });
+    const doc = setSelection({
+      layers: [mkLayer({ children: [path] })],
+      selection: [], artboards: [],
+    }, [[0, 0]]);
+    const docWithPartial = setPartialCps(doc, [0, 0], [1]); // middle anchor
+    const model = new Model(docWithPartial);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.translate_selection": { dx: "5", dy: "5" } }],
+      store.asContext(), store, { model },
+    );
+    const after = getElement(model.document, [0, 0]);
+    // Anchor 1's destination shifts.
+    assert.equal(after.d[1].x, 35);
+    assert.equal(after.d[1].y, 5);
+    // Anchor 1's in-handle (cmd[1].x2,y2) shifts with it.
+    assert.equal(after.d[1].x2, 25);
+    assert.equal(after.d[1].y2, -5);
+    // Anchor 1's out-handle is on cmd[2] (next command's x1,y1) — shifts too.
+    assert.equal(after.d[2].x1, 45);
+    assert.equal(after.d[2].y1, 15);
+    // Anchor 0's M unchanged.
+    assert.equal(after.d[0].x, 0);
+    // Anchor 2's destination unchanged (and its in-handle, cmd[2].x2,y2).
+    assert.equal(after.d[2].x, 60);
+    assert.equal(after.d[2].x2, 50);
+  });
+});
+
+describe("doc.copy_selection", () => {
+  it("duplicates each selected element offset by (dx, dy) and selects the copies", () => {
+    const model = new Model(setSelection(makeDoc(), [[0, 0]]));
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.copy_selection": { dx: "10", dy: "5" } }],
+      store.asContext(), store, { model },
+    );
+    const layer = model.document.layers[0];
+    // Original (index 0) untouched; copy inserted at index 1.
+    assert.equal(layer.children.length, 3);
+    assert.equal(layer.children[0].x, 0);
+    assert.equal(layer.children[0].y, 0);
+    assert.equal(layer.children[1].x, 10);
+    assert.equal(layer.children[1].y, 5);
+    // Selection points at the copy.
+    assert.deepEqual(model.document.selection, [[0, 1]]);
+  });
+
+  it("copies multiple selected elements in place; no index shift mishap", () => {
+    const model = new Model(setSelection(makeDoc(), [[0, 0], [0, 1]]));
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.copy_selection": { dx: "1", dy: "1" } }],
+      store.asContext(), store, { model },
+    );
+    const layer = model.document.layers[0];
+    // Two originals + two copies.
+    assert.equal(layer.children.length, 4);
+    // Originals stay at their positions.
+    assert.equal(layer.children[0].x, 0);
+    assert.equal(layer.children[2].x, 50);
+    // Copies are right after each original.
+    assert.equal(layer.children[1].x, 1);
+    assert.equal(layer.children[3].x, 51);
+  });
+
+  it("clears partial-CP entries on the new selection", async () => {
+    const { setPartialCps, partialCpsForPath } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = setSelection(makeDoc(), [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [0, 1]);
+    const model = new Model(doc);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.copy_selection": { dx: "5", dy: "5" } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(partialCpsForPath(model.document, [0, 1]), null);
+  });
 });
 
 describe("doc.select_in_rect", () => {

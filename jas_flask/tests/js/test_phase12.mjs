@@ -327,6 +327,91 @@ describe("doc.path.commit_partial_marquee", () => {
   });
 });
 
+describe("Bezier handle hits + doc.move_path_handle", () => {
+  // Path with one cubic between (0,0) and (100,0). The C command's
+  // (x1,y1)=(20,-30) is anchor 0's out-handle; (x2,y2)=(80,-30) is
+  // anchor 1's in-handle.
+  function makeDoc() {
+    const path = {
+      type: "path",
+      visibility: "preview", locked: false, opacity: 1,
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "C", x1: 20, y1: -30, x2: 80, y2: -30, x: 100, y: 0 },
+      ],
+    };
+    return {
+      layers: [mkLayer({ children: [path] })],
+      selection: [[0, 0]],
+      artboards: [],
+    };
+  }
+
+  it("probe_partial_hit latches an in-handle hit on a selected path", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "80", y: "-30", hit_radius: "8", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(store.get("tool.partial_selection.mode"), "handle");
+    assert.equal(store.get("tool.partial_selection.handle_type"), "in");
+    assert.equal(store.get("tool.partial_selection.handle_anchor_idx"), 1);
+    assert.deepEqual(store.get("tool.partial_selection.handle_path"), [0, 0]);
+  });
+
+  it("probe_partial_hit latches an out-handle hit on a selected path", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "20", y: "-30", hit_radius: "8", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(store.get("tool.partial_selection.mode"), "handle");
+    assert.equal(store.get("tool.partial_selection.handle_type"), "out");
+    assert.equal(store.get("tool.partial_selection.handle_anchor_idx"), 0);
+  });
+
+  it("doc.move_path_handle moves the latched in-handle and reflects the out", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: {
+      mode: "handle",
+      handle_path: [0, 0],
+      handle_anchor_idx: 1,
+      handle_type: "in",
+    } } });
+    runEffects(
+      [{ "doc.move_path_handle": { dx: "0", dy: "10" } }],
+      store.asContext(), store, { model },
+    );
+    const after = getElement(model.document, [0, 0]);
+    // In-handle of anchor 1 (= cmd[1].x2,y2) shifted by (0, 10).
+    assert.equal(after.d[1].x2, 80);
+    assert.equal(after.d[1].y2, -20);
+    // Out-handle of anchor 1 doesn't exist on this path (only 2
+    // anchors, no command after cmd[1]) — there's no opposite to
+    // reflect. The other end's out (cmd[1].x1,y1) belongs to
+    // anchor 0, so it stays put.
+    assert.equal(after.d[1].x1, 20);
+    assert.equal(after.d[1].y1, -30);
+  });
+
+  it("doc.move_path_handle no-op when no handle is latched", () => {
+    const model = new Model(makeDoc());
+    const before = model.document;
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.move_path_handle": { dx: "5", dy: "5" } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(model.document, before);
+  });
+});
+
 describe("Pen tool effects", () => {
   it("anchor.push appends a corner anchor", async () => {
     const ab = await import("../../static/js/engine/anchor_buffers.mjs");
