@@ -27,6 +27,7 @@ import {
   renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
 } from "/static/js/engine/canvas.mjs";
 import { saveSession, loadSession } from "/static/js/engine/session.mjs";
+import { exportSVG, importSVG } from "/static/js/engine/svg_io.mjs";
 
 const SESSION_AUTOSAVE_MS = 30000;
 
@@ -83,6 +84,58 @@ export function bootstrap() {
     mirrorState(key, value) {
       try { store.set("state." + key, value); }
       catch (_) { /* unknown scope or shallow path — ignore */ }
+    },
+    /**
+     * File → Save: serialize the current document to SVG and
+     * trigger a browser download. Marks the model as saved so
+     * `isModified` flips back to false until the next mutation.
+     */
+    saveAs(filename) {
+      const name = filename || (model.filename + ".svg");
+      const svg = exportSVG(model.document);
+      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      model.markSaved();
+    },
+    /**
+     * File → Open: replace the current document with the parsed
+     * contents of a user-selected SVG file. Returns a Promise
+     * resolving when the document has been loaded (or rejecting
+     * on parse failure / user cancel).
+     */
+    open() {
+      return new Promise((resolve, reject) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/svg+xml,.svg";
+        input.style.display = "none";
+        input.addEventListener("change", () => {
+          const file = input.files && input.files[0];
+          if (!file) { reject(new Error("no file")); return; }
+          const reader = new FileReader();
+          reader.onload = () => {
+            const parsed = importSVG(String(reader.result || ""));
+            if (!parsed) { reject(new Error("not an SVG document")); return; }
+            model.snapshot();
+            model.setDocument(parsed);
+            model.filename = file.name.replace(/\.svg$/i, "") || "Untitled";
+            model.markSaved();
+            resolve();
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsText(file);
+        });
+        document.body.appendChild(input);
+        input.click();
+        document.body.removeChild(input);
+      });
     },
   });
 
