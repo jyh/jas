@@ -204,14 +204,19 @@ export function renderSelectionLayer(doc) {
       `<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" ` +
       `fill="none" stroke="${SELECTION_COLOR}" stroke-width="1" stroke-dasharray="4 2"/>`
     );
-    // Square handles at every control point — small white squares
-    // outlined in the selection colour, matching the native apps.
+    // Square handles at every control point. Whole-element selection
+    // (the only kind Flask currently models) corresponds to Rust's
+    // SelectionKind::All — every CP is "selected", so every handle is
+    // filled solid in the selection colour. Partial selection (per-CP
+    // marquee, with white-outline handles for the unselected ones)
+    // ships when Flask's selection model grows a kind field; see
+    // jas_dioxus/src/document/document.rs::SelectionKind.
     const half = HANDLE_SIZE / 2;
     for (const [px, py] of controlPoints(elem)) {
       parts.push(
         `<rect x="${px - half}" y="${py - half}" ` +
         `width="${HANDLE_SIZE}" height="${HANDLE_SIZE}" ` +
-        `fill="white" stroke="${SELECTION_COLOR}" stroke-width="1"/>`
+        `fill="${SELECTION_COLOR}" stroke="${SELECTION_COLOR}" stroke-width="1"/>`
       );
     }
   }
