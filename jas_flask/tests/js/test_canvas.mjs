@@ -47,7 +47,24 @@ describe("renderSelectionLayer", () => {
   it("multiple selections produce multiple bboxes", () => {
     const doc = setSelection(makeDoc(), [[0, 0], [0, 1]]);
     const svg = renderSelectionLayer(doc);
-    assert.equal((svg.match(/<rect /g) || []).length, 2);
+    // Two bboxes + control-point handles for each. Bboxes are
+    // dashed; handles have white fill — count just the bboxes by
+    // the dasharray attribute.
+    assert.equal((svg.match(/stroke-dasharray="4 2"/g) || []).length, 2);
+  });
+
+  it("emits a control-point handle at each anchor of a selected rect", () => {
+    // Mirrors jas_dioxus draws — small white squares stroked in the
+    // selection color at every control point. For a rect that's 4
+    // corners.
+    const doc = setSelection(makeDoc(), [[0, 0]]);
+    const svg = renderSelectionLayer(doc);
+    // The bounding-box rect uses stroke-dasharray; handles do not.
+    // Strip the dashed bbox and count the remaining <rect>s.
+    const handlesOnly = svg.replace(/<rect [^/]*stroke-dasharray[^/]*\/>/g, "");
+    assert.equal((handlesOnly.match(/<rect /g) || []).length, 4);
+    // Handles fill white and stroke in the selection color.
+    assert.match(handlesOnly, /fill="white"/);
   });
 
   it("degenerate bounds skipped", () => {

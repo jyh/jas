@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   elementBounds, pointInRect, rectsIntersect,
   hitTest, hitTestRect, translateElement,
-  calligraphicOutline,
+  calligraphicOutline, controlPoints,
 } from "../../static/js/engine/geometry.mjs";
 import {
   mkRect, mkCircle, mkEllipse, mkLine, mkPath, mkText,
@@ -398,5 +398,53 @@ describe("calligraphicOutline", () => {
     // tangent angle; at the cubic's endpoints the perpendicular drop is
     // ~half-width · cos(tangent) — well below zero but not the full -2.
     assert.ok(Math.min(...ys) < -0.5, "outline should dip below path baseline");
+  });
+});
+
+describe("controlPoints", () => {
+  // Mirrors jas_dioxus/src/geometry/element.rs::control_points so
+  // selection handles match the native apps.
+  it("rect → four corners (TL, TR, BR, BL)", () => {
+    const cps = controlPoints(mkRect({ x: 10, y: 20, width: 30, height: 40 }));
+    assert.deepEqual(cps, [
+      [10, 20], [40, 20], [40, 60], [10, 60],
+    ]);
+  });
+
+  it("line → two endpoints", () => {
+    const cps = controlPoints(mkLine({ x1: 5, y1: 5, x2: 25, y2: 35 }));
+    assert.deepEqual(cps, [[5, 5], [25, 35]]);
+  });
+
+  it("circle → four cardinal points (top, right, bottom, left)", () => {
+    const cps = controlPoints(mkCircle({ cx: 100, cy: 100, r: 20 }));
+    assert.deepEqual(cps, [[100, 80], [120, 100], [100, 120], [80, 100]]);
+  });
+
+  it("ellipse → four cardinals using rx / ry", () => {
+    const cps = controlPoints(mkEllipse({ cx: 50, cy: 50, rx: 30, ry: 10 }));
+    assert.deepEqual(cps, [[50, 40], [80, 50], [50, 60], [20, 50]]);
+  });
+
+  it("path → anchor points at each command's destination", () => {
+    const cps = controlPoints(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "L", x: 10, y: 0 },
+        { type: "C", x1: 12, y1: 0, x2: 12, y2: 5, x: 10, y: 10 },
+        { type: "Z" },
+      ],
+    }));
+    // Z contributes no anchor.
+    assert.deepEqual(cps, [[0, 0], [10, 0], [10, 10]]);
+  });
+
+  it("group falls back to bounding-box corners", () => {
+    const g = mkGroup({ children: [
+      mkRect({ x: 0, y: 0, width: 10, height: 10 }),
+      mkRect({ x: 30, y: 20, width: 5, height: 5 }),
+    ] });
+    const cps = controlPoints(g);
+    assert.deepEqual(cps, [[0, 0], [35, 0], [35, 25], [0, 25]]);
   });
 });
