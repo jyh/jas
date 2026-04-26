@@ -296,6 +296,13 @@
   var _NAMESPACES = ["state", "panel", "dialog", "param", "prop", "event",
                      "self", "active_document", "document", "workspace", "theme", "data"];
 
+  // Coerce a resolved value to a comparison-safe string. Treats null
+  // and undefined as "" but preserves 0 / false as "0" / "false".
+  function _toCmpStr(v) {
+    if (v === null || v === undefined) return "";
+    return String(v);
+  }
+
   function resolve(template, ctx) {
     if (template === null || template === undefined) return null;
     if (typeof template === "number" || typeof template === "boolean") return template;
@@ -316,12 +323,15 @@
     // Comparison operators: resolve each side separately
     var compMatch = s.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
     if (compMatch) {
-      var lhs = String(resolve(compMatch[1].trim(), ctx) || "");
+      // Use _toCmpStr instead of `String(x || "")` — `|| ""` collapses
+      // 0 and false to the empty string, which silently broke
+      // numeric comparisons like `state.active_tab == 0`.
+      var lhs = _toCmpStr(resolve(compMatch[1].trim(), ctx));
       var rhs = compMatch[3].trim();
       if (rhs.length >= 2 && rhs.charAt(0) === '"' && rhs.charAt(rhs.length - 1) === '"') {
         rhs = rhs.substring(1, rhs.length - 1);
       } else {
-        rhs = String(resolve(rhs, ctx) || "");
+        rhs = _toCmpStr(resolve(rhs, ctx));
       }
       return compMatch[2] === "==" ? lhs === rhs : lhs !== rhs;
     }
