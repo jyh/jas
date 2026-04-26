@@ -1650,6 +1650,158 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             controller.set_selection(new_set)
         return None
 
+    # ── Eyedropper effects ───────────────────────────────────
+    # See EYEDROPPER_TOOL.md §Gestures. Two effects backing the
+    # eyedropper.yaml on_mousedown branches:
+    #   doc.eyedropper.sample      → plain-click sample + selection
+    #                                apply
+    #   doc.eyedropper.apply_loaded → Alt-click apply (falls through
+    #                                to sample when the cache is null)
+
+    def _read_eyedropper_config(s, c):
+        from algorithms.eyedropper import EyedropperConfig
+        d = EyedropperConfig()
+
+        def bool_at(key: str, fallback: bool) -> bool:
+            v = _eval_value(f"state.{key}", s, c)
+            return bool(v.value) if v.type == ValueType.BOOL else fallback
+
+        return EyedropperConfig(
+            fill=bool_at("eyedropper_fill", d.fill),
+            stroke=bool_at("eyedropper_stroke", d.stroke),
+            stroke_color=bool_at("eyedropper_stroke_color", d.stroke_color),
+            stroke_weight=bool_at("eyedropper_stroke_weight", d.stroke_weight),
+            stroke_cap_join=bool_at(
+                "eyedropper_stroke_cap_join", d.stroke_cap_join),
+            stroke_align=bool_at("eyedropper_stroke_align", d.stroke_align),
+            stroke_dash=bool_at("eyedropper_stroke_dash", d.stroke_dash),
+            stroke_arrowheads=bool_at(
+                "eyedropper_stroke_arrowheads", d.stroke_arrowheads),
+            stroke_profile=bool_at(
+                "eyedropper_stroke_profile", d.stroke_profile),
+            stroke_brush=bool_at("eyedropper_stroke_brush", d.stroke_brush),
+            opacity=bool_at("eyedropper_opacity", d.opacity),
+            opacity_alpha=bool_at(
+                "eyedropper_opacity_alpha", d.opacity_alpha),
+            opacity_blend=bool_at(
+                "eyedropper_opacity_blend", d.opacity_blend),
+            character=bool_at("eyedropper_character", d.character),
+            character_font=bool_at(
+                "eyedropper_character_font", d.character_font),
+            character_size=bool_at(
+                "eyedropper_character_size", d.character_size),
+            character_leading=bool_at(
+                "eyedropper_character_leading", d.character_leading),
+            character_kerning=bool_at(
+                "eyedropper_character_kerning", d.character_kerning),
+            character_tracking=bool_at(
+                "eyedropper_character_tracking", d.character_tracking),
+            character_color=bool_at(
+                "eyedropper_character_color", d.character_color),
+            paragraph=bool_at("eyedropper_paragraph", d.paragraph),
+            paragraph_align=bool_at(
+                "eyedropper_paragraph_align", d.paragraph_align),
+            paragraph_indent=bool_at(
+                "eyedropper_paragraph_indent", d.paragraph_indent),
+            paragraph_space=bool_at(
+                "eyedropper_paragraph_space", d.paragraph_space),
+            paragraph_hyphenate=bool_at(
+                "eyedropper_paragraph_hyphenate", d.paragraph_hyphenate),
+        )
+
+    def _apply_to_target_recursive(doc, path, appearance, cfg):
+        """Walk the element at `path`. If it is a Group / Layer,
+        recurse into each child path. Otherwise apply the appearance
+        when target-eligible. Returns a new Document with all applies
+        threaded through `Document.replace_element`."""
+        from algorithms.eyedropper import (
+            apply_appearance,
+            is_target_eligible,
+        )
+        from geometry.element import Group, Layer
+
+        try:
+            elem = doc.get_element(path)
+        except Exception:
+            return doc
+
+        if isinstance(elem, (Group, Layer)):
+            new_doc = doc
+            for i, _child in enumerate(elem.children):
+                child_path = tuple(path) + (i,)
+                new_doc = _apply_to_target_recursive(
+                    new_doc, child_path, appearance, cfg)
+            return new_doc
+
+        if not is_target_eligible(elem):
+            return doc
+
+        new_elem = apply_appearance(elem, appearance, cfg)
+        return doc.replace_element(path, new_elem)
+
+    def doc_eyedropper_sample(spec, ctx, store):
+        from algorithms.eyedropper import (
+            appearance_to_dict,
+            extract_appearance,
+            is_source_eligible,
+        )
+
+        if not isinstance(spec, dict):
+            return None
+        source_path = extract_path(spec.get("source"), store, ctx)
+        if source_path is None:
+            return None
+
+        doc = controller.document
+        try:
+            source_elem = doc.get_element(source_path)
+        except Exception:
+            return None
+        if not is_source_eligible(source_elem):
+            return None
+
+        appearance = extract_appearance(source_elem)
+        # StateStore.set takes the bare key; the eval-context layer
+        # surfaces it as state.eyedropper_cache.
+        store.set("eyedropper_cache", appearance_to_dict(appearance))
+
+        if doc.selection:
+            cfg = _read_eyedropper_config(store, ctx)
+            new_doc = doc
+            for es in doc.selection:
+                new_doc = _apply_to_target_recursive(
+                    new_doc, es.path, appearance, cfg)
+            controller.set_document(new_doc)
+        return None
+
+    def doc_eyedropper_apply_loaded(spec, ctx, store):
+        from algorithms.eyedropper import appearance_from_dict
+
+        if not isinstance(spec, dict):
+            return None
+        target_path = extract_path(spec.get("target"), store, ctx)
+        if target_path is None:
+            return None
+
+        cache = store.get("eyedropper_cache")
+        if cache is None:
+            # Empty cache → fall through to plain sample. Same
+            # element acts as both source and target-of-selection-
+            # apply.
+            doc_eyedropper_sample(
+                {"source": list(target_path)}, ctx, store)
+            return None
+
+        if not isinstance(cache, dict):
+            return None
+        appearance = appearance_from_dict(cache)
+        cfg = _read_eyedropper_config(store, ctx)
+        doc = controller.document
+        new_doc = _apply_to_target_recursive(
+            doc, target_path, appearance, cfg)
+        controller.set_document(new_doc)
+        return None
+
     # ── Transform tools (Scale / Rotate / Shear) ────────────
     # See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md
     # §Apply behavior.
@@ -2934,6 +3086,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.path.erase_at_rect"] = doc_path_erase_at_rect
     effects["doc.path.smooth_at_cursor"] = doc_path_smooth_at_cursor
     effects["doc.magic_wand.apply"] = doc_magic_wand_apply
+    effects["doc.eyedropper.sample"] = doc_eyedropper_sample
+    effects["doc.eyedropper.apply_loaded"] = doc_eyedropper_apply_loaded
     effects["doc.scale.apply"] = doc_scale_apply
     effects["doc.rotate.apply"] = doc_rotate_apply
     effects["doc.shear.apply"] = doc_shear_apply
