@@ -40,7 +40,7 @@
                 }
               ],
               "bind": {
-                "active": "state.active_tab == prop.index"
+                "active": "state.active_tab == {{prop.index}}"
               },
               "children": [
                 {
@@ -85,7 +85,7 @@
                 "background": "{{theme.colors.window_bg}}"
               },
               "bind": {
-                "visible": "state.active_tab == prop.index"
+                "visible": "state.active_tab == {{prop.index}}"
               }
             }
           }
