@@ -26,6 +26,9 @@ import { registerTools, dispatchEvent } from "/static/js/engine/tools.mjs";
 import {
   renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
 } from "/static/js/engine/canvas.mjs";
+import { saveSession, loadSession } from "/static/js/engine/session.mjs";
+
+const SESSION_AUTOSAVE_MS = 30000;
 
 let model = null;
 let store = null;
@@ -46,7 +49,12 @@ export function bootstrap() {
   store = new StateStore({
     state: globalThis.APP_STATE ? { ...globalThis.APP_STATE } : {},
   });
-  model = new Model(emptyDocument());
+
+  // Restore saved session if present; otherwise start blank.
+  const saved = loadSession();
+  model = saved
+    ? new Model(saved.document, saved.filename)
+    : new Model(emptyDocument());
 
   // Register tool yamls so dispatchEvent can find on_<event>
   // handlers. APP_TOOLS is the compiled tools dict the server
@@ -77,6 +85,26 @@ export function bootstrap() {
       catch (_) { /* unknown scope or shallow path — ignore */ }
     },
   });
+
+  // ── Persistence ──────────────────────────────────────
+  //
+  // Save the current document on tab close + every 30 seconds
+  // so an unexpected reload (browser crash, accidental Cmd+W)
+  // doesn't lose work. Mirror's the Rust session.rs cadence.
+  // The Model's listener already fires on every mutation; we
+  // throttle saves to the autosave interval rather than writing
+  // on every mouse-driven mutation, to keep localStorage I/O
+  // off the drag hot path.
+  let saveDebounceTimer = null;
+  function scheduleSave() {
+    if (saveDebounceTimer != null) return;
+    saveDebounceTimer = setTimeout(() => {
+      saveDebounceTimer = null;
+      saveSession(model);
+    }, SESSION_AUTOSAVE_MS);
+  }
+  model.addListener(scheduleSave);
+  window.addEventListener("beforeunload", () => saveSession(model));
 
   // ── Mouse-event wiring ────────────────────────────────
   //
