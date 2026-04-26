@@ -56,6 +56,58 @@ class TestRenderButton:
         assert "btn-secondary" in html
 
 
+class TestRenderIconButton:
+    """Toolbar icon buttons with optional alternates indicator.
+
+    Buttons whose yaml carries an ``alternates:`` block show a small
+    triangle in the lower-right corner, mirroring the Rust / Swift /
+    OCaml / Python convention. Buttons without alternates render the
+    icon alone."""
+
+    def test_icon_button_without_alternates_omits_triangle(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_selection", "summary": "Selection",
+            "icon": "selection_arrow",
+            "style": {"size": 32},
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert "btn_selection" in html
+        assert "alternate-triangle" not in html
+
+    def test_icon_button_with_alternates_renders_triangle(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_arrow_slot",
+            "summary": "Partial Selection",
+            "icon": "partial_selection_arrow",
+            "style": {"size": 32},
+            "alternates": {
+                "menu_id": "arrow_alternates",
+                "items": [
+                    {"id": "partial_selection", "label": "Partial Selection",
+                     "icon": "partial_selection_arrow"},
+                    {"id": "interior_selection", "label": "Interior Selection",
+                     "icon": "interior_selection_arrow"},
+                ],
+            },
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert "alternate-triangle" in html
+
+    def test_alternates_triangle_has_data_attribute(self, theme, state):
+        """The triangle is annotated so JS / tests can target it
+        independently of the icon."""
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_pen_slot", "summary": "Pen",
+            "icon": "pen", "style": {"size": 32},
+            "alternates": {"menu_id": "pen_alternates", "items": []},
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-has-alternates="true"' in html
+
+
 class TestRenderPaneSystem:
     def test_position_relative(self, theme, state):
         from renderer import render_element

@@ -569,7 +569,16 @@ def _render_icon_button(el, theme, state):
     if isinstance(sz, str) and "{{" in sz:
         sz = _resolve(sz, theme, state)
     pos = style.get("position", {})
-    pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;" if pos else ""
+    # `position:relative` is needed unconditionally when alternates
+    # are present so the triangle indicator can absolutely-position
+    # itself; absolute pane positioning takes precedence when set.
+    has_alternates = bool(el.get("alternates"))
+    if pos:
+        pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;"
+    elif has_alternates:
+        pos_css = "position:relative;"
+    else:
+        pos_css = ""
     icon_html = ""
     icon_def = _icons.get(icon_name)
     if icon_def:
@@ -584,11 +593,27 @@ def _render_icon_button(el, theme, state):
         # Fallback: show first letter of summary or icon name
         fallback = summary[0] if summary else (icon_name[0] if icon_name else "?")
         icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:var(--app-text,#ccc)">{escape(str(fallback))}</span>'
+    # Small filled triangle in the lower-right corner indicating
+    # long-press alternates exist for this slot. Mirrors
+    # _draw_alternate_triangle in jas/tools/toolbar.py and the SVG
+    # glyph in jas_dioxus/src/workspace/icons.rs.
+    triangle_html = ""
+    extra_attrs = ""
+    if has_alternates:
+        tri_sz = 5
+        triangle_html = (
+            f'<svg class="alternate-triangle" width="{tri_sz}" height="{tri_sz}"'
+            f' viewBox="0 0 {tri_sz} {tri_sz}"'
+            f' style="position:absolute;right:0;bottom:0;pointer-events:none">'
+            f'<path d="M {tri_sz} {tri_sz} L 0 {tri_sz} L {tri_sz} 0 Z"'
+            f' fill="var(--app-text,#cccccc)"/></svg>'
+        )
+        extra_attrs = ' data-has-alternates="true"'
     return Markup(
         f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary app-tool-btn p-0"'
         f' style="{pos_css}width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
-        f' title="{summary}"{_data_attrs(el)}>'
-        f'{icon_html}</button>'
+        f' title="{summary}"{_data_attrs(el)}{extra_attrs}>'
+        f'{icon_html}{triangle_html}</button>'
     )
 
 
