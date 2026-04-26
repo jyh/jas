@@ -264,9 +264,35 @@ function renderOverlaySpec(spec, scope) {
       evaluated[k] = v;
     }
   }
-  // Build an SVG element matching `type`.
-  const inner = buildOverlayElement(evaluated);
-  return inner;
+  // Custom overlay types short-circuit to specialised renderers.
+  // Plain SVG element types fall through to buildOverlayElement.
+  if (evaluated.type === "partial_selection_overlay") {
+    return renderPartialSelectionOverlay(evaluated);
+  }
+  return buildOverlayElement(evaluated);
+}
+
+// Marquee rect for the Partial Selection tool. The selected-element
+// path handles are already drawn by renderSelectionLayer, so the
+// overlay's only job here is the rubber-band rect — and only when
+// the tool is in the marquee mode.
+function renderPartialSelectionOverlay(evaluated) {
+  if (evaluated.mode !== "marquee") return "";
+  const x1 = num(Number(evaluated.marquee_start_x) || 0);
+  const y1 = num(Number(evaluated.marquee_start_y) || 0);
+  const x2 = num(Number(evaluated.marquee_cur_x) || 0);
+  const y2 = num(Number(evaluated.marquee_cur_y) || 0);
+  const minX = Math.min(Number(x1), Number(x2));
+  const minY = Math.min(Number(y1), Number(y2));
+  const w = Math.abs(Number(x2) - Number(x1));
+  const h = Math.abs(Number(y2) - Number(y1));
+  return (
+    `<rect x="${num(minX)}" y="${num(minY)}" ` +
+    `width="${num(w)}" height="${num(h)}" ` +
+    `fill="rgba(0, 120, 215, 0.08)" ` +
+    `stroke="rgba(0, 120, 215, 0.9)" stroke-width="1" ` +
+    `stroke-dasharray="4 2"/>`
+  );
 }
 
 function buildOverlayElement(evaluated) {
