@@ -569,16 +569,16 @@ def _render_icon_button(el, theme, state):
     if isinstance(sz, str) and "{{" in sz:
         sz = _resolve(sz, theme, state)
     pos = style.get("position", {})
-    # `position:relative` is needed unconditionally when alternates
-    # are present so the triangle indicator can absolutely-position
-    # itself; absolute pane positioning takes precedence when set.
+    # When the yaml supplies an absolute pane position it takes
+    # precedence; otherwise leave positioning to .app-tool-btn in
+    # app.css (`position: relative`), which gives the triangle SVG
+    # a containing block while keeping plain and alternate-bearing
+    # buttons' inline styles identical.
+    pos_css = (
+        f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;"
+        if pos else ""
+    )
     has_alternates = bool(el.get("alternates"))
-    if pos:
-        pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;"
-    elif has_alternates:
-        pos_css = "position:relative;"
-    else:
-        pos_css = ""
     icon_html = ""
     icon_def = _icons.get(icon_name)
     if icon_def:
