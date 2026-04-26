@@ -388,6 +388,7 @@ function runEffect(effect, scope, store, options) {
             : [0];
           if (!parentPath) return;
           const resolved = resolveElementSpec(elemSpec, scope);
+          applyShapeDefaults(resolved, store);
           model.mutate((d) => addElementAt(d, parentPath, resolved));
           return;
         }
@@ -780,4 +781,27 @@ export function setElementAttr(doc, path, attr, value) {
   if (li < 0 || li >= layers.length) return doc;
   layers[li] = replaceElementAt(layers[li], rest, (e) => ({ ...e, [attr]: value }));
   return { ...doc, layers };
+}
+
+// Drawing tool yamls (rect, ellipse, line, …) intentionally omit fill
+// and stroke from their add_element specs and rely on the engine to
+// fold in the user's current panel colors. Without this, every
+// freshly drawn shape would render with the SVG default black fill.
+const SHAPE_TYPES = new Set([
+  "rect", "circle", "ellipse", "line",
+  "polygon", "polyline", "path",
+]);
+
+function applyShapeDefaults(elem, store) {
+  if (!elem || !SHAPE_TYPES.has(elem.type)) return;
+  const state = store && store.state ? store.state : {};
+  if (!("fill" in elem) && state.fill_color !== undefined) {
+    elem.fill = state.fill_color;
+  }
+  if (!("stroke" in elem) && state.stroke_color !== undefined) {
+    elem.stroke = state.stroke_color;
+  }
+  if (!("stroke-width" in elem) && state.stroke_width !== undefined) {
+    elem["stroke-width"] = state.stroke_width;
+  }
 }
