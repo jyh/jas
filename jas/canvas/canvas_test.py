@@ -19,7 +19,7 @@ class ToolbarTest(absltest.TestCase):
 
     def test_tool_enum_values(self):
         tools = list(Tool)
-        self.assertEqual(len(tools), 26)
+        self.assertEqual(len(tools), 28)
         self.assertIn(Tool.SELECTION, tools)
         self.assertIn(Tool.PARTIAL_SELECTION, tools)
         self.assertIn(Tool.INTERIOR_SELECTION, tools)
@@ -46,6 +46,7 @@ class ToolbarTest(absltest.TestCase):
         self.assertIn(Tool.SHEAR, tools)
         self.assertIn(Tool.HAND, tools)
         self.assertIn(Tool.ZOOM, tools)
+        self.assertIn(Tool.EYEDROPPER, tools)
 
 
 
