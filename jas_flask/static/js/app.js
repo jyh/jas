@@ -569,6 +569,40 @@
         }
       }
     });
+    // data-alternate-icons: toolbar slot buttons whose displayed
+    // icon should track which alternate is active. The attribute
+    // is a JSON map {tool_id: icon_name}; when state.active_tool
+    // matches a key, swap the slot's <svg> to that icon's content.
+    // Otherwise leave the default icon untouched (e.g. when an
+    // unrelated tool is active for some other slot).
+    //
+    // We mirror the original SVG (the first <svg> child of the
+    // button — not the alternate-triangle <svg> which has class
+    // "alternate-triangle") so the triangle indicator survives
+    // the swap.
+    document.querySelectorAll("[data-alternate-icons]").forEach(function (el) {
+      var raw = el.getAttribute("data-alternate-icons");
+      var map;
+      try { map = JSON.parse(raw); } catch (ex) { return; }
+      if (!map || typeof map !== "object") return;
+      var tool = state.active_tool;
+      var iconName = map[tool];
+      if (!iconName) return;
+      var iconDef = (typeof APP_ICONS !== "undefined") ? APP_ICONS[iconName] : null;
+      if (!iconDef) return;
+      // Find the icon SVG — first <svg> that isn't the triangle.
+      var svgs = el.querySelectorAll("svg");
+      var iconSvg = null;
+      for (var i = 0; i < svgs.length; i++) {
+        if (!svgs[i].classList.contains("alternate-triangle")) {
+          iconSvg = svgs[i];
+          break;
+        }
+      }
+      if (!iconSvg) return;
+      iconSvg.setAttribute("viewBox", iconDef.viewbox || "0 0 16 16");
+      iconSvg.innerHTML = iconDef.svg || "";
+    });
     // Generic data-bind-z_index: set z-index via if/then/else expression
     document.querySelectorAll("[data-bind-z_index]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-z_index");
