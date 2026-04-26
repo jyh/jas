@@ -327,6 +327,108 @@ describe("doc.path.commit_partial_marquee", () => {
   });
 });
 
+describe("Pen tool effects", () => {
+  it("anchor.push appends a corner anchor", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_push");
+    const store = new StateStore();
+    runEffects(
+      [{ "anchor.push": { buffer: "test_pen_push", x: "10", y: "20" } }],
+      store.asContext(), store, {},
+    );
+    assert.equal(ab.length("test_pen_push"), 1);
+    ab.clear("test_pen_push");
+  });
+
+  it("anchor.set_last_out flips smooth and mirrors in-handle", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_smooth");
+    const store = new StateStore();
+    runEffects(
+      [
+        { "anchor.push": { buffer: "test_pen_smooth", x: "50", y: "50" } },
+        { "anchor.set_last_out": { buffer: "test_pen_smooth", hx: "60", hy: "50" } },
+      ],
+      store.asContext(), store, {},
+    );
+    const [a] = ab.anchors("test_pen_smooth");
+    assert.equal(a.hout_x, 60);
+    assert.equal(a.hin_x, 40);
+    assert.equal(a.smooth, true);
+    ab.clear("test_pen_smooth");
+  });
+
+  it("anchor_buffer_length / anchor_buffer_close_hit primitives evaluate in YAML guards", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    const { evaluate } = await import("../../static/js/engine/expr.mjs");
+    const { Scope } = await import("../../static/js/engine/scope.mjs");
+    const { toBool, toJson } = await import("../../static/js/engine/value.mjs");
+    ab.clear("test_pen_p");
+    ab.push("test_pen_p", 100, 100);
+    ab.push("test_pen_p", 200, 200);
+    const scope = new Scope({});
+    assert.equal(
+      toJson(evaluate("anchor_buffer_length('test_pen_p')", scope)), 2);
+    assert.equal(
+      toBool(evaluate("anchor_buffer_close_hit('test_pen_p', 102, 102, 8)", scope)),
+      true);
+    assert.equal(
+      toBool(evaluate("anchor_buffer_close_hit('test_pen_p', 200, 200, 8)", scope)),
+      false); // last anchor isn't first
+    ab.clear("test_pen_p");
+  });
+
+  it("doc.add_path_from_anchor_buffer appends a Path with CurveTos", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_add");
+    ab.push("test_pen_add", 0, 0);
+    ab.push("test_pen_add", 50, 50);
+    ab.push("test_pen_add", 100, 0);
+    const model = new Model(emptyDocument());
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.add_path_from_anchor_buffer": {
+        buffer: "test_pen_add", closed: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    const elem = model.document.layers[0].children[0];
+    assert.equal(elem.type, "path");
+    // 1 MoveTo + 2 CurveTos.
+    assert.equal(elem.d.length, 3);
+    assert.equal(elem.d[0].type, "M");
+    assert.equal(elem.d[1].type, "C");
+    assert.equal(elem.d[2].type, "C");
+    // Last command lands at the third anchor (100, 0).
+    assert.equal(elem.d[2].x, 100);
+    assert.equal(elem.d[2].y, 0);
+    // Open paths default fill=null so they don't trap a filled hairline.
+    assert.equal(elem.fill, null);
+    ab.clear("test_pen_add");
+  });
+
+  it("doc.add_path_from_anchor_buffer with closed=true emits CurveTo + Z", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_closed");
+    ab.push("test_pen_closed", 0, 0);
+    ab.push("test_pen_closed", 100, 0);
+    ab.push("test_pen_closed", 50, 80);
+    const model = new Model(emptyDocument());
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.add_path_from_anchor_buffer": {
+        buffer: "test_pen_closed", closed: "true",
+      } }],
+      store.asContext(), store, { model },
+    );
+    const elem = model.document.layers[0].children[0];
+    // M + 2 CurveTos + closing CurveTo + Z = 5 commands.
+    assert.equal(elem.d.length, 5);
+    assert.equal(elem.d[4].type, "Z");
+    ab.clear("test_pen_closed");
+  });
+});
+
 describe("layer_length primitive", () => {
   beforeEach(_resetForTesting);
 

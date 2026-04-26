@@ -17,7 +17,9 @@
 import { Model } from "/static/js/engine/model.mjs";
 import { emptyDocument, ensureDocumentInvariants } from "/static/js/engine/document.mjs";
 import { StateStore } from "/static/js/engine/store.mjs";
-import { registerTools, dispatchEvent, getTool } from "/static/js/engine/tools.mjs";
+import {
+  registerTools, dispatchEvent, getTool,
+} from "/static/js/engine/tools.mjs";
 import {
   renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
   renderArtboardFillLayer, renderArtboardDecorationLayer,
@@ -115,6 +117,39 @@ export function bootstrap() {
       return next;
     });
   });
+
+  // ── Keyboard wiring for canvas tools ──────────────────
+  //
+  // The Pen and Pencil tools have on_keydown handlers (Escape / Enter
+  // commit or cancel an in-progress path). Capture-phase listener so
+  // we win against app.js's bubble-phase Escape→wireframe toggle.
+  // Only intercept the keys our tools care about, and only when the
+  // active tool actually defines on_keydown — leaves the rest of the
+  // keyboard (shortcuts, Escape outside drawing, etc.) to app.js.
+  const TOOL_KEYS = new Set(["Escape", "Enter"]);
+  document.addEventListener("keydown", (evt) => {
+    if (!TOOL_KEYS.has(evt.key)) return;
+    if (evt.target && (evt.target.tagName === "INPUT"
+        || evt.target.tagName === "TEXTAREA"
+        || evt.target.isContentEditable)) return;
+    const m = activeModel();
+    if (!m) return;
+    const toolId = store.get("state.active_tool") || "selection";
+    const tool = getTool(toolId);
+    if (!tool || !tool.handlers || !tool.handlers.on_keydown) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    dispatchEvent(toolId, {
+      type: "keydown",
+      key: evt.key,
+      modifiers: {
+        shift: evt.shiftKey, ctrl: evt.ctrlKey,
+        alt: evt.altKey, meta: evt.metaKey,
+      },
+    }, store, { model: m });
+    const entry = activeCanvasId ? canvases.get(activeCanvasId) : null;
+    if (entry) renderToolOverlay(entry.canvasEl);
+  }, true);
 
   // ── Session persistence ─────────────────────────────────
   //
