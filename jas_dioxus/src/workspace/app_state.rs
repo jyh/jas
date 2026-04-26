@@ -98,6 +98,7 @@ impl TabState {
         tools.insert(ToolKind::Lasso, yaml_tool("lasso"));
         tools.insert(ToolKind::Hand, yaml_tool("hand"));
         tools.insert(ToolKind::Zoom, yaml_tool("zoom"));
+        tools.insert(ToolKind::Eyedropper, yaml_tool("eyedropper"));
         let mut model = model;
         // Initial centering at construction time uses Model's default
         // viewport (888x900 from layout.yaml). The first call to

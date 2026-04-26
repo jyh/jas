@@ -1751,6 +1751,33 @@ fn run_doc_effect(
                 magic_wand_apply(model, store, ctx, &seed_path, &mode);
             }
         }
+        "doc.eyedropper.sample" => {
+            // Eyedropper plain-click sample per
+            // EYEDROPPER_TOOL.md §Gestures. Reads the source-element
+            // path, snapshots its appearance into
+            // state.eyedropper_cache, and (when the selection is
+            // non-empty) applies the same appearance to every
+            // eligible target in the selection.
+            if let serde_json::Value::Object(args) = spec {
+                let Some(source_path) =
+                    args.get("source").and_then(|v| extract_path(v, store, ctx))
+                else { return; };
+                eyedropper_sample(model, store, ctx, &source_path);
+            }
+        }
+        "doc.eyedropper.apply_loaded" => {
+            // Eyedropper Alt+click apply per
+            // EYEDROPPER_TOOL.md §Gestures. Reads the cached
+            // appearance from state.eyedropper_cache and writes it
+            // to the clicked target. When the cache is null, falls
+            // through to plain-sample semantics.
+            if let serde_json::Value::Object(args) = spec {
+                let Some(target_path) =
+                    args.get("target").and_then(|v| extract_path(v, store, ctx))
+                else { return; };
+                eyedropper_apply_loaded(model, store, ctx, &target_path);
+            }
+        }
         "doc.path.smooth_at_cursor" => {
             // Iterates *selected* unlocked Path elements, finds the
             // contiguous flat-polyline range within `radius` of (x, y),
@@ -4851,6 +4878,168 @@ fn read_magic_wand_config(
     cfg
 }
 
+/// Implementation of doc.eyedropper.sample. See
+/// EYEDROPPER_TOOL.md §Gestures.
+///
+/// Snapshots the source element's attrs into state.eyedropper_cache.
+/// When the current selection is non-empty, also writes the same
+/// attrs to every eligible target in the selection (recursing into
+/// Group / Layer containers).
+fn eyedropper_sample(
+    model: &mut Model,
+    store: &mut StateStore,
+    ctx: &serde_json::Value,
+    source_path: &[usize],
+) {
+    use crate::algorithms::eyedropper::{extract_appearance, is_source_eligible};
+
+    let doc = model.document().clone();
+    let path_vec = source_path.to_vec();
+    let Some(source_elem) = doc.get_element(&path_vec).map(|e| (*e).clone())
+    else { return; };
+    if !is_source_eligible(&source_elem) {
+        return;
+    }
+
+    let appearance = extract_appearance(&source_elem);
+    let cache_json = serde_json::to_value(&appearance)
+        .unwrap_or(serde_json::Value::Null);
+    // StateStore.set takes the bare key (no `state.` prefix); the
+    // eval-context layer is what surfaces it as state.eyedropper_cache.
+    store.set("eyedropper_cache", cache_json);
+
+    if !doc.selection.is_empty() {
+        let cfg = read_eyedropper_config(store, ctx);
+        let mut new_doc = doc.clone();
+        let selection_paths: Vec<Vec<usize>> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        for path in &selection_paths {
+            new_doc = apply_to_target_recursive(&new_doc, path, &appearance, &cfg);
+        }
+        model.set_document(new_doc);
+    }
+}
+
+/// Implementation of doc.eyedropper.apply_loaded. See
+/// EYEDROPPER_TOOL.md §Gestures.
+///
+/// Reads state.eyedropper_cache and writes the cached attrs to the
+/// clicked target. When the cache is null, falls through to plain-
+/// sample semantics so an empty-cache Alt+click still does
+/// something useful.
+fn eyedropper_apply_loaded(
+    model: &mut Model,
+    store: &mut StateStore,
+    ctx: &serde_json::Value,
+    target_path: &[usize],
+) {
+    use crate::algorithms::eyedropper::Appearance;
+
+    let cache_json = store.get("eyedropper_cache").clone();
+    if cache_json.is_null() {
+        // Empty cache: fall through to sample.
+        eyedropper_sample(model, store, ctx, target_path);
+        return;
+    }
+
+    let appearance: Appearance = match serde_json::from_value(cache_json) {
+        Ok(a) => a,
+        Err(_) => return,
+    };
+
+    let cfg = read_eyedropper_config(store, ctx);
+    let doc = model.document().clone();
+    let new_doc = apply_to_target_recursive(
+        &doc, &target_path.to_vec(), &appearance, &cfg,
+    );
+    model.set_document(new_doc);
+}
+
+/// Walk the document at `path`. If the element is a Group or Layer,
+/// recurse into each child. Otherwise apply the appearance when the
+/// element is target-eligible. Returns a new Document with all
+/// applies threaded through `Document::replace_element`.
+fn apply_to_target_recursive(
+    doc: &crate::document::document::Document,
+    path: &[usize],
+    appearance: &crate::algorithms::eyedropper::Appearance,
+    cfg: &crate::algorithms::eyedropper::EyedropperConfig,
+) -> crate::document::document::Document {
+    use crate::algorithms::eyedropper::{apply_appearance, is_target_eligible};
+
+    let path_vec = path.to_vec();
+    let Some(elem) = doc.get_element(&path_vec) else { return doc.clone(); };
+    let elem_clone = (*elem).clone();
+
+    match &elem_clone {
+        Element::Group(g) => {
+            let mut acc = doc.clone();
+            for i in 0..g.children.len() {
+                let mut child_path = path.to_vec();
+                child_path.push(i);
+                acc = apply_to_target_recursive(&acc, &child_path, appearance, cfg);
+            }
+            acc
+        }
+        Element::Layer(l) => {
+            let mut acc = doc.clone();
+            for i in 0..l.children.len() {
+                let mut child_path = path.to_vec();
+                child_path.push(i);
+                acc = apply_to_target_recursive(&acc, &child_path, appearance, cfg);
+            }
+            acc
+        }
+        _ => {
+            if !is_target_eligible(&elem_clone) {
+                return doc.clone();
+            }
+            let new_elem = apply_appearance(&elem_clone, appearance, cfg);
+            doc.replace_element(&path_vec, new_elem)
+        }
+    }
+}
+
+/// Read the 25 `state.eyedropper_*` keys into an EyedropperConfig.
+/// Falls back to the spec defaults (all true) when a key is missing.
+fn read_eyedropper_config(
+    store: &StateStore, ctx: &serde_json::Value,
+) -> crate::algorithms::eyedropper::EyedropperConfig {
+    use crate::algorithms::eyedropper::EyedropperConfig;
+    let mut cfg = EyedropperConfig::default();
+    let bool_at = |key: &str, fallback: bool| -> bool {
+        match eval_expr(&format!("state.{}", key), store, ctx) {
+            Value::Bool(b) => b, _ => fallback,
+        }
+    };
+    cfg.fill                  = bool_at("eyedropper_fill",                  cfg.fill);
+    cfg.stroke                = bool_at("eyedropper_stroke",                cfg.stroke);
+    cfg.stroke_color          = bool_at("eyedropper_stroke_color",          cfg.stroke_color);
+    cfg.stroke_weight         = bool_at("eyedropper_stroke_weight",         cfg.stroke_weight);
+    cfg.stroke_cap_join       = bool_at("eyedropper_stroke_cap_join",       cfg.stroke_cap_join);
+    cfg.stroke_align          = bool_at("eyedropper_stroke_align",          cfg.stroke_align);
+    cfg.stroke_dash           = bool_at("eyedropper_stroke_dash",           cfg.stroke_dash);
+    cfg.stroke_arrowheads     = bool_at("eyedropper_stroke_arrowheads",     cfg.stroke_arrowheads);
+    cfg.stroke_profile        = bool_at("eyedropper_stroke_profile",        cfg.stroke_profile);
+    cfg.stroke_brush          = bool_at("eyedropper_stroke_brush",          cfg.stroke_brush);
+    cfg.opacity               = bool_at("eyedropper_opacity",               cfg.opacity);
+    cfg.opacity_alpha         = bool_at("eyedropper_opacity_alpha",         cfg.opacity_alpha);
+    cfg.opacity_blend         = bool_at("eyedropper_opacity_blend",         cfg.opacity_blend);
+    cfg.character             = bool_at("eyedropper_character",             cfg.character);
+    cfg.character_font        = bool_at("eyedropper_character_font",        cfg.character_font);
+    cfg.character_size        = bool_at("eyedropper_character_size",        cfg.character_size);
+    cfg.character_leading     = bool_at("eyedropper_character_leading",     cfg.character_leading);
+    cfg.character_kerning     = bool_at("eyedropper_character_kerning",     cfg.character_kerning);
+    cfg.character_tracking    = bool_at("eyedropper_character_tracking",    cfg.character_tracking);
+    cfg.character_color       = bool_at("eyedropper_character_color",       cfg.character_color);
+    cfg.paragraph             = bool_at("eyedropper_paragraph",             cfg.paragraph);
+    cfg.paragraph_align       = bool_at("eyedropper_paragraph_align",       cfg.paragraph_align);
+    cfg.paragraph_indent      = bool_at("eyedropper_paragraph_indent",      cfg.paragraph_indent);
+    cfg.paragraph_space       = bool_at("eyedropper_paragraph_space",       cfg.paragraph_space);
+    cfg.paragraph_hyphenate   = bool_at("eyedropper_paragraph_hyphenate",   cfg.paragraph_hyphenate);
+    cfg
+}
+
 /// Walk the document and invoke `visit(path, element)` for every
 /// leaf element that passes the §Eligibility filter — locked /
 /// hidden / mask-subtree / Compound Shape operands / containers
@@ -7246,6 +7435,265 @@ mod tests {
             .selection.iter().map(|es| es.path.clone()).collect();
         assert_eq!(paths.len(), 1);
         assert!(paths.contains(&vec![0, 0]));
+    }
+
+    // ── doc.eyedropper.sample / apply_loaded ────────────────────
+
+    fn eyedropper_state_defaults(store: &mut StateStore) {
+        // All 25 toggles default true. A failing test where
+        // the wrong attribute is copied means a state default
+        // disagrees with what the spec promises.
+        for key in &[
+            "eyedropper_fill",
+            "eyedropper_stroke",
+            "eyedropper_stroke_color",
+            "eyedropper_stroke_weight",
+            "eyedropper_stroke_cap_join",
+            "eyedropper_stroke_align",
+            "eyedropper_stroke_dash",
+            "eyedropper_stroke_arrowheads",
+            "eyedropper_stroke_profile",
+            "eyedropper_stroke_brush",
+            "eyedropper_opacity",
+            "eyedropper_opacity_alpha",
+            "eyedropper_opacity_blend",
+            "eyedropper_character",
+            "eyedropper_character_font",
+            "eyedropper_character_size",
+            "eyedropper_character_leading",
+            "eyedropper_character_kerning",
+            "eyedropper_character_tracking",
+            "eyedropper_character_color",
+            "eyedropper_paragraph",
+            "eyedropper_paragraph_align",
+            "eyedropper_paragraph_indent",
+            "eyedropper_paragraph_space",
+            "eyedropper_paragraph_hyphenate",
+        ] {
+            store.set(key, serde_json::json!(true));
+        }
+        store.set("eyedropper_cache", serde_json::Value::Null);
+    }
+
+    fn make_two_rects_red_then_empty() -> Model {
+        use crate::geometry::element::Stroke;
+        let red = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let make = |fill: Option<Fill>, x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0, fill, stroke: Some(stroke.clone()),
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![
+                std::rc::Rc::new(make(Some(red), 0.0)),
+                std::rc::Rc::new(make(None, 20.0)),
+            ],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: Vec::new(), ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn eyedropper_sample_writes_to_cache() {
+        let mut model = make_two_rects_red_then_empty();
+        let mut store = StateStore::new();
+        eyedropper_state_defaults(&mut store);
+        let effects = vec![serde_json::json!({
+            "doc.eyedropper.sample": { "source": [0, 0] }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let cache = store.get("eyedropper_cache").clone();
+        assert!(!cache.is_null(), "sample must populate cache");
+        // Cache is a serialized Appearance — the fill key should be
+        // present and carry the red color.
+        let fill = cache.get("fill").expect("cache.fill present");
+        assert!(fill.get("color").is_some(), "fill has color");
+    }
+
+    #[test]
+    fn eyedropper_sample_with_selection_applies_to_selection() {
+        let mut model = make_two_rects_red_then_empty();
+        // Select rect 1 (the empty one).
+        crate::document::controller::Controller::set_selection(
+            &mut model, vec![ElementSelection::all(vec![0, 1])]);
+        let mut store = StateStore::new();
+        eyedropper_state_defaults(&mut store);
+        let effects = vec![serde_json::json!({
+            "doc.eyedropper.sample": { "source": [0, 0] }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Rect 1 should now have red fill copied from rect 0.
+        let target = model.document().get_element(&vec![0, 1]).unwrap();
+        let fill = target.fill().expect("target now has fill");
+        assert_eq!(fill.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn eyedropper_apply_loaded_writes_cache_to_target() {
+        let mut model = make_two_rects_red_then_empty();
+        let mut store = StateStore::new();
+        eyedropper_state_defaults(&mut store);
+        // Pre-populate the cache by sampling rect 0.
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.eyedropper.sample": { "source": [0, 0] }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Now Alt+click rect 1 (no selection).
+        crate::document::controller::Controller::set_selection(&mut model, Vec::new());
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.eyedropper.apply_loaded": { "target": [0, 1] }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let target = model.document().get_element(&vec![0, 1]).unwrap();
+        let fill = target.fill().expect("apply_loaded wrote fill");
+        assert_eq!(fill.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn eyedropper_apply_loaded_falls_through_to_sample_when_cache_null() {
+        let mut model = make_two_rects_red_then_empty();
+        let mut store = StateStore::new();
+        eyedropper_state_defaults(&mut store);
+        // Cache is null. Alt+click on rect 0 should sample (not apply).
+        let effects = vec![serde_json::json!({
+            "doc.eyedropper.apply_loaded": { "target": [0, 0] }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let cache = store.get("eyedropper_cache").clone();
+        assert!(!cache.is_null(),
+            "empty-cache Alt+click should fall through to sample");
+    }
+
+    #[test]
+    fn eyedropper_skips_locked_target() {
+        use crate::geometry::element::Stroke;
+        // Two rects: rect 0 red (source), rect 1 locked + empty
+        // (target). Apply to selection — locked target skipped.
+        let red = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let make = |fill: Option<Fill>, x: f64, locked: bool| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0, fill, stroke: Some(stroke.clone()),
+            common: CommonProps {
+                locked, ..CommonProps::default()
+            },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![
+                std::rc::Rc::new(make(Some(red), 0.0, false)),
+                std::rc::Rc::new(make(None, 20.0, true)),
+            ],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 1])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        eyedropper_state_defaults(&mut store);
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.eyedropper.sample": { "source": [0, 0] }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Locked target's fill stays None.
+        let target = model.document().get_element(&vec![0, 1]).unwrap();
+        assert_eq!(target.fill(), None,
+            "locked target must not receive apply");
+    }
+
+    #[test]
+    fn eyedropper_master_off_skips_fill_group() {
+        let mut model = make_two_rects_red_then_empty();
+        // Select the empty rect 1 as target.
+        crate::document::controller::Controller::set_selection(
+            &mut model, vec![ElementSelection::all(vec![0, 1])]);
+        let mut store = StateStore::new();
+        eyedropper_state_defaults(&mut store);
+        // Disable Fill master.
+        store.set("eyedropper_fill", serde_json::json!(false));
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.eyedropper.sample": { "source": [0, 0] }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        let target = model.document().get_element(&vec![0, 1]).unwrap();
+        assert_eq!(target.fill(), None,
+            "Fill master OFF must leave target's fill unchanged");
+    }
+
+    #[test]
+    fn eyedropper_recurses_into_group_when_applying_to_selection() {
+        use crate::geometry::element::{Stroke, GroupElem};
+        // Rect 0: red source. Group containing two empty rects.
+        // Selection = [Group]. Sample rect 0 → both group children
+        // should get red fill.
+        let red = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let make_rect = |fill: Option<Fill>, x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0, fill, stroke: Some(stroke.clone()),
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![
+                std::rc::Rc::new(make_rect(None, 20.0)),
+                std::rc::Rc::new(make_rect(None, 40.0)),
+            ],
+            ..GroupElem::default()
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![
+                std::rc::Rc::new(make_rect(Some(red), 0.0)),
+                std::rc::Rc::new(group),
+            ],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            // Select the group at [0, 1].
+            selection: vec![ElementSelection::all(vec![0, 1])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        eyedropper_state_defaults(&mut store);
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.eyedropper.sample": { "source": [0, 0] }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        // Both group children should have received the red fill.
+        let child0 = model.document().get_element(&vec![0, 1, 0]).unwrap();
+        let child1 = model.document().get_element(&vec![0, 1, 1]).unwrap();
+        assert_eq!(child0.fill().map(|f| f.color), Some(Color::rgb(1.0, 0.0, 0.0)));
+        assert_eq!(child1.fill().map(|f| f.color), Some(Color::rgb(1.0, 0.0, 0.0)));
     }
 
     // ─── Zoom + Pan effects ────────────────────────────────────

@@ -15,4 +15,5 @@ pub mod offset_path;
 pub mod hyphenator;
 pub mod knuth_plass;
 pub mod magic_wand;
+pub mod eyedropper;
 pub mod transform_apply;

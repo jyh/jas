@@ -32,6 +32,7 @@ public enum Tool: String, CaseIterable {
     case hand
     case zoom
     case artboard
+    case eyedropper
 }
 
 /// Map a Tool enum case to the matching workspace/tools/*.yaml
@@ -66,6 +67,7 @@ func toolYamlId(_ tool: Tool) -> String? {
     case .hand: return "hand"
     case .zoom: return "zoom"
     case .artboard: return "artboard"
+    case .eyedropper: return "eyedropper"
     case .typeTool, .typeOnPath: return nil
     }
 }
@@ -634,6 +636,15 @@ struct ToolbarPanel: View {
                         currentTool: $currentTool,
                         visibleTool: $navSlotTool,
                         alternates: [.hand, .zoom],
+                        onRequestOptions: onOpenToolOptions
+                    )
+                    // Eyedropper — top-level slot, no alternates
+                    // (Phase 1). Dblclick opens the Eyedropper Tool
+                    // Options dialog via tool_options_dialog. See
+                    // EYEDROPPER_TOOL.md.
+                    ToolbarView.toolButton(
+                        currentTool: $currentTool,
+                        tool: .eyedropper,
                         onRequestOptions: onOpenToolOptions
                     )
                 }
