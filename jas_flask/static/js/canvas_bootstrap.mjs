@@ -56,7 +56,14 @@ export function bootstrap() {
   // handlers. APP_TOOLS is the compiled tools dict the server
   // injects into normal.html via {{ tools_json | safe }}.
   if (globalThis.APP_TOOLS) {
+    console.log("[bootstrap] APP_TOOLS keys:", Object.keys(globalThis.APP_TOOLS).length,
+      "rect-handlers:", globalThis.APP_TOOLS.rect && Object.keys(globalThis.APP_TOOLS.rect.handlers || {}));
     registerTools(globalThis.APP_TOOLS, store);
+    console.log("[bootstrap] after registerTools — store.tool keys:",
+      Object.keys(store.tool || {}),
+      "store.tool.rect:", store.tool.rect);
+  } else {
+    console.warn("[bootstrap] APP_TOOLS missing!");
   }
 
   // Watch drawing_surface for canvases. Per the layout spec, none
