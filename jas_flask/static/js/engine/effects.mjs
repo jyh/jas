@@ -768,8 +768,12 @@ function appendInElement(container, subpath, elem) {
 /**
  * Set an attribute on the element at `path`. Shallow — replaces the
  * top-level field only (x, y, width, fill, etc.). Returns a new Doc.
+ *
+ * Exported so the bootstrap script can route panel-state changes
+ * (Color / Stroke) onto the current selection without going
+ * through the dispatchEvent path (no tool to wrap them as).
  */
-function setElementAttr(doc, path, attr, value) {
+export function setElementAttr(doc, path, attr, value) {
   if (!Array.isArray(path) || path.length === 0) return doc;
   const [li, ...rest] = path;
   const layers = doc.layers.slice();
