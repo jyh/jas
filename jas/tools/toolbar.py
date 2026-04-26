@@ -177,27 +177,49 @@ class ToolButton(QToolButton):
             self._draw_alternate_triangle(painter)
 
     def _draw_hand_tool(self, painter):
-        """Open palm with four fingers extended. Per HAND_TOOL.md
-        §Tool icon."""
-        pen = QPen(_icon_color(), 2.0)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        for x, tip in [(10, 5), (13, 3), (16, 4), (19, 6)]:
-            painter.drawLine(x, 14, x, tip)
-        # Palm + thumb.
+        """Filled-silhouette hand glyph. Source path imported from
+        examples/hand-tool.svg (256x256), scaled 28/256 = 0.109375
+        to fit the toolbar viewBox. Per HAND_TOOL.md §Tool icon."""
         path = QPainterPath()
-        path.moveTo(9, 14)
-        path.lineTo(4, 18)
-        path.lineTo(4, 22)
-        path.quadTo(5, 25, 9, 25)
-        path.lineTo(19, 25)
-        path.quadTo(22, 25, 22, 22)
-        path.lineTo(22, 14)
-        pen2 = QPen(_icon_color(), 2.0)
-        pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen2.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen2)
+        path.moveTo(0.0000, 242.2100)
+        path.lineTo(201.2900, 109.5100)
+        path.cubicTo(162.6200, 185.8600, 178.7700, 207.2800,
+                     130.4400, 205.4300)
+        path.cubicTo(113.0300, 204.7600, 107.6100, 191.5700,
+                     96.4900, 176.2600)
+        path.cubicTo(85.8800, 161.6600, 47.9100, 131.0500,
+                     60.9100, 126.2000)
+        path.cubicTo(63.0900, 125.3900, 68.4300, 124.9800,
+                     71.0400, 126.2300)
+        path.lineTo(105.7600, 142.8200)
+        path.cubicTo(108.9000, 119.3200, 82.5000, 82.4600,
+                     96.6000, 71.9500)
+        path.cubicTo(98.8700, 70.2600, 107.4300, 74.2400,
+                     108.5500, 77.2600)
+        path.lineTo(122.2600, 114.1000)
+        path.lineTo(125.1100, 68.0000)
+        path.cubicTo(125.2900, 65.1100, 128.4200, 59.7800,
+                     130.2900, 58.1700)
+        path.cubicTo(132.6400, 56.1400, 141.6300, 61.4900,
+                     141.8100, 64.8000)
+        path.lineTo(144.6100, 117.5700)
+        path.cubicTo(157.9800, 103.8300, 148.1200, 82.3900,
+                     160.7700, 67.9300)
+        path.cubicTo(163.1900, 65.1600, 173.6400, 71.6200,
+                     173.2700, 75.7700)
+        path.lineTo(168.4500, 129.3600)
+        path.lineTo(187.8900, 100.9700)
+        path.cubicTo(189.7000, 98.3200, 195.2400, 95.3000,
+                     197.9400, 95.1500)
+        path.cubicTo(201.3000, 94.9700, 203.4000, 105.3700,
+                     201.3000, 109.5000)
+        path.closeSubpath()
+        painter.save()
+        painter.scale(0.109375, 0.109375)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_icon_color())
         painter.drawPath(path)
+        painter.restore()
 
     def _draw_zoom_tool(self, painter):
         """Magnifying glass: circular lens + ~45° handle.

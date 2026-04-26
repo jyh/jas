@@ -333,6 +333,16 @@
     if (isFuncCall || _NAMESPACES.indexOf(prefix) >= 0) {
       return evalExpr(s, ctx);
     }
+    // String literal: "foo" or 'foo' — strip the surrounding
+    // quotes so expressions like `set: { active_tool: '"rect"' }`
+    // store the unquoted value `rect`. Matches the rhs-quote
+    // stripping in the comparison handler above and the OCaml /
+    // Python expression-language semantics.
+    if (s.length >= 2 &&
+        ((s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') ||
+         (s.charAt(0) === "'" && s.charAt(s.length - 1) === "'"))) {
+      return s.substring(1, s.length - 1);
+    }
     // Literal string (CSS values, plain text, etc.)
     return s;
   }
@@ -356,6 +366,40 @@
       }
       var arg = resolve(argStr, ctx);
       return colorFunctions[fnMatch[1]](arg);
+    }
+    // Built-in `mem(needle, haystack)` — true iff `needle` is in
+    // `haystack`. `haystack` is a list literal like ["a", "b"].
+    // Used by toolbar slots to drive `bind.checked` for tools that
+    // share a long-press slot with alternates. Mirrors the same-name
+    // primitive in the OCaml / Python expression interpreters.
+    //
+    // Without this branch the evaluator falls through and returns
+    // "" for the whole expression; `evalCondition("")` then returns
+    // true via its empty-string-is-no-condition fallback, leaving
+    // every alternate-bearing slot button stuck with the `.active`
+    // class.
+    if (fnMatch && fnMatch[1] === "mem") {
+      var memArgStr = fnMatch[2];
+      var memDepth = 0, memSplit = -1;
+      for (var mi = 0; mi < memArgStr.length; mi++) {
+        var mch = memArgStr.charAt(mi);
+        if (mch === "[" || mch === "(") memDepth++;
+        else if (mch === "]" || mch === ")") memDepth--;
+        else if (mch === "," && memDepth === 0) { memSplit = mi; break; }
+      }
+      if (memSplit === -1) return false;
+      var needleExpr = memArgStr.substring(0, memSplit).trim();
+      var haystackExpr = memArgStr.substring(memSplit + 1).trim();
+      var needle = resolve(needleExpr, ctx);
+      var needleStr = needle === null || needle === undefined
+        ? "" : String(needle);
+      try {
+        var haystack = JSON.parse(haystackExpr.replace(/'/g, '"'));
+        if (Array.isArray(haystack)) {
+          return haystack.indexOf(needleStr) >= 0;
+        }
+      } catch (e) {}
+      return false;
     }
     var parts = expr.split(".");
     if (parts[0] === "state") return state[parts[1]];
@@ -535,6 +579,40 @@
         }
       }
     });
+    // data-alternate-icons: toolbar slot buttons whose displayed
+    // icon should track which alternate is active. The attribute
+    // is a JSON map {tool_id: icon_name}; when state.active_tool
+    // matches a key, swap the slot's <svg> to that icon's content.
+    // Otherwise leave the default icon untouched (e.g. when an
+    // unrelated tool is active for some other slot).
+    //
+    // We mirror the original SVG (the first <svg> child of the
+    // button — not the alternate-triangle <svg> which has class
+    // "alternate-triangle") so the triangle indicator survives
+    // the swap.
+    document.querySelectorAll("[data-alternate-icons]").forEach(function (el) {
+      var raw = el.getAttribute("data-alternate-icons");
+      var map;
+      try { map = JSON.parse(raw); } catch (ex) { return; }
+      if (!map || typeof map !== "object") return;
+      var tool = state.active_tool;
+      var iconName = map[tool];
+      if (!iconName) return;
+      var iconDef = (typeof APP_ICONS !== "undefined") ? APP_ICONS[iconName] : null;
+      if (!iconDef) return;
+      // Find the icon SVG — first <svg> that isn't the triangle.
+      var svgs = el.querySelectorAll("svg");
+      var iconSvg = null;
+      for (var i = 0; i < svgs.length; i++) {
+        if (!svgs[i].classList.contains("alternate-triangle")) {
+          iconSvg = svgs[i];
+          break;
+        }
+      }
+      if (!iconSvg) return;
+      iconSvg.setAttribute("viewBox", iconDef.viewbox || "0 0 16 16");
+      iconSvg.innerHTML = iconDef.svg || "";
+    });
     // Generic data-bind-z_index: set z-index via if/then/else expression
     document.querySelectorAll("[data-bind-z_index]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-z_index");
@@ -599,6 +677,90 @@
       }
       ctx.putImageData(imageData, 0, 0);
     });
+  }
+
+  // ── Popover dialog show/hide ───────────────────────────────
+  //
+  // Tool-alternate flyouts (declared in dialog yaml as
+  // `modal: false`) anchor next to the triggering toolbar slot
+  // instead of centering with a backdrop. Skip the Bootstrap
+  // Modal API entirely; manage `display` + position inline.
+
+  function showPopover(el, ctx) {
+    // Resolve the triggering element. ctx.self is the slot button
+    // when fired by wireBehaviors; ctx.event.target_id is a fallback.
+    var triggerId =
+      (ctx && ctx.self && ctx.self.id) ||
+      (ctx && ctx.event && ctx.event.target_id) ||
+      null;
+    var trigger = triggerId ? document.getElementById(triggerId) : null;
+    el.classList.add("show");
+    el.style.display = "block";
+    el.removeAttribute("aria-hidden");
+    el.setAttribute("aria-modal", "false");
+    var inner = el.querySelector(".modal-dialog");
+    if (inner) {
+      inner.style.position = "fixed";
+      inner.style.margin = "0";
+      inner.style.maxWidth = "none";
+      if (trigger) {
+        var r = trigger.getBoundingClientRect();
+        // Anchor 4 px to the right of the trigger, top-aligned.
+        // The popover is measured by the browser after .show, so
+        // a second-pass clamp keeps it on-screen.
+        inner.style.left = (r.right + 4) + "px";
+        inner.style.top = r.top + "px";
+        // Clamp to viewport once layout settles.
+        requestAnimationFrame(function () {
+          var pop = inner.getBoundingClientRect();
+          var vw = window.innerWidth;
+          var vh = window.innerHeight;
+          if (pop.right > vw - 4) {
+            inner.style.left = Math.max(4, vw - pop.width - 4) + "px";
+          }
+          if (pop.bottom > vh - 4) {
+            inner.style.top = Math.max(4, vh - pop.height - 4) + "px";
+          }
+        });
+      } else {
+        // No trigger known — fall back to centred.
+        inner.style.left = "50%";
+        inner.style.top = "20%";
+        inner.style.transform = "translateX(-50%)";
+      }
+    }
+    // Click-outside handler. Use mousedown so a click-inside event
+    // doesn't fire the dismiss before the inside button's click
+    // handler runs. Capture phase to win over inner buttons that
+    // stopPropagation. Single-shot.
+    var dismiss = function (evt) {
+      if (!el.contains(evt.target) && (!trigger || !trigger.contains(evt.target))) {
+        hidePopover(el);
+      }
+    };
+    el._popoverDismiss = dismiss;
+    setTimeout(function () {
+      document.addEventListener("mousedown", dismiss, true);
+    }, 0);
+  }
+
+  function hidePopover(el) {
+    el.classList.remove("show");
+    el.style.display = "none";
+    el.setAttribute("aria-hidden", "true");
+    var inner = el.querySelector(".modal-dialog");
+    if (inner) {
+      inner.style.position = "";
+      inner.style.left = "";
+      inner.style.top = "";
+      inner.style.margin = "";
+      inner.style.maxWidth = "";
+      inner.style.transform = "";
+    }
+    if (el._popoverDismiss) {
+      document.removeEventListener("mousedown", el._popoverDismiss, true);
+      delete el._popoverDismiss;
+    }
   }
 
   // ── Effects interpreter ────────────────────────────────────
@@ -1033,7 +1195,13 @@
             dialogSnapshot = null;
           }
         }
-        if (typeof bootstrap !== "undefined") {
+        if (modalEl.getAttribute("data-popover") === "true") {
+          // Popover: anchor next to the triggering element (e.g.
+          // a toolbar slot button). Skip Bootstrap modal API so
+          // there's no backdrop and the dialog isn't forced to the
+          // viewport center.
+          showPopover(modalEl, ctx);
+        } else if (typeof bootstrap !== "undefined") {
           var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
           modal.show();
         }
@@ -1049,6 +1217,10 @@
         modalToClose = document.getElementById("dialog-" + resolve(cdId, ctx));
       } else {
         modalToClose = document.querySelector(".modal.show");
+      }
+      if (modalToClose && modalToClose.getAttribute("data-popover") === "true") {
+        hidePopover(modalToClose);
+        return;
       }
       if (modalToClose && typeof bootstrap !== "undefined") {
         var bsModal = bootstrap.Modal.getInstance(modalToClose);

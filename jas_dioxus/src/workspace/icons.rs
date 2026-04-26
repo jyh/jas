@@ -114,10 +114,11 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
         // SHEAR_TOOL.md §Tool icon).
         ToolKind::Shear => format!(
             r#"<polygon points="9,4 26,4 19,24 2,24" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
-        // Hand — open palm with four fingers extended and a stubby
-        // base for the thumb / palm. See HAND_TOOL.md §Tool icon.
+        // Hand — single filled silhouette imported from
+        // examples/hand-tool.svg (256x256 source path scaled
+        // 28/256 = 0.109375 to fit the toolbar viewBox).
         ToolKind::Hand => format!(
-            r#"<line x1="10" y1="14" x2="10" y2="5" stroke="{c}" stroke-width="2" stroke-linecap="round"/><line x1="13" y1="14" x2="13" y2="3" stroke="{c}" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="14" x2="16" y2="4" stroke="{c}" stroke-width="2" stroke-linecap="round"/><line x1="19" y1="14" x2="19" y2="6" stroke="{c}" stroke-width="2" stroke-linecap="round"/><path d="M9,14 L4,18 L4,22 Q5,25 9,25 L19,25 Q22,25 22,22 L22,14" fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>"#),
+            r##"<g transform="scale(0.109375)"><path d="M0,242.21,201.29,109.51c-38.67,76.35-22.52,97.77-70.85,95.92-17.41-.67-22.83-13.86-33.95-29.17-10.61-14.6-48.58-45.21-35.58-50.06,2.18-.81,7.52-1.22,10.13.03l34.72,16.59c3.14-23.5-23.26-60.36-9.16-70.87,2.27-1.69,10.83,2.29,11.95,5.31l13.71,36.84,2.85-46.1c.18-2.89,3.31-8.22,5.18-9.83,2.35-2.03,11.34,3.32,11.52,6.63l2.8,52.77c13.37-13.74,3.51-35.18,16.16-49.64,2.42-2.77,12.87,3.69,12.5,7.84l-4.82,53.59,19.44-28.39c1.81-2.65,7.35-5.67,10.05-5.82,3.36-.18,5.46,10.22,3.36,14.35Z" fill="{c}"/></g>"##),
         // Zoom — circular lens with a short diagonal handle exiting
         // at lower-right. No interior glyph; the plus / minus appear
         // in the cursor at use time, not the toolbar icon. See

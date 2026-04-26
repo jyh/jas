@@ -937,31 +937,73 @@ public struct ToolbarView {
                 context.stroke(path, with: .color(color), lineWidth: 1.5)
 
             case .hand:
-                // Hand — open palm with four fingers extended and a
-                // stubby base. Per HAND_TOOL.md §Tool icon.
-                let strokeStyle = StrokeStyle(lineWidth: 2.0, lineCap: .round)
-                for (x1, y1) in [(10.0, 14.0), (13.0, 14.0), (16.0, 14.0), (19.0, 14.0)] {
-                    let yTip = [10.0: 5.0, 13.0: 3.0, 16.0: 4.0, 19.0: 6.0][x1] ?? 5.0
-                    var p = SwiftUI.Path()
-                    p.move(to: CGPoint(x: ox + x1, y: oy + y1))
-                    p.addLine(to: CGPoint(x: ox + x1, y: oy + yTip))
-                    context.stroke(p, with: .color(color), style: strokeStyle)
-                }
-                var palm = SwiftUI.Path()
-                palm.move(to: CGPoint(x: ox + 9,  y: oy + 14))
-                palm.addLine(to: CGPoint(x: ox + 4,  y: oy + 18))
-                palm.addLine(to: CGPoint(x: ox + 4,  y: oy + 22))
-                palm.addQuadCurve(
-                    to: CGPoint(x: ox + 9, y: oy + 25),
-                    control: CGPoint(x: ox + 5, y: oy + 25))
-                palm.addLine(to: CGPoint(x: ox + 19, y: oy + 25))
-                palm.addQuadCurve(
-                    to: CGPoint(x: ox + 22, y: oy + 22),
-                    control: CGPoint(x: ox + 22, y: oy + 25))
-                palm.addLine(to: CGPoint(x: ox + 22, y: oy + 14))
-                context.stroke(
-                    palm, with: .color(color),
-                    style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
+                // Hand — single filled silhouette imported from
+                // examples/hand-tool.svg (256x256 source, scaled
+                // 28/256 = 0.109375 to fit the toolbar viewBox).
+                // Per HAND_TOOL.md §Tool icon.
+                let s: CGFloat = 0.109375
+                let transform = CGAffineTransform(
+                    translationX: ox, y: oy).scaledBy(x: s, y: s)
+                var hand = SwiftUI.Path()
+                hand.move(to: CGPoint(x: 0.0, y: 242.21))
+                hand.addLine(to: CGPoint(x: 201.29, y: 109.51))
+                hand.addCurve(
+                    to: CGPoint(x: 130.44, y: 205.43),
+                    control1: CGPoint(x: 162.62, y: 185.86),
+                    control2: CGPoint(x: 178.77, y: 207.28))
+                hand.addCurve(
+                    to: CGPoint(x: 96.49, y: 176.26),
+                    control1: CGPoint(x: 113.03, y: 204.76),
+                    control2: CGPoint(x: 107.61, y: 191.57))
+                hand.addCurve(
+                    to: CGPoint(x: 60.91, y: 126.20),
+                    control1: CGPoint(x: 85.88, y: 161.66),
+                    control2: CGPoint(x: 47.91, y: 131.05))
+                hand.addCurve(
+                    to: CGPoint(x: 71.04, y: 126.23),
+                    control1: CGPoint(x: 63.09, y: 125.39),
+                    control2: CGPoint(x: 68.43, y: 124.98))
+                hand.addLine(to: CGPoint(x: 105.76, y: 142.82))
+                hand.addCurve(
+                    to: CGPoint(x: 96.60, y: 71.95),
+                    control1: CGPoint(x: 108.90, y: 119.32),
+                    control2: CGPoint(x: 82.50, y: 82.46))
+                hand.addCurve(
+                    to: CGPoint(x: 108.55, y: 77.26),
+                    control1: CGPoint(x: 98.87, y: 70.26),
+                    control2: CGPoint(x: 107.43, y: 74.24))
+                hand.addLine(to: CGPoint(x: 122.26, y: 114.10))
+                hand.addLine(to: CGPoint(x: 125.11, y: 68.00))
+                hand.addCurve(
+                    to: CGPoint(x: 130.29, y: 58.17),
+                    control1: CGPoint(x: 125.29, y: 65.11),
+                    control2: CGPoint(x: 128.42, y: 59.78))
+                hand.addCurve(
+                    to: CGPoint(x: 141.81, y: 64.80),
+                    control1: CGPoint(x: 132.64, y: 56.14),
+                    control2: CGPoint(x: 141.63, y: 61.49))
+                hand.addLine(to: CGPoint(x: 144.61, y: 117.57))
+                hand.addCurve(
+                    to: CGPoint(x: 160.77, y: 67.93),
+                    control1: CGPoint(x: 157.98, y: 103.83),
+                    control2: CGPoint(x: 148.12, y: 82.39))
+                hand.addCurve(
+                    to: CGPoint(x: 173.27, y: 75.77),
+                    control1: CGPoint(x: 163.19, y: 65.16),
+                    control2: CGPoint(x: 173.64, y: 71.62))
+                hand.addLine(to: CGPoint(x: 168.45, y: 129.36))
+                hand.addLine(to: CGPoint(x: 187.89, y: 100.97))
+                hand.addCurve(
+                    to: CGPoint(x: 197.94, y: 95.15),
+                    control1: CGPoint(x: 189.70, y: 98.32),
+                    control2: CGPoint(x: 195.24, y: 95.30))
+                hand.addCurve(
+                    to: CGPoint(x: 201.30, y: 109.50),
+                    control1: CGPoint(x: 201.30, y: 94.97),
+                    control2: CGPoint(x: 203.40, y: 105.37))
+                hand.closeSubpath()
+                hand = hand.applying(transform)
+                context.fill(hand, with: .color(color))
 
             case .zoom:
                 // Zoom — circular lens with short ~45° handle at
