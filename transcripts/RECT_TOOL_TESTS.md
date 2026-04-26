@@ -36,7 +36,12 @@ _Last synced: 2026-04-23_
 **Rust — `jas_dioxus/src/tools/yaml_tool.rs` (#[cfg(test)])**
 - Reference implementation; rect + rounded-rect committing paths inline.
 
-**Flask — no coverage.**
+**Flask — `jas_flask/tests/js/test_phase12.mjs`** (~7 tests)
+- doc.add_element appends a rect, resolves expression-valued geometry,
+  applies state.fill_color / stroke_color / stroke_width defaults when
+  the spec omits them.
+- Plus engine-level coverage of the buffer / point primitives the
+  rounded-rect tool would also use (see `tests/js/test_canvas.mjs`).
 
 The manual suite below covers overlay appearance (including rx/ry in
 the preview), cursor glyph, default fill / stroke picked up live, tool
@@ -264,6 +269,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **RCT-201** [wired] Rounded Rect commit produces matching rx/ry=10.
       Do: Rounded Rect; press (0,0); drag to (100,100); release.
@@ -272,6 +278,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **RCT-202** [wired] Zero-size click is suppressed in every app.
       Do: Press and release without moving.
@@ -280,6 +287,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **RCT-203** [wired] Up-and-left drag normalizes the same way across
   apps.
@@ -290,6 +298,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **RCT-204** [wired] Escape during drag leaves document unchanged.
       Do: Begin a rect drag; press Esc.
@@ -298,6 +307,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 ---
 

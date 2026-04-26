@@ -43,8 +43,15 @@ cases)
   hit-test priority, marquee, drag-move, Alt-drag copy, Escape-cancel,
   Shift-click toggle, CP-marquee (partial), handle-drag (partial).
 
-**Flask — no coverage.** Canvas tool runtime is native-apps-only; Flask
-renders the workspace generically without a selection tool surface.
+**Flask — `jas_flask/tests/js/test_phase9.mjs`,
+`tests/js/test_phase12.mjs`, `tests/js/test_canvas.mjs`** (~20 tests
+spread across files)
+- doc.translate_selection incl. partial-CP path anchor moves;
+  doc.copy_selection (alt-drag).
+- doc.path.probe_partial_hit (CP hits, handle hits, miss → marquee);
+  doc.path.commit_partial_marquee (replace + additive); doc.move_path_handle
+  (smooth-anchor reflection).
+- Selection HUD render (bbox + handles, partial-CP fill state).
 
 The manual suite below covers what auto-tests cannot reach: marquee
 overlay appearance, cursor switching, keyboard focus, appearance theming,
@@ -626,6 +633,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **SEL-301** [wired] Shift-click toggles selection identically across
   apps.
@@ -637,6 +645,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **SEL-302** [wired] Marquee result matches across apps.
       Do: Drag a marquee from (-5,-5) to (12,12) on 3-rect fixture.
@@ -646,6 +655,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **SEL-303** [wired] Drag-move produces same final coordinates.
       Do: Select middle rect (at 150,100); drag by (+30, +40).
@@ -655,6 +665,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **SEL-304** [wired] Alt-drag produces identical copy count.
       Do: Select middle rect; Alt-drag by 100 px right.
@@ -664,6 +675,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **SEL-305** [wired] Interior Selection picks the leaf inside a
   group.
@@ -674,6 +686,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **SEL-306** [wired] Partial Selection handle-drag cusp semantics.
       Do: Curved path; Partial Selection; drag a smooth anchor's
@@ -684,6 +697,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **SEL-307** [wired] Escape during marquee leaves selection
   untouched.
@@ -693,6 +707,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 ---
 
