@@ -165,6 +165,11 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         all_appearances_json = json.dumps(theme_config.get("appearances", {}))
         base_theme_json = json.dumps(theme_config.get("base", {}))
         metrics_json = json.dumps(theme_config.get("metrics", {}))
+        # Tool yamls — consumed by static/js/canvas_bootstrap.mjs to
+        # seed engine/tools.mjs's registry, so engine/tools.mjs's
+        # dispatchEvent can find on_<event> handlers when DOM events
+        # land on the canvas.
+        tools_json = json.dumps(ws.get("tools", {}))
 
         template = "wireframe.html" if mode == "wireframe" else "normal.html"
         return render_template(template, ws=ws_for_template,
@@ -181,7 +186,8 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                                active_appearance_json=active_appearance_json,
                                all_appearances_json=all_appearances_json,
                                base_theme_json=base_theme_json,
-                               metrics_json=metrics_json)
+                               metrics_json=metrics_json,
+                               tools_json=tools_json)
 
     @app.route("/canvas")
     def canvas_demo():
