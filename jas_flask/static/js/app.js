@@ -1525,6 +1525,25 @@
 
   function dispatch(actionId, params) {
     params = params || {};
+    // File menu actions short-circuit to the engine bootstrap. The
+    // yaml definitions today are placeholder log-only stubs gated
+    // on `state.tab_count > 0`; rather than threading tab state
+    // through every action eval (V1 is single-document), we route
+    // the canonical save / save-as / open ids straight to JAS.*.
+    if (globalThis.JAS) {
+      if ((actionId === "save" || actionId === "save_as")
+          && typeof globalThis.JAS.saveAs === "function") {
+        globalThis.JAS.saveAs();
+        return;
+      }
+      if (actionId === "open_file"
+          && typeof globalThis.JAS.open === "function") {
+        globalThis.JAS.open().catch(function (e) {
+          console.warn("[open_file] failed:", e && e.message);
+        });
+        return;
+      }
+    }
     var def = actions[actionId];
     if (!def) {
       console.warn("[action] unknown:", actionId);
