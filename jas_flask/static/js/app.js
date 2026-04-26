@@ -3299,6 +3299,122 @@
     initDockModels();
   });
 
+  // ── Auto-save / restore current workspace ────────────────
+  //
+  // Persists the live pane layout (positions, dock models, floating
+  // docks, layout-state vars, active appearance) to localStorage on
+  // every page unload. On the next load, after the dock and pane
+  // wiring has finished, apply the snapshot — equivalent to invoking
+  // the load_layout effect on a named workspace, except this one is
+  // unnamed and tracks the user's working state automatically.
+  //
+  // Distinct from the explicit "Save Workspace…" feature (which uses
+  // STORAGE_KEY = "workspace_layouts") and from the document session
+  // save in canvas_bootstrap.mjs (which persists per-tab Models).
+  var LIVE_LAYOUT_KEY = "jas_flask_live_layout";
+
+  function snapshotLiveLayout() {
+    var configs = typeof APP_PANE_CONFIGS !== "undefined" ? APP_PANE_CONFIGS : {};
+    var snapshot = {
+      panes: {}, state: {}, dock: {}, floating: [],
+      appearance: activeAppearanceName,
+    };
+    document.querySelectorAll(".app-pane").forEach(function (p) {
+      if (!p.id) return;
+      snapshot.panes[p.id] = {
+        left: p.offsetLeft, top: p.offsetTop,
+        width: p.offsetWidth, height: p.offsetHeight,
+      };
+      var cfg = configs[p.id];
+      if (cfg && cfg.layout_state) {
+        cfg.layout_state.forEach(function (key) {
+          if (state.hasOwnProperty(key)) snapshot.state[key] = state[key];
+        });
+      }
+    });
+    for (var dockId in dockModels) {
+      if (!dockModels.hasOwnProperty(dockId)) continue;
+      if (dockId.indexOf("floating_dock_") === 0) {
+        var paneId = dockId.replace("_view", "");
+        var paneEl = document.getElementById(paneId);
+        snapshot.floating.push({
+          dockViewId: dockId,
+          groups: dockModels[dockId].groups,
+          x: paneEl ? paneEl.offsetLeft : 0,
+          y: paneEl ? paneEl.offsetTop : 0,
+          width: paneEl ? paneEl.offsetWidth : 220,
+          height: paneEl ? paneEl.offsetHeight : 300,
+        });
+      } else {
+        snapshot.dock[dockId] = { groups: dockModels[dockId].groups };
+      }
+    }
+    return snapshot;
+  }
+
+  function applyLiveLayout(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    var panes = snapshot.panes || {};
+    for (var paneId in panes) {
+      if (!panes.hasOwnProperty(paneId)) continue;
+      var el = document.getElementById(paneId);
+      if (!el) continue;
+      var pos = panes[paneId];
+      el.style.left = pos.left + "px";
+      el.style.top = pos.top + "px";
+      el.style.width = pos.width + "px";
+      el.style.height = pos.height + "px";
+      el.classList.remove("d-none");
+    }
+    if (snapshot.state) {
+      for (var key in snapshot.state) {
+        if (snapshot.state.hasOwnProperty(key)) {
+          setState(key, snapshot.state[key]);
+        }
+      }
+    }
+    if (snapshot.dock) {
+      for (var dockId in snapshot.dock) {
+        if (!snapshot.dock.hasOwnProperty(dockId)) continue;
+        if (dockModels[dockId]) {
+          dockModels[dockId].groups = snapshot.dock[dockId].groups;
+          rerenderDockView(dockId);
+        }
+      }
+    }
+    document.querySelectorAll("[id^='floating_dock_']").forEach(function (el) { el.remove(); });
+    for (var dk in dockModels) {
+      if (dk.indexOf("floating_dock_") === 0) delete dockModels[dk];
+    }
+    if (Array.isArray(snapshot.floating)) {
+      snapshot.floating.forEach(function (fd) {
+        createFloatingDock(fd.groups, fd.x, fd.y);
+      });
+    }
+    if (snapshot.appearance) applyAppearance(snapshot.appearance);
+  }
+
+  window.addEventListener("beforeunload", function () {
+    try {
+      localStorage.setItem(LIVE_LAYOUT_KEY, JSON.stringify(snapshotLiveLayout()));
+    } catch (e) { /* QuotaExceededError, security errors — best-effort */ }
+  });
+
+  // Defer the restore until after every DOMContentLoaded handler in
+  // this IIFE has run (initDockModels populates dockModels, panel
+  // bindings get their initial values, etc.). setTimeout 0 hops past
+  // the current task — the saved snapshot then lands on a fully-
+  // wired DOM.
+  document.addEventListener("DOMContentLoaded", function () {
+    setTimeout(function () {
+      var raw;
+      try { raw = localStorage.getItem(LIVE_LAYOUT_KEY); } catch (e) { return; }
+      if (!raw) return;
+      try { applyLiveLayout(JSON.parse(raw)); }
+      catch (e) { console.warn("[live-layout] restore failed:", e); }
+    }, 0);
+  });
+
 })();
 
 
