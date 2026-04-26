@@ -679,6 +679,90 @@
     });
   }
 
+  // ── Popover dialog show/hide ───────────────────────────────
+  //
+  // Tool-alternate flyouts (declared in dialog yaml as
+  // `modal: false`) anchor next to the triggering toolbar slot
+  // instead of centering with a backdrop. Skip the Bootstrap
+  // Modal API entirely; manage `display` + position inline.
+
+  function showPopover(el, ctx) {
+    // Resolve the triggering element. ctx.self is the slot button
+    // when fired by wireBehaviors; ctx.event.target_id is a fallback.
+    var triggerId =
+      (ctx && ctx.self && ctx.self.id) ||
+      (ctx && ctx.event && ctx.event.target_id) ||
+      null;
+    var trigger = triggerId ? document.getElementById(triggerId) : null;
+    el.classList.add("show");
+    el.style.display = "block";
+    el.removeAttribute("aria-hidden");
+    el.setAttribute("aria-modal", "false");
+    var inner = el.querySelector(".modal-dialog");
+    if (inner) {
+      inner.style.position = "fixed";
+      inner.style.margin = "0";
+      inner.style.maxWidth = "none";
+      if (trigger) {
+        var r = trigger.getBoundingClientRect();
+        // Anchor 4 px to the right of the trigger, top-aligned.
+        // The popover is measured by the browser after .show, so
+        // a second-pass clamp keeps it on-screen.
+        inner.style.left = (r.right + 4) + "px";
+        inner.style.top = r.top + "px";
+        // Clamp to viewport once layout settles.
+        requestAnimationFrame(function () {
+          var pop = inner.getBoundingClientRect();
+          var vw = window.innerWidth;
+          var vh = window.innerHeight;
+          if (pop.right > vw - 4) {
+            inner.style.left = Math.max(4, vw - pop.width - 4) + "px";
+          }
+          if (pop.bottom > vh - 4) {
+            inner.style.top = Math.max(4, vh - pop.height - 4) + "px";
+          }
+        });
+      } else {
+        // No trigger known — fall back to centred.
+        inner.style.left = "50%";
+        inner.style.top = "20%";
+        inner.style.transform = "translateX(-50%)";
+      }
+    }
+    // Click-outside handler. Use mousedown so a click-inside event
+    // doesn't fire the dismiss before the inside button's click
+    // handler runs. Capture phase to win over inner buttons that
+    // stopPropagation. Single-shot.
+    var dismiss = function (evt) {
+      if (!el.contains(evt.target) && (!trigger || !trigger.contains(evt.target))) {
+        hidePopover(el);
+      }
+    };
+    el._popoverDismiss = dismiss;
+    setTimeout(function () {
+      document.addEventListener("mousedown", dismiss, true);
+    }, 0);
+  }
+
+  function hidePopover(el) {
+    el.classList.remove("show");
+    el.style.display = "none";
+    el.setAttribute("aria-hidden", "true");
+    var inner = el.querySelector(".modal-dialog");
+    if (inner) {
+      inner.style.position = "";
+      inner.style.left = "";
+      inner.style.top = "";
+      inner.style.margin = "";
+      inner.style.maxWidth = "";
+      inner.style.transform = "";
+    }
+    if (el._popoverDismiss) {
+      document.removeEventListener("mousedown", el._popoverDismiss, true);
+      delete el._popoverDismiss;
+    }
+  }
+
   // ── Effects interpreter ────────────────────────────────────
 
   function runEffects(effects, ctx) {
@@ -1111,7 +1195,13 @@
             dialogSnapshot = null;
           }
         }
-        if (typeof bootstrap !== "undefined") {
+        if (modalEl.getAttribute("data-popover") === "true") {
+          // Popover: anchor next to the triggering element (e.g.
+          // a toolbar slot button). Skip Bootstrap modal API so
+          // there's no backdrop and the dialog isn't forced to the
+          // viewport center.
+          showPopover(modalEl, ctx);
+        } else if (typeof bootstrap !== "undefined") {
           var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
           modal.show();
         }
@@ -1127,6 +1217,10 @@
         modalToClose = document.getElementById("dialog-" + resolve(cdId, ctx));
       } else {
         modalToClose = document.querySelector(".modal.show");
+      }
+      if (modalToClose && modalToClose.getAttribute("data-popover") === "true") {
+        hidePopover(modalToClose);
+        return;
       }
       if (modalToClose && typeof bootstrap !== "undefined") {
         var bsModal = bootstrap.Modal.getInstance(modalToClose);

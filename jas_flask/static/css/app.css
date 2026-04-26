@@ -100,6 +100,34 @@ button.app-tool-btn.active {
     box-shadow: none;
 }
 
+/* Popover dialogs (modal: false in yaml) — anchored flyouts
+   like toolbar-slot alternate menus. Override Bootstrap's
+   .modal centering / backdrop / flex layout so JS can position
+   the .modal-dialog absolutely next to the trigger. */
+.app-popover {
+    background: transparent;
+    pointer-events: none;
+    display: none;
+}
+.app-popover.show {
+    display: block;
+    pointer-events: auto;
+}
+.app-popover .modal-dialog {
+    pointer-events: auto;
+    width: max-content;
+    min-width: 180px;
+    margin: 0;
+}
+.app-popover .modal-content {
+    background: var(--app-pane-bg, #444);
+    border: 1px solid var(--app-border, #555);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.app-popover .modal-body {
+    padding: 4px;
+}
+
 /* Color swatches */
 .app-color-swatch {
     cursor: pointer;

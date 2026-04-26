@@ -429,6 +429,44 @@ class TestRenderDialogs:
         assert "Confirm" in html
         assert "OK" in html
 
+    def test_popover_dialog_emits_data_popover(self, theme, state):
+        """Dialogs declared with ``modal: false`` (e.g. tool-alternate
+        flyouts) emit ``data-popover="true"`` and an ``app-popover``
+        class so the JS anchors them next to the trigger element
+        rather than centering them with a backdrop. They also omit
+        the modal title bar — the trigger context is the cue."""
+        from renderer import render_dialogs
+        dialogs = {
+            "shape_alternates": {
+                "summary": "Shape Tools",
+                "modal": False,
+                "content": {"type": "text", "content": "items"},
+            }
+        }
+        html = render_dialogs(dialogs, theme, state)
+        assert 'data-popover="true"' in html
+        assert "app-popover" in html
+        # No modal title bar / close button on a popover.
+        assert "modal-header" not in html
+        assert "btn-close" not in html
+
+    def test_modal_true_keeps_full_dialog_chrome(self, theme, state):
+        """``modal: true`` (or unset) preserves the standard Bootstrap
+        modal markup with title bar + close button. Verifies the
+        popover branch doesn't accidentally swallow regular dialogs."""
+        from renderer import render_dialogs
+        dialogs = {
+            "tool_options": {
+                "summary": "Tool Options",
+                "modal": True,
+                "content": {"type": "text", "content": "x"},
+            }
+        }
+        html = render_dialogs(dialogs, theme, state)
+        assert 'data-popover="true"' not in html
+        assert "modal-header" in html
+        assert "btn-close" in html
+
     def test_preview_targets_emitted(self, theme, state):
         """Dialog with preview_targets emits a data-dialog-preview-targets
         JSON attribute carrying the dialog-state-field → document-target
