@@ -90,6 +90,51 @@ describe("renderSelectionLayer", () => {
   });
 });
 
+describe("pen_overlay (Pen tool)", () => {
+  // Pen overlay renders the in-progress path through anchors so far,
+  // anchor squares, optional handle indicators on smooth anchors,
+  // a preview segment to the cursor while placing, and a close-hit
+  // ring around the first anchor when the cursor approaches it.
+  const toolSpec = {
+    id: "pen",
+    overlay: {
+      if: "true",
+      render: {
+        type: "pen_overlay",
+        buffer: "pen_test",
+        mouse_x: "tool.pen.mouse_x",
+        mouse_y: "tool.pen.mouse_y",
+        close_radius: "8",
+        placing: "tool.pen.mode == 'placing'",
+      },
+    },
+  };
+
+  it("draws the path-so-far + anchor squares", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("pen_test");
+    ab.push("pen_test", 10, 10);
+    ab.push("pen_test", 50, 50);
+    const scope = new Scope({ tool: { pen: { mode: "placing", mouse_x: 0, mouse_y: 0 } } });
+    const svg = renderOverlayLayer(toolSpec, scope);
+    assert.match(svg, /<path /);
+    // Two anchor squares.
+    assert.equal((svg.match(/<rect /g) || []).length, 2);
+    ab.clear("pen_test");
+  });
+
+  it("renders close-hit ring when cursor is near the first anchor", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("pen_test");
+    ab.push("pen_test", 100, 100);
+    ab.push("pen_test", 200, 200);
+    const scope = new Scope({ tool: { pen: { mode: "placing", mouse_x: 102, mouse_y: 102 } } });
+    const svg = renderOverlayLayer(toolSpec, scope);
+    assert.match(svg, /<circle/); // close-hit ring (and possibly handle dots)
+    ab.clear("pen_test");
+  });
+});
+
 describe("buffer_polyline overlay (Pencil)", () => {
   // The pencil.yaml overlay is type: buffer_polyline with `buffer:`
   // pointing at the named point buffer and `style:` for the stroke.

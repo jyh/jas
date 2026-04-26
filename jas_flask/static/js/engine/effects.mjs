@@ -21,6 +21,7 @@
 import { evaluate } from "./expr.mjs";
 import { Scope } from "./scope.mjs";
 import { toBool, toJson, PATH } from "./value.mjs";
+import { registerPrimitive } from "./evaluator.mjs";
 import {
   setSelection, addToSelection, toggleSelection, clearSelection,
   getElement, mkPath,
@@ -28,6 +29,7 @@ import {
 } from "./document.mjs";
 import { hitTestRect, translateElement, controlPoints } from "./geometry.mjs";
 import * as pointBuffers from "./point_buffers.mjs";
+import * as anchorBuffers from "./anchor_buffers.mjs";
 import { fitCurve } from "./fit_curve.mjs";
 
 /**
@@ -306,6 +308,44 @@ function runEffect(effect, scope, store, options) {
     return;
   }
 
+  // ── Anchor-buffer mutations (Pen tool) ──────────────
+  if ("anchor.push" in effect) {
+    const spec = effect["anchor.push"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      const x = Number(toJson(evaluate(String(spec.x ?? "0"), scope))) || 0;
+      const y = Number(toJson(evaluate(String(spec.y ?? "0"), scope))) || 0;
+      if (name) anchorBuffers.push(name, x, y);
+    }
+    return;
+  }
+  if ("anchor.pop" in effect) {
+    const spec = effect["anchor.pop"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      if (name) anchorBuffers.pop(name);
+    }
+    return;
+  }
+  if ("anchor.clear" in effect) {
+    const spec = effect["anchor.clear"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      if (name) anchorBuffers.clear(name);
+    }
+    return;
+  }
+  if ("anchor.set_last_out" in effect) {
+    const spec = effect["anchor.set_last_out"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      const hx = Number(toJson(evaluate(String(spec.hx ?? "0"), scope))) || 0;
+      const hy = Number(toJson(evaluate(String(spec.hy ?? "0"), scope))) || 0;
+      if (name) anchorBuffers.setLastOutHandle(name, hx, hy);
+    }
+    return;
+  }
+
   // ── Document mutations ───────────────────────────────
   // Routes through options.model (a Model from model.mjs) when
   // supplied; falls back to options.onDocEffect for test harnesses
@@ -511,6 +551,55 @@ function runEffect(effect, scope, store, options) {
             }
             return next;
           });
+          return;
+        }
+        case "doc.add_path_from_anchor_buffer": {
+          // Spec: { buffer: <name>, closed?: <expr>,
+          //         stroke?: <expr>, fill?: <expr> }
+          // Walks the named anchor buffer; emits one CurveTo per
+          // consecutive pair of anchors (using prev.hout + curr.hin
+          // as control points — corner anchors collapse to straight
+          // lines automatically). When closed is true, adds a final
+          // CurveTo from the last anchor back to the first plus a
+          // ClosePath. Mirrors jas_dioxus PenTool::finish.
+          const name = String(spec.buffer || "");
+          if (!name) return;
+          const anchors = anchorBuffers.anchors(name);
+          if (anchors.length < 2) return;
+          const closed = "closed" in spec
+            ? toBool(evaluate(String(spec.closed), scope)) : false;
+          const cmds = [{ type: "M", x: anchors[0].x, y: anchors[0].y }];
+          for (let i = 1; i < anchors.length; i++) {
+            const prev = anchors[i - 1];
+            const curr = anchors[i];
+            cmds.push({
+              type: "C",
+              x1: prev.hout_x, y1: prev.hout_y,
+              x2: curr.hin_x,  y2: curr.hin_y,
+              x: curr.x, y: curr.y,
+            });
+          }
+          if (closed) {
+            const last = anchors[anchors.length - 1];
+            const first = anchors[0];
+            cmds.push({
+              type: "C",
+              x1: last.hout_x, y1: last.hout_y,
+              x2: first.hin_x, y2: first.hin_y,
+              x: first.x, y: first.y,
+            });
+            cmds.push({ type: "Z" });
+          }
+          const extra = {};
+          if ("stroke" in spec) extra.stroke = toJson(evaluate(String(spec.stroke), scope));
+          if ("fill" in spec) extra.fill = toJson(evaluate(String(spec.fill), scope));
+          const elem = mkPath({ d: cmds, ...extra });
+          // Open paths default to no fill (a free-standing curve is
+          // rarely meant to be filled). Closed paths fall through to
+          // the panel's fill colour.
+          if (!closed && !("fill" in spec)) elem.fill = null;
+          applyShapeDefaults(elem, store);
+          model.mutate((d) => addElementAt(d, [0], elem));
           return;
         }
         case "doc.add_path_from_buffer": {
@@ -881,6 +970,22 @@ export function setElementAttr(doc, path, attr, value) {
   layers[li] = replaceElementAt(layers[li], rest, (e) => ({ ...e, [attr]: value }));
   return { ...doc, layers };
 }
+
+// Pen-tool primitives. Registered at module load so YAML guards
+// like `anchor_buffer_length('pen') >= 2` work without dispatcher
+// wiring per call. Both look up the named anchor buffer directly;
+// no model needed.
+registerPrimitive("anchor_buffer_length", (args) => {
+  const name = args[0] && args[0].kind === "string" ? args[0].value : "";
+  return { kind: "number", value: anchorBuffers.length(name) };
+});
+registerPrimitive("anchor_buffer_close_hit", (args) => {
+  const name = args[0] && args[0].kind === "string" ? args[0].value : "";
+  const x = args[1] && args[1].kind === "number" ? args[1].value : 0;
+  const y = args[2] && args[2].kind === "number" ? args[2].value : 0;
+  const r = args[3] && args[3].kind === "number" ? args[3].value : 8;
+  return { kind: "bool", value: anchorBuffers.closeHit(name, x, y, r) };
+});
 
 // Hit-test for a control point under (x, y) within `radius`.
 // Walks every shape in the document (top-down, last child wins for

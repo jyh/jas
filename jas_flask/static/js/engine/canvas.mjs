@@ -13,6 +13,7 @@ import { renderDocument, renderElement } from "./renderer.mjs";
 import { elementBounds, controlPoints } from "./geometry.mjs";
 import { getElement, partialCpsForPath } from "./document.mjs";
 import * as pointBuffers from "./point_buffers.mjs";
+import * as anchorBuffers from "./anchor_buffers.mjs";
 import { evaluate } from "./expr.mjs";
 import { Scope } from "./scope.mjs";
 import { toBool, toStringCoerce } from "./value.mjs";
@@ -276,7 +277,90 @@ function renderOverlaySpec(spec, scope) {
   if (evaluated.type === "buffer_polyline") {
     return renderBufferPolyline(evaluated);
   }
+  if (evaluated.type === "pen_overlay") {
+    return renderPenOverlay(evaluated);
+  }
   return buildOverlayElement(evaluated);
+}
+
+// Live preview for the Pen tool. Draws the in-progress path through
+// the anchors so far, plus a preview segment from the last anchor to
+// the cursor when the tool is in 'placing' mode (between clicks),
+// plus a small ring around the first anchor when the cursor is
+// within close_radius of it (the close-path indicator).
+function renderPenOverlay(evaluated) {
+  const name = String(evaluated.buffer || "");
+  if (!name) return "";
+  const anchors = anchorBuffers.anchors(name);
+  if (anchors.length === 0) return "";
+  const placing = String(evaluated.placing) === "true";
+  const mouseX = Number(evaluated.mouse_x) || 0;
+  const mouseY = Number(evaluated.mouse_y) || 0;
+  const closeR = Number(evaluated.close_radius) || 8;
+
+  const parts = [];
+  // Stroked path through the placed anchors.
+  let d = `M ${num(anchors[0].x)} ${num(anchors[0].y)}`;
+  for (let i = 1; i < anchors.length; i++) {
+    const prev = anchors[i - 1], cur = anchors[i];
+    d += ` C ${num(prev.hout_x)} ${num(prev.hout_y)}` +
+         ` ${num(cur.hin_x)} ${num(cur.hin_y)}` +
+         ` ${num(cur.x)} ${num(cur.y)}`;
+  }
+  // Preview segment from the last anchor to the cursor (only while
+  // placing — don't draw during an active drag).
+  if (placing && anchors.length >= 1) {
+    const last = anchors[anchors.length - 1];
+    d += ` C ${num(last.hout_x)} ${num(last.hout_y)}` +
+         ` ${num(mouseX)} ${num(mouseY)}` +
+         ` ${num(mouseX)} ${num(mouseY)}`;
+  }
+  parts.push(
+    `<path d="${d}" fill="none" ` +
+    `stroke="rgba(0, 120, 215, 0.9)" stroke-width="1"/>`
+  );
+
+  // Anchor handle indicators: lines from anchor to its in/out
+  // handles for any smooth anchor.
+  for (const a of anchors) {
+    if (!a.smooth) continue;
+    parts.push(
+      `<line x1="${num(a.hin_x)}" y1="${num(a.hin_y)}" ` +
+      `x2="${num(a.hout_x)}" y2="${num(a.hout_y)}" ` +
+      `stroke="rgba(0, 120, 215, 0.5)" stroke-width="1"/>`
+    );
+    for (const [hx, hy] of [[a.hin_x, a.hin_y], [a.hout_x, a.hout_y]]) {
+      parts.push(
+        `<circle cx="${num(hx)}" cy="${num(hy)}" r="3" ` +
+        `fill="white" stroke="rgba(0, 120, 215, 0.9)" stroke-width="1"/>`
+      );
+    }
+  }
+
+  // Anchor squares — first anchor gets the close-hit ring when the
+  // cursor is within close_radius (and there are 2+ anchors so close
+  // is even possible).
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i];
+    parts.push(
+      `<rect x="${num(a.x - 3)}" y="${num(a.y - 3)}" ` +
+      `width="6" height="6" ` +
+      `fill="white" stroke="rgba(0, 120, 215, 0.9)" stroke-width="1"/>`
+    );
+  }
+  if (anchors.length >= 2) {
+    const first = anchors[0];
+    const dx = mouseX - first.x, dy = mouseY - first.y;
+    if (dx * dx + dy * dy <= closeR * closeR) {
+      parts.push(
+        `<circle cx="${num(first.x)}" cy="${num(first.y)}" ` +
+        `r="${num(closeR)}" ` +
+        `fill="none" stroke="rgba(0, 120, 215, 0.9)" stroke-width="2"/>`
+      );
+    }
+  }
+
+  return parts.join("");
 }
 
 // Polyline preview tracking the live drag of an accumulator tool
