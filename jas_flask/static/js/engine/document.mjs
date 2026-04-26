@@ -111,6 +111,30 @@ export function generateArtboardId() {
   return s;
 }
 
+/**
+ * Patch a document loaded from session / SVG / wherever so it
+ * satisfies the cross-app invariants: at least one artboard, the
+ * artboard_options block present, layers/selection arrays. Mutates
+ * in place and returns the doc. Use whenever a document arrives
+ * from a source that may predate a schema bump (notably old saved
+ * sessions in localStorage).
+ */
+export function ensureDocumentInvariants(doc) {
+  if (!doc || typeof doc !== "object") return doc;
+  if (!Array.isArray(doc.layers)) doc.layers = [mkLayer({ name: "Layer 1" })];
+  if (!Array.isArray(doc.selection)) doc.selection = [];
+  if (!Array.isArray(doc.artboards) || doc.artboards.length === 0) {
+    doc.artboards = [makeDefaultArtboard({ fill: "#ffffff" })];
+  }
+  if (!doc.artboard_options || typeof doc.artboard_options !== "object") {
+    doc.artboard_options = {
+      fade_region_outside_artboard: true,
+      update_while_dragging: true,
+    };
+  }
+  return doc;
+}
+
 /** Canonical default artboard — Letter 612x792 at origin, transparent
  * fill, all display toggles off. */
 export function makeDefaultArtboard(over = {}) {
