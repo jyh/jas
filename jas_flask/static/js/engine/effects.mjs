@@ -371,13 +371,22 @@ function runEffect(effect, scope, store, options) {
           return;
         }
         case "doc.add_element": {
-          // Spec: { parent: <path expr>, element: <element-spec> }
+          // Spec: { parent?: <path expr>, element: <element-spec> }
           // The element-spec is a dict with `type:` + geometry fields.
           // Geometry fields may be expressions; they're evaluated
           // against the scope before the element is appended.
-          const parentPath = extractPath(spec.parent, scope);
+          //
+          // `parent` defaults to [0] — the active layer. Native apps'
+          // doc_add_element (jas_dioxus controller, jas controller,
+          // etc.) all default to the active layer when the caller
+          // doesn't specify; the Flask runtime matches that so tool
+          // yamls don't have to repeat `parent: [0]` on every call.
           const elemSpec = spec.element;
-          if (!parentPath || !elemSpec) return;
+          if (!elemSpec) return;
+          const parentPath = spec.parent !== undefined
+            ? extractPath(spec.parent, scope)
+            : [0];
+          if (!parentPath) return;
           const resolved = resolveElementSpec(elemSpec, scope);
           model.mutate((d) => addElementAt(d, parentPath, resolved));
           return;
@@ -759,8 +768,12 @@ function appendInElement(container, subpath, elem) {
 /**
  * Set an attribute on the element at `path`. Shallow — replaces the
  * top-level field only (x, y, width, fill, etc.). Returns a new Doc.
+ *
+ * Exported so the bootstrap script can route panel-state changes
+ * (Color / Stroke) onto the current selection without going
+ * through the dispatchEvent path (no tool to wrap them as).
  */
-function setElementAttr(doc, path, attr, value) {
+export function setElementAttr(doc, path, attr, value) {
   if (!Array.isArray(path) || path.length === 0) return doc;
   const [li, ...rest] = path;
   const layers = doc.layers.slice();

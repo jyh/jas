@@ -384,6 +384,60 @@ class TestRenderUnknown:
         assert "Magic Wand Tool" in html or "magic_wand" in html
 
 
+class TestRenderCanvas:
+    """Drawing-surface canvas widget — emits the 3-layer SVG stack
+    that engine/canvas.mjs renders into. Phase 1 of the Flask
+    document-model integration."""
+
+    def test_emits_three_svg_layers(self, theme, state):
+        from renderer import render_element
+        el = {"type": "canvas", "id": "drawing_canvas"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'id="canvas-doc"' in html
+        assert 'id="canvas-sel"' in html
+        assert 'id="canvas-overlay"' in html
+
+    def test_layers_have_layer_data_attrs(self, theme, state):
+        """The bootstrap script targets layers by data-canvas-layer
+        rather than ID, so swapping in alternate IDs (multi-tab in V2)
+        doesn't break the selector."""
+        from renderer import render_element
+        el = {"type": "canvas", "id": "c1"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-canvas-layer="doc"' in html
+        assert 'data-canvas-layer="selection"' in html
+        assert 'data-canvas-layer="overlay"' in html
+
+    def test_selection_and_overlay_layers_block_no_pointer_events(
+            self, theme, state):
+        """Selection HUD and tool overlay layers must not intercept
+        mouse events — the document layer is the hit-test target."""
+        from renderer import render_element
+        el = {"type": "canvas", "id": "c1"}
+        html = render_element(el, theme, state, mode="normal")
+        # Crude but adequate: count `pointer-events:none` occurrences.
+        # canvas-sel + canvas-overlay each carry it; canvas-doc must not.
+        assert html.count("pointer-events:none") == 2
+
+    def test_viewport_container_has_transform_origin(self, theme, state):
+        """Pan/zoom is applied via CSS transform on the viewport
+        container; the origin must be the top-left so canvas
+        coordinates map predictably under scale()."""
+        from renderer import render_element
+        el = {"type": "canvas", "id": "c1"}
+        html = render_element(el, theme, state, mode="normal")
+        assert "transform-origin:0 0" in html or "transform-origin: 0 0" in html
+
+    def test_data_canvas_id_links_viewport_to_widget(self, theme, state):
+        """The viewport's data-canvas-id should match the widget's id
+        so multi-canvas (multi-tab) layouts can disambiguate which
+        viewport belongs to which document."""
+        from renderer import render_element
+        el = {"type": "canvas", "id": "drawing_canvas"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-canvas-id="drawing_canvas"' in html
+
+
 class TestRenderMenubar:
     def test_menubar_renders(self, theme):
         from renderer import render_menubar

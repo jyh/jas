@@ -26,6 +26,9 @@
   const APP_ALL_APPEARANCES = {{ all_appearances_json | safe }};
   const APP_BASE_THEME = {{ base_theme_json | safe }};
   const APP_METRICS = {{ metrics_json | safe }};
+  const APP_TOOLS = {{ tools_json | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ range(99999) | random }}"></script>
+<script type="module"
+        src="{{ url_for('static', filename='js/canvas_bootstrap.mjs') }}?v={{ range(99999) | random }}"></script>
 {% endblock %}

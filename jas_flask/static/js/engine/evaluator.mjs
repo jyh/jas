@@ -254,6 +254,13 @@ export const PRIMITIVES = {
   ceil: (args) => args[0]?.kind === NUMBER ? mkNumber(Math.ceil(args[0].value)) : mkNull(),
   round: (args) => args[0]?.kind === NUMBER ? mkNumber(Math.round(args[0].value)) : mkNull(),
   sqrt: (args) => args[0]?.kind === NUMBER ? mkNumber(Math.sqrt(args[0].value)) : mkNull(),
+  // Variadic Euclidean norm — matches Python's math.hypot and the
+  // expression-language `hypot()` used by line / pencil tools'
+  // drag-distance guards.
+  hypot: (args) => {
+    if (!args.length || args.some((a) => a?.kind !== NUMBER)) return mkNull();
+    return mkNumber(Math.hypot(...args.map((a) => a.value)));
+  },
   sin: (args) => args[0]?.kind === NUMBER ? mkNumber(Math.sin(args[0].value)) : mkNull(),
   cos: (args) => args[0]?.kind === NUMBER ? mkNumber(Math.cos(args[0].value)) : mkNull(),
   tan: (args) => args[0]?.kind === NUMBER ? mkNumber(Math.tan(args[0].value)) : mkNull(),

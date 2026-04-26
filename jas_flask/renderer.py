@@ -849,23 +849,41 @@ def _render_select(el, theme, state):
 
 
 def _render_canvas(el, theme, state):
-    summary = escape(el.get("summary", "Canvas"))
-    logo_html = ""
-    if _brand:
-        svg = _brand.get("logo_small_svg") or _brand.get("logo_svg", "")
-        color = _brand.get("color", "#C9900A")
-        if svg:
-            logo_html = (
-                f'<span style="position:absolute;top:10px;right:12px;'
-                f'width:54px;height:24px;color:{escape(color)};opacity:0.35;">{svg}</span>'
-            )
+    """Drawing-surface canvas — emits the 3-layer SVG stack the
+    client-side engine renders into.
+
+    Per FLASK_PARITY.md §7: a viewport container that owns the
+    pan/zoom CSS transform, with three absolutely-positioned SVG
+    children layered bottom-up: document, selection HUD, tool
+    overlay. The engine populates them via
+    `engine/canvas.mjs::renderCanvas` after wiring; on first paint
+    they are empty.
+
+    Stable IDs (canvas-doc / canvas-sel / canvas-overlay) so the
+    bootstrap script can `getElementById` them without reading the
+    surrounding layout.
+    """
+    el_id = el.get("id", "canvas")
+    bg = el.get("style", {}).get("background", "#ffffff")
+    if isinstance(bg, str) and "{{" in bg:
+        bg = _resolve(bg, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="app-canvas" '
-        f'style="flex:1;background:#fff;display:flex;align-items:center;justify-content:center;'
-        f'color:#999;font-size:14px;min-height:200px;position:relative;"'
+        f'<div{_id_attr(el)} class="app-canvas-stack"'
+        f' style="flex:1;position:relative;background:{escape(str(bg))};'
+        f'min-height:200px;overflow:hidden;"'
         f'{_data_attrs(el)}>'
-        f'{logo_html}'
-        f'{summary} (tier 3)</div>'
+        f'<div class="app-canvas-viewport" data-canvas-id="{escape(el_id)}"'
+        f' style="position:absolute;inset:0;transform-origin:0 0;">'
+        f'<svg id="canvas-doc" data-canvas-layer="doc"'
+        f' style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;"></svg>'
+        f'<svg id="canvas-sel" data-canvas-layer="selection"'
+        f' style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;'
+        f'pointer-events:none;"></svg>'
+        f'<svg id="canvas-overlay" data-canvas-layer="overlay"'
+        f' style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;'
+        f'pointer-events:none;"></svg>'
+        f'</div>'
+        f'</div>'
     )
 
 

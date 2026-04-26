@@ -592,6 +592,25 @@ layout:
               min_height: 200
               background: "{{theme.colors.window_bg}}"
             children:
+              # Drawing canvas — the 3-layer SVG stack the
+              # client-side engine (static/js/engine/) renders into.
+              # Document, selection HUD and tool overlay are
+              # rendered as siblings under a viewport container that
+              # owns the pan/zoom CSS transform. See
+              # FLASK_PARITY.md §7 and FLASK_INTEGRATION_GAPS.md
+              # Phase 1 for the integration plan.
+              - id: drawing_canvas
+                type: canvas
+                summary: "Drawing canvas"
+                description: >
+                  Interactive drawing surface. Tool dispatch reads
+                  pointer events on this element and routes them to
+                  the active tool's on_mouse* handlers via
+                  engine/tools.mjs::dispatchEvent. The Model (with
+                  undo/redo) drives re-render of the document layer
+                  on every mutation.
+                style:
+                  background: "{{theme.colors.window_bg}}"
               - id: canvas_brand_logo
                 type: brand_logo
                 summary: "Brand logo placeholder"
