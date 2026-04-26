@@ -40,6 +40,7 @@ fn tool_yaml_id(kind: ToolKind) -> Option<&'static str> {
         ToolKind::Hand => "hand",
         ToolKind::Zoom => "zoom",
         ToolKind::Artboard => "artboard",
+        ToolKind::Eyedropper => "eyedropper",
         ToolKind::Type | ToolKind::TypeOnPath => return None,
     })
 }
@@ -133,6 +134,10 @@ pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     // fit_active_artboard; Zoom-icon dblclick → zoom_to_actual_size.
     // See HAND_TOOL.md / ZOOM_TOOL.md.
     (5, 0, &[ToolKind::Hand, ToolKind::Zoom]),
+    // Eyedropper — top-level slot, no alternates (Phase 1).
+    // Dblclick opens the Eyedropper Tool Options dialog via the
+    // tool_options_dialog convention. See EYEDROPPER_TOOL.md.
+    (5, 1, &[ToolKind::Eyedropper]),
 ];
 
 /// Long-press threshold in milliseconds (matches theme.sizes.long_press_ms).

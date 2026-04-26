@@ -74,3 +74,5 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Zoom -> (load_yaml_tool_or_fail "zoom" :> Canvas_tool.canvas_tool)
   (* Artboard-tool family — see ARTBOARD_TOOL.md *)
   | Toolbar.Artboard -> (load_yaml_tool_or_fail "artboard" :> Canvas_tool.canvas_tool)
+  (* Eyedropper — see EYEDROPPER_TOOL.md *)
+  | Toolbar.Eyedropper -> (load_yaml_tool_or_fail "eyedropper" :> Canvas_tool.canvas_tool)

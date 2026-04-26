@@ -57,6 +57,7 @@ class Tool(Enum):
     SHEAR = auto()
     HAND = auto()
     ZOOM = auto()
+    EYEDROPPER = auto()
     ARTBOARD = auto()
 
 
@@ -169,6 +170,8 @@ class ToolButton(QToolButton):
             self._draw_hand_tool(painter)
         elif self.tool == Tool.ZOOM:
             self._draw_zoom_tool(painter)
+        elif self.tool == Tool.EYEDROPPER:
+            self._draw_eyedropper_tool(painter)
 
         if self.has_alternates:
             self._draw_alternate_triangle(painter)
@@ -1030,6 +1033,47 @@ class ToolButton(QToolButton):
         accent.closeSubpath()
         painter.drawPath(accent)
 
+    def _draw_eyedropper_tool(self, painter):
+        """Eyedropper icon: squeeze cap (with grip lines) at upper-right,
+        thin glass tube descending at ~45 degrees to a sharp tip at
+        lower-left. Mirrors the Rust SVG glyph in
+        ``jas_dioxus/src/workspace/icons.rs``. See EYEDROPPER_TOOL.md
+        §Tool icon."""
+        from PySide6.QtCore import QPointF
+        # Tube — diagonal stroke from cap base down to tip.
+        pen = QPen(_icon_color(), 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # Glass tube: filled trapezoid following the diagonal.
+        tube = QPainterPath()
+        tube.moveTo(4, 24)            # Tip at lower-left
+        tube.lineTo(7, 21)
+        tube.lineTo(20, 8)
+        tube.lineTo(23, 11)
+        tube.lineTo(11, 23)
+        tube.lineTo(8, 26)
+        tube.closeSubpath()
+        painter.drawPath(tube)
+        # Cap — small filled rectangle at the upper-right end of the
+        # tube. Rotated 45 degrees so it sits flush with the tube.
+        painter.save()
+        painter.translate(QPointF(21.5, 9.5))
+        painter.rotate(-45)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_icon_color())
+        cap_w = 7.0
+        cap_h = 4.5
+        painter.drawRect(int(-cap_w / 2), int(-cap_h / 2), int(cap_w), int(cap_h))
+        # Two horizontal grip lines on the cap, in the canvas
+        # background color so they read as cut-outs.
+        painter.setPen(QPen(_checked_bg(), 0.8))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(QPointF(-cap_w / 2 + 1, -0.6), QPointF(cap_w / 2 - 1, -0.6))
+        painter.drawLine(QPointF(-cap_w / 2 + 1, 0.6), QPointF(cap_w / 2 - 1, 0.6))
+        painter.restore()
+
     def _draw_alternate_triangle(self, painter):
         """Small filled triangle in the lower-right corner indicating alternates."""
         tri = QPainterPath()
@@ -1323,6 +1367,10 @@ class Toolbar(QWidget):
             # zoom_to_actual_size, both via tool_options_action.
             # See HAND_TOOL.md / ZOOM_TOOL.md.
             (Tool.HAND, 5, 0),
+            # Eyedropper — sample appearance from a clicked element
+            # and write it into other elements. Standalone slot
+            # (no alternates). See EYEDROPPER_TOOL.md.
+            (Tool.EYEDROPPER, 5, 1),
         ]
         for tool, row, col in tools:
             has_alt = (tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS

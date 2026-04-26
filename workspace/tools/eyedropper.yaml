@@ -1,0 +1,105 @@
+# Eyedropper tool — samples appearance attributes from a clicked
+# source element and writes them to other elements.
+#
+# Two click semantics per EYEDROPPER_TOOL.md §Gestures:
+#   plain click → write source's attrs into state.eyedropper_cache;
+#                 if selection ≠ ∅, also write attrs to every
+#                 eligible target in the selection.
+#   Alt+click   → apply state.eyedropper_cache to the clicked target.
+#                 Falls through to sample when the cache is null
+#                 (handled inside doc.eyedropper.apply_loaded).
+#   click empty → no-op (Esc is the only way to clear the cache).
+#   Escape      → clear state.eyedropper_cache.
+#
+# Source-side eligibility (locked YES / hidden NO) and target-side
+# eligibility (locked NO / hidden YES) live in the
+# doc.eyedropper.* effect implementations; see
+# EYEDROPPER_TOOL.md §Eligibility.
+#
+# Double-clicking the toolbar icon opens the Eyedropper Tool Options
+# dialog via the existing tool_options_dialog convention (shared
+# with Paintbrush and Blob Brush). Five attribute groups (Fill /
+# Stroke / Opacity / Character / Paragraph) with 21 sub-toggles
+# gate which parts of the cached appearance are applied; toggles
+# live in per-document state.eyedropper_* booleans.
+#
+# Cache is per-document and persists across save/load.
+#
+# See transcripts/EYEDROPPER_TOOL.md for the full spec.
+
+id: eyedropper
+cursor: eyedropper
+menu_label: "Eyedropper Tool"
+shortcut: "I"
+tool_options_dialog: "eyedropper_tool_options"
+
+# Tool-local state. The cache itself lives in state.eyedropper_cache
+# (per-document, persists across save/load); these tool-local fields
+# track the most recent cursor position so the cursor_color_chip
+# overlay can render the chip near the pointer without per-frame
+# event scope access.
+state:
+  hover_x: { default: 0 }
+  hover_y: { default: 0 }
+  has_hovered: { default: false }
+
+handlers:
+
+  on_enter:
+    - set: { tool.eyedropper.has_hovered: "false" }
+
+  on_leave:
+    - set: { tool.eyedropper.has_hovered: "false" }
+
+  on_mousemove:
+    - set: { tool.eyedropper.hover_x: "event.x" }
+    - set: { tool.eyedropper.hover_y: "event.y" }
+    - set: { tool.eyedropper.has_hovered: "true" }
+
+  on_mousedown:
+    - "doc.snapshot": {}
+    - let:
+        hit: "hit_test(event.x, event.y)"
+      in:
+        - if: "hit == null"
+          then:
+            # Click on empty document space — no-op.
+            - {}
+          else:
+            - if: "event.modifiers.alt"
+              then:
+                # Alt+click → apply cached appearance. When the
+                # cache is null, the effect falls through to a
+                # plain sample (so an empty-cache Alt+click still
+                # does something useful).
+                - "doc.eyedropper.apply_loaded":
+                    target: "hit"
+              else:
+                # Plain click → sample. The effect also writes
+                # attrs to every eligible target in the current
+                # selection when the selection is non-empty.
+                - "doc.eyedropper.sample":
+                    source: "hit"
+
+  on_keydown:
+    - if: "event.key == 'Escape'"
+      then:
+        - set: { state.eyedropper_cache: "null" }
+
+  on_dblclick:
+    # Double-click the canvas does nothing — the dblclick-on-toolbar-
+    # icon path that opens the Tool Options dialog is wired by the
+    # toolbar dispatcher via tool_options_dialog, not here.
+    - {}
+
+# Overlay: a small color chip following the cursor while the cache
+# is non-null and the cursor has been seen at least once. Render
+# type is new (joins the existing render-type list); see
+# EYEDROPPER_TOOL.md §Overlay for geometry and styling.
+overlay:
+  if: "state.eyedropper_cache != null and tool.eyedropper.has_hovered"
+  render:
+    type: cursor_color_chip
+    x: "tool.eyedropper.hover_x"
+    y: "tool.eyedropper.hover_y"
+    cache: "state.eyedropper_cache"

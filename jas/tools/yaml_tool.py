@@ -293,6 +293,8 @@ class YamlTool(CanvasTool):
                         painter, render, eval_ctx, ctx.document)
                 elif render_type == "oval_cursor":
                     _draw_oval_cursor_overlay(painter, render, eval_ctx)
+                elif render_type == "cursor_color_chip":
+                    _draw_cursor_color_chip_overlay(painter, render, eval_ctx)
                 elif render_type == "reference_point_cross":
                     _draw_reference_point_cross(
                         painter, render, eval_ctx, ctx.document)
@@ -1023,6 +1025,103 @@ def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict) -> None:
     painter.setPen(crosshair_pen)
     painter.drawLine(cx - 3, cy, cx + 3, cy)
     painter.drawLine(cx, cy - 3, cx, cy + 3)
+
+
+# ── cursor_color_chip overlay ─────────────────────────────────
+# 12x12 chip at offset (+12, +12) from the cursor, filled with the
+# cached fill color and bordered with the cached stroke color. See
+# EYEDROPPER_TOOL.md §Overlay.
+
+def _color_value_to_rgba(v) -> tuple[float, float, float, float]:
+    """Convert a JSON color value (hex string, [r,g,b(,a)] list, or
+    {r,g,b,a} dict) to an (r, g, b, a) tuple in [0, 1]. Falls back
+    to opaque black on parse failure. Mirrors the Rust
+    color_value_to_css."""
+    if isinstance(v, str):
+        return parse_color(v) or (0.0, 0.0, 0.0, 1.0)
+    if isinstance(v, (list, tuple)) and len(v) >= 3:
+        a = float(v[3]) if len(v) >= 4 else 1.0
+        return (float(v[0]), float(v[1]), float(v[2]), a)
+    if isinstance(v, dict) and "r" in v and "g" in v and "b" in v:
+        return (
+            float(v["r"]), float(v["g"]), float(v["b"]),
+            float(v.get("a", 1.0)),
+        )
+    return (0.0, 0.0, 0.0, 1.0)
+
+
+def _draw_cursor_color_chip_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    """Eyedropper cursor chip — 12x12 swatch following the cursor
+    that previews the cached appearance.
+
+    Render fields:
+      x, y    cursor position (expression-evaluated).
+      cache   cached Appearance dict (typically the string
+              "state.eyedropper_cache"; the renderer reads the
+              underlying dict directly from eval_ctx since
+              evaluate() does not return Object values).
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QBrush, QPen
+
+    cx = _eval_number_field(eval_ctx, render.get("x"))
+    cy = _eval_number_field(eval_ctx, render.get("y"))
+
+    # Resolve the cache field. Accept either an inline dict or a
+    # string of the form "state.<key>".
+    cache: dict | None = None
+    cache_field = render.get("cache")
+    if isinstance(cache_field, str):
+        trimmed = cache_field.strip()
+        key = (trimmed[6:] if trimmed.startswith("state.") else trimmed)
+        state = eval_ctx.get("state") if isinstance(eval_ctx, dict) else None
+        if isinstance(state, dict):
+            v = state.get(key)
+            if isinstance(v, dict):
+                cache = v
+    elif isinstance(cache_field, dict):
+        cache = cache_field
+    if cache is None:
+        return
+
+    chip_x = cx + 12.0
+    chip_y = cy + 12.0
+    chip_w = 12.0
+    chip_h = 12.0
+
+    # Fill: cache.fill.color when present (solid). Otherwise a
+    # white square + red diagonal as the none-glyph.
+    fill_obj = cache.get("fill") if isinstance(cache.get("fill"), dict) else None
+    if fill_obj is not None and "color" in fill_obj:
+        rgba = _color_value_to_rgba(fill_obj["color"])
+        painter.setBrush(QBrush(_qcolor(rgba)))
+        painter.setPen(QPen(Qt.PenStyle.NoPen))
+        painter.drawRect(int(chip_x), int(chip_y), int(chip_w), int(chip_h))
+    else:
+        painter.setBrush(QBrush(_qcolor((1.0, 1.0, 1.0, 1.0))))
+        painter.setPen(QPen(Qt.PenStyle.NoPen))
+        painter.drawRect(int(chip_x), int(chip_y), int(chip_w), int(chip_h))
+        slash_pen = QPen(_qcolor((1.0, 0.0, 0.0, 1.0)), 1.5)
+        painter.setPen(slash_pen)
+        painter.drawLine(
+            int(chip_x), int(chip_y + chip_h),
+            int(chip_x + chip_w), int(chip_y),
+        )
+
+    # Border: 1px from cache.stroke.color, else neutral #888 so the
+    # chip stays visible against any backdrop.
+    stroke_obj = (cache.get("stroke")
+                  if isinstance(cache.get("stroke"), dict) else None)
+    if stroke_obj is not None and "color" in stroke_obj:
+        border_rgba = _color_value_to_rgba(stroke_obj["color"])
+    else:
+        f = 0x88 / 255.0
+        border_rgba = (f, f, f, 1.0)
+    border_pen = QPen(_qcolor(border_rgba), 1.0)
+    painter.setPen(border_pen)
+    painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+    painter.drawRect(
+        int(chip_x), int(chip_y), int(chip_w - 1.0), int(chip_h - 1.0))
 
 
 # ── Transform-tool overlays ──────────────────────────────────
