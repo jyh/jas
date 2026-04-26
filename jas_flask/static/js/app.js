@@ -333,6 +333,16 @@
     if (isFuncCall || _NAMESPACES.indexOf(prefix) >= 0) {
       return evalExpr(s, ctx);
     }
+    // String literal: "foo" or 'foo' — strip the surrounding
+    // quotes so expressions like `set: { active_tool: '"rect"' }`
+    // store the unquoted value `rect`. Matches the rhs-quote
+    // stripping in the comparison handler above and the OCaml /
+    // Python expression-language semantics.
+    if (s.length >= 2 &&
+        ((s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') ||
+         (s.charAt(0) === "'" && s.charAt(s.length - 1) === "'"))) {
+      return s.substring(1, s.length - 1);
+    }
     // Literal string (CSS values, plain text, etc.)
     return s;
   }
