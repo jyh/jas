@@ -6,6 +6,9 @@ can't: widget rendering, typeahead, focus/tab order, menu interaction,
 dock/float, appearance theming, visual correctness of canvas output,
 cross-panel regressions, and keyboard-only paths.
 
+For the catalog of existing test files (tier-ordered + alphabetical),
+see [`MANUAL_TEST_INDEX.md`](MANUAL_TEST_INDEX.md).
+
 ## Core approach
 
 - One file per component: `<NAME>_TESTS.md` in the transcripts/ directory.
