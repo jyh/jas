@@ -246,6 +246,87 @@ describe("doc.path.probe_partial_hit", () => {
   });
 });
 
+describe("doc.path.commit_partial_marquee", () => {
+  function makeDoc() {
+    return {
+      layers: [mkLayer({ children: [
+        // Rect from (0,0) to (100,80). CPs: TL(0,0), TR(100,0),
+        // BR(100,80), BL(0,80).
+        { type: "rect", x: 0, y: 0, width: 100, height: 80,
+          visibility: "preview", locked: false, opacity: 1 },
+      ] })],
+      selection: [],
+      artboards: [],
+    };
+  }
+
+  it("CPs inside the rect become partial-selected; element joins selection", async () => {
+    const { partialCpsForPath } = await import("../../static/js/engine/document.mjs");
+    const model = new Model(makeDoc());
+    const store = new StateStore();
+    // Marquee that covers the top edge: TL (0,0) and TR (100,0).
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "-5", y1: "-5", x2: "105", y2: "5", additive: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.deepEqual(model.document.selection, [[0, 0]]);
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0, 1]);
+  });
+
+  it("non-additive replaces an existing partial set", async () => {
+    const { partialCpsForPath, setSelection, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [3]); // BL pre-selected
+    const model = new Model(doc);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "-5", y1: "-5", x2: "5", y2: "5", additive: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    // Marquee covers only TL → replaces [3] with [0].
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0]);
+  });
+
+  it("additive merges into the existing partial set", async () => {
+    const { partialCpsForPath, setSelection, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [3]); // BL pre-selected
+    const model = new Model(doc);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "-5", y1: "-5", x2: "5", y2: "5", additive: "true",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0, 3]);
+  });
+
+  it("empty marquee with non-additive clears the selection", async () => {
+    const { partialCpsForPath, setSelection } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    const model = new Model(doc);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "200", y1: "200", x2: "300", y2: "300", additive: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(model.document.selection.length, 0);
+  });
+});
+
 describe("layer_length primitive", () => {
   beforeEach(_resetForTesting);
 

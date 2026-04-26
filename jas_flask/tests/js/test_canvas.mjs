@@ -90,6 +90,52 @@ describe("renderSelectionLayer", () => {
   });
 });
 
+describe("partial_selection overlay", () => {
+  // The partial_selection.yaml overlay has type "partial_selection_overlay"
+  // — the Rust renderer draws path handles + a marquee rect. In Flask,
+  // path handles already render in renderSelectionLayer; the overlay
+  // only needs to emit the marquee rect when mode == 'marquee'.
+  const toolSpec = {
+    id: "partial_selection",
+    overlay: {
+      if: "true",
+      render: {
+        type: "partial_selection_overlay",
+        mode: "tool.partial_selection.mode",
+        marquee_start_x: "tool.partial_selection.marquee_start_x",
+        marquee_start_y: "tool.partial_selection.marquee_start_y",
+        marquee_cur_x: "tool.partial_selection.marquee_cur_x",
+        marquee_cur_y: "tool.partial_selection.marquee_cur_y",
+      },
+    },
+  };
+
+  it("draws the marquee rect when mode == 'marquee'", () => {
+    const scope = new Scope({ tool: { partial_selection: {
+      mode: "marquee",
+      marquee_start_x: 10, marquee_start_y: 20,
+      marquee_cur_x: 110, marquee_cur_y: 80,
+    } } });
+    const svg = renderOverlayLayer(toolSpec, scope);
+    assert.match(svg, /<rect/);
+    assert.match(svg, /x="10"/);
+    assert.match(svg, /y="20"/);
+    assert.match(svg, /width="100"/);
+    assert.match(svg, /height="60"/);
+    // Dashed selection-blue stroke.
+    assert.match(svg, /stroke-dasharray/);
+  });
+
+  it("renders nothing when mode != 'marquee'", () => {
+    const scope = new Scope({ tool: { partial_selection: {
+      mode: "idle",
+      marquee_start_x: 0, marquee_start_y: 0,
+      marquee_cur_x: 0, marquee_cur_y: 0,
+    } } });
+    assert.equal(renderOverlayLayer(toolSpec, scope), "");
+  });
+});
+
 describe("renderOverlayLayer", () => {
   const toolSpec = {
     id: "selection",

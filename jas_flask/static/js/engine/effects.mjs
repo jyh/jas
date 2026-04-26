@@ -371,6 +371,51 @@ function runEffect(effect, scope, store, options) {
           model.mutate(deleteSelectedElements);
           return;
         }
+        case "doc.path.commit_partial_marquee": {
+          // Spec: { x1, y1, x2, y2, additive }
+          // Walk every shape in the document; for each, list which
+          // CPs fall inside the marquee rect. additive = true merges
+          // into the existing partial set (and keeps the existing
+          // selection); additive = false replaces both. Element
+          // joins the selection iff at least one CP is hit.
+          const x1 = Number(toJson(evaluate(String(spec.x1), scope))) || 0;
+          const y1 = Number(toJson(evaluate(String(spec.y1), scope))) || 0;
+          const x2 = Number(toJson(evaluate(String(spec.x2), scope))) || 0;
+          const y2 = Number(toJson(evaluate(String(spec.y2), scope))) || 0;
+          const additive = "additive" in spec
+            ? toBool(evaluate(String(spec.additive), scope)) : false;
+          const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+          const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
+          const hits = _cpsInRect(model.document, minX, minY, maxX, maxY);
+          model.mutate((d) => {
+            if (additive) {
+              let next = d;
+              for (const [pathKey, cps] of hits) {
+                const path = pathKey.split(",").map(Number);
+                const inSel = next.selection.some(
+                  (p) => p.length === path.length
+                    && p.every((v, i) => v === path[i]));
+                if (!inSel) {
+                  next = { ...next, selection: [...next.selection, path.slice()] };
+                }
+                const cur = partialCpsForPath(next, path) || [];
+                const merged = Array.from(new Set([...cur, ...cps]));
+                next = setPartialCps(next, path, merged);
+              }
+              return next;
+            }
+            // Non-additive: replace selection + partial map with the hits.
+            const newSel = [];
+            let next = { ...d, selection: newSel, partial_cps: {} };
+            for (const [pathKey, cps] of hits) {
+              const path = pathKey.split(",").map(Number);
+              newSel.push(path.slice());
+              next = setPartialCps(next, path, cps);
+            }
+            return { ...next, selection: newSel };
+          });
+          return;
+        }
         case "doc.path.probe_partial_hit": {
           // Phase-1 partial-selection primitive. Hit-tests for a
           // control point under (x, y); on hit, snapshots, replaces
@@ -862,6 +907,35 @@ function _hitTestCp(doc, x, y, radius) {
     if (hit) return hit;
   }
   return null;
+}
+
+// Find every control point inside the rect. Returns a Map keyed by
+// pathKey ("0,2,1") with values being arrays of CP indices for that
+// element. Visits all layers/groups recursively.
+function _cpsInRect(doc, minX, minY, maxX, maxY) {
+  const hits = new Map();
+  if (!doc || !Array.isArray(doc.layers)) return hits;
+  function recur(elem, path) {
+    if (!elem) return;
+    if (elem.type === "layer" || elem.type === "group") {
+      const kids = elem.children || [];
+      for (let i = 0; i < kids.length; i++) recur(kids[i], [...path, i]);
+      return;
+    }
+    const cps = controlPoints(elem);
+    const inside = [];
+    for (let i = 0; i < cps.length; i++) {
+      const [px, py] = cps[i];
+      if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
+        inside.push(i);
+      }
+    }
+    if (inside.length > 0) hits.set(path.join(","), inside);
+  }
+  for (let li = 0; li < doc.layers.length; li++) {
+    recur(doc.layers[li], [li]);
+  }
+  return hits;
 }
 
 // Drawing tool yamls (rect, ellipse, line, …) intentionally omit fill
