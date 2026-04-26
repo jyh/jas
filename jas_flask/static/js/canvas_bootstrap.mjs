@@ -15,7 +15,7 @@
 // URLs don't infect module-internal references.
 
 import { Model } from "/static/js/engine/model.mjs";
-import { emptyDocument } from "/static/js/engine/document.mjs";
+import { emptyDocument, ensureDocumentInvariants } from "/static/js/engine/document.mjs";
 import { StateStore } from "/static/js/engine/store.mjs";
 import { registerTools, dispatchEvent, getTool } from "/static/js/engine/tools.mjs";
 import {
@@ -273,7 +273,11 @@ function adoptCanvas(canvasEl) {
   const restored = pendingRestoreDocs.shift();
   let model;
   if (restored) {
-    model = new Model(restored.document, restored.filename || undefined);
+    // Defensive: an old localStorage payload may predate a schema
+    // bump (e.g. saved before artboards were a thing). Patch the doc
+    // up to the current invariants before binding.
+    const doc = ensureDocumentInvariants(restored.document);
+    model = new Model(doc, restored.filename || undefined);
     model.markSaved();
   } else {
     model = new Model(emptyDocument());
