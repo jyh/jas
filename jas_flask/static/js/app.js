@@ -975,6 +975,9 @@
     if (effect.remove_child) {
       var childId = resolve(effect.remove_child, ctx);
       var childEl = document.getElementById(childId);
+      console.log("[remove_child]", JSON.stringify(effect.remove_child),
+        "→ id=", JSON.stringify(childId),
+        "found=", !!childEl);
       if (childEl) childEl.remove();
       return;
     }
