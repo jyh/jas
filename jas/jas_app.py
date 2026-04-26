@@ -961,6 +961,7 @@ class MainWindow(QMainWindow):
         Tool.SCALE: "scale",
         Tool.ROTATE: "rotate",
         Tool.SHEAR: "shear",
+        Tool.EYEDROPPER: "eyedropper",
         Tool.ARTBOARD: "artboard",
     }
 
