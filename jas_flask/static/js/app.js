@@ -975,9 +975,6 @@
     if (effect.remove_child) {
       var childId = resolve(effect.remove_child, ctx);
       var childEl = document.getElementById(childId);
-      console.log("[remove_child]", JSON.stringify(effect.remove_child),
-        "→ id=", JSON.stringify(childId),
-        "found=", !!childEl);
       if (childEl) childEl.remove();
       return;
     }
@@ -1701,6 +1698,13 @@
     var behaviors;
     try { behaviors = JSON.parse(el.getAttribute("data-behaviors")); } catch (ex) { return; }
     var capturedProps = props || null;
+    // Tag this element so the DOMContentLoaded [data-behaviors] scan
+    // doesn't re-wire it. Otherwise dynamically-created elements get
+    // both this rich-context wiring (with capturedProps) AND the
+    // generic post-load wiring, which fires the action a second
+    // time without props — manifested as e.g. close_tab firing once
+    // with the right index then again with index="".
+    el.setAttribute("data-behaviors-wired", "1");
     behaviors.forEach(function (b) {
       var domEvent = eventMap[b.event];
       if (!domEvent) return;
@@ -2015,8 +2019,11 @@
       dispatch(action, params);
     });
 
-    // Wire behavior data attributes — group by event, first matching condition wins
-    document.querySelectorAll("[data-behaviors]").forEach(function (el) {
+    // Wire behavior data attributes — group by event, first matching condition wins.
+    // Skip elements already wired by createElementFromSpec (those carry
+    // the data-behaviors-wired marker and were given proper ctx.props
+    // in their listener closure).
+    document.querySelectorAll("[data-behaviors]:not([data-behaviors-wired])").forEach(function (el) {
       var behaviors;
       try { behaviors = JSON.parse(el.getAttribute("data-behaviors")); } catch (ex) { return; }
       // Group behaviors by event type
