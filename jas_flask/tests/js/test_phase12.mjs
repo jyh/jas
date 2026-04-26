@@ -185,6 +185,67 @@ describe("doc.set_attr", () => {
   });
 });
 
+describe("doc.path.probe_partial_hit", () => {
+  function makeDoc() {
+    return {
+      layers: [mkLayer({ children: [
+        { type: "rect", x: 10, y: 10, width: 100, height: 80,
+          visibility: "preview", locked: false, opacity: 1 },
+      ] })],
+      selection: [],
+      artboards: [],
+    };
+  }
+
+  it("clicking a CP without shift replaces the partial selection with that CP", async () => {
+    const { partialCpsForPath } = await import("../../static/js/engine/document.mjs");
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "10", y: "10", radius: "6", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    // CP 0 (TL corner) is at (10, 10) — exact hit.
+    assert.deepEqual(model.document.selection, [[0, 0]]);
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0]);
+    assert.equal(store.get("tool.partial_selection.mode"), "moving_pending");
+  });
+
+  it("shift-clicking a CP toggles it in the partial set", async () => {
+    const { partialCpsForPath, setSelection, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [0]); // TL already partial
+    const model = new Model(doc);
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    // Shift-click on TR (110, 10).
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "110", y: "10", radius: "6", shift: "true",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0, 1]);
+  });
+
+  it("clicking empty space sets mode to marquee", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "500", y: "500", radius: "6", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(store.get("tool.partial_selection.mode"), "marquee");
+    // No selection change.
+    assert.equal(model.document.selection.length, 0);
+  });
+});
+
 describe("layer_length primitive", () => {
   beforeEach(_resetForTesting);
 

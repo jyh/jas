@@ -200,11 +200,13 @@ export function docFromJson(json) {
 
 /**
  * Replace the selection with a given list of path-arrays. Paths that
- * don't resolve to elements are silently dropped.
+ * don't resolve to elements are silently dropped. Drops any partial-
+ * CP entries for paths no longer selected.
  */
 export function setSelection(doc, paths) {
   const valid = paths.filter((p) => getElement(doc, p) !== null);
-  return { ...doc, selection: valid.map((p) => p.slice()) };
+  const next = { ...doc, selection: valid.map((p) => p.slice()) };
+  return _trimPartialCps(next);
 }
 
 /** Add a path to the selection, if not already present. */
@@ -213,21 +215,82 @@ export function addToSelection(doc, path) {
   return { ...doc, selection: [...doc.selection, path.slice()] };
 }
 
-/** Toggle a path's membership in the selection. */
+/** Toggle a path's membership in the selection. Removes the path's
+ * partial-CP entry too when the path leaves the selection. */
 export function toggleSelection(doc, path) {
   const hasIt = doc.selection.some((p) => arraysEqual(p, path));
   if (hasIt) {
-    return {
+    const next = {
       ...doc,
       selection: doc.selection.filter((p) => !arraysEqual(p, path)),
     };
+    return _trimPartialCps(next);
   }
   return addToSelection(doc, path);
 }
 
-/** Clear the selection. */
+/** Clear the selection (and any partial-CP entries). */
 export function clearSelection(doc) {
-  return { ...doc, selection: [] };
+  return { ...doc, selection: [], partial_cps: {} };
+}
+
+// ─── Partial control-point selection ─────────────────────
+//
+// Mirrors jas_dioxus' SelectionKind::Partial. Storage shape:
+//   doc.partial_cps: { [pathKey: string]: number[] }
+// where pathKey is the path joined by commas ("0,2,1"). Missing key
+// (or a clearSelection) means SelectionKind::All — every CP of the
+// element is "selected" and the renderer fills its handles solid.
+// Presence means Partial: only the listed CP indices are filled
+// solid, the others render as white squares with a selection-blue
+// outline.
+
+/** Return the array of selected CP indices for `path`, or null when
+ * the path has no Partial entry (i.e. the element is whole-selected /
+ * SelectionKind::All). */
+export function partialCpsForPath(doc, path) {
+  if (!doc || !doc.partial_cps) return null;
+  const cps = doc.partial_cps[_pathKey(path)];
+  return Array.isArray(cps) ? cps.slice() : null;
+}
+
+/** Replace the partial-CP set for `path`. An empty array removes the
+ * entry (back to SelectionKind::All). Indices are sorted ascending. */
+export function setPartialCps(doc, path, cps) {
+  const map = { ...(doc.partial_cps || {}) };
+  const key = _pathKey(path);
+  if (!Array.isArray(cps) || cps.length === 0) {
+    delete map[key];
+  } else {
+    map[key] = cps.slice().sort((a, b) => a - b);
+  }
+  return { ...doc, partial_cps: map };
+}
+
+/** Toggle a single CP index in the partial-CP set for `path`.
+ * Adding the first index implicitly converts All → Partial; removing
+ * the last drops the entry back to All. */
+export function togglePartialCp(doc, path, cpIndex) {
+  const cur = partialCpsForPath(doc, path) || [];
+  const idx = cur.indexOf(cpIndex);
+  const next = idx >= 0
+    ? cur.filter((i) => i !== cpIndex)
+    : [...cur, cpIndex];
+  return setPartialCps(doc, path, next);
+}
+
+function _pathKey(path) {
+  return Array.isArray(path) ? path.join(",") : String(path);
+}
+
+function _trimPartialCps(doc) {
+  if (!doc.partial_cps) return doc;
+  const live = new Set(doc.selection.map((p) => _pathKey(p)));
+  const map = {};
+  for (const k of Object.keys(doc.partial_cps)) {
+    if (live.has(k)) map[k] = doc.partial_cps[k];
+  }
+  return { ...doc, partial_cps: map };
 }
 
 function arraysEqual(a, b) {

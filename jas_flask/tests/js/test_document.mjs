@@ -8,6 +8,7 @@ import {
   isContainer, emptyDocument, getElement, cloneDocument,
   docToJson, docFromJson,
   setSelection, addToSelection, toggleSelection, clearSelection,
+  partialCpsForPath, setPartialCps, togglePartialCp,
 } from "../../static/js/engine/document.mjs";
 
 import { Model } from "../../static/js/engine/model.mjs";
@@ -224,6 +225,61 @@ describe("selection mutations", () => {
     let d = setSelection(makeDoc(), [[0, 0], [0, 1]]);
     d = clearSelection(d);
     assert.equal(d.selection.length, 0);
+  });
+
+  it("partialCpsForPath returns null when no partial entry exists", () => {
+    // No partial entry → SelectionKind::All semantics. Caller treats
+    // null as "every CP is selected".
+    const d = setSelection(makeDoc(), [[0, 0]]);
+    assert.equal(partialCpsForPath(d, [0, 0]), null);
+  });
+
+  it("setPartialCps stores indices for a path; partialCpsForPath reads them", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [0, 2]);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [0, 2]);
+  });
+
+  it("setPartialCps with empty array clears the partial entry", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [1]);
+    d = setPartialCps(d, [0, 0], []);
+    assert.equal(partialCpsForPath(d, [0, 0]), null);
+  });
+
+  it("togglePartialCp adds an absent index", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = togglePartialCp(d, [0, 0], 2);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [2]);
+  });
+
+  it("togglePartialCp removes a present index", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [0, 2]);
+    d = togglePartialCp(d, [0, 0], 0);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [2]);
+  });
+
+  it("togglePartialCp leaves indices sorted ascending", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = togglePartialCp(d, [0, 0], 3);
+    d = togglePartialCp(d, [0, 0], 1);
+    d = togglePartialCp(d, [0, 0], 2);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [1, 2, 3]);
+  });
+
+  it("clearSelection drops partial entries too", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [1]);
+    d = clearSelection(d);
+    assert.equal(partialCpsForPath(d, [0, 0]), null);
+  });
+
+  it("setSelection drops partial entries for paths no longer selected", () => {
+    let d = setSelection(makeDoc(), [[0, 0], [0, 1]]);
+    d = setPartialCps(d, [0, 1], [0]);
+    d = setSelection(d, [[0, 0]]);
+    assert.equal(partialCpsForPath(d, [0, 1]), null);
   });
 
   it("mutations don't alter input", () => {

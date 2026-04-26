@@ -24,8 +24,9 @@ import { toBool, toJson, PATH } from "./value.mjs";
 import {
   setSelection, addToSelection, toggleSelection, clearSelection,
   getElement, mkPath,
+  partialCpsForPath, setPartialCps,
 } from "./document.mjs";
-import { hitTestRect, translateElement } from "./geometry.mjs";
+import { hitTestRect, translateElement, controlPoints } from "./geometry.mjs";
 import * as pointBuffers from "./point_buffers.mjs";
 import { fitCurve } from "./fit_curve.mjs";
 
@@ -368,6 +369,54 @@ function runEffect(effect, scope, store, options) {
         }
         case "doc.delete_selection": {
           model.mutate(deleteSelectedElements);
+          return;
+        }
+        case "doc.path.probe_partial_hit": {
+          // Phase-1 partial-selection primitive. Hit-tests for a
+          // control point under (x, y); on hit, snapshots, replaces
+          // the partial-CP set on that element (toggling under
+          // shift), and sets tool.partial_selection.mode to
+          // 'moving_pending'. On miss, sets mode to 'marquee'. The
+          // full Rust impl also handles Bezier handle hits and
+          // recurses through groups; both deferred — see
+          // jas_dioxus/src/interpreter/effects.rs::path_probe_partial_hit.
+          const x = Number(toJson(evaluate(String(spec.x), scope))) || 0;
+          const y = Number(toJson(evaluate(String(spec.y), scope))) || 0;
+          const radius = "radius" in spec
+            ? Number(toJson(evaluate(String(spec.radius), scope))) || 6
+            : 6;
+          const shift = "shift" in spec
+            ? toBool(evaluate(String(spec.shift), scope)) : false;
+          const hit = _hitTestCp(model.document, x, y, radius);
+          if (hit) {
+            model.snapshot();
+            model.mutate((d) => {
+              const cur = partialCpsForPath(d, hit.path) || [];
+              let nextCps;
+              let nextSel = d.selection;
+              const inSel = d.selection.some(
+                (p) => p.length === hit.path.length
+                  && p.every((v, i) => v === hit.path[i]));
+              if (!inSel) {
+                nextSel = [...d.selection, hit.path.slice()];
+              }
+              if (shift) {
+                const idx = cur.indexOf(hit.cp_index);
+                nextCps = idx >= 0
+                  ? cur.filter((i) => i !== hit.cp_index)
+                  : [...cur, hit.cp_index];
+              } else {
+                // No shift: replace with just this CP.
+                nextSel = [hit.path.slice()];
+                nextCps = [hit.cp_index];
+              }
+              const withSel = { ...d, selection: nextSel };
+              return setPartialCps(withSel, hit.path, nextCps);
+            });
+            store.set("tool.partial_selection.mode", "moving_pending");
+          } else {
+            store.set("tool.partial_selection.mode", "marquee");
+          }
           return;
         }
         case "doc.add_element": {
@@ -781,6 +830,38 @@ export function setElementAttr(doc, path, attr, value) {
   if (li < 0 || li >= layers.length) return doc;
   layers[li] = replaceElementAt(layers[li], rest, (e) => ({ ...e, [attr]: value }));
   return { ...doc, layers };
+}
+
+// Hit-test for a control point under (x, y) within `radius`.
+// Walks every shape in the document (top-down, last child wins for
+// overlap) and returns the first CP within radius. Returns
+// `{ path, cp_index }` on hit, null on miss. Recurses into groups
+// and layers.
+function _hitTestCp(doc, x, y, radius) {
+  if (!doc || !Array.isArray(doc.layers)) return null;
+  const r2 = radius * radius;
+  function recur(elem, path) {
+    if (!elem) return null;
+    if (elem.type === "layer" || elem.type === "group") {
+      const kids = elem.children || [];
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const hit = recur(kids[i], [...path, i]);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    const cps = controlPoints(elem);
+    for (let i = 0; i < cps.length; i++) {
+      const dx = cps[i][0] - x, dy = cps[i][1] - y;
+      if (dx * dx + dy * dy <= r2) return { path, cp_index: i };
+    }
+    return null;
+  }
+  for (let li = doc.layers.length - 1; li >= 0; li--) {
+    const hit = recur(doc.layers[li], [li]);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 // Drawing tool yamls (rect, ellipse, line, …) intentionally omit fill

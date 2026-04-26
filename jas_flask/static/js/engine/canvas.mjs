@@ -11,7 +11,7 @@
 
 import { renderDocument, renderElement } from "./renderer.mjs";
 import { elementBounds, controlPoints } from "./geometry.mjs";
-import { getElement } from "./document.mjs";
+import { getElement, partialCpsForPath } from "./document.mjs";
 import { evaluate } from "./expr.mjs";
 import { Scope } from "./scope.mjs";
 import { toBool, toStringCoerce } from "./value.mjs";
@@ -204,19 +204,21 @@ export function renderSelectionLayer(doc) {
       `<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" ` +
       `fill="none" stroke="${SELECTION_COLOR}" stroke-width="1" stroke-dasharray="4 2"/>`
     );
-    // Square handles at every control point. Whole-element selection
-    // (the only kind Flask currently models) corresponds to Rust's
-    // SelectionKind::All — every CP is "selected", so every handle is
-    // filled solid in the selection colour. Partial selection (per-CP
-    // marquee, with white-outline handles for the unselected ones)
-    // ships when Flask's selection model grows a kind field; see
-    // jas_dioxus/src/document/document.rs::SelectionKind.
+    // Square handles at every control point. SelectionKind::All
+    // (no partial entry) → every handle filled solid. Partial(cps)
+    // → only listed CPs solid; others white with a selection-blue
+    // outline. Mirrors jas_dioxus' draw loop.
     const half = HANDLE_SIZE / 2;
-    for (const [px, py] of controlPoints(elem)) {
+    const partial = partialCpsForPath(doc, path);
+    const cps = controlPoints(elem);
+    for (let i = 0; i < cps.length; i++) {
+      const [px, py] = cps[i];
+      const selected = partial == null || partial.includes(i);
+      const fill = selected ? SELECTION_COLOR : "white";
       parts.push(
         `<rect x="${px - half}" y="${py - half}" ` +
         `width="${HANDLE_SIZE}" height="${HANDLE_SIZE}" ` +
-        `fill="${SELECTION_COLOR}" stroke="${SELECTION_COLOR}" stroke-width="1"/>`
+        `fill="${fill}" stroke="${SELECTION_COLOR}" stroke-width="1"/>`
       );
     }
   }

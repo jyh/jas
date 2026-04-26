@@ -8,7 +8,7 @@ import {
   renderArtboardFillLayer, renderArtboardDecorationLayer,
 } from "../../static/js/engine/canvas.mjs";
 import {
-  mkLayer, mkRect, mkCircle, setSelection,
+  mkLayer, mkRect, mkCircle, setSelection, setPartialCps,
 } from "../../static/js/engine/document.mjs";
 import { Scope } from "../../static/js/engine/scope.mjs";
 
@@ -54,19 +54,30 @@ describe("renderSelectionLayer", () => {
   });
 
   it("emits a control-point handle at each anchor of a selected rect", () => {
-    // Whole-element selection (the only kind Flask models today)
-    // corresponds to Rust's SelectionKind::All — every handle is
-    // filled solid in the selection colour. For a rect that's 4
-    // corners.
+    // Whole-element (All) selection: every handle filled solid.
     const doc = setSelection(makeDoc(), [[0, 0]]);
     const svg = renderSelectionLayer(doc);
-    // The bounding-box rect uses stroke-dasharray; handles do not.
-    // Strip the dashed bbox and count the remaining <rect>s.
     const handlesOnly = svg.replace(/<rect [^/]*stroke-dasharray[^/]*\/>/g, "");
     assert.equal((handlesOnly.match(/<rect /g) || []).length, 4);
-    // Handles are solid-blue filled (SelectionKind::All).
     const SEL_COLOR = "rgba\\(0, 120, 215, 0\\.9\\)";
     assert.match(handlesOnly, new RegExp(`fill="${SEL_COLOR}"`));
+  });
+
+  it("partial selection: only listed CPs solid, others white outlined", () => {
+    // Rect has 4 CPs (TL=0, TR=1, BR=2, BL=3). Mark CPs 0 and 2 as
+    // partial-selected — those should fill solid blue, the other two
+    // should fill white with a selection-blue outline.
+    let doc = setSelection(makeDoc(), [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [0, 2]);
+    const svg = renderSelectionLayer(doc);
+    const handlesOnly = svg.replace(/<rect [^/]*stroke-dasharray[^/]*\/>/g, "");
+    // Still 4 handle rects.
+    assert.equal((handlesOnly.match(/<rect /g) || []).length, 4);
+    // Two solid-blue handles, two white.
+    const solid = (handlesOnly.match(/fill="rgba\(0, 120, 215, 0\.9\)"/g) || []).length;
+    const white = (handlesOnly.match(/fill="white"/g) || []).length;
+    assert.equal(solid, 2);
+    assert.equal(white, 2);
   });
 
   it("degenerate bounds skipped", () => {
