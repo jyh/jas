@@ -130,11 +130,16 @@ class TestRenderIconButton:
                 f"button shading uniformly"
             )
 
-    def test_alternate_and_plain_buttons_use_identical_class_list(
+    def test_alternate_and_plain_buttons_share_class_and_style(
             self, theme, state):
-        """Tools with and without alternates differ only in the
-        triangle child + data-has-alternates attribute. Their class
-        list must be identical so they pick up the same CSS rules."""
+        """Tools with and without alternates must render with
+        identical class list AND identical inline style — the only
+        differences are the triangle SVG child, the
+        ``data-has-alternates`` attribute, and any yaml-driven
+        behaviors. If the inline ``style`` differs (e.g. one button
+        has ``position:relative`` and the other doesn't) browsers
+        can compute different stacking contexts and apparent
+        rendering for otherwise-identical buttons."""
         import re
         from renderer import render_element
         plain = render_element(
@@ -147,6 +152,11 @@ class TestRenderIconButton:
         alt_class = re.search(r'class="([^"]*)"', alt).group(1)
         assert plain_class == alt_class, (
             f"class lists differ:\n  plain: {plain_class}\n  alt:   {alt_class}"
+        )
+        plain_style = re.search(r'style="([^"]*)"', plain).group(1)
+        alt_style = re.search(r'style="([^"]*)"', alt).group(1)
+        assert plain_style == alt_style, (
+            f"inline styles differ:\n  plain: {plain_style}\n  alt:   {alt_style}"
         )
 
 
