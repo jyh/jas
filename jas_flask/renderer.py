@@ -609,8 +609,14 @@ def _render_icon_button(el, theme, state):
             f' fill="var(--app-text,#cccccc)"/></svg>'
         )
         extra_attrs = ' data-has-alternates="true"'
+    # NOTE: deliberately omit Bootstrap's `btn-outline-secondary`.
+    # That class fights with .app-tool-btn over the :hover / :focus /
+    # .active backgrounds and makes focused-but-not-active buttons
+    # look darker than their unfocused peers. `btn` alone is kept
+    # for the size + padding reset; .app-tool-btn (in app.css) owns
+    # all colour states.
     return Markup(
-        f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary app-tool-btn p-0"'
+        f'<button{_id_attr(el)} class="btn btn-sm app-tool-btn p-0"'
         f' style="{pos_css}width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
         f' title="{summary}"{_data_attrs(el)}{extra_attrs}>'
         f'{icon_html}{triangle_html}</button>'

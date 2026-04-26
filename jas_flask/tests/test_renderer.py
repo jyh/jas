@@ -107,6 +107,48 @@ class TestRenderIconButton:
         html = render_element(el, theme, state, mode="normal")
         assert 'data-has-alternates="true"' in html
 
+    def test_buttons_omit_bootstrap_btn_outline_class(self, theme, state):
+        """Tool buttons should not carry ``btn-outline-secondary``.
+
+        Bootstrap's outline-secondary class fights with app.css over
+        :hover / :focus / .active backgrounds, producing inconsistent
+        shading where focused-but-not-active buttons look darker than
+        their unfocused peers. app.css's ``.app-tool-btn`` owns the
+        base + hover + active states; we just need ``btn`` for the
+        size / padding reset."""
+        from renderer import render_element
+        for el in [
+            {"type": "icon_button", "id": "a", "summary": "A", "icon": "a",
+             "style": {"size": 32}},
+            {"type": "icon_button", "id": "b", "summary": "B", "icon": "b",
+             "style": {"size": 32}, "alternates": {"items": []}},
+        ]:
+            html = render_element(el, theme, state, mode="normal")
+            assert "btn-outline-secondary" not in html, (
+                f"icon_button {el['id']!r} still carries Bootstrap "
+                f"btn-outline-secondary; remove it so app.css owns "
+                f"button shading uniformly"
+            )
+
+    def test_alternate_and_plain_buttons_use_identical_class_list(
+            self, theme, state):
+        """Tools with and without alternates differ only in the
+        triangle child + data-has-alternates attribute. Their class
+        list must be identical so they pick up the same CSS rules."""
+        import re
+        from renderer import render_element
+        plain = render_element(
+            {"type": "icon_button", "id": "p", "summary": "P", "icon": "p",
+             "style": {"size": 32}}, theme, state)
+        alt = render_element(
+            {"type": "icon_button", "id": "a", "summary": "A", "icon": "a",
+             "style": {"size": 32}, "alternates": {"items": []}}, theme, state)
+        plain_class = re.search(r'class="([^"]*)"', plain).group(1)
+        alt_class = re.search(r'class="([^"]*)"', alt).group(1)
+        assert plain_class == alt_class, (
+            f"class lists differ:\n  plain: {plain_class}\n  alt:   {alt_class}"
+        )
+
 
 class TestRenderPaneSystem:
     def test_position_relative(self, theme, state):

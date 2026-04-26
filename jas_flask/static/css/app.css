@@ -68,15 +68,26 @@
     justify-content: center;
     transition: background 0.1s;
 }
+/* Hover gives a subtle affordance distinct from the selected state
+   so a hovered-but-not-active button doesn't read as selected. */
 .app-tool-btn:hover {
-    background: var(--app-button-checked, #505050);
+    background: var(--app-tab-active, #4a4a4a);
     border-color: transparent;
     color: var(--app-text, #ccc);
 }
+/* Selected (active) tool is visibly darker than every other tool
+   in the toolbar — including hover. */
 .app-tool-btn.active,
 .app-tool-btn[aria-pressed="true"] {
     background: var(--app-button-checked, #505050);
     border-color: transparent;
+}
+/* Suppress Bootstrap's :focus halo / outline so a previously-clicked
+   button doesn't keep a focus ring that reads as a different shade. */
+.app-tool-btn:focus,
+.app-tool-btn:focus-visible {
+    outline: none;
+    box-shadow: none;
 }
 
 /* Color swatches */
