@@ -22,7 +22,7 @@
 import { Model } from "/static/js/engine/model.mjs";
 import { emptyDocument } from "/static/js/engine/document.mjs";
 import { StateStore } from "/static/js/engine/store.mjs";
-import { registerTools } from "/static/js/engine/tools.mjs";
+import { registerTools, dispatchEvent } from "/static/js/engine/tools.mjs";
 import {
   renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
 } from "/static/js/engine/canvas.mjs";
@@ -62,11 +62,80 @@ export function bootstrap() {
   renderAll();
 
   // Expose to global for easy debugging from devtools, and so
-  // Phase 2 mouse-event wiring (lives in app.js) can reach the
-  // engine without re-importing everything.
-  globalThis.JAS = Object.assign(globalThis.JAS || {}, { model, store });
+  // app.js's setState can mirror state-namespace writes into the
+  // engine store (see globalThis.JAS.mirrorState below).
+  globalThis.JAS = Object.assign(globalThis.JAS || {}, {
+    model,
+    store,
+    /**
+     * app.js calls this from setState() so changes to the
+     * canonical state live in app.js (driving panels) also reach
+     * the engine store, where tool yamls read them.
+     */
+    mirrorState(key, value) {
+      try { store.set("state." + key, value); }
+      catch (_) { /* unknown scope or shallow path — ignore */ }
+    },
+  });
+
+  // ── Mouse-event wiring ────────────────────────────────
+  //
+  // Translate DOM events on the document layer into the
+  // dispatchEvent payload the engine's tools expect. Pointer
+  // capture: mousedown attaches mousemove + mouseup listeners
+  // to the *document* so the user can drag past the canvas
+  // edge without losing the gesture.
+  wireCanvasEvents(docLayer);
 
   return { model, store };
+}
+
+function wireCanvasEvents(docLayer) {
+  function payload(type, evt) {
+    const r = docLayer.getBoundingClientRect();
+    return {
+      type,
+      x: evt.clientX - r.left,
+      y: evt.clientY - r.top,
+      modifiers: {
+        shift: evt.shiftKey,
+        ctrl: evt.ctrlKey,
+        alt: evt.altKey,
+        meta: evt.metaKey,
+      },
+    };
+  }
+
+  function activeTool() {
+    return store.get("state.active_tool") || "selection";
+  }
+
+  let dragging = false;
+
+  docLayer.addEventListener("mousedown", (evt) => {
+    if (evt.button !== 0) return;
+    dragging = true;
+    dispatchEvent(activeTool(), payload("mousedown", evt), store, { model });
+    evt.preventDefault();
+  });
+
+  // mousemove + mouseup attach to the document so a drag that
+  // leaves the canvas keeps tracking until release.
+  document.addEventListener("mousemove", (evt) => {
+    if (!dragging) return;
+    dispatchEvent(activeTool(), payload("mousemove", evt), store, { model });
+  });
+
+  document.addEventListener("mouseup", (evt) => {
+    if (!dragging) return;
+    dragging = false;
+    dispatchEvent(activeTool(), payload("mouseup", evt), store, { model });
+  });
+
+  docLayer.addEventListener("dblclick", (evt) => {
+    if (evt.button !== 0) return;
+    dispatchEvent(activeTool(), payload("dblclick", evt), store, { model });
+  });
 }
 
 function renderAll() {
