@@ -25,6 +25,7 @@ import { StateStore } from "/static/js/engine/store.mjs";
 import { registerTools, dispatchEvent } from "/static/js/engine/tools.mjs";
 import {
   renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
+  renderArtboardFillLayer, renderArtboardDecorationLayer,
 } from "/static/js/engine/canvas.mjs";
 import { saveSession, loadSession } from "/static/js/engine/session.mjs";
 import { exportSVG, importSVG } from "/static/js/engine/svg_io.mjs";
@@ -257,11 +258,27 @@ function wireCanvasEvents(docLayer) {
 }
 
 function renderAll() {
+  setLayer("artboard-fill", renderArtboardFillLayer(model.document));
   setLayer("doc", renderDocumentLayer(model.document));
+  // Fade overlay (fade_region_outside_artboard) requires a stable
+  // un-transformed viewBox; the main canvas applies a CSS transform
+  // for pan/zoom that complicates the calculation. Phase 1 ships
+  // fills + borders + accent + labels here and defers the fade
+  // overlay until pan/zoom plumbing exposes the document-coordinate
+  // viewport.
+  setLayer("artboard-deco", renderArtboardDecorationLayer(model.document, {
+    panelSelectedIds: panelSelectedArtboardIds(),
+  }));
   setLayer("selection", renderSelectionLayer(model.document));
   // Overlay needs an active-tool spec + scope; no tool wired yet
   // in Phase 1, so leave it blank. Phase 2 fills this in.
   setLayer("overlay", "");
+}
+
+function panelSelectedArtboardIds() {
+  if (!store) return [];
+  const ids = store.get("state.artboards_panel_selection_ids");
+  return Array.isArray(ids) ? ids : [];
 }
 
 function setLayer(name, svgFragment) {

@@ -849,24 +849,28 @@ def _render_select(el, theme, state):
 
 
 def _render_canvas(el, theme, state):
-    """Drawing-surface canvas — emits the 3-layer SVG stack the
+    """Drawing-surface canvas — emits the 5-layer SVG stack the
     client-side engine renders into.
 
-    Per FLASK_PARITY.md §7: a viewport container that owns the
-    pan/zoom CSS transform, with three absolutely-positioned SVG
-    children layered bottom-up: document, selection HUD, tool
-    overlay. The engine populates them via
-    `engine/canvas.mjs::renderCanvas` after wiring; on first paint
-    they are empty.
+    Per FLASK_PARITY.md §7 plus the artboard rendering pass: a
+    viewport container that owns the pan/zoom CSS transform, with
+    five absolutely-positioned SVG children layered bottom-up:
+    artboard fill, document, artboard decoration (borders / accent /
+    labels / fade overlay), selection HUD, tool overlay. The engine
+    populates them via `engine/canvas.mjs` after wiring; on first
+    paint they are empty.
 
-    Stable IDs (canvas-doc / canvas-sel / canvas-overlay) so the
-    bootstrap script can `getElementById` them without reading the
-    surrounding layout.
+    Stable IDs let the bootstrap script reach each layer without
+    reading the surrounding layout.
     """
     el_id = el.get("id", "canvas")
     bg = el.get("style", {}).get("background", "#ffffff")
     if isinstance(bg, str) and "{{" in bg:
         bg = _resolve(bg, theme, state)
+    layer_style = (
+        "position:absolute;inset:0;width:100%;height:100%;overflow:visible;"
+    )
+    pointerless = "pointer-events:none;"
     return Markup(
         f'<div{_id_attr(el)} class="app-canvas-stack"'
         f' style="flex:1;position:relative;background:{escape(str(bg))};'
@@ -874,14 +878,16 @@ def _render_canvas(el, theme, state):
         f'{_data_attrs(el)}>'
         f'<div class="app-canvas-viewport" data-canvas-id="{escape(el_id)}"'
         f' style="position:absolute;inset:0;transform-origin:0 0;">'
+        f'<svg id="canvas-artboard-fill" data-canvas-layer="artboard-fill"'
+        f' style="{layer_style}{pointerless}"></svg>'
         f'<svg id="canvas-doc" data-canvas-layer="doc"'
-        f' style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;"></svg>'
+        f' style="{layer_style}"></svg>'
+        f'<svg id="canvas-artboard-deco" data-canvas-layer="artboard-deco"'
+        f' style="{layer_style}{pointerless}"></svg>'
         f'<svg id="canvas-sel" data-canvas-layer="selection"'
-        f' style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;'
-        f'pointer-events:none;"></svg>'
+        f' style="{layer_style}{pointerless}"></svg>'
         f'<svg id="canvas-overlay" data-canvas-layer="overlay"'
-        f' style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;'
-        f'pointer-events:none;"></svg>'
+        f' style="{layer_style}{pointerless}"></svg>'
         f'</div>'
         f'</div>'
     )
