@@ -1905,6 +1905,144 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* ── Eyedropper effects ──────────────────────────────────
+     See EYEDROPPER_TOOL.md §Gestures. Two effects backing the
+     eyedropper.yaml on_mousedown branches:
+       doc.eyedropper.sample      → plain-click sample + selection apply
+       doc.eyedropper.apply_loaded → Alt-click apply (falls through to
+                                     sample when state.eyedropper_cache
+                                     is null). *)
+
+  let read_eyedropper_config store ctx : Eyedropper.config =
+    let bool_at key fallback =
+      match eval_expr_as_value (Some (`String ("state." ^ key))) store ctx with
+      | Expr_eval.Bool b -> b
+      | _ -> fallback
+    in
+    let d = Eyedropper.default_config in
+    {
+      Eyedropper.fill                = bool_at "eyedropper_fill"                d.fill;
+      stroke                         = bool_at "eyedropper_stroke"              d.stroke;
+      stroke_color                   = bool_at "eyedropper_stroke_color"        d.stroke_color;
+      stroke_weight                  = bool_at "eyedropper_stroke_weight"       d.stroke_weight;
+      stroke_cap_join                = bool_at "eyedropper_stroke_cap_join"     d.stroke_cap_join;
+      stroke_align                   = bool_at "eyedropper_stroke_align"        d.stroke_align;
+      stroke_dash                    = bool_at "eyedropper_stroke_dash"         d.stroke_dash;
+      stroke_arrowheads              = bool_at "eyedropper_stroke_arrowheads"   d.stroke_arrowheads;
+      stroke_profile                 = bool_at "eyedropper_stroke_profile"      d.stroke_profile;
+      stroke_brush                   = bool_at "eyedropper_stroke_brush"        d.stroke_brush;
+      opacity                        = bool_at "eyedropper_opacity"             d.opacity;
+      opacity_alpha                  = bool_at "eyedropper_opacity_alpha"       d.opacity_alpha;
+      opacity_blend                  = bool_at "eyedropper_opacity_blend"       d.opacity_blend;
+      character                      = bool_at "eyedropper_character"           d.character;
+      character_font                 = bool_at "eyedropper_character_font"      d.character_font;
+      character_size                 = bool_at "eyedropper_character_size"      d.character_size;
+      character_leading              = bool_at "eyedropper_character_leading"   d.character_leading;
+      character_kerning              = bool_at "eyedropper_character_kerning"   d.character_kerning;
+      character_tracking             = bool_at "eyedropper_character_tracking"  d.character_tracking;
+      character_color                = bool_at "eyedropper_character_color"     d.character_color;
+      paragraph                      = bool_at "eyedropper_paragraph"           d.paragraph;
+      paragraph_align                = bool_at "eyedropper_paragraph_align"     d.paragraph_align;
+      paragraph_indent               = bool_at "eyedropper_paragraph_indent"    d.paragraph_indent;
+      paragraph_space                = bool_at "eyedropper_paragraph_space"     d.paragraph_space;
+      paragraph_hyphenate            = bool_at "eyedropper_paragraph_hyphenate" d.paragraph_hyphenate;
+    }
+  in
+
+  (* Walk the element at [path] in [doc]. If it is a Group / Layer,
+     recurse into each child path. Otherwise apply the appearance
+     when target-eligible. Returns a new document threaded through
+     Document.replace_element. *)
+  let rec apply_to_target_recursive
+      (doc : Document.document) (path : int list)
+      (app : Eyedropper.appearance) (cfg : Eyedropper.config)
+    : Document.document =
+    if not (is_valid_path doc path) then doc
+    else
+      let elem = Document.get_element doc path in
+      match elem with
+      | Element.Group { children; _ } ->
+        let acc = ref doc in
+        Array.iteri (fun i _ ->
+          acc := apply_to_target_recursive !acc (path @ [i]) app cfg
+        ) children;
+        !acc
+      | Element.Layer { children; _ } ->
+        let acc = ref doc in
+        Array.iteri (fun i _ ->
+          acc := apply_to_target_recursive !acc (path @ [i]) app cfg
+        ) children;
+        !acc
+      | _ ->
+        if not (Eyedropper.is_target_eligible elem) then doc
+        else
+          let new_elem = Eyedropper.apply_appearance elem app cfg in
+          Document.replace_element doc path new_elem
+  in
+
+  let doc_eyedropper_sample spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       (match extract_path (Option.value (lookup "source") ~default:`Null)
+                store ctx with
+        | None -> ()
+        | Some source_path ->
+          let doc = ctrl#document in
+          if not (is_valid_path doc source_path) then ()
+          else
+            let source_elem = Document.get_element doc source_path in
+            if not (Eyedropper.is_source_eligible source_elem) then ()
+            else begin
+              let appearance = Eyedropper.extract_appearance source_elem in
+              let cache_json = Eyedropper.appearance_to_json appearance in
+              (* StateStore.set takes the bare key; the eval-context
+                 layer surfaces it as state.eyedropper_cache. *)
+              State_store.set store "eyedropper_cache" cache_json;
+              if not (Document.PathMap.is_empty doc.selection) then begin
+                let cfg = read_eyedropper_config store ctx in
+                let new_doc = ref doc in
+                Document.PathMap.iter (fun _ (es : Document.element_selection) ->
+                  new_doc := apply_to_target_recursive
+                               !new_doc es.es_path appearance cfg
+                ) doc.selection;
+                ctrl#set_document !new_doc
+              end
+            end)
+     | _ -> ());
+    `Null
+  in
+
+  let doc_eyedropper_apply_loaded spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let lookup k = List.assoc_opt k args in
+       (match extract_path (Option.value (lookup "target") ~default:`Null)
+                store ctx with
+        | None -> ()
+        | Some target_path ->
+          let cache_json = State_store.get store "eyedropper_cache" in
+          (match cache_json with
+           | `Null ->
+             (* Empty cache → fall through to plain sample. The same
+                clicked element acts as both source and target-of-
+                selection-apply. *)
+             let _ = doc_eyedropper_sample
+               (`Assoc [("source", `List
+                  (List.map (fun i -> `Int i) target_path))]) ctx store
+             in ()
+           | _ ->
+             let appearance = Eyedropper.appearance_of_json cache_json in
+             let cfg = read_eyedropper_config store ctx in
+             let doc = ctrl#document in
+             let new_doc =
+               apply_to_target_recursive doc target_path appearance cfg
+             in
+             ctrl#set_document new_doc))
+     | _ -> ());
+    `Null
+  in
+
   (* ── Transform tools (Scale / Rotate / Shear) ─────────── *)
 
   (* Resolve the active reference point. Reads
@@ -3699,6 +3837,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.path.erase_at_rect", doc_path_erase_at_rect);
     ("doc.path.smooth_at_cursor", doc_path_smooth_at_cursor);
     ("doc.magic_wand.apply", doc_magic_wand_apply);
+    ("doc.eyedropper.sample", doc_eyedropper_sample);
+    ("doc.eyedropper.apply_loaded", doc_eyedropper_apply_loaded);
     (* Transform tools — Scale / Rotate / Shear apply + preview snapshot.
        See SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md \167 Apply behavior. *)
     ("doc.scale.apply", doc_scale_apply);
