@@ -2,10 +2,12 @@
 // overlay layers into a single SVG tree driven by reactive Model /
 // Store updates.
 //
-// Per FLASK_PARITY.md §7: all-SVG-DOM, four layers, CSS transform on
-// the viewport container for pan/zoom. This module owns the JS side
-// of that design — DOM creation happens in the browser; the function
-// below is isolated enough to test by string comparison.
+// Per FLASK_PARITY.md §7: all-SVG-DOM, layered SVGs, CSS transform on
+// the viewport container for pan/zoom. The layer stack is now five
+// elements (artboard-fill, doc, artboard-deco, selection, overlay) —
+// see the artboard-rendering section below. This module owns the JS
+// side of that design — DOM creation happens in the browser; the
+// function below is isolated enough to test by string comparison.
 
 import { renderDocument, renderElement } from "./renderer.mjs";
 import { elementBounds } from "./geometry.mjs";
@@ -26,13 +28,148 @@ import { toBool, toStringCoerce } from "./value.mjs";
  * @param {Scope|Object} [args.scope]   Scope for overlay expression
  * @param {Object} [args.viewport]      {pan_x, pan_y, zoom} for the container
  */
-export function renderCanvas({ doc, activeTool, toolSpec, scope, viewport } = {}) {
+export function renderCanvas({
+  doc, activeTool, toolSpec, scope, viewport,
+  panelSelectedIds, viewBox,
+} = {}) {
   return {
+    artboardFillLayer: renderArtboardFillLayer(doc),
     documentLayer: renderDocumentLayer(doc),
+    artboardDecorationLayer: renderArtboardDecorationLayer(doc, {
+      panelSelectedIds, viewBox,
+    }),
     selectionLayer: renderSelectionLayer(doc),
     overlayLayer: renderOverlayLayer(toolSpec, scope),
     viewportTransform: viewportTransform(viewport),
   };
+}
+
+// ─── Artboard layers ────────────────────────────────────────
+//
+// Mirrors the Rust canvas paint order (jas_dioxus/src/canvas/render.rs):
+//   1. fills          → renderArtboardFillLayer  (below document)
+//   2. element tree   → renderDocumentLayer
+//   3. fade overlay   ┐
+//   4. borders        ├ renderArtboardDecorationLayer (above document,
+//   5. accent         │  below selection)
+//   6. labels         │
+//   7. display marks  ┘
+// Display marks (center mark / cross hairs / safe areas) default to off
+// in Artboard and are deferred — they ship when their toggles are
+// surfaced. Cross-app contract for the Artboard shape is documented in
+// jas_dioxus/src/document/artboard.rs.
+
+const ARTBOARD_BORDER_COLOR = "rgb(48,48,48)";
+const ARTBOARD_ACCENT_COLOR = "rgba(0, 120, 215, 0.95)";
+const ARTBOARD_LABEL_COLOR  = "rgb(200,200,200)";
+const ARTBOARD_FADE_COLOR   = "rgba(160, 160, 160, 0.5)";
+
+export function renderArtboardFillLayer(doc) {
+  if (!doc || !Array.isArray(doc.artboards) || doc.artboards.length === 0) {
+    return "";
+  }
+  const parts = [];
+  for (const ab of doc.artboards) {
+    if (!ab.fill || ab.fill === "transparent") continue;
+    parts.push(
+      `<rect x="${num(ab.x)}" y="${num(ab.y)}" ` +
+      `width="${num(ab.width)}" height="${num(ab.height)}" ` +
+      `fill="${esc(ab.fill)}"/>`
+    );
+  }
+  return parts.join("");
+}
+
+export function renderArtboardDecorationLayer(doc, opts = {}) {
+  if (!doc || !Array.isArray(doc.artboards) || doc.artboards.length === 0) {
+    return "";
+  }
+  const panelSelectedIds = Array.isArray(opts.panelSelectedIds)
+    ? opts.panelSelectedIds : [];
+  const parts = [];
+
+  // Fade overlay first (lowest in this layer).
+  const fadeOn = doc.artboard_options &&
+    doc.artboard_options.fade_region_outside_artboard;
+  if (fadeOn && opts.viewBox) {
+    parts.push(fadePath(doc.artboards, opts.viewBox));
+  }
+
+  // Default 1px border per artboard.
+  for (const ab of doc.artboards) {
+    parts.push(
+      `<rect x="${num(ab.x)}" y="${num(ab.y)}" ` +
+      `width="${num(ab.width)}" height="${num(ab.height)}" ` +
+      `fill="none" stroke="${ARTBOARD_BORDER_COLOR}" stroke-width="1"/>`
+    );
+  }
+
+  // 2px accent border on panel-selected artboards. The accent is
+  // padded by 1.5 units so its outer edge sits one pixel outside the
+  // default border (matches the Rust drawer).
+  if (panelSelectedIds.length > 0) {
+    const pad = 1.5;
+    for (const ab of doc.artboards) {
+      if (!panelSelectedIds.includes(ab.id)) continue;
+      parts.push(
+        `<rect x="${num(ab.x - pad)}" y="${num(ab.y - pad)}" ` +
+        `width="${num(ab.width + 2 * pad)}" height="${num(ab.height + 2 * pad)}" ` +
+        `fill="none" stroke="${ARTBOARD_ACCENT_COLOR}" stroke-width="2"/>`
+      );
+    }
+  }
+
+  // Number-prefixed name above the top-left corner.
+  for (let i = 0; i < doc.artboards.length; i++) {
+    const ab = doc.artboards[i];
+    parts.push(
+      `<text x="${num(ab.x)}" y="${num(ab.y - 3)}" ` +
+      `font-size="11" font-family="sans-serif" ` +
+      `fill="${ARTBOARD_LABEL_COLOR}">` +
+      `${esc(`${i + 1}  ${ab.name || ""}`)}</text>`
+    );
+  }
+
+  return parts.join("");
+}
+
+// Build a single <path> with even-odd fill — outer rectangle covers
+// the whole viewBox, inner rectangles (one per artboard) punch holes
+// through. Equivalent to Rust's destination-out compositing without
+// needing canvas-state tricks.
+function fadePath(artboards, viewBox) {
+  const parts = [
+    `M ${num(viewBox.x)} ${num(viewBox.y)} `,
+    `h ${num(viewBox.width)} `,
+    `v ${num(viewBox.height)} `,
+    `h ${num(-viewBox.width)} Z`,
+  ];
+  for (const ab of artboards) {
+    parts.push(
+      ` M ${num(ab.x)} ${num(ab.y)} `,
+      `h ${num(ab.width)} `,
+      `v ${num(ab.height)} `,
+      `h ${num(-ab.width)} Z`,
+    );
+  }
+  return (
+    `<path d="${parts.join("")}" fill-rule="evenodd" ` +
+    `fill="${ARTBOARD_FADE_COLOR}"/>`
+  );
+}
+
+// Local helpers — kept private to avoid colliding with renderer.mjs's.
+function num(n) {
+  if (typeof n !== "number") return "0";
+  if (Number.isInteger(n)) return String(n);
+  return parseFloat(n.toFixed(6)).toString();
+}
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // ─── Document layer ─────────────────────────────────────────

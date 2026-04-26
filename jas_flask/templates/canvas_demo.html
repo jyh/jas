@@ -46,7 +46,11 @@
       height: 100%;
       overflow: visible;
     }
-    #doc-layer { background: #f5f5f5; }
+    /* Pasteboard color shows through where no artboard covers it. The
+       per-artboard fill / fade overlay is drawn by the JS engine. */
+    #canvas-container { background: #cfcfcf; }
+    #artboard-fill-layer,
+    #artboard-deco-layer,
     #selection-layer,
     #overlay-layer { pointer-events: none; }
     .tool-label {
@@ -67,7 +71,9 @@
 
   <div id="canvas-container">
     <div id="canvas-viewport">
+      <svg id="artboard-fill-layer" viewBox="0 0 800 600"></svg>
       <svg id="doc-layer" viewBox="0 0 800 600"></svg>
+      <svg id="artboard-deco-layer" viewBox="0 0 800 600"></svg>
       <svg id="selection-layer" viewBox="0 0 800 600"></svg>
       <svg id="overlay-layer" viewBox="0 0 800 600"></svg>
     </div>
@@ -84,13 +90,17 @@
     } from "{{ url_for('static', filename='js/engine/document.mjs') }}";
     import {
       renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
+      renderArtboardFillLayer, renderArtboardDecorationLayer,
     } from "{{ url_for('static', filename='js/engine/canvas.mjs') }}";
     import { Scope } from "{{ url_for('static', filename='js/engine/scope.mjs') }}";
 
     const status = document.getElementById("status");
+    const artboardFillLayer = document.getElementById("artboard-fill-layer");
     const docLayer = document.getElementById("doc-layer");
+    const artboardDecoLayer = document.getElementById("artboard-deco-layer");
     const selLayer = document.getElementById("selection-layer");
     const overlayLayer = document.getElementById("overlay-layer");
+    const CANVAS_VIEWBOX = { x: 0, y: 0, width: 800, height: 600 };
 
     status.textContent = "loading workspace.json…";
     const ws = await fetch("/api/workspace").then((r) => r.json());
@@ -109,7 +119,26 @@
         ],
       })],
       selection: [],
-      artboards: [],
+      artboards: [
+        // Letter-sized artboard centered roughly in the 800×600 view,
+        // shrunk to fit. Defines a printable region; the gray pasteboard
+        // shows around it once fade is on.
+        {
+          id: "demo0001",
+          name: "Artboard 1",
+          x: 60, y: 40,
+          width: 480, height: 520,
+          fill: "#ffffff",
+          show_center_mark: false,
+          show_cross_hairs: false,
+          show_video_safe_areas: false,
+          video_ruler_pixel_aspect_ratio: 1.0,
+        },
+      ],
+      artboard_options: {
+        fade_region_outside_artboard: true,
+        update_while_dragging: true,
+      },
     };
     const model = new Model(doc);
     const store = new StateStore();
@@ -152,7 +181,12 @@
     buildToolBar();
 
     function render() {
+      artboardFillLayer.innerHTML = renderArtboardFillLayer(model.document);
       docLayer.innerHTML = renderDocumentLayer(model.document);
+      artboardDecoLayer.innerHTML = renderArtboardDecorationLayer(
+        model.document,
+        { viewBox: CANVAS_VIEWBOX, panelSelectedIds: [] },
+      );
       selLayer.innerHTML = renderSelectionLayer(model.document);
       const scope = new Scope({
         state: store.state, panel: store.panel, tool: store.tool,
