@@ -362,11 +362,16 @@ function wireCanvasEvents(canvasEl, model) {
 
   let dragging = false;
   canvasEl.addEventListener("mousedown", (evt) => {
-    console.log("[canvas mousedown]", canvasEl.id, "button=", evt.button,
-      "tool=", activeTool(), "x,y=", evt.clientX, evt.clientY);
     if (evt.button !== 0) return;
     dragging = true;
-    dispatchEvent(activeTool(), payload("mousedown", evt), store, { model });
+    const p = payload("mousedown", evt);
+    console.log("[canvas mousedown]", canvasEl.id, "tool=", activeTool(),
+      "payload x,y=", p.x, p.y, "rect.mode before=", store.get("tool.rect.mode"));
+    dispatchEvent(activeTool(), p, store, { model });
+    console.log("[canvas mousedown] after dispatch — rect.mode=",
+      store.get("tool.rect.mode"),
+      "start_x=", store.get("tool.rect.start_x"),
+      "start_y=", store.get("tool.rect.start_y"));
     evt.preventDefault();
   });
   // Move/up listen on document so a drag past the canvas edge keeps
@@ -380,12 +385,17 @@ function wireCanvasEvents(canvasEl, model) {
     dragging = false;
     const before = model.document.layers[0]
       ? (model.document.layers[0].children || []).length : 0;
-    dispatchEvent(activeTool(), payload("mouseup", evt), store, { model });
+    const p = payload("mouseup", evt);
+    console.log("[canvas mouseup]", canvasEl.id, "tool=", activeTool(),
+      "payload x,y=", p.x, p.y,
+      "rect.mode=", store.get("tool.rect.mode"),
+      "start_x=", store.get("tool.rect.start_x"),
+      "start_y=", store.get("tool.rect.start_y"));
+    dispatchEvent(activeTool(), p, store, { model });
     const after = model.document.layers[0]
       ? (model.document.layers[0].children || []).length : 0;
-    console.log("[canvas mouseup]", canvasEl.id, "tool=", activeTool(),
-      "x,y=", evt.clientX, evt.clientY,
-      "elem-count", before, "→", after);
+    console.log("[canvas mouseup] after dispatch — elem-count", before, "→", after,
+      "rect.mode=", store.get("tool.rect.mode"));
   });
   canvasEl.addEventListener("dblclick", (evt) => {
     if (evt.button !== 0) return;
