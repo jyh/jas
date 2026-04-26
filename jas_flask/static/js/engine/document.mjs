@@ -80,14 +80,48 @@ export function isContainer(elem) {
 // ─── Document ───────────────────────────────────────────────
 
 /**
- * Create an empty Document with a single empty layer. Matches the
- * native apps' default shape so fresh docs are interchangeable.
+ * Create an empty Document with a single empty layer and a single
+ * Letter-sized artboard. Matches the native apps' default shape
+ * (jas_dioxus/src/document/document.rs `Document::default`) so fresh
+ * docs are interchangeable across the four runtimes.
  */
 export function emptyDocument() {
   return {
     layers: [mkLayer({ name: "Layer 1" })],
     selection: [],
-    artboards: [],
+    artboards: [makeDefaultArtboard()],
+    artboard_options: {
+      fade_region_outside_artboard: true,
+      update_while_dragging: true,
+    },
+  };
+}
+
+const ARTBOARD_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/** Mint an 8-char base36 id matching the Rust artboard id format. */
+export function generateArtboardId() {
+  let s = "";
+  for (let i = 0; i < 8; i++) {
+    const idx = Math.floor(Math.random() * ARTBOARD_ID_ALPHABET.length);
+    s += ARTBOARD_ID_ALPHABET[idx];
+  }
+  return s;
+}
+
+/** Canonical default artboard — Letter 612x792 at origin, transparent
+ * fill, all display toggles off. */
+export function makeDefaultArtboard(over = {}) {
+  return {
+    id: generateArtboardId(),
+    name: "Artboard 1",
+    x: 0, y: 0, width: 612, height: 792,
+    fill: "transparent",
+    show_center_mark: false,
+    show_cross_hairs: false,
+    show_video_safe_areas: false,
+    video_ruler_pixel_aspect_ratio: 1.0,
+    ...over,
   };
 }
 
