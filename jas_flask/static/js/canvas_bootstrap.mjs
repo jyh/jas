@@ -323,11 +323,15 @@ function activeModel() {
 }
 
 function wireCanvasEvents(canvasEl, model) {
-  const docLayer = canvasEl.querySelector('[data-canvas-layer="doc"]');
-  if (!docLayer) return;
-
+  // Hit target is the canvas-stack itself, not a single SVG layer.
+  // The doc-layer SVG defaults to pointer-events: visiblePainted, so
+  // an empty SVG (fresh document, no shapes drawn yet) wouldn't catch
+  // the user's first mousedown and tools like Rect couldn't even
+  // start a drag. The other layers above doc all have
+  // pointer-events: none, so events naturally fall through to the
+  // canvas-stack.
   function payload(type, evt) {
-    const r = docLayer.getBoundingClientRect();
+    const r = canvasEl.getBoundingClientRect();
     return {
       type,
       x: evt.clientX - r.left,
@@ -345,7 +349,7 @@ function wireCanvasEvents(canvasEl, model) {
   }
 
   let dragging = false;
-  docLayer.addEventListener("mousedown", (evt) => {
+  canvasEl.addEventListener("mousedown", (evt) => {
     if (evt.button !== 0) return;
     dragging = true;
     dispatchEvent(activeTool(), payload("mousedown", evt), store, { model });
@@ -362,7 +366,7 @@ function wireCanvasEvents(canvasEl, model) {
     dragging = false;
     dispatchEvent(activeTool(), payload("mouseup", evt), store, { model });
   });
-  docLayer.addEventListener("dblclick", (evt) => {
+  canvasEl.addEventListener("dblclick", (evt) => {
     if (evt.button !== 0) return;
     dispatchEvent(activeTool(), payload("dblclick", evt), store, { model });
   });
