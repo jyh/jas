@@ -17,11 +17,12 @@
 import { Model } from "/static/js/engine/model.mjs";
 import { emptyDocument } from "/static/js/engine/document.mjs";
 import { StateStore } from "/static/js/engine/store.mjs";
-import { registerTools, dispatchEvent } from "/static/js/engine/tools.mjs";
+import { registerTools, dispatchEvent, getTool } from "/static/js/engine/tools.mjs";
 import {
   renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
   renderArtboardFillLayer, renderArtboardDecorationLayer,
 } from "/static/js/engine/canvas.mjs";
+import { Scope } from "/static/js/engine/scope.mjs";
 import { exportSVG, importSVG } from "/static/js/engine/svg_io.mjs";
 import { setElementAttr } from "/static/js/engine/effects.mjs";
 import { saveSession, loadSession } from "/static/js/engine/session.mjs";
@@ -71,9 +72,19 @@ export function bootstrap() {
   }
 
   // Track active tab so the JAS hooks (save/undo/redo) and the panel
-  // → selection writer below operate on the right document.
+  // → selection writer below operate on the right document. Also
+  // re-render the overlay layer of the active canvas whenever tool-
+  // local state mutates, so drag previews (rect dashed outline, pen
+  // anchor handles, …) follow the cursor.
   store.addListener((path) => {
-    if (path === "state.active_tab") refreshActiveCanvas();
+    if (path === "state.active_tab") {
+      refreshActiveCanvas();
+      return;
+    }
+    if (path === "state.active_tool" || path.startsWith("tool.")) {
+      const entry = activeCanvasId ? canvases.get(activeCanvasId) : null;
+      if (entry) renderToolOverlay(entry.canvasEl);
+    }
   });
   refreshActiveCanvas();
 
@@ -252,6 +263,7 @@ function handleMutations(mutations) {
 function adoptCanvas(canvasEl) {
   const id = canvasEl.id;
   if (!id || canvases.has(id)) return;
+  console.log("[adoptCanvas]", id, "rect=", canvasEl.getBoundingClientRect());
   // Pull a saved document off the pending-restore queue if one is
   // waiting; otherwise seed a fresh empty doc with one default
   // artboard. The queue is populated only at startup from
@@ -350,6 +362,8 @@ function wireCanvasEvents(canvasEl, model) {
 
   let dragging = false;
   canvasEl.addEventListener("mousedown", (evt) => {
+    console.log("[canvas mousedown]", canvasEl.id, "button=", evt.button,
+      "tool=", activeTool(), "x,y=", evt.clientX, evt.clientY);
     if (evt.button !== 0) return;
     dragging = true;
     dispatchEvent(activeTool(), payload("mousedown", evt), store, { model });
@@ -364,7 +378,14 @@ function wireCanvasEvents(canvasEl, model) {
   document.addEventListener("mouseup", (evt) => {
     if (!dragging) return;
     dragging = false;
+    const before = model.document.layers[0]
+      ? (model.document.layers[0].children || []).length : 0;
     dispatchEvent(activeTool(), payload("mouseup", evt), store, { model });
+    const after = model.document.layers[0]
+      ? (model.document.layers[0].children || []).length : 0;
+    console.log("[canvas mouseup]", canvasEl.id, "tool=", activeTool(),
+      "x,y=", evt.clientX, evt.clientY,
+      "elem-count", before, "→", after);
   });
   canvasEl.addEventListener("dblclick", (evt) => {
     if (evt.button !== 0) return;
@@ -384,7 +405,26 @@ function renderCanvas(canvasEl, model) {
     panelSelectedIds: panelSelectedArtboardIds(),
   }));
   setLayer(canvasEl, "selection", renderSelectionLayer(model.document));
-  setLayer(canvasEl, "overlay", "");
+  renderToolOverlay(canvasEl);
+}
+
+// Render the active tool's overlay (the dashed preview most drawing
+// tools draw during a drag). Re-runs on every relevant store change
+// — see the listener wired in bootstrap().
+function renderToolOverlay(canvasEl) {
+  if (!store) return;
+  const toolId = store.get("state.active_tool") || "selection";
+  const toolSpec = getTool(toolId);
+  if (!toolSpec || !toolSpec.overlay) {
+    setLayer(canvasEl, "overlay", "");
+    return;
+  }
+  const scope = new Scope({
+    state: store.state,
+    panel: store.panel,
+    tool: store.tool,
+  });
+  setLayer(canvasEl, "overlay", renderOverlayLayer(toolSpec, scope));
 }
 
 function panelSelectedArtboardIds() {
