@@ -365,27 +365,39 @@ function wireCanvasEvents(canvasEl, model) {
     return store.get("state.active_tool") || "selection";
   }
 
+  // Re-render the active tool's overlay after each dispatch.
+  // Tools backed by tool-local state (Rect, Selection) already
+  // trigger a re-render via the store listener wired in bootstrap.
+  // Tools backed by buffer state (Pencil's freehand drag, Pen's
+  // anchor accumulator) mutate point_buffers / anchor_buffers
+  // outside the store, so the overlay needs an explicit refresh
+  // after every mouse event to keep the live preview in sync.
+  function dispatchAndRefresh(type, evt) {
+    dispatchEvent(activeTool(), payload(type, evt), store, { model });
+    renderToolOverlay(canvasEl);
+  }
+
   let dragging = false;
   canvasEl.addEventListener("mousedown", (evt) => {
     if (evt.button !== 0) return;
     dragging = true;
-    dispatchEvent(activeTool(), payload("mousedown", evt), store, { model });
+    dispatchAndRefresh("mousedown", evt);
     evt.preventDefault();
   });
   // Move/up listen on document so a drag past the canvas edge keeps
   // tracking until release.
   document.addEventListener("mousemove", (evt) => {
     if (!dragging) return;
-    dispatchEvent(activeTool(), payload("mousemove", evt), store, { model });
+    dispatchAndRefresh("mousemove", evt);
   });
   document.addEventListener("mouseup", (evt) => {
     if (!dragging) return;
     dragging = false;
-    dispatchEvent(activeTool(), payload("mouseup", evt), store, { model });
+    dispatchAndRefresh("mouseup", evt);
   });
   canvasEl.addEventListener("dblclick", (evt) => {
     if (evt.button !== 0) return;
-    dispatchEvent(activeTool(), payload("dblclick", evt), store, { model });
+    dispatchAndRefresh("dblclick", evt);
   });
 }
 
