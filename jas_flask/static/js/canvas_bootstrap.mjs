@@ -24,12 +24,22 @@ import {
 } from "/static/js/engine/canvas.mjs";
 import { exportSVG, importSVG } from "/static/js/engine/svg_io.mjs";
 import { setElementAttr } from "/static/js/engine/effects.mjs";
+import { saveSession, loadSession } from "/static/js/engine/session.mjs";
+
+const SESSION_AUTOSAVE_MS = 30000;
 
 let store = null;
 
 // canvasId → { canvasEl, model }
 const canvases = new Map();
 let activeCanvasId = null;
+
+// On startup, when restoring saved tabs, the bootstrap dispatches
+// new_document once per saved doc. Each dispatch synchronously
+// creates a canvas via app.js's create_child effect; the
+// MutationObserver fires, adoptCanvas runs, and pops the next saved
+// doc off this queue instead of seeding emptyDocument().
+const pendingRestoreDocs = [];
 
 /**
  * One-time setup. Idempotent — second call is a no-op.
@@ -93,6 +103,13 @@ export function bootstrap() {
     });
   });
 
+  // ── Session persistence ─────────────────────────────────
+  //
+  // beforeunload flushes immediately. Per-mutation autosave is wired
+  // inside adoptCanvas (each new model gets a debounced listener);
+  // see scheduleSave / flushSession below.
+  window.addEventListener("beforeunload", flushSession);
+
   // Devtools handle + app.js bridge.
   globalThis.JAS = Object.assign(globalThis.JAS || {}, {
     store,
@@ -155,7 +172,60 @@ export function bootstrap() {
     },
   });
 
+  restoreSavedWorkspace();
   return { store };
+}
+
+/**
+ * Hydrate the workspace from localStorage. Called once during
+ * bootstrap, after JAS is exposed and the MutationObserver is armed.
+ *
+ * Strategy: queue the saved documents, then dispatch new_document
+ * once per saved tab via app.js's APP_DISPATCH. Each dispatch
+ * synchronously creates a tab + canvas (matching the YAML spec's
+ * happy path); the MutationObserver fires, adoptCanvas pops the next
+ * pending doc and binds a Model around it. After the dispatch loop
+ * the engine state is folded back in (active_tool, fill_color, …),
+ * and active_tab is overridden to the saved value (the dispatch loop
+ * leaves it pointing at the most-recently created tab).
+ */
+function restoreSavedWorkspace() {
+  const saved = loadSession();
+  if (!saved || saved.documents.length === 0) return;
+  if (typeof globalThis.APP_DISPATCH !== "function") {
+    console.warn("[session] APP_DISPATCH not available; skipping restore");
+    return;
+  }
+
+  pendingRestoreDocs.push(...saved.documents);
+  const N = saved.documents.length;
+  for (let i = 0; i < N; i++) {
+    globalThis.APP_DISPATCH("new_document", {});
+  }
+
+  // Restore the rest of the engine state. tab_count / active_tab
+  // were just driven by the dispatch loop, so let those stand for
+  // tab_count and override active_tab from the saved value.
+  const SKIP = new Set(["tab_count"]);
+  const setStateFn = globalThis.APP_SET_STATE;
+  for (const [k, v] of Object.entries(saved.state || {})) {
+    if (SKIP.has(k)) continue;
+    if (k === "active_tab") continue; // applied below
+    if (typeof setStateFn === "function") {
+      setStateFn(k, v);
+    } else {
+      try { store.set("state." + k, v); } catch (_) { /* ignore */ }
+    }
+  }
+  // active_tab last so panel-visibility bindings settle on the right
+  // canvas.
+  if (saved.state && Object.prototype.hasOwnProperty.call(saved.state, "active_tab")) {
+    if (typeof setStateFn === "function") {
+      setStateFn("active_tab", saved.state.active_tab);
+    } else {
+      try { store.set("state.active_tab", saved.state.active_tab); } catch (_) {}
+    }
+  }
 }
 
 function handleMutations(mutations) {
@@ -182,12 +252,47 @@ function handleMutations(mutations) {
 function adoptCanvas(canvasEl) {
   const id = canvasEl.id;
   if (!id || canvases.has(id)) return;
-  const model = new Model(emptyDocument());
+  // Pull a saved document off the pending-restore queue if one is
+  // waiting; otherwise seed a fresh empty doc with one default
+  // artboard. The queue is populated only at startup from
+  // localStorage, so runtime new_document calls fall through to the
+  // empty-doc branch.
+  const restored = pendingRestoreDocs.shift();
+  let model;
+  if (restored) {
+    model = new Model(restored.document, restored.filename || undefined);
+    model.markSaved();
+  } else {
+    model = new Model(emptyDocument());
+  }
   canvases.set(id, { canvasEl, model });
   model.addListener(() => renderCanvas(canvasEl, model));
+  model.addListener(scheduleSave);
   renderCanvas(canvasEl, model);
   wireCanvasEvents(canvasEl, model);
   refreshActiveCanvas();
+}
+
+// ── Session persistence helpers ──────────────────────────
+//
+// scheduleSave: debounced autosave (every model mutation arms a
+// timer; localStorage write fires once per 30s window). flushSession:
+// synchronous snapshot used on beforeunload and as the timer body.
+let saveDebounceTimer = null;
+function scheduleSave() {
+  if (saveDebounceTimer != null) return;
+  saveDebounceTimer = setTimeout(() => {
+    saveDebounceTimer = null;
+    flushSession();
+  }, SESSION_AUTOSAVE_MS);
+}
+function flushSession() {
+  if (!store) return;
+  const entries = [];
+  for (const [canvas_id, { model }] of canvases.entries()) {
+    entries.push({ canvas_id, model });
+  }
+  saveSession(entries, store.state || {});
 }
 
 function releaseCanvas(canvasEl) {

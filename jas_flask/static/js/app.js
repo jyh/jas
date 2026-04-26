@@ -1785,6 +1785,12 @@
     }
   }
 
+  // Expose for the engine bootstrap (canvas_bootstrap.mjs) so it
+  // can replay actions on startup — specifically, dispatching
+  // new_document once per saved tab to rehydrate the workspace.
+  globalThis.APP_DISPATCH = dispatch;
+  globalThis.APP_SET_STATE = setState;
+
   // ── Dynamic workspace menu ──────────────────────────────────
 
   function rebuildWorkspaceMenu() {
