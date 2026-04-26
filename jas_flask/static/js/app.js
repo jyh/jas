@@ -357,6 +357,40 @@
       var arg = resolve(argStr, ctx);
       return colorFunctions[fnMatch[1]](arg);
     }
+    // Built-in `mem(needle, haystack)` — true iff `needle` is in
+    // `haystack`. `haystack` is a list literal like ["a", "b"].
+    // Used by toolbar slots to drive `bind.checked` for tools that
+    // share a long-press slot with alternates. Mirrors the same-name
+    // primitive in the OCaml / Python expression interpreters.
+    //
+    // Without this branch the evaluator falls through and returns
+    // "" for the whole expression; `evalCondition("")` then returns
+    // true via its empty-string-is-no-condition fallback, leaving
+    // every alternate-bearing slot button stuck with the `.active`
+    // class.
+    if (fnMatch && fnMatch[1] === "mem") {
+      var memArgStr = fnMatch[2];
+      var memDepth = 0, memSplit = -1;
+      for (var mi = 0; mi < memArgStr.length; mi++) {
+        var mch = memArgStr.charAt(mi);
+        if (mch === "[" || mch === "(") memDepth++;
+        else if (mch === "]" || mch === ")") memDepth--;
+        else if (mch === "," && memDepth === 0) { memSplit = mi; break; }
+      }
+      if (memSplit === -1) return false;
+      var needleExpr = memArgStr.substring(0, memSplit).trim();
+      var haystackExpr = memArgStr.substring(memSplit + 1).trim();
+      var needle = resolve(needleExpr, ctx);
+      var needleStr = needle === null || needle === undefined
+        ? "" : String(needle);
+      try {
+        var haystack = JSON.parse(haystackExpr.replace(/'/g, '"'));
+        if (Array.isArray(haystack)) {
+          return haystack.indexOf(needleStr) >= 0;
+        }
+      } catch (e) {}
+      return false;
+    }
     var parts = expr.split(".");
     if (parts[0] === "state") return state[parts[1]];
     if (parts[0] === "param" && ctx.params) return ctx.params[parts[1]];
