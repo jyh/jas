@@ -371,13 +371,22 @@ function runEffect(effect, scope, store, options) {
           return;
         }
         case "doc.add_element": {
-          // Spec: { parent: <path expr>, element: <element-spec> }
+          // Spec: { parent?: <path expr>, element: <element-spec> }
           // The element-spec is a dict with `type:` + geometry fields.
           // Geometry fields may be expressions; they're evaluated
           // against the scope before the element is appended.
-          const parentPath = extractPath(spec.parent, scope);
+          //
+          // `parent` defaults to [0] — the active layer. Native apps'
+          // doc_add_element (jas_dioxus controller, jas controller,
+          // etc.) all default to the active layer when the caller
+          // doesn't specify; the Flask runtime matches that so tool
+          // yamls don't have to repeat `parent: [0]` on every call.
           const elemSpec = spec.element;
-          if (!parentPath || !elemSpec) return;
+          if (!elemSpec) return;
+          const parentPath = spec.parent !== undefined
+            ? extractPath(spec.parent, scope)
+            : [0];
+          if (!parentPath) return;
           const resolved = resolveElementSpec(elemSpec, scope);
           model.mutate((d) => addElementAt(d, parentPath, resolved));
           return;
