@@ -81,15 +81,17 @@ export function isContainer(elem) {
 
 /**
  * Create an empty Document with a single empty layer and a single
- * Letter-sized artboard. Matches the native apps' default shape
- * (jas_dioxus/src/document/document.rs `Document::default`) so fresh
- * docs are interchangeable across the four runtimes.
+ * Letter-sized artboard. The artboard structure matches the native
+ * apps' Document::default (jas_dioxus/src/document/document.rs); the
+ * fill diverges intentionally — Flask defaults to white so the page
+ * is visible against the dark pasteboard, whereas the Rust struct
+ * default is transparent (it sits on a white canvas).
  */
 export function emptyDocument() {
   return {
     layers: [mkLayer({ name: "Layer 1" })],
     selection: [],
-    artboards: [makeDefaultArtboard()],
+    artboards: [makeDefaultArtboard({ fill: "#ffffff" })],
     artboard_options: {
       fade_region_outside_artboard: true,
       update_while_dragging: true,

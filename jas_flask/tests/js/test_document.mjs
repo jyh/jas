@@ -74,10 +74,12 @@ describe("Document / getElement", () => {
     assert.equal(d.selection.length, 0);
   });
 
-  it("emptyDocument seeds one Letter-sized transparent artboard", () => {
+  it("emptyDocument seeds one Letter-sized white artboard", () => {
     // Cross-app contract: every observable document has at least one
-    // artboard (jas_dioxus/src/document/artboard.rs §invariant). The
-    // canonical default is Letter 612x792 at origin, transparent.
+    // artboard (jas_dioxus/src/document/artboard.rs §invariant). Flask
+    // overrides the Rust struct's transparent default with white so a
+    // freshly created document shows a visible "page" against the dark
+    // pasteboard (see actions.yaml::new_document and the bootstrap).
     const d = emptyDocument();
     assert.equal(d.artboards.length, 1);
     const ab = d.artboards[0];
@@ -86,7 +88,7 @@ describe("Document / getElement", () => {
     assert.equal(ab.y, 0);
     assert.equal(ab.width, 612);
     assert.equal(ab.height, 792);
-    assert.equal(ab.fill, "transparent");
+    assert.equal(ab.fill, "#ffffff");
     assert.equal(typeof ab.id, "string");
     assert.equal(ab.id.length, 8);
     assert.equal(ab.show_center_mark, false);
