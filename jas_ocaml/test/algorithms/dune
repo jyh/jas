@@ -45,3 +45,8 @@
 (test
  (name magic_wand_test)
  (libraries jas alcotest))
+
+(test
+ (name eyedropper_test)
+ (modules eyedropper_test)
+ (libraries jas alcotest))
