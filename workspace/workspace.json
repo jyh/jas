@@ -4634,8 +4634,8 @@
       "svg": "<circle cx=\"11\" cy=\"11\" r=\"6.5\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"2\"/>\n<line x1=\"15.5\" y1=\"15.5\" x2=\"22.5\" y2=\"22.5\"\n  stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\"/>\n"
     },
     "hand": {
-      "viewbox": "0 0 28 28",
-      "svg": "<line x1=\"10\" y1=\"14\" x2=\"10\" y2=\"5\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"13\" y1=\"14\" x2=\"13\" y2=\"3\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"16\" y1=\"14\" x2=\"16\" y2=\"4\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"19\" y1=\"14\" x2=\"19\" y2=\"6\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<path d=\"M9,14 L4,18 L4,22 Q5,25 9,25 L19,25 Q22,25 22,22 L22,14\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"
+      "viewbox": "0 0 256 256",
+      "svg": "<path fill=\"currentColor\" d=\"M0,242.21,201.29,109.51c-38.67,76.35-22.52,97.77-70.85,95.92-17.41-.67-22.83-13.86-33.95-29.17-10.61-14.6-48.58-45.21-35.58-50.06,2.18-.81,7.52-1.22,10.13.03l34.72,16.59c3.14-23.5-23.26-60.36-9.16-70.87,2.27-1.69,10.83,2.29,11.95,5.31l13.71,36.84,2.85-46.1c.18-2.89,3.31-8.22,5.18-9.83,2.35-2.03,11.34,3.32,11.52,6.63l2.8,52.77c13.37-13.74,3.51-35.18,16.16-49.64,2.42-2.77,12.87,3.69,12.5,7.84l-4.82,53.59,19.44-28.39c1.81-2.65,7.35-5.67,10.05-5.82,3.36-.18,5.46,10.22,3.36,14.35Z\"/>\n"
     },
     "artboard": {
       "viewbox": "0 0 28 28",
@@ -6175,7 +6175,7 @@
               "id": "drawing_surface",
               "type": "container",
               "summary": "Drawing surface",
-              "description": "Container for document canvases, filling the space below the tab bar. Each open document gets a canvas element here via create_child. Only the canvas matching active_tab is visible; the rest are hidden. Starts empty. The visible canvas is the interactive drawing surface where tools operate.\n",
+              "description": "Container for document canvases, filling the space below the tab bar. Each open document gets a canvas element here via create_child (see actions.yaml::new_document, ::open_file). Only the canvas matching active_tab is visible; the rest are hidden. Starts empty \u2014 the brand logo below acts as the visual placeholder until the first document is opened. The visible canvas is the interactive drawing surface where tools operate; canvas_bootstrap.mjs binds a Model (with undo/redo) to each new canvas-stack as it appears in the DOM and the engine renders the matching document into its 5-layer SVG stack.\n",
               "layout": "column",
               "style": {
                 "flex": 1,

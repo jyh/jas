@@ -1601,11 +1601,36 @@
         el.textContent = iconName;
       }
     } else if (type === "canvas") {
-      el.className = "app-canvas";
-      styles.push("display:flex", "align-items:center", "justify-content:center",
-                   "color:#999", "font-size:14px", "min-height:200px");
+      // Per-tab canvas: emit the 5-layer SVG stack the engine renders
+      // into. Mirror of renderer.py::_render_canvas so a runtime-
+      // created canvas (via create_child) is structurally identical to
+      // a server-rendered one. canvas_bootstrap.mjs binds a Model with
+      // a fresh emptyDocument() (one default artboard) to each new
+      // app-canvas-stack as it lands in the DOM.
+      el.className = "app-canvas-stack";
+      var canvasId = el.id || "canvas";
+      var bg = (s.background ? resolve(s.background, ctx) : "var(--app-window-bg)");
+      styles.push(
+        "flex:1", "position:relative", "background:" + bg,
+        "min-height:200px", "overflow:hidden"
+      );
       el.style.cssText = styles.join(";");
-      el.textContent = (spec.summary || "Canvas") + " (tier 3)";
+      var layerStyle = "position:absolute;inset:0;width:100%;height:100%;overflow:visible;";
+      var pointerless = "pointer-events:none;";
+      el.innerHTML =
+        '<div class="app-canvas-viewport" data-canvas-id="' + canvasId +
+        '" style="position:absolute;inset:0;transform-origin:0 0;">' +
+        '<svg data-canvas-layer="artboard-fill"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '<svg data-canvas-layer="doc"' +
+        ' style="' + layerStyle + '"></svg>' +
+        '<svg data-canvas-layer="artboard-deco"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '<svg data-canvas-layer="selection"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '<svg data-canvas-layer="overlay"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '</div>';
     } else if (type === "placeholder") {
       el.className = "app-placeholder";
       styles.push("border:1px dashed #666", "padding:12px", "color:#888",
