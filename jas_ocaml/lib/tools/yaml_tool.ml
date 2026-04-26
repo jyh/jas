@@ -1015,6 +1015,136 @@ let draw_oval_cursor_overlay (cr : Cairo.context)
   Cairo.line_to cr cx (cy +. 3.0);
   Cairo.stroke cr
 
+(* ─────────────────────────────────────────────────────────────────
+   cursor_color_chip — a 12x12 chip following the cursor at offset
+   (+12, +12), filled with the cached fill color and bordered with
+   the cached stroke color. See EYEDROPPER_TOOL.md §Overlay. *)
+
+(** Convert a JSON color value (hex string, [r;g;b] / [r;g;b;a]
+    array, or {r,g,b,a} object) to a (r, g, b, a) tuple in [0, 1].
+    Falls back to opaque black on parse failure. Mirrors the
+    Rust color_value_to_css. *)
+let color_value_to_rgba (v : Yojson.Safe.t) : float * float * float * float =
+  match v with
+  | `String s ->
+    (match parse_color s with
+     | Some rgba -> rgba
+     | None -> (0.0, 0.0, 0.0, 1.0))
+  | `List items when List.length items >= 3 ->
+    let to_f = function
+      | `Float f -> f
+      | `Int i -> float_of_int i
+      | _ -> 0.0
+    in
+    let r = to_f (List.nth items 0) in
+    let g = to_f (List.nth items 1) in
+    let b = to_f (List.nth items 2) in
+    let a =
+      if List.length items >= 4 then to_f (List.nth items 3) else 1.0
+    in
+    (r, g, b, a)
+  | `Assoc fields ->
+    let f k = match List.assoc_opt k fields with
+      | Some (`Float v) -> v
+      | Some (`Int i) -> float_of_int i
+      | _ -> 0.0
+    in
+    (f "r", f "g", f "b",
+     match List.assoc_opt "a" fields with
+     | Some (`Float v) -> v
+     | Some (`Int i) -> float_of_int i
+     | _ -> 1.0)
+  | _ -> (0.0, 0.0, 0.0, 1.0)
+
+let draw_cursor_color_chip_overlay (cr : Cairo.context)
+    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t) : unit =
+  let cx = eval_number_field eval_ctx (render_get render "x") in
+  let cy = eval_number_field eval_ctx (render_get render "y") in
+  (* Resolve the [cache:] field. Accept either an inline JSON object
+     or a string expression of the form [state.<key>] — read the
+     underlying object directly out of eval_ctx since Expr_eval has
+     no Assoc value variant. *)
+  let cache_value : Yojson.Safe.t =
+    match render_get render "cache" with
+    | None -> `Null
+    | Some (`String expr) ->
+      let trimmed = String.trim expr in
+      let key =
+        if String.length trimmed > 6
+           && String.sub trimmed 0 6 = "state."
+        then String.sub trimmed 6 (String.length trimmed - 6)
+        else trimmed
+      in
+      (match eval_ctx with
+       | `Assoc top ->
+         (match List.assoc_opt "state" top with
+          | Some (`Assoc state_fields) ->
+            (match List.assoc_opt key state_fields with
+             | Some v -> v
+             | None -> `Null)
+          | _ -> `Null)
+       | _ -> `Null)
+    | Some v -> v
+  in
+  if cache_value = `Null then ()
+  else begin
+    let chip_x = cx +. 12.0 in
+    let chip_y = cy +. 12.0 in
+    let chip_w = 12.0 in
+    let chip_h = 12.0 in
+
+    (* Extract fill.color from cache. None means render the
+       none-glyph (white square + red diagonal). *)
+    let fill_color : Yojson.Safe.t option =
+      match cache_value with
+      | `Assoc cf ->
+        (match List.assoc_opt "fill" cf with
+         | Some (`Assoc ff) -> List.assoc_opt "color" ff
+         | _ -> None)
+      | _ -> None
+    in
+    (match fill_color with
+     | Some color_v ->
+       let (r, g, b, a) = color_value_to_rgba color_v in
+       Cairo.set_source_rgba cr r g b a;
+       Cairo.rectangle cr chip_x chip_y ~w:chip_w ~h:chip_h;
+       Cairo.fill cr
+     | None ->
+       (* None glyph: white square with a red diagonal slash. *)
+       Cairo.set_source_rgba cr 1.0 1.0 1.0 1.0;
+       Cairo.rectangle cr chip_x chip_y ~w:chip_w ~h:chip_h;
+       Cairo.fill cr;
+       Cairo.set_source_rgba cr 1.0 0.0 0.0 1.0;
+       Cairo.set_line_width cr 1.5;
+       Cairo.move_to cr chip_x (chip_y +. chip_h);
+       Cairo.line_to cr (chip_x +. chip_w) chip_y;
+       Cairo.stroke cr);
+
+    (* Border — 1px from cache.stroke.color, else fixed neutral
+       #888 so the chip stays visible against any backdrop. *)
+    let stroke_color : Yojson.Safe.t option =
+      match cache_value with
+      | `Assoc cf ->
+        (match List.assoc_opt "stroke" cf with
+         | Some (`Assoc sf) -> List.assoc_opt "color" sf
+         | _ -> None)
+      | _ -> None
+    in
+    let (r, g, b, a) =
+      match stroke_color with
+      | Some v -> color_value_to_rgba v
+      | None ->
+        let neutral = 0x88 in
+        let f = float_of_int neutral /. 255.0 in
+        (f, f, f, 1.0)
+    in
+    Cairo.set_source_rgba cr r g b a;
+    Cairo.set_line_width cr 1.0;
+    Cairo.rectangle cr (chip_x +. 0.5) (chip_y +. 0.5)
+      ~w:(chip_w -. 1.0) ~h:(chip_h -. 1.0);
+    Cairo.stroke cr
+  end
+
 (* ═══════════════════════════════════════════════════════════════ *)
 
 (** Build the [$event] scope for a pointer event. *)
@@ -1166,6 +1296,8 @@ class yaml_tool (spec : tool_spec) = object (_self)
             ctx.controller#document
         | "oval_cursor" ->
           draw_oval_cursor_overlay cr overlay.render eval_ctx
+        | "cursor_color_chip" ->
+          draw_cursor_color_chip_overlay cr overlay.render eval_ctx
         | "reference_point_cross" ->
           draw_reference_point_cross cr overlay.render eval_ctx
             ctx.controller#document
