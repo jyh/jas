@@ -54,8 +54,9 @@ describe("renderSelectionLayer", () => {
   });
 
   it("emits a control-point handle at each anchor of a selected rect", () => {
-    // Mirrors jas_dioxus draws — small white squares stroked in the
-    // selection color at every control point. For a rect that's 4
+    // Whole-element selection (the only kind Flask models today)
+    // corresponds to Rust's SelectionKind::All — every handle is
+    // filled solid in the selection colour. For a rect that's 4
     // corners.
     const doc = setSelection(makeDoc(), [[0, 0]]);
     const svg = renderSelectionLayer(doc);
@@ -63,8 +64,9 @@ describe("renderSelectionLayer", () => {
     // Strip the dashed bbox and count the remaining <rect>s.
     const handlesOnly = svg.replace(/<rect [^/]*stroke-dasharray[^/]*\/>/g, "");
     assert.equal((handlesOnly.match(/<rect /g) || []).length, 4);
-    // Handles fill white and stroke in the selection color.
-    assert.match(handlesOnly, /fill="white"/);
+    // Handles are solid-blue filled (SelectionKind::All).
+    const SEL_COLOR = "rgba\\(0, 120, 215, 0\\.9\\)";
+    assert.match(handlesOnly, new RegExp(`fill="${SEL_COLOR}"`));
   });
 
   it("degenerate bounds skipped", () => {
