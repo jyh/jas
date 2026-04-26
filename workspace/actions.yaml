@@ -28,7 +28,10 @@ actions:
                 effects:
                   - set: { active_tab: "prop.index" }
             bind:
-              active: "state.active_tab == prop.index"
+              # {{prop.index}} is resolved once at creation time so the
+              # bind expression bakes the tab's index in; only state.*
+              # remains reactive.
+              active: "state.active_tab == {{prop.index}}"
             children:
               - type: text
                 content: "Untitled-{{prop.index}}"
@@ -59,7 +62,8 @@ actions:
               flex: 1
               background: "{{theme.colors.window_bg}}"
             bind:
-              visible: "state.active_tab == prop.index"
+              # See the tab-button bind:active above for the {{}} rule.
+              visible: "state.active_tab == {{prop.index}}"
       - increment: { key: tab_count, by: 1 }
   open_file:
     description: >
