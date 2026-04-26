@@ -126,58 +126,42 @@ describe("layer_length primitive", () => {
 describe("rect tool — end-to-end element creation", () => {
   beforeEach(_resetForTesting);
 
-  it("mousedown adds a zero-sized rect; mousemove resizes it", async () => {
+  it("mousedown enters drawing mode; mouseup commits the rect", async () => {
+    // rect.yaml authors the tool as: mousedown → set drawing/start
+    // coords (no element created yet); mousemove → update cur coords;
+    // mouseup → if drag size > 1px, snapshot + add_element. The yaml
+    // matches RectTool semantics in jas_dioxus / JasSwift / jas_ocaml /
+    // jas — commit on release, not press.
     const ws = await workspaceDataPromise;
     const model = new Model(emptyDocument());
     const store = new StateStore();
     registerTools(ws.tools, store);
+    const noMods = { shift: false, ctrl: false, alt: false, meta: false };
 
-    dispatchEvent(
-      "rect",
-      {
-        type: "mousedown",
-        x: 10, y: 20,
-        modifiers: { shift: false, ctrl: false, alt: false, meta: false },
-      },
-      store,
-      { model },
-    );
+    dispatchEvent("rect", { type: "mousedown", x: 10, y: 20, modifiers: noMods },
+                  store, { model });
     assert.equal(store.get("tool.rect.mode"), "drawing");
-    let layer = model.document.layers[0];
-    assert.equal(layer.children.length, 1);
-    let rect = layer.children[0];
-    assert.equal(rect.type, "rect");
-    assert.equal(rect.x, 10);
-    assert.equal(rect.y, 20);
+    // No element appended on mousedown — rect is committed on release.
+    assert.equal(model.document.layers[0].children.length, 0);
 
-    // mousemove to 80, 100 — rect should grow to 70x80
-    dispatchEvent(
-      "rect",
-      {
-        type: "mousemove",
-        x: 80, y: 100,
-        modifiers: { shift: false, ctrl: false, alt: false, meta: false },
-      },
-      store,
-      { model },
-    );
-    rect = getElement(model.document, [0, 0]);
+    dispatchEvent("rect", { type: "mousemove", x: 80, y: 100, modifiers: noMods },
+                  store, { model });
+    // mousemove only updates tool-local cur coords. Still no element.
+    assert.equal(model.document.layers[0].children.length, 0);
+    assert.equal(store.get("tool.rect.cur_x"), 80);
+    assert.equal(store.get("tool.rect.cur_y"), 100);
+
+    dispatchEvent("rect", { type: "mouseup", x: 80, y: 100, modifiers: noMods },
+                  store, { model });
+    assert.equal(store.get("tool.rect.mode"), "idle");
+    // Rect lands at (10, 20) with size 70x80.
+    assert.equal(model.document.layers[0].children.length, 1);
+    const rect = getElement(model.document, [0, 0]);
+    assert.equal(rect.type, "rect");
     assert.equal(rect.x, 10);
     assert.equal(rect.y, 20);
     assert.equal(rect.width, 70);
     assert.equal(rect.height, 80);
-
-    // mouseup commits — mode → idle.
-    dispatchEvent(
-      "rect",
-      {
-        type: "mouseup", x: 80, y: 100,
-        modifiers: { shift: false, ctrl: false, alt: false, meta: false },
-      },
-      store,
-      { model },
-    );
-    assert.equal(store.get("tool.rect.mode"), "idle");
   });
 
   it("drag from bottom-right to top-left produces rect with clamped origin", async () => {
@@ -185,38 +169,54 @@ describe("rect tool — end-to-end element creation", () => {
     const model = new Model(emptyDocument());
     const store = new StateStore();
     registerTools(ws.tools, store);
+    const noMods = { shift: false, ctrl: false, alt: false, meta: false };
 
-    dispatchEvent("rect", {
-      type: "mousedown", x: 100, y: 100,
-      modifiers: { shift: false, ctrl: false, alt: false, meta: false },
-    }, store, { model });
-
-    dispatchEvent("rect", {
-      type: "mousemove", x: 30, y: 20,
-      modifiers: { shift: false, ctrl: false, alt: false, meta: false },
-    }, store, { model });
+    dispatchEvent("rect", { type: "mousedown", x: 100, y: 100, modifiers: noMods },
+                  store, { model });
+    dispatchEvent("rect", { type: "mousemove", x: 30, y: 20, modifiers: noMods },
+                  store, { model });
+    dispatchEvent("rect", { type: "mouseup", x: 30, y: 20, modifiers: noMods },
+                  store, { model });
 
     const rect = getElement(model.document, [0, 0]);
+    assert.ok(rect, "rect should be committed on mouseup");
     assert.equal(rect.x, 30);
     assert.equal(rect.y, 20);
     assert.equal(rect.width, 70);
     assert.equal(rect.height, 80);
   });
 
-  it("undo after rect creation removes the rect", async () => {
+  it("zero-size click (mousedown==mouseup) is suppressed — no rect committed", async () => {
+    // The yaml's `abs(event.x - tool.rect.start_x) > 1 and abs(event.y -
+    // tool.rect.start_y) > 1` guard prevents a stray click from
+    // creating a degenerate rect. Matches native RectTool behavior.
     const ws = await workspaceDataPromise;
     const model = new Model(emptyDocument());
     const store = new StateStore();
     registerTools(ws.tools, store);
+    const noMods = { shift: false, ctrl: false, alt: false, meta: false };
 
-    dispatchEvent("rect", {
-      type: "mousedown", x: 10, y: 10,
-      modifiers: { shift: false, ctrl: false, alt: false, meta: false },
-    }, store, { model });
-    dispatchEvent("rect", {
-      type: "mouseup", x: 10, y: 10,
-      modifiers: { shift: false, ctrl: false, alt: false, meta: false },
-    }, store, { model });
+    dispatchEvent("rect", { type: "mousedown", x: 10, y: 10, modifiers: noMods },
+                  store, { model });
+    dispatchEvent("rect", { type: "mouseup", x: 10, y: 10, modifiers: noMods },
+                  store, { model });
+    assert.equal(model.document.layers[0].children.length, 0);
+    assert.equal(store.get("tool.rect.mode"), "idle");
+  });
+
+  it("undo after rect drag removes the rect", async () => {
+    const ws = await workspaceDataPromise;
+    const model = new Model(emptyDocument());
+    const store = new StateStore();
+    registerTools(ws.tools, store);
+    const noMods = { shift: false, ctrl: false, alt: false, meta: false };
+
+    dispatchEvent("rect", { type: "mousedown", x: 10, y: 10, modifiers: noMods },
+                  store, { model });
+    dispatchEvent("rect", { type: "mousemove", x: 50, y: 60, modifiers: noMods },
+                  store, { model });
+    dispatchEvent("rect", { type: "mouseup", x: 50, y: 60, modifiers: noMods },
+                  store, { model });
 
     assert.equal(model.document.layers[0].children.length, 1);
     model.undo();
