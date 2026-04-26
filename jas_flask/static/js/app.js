@@ -454,6 +454,12 @@
     var old = state[key];
     state[key] = value;
     if (old !== value) {
+      // Mirror to the engine store (canvas_bootstrap.mjs publishes
+      // it on globalThis.JAS.mirrorState) so canvas tool dispatch
+      // reads the right active_tool / fill_color / etc. App.js
+      // remains the canonical state holder for panels.
+      var mirror = (globalThis.JAS && globalThis.JAS.mirrorState);
+      if (typeof mirror === "function") mirror(key, value);
       updateBindings(key, value);
     }
   }
