@@ -609,6 +609,24 @@ def _render_icon_button(el, theme, state):
             f' fill="var(--app-text,#cccccc)"/></svg>'
         )
         extra_attrs = ' data-has-alternates="true"'
+        # Emit a {tool_id: icon_name} map so the JS can swap the
+        # displayed icon when state.active_tool becomes one of the
+        # alternates. Without this, selecting Rounded Rect from the
+        # long-press menu would leave the slot stuck on the Rect
+        # icon. Items missing an `icon` field are skipped.
+        alt_items = (el.get("alternates") or {}).get("items") or []
+        icon_map = {}
+        for item in alt_items:
+            if not isinstance(item, dict):
+                continue
+            tid = item.get("id")
+            icn = item.get("icon")
+            if tid and icn:
+                icon_map[tid] = icn
+        if icon_map:
+            extra_attrs += (
+                f" data-alternate-icons='{escape(json.dumps(icon_map))}'"
+            )
     # NOTE: deliberately omit Bootstrap's `btn-outline-secondary`.
     # That class fights with .app-tool-btn over the :hover / :focus /
     # .active backgrounds and makes focused-but-not-active buttons

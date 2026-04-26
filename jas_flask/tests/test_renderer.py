@@ -130,6 +130,74 @@ class TestRenderIconButton:
                 f"button shading uniformly"
             )
 
+    def test_alternates_button_emits_alternate_icons_map(self, theme, state):
+        """Slot buttons with alternates emit a JSON map of
+        ``{tool_id: icon_name}`` so the JS can swap the displayed
+        icon when ``state.active_tool`` becomes one of the
+        alternates. Without this map the slot stays stuck on the
+        default icon (e.g. selecting Rounded Rect leaves the slot
+        showing the Rect icon)."""
+        import json, re
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_shape_slot",
+            "summary": "Rect", "icon": "rect", "style": {"size": 32},
+            "alternates": {
+                "menu_id": "shape_alternates",
+                "items": [
+                    {"id": "rect", "label": "Rect", "icon": "rect"},
+                    {"id": "rounded_rect", "label": "Rounded Rect",
+                     "icon": "rounded_rect"},
+                    {"id": "polygon", "label": "Polygon", "icon": "polygon"},
+                    {"id": "star", "label": "Star", "icon": "star"},
+                ],
+            },
+        }
+        html = render_element(el, theme, state, mode="normal")
+        m = re.search(r"data-alternate-icons='([^']*)'", html)
+        assert m is not None, (
+            "expected data-alternate-icons attribute on slot button"
+        )
+        # The renderer emits the JSON HTML-escaped (Markup-escape
+        # turns " into &#34;) — decode before parsing.
+        decoded = m.group(1).replace("&#34;", '"')
+        icons_map = json.loads(decoded)
+        assert icons_map == {
+            "rect": "rect",
+            "rounded_rect": "rounded_rect",
+            "polygon": "polygon",
+            "star": "star",
+        }
+
+    def test_plain_button_omits_alternate_icons_map(self, theme, state):
+        from renderer import render_element
+        el = {"type": "icon_button", "id": "btn_selection",
+              "summary": "Selection", "icon": "selection_arrow",
+              "style": {"size": 32}}
+        html = render_element(el, theme, state, mode="normal")
+        assert "data-alternate-icons" not in html
+
+    def test_alternates_without_icon_fields_skip_map(self, theme, state):
+        """When an alternate item omits ``icon`` (rare but legal),
+        skip it in the map rather than emitting a null entry that
+        would crash the JS lookup."""
+        from renderer import render_element
+        el = {
+            "type": "icon_button", "id": "btn_partial",
+            "summary": "P", "icon": "p", "style": {"size": 32},
+            "alternates": {"items": [
+                {"id": "a", "icon": "a"},
+                {"id": "b"},  # no icon
+                {"id": "c", "icon": "c"},
+            ]},
+        }
+        html = render_element(el, theme, state, mode="normal")
+        import json, re
+        m = re.search(r"data-alternate-icons='([^']*)'", html)
+        decoded = m.group(1).replace("&#34;", '"')
+        icons_map = json.loads(decoded)
+        assert icons_map == {"a": "a", "c": "c"}
+
     def test_alternate_and_plain_buttons_share_class_and_style(
             self, theme, state):
         """Tools with and without alternates must render with
