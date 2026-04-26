@@ -121,16 +121,37 @@ def render_dialogs(dialogs: dict, theme: dict, state: dict, brand: dict | None =
                 props[sk] = p
         if props:
             data_attrs += f' data-dialog-props="{escape(json.dumps(props))}"'
-        html += (
-            f'<div class="modal fade" id="dialog-{dialog_id}" tabindex="-1"{data_attrs}>'
-            f'<div class="modal-dialog"><div class="modal-content">'
-            f'<div class="modal-header" style="display:flex;align-items:center;">'
-            f'{logo_html}'
-            f'<h5 class="modal-title">{summary}</h5>'
-            f'<button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button></div>'
-            f'<div class="modal-body">{body_html}</div>'
-            f'</div></div></div>'
-        )
+        # Yaml `modal: false` switches the dialog to popover behavior
+        # — anchored next to the trigger element (e.g. a toolbar slot
+        # button) instead of centered with a backdrop. The JS reads
+        # `data-popover="true"` to position and show it differently.
+        # Tool-alternate flyouts use this; full-feature dialogs (Tool
+        # Options, Boolean Options, etc.) keep the default modal=true.
+        is_popover = dialog.get("modal") is False
+        if is_popover:
+            data_attrs += ' data-popover="true"'
+            # Popovers omit the modal title bar — they're compact menus
+            # anchored to the trigger; the trigger context already
+            # tells the user what was pressed.
+            html += (
+                f'<div class="modal app-popover" id="dialog-{dialog_id}"'
+                f' tabindex="-1"{data_attrs}>'
+                f'<div class="modal-dialog"><div class="modal-content">'
+                f'<div class="modal-body">{body_html}</div>'
+                f'</div></div></div>'
+            )
+        else:
+            html += (
+                f'<div class="modal fade" id="dialog-{dialog_id}"'
+                f' tabindex="-1"{data_attrs}>'
+                f'<div class="modal-dialog"><div class="modal-content">'
+                f'<div class="modal-header" style="display:flex;align-items:center;">'
+                f'{logo_html}'
+                f'<h5 class="modal-title">{summary}</h5>'
+                f'<button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button></div>'
+                f'<div class="modal-body">{body_html}</div>'
+                f'</div></div></div>'
+            )
     return Markup(html)
 
 
