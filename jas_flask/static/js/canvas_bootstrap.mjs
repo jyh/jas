@@ -56,14 +56,9 @@ export function bootstrap() {
   // handlers. APP_TOOLS is the compiled tools dict the server
   // injects into normal.html via {{ tools_json | safe }}.
   if (globalThis.APP_TOOLS) {
-    console.log("[bootstrap] APP_TOOLS keys:", Object.keys(globalThis.APP_TOOLS).length,
-      "rect-handlers:", globalThis.APP_TOOLS.rect && Object.keys(globalThis.APP_TOOLS.rect.handlers || {}));
     registerTools(globalThis.APP_TOOLS, store);
-    console.log("[bootstrap] after registerTools — store.tool keys:",
-      Object.keys(store.tool || {}),
-      "store.tool.rect:", store.tool.rect);
   } else {
-    console.warn("[bootstrap] APP_TOOLS missing!");
+    console.warn("[bootstrap] APP_TOOLS missing — tools won't dispatch");
   }
 
   // Watch drawing_surface for canvases. Per the layout spec, none
@@ -270,7 +265,6 @@ function handleMutations(mutations) {
 function adoptCanvas(canvasEl) {
   const id = canvasEl.id;
   if (!id || canvases.has(id)) return;
-  console.log("[adoptCanvas]", id, "rect=", canvasEl.getBoundingClientRect());
   // Pull a saved document off the pending-restore queue if one is
   // waiting; otherwise seed a fresh empty doc with one default
   // artboard. The queue is populated only at startup from
@@ -371,14 +365,7 @@ function wireCanvasEvents(canvasEl, model) {
   canvasEl.addEventListener("mousedown", (evt) => {
     if (evt.button !== 0) return;
     dragging = true;
-    const p = payload("mousedown", evt);
-    console.log("[canvas mousedown]", canvasEl.id, "tool=", activeTool(),
-      "payload x,y=", p.x, p.y, "rect.mode before=", store.get("tool.rect.mode"));
-    dispatchEvent(activeTool(), p, store, { model });
-    console.log("[canvas mousedown] after dispatch — rect.mode=",
-      store.get("tool.rect.mode"),
-      "start_x=", store.get("tool.rect.start_x"),
-      "start_y=", store.get("tool.rect.start_y"));
+    dispatchEvent(activeTool(), payload("mousedown", evt), store, { model });
     evt.preventDefault();
   });
   // Move/up listen on document so a drag past the canvas edge keeps
@@ -390,19 +377,7 @@ function wireCanvasEvents(canvasEl, model) {
   document.addEventListener("mouseup", (evt) => {
     if (!dragging) return;
     dragging = false;
-    const before = model.document.layers[0]
-      ? (model.document.layers[0].children || []).length : 0;
-    const p = payload("mouseup", evt);
-    console.log("[canvas mouseup]", canvasEl.id, "tool=", activeTool(),
-      "payload x,y=", p.x, p.y,
-      "rect.mode=", store.get("tool.rect.mode"),
-      "start_x=", store.get("tool.rect.start_x"),
-      "start_y=", store.get("tool.rect.start_y"));
-    dispatchEvent(activeTool(), p, store, { model });
-    const after = model.document.layers[0]
-      ? (model.document.layers[0].children || []).length : 0;
-    console.log("[canvas mouseup] after dispatch — elem-count", before, "→", after,
-      "rect.mode=", store.get("tool.rect.mode"));
+    dispatchEvent(activeTool(), payload("mouseup", evt), store, { model });
   });
   canvasEl.addEventListener("dblclick", (evt) => {
     if (evt.button !== 0) return;
