@@ -498,6 +498,12 @@
     var old = state[key];
     state[key] = value;
     if (old !== value) {
+      // Mirror to the engine store (canvas_bootstrap.mjs publishes
+      // it on globalThis.JAS.mirrorState) so canvas tool dispatch
+      // reads the right active_tool / fill_color / etc. App.js
+      // remains the canonical state holder for panels.
+      var mirror = (globalThis.JAS && globalThis.JAS.mirrorState);
+      if (typeof mirror === "function") mirror(key, value);
       updateBindings(key, value);
     }
   }
@@ -1691,6 +1697,35 @@
 
   function dispatch(actionId, params) {
     params = params || {};
+    // File menu actions short-circuit to the engine bootstrap. The
+    // yaml definitions today are placeholder log-only stubs gated
+    // on `state.tab_count > 0`; rather than threading tab state
+    // through every action eval (V1 is single-document), we route
+    // the canonical save / save-as / open ids straight to JAS.*.
+    if (globalThis.JAS) {
+      if ((actionId === "save" || actionId === "save_as")
+          && typeof globalThis.JAS.saveAs === "function") {
+        globalThis.JAS.saveAs();
+        return;
+      }
+      if (actionId === "open_file"
+          && typeof globalThis.JAS.open === "function") {
+        globalThis.JAS.open().catch(function (e) {
+          console.warn("[open_file] failed:", e && e.message);
+        });
+        return;
+      }
+      if (actionId === "undo"
+          && typeof globalThis.JAS.undo === "function") {
+        globalThis.JAS.undo();
+        return;
+      }
+      if (actionId === "redo"
+          && typeof globalThis.JAS.redo === "function") {
+        globalThis.JAS.redo();
+        return;
+      }
+    }
     var def = actions[actionId];
     if (!def) {
       console.warn("[action] unknown:", actionId);
