@@ -17,6 +17,89 @@ import { isContainer } from "./document.mjs";
  * Groups / layers return the union of their children's bounds.
  * Unknown / degenerate elements return a zero-size box.
  */
+/**
+ * Anchor positions used to draw selection handles, mirroring
+ * `jas_dioxus/src/geometry/element.rs::control_points`. Returns an
+ * array of `[x, y]` pairs in document coordinates.
+ *
+ * Per-type:
+ *   - line   → both endpoints
+ *   - rect   → 4 corners (TL, TR, BR, BL)
+ *   - circle → 4 cardinal points (top, right, bottom, left)
+ *   - ellipse→ 4 cardinals using rx/ry
+ *   - polygon→ all points, in order
+ *   - path   → anchor of each command (Z contributes none)
+ *   - else   → bounding-box corners
+ */
+export function controlPoints(elem) {
+  if (!elem || typeof elem !== "object") return [];
+  switch (elem.type) {
+    case "line":
+      return [[elem.x1, elem.y1], [elem.x2, elem.y2]];
+    case "rect":
+      return [
+        [elem.x, elem.y],
+        [elem.x + elem.width, elem.y],
+        [elem.x + elem.width, elem.y + elem.height],
+        [elem.x, elem.y + elem.height],
+      ];
+    case "circle":
+      return [
+        [elem.cx, elem.cy - elem.r],
+        [elem.cx + elem.r, elem.cy],
+        [elem.cx, elem.cy + elem.r],
+        [elem.cx - elem.r, elem.cy],
+      ];
+    case "ellipse":
+      return [
+        [elem.cx, elem.cy - elem.ry],
+        [elem.cx + elem.rx, elem.cy],
+        [elem.cx, elem.cy + elem.ry],
+        [elem.cx - elem.rx, elem.cy],
+      ];
+    case "polygon":
+    case "polyline":
+      return (elem.points || []).map((p) =>
+        Array.isArray(p) ? [p[0], p[1]] : [p.x, p.y]);
+    case "path":
+      return pathAnchorPoints(elem.d || []);
+    default: {
+      const b = elementBounds(elem);
+      return [
+        [b.x, b.y],
+        [b.x + b.width, b.y],
+        [b.x + b.width, b.y + b.height],
+        [b.x, b.y + b.height],
+      ];
+    }
+  }
+}
+
+function pathAnchorPoints(commands) {
+  const pts = [];
+  for (const cmd of commands) {
+    switch (cmd.type) {
+      case "M":
+      case "L":
+      case "T":
+      case "C":
+      case "S":
+      case "Q":
+      case "A":
+        pts.push([cmd.x, cmd.y]);
+        break;
+      case "H":
+        pts.push([cmd.x, pts.length ? pts[pts.length - 1][1] : 0]);
+        break;
+      case "V":
+        pts.push([pts.length ? pts[pts.length - 1][0] : 0, cmd.y]);
+        break;
+      // Z contributes no anchor.
+    }
+  }
+  return pts;
+}
+
 export function elementBounds(elem) {
   if (!elem || typeof elem !== "object") {
     return { x: 0, y: 0, width: 0, height: 0 };

@@ -10,7 +10,7 @@
 // function below is isolated enough to test by string comparison.
 
 import { renderDocument, renderElement } from "./renderer.mjs";
-import { elementBounds } from "./geometry.mjs";
+import { elementBounds, controlPoints } from "./geometry.mjs";
 import { getElement } from "./document.mjs";
 import { evaluate } from "./expr.mjs";
 import { Scope } from "./scope.mjs";
@@ -183,6 +183,12 @@ export function renderDocumentLayer(doc) {
 // V1: dashed bounding-box per selected element. Handles (resize, rotate)
 // land when a tool-specific selection HUD is designed.
 
+// Selection HUD colour and handle size — matches the native apps
+// (jas_dioxus/src/canvas/render.rs HANDLE_DRAW_SIZE = 10, sel_color
+// rgba(0, 120, 215, 0.9)).
+const SELECTION_COLOR = "rgba(0, 120, 215, 0.9)";
+const HANDLE_SIZE = 10;
+
 export function renderSelectionLayer(doc) {
   if (!doc || !Array.isArray(doc.selection) || doc.selection.length === 0) {
     return "";
@@ -193,10 +199,21 @@ export function renderSelectionLayer(doc) {
     if (!elem) continue;
     const b = elementBounds(elem);
     if (b.width <= 0 && b.height <= 0) continue;
+    // Dashed bounding-box outline (uses the cooler selection-blue).
     parts.push(
       `<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" ` +
-      `fill="none" stroke="#4a90d9" stroke-width="1" stroke-dasharray="4 2"/>`
+      `fill="none" stroke="${SELECTION_COLOR}" stroke-width="1" stroke-dasharray="4 2"/>`
     );
+    // Square handles at every control point — small white squares
+    // outlined in the selection colour, matching the native apps.
+    const half = HANDLE_SIZE / 2;
+    for (const [px, py] of controlPoints(elem)) {
+      parts.push(
+        `<rect x="${px - half}" y="${py - half}" ` +
+        `width="${HANDLE_SIZE}" height="${HANDLE_SIZE}" ` +
+        `fill="white" stroke="${SELECTION_COLOR}" stroke-width="1"/>`
+      );
+    }
   }
   return parts.join("");
 }
