@@ -13,20 +13,24 @@
 
 {% block scripts %}
 <script>
-  const APP_STATE = {{ state_json | safe }};
-  const APP_ACTIONS = {{ actions_json | safe }};
-  const APP_SHORTCUTS = {{ shortcuts_json | safe }};
-  const APP_PANE_CONFIGS = {{ positions_json | safe }};
-  const APP_ICONS = {{ icons_json | safe }};
+  // var (not const) so the bindings attach to globalThis.* and are
+  // visible to the module-scoped canvas_bootstrap.mjs. App.js is a
+  // classic script in the same script scope, so it sees them either
+  // way; the module script needs the global property.
+  var APP_STATE = {{ state_json | safe }};
+  var APP_ACTIONS = {{ actions_json | safe }};
+  var APP_SHORTCUTS = {{ shortcuts_json | safe }};
+  var APP_PANE_CONFIGS = {{ positions_json | safe }};
+  var APP_ICONS = {{ icons_json | safe }};
   var APP_THEME = {{ theme_json | safe }};
-  const APP_DEFAULT_LAYOUTS = {{ default_layouts_json | safe }};
-  const APP_RUNTIME_CONTEXTS = {{ runtime_contexts_json | safe }};
-  const APP_APPEARANCES = {{ appearances_json | safe }};
-  const APP_ACTIVE_APPEARANCE = {{ active_appearance_json | safe }};
-  const APP_ALL_APPEARANCES = {{ all_appearances_json | safe }};
-  const APP_BASE_THEME = {{ base_theme_json | safe }};
-  const APP_METRICS = {{ metrics_json | safe }};
-  const APP_TOOLS = {{ tools_json | safe }};
+  var APP_DEFAULT_LAYOUTS = {{ default_layouts_json | safe }};
+  var APP_RUNTIME_CONTEXTS = {{ runtime_contexts_json | safe }};
+  var APP_APPEARANCES = {{ appearances_json | safe }};
+  var APP_ACTIVE_APPEARANCE = {{ active_appearance_json | safe }};
+  var APP_ALL_APPEARANCES = {{ all_appearances_json | safe }};
+  var APP_BASE_THEME = {{ base_theme_json | safe }};
+  var APP_METRICS = {{ metrics_json | safe }};
+  var APP_TOOLS = {{ tools_json | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ range(99999) | random }}"></script>
 <script type="module"
