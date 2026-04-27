@@ -21,10 +21,15 @@ state:
   mode:
     default: "idle"
     enum: [idle, drawing]
+  # Screen-space drag track for the dashed preview overlay.
   start_x: { default: 0 }
   start_y: { default: 0 }
   cur_x: { default: 0 }
   cur_y: { default: 0 }
+  # Document-space anchor captured at mousedown so the committed
+  # star lands where the user drew it regardless of pan / zoom.
+  doc_start_x: { default: 0 }
+  doc_start_y: { default: 0 }
 
 handlers:
 
@@ -40,6 +45,8 @@ handlers:
     - set: { tool.star.start_y: "event.y" }
     - set: { tool.star.cur_x: "event.x" }
     - set: { tool.star.cur_y: "event.y" }
+    - set: { tool.star.doc_start_x: "event.doc_x" }
+    - set: { tool.star.doc_start_y: "event.doc_y" }
 
   on_mousemove:
     - if: "tool.star.mode == 'drawing'"
@@ -56,10 +63,10 @@ handlers:
             - "doc.add_element":
                 element:
                   type: star
-                  x1: "tool.star.start_x"
-                  y1: "tool.star.start_y"
-                  x2: "event.x"
-                  y2: "event.y"
+                  x1: "tool.star.doc_start_x"
+                  y1: "tool.star.doc_start_y"
+                  x2: "event.doc_x"
+                  y2: "event.doc_y"
                   points: "5"
     - set: { tool.star.mode: "'idle'" }
 
