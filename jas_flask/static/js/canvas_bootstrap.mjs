@@ -451,8 +451,15 @@ function wireCanvasEvents(canvasEl, model) {
     dispatchAndRefresh("mousedown", evt);
     evt.preventDefault();
   });
-  // Move/up listen on document so a drag past the canvas edge keeps
-  // tracking until release.
+  // Hover (no drag in progress): dispatch to the active tool so
+  // tools that need to track the cursor between clicks (Pen's
+  // preview curve, hover-state cursors, etc.) get the events. The
+  // document-level handler below covers the during-drag case so a
+  // drag past the canvas edge keeps tracking.
+  canvasEl.addEventListener("mousemove", (evt) => {
+    if (dragging) return;
+    dispatchAndRefresh("mousemove", evt);
+  });
   document.addEventListener("mousemove", (evt) => {
     if (!dragging) return;
     dispatchAndRefresh("mousemove", evt);
