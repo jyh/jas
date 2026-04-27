@@ -4613,6 +4613,10 @@
       "viewbox": "0 0 256 256",
       "svg": "<rect fill=\"gray\" stroke=\"currentColor\" stroke-miterlimit=\"10\" stroke-width=\"8\"\n  x=\"23.33\" y=\"58.26\" width=\"212.06\" height=\"139.47\"/>\n"
     },
+    "ellipse": {
+      "viewbox": "0 0 256 256",
+      "svg": "<ellipse fill=\"gray\" stroke=\"currentColor\" stroke-miterlimit=\"10\" stroke-width=\"8\"\n  cx=\"128\" cy=\"128\" rx=\"106\" ry=\"70\"/>\n"
+    },
     "rounded_rect": {
       "viewbox": "0 0 256 256",
       "svg": "<rect fill=\"gray\" x=\"23.33\" y=\"58.26\" width=\"212.06\" height=\"139.47\" rx=\"30\" ry=\"30\"/> <rect fill=\"none\" stroke=\"currentColor\" stroke-miterlimit=\"10\" stroke-width=\"8\"\n  x=\"23.33\" y=\"58.26\" width=\"212.06\" height=\"139.47\" rx=\"30\" ry=\"30\"/>\n"
@@ -5702,7 +5706,7 @@
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"rect\", \"rounded_rect\", \"polygon\", \"star\"])"
+                    "checked": "mem(state.active_tool, [\"rect\", \"rounded_rect\", \"ellipse\", \"polygon\", \"star\"])"
                   },
                   "alternates": {
                     "menu_id": "shape_alternates",
@@ -5718,6 +5722,12 @@
                         "label": "Rounded Rectangle",
                         "icon": "rounded_rect",
                         "description": "Draw rectangles with rounded corners"
+                      },
+                      {
+                        "id": "ellipse",
+                        "label": "Ellipse",
+                        "icon": "ellipse",
+                        "description": "Draw ellipses and circles"
                       },
                       {
                         "id": "polygon",
@@ -29647,6 +29657,33 @@
                   {
                     "set": {
                       "active_tool": "\"rounded_rect\""
+                    }
+                  },
+                  {
+                    "close_dialog": null
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "icon_button",
+            "icon": "ellipse",
+            "label": "Ellipse",
+            "summary": "Draw ellipses and circles",
+            "style": {
+              "width": "100%",
+              "justify": "start",
+              "gap": 8,
+              "padding": "4 8"
+            },
+            "behavior": [
+              {
+                "event": "click",
+                "effects": [
+                  {
+                    "set": {
+                      "active_tool": "\"ellipse\""
                     }
                   },
                   {
