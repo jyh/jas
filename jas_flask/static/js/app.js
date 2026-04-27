@@ -2859,6 +2859,44 @@
         hbBtn.textContent = "\u2261";
         var hbMenu = document.createElement("ul");
         hbMenu.className = "dropdown-menu";
+        // Mirror the server-side render in renderer.py: merge the
+        // active panel's own menu items first (HSB / RGB / Show
+        // Recent Colors / etc.), then a separator, then the
+        // per-panel "Close X" items at the bottom.
+        var activeName = panels[Math.min(active, panels.length - 1)];
+        var panelMenus = (typeof APP_PANEL_MENUS !== "undefined") ? APP_PANEL_MENUS : {};
+        var activeMenu = panelMenus[activeName + "_panel_content"] || [];
+        activeMenu.forEach(function (item) {
+          var li = document.createElement("li");
+          if (item === "separator") {
+            var hr = document.createElement("hr");
+            hr.className = "dropdown-divider";
+            li.appendChild(hr);
+            hbMenu.appendChild(li);
+            return;
+          }
+          if (!item || typeof item !== "object" || !item.label) return;
+          var a = document.createElement("a");
+          a.className = "dropdown-item";
+          a.href = "#";
+          a.textContent = item.label;
+          if (item.disabled) a.classList.add("disabled");
+          if (item.action && !item.disabled) {
+            a.setAttribute("data-action", item.action);
+            if (item.params) {
+              a.setAttribute("data-action-params", JSON.stringify(item.params));
+            }
+          }
+          li.appendChild(a);
+          hbMenu.appendChild(li);
+        });
+        if (activeMenu.length > 0 && panels.length > 0) {
+          var sepLi = document.createElement("li");
+          var sepHr = document.createElement("hr");
+          sepHr.className = "dropdown-divider";
+          sepLi.appendChild(sepHr);
+          hbMenu.appendChild(sepLi);
+        }
         panels.forEach(function (panelName) {
           var li = document.createElement("li");
           var a = document.createElement("a");

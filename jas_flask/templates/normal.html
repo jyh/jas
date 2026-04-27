@@ -31,6 +31,7 @@
   var APP_BASE_THEME = {{ base_theme_json | safe }};
   var APP_METRICS = {{ metrics_json | safe }};
   var APP_TOOLS = {{ tools_json | safe }};
+  var APP_PANEL_MENUS = {{ panel_menus_json | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ range(99999) | random }}"></script>
 <script type="module"
