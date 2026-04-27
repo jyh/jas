@@ -23,6 +23,22 @@ describe("renderer — leaf elements", () => {
     assert.match(svg, /fill="#ff0000"/);
   });
 
+  it("rect with rx / ry emits the corner-radius attrs (rounded rect)", () => {
+    const svg = renderElement(mkRect({
+      x: 0, y: 0, width: 100, height: 100, rx: 10, ry: 10,
+    }));
+    assert.match(svg, /rx="10"/);
+    assert.match(svg, /ry="10"/);
+  });
+
+  it("rect with rx=0 / ry=0 omits the attrs (sharp corners)", () => {
+    const svg = renderElement(mkRect({
+      x: 0, y: 0, width: 100, height: 100, rx: 0, ry: 0,
+    }));
+    assert.doesNotMatch(svg, /rx=/);
+    assert.doesNotMatch(svg, /ry=/);
+  });
+
   it("circle", () => {
     const svg = renderElement(mkCircle({ cx: 50, cy: 50, r: 10 }));
     assert.match(svg, /<circle/);
