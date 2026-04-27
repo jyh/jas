@@ -81,6 +81,8 @@ function renderRect(e) {
     `y="${num(e.y)}"`,
     `width="${num(e.width)}"`,
     `height="${num(e.height)}"`,
+    typeof e.rx === "number" && e.rx > 0 ? `rx="${num(e.rx)}"` : "",
+    typeof e.ry === "number" && e.ry > 0 ? `ry="${num(e.ry)}"` : "",
     styleAttrs(e),
   ].filter(Boolean).join(" ");
   return `<rect ${attrs}/>`;
