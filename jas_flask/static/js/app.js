@@ -2855,7 +2855,7 @@
         // data-bs-toggle="dropdown" on the wrapper.
         hbBtn.className = "btn btn-sm p-0";
         hbBtn.setAttribute("data-bs-toggle", "dropdown");
-        hbBtn.style.cssText = "color:#888;background:transparent;border:none;font-size:14px";
+        hbBtn.style.cssText = "color:#888;background:transparent;border:none;font-size:21px;line-height:1";
         hbBtn.textContent = "\u2261";
         var hbMenu = document.createElement("ul");
         hbMenu.className = "dropdown-menu";
