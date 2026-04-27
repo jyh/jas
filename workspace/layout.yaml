@@ -364,7 +364,7 @@ layout:
                     action: select_tool
                     params: { tool: rect }
                 bind:
-                  checked: 'mem(state.active_tool, ["rect", "rounded_rect", "polygon", "star"])'
+                  checked: 'mem(state.active_tool, ["rect", "rounded_rect", "ellipse", "polygon", "star"])'
                 alternates:
                   menu_id: shape_alternates
                   items:
@@ -372,6 +372,8 @@ layout:
                         description: "Draw rectangles and squares" }
                     - { id: rounded_rect, label: "Rounded Rectangle", icon: "rounded_rect",
                         description: "Draw rectangles with rounded corners" }
+                    - { id: ellipse,      label: "Ellipse",           icon: "ellipse",
+                        description: "Draw ellipses and circles" }
                     - { id: polygon,      label: "Polygon",           icon: "polygon",
                         description: "Draw regular polygons" }
                     - { id: star,         label: "Star",              icon: "star",

@@ -41,7 +41,10 @@ because the tool isn't registered.
 
 **Rust — none.**
 
-**Flask — no coverage.**
+**Flask — covered indirectly via shared Rect-shape pipeline.**
+Ellipse uses doc.add_element + doc.set_attr (live-edit during the
+drag, not overlay→commit) — both are exercised by
+`tests/js/test_phase12.mjs`. No Ellipse-specific JS unit suite yet.
 
 The yaml spec itself is validated by workspace loader tests in every
 app. The tool semantics would borrow the rect validation flow once
@@ -195,6 +198,7 @@ All blocked until wiring lands. Retain IDs for post-wire regression.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 - **ELL-201** [placeholder] Overlay previews in every app.
       Do: Begin a drag.
@@ -204,6 +208,7 @@ All blocked until wiring lands. Retain IDs for post-wire regression.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [ ] Flask      last: —
 
 ---
 
