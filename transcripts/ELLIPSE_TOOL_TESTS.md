@@ -198,7 +198,7 @@ All blocked until wiring lands. Retain IDs for post-wire regression.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: Ellipse newly surfaced via shape-toolbar alternates; surfaced + fixed hardcoded `#d94ad9` magenta fill in ellipse.yaml — now uses state.fill_color / stroke_color via doc.add_element shape defaults.
 
 - **ELL-201** [placeholder] Overlay previews in every app.
       Do: Begin a drag.
@@ -208,7 +208,7 @@ All blocked until wiring lands. Retain IDs for post-wire regression.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: Flask uses ellipse.yaml's live-edit pattern (real element grows during drag), not the overlay-then-commit pattern Rect uses. Visual feedback present; "dashed preview" semantics don't apply.
 
 ---
 
