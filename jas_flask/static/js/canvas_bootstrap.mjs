@@ -27,7 +27,10 @@ import {
 } from "/static/js/engine/canvas.mjs";
 import { Scope } from "/static/js/engine/scope.mjs";
 import { exportSVG, importSVG } from "/static/js/engine/svg_io.mjs";
-import { setElementAttr, deleteSelectedElements } from "/static/js/engine/effects.mjs";
+import {
+  setElementAttr, deleteSelectedElements,
+  groupSelection, ungroupSelection,
+} from "/static/js/engine/effects.mjs";
 import { saveSession, loadSession } from "/static/js/engine/session.mjs";
 
 const SESSION_AUTOSAVE_MS = 30000;
@@ -267,6 +270,24 @@ export function bootstrap() {
       if (!m || !m.selection || m.selection.length === 0) return;
       m.snapshot();
       m.mutate(deleteSelectedElements);
+    },
+
+    /** Object → Group. Wraps the current selection (≥2 siblings) in
+     * a new Group at the frontmost selected position. */
+    groupSelection() {
+      const m = activeModel();
+      if (!m) return;
+      m.snapshot();
+      m.mutate(groupSelection);
+    },
+
+    /** Object → Ungroup. Promotes children of selected Groups one
+     * level. Non-group elements in the selection are untouched. */
+    ungroupSelection() {
+      const m = activeModel();
+      if (!m) return;
+      m.snapshot();
+      m.mutate(ungroupSelection);
     },
   });
 

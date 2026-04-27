@@ -354,6 +354,29 @@ export function hitTest(doc, px, py) {
   return null;
 }
 
+/**
+ * Flat hit-test — stops at direct layer children. Returns
+ * `[li, ci]` on hit, or null. Used by the regular Selection tool,
+ * which wants click-on-group-child to select the group itself.
+ * Mirrors `jas_dioxus/src/interpreter/doc_primitives.rs::hit_test`
+ * (the flat sibling of the recursive hit_test_deep).
+ */
+export function hitTestFlat(doc, px, py) {
+  if (!doc || !Array.isArray(doc.layers)) return null;
+  for (let li = doc.layers.length - 1; li >= 0; li--) {
+    const layer = doc.layers[li];
+    if (layerHidden(layer)) continue;
+    const children = layer.children || [];
+    for (let ci = children.length - 1; ci >= 0; ci--) {
+      const child = children[ci];
+      if (elemHidden(child)) continue;
+      const b = elementBounds(child);
+      if (pointInRect(px, py, b)) return [li, ci];
+    }
+  }
+  return null;
+}
+
 function recurseHitTest(elem, path, px, py) {
   if (elemHidden(elem)) return null;
   if (isContainer(elem)) {

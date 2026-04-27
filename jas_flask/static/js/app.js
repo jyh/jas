@@ -1783,6 +1783,16 @@
         globalThis.JAS.deleteSelection();
         return;
       }
+      if (actionId === "group"
+          && typeof globalThis.JAS.groupSelection === "function") {
+        globalThis.JAS.groupSelection();
+        return;
+      }
+      if (actionId === "ungroup"
+          && typeof globalThis.JAS.ungroupSelection === "function") {
+        globalThis.JAS.ungroupSelection();
+        return;
+      }
     }
     var def = actions[actionId];
     if (!def) {

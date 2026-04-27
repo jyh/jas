@@ -12,7 +12,7 @@
 import { runEffects } from "./effects.mjs";
 import { Scope } from "./scope.mjs";
 import { registerPrimitive } from "./evaluator.mjs";
-import { hitTest as hitTestImpl } from "./geometry.mjs";
+import { hitTest as hitTestImpl, hitTestFlat } from "./geometry.mjs";
 import { mkNull, NUMBER } from "./value.mjs";
 
 // Tool id → tool spec (as loaded from workspace.json).
@@ -100,7 +100,19 @@ export function dispatchEvent(toolId, event, store, options = {}) {
 
 function registerDocumentPrimitives(model) {
   const offs = [];
+  // Flat hit-test: stops at direct layer children (Selection tool's
+  // "click-group-child selects the group" semantic).
   offs.push(registerPrimitive("hit_test", (args) => {
+    if (args.length < 2 || args[0].kind !== NUMBER || args[1].kind !== NUMBER) {
+      return mkNull();
+    }
+    const path = hitTestFlat(model.document, args[0].value, args[1].value);
+    if (!path) return mkNull();
+    return { kind: "path", value: path };
+  }));
+  // Deep hit-test: recurses into groups, returns the leaf path.
+  // Interior Selection's hit_test_deep call.
+  offs.push(registerPrimitive("hit_test_deep", (args) => {
     if (args.length < 2 || args[0].kind !== NUMBER || args[1].kind !== NUMBER) {
       return mkNull();
     }
