@@ -234,7 +234,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PNC-201** [wired] FIT_ERROR = 4.0 identical across apps.
       Do: Inspect the yaml `doc.add_path_from_buffer` call.
@@ -243,7 +243,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · pencil.yaml has `fit_error: "4"` (string-typed numeric 4); Flask's effects.mjs evaluates → Number(4) = 4.0.
 
 - **PNC-202** [wired] Esc during drag leaves document unchanged.
       Do: Begin a drag; press Esc.
@@ -252,7 +252,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PNC-203** [wired] Undo removes the last pencil path in every app.
       Do: Draw curve; Ctrl/Cmd-Z.
@@ -261,7 +261,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 ---
 
