@@ -2144,7 +2144,16 @@
       } catch (e) {}
     });
 
-    // Wire panel slider/input → live color update and commit.
+    // Map panel-local field → global state key. Inputs bound to a
+    // listed field route their commit straight to setState (which
+    // canvas_bootstrap.mjs's PANEL_TO_ATTR mirror picks up to
+    // mutate the active selection), bypassing the Color-panel-
+    // specific colorize path below.
+    var PANEL_FIELD_TO_STATE = {
+      weight: "stroke_width",
+    };
+
+    // Wire panel slider/input → live update and commit.
     // Text inputs (e.g. the hex field) are skipped — parseFloat
     // their value would corrupt panel state, and the surrounding
     // updateBindings would overwrite the user's keystrokes. They
@@ -2157,8 +2166,16 @@
       var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
       if (!pm) return;
       var field = pm[1];
+      var v = parseFloat(el.value);
+      panelState[field] = v;
+      // Direct-route fields (stroke weight, etc.) skip the color
+      // recompute and write straight to global state.
+      var stateKey = PANEL_FIELD_TO_STATE[field];
+      if (stateKey) {
+        setState(stateKey, v);
+        return;
+      }
       panelColorSyncLocked = true;
-      panelState[field] = parseFloat(el.value);
       var newColor = panelStateToColor();
       panelState.hex = colorFunctions.hex(newColor);
       setState(state.fill_on_top ? "fill_color" : "stroke_color", newColor);
