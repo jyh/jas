@@ -123,6 +123,11 @@ export function bootstrap() {
     "state.fill_color": "fill",
     "state.stroke_color": "stroke",
     "state.stroke_width": "stroke-width",
+    "state.stroke_cap": "stroke-linecap",
+    "state.stroke_join": "stroke-linejoin",
+    "state.stroke_miter_limit": "stroke-miterlimit",
+    "state.stroke_dasharray": "stroke-dasharray",
+    "state.stroke_dashoffset": "stroke-dashoffset",
   };
   store.addListener((path, value) => {
     const attr = PANEL_TO_ATTR[path];
@@ -446,6 +451,26 @@ function syncStateFromElement(elem) {
   } else if (elem.stroke && typeof elem.stroke === "object"
              && typeof elem.stroke.width === "number") {
     setState("stroke_width", elem.stroke.width);
+  }
+  // Stroke shape attributes — mirror back so the Stroke panel's
+  // cap / join / dash buttons reflect the active selection.
+  if (typeof elem["stroke-linecap"] === "string") {
+    setState("stroke_cap", elem["stroke-linecap"]);
+  } else {
+    setState("stroke_cap", "butt"); // default
+  }
+  if (typeof elem["stroke-linejoin"] === "string") {
+    setState("stroke_join", elem["stroke-linejoin"]);
+  } else {
+    setState("stroke_join", "miter");
+  }
+  if (typeof elem["stroke-miterlimit"] === "number") {
+    setState("stroke_miter_limit", elem["stroke-miterlimit"]);
+  }
+  if (typeof elem["stroke-dasharray"] === "string") {
+    setState("stroke_dasharray", elem["stroke-dasharray"]);
+  } else {
+    setState("stroke_dasharray", "");
   }
 }
 

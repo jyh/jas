@@ -264,6 +264,31 @@ function styleAttrs(elem) {
   if (typeof elem["stroke-width"] === "number") {
     parts.push(`stroke-width="${num(elem["stroke-width"])}"`);
   }
+  // Stroke shape attributes (cap / join / miterlimit / dasharray /
+  // dashoffset). Emit only when non-default so the serialized output
+  // matches the native apps' identity-omission convention (e.g. cap
+  // = "butt" is the default and is left off the SVG).
+  if (typeof elem["stroke-linecap"] === "string"
+      && elem["stroke-linecap"] !== "butt") {
+    parts.push(`stroke-linecap="${esc(elem["stroke-linecap"])}"`);
+  }
+  if (typeof elem["stroke-linejoin"] === "string"
+      && elem["stroke-linejoin"] !== "miter") {
+    parts.push(`stroke-linejoin="${esc(elem["stroke-linejoin"])}"`);
+  }
+  if (typeof elem["stroke-miterlimit"] === "number"
+      && elem["stroke-miterlimit"] !== 4) {
+    parts.push(`stroke-miterlimit="${num(elem["stroke-miterlimit"])}"`);
+  }
+  if (typeof elem["stroke-dasharray"] === "string"
+      && elem["stroke-dasharray"] !== ""
+      && elem["stroke-dasharray"] !== "none") {
+    parts.push(`stroke-dasharray="${esc(elem["stroke-dasharray"])}"`);
+  }
+  if (typeof elem["stroke-dashoffset"] === "number"
+      && elem["stroke-dashoffset"] !== 0) {
+    parts.push(`stroke-dashoffset="${num(elem["stroke-dashoffset"])}"`);
+  }
   if (typeof elem.opacity === "number" && elem.opacity !== 1.0) {
     parts.push(`opacity="${num(elem.opacity)}"`);
   }
