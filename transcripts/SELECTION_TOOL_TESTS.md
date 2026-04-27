@@ -686,7 +686,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —  · blocked: Interior Selection tool not key-bound, and `group` action is a log-only stub in actions.yaml (no group_selection effect). Re-examine once Group / Interior Selection wiring lands in Flask.
+      - [x] Flask      last: 2026-04-27  · note: implemented Group / Ungroup actions (JAS.groupSelection / ungroupSelection routed through app.js dispatch), split hit_test into a flat layer-children variant + recursive hit_test_deep, and dispatched doc.partial_select_in_rect for the marquee. Interior Selection tool has no shortcut binding; set `state.active_tool='interior_selection'` via devtools.
 
 - **SEL-306** [wired] Partial Selection handle-drag cusp semantics.
       Do: Curved path; Partial Selection; drag a smooth anchor's
