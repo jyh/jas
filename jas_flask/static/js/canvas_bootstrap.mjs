@@ -78,12 +78,15 @@ export function bootstrap() {
   // Track active tab so the JAS hooks (save/undo/redo) and the panel
   // → selection writer below operate on the right document. Also
   // re-render the overlay layer of the active canvas whenever tool-
-  // local state mutates, so drag previews (rect dashed outline, pen
-  // anchor handles, …) follow the cursor.
+  // local state mutates (so drag previews stay glued to the cursor)
+  // and refresh the canvas cursor when the active tool changes.
   store.addListener((path) => {
     if (path === "state.active_tab") {
       refreshActiveCanvas();
       return;
+    }
+    if (path === "state.active_tool") {
+      applyCanvasCursors();
     }
     if (path === "state.active_tool" || path.startsWith("tool.")) {
       const entry = activeCanvasId ? canvases.get(activeCanvasId) : null;
@@ -91,6 +94,7 @@ export function bootstrap() {
     }
   });
   refreshActiveCanvas();
+  applyCanvasCursors();
 
   // Panel → document propagation. V1 panels (Color, Stroke) drive
   // global state.fill_color / state.stroke_color etc.; the listener
@@ -354,7 +358,35 @@ function adoptCanvas(canvasEl) {
   model.addListener(scheduleSave);
   renderCanvas(canvasEl, model);
   wireCanvasEvents(canvasEl, model);
+  applyCanvasCursors();
   refreshActiveCanvas();
+}
+
+// Map the YAML tool's `cursor:` field to a CSS cursor value and
+// apply it to every canvas-stack. Mapping mirrors the cursor names
+// used in workspace/tools/*.yaml; unknown / not-yet-supported names
+// fall through to "default".
+const CURSOR_CSS = {
+  arrow: "default",
+  crosshair: "crosshair",
+  // CSS has no native eyedropper; the native apps use a custom
+  // bitmap. Crosshair is a reasonable fallback until a custom URL
+  // cursor lands.
+  eyedropper: "crosshair",
+  none: "none",
+  open_hand: "grab",
+  zoom_in: "zoom-in",
+};
+
+function applyCanvasCursors() {
+  if (!store) return;
+  const toolId = store.get("state.active_tool") || "selection";
+  const tool = getTool(toolId);
+  const cursorName = tool && tool.cursor ? tool.cursor : "arrow";
+  const css = CURSOR_CSS[cursorName] || "default";
+  for (const { canvasEl } of canvases.values()) {
+    canvasEl.style.cursor = css;
+  }
 }
 
 // ── Session persistence helpers ──────────────────────────
