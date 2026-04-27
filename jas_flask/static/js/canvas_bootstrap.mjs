@@ -129,11 +129,32 @@ export function bootstrap() {
     "state.stroke_dasharray": "stroke-dasharray",
     "state.stroke_dashoffset": "stroke-dashoffset",
   };
+  // State fields that contribute to the derived stroke-dasharray
+  // string. When any of them changes, recompute and apply.
+  const DASH_FIELDS = new Set([
+    "state.stroke_dashed",
+    "state.stroke_dash_1", "state.stroke_gap_1",
+    "state.stroke_dash_2", "state.stroke_gap_2",
+    "state.stroke_dash_3", "state.stroke_gap_3",
+  ]);
+
   store.addListener((path, value) => {
-    const attr = PANEL_TO_ATTR[path];
-    if (!attr) return;
     const m = activeModel();
     if (!m || !m.selection || m.selection.length === 0) return;
+    if (DASH_FIELDS.has(path)) {
+      const dasharray = buildDasharray(store.state || {});
+      m.snapshot();
+      m.mutate((d) => {
+        let next = d;
+        for (const elemPath of d.selection) {
+          next = setElementAttr(next, elemPath, "stroke-dasharray", dasharray);
+        }
+        return next;
+      });
+      return;
+    }
+    const attr = PANEL_TO_ATTR[path];
+    if (!attr) return;
     m.snapshot();
     m.mutate((d) => {
       let next = d;
@@ -330,11 +351,17 @@ function restoreSavedWorkspace() {
   // Restore the rest of the engine state. tab_count / active_tab
   // were just driven by the dispatch loop, so let those stand for
   // tab_count and override active_tab from the saved value.
+  // Sessions saved before resolve() learned to evaluate the "not X"
+  // prefix may carry literal "not …" strings in fields that were
+  // supposed to hold booleans (e.g. stroke_dashed). Drop those so the
+  // default kicks in — leaving them in place would keep the checkbox
+  // bindings out of sync with the rendered dashes.
   const SKIP = new Set(["tab_count"]);
   const setStateFn = globalThis.APP_SET_STATE;
   for (const [k, v] of Object.entries(saved.state || {})) {
     if (SKIP.has(k)) continue;
     if (k === "active_tab") continue; // applied below
+    if (typeof v === "string" && v.startsWith("not ")) continue;
     if (typeof setStateFn === "function") {
       setStateFn(k, v);
     } else {
@@ -472,6 +499,39 @@ function syncStateFromElement(elem) {
   } else {
     setState("stroke_dasharray", "");
   }
+  // Derive the boolean stroke_dashed flag from the dasharray string.
+  // A non-empty, non-"none" value means the stroke is dashed; an
+  // empty or absent attribute means it is not. Without this the
+  // dashed checkbox can drift out of sync with the actual element.
+  const dashStr = elem["stroke-dasharray"];
+  const isDashed = typeof dashStr === "string"
+    && dashStr !== "" && dashStr !== "none";
+  setState("stroke_dashed", isDashed);
+}
+
+// Build the SVG `stroke-dasharray` string from the Stroke panel's
+// individual dash / gap fields. Returns "" when stroke_dashed is
+// off, signalling "no dasharray" to the renderer (which omits the
+// attribute entirely).
+//
+// Walk the three (dash_N, gap_N) pairs in order. Each pair
+// contributes both numbers as long as both are present (numbers,
+// including zero); a pair with either side null/undefined ends the
+// pattern. This yields "12 6 0 6" for the Dash-Dot preset
+// (d1=12, g1=6, d2=0, g2=6, d3=null, g3=null).
+function buildDasharray(state) {
+  if (!state || !state.stroke_dashed) return "";
+  const parts = [];
+  for (const i of [1, 2, 3]) {
+    const d = state[`stroke_dash_${i}`];
+    const g = state[`stroke_gap_${i}`];
+    // Number.isFinite rejects null, undefined, NaN, and +/-Infinity —
+    // matching the panel semantics where a blank input or a cleared
+    // pair ends the pattern.
+    if (!Number.isFinite(d) || !Number.isFinite(g)) break;
+    parts.push(String(d), String(g));
+  }
+  return parts.join(" ");
 }
 
 // Map the YAML tool's `cursor:` field to a CSS cursor value and

@@ -696,7 +696,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced + fixed: input handler routed all panel inputs through panelStateToColor (color-panel-specific); added PANEL_FIELD_TO_STATE so panel.weight writes setState("stroke_width"). Also wired selection→panel sync so the panel reflects the selected element.
 
 - **STR-301** [wired] Cap change to Round writes `stroke-linecap="round"`.
       Do: Click `stk_cap_round`.
@@ -706,7 +706,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced + fixed: PANEL_TO_ATTR was missing every stroke shape attr (cap / join / miter / dash). Added the five mappings, taught styleAttrs to emit them with identity-omission on defaults, and extended selection-sync + state→panel mirror so the panel buttons reflect the active selection.
 
 - **STR-302** [wired] Dashed preset Dash-Dot writes the 4-element array.
       Setup: Dashed off.
@@ -716,7 +716,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced + fixed several issues. (1) PANEL_TO_ATTR only knew the single key `stroke_dasharray`; the panel writes seven fields (`stroke_dashed` + three (dash_N, gap_N) pairs), so added a DASH_FIELDS set and a `buildDasharray` helper that derives the SVG string from those individual state keys. (2) `resolve()` had no `not X` handler, so `set: { stroke_dashed: "not state.stroke_dashed" }` was poisoning state with the literal string — added the handler, plus a guard in `evalCondition` so already-corrupted sessions don't infinite-loop, plus a one-shot cleanup in restoreSavedWorkspace that drops `"not …"` strings. (3) Dash/gap input commits never reached state — added six dash_N/gap_N entries to PANEL_FIELD_TO_STATE. (4) `stroke_dashed` now syncs from the selected element's stroke-dasharray (and STATE_TO_PANEL_FIELD propagates it to panelState.dashed) so the checkbox tracks the actual element.
 
 - **STR-303** [wired] Setting miter limit on a Round Join is gracefully ignored.
       Setup: Round Join active.
@@ -726,7 +726,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced two expression-evaluator gaps. (1) `or`/`and` were unhandled — resolve()'s lazy `.+?` comparison match would swallow the operator + second comparand into the rhs of a single `!=`, leaving every multi-clause disabled binding stuck at always-true. Added a top-level splitter (respecting quotes + brackets) in both resolve() and evalCondition(), with `or`/`and` placed at lower precedence than comparisons. (2) `state.foo != null` always reported true — _toCmpStr(null) yields "" while the literal "null" rhs stays "null". Added a special-case in the comparison handler so a literal `null` rhs compares directly against the resolved lhs (treating null/undefined/"null" as nullish).
 
 - **STR-304** [wired] Swap arrowheads exchanges shape + scale.
       Setup: Start = Closed Arrow at 75%, End = Diamond at 200%.
@@ -737,7 +737,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [~] Flask      last: 2026-04-27  · note: deferred — arrowhead rendering isn't wired in Flask. The panel writes the six state fields (start/end shape + scale + link + align) and the swap button toggles them, but there's no element mirror, no `<defs>` block emission for the 15 arrow shapes, and no `marker-start`/`marker-end` attribute on rendered paths. Comparable in scope to the brush-library buildout — needs its own spec / phase, not a one-shot fix during this parity sweep.
 
 - **STR-305** [wired] Selection sync round-trip.
       Setup: Select element A with cap=round, weight=4. Verify panel
