@@ -1231,7 +1231,7 @@ def _render_dock_view(el, theme, state):
                     active_panel_spec = _panels.get(active_key)
 
                 html += '<div class="dropdown d-inline-block">'
-                html += '<button class="btn btn-sm p-0" data-bs-toggle="dropdown" style="color:var(--app-text-button,#888);background:transparent;border:none;font-size:16px;display:inline-flex;align-items:center">≡</button>'
+                html += '<button class="btn btn-sm p-0" data-bs-toggle="dropdown" style="color:var(--app-text-button,#888);background:transparent;border:none;font-size:24px;line-height:1;display:inline-flex;align-items:center">≡</button>'
                 html += '<ul class="dropdown-menu">'
                 # Panel-specific menu items first
                 if active_panel_spec and active_panel_spec.get("menu"):
