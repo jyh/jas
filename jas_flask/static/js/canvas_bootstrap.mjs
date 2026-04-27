@@ -19,6 +19,7 @@ import { emptyDocument, ensureDocumentInvariants } from "/static/js/engine/docum
 import { StateStore } from "/static/js/engine/store.mjs";
 import {
   registerTools, dispatchEvent, getTool,
+  activateTool, deactivateTool,
 } from "/static/js/engine/tools.mjs";
 import {
   renderDocumentLayer, renderSelectionLayer, renderOverlayLayer,
@@ -80,12 +81,25 @@ export function bootstrap() {
   // re-render the overlay layer of the active canvas whenever tool-
   // local state mutates (so drag previews stay glued to the cursor)
   // and refresh the canvas cursor when the active tool changes.
-  store.addListener((path) => {
+  // Tracks the prior active_tool so the store listener can fire
+  // on_leave for it before on_enter for the new tool. Tools that
+  // accumulate buffer state (Pen, Pencil) commit / clear in their
+  // on_leave handler — without this, switching tools mid-flow
+  // would strand anchors / points in the buffer.
+  let prevActiveTool = store.get("state.active_tool") || "selection";
+  store.addListener((path, value) => {
     if (path === "state.active_tab") {
       refreshActiveCanvas();
       return;
     }
     if (path === "state.active_tool") {
+      const next = String(value || "selection");
+      const m = activeModel();
+      if (m && prevActiveTool && prevActiveTool !== next) {
+        deactivateTool(prevActiveTool, store, { model: m });
+        activateTool(next, store, { model: m });
+      }
+      prevActiveTool = next;
       applyCanvasCursors();
     }
     if (path === "state.active_tool" || path.startsWith("tool.")) {
