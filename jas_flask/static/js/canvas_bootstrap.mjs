@@ -479,6 +479,16 @@ function wireCanvasEvents(canvasEl, model) {
   let dragging = false;
   canvasEl.addEventListener("mousedown", (evt) => {
     if (evt.button !== 0) return;
+    // Browsers fire mousedown on each click of a multi-click; the
+    // dblclick event arrives separately *after* the second mouseup.
+    // Tools like Pen that handle dblclick by popping the most recent
+    // anchor would over-count if both mousedowns also pushed one.
+    // Suppress all mousedowns past the first; let dblclick stand on
+    // its own.
+    if (evt.detail >= 2) {
+      evt.preventDefault();
+      return;
+    }
     dragging = true;
     dispatchAndRefresh("mousedown", evt);
     evt.preventDefault();
