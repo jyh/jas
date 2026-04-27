@@ -2456,7 +2456,11 @@
     if (e.shiftKey) parts.push("shift");
     var key = e.key;
     if (key === " ") key = "space";
-    if (key.length === 1) key = key.toLowerCase();
+    // Lowercase always — normalizeKey lowercases the YAML side
+    // unconditionally, so multi-char keys like "Delete" / "Backspace"
+    // / "Enter" / "Tab" / "F2" must too. Only lowercasing the
+    // single-char case left those broken.
+    key = key.toLowerCase();
     parts.push(key);
     return parts.sort().join("+");
   }
