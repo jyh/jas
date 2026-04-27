@@ -2833,7 +2833,7 @@
       // Chevron
       var chevron = document.createElement("button");
       chevron.className = "btn btn-sm app-dock-chevron p-0";
-      chevron.style.cssText = "color:#888;background:transparent;border:none;font-size:18px;line-height:1";
+      chevron.style.cssText = "color:#888;background:transparent;border:none;font-size:21px;line-height:1";
       chevron.textContent = groupCollapsed ? "\u00bb" : "\u00ab";
       chevron.addEventListener("click", function () {
         model.groups[gi].collapsed = !model.groups[gi].collapsed;

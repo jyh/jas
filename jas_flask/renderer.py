@@ -1218,7 +1218,7 @@ def _render_dock_view(el, theme, state):
             # Collapse chevron
             chevron = "\u00bb" if collapsed else "\u00ab"
             html += (
-                f'<button class="btn btn-sm app-dock-chevron p-0" style="color:var(--app-text-button,#888);background:transparent;border:none;font-size:16px;line-height:1;display:inline-flex;align-items:center"'
+                f'<button class="btn btn-sm app-dock-chevron p-0" style="color:var(--app-text-button,#888);background:transparent;border:none;font-size:24px;line-height:1;display:inline-flex;align-items:center"'
                 f' data-dock="{escape(eid)}" data-group="{gi}">{chevron}</button>'
             )
 
