@@ -303,6 +303,34 @@
     return String(v);
   }
 
+  // Split `s` on every occurrence of `sep` that sits at the top level —
+  // outside double / single quotes and outside any (), [], or {}
+  // brackets. Used by evalCondition to split " or " / " and " without
+  // tripping over operators that appear inside string literals or
+  // nested function calls.
+  function _splitTopLevel(s, sep) {
+    var parts = [];
+    var depth = 0, inDQ = false, inSQ = false;
+    var start = 0;
+    var sepLen = sep.length;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      if (inDQ) { if (ch === '"') inDQ = false; continue; }
+      if (inSQ) { if (ch === "'") inSQ = false; continue; }
+      if (ch === '"') { inDQ = true; continue; }
+      if (ch === "'") { inSQ = true; continue; }
+      if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+      if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+      if (depth === 0 && s.substr(i, sepLen) === sep) {
+        parts.push(s.substring(start, i));
+        start = i + sepLen;
+        i += sepLen - 1;
+      }
+    }
+    parts.push(s.substring(start));
+    return parts;
+  }
+
   function resolve(template, ctx) {
     if (template === null || template === undefined) return null;
     if (typeof template === "number" || typeof template === "boolean") return template;
@@ -320,14 +348,55 @@
       var condBool = (cond === true || cond === "true" || (cond && cond !== "false" && cond !== "0" && cond !== "null" && cond !== ""));
       return condBool ? resolve(ternMatch[2].trim(), ctx) : resolve(ternMatch[3].trim(), ctx);
     }
+    // Top-level `or` / `and`. Split BEFORE the comparison handler
+    // below — its lazy `.+?` lhs match would otherwise grab the
+    // operator and the second comparand as a single rhs string,
+    // turning "a != b or c != d" into a single garbled compare.
+    var orPartsR = _splitTopLevel(s, " or ");
+    if (orPartsR.length > 1) {
+      for (var oj = 0; oj < orPartsR.length; oj++) {
+        if (evalCondition(orPartsR[oj].trim(), ctx)) return true;
+      }
+      return false;
+    }
+    var andPartsR = _splitTopLevel(s, " and ");
+    if (andPartsR.length > 1) {
+      for (var aj = 0; aj < andPartsR.length; aj++) {
+        if (!evalCondition(andPartsR[aj].trim(), ctx)) return false;
+      }
+      return true;
+    }
+    // Logical NOT: "not X" → boolean negation of resolve(X). Without
+    // this handler, `set: { foo: "not state.foo" }` writes the literal
+    // string "not state.foo" instead of toggling foo's boolean — and
+    // that string then poisons every later data-bind-checked
+    // evaluation (evalCondition recurses on the "not " prefix forever).
+    if (s.length > 4 && s.substring(0, 4) === "not ") {
+      var notInner = resolve(s.substring(4).trim(), ctx);
+      var notBool = (notInner === true || notInner === "true"
+        || (notInner && notInner !== "false" && notInner !== "0"
+            && notInner !== "null" && notInner !== ""));
+      return !notBool;
+    }
     // Comparison operators: resolve each side separately
     var compMatch = s.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
     if (compMatch) {
+      // Literal-`null` rhs is its own case — resolve coerces null
+      // through _toCmpStr to "" while a literal "null" string keeps
+      // its quotes, so naive string compare reports inequality even
+      // when both sides are nullish (e.g. `state.stroke_brush != null`
+      // with no brush set).
+      var rhsRaw = compMatch[3].trim();
+      if (rhsRaw === "null") {
+        var lhsValN = resolve(compMatch[1].trim(), ctx);
+        var nullEq = lhsValN === null || lhsValN === undefined || lhsValN === "null";
+        return compMatch[2] === "==" ? nullEq : !nullEq;
+      }
       // Use _toCmpStr instead of `String(x || "")` — `|| ""` collapses
       // 0 and false to the empty string, which silently broke
       // numeric comparisons like `state.active_tab == 0`.
       var lhs = _toCmpStr(resolve(compMatch[1].trim(), ctx));
-      var rhs = compMatch[3].trim();
+      var rhs = rhsRaw;
       if (rhs.length >= 2 && rhs.charAt(0) === '"' && rhs.charAt(rhs.length - 1) === '"') {
         rhs = rhs.substring(1, rhs.length - 1);
       } else {
@@ -445,6 +514,26 @@
   function evalCondition(condStr, ctx) {
     if (condStr === false) return false;
     if (!condStr) return true;
+    // Top-level `or` / `and`. Must be split BEFORE resolve, because
+    // resolve's comparison handler is unaware of the operators and
+    // grabs the rest of the line as the rhs of `!=` / `==`, mangling
+    // disabled bindings like `panel.join != "miter" or state.foo != null`.
+    if (typeof condStr === "string") {
+      var orParts = _splitTopLevel(condStr, " or ");
+      if (orParts.length > 1) {
+        for (var oi = 0; oi < orParts.length; oi++) {
+          if (evalCondition(orParts[oi].trim(), ctx)) return true;
+        }
+        return false;
+      }
+      var andParts = _splitTopLevel(condStr, " and ");
+      if (andParts.length > 1) {
+        for (var ai = 0; ai < andParts.length; ai++) {
+          if (!evalCondition(andParts[ai].trim(), ctx)) return false;
+        }
+        return true;
+      }
+    }
     // Resolve the expression (handles both {{}} and bare expressions)
     var resolved = resolve(condStr, ctx);
     // Simple boolean evaluation
@@ -458,9 +547,18 @@
         ? evalCondition(ternaryMatch[2].trim(), ctx)
         : evalCondition(ternaryMatch[3].trim(), ctx);
     }
-    // Handle "not X"
-    if (typeof resolved === "string" && resolved.startsWith("not ")) {
-      return !evalCondition(resolved.substring(4), ctx);
+    // Handle "not X" — resolve the inner expression rather than
+    // recursing into evalCondition. evalCondition would re-resolve
+    // the same name, and if the underlying state value is itself a
+    // literal "not X" string (a recurring shape when "not"-prefixed
+    // values get stored as plain strings), the recursion never
+    // terminates and the page locks up.
+    if (typeof resolved === "string" && resolved.substring(0, 4) === "not ") {
+      var notInner2 = resolve(resolved.substring(4).trim(), ctx);
+      var notBool2 = (notInner2 === true || notInner2 === "true"
+        || (notInner2 && notInner2 !== "false" && notInner2 !== "0"
+            && notInner2 !== "null" && notInner2 !== ""));
+      return !notBool2;
     }
     // Handle "X == Y" (strip quotes from string literals for comparison)
     var eqMatch = typeof resolved === "string" ? resolved.match(/^(.+?)\s*==\s*(.+)$/) : null;
@@ -513,6 +611,7 @@
     stroke_cap: "cap",
     stroke_join: "join",
     stroke_miter_limit: "miter_limit",
+    stroke_dashed: "dashed",
   };
 
   function setState(key, value) {
@@ -2167,6 +2266,12 @@
     // specific colorize path below.
     var PANEL_FIELD_TO_STATE = {
       weight: "stroke_width",
+      dash_1: "stroke_dash_1",
+      gap_1: "stroke_gap_1",
+      dash_2: "stroke_dash_2",
+      gap_2: "stroke_gap_2",
+      dash_3: "stroke_dash_3",
+      gap_3: "stroke_gap_3",
     };
 
     // Wire panel slider/input → live update and commit.
