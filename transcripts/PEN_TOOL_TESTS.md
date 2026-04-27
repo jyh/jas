@@ -360,7 +360,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PEN-201** [wired] Click-and-drag places a smooth anchor with
   mirrored in-handle.
@@ -371,7 +371,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PEN-202** [wired] Close-hit triggers when within 8 px of first
   anchor.
@@ -382,7 +382,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PEN-203** [wired] Esc discards a 1-anchor path.
       Do: Place 1 anchor; Esc.
@@ -391,7 +391,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PEN-204** [wired] Esc commits a 2-anchor path.
       Do: Place 2 anchors; Esc.
@@ -400,7 +400,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PEN-205** [wired] Double-click pops the last anchor then commits.
       Do: Place 3 anchors; double-click at a 4th location.
@@ -410,7 +410,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced second-mousedown-of-dblclick over-counting (fixed: canvas_bootstrap suppresses mousedown when evt.detail >= 2).
 
 - **PEN-206** [wired] Tool deactivation auto-commits.
       Do: Place 3 anchors; press V.
@@ -419,7 +419,7 @@ Full pass: ~55 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced missing on_leave / on_enter dispatch on tool change (fixed: canvas_bootstrap fires deactivateTool / activateTool around state.active_tool changes).
 
 ---
 
