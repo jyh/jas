@@ -2119,9 +2119,14 @@
       } catch (e) {}
     });
 
-    // Wire panel slider/input → live color update and commit
+    // Wire panel slider/input → live color update and commit.
+    // Text inputs (e.g. the hex field) are skipped — parseFloat
+    // their value would corrupt panel state, and the surrounding
+    // updateBindings would overwrite the user's keystrokes. They
+    // commit through the keydown-on-Enter handler below instead.
     document.addEventListener("input", function (e) {
       var el = e.target;
+      if (el.type === "text" || el.type === "" || el.tagName === "TEXTAREA") return;
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
       if (!bindVal) return;
       var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
