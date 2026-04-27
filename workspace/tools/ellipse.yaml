@@ -13,6 +13,8 @@ state:
   mode:
     default: "idle"
     enum: [idle, drawing]
+  # Document-space anchor (event.doc_x/y) so the placed element's
+  # geometry matches where the user dragged regardless of pan / zoom.
   start_x: { default: 0 }
   start_y: { default: 0 }
 
@@ -26,15 +28,15 @@ handlers:
 
   on_mousedown:
     - "doc.snapshot": {}
-    - set: { tool.ellipse.start_x: "event.x" }
-    - set: { tool.ellipse.start_y: "event.y" }
+    - set: { tool.ellipse.start_x: "event.doc_x" }
+    - set: { tool.ellipse.start_y: "event.doc_y" }
     - set: { tool.ellipse.mode: "'drawing'" }
     - "doc.add_element":
         parent: "[0]"
         element:
           type: ellipse
-          cx: "event.x"
-          cy: "event.y"
+          cx: "event.doc_x"
+          cy: "event.doc_y"
           rx: "0"
           ry: "0"
           fill: "'#d94ad9'"
@@ -45,19 +47,19 @@ handlers:
         - "doc.set_attr":
             path: "[0, layer_length([0]) - 1]"
             attr: "cx"
-            value: "(tool.ellipse.start_x + event.x) / 2"
+            value: "(tool.ellipse.start_x + event.doc_x) / 2"
         - "doc.set_attr":
             path: "[0, layer_length([0]) - 1]"
             attr: "cy"
-            value: "(tool.ellipse.start_y + event.y) / 2"
+            value: "(tool.ellipse.start_y + event.doc_y) / 2"
         - "doc.set_attr":
             path: "[0, layer_length([0]) - 1]"
             attr: "rx"
-            value: "abs(event.x - tool.ellipse.start_x) / 2"
+            value: "abs(event.doc_x - tool.ellipse.start_x) / 2"
         - "doc.set_attr":
             path: "[0, layer_length([0]) - 1]"
             attr: "ry"
-            value: "abs(event.y - tool.ellipse.start_y) / 2"
+            value: "abs(event.doc_y - tool.ellipse.start_y) / 2"
 
   on_mouseup:
     - set: { tool.ellipse.mode: "'idle'" }

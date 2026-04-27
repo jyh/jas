@@ -1746,7 +1746,11 @@ const ARTBOARD_LABEL_COLOR: &str = "rgb(200,200,200)";
 
 fn artboard_fill_css(fill: &ArtboardFill) -> Option<String> {
     match fill {
-        ArtboardFill::Transparent => None,
+        // Default-Transparent artboards visually appear white over
+        // the gray pasteboard — matching the convention in every
+        // vector-illustration app. A truly see-through artboard
+        // isn't a real-world use case here.
+        ArtboardFill::Transparent => Some("#ffffff".to_string()),
         ArtboardFill::Color(hex) => Some(hex.clone()),
     }
 }
@@ -1779,6 +1783,15 @@ fn draw_fade_overlay(
     width: f64,
     height: f64,
 ) {
+    // Disabled while the pasteboard is theme-gray and artboards are
+    // painted opaque white: this routine's destination-out punches
+    // alpha=0 holes through the white artboard fills, leaving
+    // canvas-DOM-bg gray inside the artboards. Reinstate when the
+    // fade can target only the pasteboard region (e.g. via a
+    // separate raster mask drawn before the artboard fill pass).
+    let _ = (ctx, doc, width, height);
+    return;
+    #[allow(unreachable_code)]
     if !doc.artboard_options.fade_region_outside_artboard {
         return;
     }

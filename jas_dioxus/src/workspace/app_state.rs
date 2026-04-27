@@ -1386,11 +1386,12 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
-        // Layer 1: canvas background. Filled in screen-space here
-        // so it covers the viewport regardless of the view
-        // transform applied below. Per ZOOM_TOOL.md §Anchor and
-        // clamp math (rendering pipeline).
-        ctx.set_fill_style_str("white");
+        // Layer 1: canvas background (the pasteboard). Painted in
+        // screen-space so it covers the viewport regardless of the
+        // view transform applied below. Theme-pane gray matches the
+        // surrounding pane chrome; artboard rects paint white over
+        // the top of this in document-space.
+        ctx.set_fill_style_str("#3c3c3c");
         ctx.fill_rect(0.0, 0.0, w, h);
 
         // Apply view transform: zoom + pan. The renderer draws in

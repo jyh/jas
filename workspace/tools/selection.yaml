@@ -29,10 +29,20 @@ state:
   mode:
     default: "idle"
     enum: [idle, marquee, drag_move]
+  # Screen-space marquee track for the overlay rectangle.
   marquee_start_x: { default: 0 }
   marquee_start_y: { default: 0 }
   marquee_end_x: { default: 0 }
   marquee_end_y: { default: 0 }
+  # Document-space marquee bounds — what doc.select_in_rect actually
+  # tests against. Captured in parallel with marquee_*.
+  doc_marquee_start_x: { default: 0 }
+  doc_marquee_start_y: { default: 0 }
+  doc_marquee_end_x: { default: 0 }
+  doc_marquee_end_y: { default: 0 }
+  # Document-space drag anchor — translate_selection deltas work
+  # in document-space (elements live there), so the running anchor
+  # has to as well.
   drag_start_x: { default: 0 }
   drag_start_y: { default: 0 }
   # Was Alt held when the drag started? Frozen at mousedown — changes
@@ -55,7 +65,7 @@ handlers:
 
   on_mousedown:
     - let:
-        hit: "hit_test(event.x, event.y)"
+        hit: "hit_test(event.doc_x, event.doc_y)"
       in:
         - if: "hit == null"
           then:
@@ -67,6 +77,10 @@ handlers:
             - set: { tool.selection.marquee_start_y: "event.y" }
             - set: { tool.selection.marquee_end_x: "event.x" }
             - set: { tool.selection.marquee_end_y: "event.y" }
+            - set: { tool.selection.doc_marquee_start_x: "event.doc_x" }
+            - set: { tool.selection.doc_marquee_start_y: "event.doc_y" }
+            - set: { tool.selection.doc_marquee_end_x: "event.doc_x" }
+            - set: { tool.selection.doc_marquee_end_y: "event.doc_y" }
           else:
             - "doc.snapshot": {}
             - if: "event.modifiers.shift"
@@ -75,8 +89,8 @@ handlers:
               else:
                 - "doc.set_selection": { paths: [hit] }
             - set: { tool.selection.mode: "'drag_move'" }
-            - set: { tool.selection.drag_start_x: "event.x" }
-            - set: { tool.selection.drag_start_y: "event.y" }
+            - set: { tool.selection.drag_start_x: "event.doc_x" }
+            - set: { tool.selection.drag_start_y: "event.doc_y" }
             # Capture Alt at press time — if the user releases Alt
             # partway through the drag, the drag still "copies on
             # first move" because they started the drag with Alt.
@@ -88,6 +102,8 @@ handlers:
       then:
         - set: { tool.selection.marquee_end_x: "event.x" }
         - set: { tool.selection.marquee_end_y: "event.y" }
+        - set: { tool.selection.doc_marquee_end_x: "event.doc_x" }
+        - set: { tool.selection.doc_marquee_end_y: "event.doc_y" }
     - if: "tool.selection.mode == 'drag_move'"
       then:
         # Alt+drag copies the selection on the first move, then
@@ -98,24 +114,24 @@ handlers:
         - if: "tool.selection.alt_held and not tool.selection.copied"
           then:
             - "doc.copy_selection":
-                dx: "event.x - tool.selection.drag_start_x"
-                dy: "event.y - tool.selection.drag_start_y"
+                dx: "event.doc_x - tool.selection.drag_start_x"
+                dy: "event.doc_y - tool.selection.drag_start_y"
             - set: { tool.selection.copied: "true" }
           else:
             - "doc.translate_selection":
-                dx: "event.x - tool.selection.drag_start_x"
-                dy: "event.y - tool.selection.drag_start_y"
-        - set: { tool.selection.drag_start_x: "event.x" }
-        - set: { tool.selection.drag_start_y: "event.y" }
+                dx: "event.doc_x - tool.selection.drag_start_x"
+                dy: "event.doc_y - tool.selection.drag_start_y"
+        - set: { tool.selection.drag_start_x: "event.doc_x" }
+        - set: { tool.selection.drag_start_y: "event.doc_y" }
 
   on_mouseup:
     - if: "tool.selection.mode == 'marquee'"
       then:
         - "doc.select_in_rect":
-            x1: "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)"
-            y1: "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)"
-            x2: "max(tool.selection.marquee_start_x, tool.selection.marquee_end_x)"
-            y2: "max(tool.selection.marquee_start_y, tool.selection.marquee_end_y)"
+            x1: "min(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)"
+            y1: "min(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)"
+            x2: "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)"
+            y2: "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)"
             additive: "event.modifiers.shift"
     - set: { tool.selection.mode: "'idle'" }
 

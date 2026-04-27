@@ -57,8 +57,9 @@ handlers:
   on_mousedown:
     # Close-path gesture: if we already have 2+ anchors and this
     # click lands near the first one, finish the path closed instead
-    # of adding another anchor.
-    - if: "anchor_buffer_close_hit('pen', event.x, event.y, 8)"
+    # of adding another anchor. Hit-test in doc-space because that's
+    # where the anchors live; the close radius is in doc units.
+    - if: "anchor_buffer_close_hit('pen', event.doc_x, event.doc_y, 8)"
       then:
         - "doc.snapshot": {}
         - "doc.add_path_from_anchor_buffer":
@@ -75,21 +76,21 @@ handlers:
             - "doc.snapshot": {}
         - "anchor.push":
             buffer: "pen"
-            x: "event.x"
-            y: "event.y"
+            x: "event.doc_x"
+            y: "event.doc_y"
         - set: { tool.pen.mode: "'dragging'" }
 
   on_mousemove:
-    - set: { tool.pen.mouse_x: "event.x" }
-    - set: { tool.pen.mouse_y: "event.y" }
+    - set: { tool.pen.mouse_x: "event.doc_x" }
+    - set: { tool.pen.mouse_y: "event.doc_y" }
     - if: "tool.pen.mode == 'dragging'"
       then:
         # Drag the last anchor's out-handle (mirrors in-handle via
         # set_last_out_handle in anchor_buffers.rs).
         - "anchor.set_last_out":
             buffer: "pen"
-            hx: "event.x"
-            hy: "event.y"
+            hx: "event.doc_x"
+            hy: "event.doc_y"
 
   on_mouseup:
     # End of click-drag; remain in "placing" so the next click adds

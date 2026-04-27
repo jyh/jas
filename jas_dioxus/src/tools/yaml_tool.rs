@@ -211,17 +211,34 @@ impl YamlTool {
     }
 
     /// Build the `$event` scope dict for a pointer event.
+    ///
+    /// `x` / `y` are viewport-pixel coordinates (relative to the
+    /// canvas DOM element); they're what every overlay reads, since
+    /// overlays draw post-restore in screen-space.
+    ///
+    /// `doc_x` / `doc_y` are the same point converted to document
+    /// coordinates via the active view transform — what tool YAMLs
+    /// must use when committing element geometry. With a centered
+    /// artboard the view_offset is non-zero, so passing screen-space
+    /// straight into `add_element` plants the element ~hundreds of
+    /// pixels off-screen.
     fn pointer_event_payload(
         event_type: &str,
         x: f64,
         y: f64,
         shift: bool,
         alt: bool,
+        model: &Model,
     ) -> serde_json::Value {
+        let z = model.zoom_level;
+        let doc_x = if z == 0.0 { x } else { (x - model.view_offset_x) / z };
+        let doc_y = if z == 0.0 { y } else { (y - model.view_offset_y) / z };
         serde_json::json!({
             "type": event_type,
             "x": x,
             "y": y,
+            "doc_x": doc_x,
+            "doc_y": doc_y,
             "modifiers": {
                 "shift": shift,
                 "alt": alt,
@@ -272,7 +289,7 @@ impl CanvasTool for YamlTool {
         shift: bool,
         alt: bool,
     ) {
-        let payload = Self::pointer_event_payload("mousedown", x, y, shift, alt);
+        let payload = Self::pointer_event_payload("mousedown", x, y, shift, alt, model);
         self.dispatch("on_mousedown", payload, model);
     }
 
@@ -285,7 +302,7 @@ impl CanvasTool for YamlTool {
         alt: bool,
         dragging: bool,
     ) {
-        let mut payload = Self::pointer_event_payload("mousemove", x, y, shift, alt);
+        let mut payload = Self::pointer_event_payload("mousemove", x, y, shift, alt, model);
         // `dragging` is Rust-specific (Flask doesn't emit it), kept as
         // an extra scope field so YAML authors can opt into it.
         if let serde_json::Value::Object(ref mut map) = payload {
@@ -305,7 +322,7 @@ impl CanvasTool for YamlTool {
         shift: bool,
         alt: bool,
     ) {
-        let payload = Self::pointer_event_payload("mouseup", x, y, shift, alt);
+        let payload = Self::pointer_event_payload("mouseup", x, y, shift, alt, model);
         self.dispatch("on_mouseup", payload, model);
     }
 
@@ -505,9 +522,9 @@ impl CanvasTool for YamlTool {
                 "line" => draw_line_overlay(ctx, render, &eval_ctx),
                 "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
                 "star" => draw_star_overlay(ctx, render, &eval_ctx),
-                "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render),
-                "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render, &eval_ctx),
-                "pen_overlay" => draw_pen_overlay(ctx, render, &eval_ctx),
+                "buffer_polygon" => draw_buffer_polygon_overlay(ctx, render, model),
+                "buffer_polyline" => draw_buffer_polyline_overlay(ctx, render, &eval_ctx, model),
+                "pen_overlay" => draw_pen_overlay(ctx, render, &eval_ctx, model),
                 "partial_selection_overlay" => {
                     draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
                 }
@@ -861,6 +878,7 @@ fn draw_line_overlay(
 fn draw_buffer_polygon_overlay(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
+    model: &Model,
 ) {
     let name = render
         .get("buffer")
@@ -869,8 +887,15 @@ fn draw_buffer_polygon_overlay(
     if name.is_empty() {
         return;
     }
+    // Buffer points are in document-space; map to viewport pixels
+    // here because the overlay draws post-restore (identity transform).
+    let z = model.zoom_level;
+    let ox = model.view_offset_x;
+    let oy = model.view_offset_y;
     let points: Vec<(f64, f64)> =
-        crate::interpreter::point_buffers::with_points(name, |pts| pts.to_vec());
+        crate::interpreter::point_buffers::with_points(name, |pts| {
+            pts.iter().map(|p| (p.0 * z + ox, p.1 * z + oy)).collect()
+        });
     draw_closed_polygon_from_points(ctx, &points, render);
 }
 
@@ -887,6 +912,7 @@ fn draw_buffer_polyline_overlay(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
+    model: &Model,
 ) {
     let name = render
         .get("buffer")
@@ -895,8 +921,13 @@ fn draw_buffer_polyline_overlay(
     if name.is_empty() {
         return;
     }
+    // Buffer points are in document-space; map to viewport pixels
+    // here because the overlay draws post-restore (identity transform).
+    let z = model.zoom_level;
+    let ox = model.view_offset_x;
+    let oy = model.view_offset_y;
     let points: Vec<(f64, f64)> = crate::interpreter::point_buffers::with_points(
-        name, |pts| pts.to_vec());
+        name, |pts| pts.iter().map(|p| (p.0 * z + ox, p.1 * z + oy)).collect());
     if points.len() < 2 {
         return;
     }
@@ -1305,6 +1336,7 @@ fn draw_pen_overlay(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
+    model: &Model,
 ) {
     let name = render
         .get("buffer")
@@ -1313,13 +1345,39 @@ fn draw_pen_overlay(
     if name.is_empty() {
         return;
     }
-    let anchors: Vec<crate::interpreter::anchor_buffers::Anchor> =
+    // Anchors live in document-space (the buffer feeds add_path_from_anchor_buffer
+    // directly); the overlay draws post-restore in viewport-pixel space, so each
+    // coordinate has to go through the active view transform here.
+    let z = model.zoom_level;
+    let ox = model.view_offset_x;
+    let oy = model.view_offset_y;
+    let raw_anchors: Vec<crate::interpreter::anchor_buffers::Anchor> =
         crate::interpreter::anchor_buffers::with_anchors(name, |a| a.to_vec());
-    if anchors.is_empty() {
+    if raw_anchors.is_empty() {
         return;
     }
-    let mouse_x = eval_number_field(eval_ctx, render.get("mouse_x"));
-    let mouse_y = eval_number_field(eval_ctx, render.get("mouse_y"));
+    // Same shape as the buffered Anchor but in viewport pixels.
+    let anchors: Vec<crate::interpreter::anchor_buffers::Anchor> = raw_anchors
+        .iter()
+        .map(|a| {
+            let mut copy = a.clone();
+            copy.x = a.x * z + ox;
+            copy.y = a.y * z + oy;
+            copy.hx_in = a.hx_in * z + ox;
+            copy.hy_in = a.hy_in * z + oy;
+            copy.hx_out = a.hx_out * z + ox;
+            copy.hy_out = a.hy_out * z + oy;
+            copy
+        })
+        .collect();
+    // mouse_x / mouse_y in the YAML are now also doc-space (Pen
+    // writes them from event.doc_x / event.doc_y), so convert here too.
+    let mouse_x_doc = eval_number_field(eval_ctx, render.get("mouse_x"));
+    let mouse_y_doc = eval_number_field(eval_ctx, render.get("mouse_y"));
+    let mouse_x = mouse_x_doc * z + ox;
+    let mouse_y = mouse_y_doc * z + oy;
+    // close_radius stays in viewport pixels — the YAML supplies the
+    // raw 8 here and we want it to feel constant on screen.
     let close_radius =
         eval_number_field(eval_ctx, render.get("close_radius")).max(1.0);
     let placing = match render.get("placing") {
