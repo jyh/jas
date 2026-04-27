@@ -1773,6 +1773,16 @@
         globalThis.JAS.redo();
         return;
       }
+      if (actionId === "select_all"
+          && typeof globalThis.JAS.selectAll === "function") {
+        globalThis.JAS.selectAll();
+        return;
+      }
+      if (actionId === "delete_selection"
+          && typeof globalThis.JAS.deleteSelection === "function") {
+        globalThis.JAS.deleteSelection();
+        return;
+      }
     }
     var def = actions[actionId];
     if (!def) {

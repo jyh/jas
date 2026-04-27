@@ -26,7 +26,7 @@ import {
 } from "/static/js/engine/canvas.mjs";
 import { Scope } from "/static/js/engine/scope.mjs";
 import { exportSVG, importSVG } from "/static/js/engine/svg_io.mjs";
-import { setElementAttr } from "/static/js/engine/effects.mjs";
+import { setElementAttr, deleteSelectedElements } from "/static/js/engine/effects.mjs";
 import { saveSession, loadSession } from "/static/js/engine/session.mjs";
 
 const SESSION_AUTOSAVE_MS = 30000;
@@ -217,6 +217,38 @@ export function bootstrap() {
         input.click();
         document.body.removeChild(input);
       });
+    },
+
+    /** Edit → Select All. Selects every direct child of every layer
+     * that's neither locked nor invisible. Group/Layer recursion is
+     * deferred — top-level children only, matching Illustrator-style
+     * "the group itself is one selection" semantics. */
+    selectAll() {
+      const m = activeModel();
+      if (!m) return;
+      const paths = [];
+      m.document.layers.forEach((layer, li) => {
+        if (!layer || layer.visibility === "invisible") return;
+        const children = Array.isArray(layer.children) ? layer.children : [];
+        children.forEach((child, ci) => {
+          if (!child) return;
+          if (child.locked) return;
+          if (child.visibility === "invisible") return;
+          paths.push([li, ci]);
+        });
+      });
+      m.snapshot();
+      m.mutate((d) => ({ ...d, selection: paths.map((p) => p.slice()) }));
+    },
+
+    /** Edit → Delete Selection. Removes every currently-selected
+     * element via the engine's deleteSelectedElements helper, in
+     * reverse path order so sibling indices stay valid. */
+    deleteSelection() {
+      const m = activeModel();
+      if (!m || !m.selection || m.selection.length === 0) return;
+      m.snapshot();
+      m.mutate(deleteSelectedElements);
     },
   });
 
