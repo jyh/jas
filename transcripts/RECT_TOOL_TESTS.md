@@ -269,7 +269,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **RCT-201** [wired] Rounded Rect commit produces matching rx/ry=10.
       Do: Rounded Rect; press (0,0); drag to (100,100); release.
@@ -278,7 +278,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: rounded_rect lacks a key binding in shortcuts.yaml (toolbar slot's long-press alternates menu isn't rendered in Flask yet); set state.active_tool='rounded_rect' via devtools console. Surfaced renderRect missing rx/ry attrs (fixed).
 
 - **RCT-202** [wired] Zero-size click is suppressed in every app.
       Do: Press and release without moving.
@@ -287,7 +287,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **RCT-203** [wired] Up-and-left drag normalizes the same way across
   apps.
@@ -298,7 +298,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **RCT-204** [wired] Escape during drag leaves document unchanged.
       Do: Begin a rect drag; press Esc.
@@ -307,7 +307,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 ---
 
