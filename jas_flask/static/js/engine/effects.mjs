@@ -979,7 +979,7 @@ function replaceElementAt(elem, subpath, replacer) {
  * happen deepest-first (paths sorted by descending length, then by
  * descending last-index) so index shifts don't invalidate other paths.
  */
-function deleteSelectedElements(doc) {
+export function deleteSelectedElements(doc) {
   if (!doc.selection || doc.selection.length === 0) return doc;
   const sorted = doc.selection.slice().sort((a, b) => {
     if (a.length !== b.length) return b.length - a.length;
