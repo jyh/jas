@@ -24,7 +24,7 @@ import { toBool, toJson, PATH } from "./value.mjs";
 import { registerPrimitive } from "./evaluator.mjs";
 import {
   setSelection, addToSelection, toggleSelection, clearSelection,
-  getElement, mkPath,
+  getElement, mkPath, mkGroup,
   partialCpsForPath, setPartialCps,
 } from "./document.mjs";
 import { hitTestRect, translateElement, controlPoints } from "./geometry.mjs";
@@ -471,13 +471,18 @@ function runEffect(effect, scope, store, options) {
           });
           return;
         }
-        case "doc.path.commit_partial_marquee": {
+        case "doc.path.commit_partial_marquee":
+        case "doc.partial_select_in_rect": {
           // Spec: { x1, y1, x2, y2, additive }
           // Walk every shape in the document; for each, list which
           // CPs fall inside the marquee rect. additive = true merges
           // into the existing partial set (and keeps the existing
           // selection); additive = false replaces both. Element
           // joins the selection iff at least one CP is hit.
+          // Both effect names share the same impl — Partial
+          // Selection's marquee commit and Interior Selection's
+          // partial-rect select are the same operation under the
+          // hood.
           const x1 = Number(toJson(evaluate(String(spec.x1), scope))) || 0;
           const y1 = Number(toJson(evaluate(String(spec.y1), scope))) || 0;
           const x2 = Number(toJson(evaluate(String(spec.x2), scope))) || 0;
@@ -979,6 +984,100 @@ function replaceElementAt(elem, subpath, replacer) {
  * happen deepest-first (paths sorted by descending length, then by
  * descending last-index) so index shifts don't invalidate other paths.
  */
+/**
+ * Wrap the current selection in a new Group at the position of the
+ * frontmost (first-in-document-order) selected element. Requires
+ * 2+ siblings sharing the same parent path; otherwise returns the
+ * doc unchanged. Selection becomes the new group.
+ *
+ * Mirrors jas_dioxus Controller::group_selection. The Selection
+ * tool calls this via JAS.groupSelection from app.js's dispatch
+ * (the `group` action's effects are a yaml log-only stub).
+ */
+export function groupSelection(doc) {
+  if (!doc || !Array.isArray(doc.selection) || doc.selection.length < 2) {
+    return doc;
+  }
+  const sorted = doc.selection.slice().sort(comparePaths);
+  const first = sorted[0];
+  const parent = first.slice(0, -1);
+  // All paths must share the same parent + same depth.
+  for (const p of sorted) {
+    if (p.length !== first.length) return doc;
+    for (let i = 0; i < parent.length; i++) {
+      if (p[i] !== parent[i]) return doc;
+    }
+  }
+  // Gather elements in document order.
+  const elems = sorted.map((p) => getElement(doc, p));
+  if (elems.some((e) => !e)) return doc;
+  // Delete in reverse so earlier indices stay valid.
+  let layers = doc.layers.slice();
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    layers = deleteAtPath(layers, sorted[i]);
+  }
+  let next = { ...doc, layers, selection: [], partial_cps: {} };
+  // Insert a fresh Group with the gathered elements as children at
+  // the first selected position. Top-level (length-1 path) inserts
+  // into doc.layers; nested paths go through the container helper.
+  const groupElem = mkGroup({ children: elems });
+  next = insertElementAtAnyDepth(next, first, groupElem);
+  return { ...next, selection: [first.slice()] };
+}
+
+/**
+ * Inverse of groupSelection: replace each selected Group with its
+ * children at the group's z-order position. Non-group elements in
+ * the selection are left untouched. Selection becomes the union of
+ * the children that were promoted.
+ */
+export function ungroupSelection(doc) {
+  if (!doc || !Array.isArray(doc.selection) || doc.selection.length === 0) {
+    return doc;
+  }
+  // Walk groups in reverse so promotions don't shift unprocessed paths.
+  const targets = doc.selection
+    .map((p) => ({ path: p, elem: getElement(doc, p) }))
+    .filter(({ elem }) => elem && elem.type === "group")
+    .sort((a, b) => comparePaths(b.path, a.path));
+  if (targets.length === 0) return doc;
+  let next = doc;
+  const newSelection = [];
+  for (const { path, elem } of targets) {
+    const kids = Array.isArray(elem.children) ? elem.children : [];
+    let layers = next.layers.slice();
+    layers = deleteAtPath(layers, path);
+    next = { ...next, layers };
+    // Insert children in order at the group's old position.
+    const baseIdx = path[path.length - 1];
+    for (let i = 0; i < kids.length; i++) {
+      const childPath = [...path.slice(0, -1), baseIdx + i];
+      next = insertElementAtAnyDepth(next, childPath, kids[i]);
+      newSelection.push(childPath.slice());
+    }
+  }
+  // Drop the original group paths from selection; replace with
+  // promoted-children paths.
+  return { ...next, selection: newSelection, partial_cps: {} };
+}
+
+function comparePaths(a, b) {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
+
+function insertElementAtAnyDepth(doc, path, elem) {
+  if (path.length === 1) {
+    const layers = doc.layers.slice();
+    const idx = Math.max(0, Math.min(path[0], layers.length));
+    layers.splice(idx, 0, elem);
+    return { ...doc, layers };
+  }
+  return insertElementAt(doc, path, elem);
+}
+
 export function deleteSelectedElements(doc) {
   if (!doc.selection || doc.selection.length === 0) return doc;
   const sorted = doc.selection.slice().sort((a, b) => {

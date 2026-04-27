@@ -286,6 +286,117 @@ describe("doc.delete_selection", () => {
   });
 });
 
+describe("groupSelection / ungroupSelection", () => {
+  it("groups two siblings into a Group at the first selected position", async () => {
+    const { groupSelection } = await import("../../static/js/engine/effects.mjs");
+    const { setSelection } = await import("../../static/js/engine/document.mjs");
+    const doc = setSelection({
+      layers: [mkLayer({ children: [
+        mkRect({ x: 0 }), mkCircle({ r: 5 }), mkRect({ x: 100 }),
+      ] })],
+      selection: [], artboards: [],
+    }, [[0, 0], [0, 1]]);
+    const next = groupSelection(doc);
+    assert.equal(next.layers[0].children.length, 2);
+    assert.equal(next.layers[0].children[0].type, "group");
+    assert.equal(next.layers[0].children[0].children.length, 2);
+    assert.equal(next.layers[0].children[0].children[0].type, "rect");
+    assert.equal(next.layers[0].children[0].children[1].type, "circle");
+    assert.equal(next.layers[0].children[1].type, "rect"); // the third rect
+    assert.deepEqual(next.selection, [[0, 0]]);
+  });
+
+  it("groupSelection no-op when fewer than 2 selected", async () => {
+    const { groupSelection } = await import("../../static/js/engine/effects.mjs");
+    const { setSelection } = await import("../../static/js/engine/document.mjs");
+    const doc = setSelection({
+      layers: [mkLayer({ children: [mkRect(), mkCircle({ r: 5 })] })],
+      selection: [], artboards: [],
+    }, [[0, 0]]);
+    assert.equal(groupSelection(doc), doc);
+  });
+
+  it("groupSelection no-op when selection paths aren't siblings", async () => {
+    const { groupSelection } = await import("../../static/js/engine/effects.mjs");
+    const { setSelection, mkGroup } = await import("../../static/js/engine/document.mjs");
+    const doc = setSelection({
+      layers: [mkLayer({ children: [
+        mkGroup({ children: [mkRect()] }),
+        mkRect({ x: 100 }),
+      ] })],
+      selection: [], artboards: [],
+    }, [[0, 0, 0], [0, 1]]);
+    // Different parent paths → not siblings.
+    assert.equal(groupSelection(doc), doc);
+  });
+
+  it("ungroupSelection promotes children of a selected Group", async () => {
+    const { ungroupSelection } = await import("../../static/js/engine/effects.mjs");
+    const { setSelection, mkGroup } = await import("../../static/js/engine/document.mjs");
+    const doc = setSelection({
+      layers: [mkLayer({ children: [
+        mkGroup({ children: [mkRect({ x: 1 }), mkRect({ x: 2 })] }),
+        mkRect({ x: 3 }),
+      ] })],
+      selection: [], artboards: [],
+    }, [[0, 0]]);
+    const next = ungroupSelection(doc);
+    // Layer is now [rect1, rect2, rect3] — group flattened in place.
+    assert.equal(next.layers[0].children.length, 3);
+    assert.equal(next.layers[0].children[0].type, "rect");
+    assert.equal(next.layers[0].children[0].x, 1);
+    assert.equal(next.layers[0].children[1].x, 2);
+    assert.equal(next.layers[0].children[2].x, 3);
+    // Selection becomes the promoted children.
+    assert.deepEqual(next.selection, [[0, 0], [0, 1]]);
+  });
+});
+
+describe("hit_test / hit_test_deep primitives", () => {
+  beforeEach(_resetForTesting);
+
+  it("hit_test stops at direct layer children (returns group path)", async () => {
+    const { evaluate } = await import("../../static/js/engine/expr.mjs");
+    const { Scope } = await import("../../static/js/engine/scope.mjs");
+    const { mkGroup } = await import("../../static/js/engine/document.mjs");
+    const model = new Model({
+      layers: [mkLayer({ children: [
+        mkGroup({ children: [mkRect({ x: 5, y: 5, width: 10, height: 10 })] }),
+      ] })],
+      selection: [], artboards: [],
+    });
+    const store = new StateStore();
+    const ws = await workspaceDataPromise;
+    registerTools(ws.tools, store);
+    // Dispatch a click on the inner rect. Selection tool calls
+    // hit_test, which should resolve to the GROUP path [0, 0],
+    // not the inner rect at [0, 0, 0].
+    dispatchEvent("selection",
+      { type: "mousedown", x: 8, y: 8, modifiers: {} },
+      store, { model });
+    assert.deepEqual(model.selection[0], [0, 0]);
+  });
+
+  it("hit_test_deep recurses into groups (returns leaf path)", async () => {
+    const { mkGroup } = await import("../../static/js/engine/document.mjs");
+    const model = new Model({
+      layers: [mkLayer({ children: [
+        mkGroup({ children: [mkRect({ x: 5, y: 5, width: 10, height: 10 })] }),
+      ] })],
+      selection: [], artboards: [],
+    });
+    const store = new StateStore();
+    const ws = await workspaceDataPromise;
+    registerTools(ws.tools, store);
+    // Interior Selection uses hit_test_deep; click on the inner
+    // rect should resolve to the leaf path [0, 0, 0].
+    dispatchEvent("interior_selection",
+      { type: "mousedown", x: 8, y: 8, modifiers: {} },
+      store, { model });
+    assert.deepEqual(model.selection[0], [0, 0, 0]);
+  });
+});
+
 describe("hit_test primitive", () => {
   beforeEach(_resetForTesting);
 
