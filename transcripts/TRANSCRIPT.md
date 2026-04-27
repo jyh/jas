@@ -1541,3 +1541,60 @@ Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements. Rank your responses in priority
 from high to low, and giving each a number. What are the benefits? What are the
 downsides? Be ready for a deep dive into any of the suggestions.
+
+# Flask
+
+Let's suppose we want to extend the flask app to include all features, but we
+want it to remain generic, all jas-specific features are in yaml. What
+implications does this have?
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+# Generic
+
+Where do we stand with the following policy, "All apps should use generic yaml
+renders wherever possible. Native-code is discouraged."
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+# Brushes
+
+Read BRUSHES.md
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+# Paintbrush
+
+Read PAINTBRUSH_TOOL.md
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+# Blob brush
+
+Read BLOB_BRUSH_TOOL.md
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+# Magic Wand
+
+Read MAGIC_WAND.md
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
