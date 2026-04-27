@@ -510,6 +510,9 @@
   // into the panel-local field driving the UI input.
   var STATE_TO_PANEL_FIELD = {
     stroke_width: "weight",
+    stroke_cap: "cap",
+    stroke_join: "join",
+    stroke_miter_limit: "miter_limit",
   };
 
   function setState(key, value) {
