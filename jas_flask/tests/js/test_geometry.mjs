@@ -45,6 +45,52 @@ describe("elementBounds — leaf types", () => {
     assert.deepEqual(b, { x: 0, y: 0, width: 100, height: 50 });
   });
 
+  it("path bounds include cubic-Bezier extrema, not just endpoints", () => {
+    // Symmetric cubic from (0,0) to (100,0) with both control
+    // points at y=-100 — the curve dips below the endpoints. The
+    // analytical extremum lies on y, at t=0.5; cubic_eval gives
+    //   y = 3 · 0.5 · 0.5² · (-100) + 3 · 0.5² · 0.5 · (-100)
+    //     = -75
+    // So bounds should include y down to -75. (Old endpoint-only
+    // bounds would have y = 0, missing the dip entirely.)
+    const b = elementBounds(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "C", x1: 0, y1: -100, x2: 100, y2: -100, x: 100, y: 0 },
+      ],
+    }));
+    assert.equal(b.x, 0);
+    assert.equal(b.width, 100);
+    // Allow a hair of float slop.
+    assert.ok(Math.abs(b.y - (-75)) < 1e-6, `expected y≈-75, got ${b.y}`);
+    assert.ok(Math.abs(b.height - 75) < 1e-6, `expected height≈75, got ${b.height}`);
+  });
+
+  it("path bounds include quadratic-Bezier extrema", () => {
+    // Q from (0,0) to (100,0) with control at (50,100). Apex at
+    // t=0.5: y = 2·0.5·0.5·100 = 50. (Endpoint-only bounds would
+    // miss it.)
+    const b = elementBounds(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "Q", x1: 50, y1: 100, x: 100, y: 0 },
+      ],
+    }));
+    assert.ok(Math.abs(b.height - 50) < 1e-6, `expected height≈50, got ${b.height}`);
+  });
+
+  it("path bounds: cubic with no internal extrema doesn't grow past endpoints", () => {
+    // Monotonic cubic — control points stay inside the endpoint
+    // span on x and y. No internal extrema; bounds match endpoints.
+    const b = elementBounds(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "C", x1: 30, y1: 30, x2: 70, y2: 70, x: 100, y: 100 },
+      ],
+    }));
+    assert.deepEqual(b, { x: 0, y: 0, width: 100, height: 100 });
+  });
+
   it("text estimates width from content", () => {
     const b = elementBounds(mkText({ x: 0, y: 12, content: "abc", font_size: 10 }));
     assert.equal(b.width, 3 * 10 * 0.55);
