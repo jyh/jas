@@ -852,6 +852,31 @@
       var psKey = resolve(effect.set_panel_state.key, ctx);
       var psVal = resolve(effect.set_panel_state.value, ctx);
       panelState[psKey] = psVal;
+      // QoL: switching the Color panel into Web Safe RGB also snaps
+      // the active fill / stroke colors. Strict spec says mode change
+      // doesn't touch the color, but every channel slider shown in
+      // Web Safe RGB rounds to steps of 51, so leaving an off-grid
+      // color behind is just confusing.
+      if (psKey === "mode" && psVal === "web_safe_rgb") {
+        var snap = function (hex) {
+          if (typeof hex !== "string" || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+          var r = parseInt(hex.slice(1, 3), 16);
+          var g = parseInt(hex.slice(3, 5), 16);
+          var b = parseInt(hex.slice(5, 7), 16);
+          r = Math.min(255, Math.round(r / 51) * 51);
+          g = Math.min(255, Math.round(g / 51) * 51);
+          b = Math.min(255, Math.round(b / 51) * 51);
+          var h2 = function (n) { var s = n.toString(16); return s.length === 1 ? "0" + s : s; };
+          return "#" + h2(r) + h2(g) + h2(b);
+        };
+        var fc = state.fill_color;
+        var sc = state.stroke_color;
+        var snappedFC = snap(fc);
+        var snappedSC = snap(sc);
+        if (typeof fc === "string" && snappedFC !== fc) setState("fill_color", snappedFC);
+        if (typeof sc === "string" && snappedSC !== sc) setState("stroke_color", snappedSC);
+        syncPanelColorState();
+      }
       updateBindings(null, null);
       return;
     }
