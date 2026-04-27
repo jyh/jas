@@ -213,6 +213,14 @@ export function renderSelectionLayer(doc) {
     const half = HANDLE_SIZE / 2;
     const partial = partialCpsForPath(doc, path);
     const cps = controlPoints(elem);
+    // For selected anchors of a Path, also draw the in/out Bezier
+    // handle indicators (line + 3px circle at each non-coincident
+    // handle position). Without these, the user has no visible
+    // affordance to drag handles via the Partial Selection tool.
+    if (elem.type === "path" && Array.isArray(elem.d)) {
+      const handleParts = bezierHandleIndicators(elem, partial);
+      if (handleParts.length) parts.push(handleParts);
+    }
     for (let i = 0; i < cps.length; i++) {
       const [px, py] = cps[i];
       const selected = partial == null || partial.includes(i);
@@ -225,6 +233,53 @@ export function renderSelectionLayer(doc) {
     }
   }
   return parts.join("");
+}
+
+// Render in/out handle indicators (anchor→handle line + circle at
+// the handle position) for every Path anchor that's selected and
+// has at least one non-coincident Bezier handle. `partial` is the
+// partial-CP array (null = SelectionKind::All — every anchor counts
+// as selected). Mirrors the live affordance the Pen overlay shows
+// during placement; here it's the post-commit version, draggable
+// by the Partial Selection tool.
+function bezierHandleIndicators(elem, partial) {
+  const out = [];
+  // Map each non-Z command index to anchor index.
+  let ai = 0;
+  for (let i = 0; i < elem.d.length; i++) {
+    const c = elem.d[i];
+    if (c.type === "Z") continue;
+    const anchorIdx = ai++;
+    const selected = partial == null || partial.includes(anchorIdx);
+    if (!selected) continue;
+    const ax = typeof c.x === "number" ? c.x : 0;
+    const ay = typeof c.y === "number" ? c.y : 0;
+    // In-handle on this command's x2/y2 (C / S).
+    if (typeof c.x2 === "number" && typeof c.y2 === "number") {
+      const dx = c.x2 - ax, dy = c.y2 - ay;
+      if (dx * dx + dy * dy > 0.01) {
+        out.push(handleIndicator(ax, ay, c.x2, c.y2));
+      }
+    }
+    // Out-handle on the next command's x1/y1 (C / S / Q).
+    const next = i + 1 < elem.d.length ? elem.d[i + 1] : null;
+    if (next && typeof next.x1 === "number" && typeof next.y1 === "number") {
+      const dx = next.x1 - ax, dy = next.y1 - ay;
+      if (dx * dx + dy * dy > 0.01) {
+        out.push(handleIndicator(ax, ay, next.x1, next.y1));
+      }
+    }
+  }
+  return out.join("");
+}
+
+function handleIndicator(ax, ay, hx, hy) {
+  return (
+    `<line x1="${ax}" y1="${ay}" x2="${hx}" y2="${hy}" ` +
+    `stroke="${SELECTION_COLOR}" stroke-width="1"/>` +
+    `<circle cx="${hx}" cy="${hy}" r="3" ` +
+    `fill="white" stroke="${SELECTION_COLOR}" stroke-width="1"/>`
+  );
 }
 
 // ─── Tool overlay layer ─────────────────────────────────────
