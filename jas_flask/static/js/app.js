@@ -504,6 +504,14 @@
 
   // ── State mutation + reactive update ───────────────────────
 
+  // Inverse of PANEL_FIELD_TO_STATE — when global state.* changes
+  // (e.g. selection-sync from canvas_bootstrap pushes the active
+  // element's stroke-width onto state.stroke_width), mirror it back
+  // into the panel-local field driving the UI input.
+  var STATE_TO_PANEL_FIELD = {
+    stroke_width: "weight",
+  };
+
   function setState(key, value) {
     var old = state[key];
     state[key] = value;
@@ -514,6 +522,11 @@
       // remains the canonical state holder for panels.
       var mirror = (globalThis.JAS && globalThis.JAS.mirrorState);
       if (typeof mirror === "function") mirror(key, value);
+      // Reflect into panel-local state so any input bound to
+      // panel.<field> picks up the new value at the next
+      // updateBindings tick.
+      var panelField = STATE_TO_PANEL_FIELD[key];
+      if (panelField) panelState[panelField] = value;
       updateBindings(key, value);
     }
   }

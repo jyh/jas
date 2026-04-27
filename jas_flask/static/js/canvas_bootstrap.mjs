@@ -391,10 +391,62 @@ function adoptCanvas(canvasEl) {
   canvases.set(id, { canvasEl, model });
   model.addListener(() => renderCanvas(canvasEl, model));
   model.addListener(scheduleSave);
+  // Selection → panel sync. Whenever the model mutates, mirror the
+  // first selected element's fill / stroke / stroke-width onto the
+  // global state.* keys (and through APP_SET_STATE → panelState),
+  // so the Color and Stroke panels reflect what's actually selected.
+  // Skips when the canvas isn't the active one — non-active models
+  // shouldn't drive the (single) panel state.
+  let lastSelectionKey = "";
+  model.addListener(() => {
+    if (id !== activeCanvasId) return;
+    const sel = model.document.selection || [];
+    const key = sel.map((p) => p.join(",")).join("|");
+    if (key === lastSelectionKey) return;
+    lastSelectionKey = key;
+    if (sel.length === 0) return;
+    const elem = walkPath(model.document, sel[0]);
+    if (!elem) return;
+    syncStateFromElement(elem);
+  });
   renderCanvas(canvasEl, model);
   wireCanvasEvents(canvasEl, model);
   applyCanvasCursors();
   refreshActiveCanvas();
+}
+
+function walkPath(doc, path) {
+  if (!doc || !Array.isArray(doc.layers) || !Array.isArray(path) || path.length === 0) return null;
+  let cur = doc.layers[path[0]];
+  for (let i = 1; i < path.length; i++) {
+    if (!cur || !Array.isArray(cur.children)) return null;
+    cur = cur.children[path[i]];
+  }
+  return cur || null;
+}
+
+// Element → state mirror. Skips writes when the value matches what
+// the global state already has (so we don't loop with the
+// PANEL_TO_ATTR writer further down). Mirrors via APP_SET_STATE so
+// app.js's panelState (and any data-bind UI) refreshes.
+function syncStateFromElement(elem) {
+  if (!elem) return;
+  const setState = globalThis.APP_SET_STATE;
+  if (typeof setState !== "function") return;
+  if (typeof elem.fill === "string" || elem.fill === null) {
+    setState("fill_color", elem.fill === null ? null : elem.fill);
+  }
+  if (typeof elem.stroke === "string" || elem.stroke === null) {
+    setState("stroke_color", elem.stroke === null ? null : elem.stroke);
+  } else if (elem.stroke && typeof elem.stroke === "object" && elem.stroke.color) {
+    setState("stroke_color", elem.stroke.color);
+  }
+  if (typeof elem["stroke-width"] === "number") {
+    setState("stroke_width", elem["stroke-width"]);
+  } else if (elem.stroke && typeof elem.stroke === "object"
+             && typeof elem.stroke.width === "number") {
+    setState("stroke_width", elem.stroke.width);
+  }
 }
 
 // Map the YAML tool's `cursor:` field to a CSS cursor value and
