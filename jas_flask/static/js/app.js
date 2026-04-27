@@ -2846,7 +2846,14 @@
         var hbDiv = document.createElement("div");
         hbDiv.className = "dropdown d-inline-block";
         var hbBtn = document.createElement("button");
-        hbBtn.className = "btn btn-sm p-0 dropdown-toggle";
+        // Match the server-side renderer in renderer.py: no
+        // `dropdown-toggle` class. That class triggers Bootstrap's
+        // .dropdown-toggle::after caret, leaving a vestigial down-
+        // pointing triangle next to the hamburger ≡ that adds nothing
+        // (the ≡ already signals "menu opens here") and crowds the
+        // header. The dropdown itself still works via
+        // data-bs-toggle="dropdown" on the wrapper.
+        hbBtn.className = "btn btn-sm p-0";
         hbBtn.setAttribute("data-bs-toggle", "dropdown");
         hbBtn.style.cssText = "color:#888;background:transparent;border:none;font-size:14px";
         hbBtn.textContent = "\u2261";
