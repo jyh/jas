@@ -2157,7 +2157,22 @@
       if (hexBind !== "{{panel.hex}}" && hexBind !== "panel.hex") return;
       var raw = el.value.replace(/^#/, "").trim();
       if (/^[0-9a-fA-F]{6}$/.test(raw)) {
-        var newColor = "#" + raw.toLowerCase();
+        var r = parseInt(raw.slice(0, 2), 16);
+        var g = parseInt(raw.slice(2, 4), 16);
+        var b = parseInt(raw.slice(4, 6), 16);
+        // Web Safe RGB mode snaps each channel to the nearest of
+        // 0/51/102/153/204/255 — Rust / Swift / OCaml / Python all
+        // do this on commit.
+        if (panelState.mode === "web_safe_rgb") {
+          r = Math.min(255, Math.round(r / 51) * 51);
+          g = Math.min(255, Math.round(g / 51) * 51);
+          b = Math.min(255, Math.round(b / 51) * 51);
+        }
+        var hex2 = function (n) {
+          var s = n.toString(16);
+          return s.length === 1 ? "0" + s : s;
+        };
+        var newColor = "#" + hex2(r) + hex2(g) + hex2(b);
         panelColorSyncLocked = true;
         setState(state.fill_on_top ? "fill_color" : "stroke_color", newColor);
         panelColorSyncLocked = false;
