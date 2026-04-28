@@ -692,7 +692,7 @@ user-visible bugs. Batch by app: run a full column at a time.
 - **STR-300** [wired] Editing weight commits via `apply_stroke_panel_to_selection`.
       Setup: Selection with weight 1. Do: Enter "5".
       Expect: SVG `stroke-width="5"` on element.
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-04-27  · note: parity sweep — surfaced + fixed (a) the canvas was painting the entire viewport white so the artboard fill (default Transparent) blended in: now repaints in #3c3c3c with Transparent artboards rendered as white; (b) every YAML drawing / selection / partial-selection tool fed raw element_coordinates() into element geometry, which displaced commits by view_offset_x (~400 px on a centered Letter artboard): now event payload also carries doc_x / doc_y, and rect / rounded_rect / line / polygon / star / ellipse / pen / pencil / selection / interior_selection / partial_selection route doc-touching writes through doc-space (overlay-only writes still use screen-space).
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
@@ -702,7 +702,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       Do: Click `stk_cap_round`.
       Expect: SVG attr present on element; default Butt → omitted on
               return.
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-04-27
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
