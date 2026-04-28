@@ -104,29 +104,44 @@ Given two adjacent alignment points and whether the subpath is closed:
 
 For closed subpaths, all boundary kinds are `INTERIOR_INTERIOR`.
 
-### `solve_segment_period`
+### `solve_segment_scale`
 
-Given segment length `L`, base period `P` (sum of `dash_array`), and
-boundary kind, find the integer `n` and scale `s` such that the
-effective length of `n` scaled periods matches `L` per the boundary
-kind. The scale `s` is the per-segment flex applied uniformly to every
-dash and gap in the pattern.
+Given segment length `L`, base period `P = d + g` (sum of the first
+two pattern entries), first-dash length `d`, and boundary kind, find
+the integer `m` and scale `s` such that the segment's dash layout
+fits exactly in length `L`. The scale `s` is the per-segment flex
+applied uniformly to every dash and gap in the pattern.
+
+The layouts and resulting formulas:
 
 ```
-INTERIOR_INTERIOR / END_END:
-  n = round(L / P)
-  s = L / (n * P)
+II — half-dash, gap, dash, gap, ..., dash, gap, half-dash
+   layout: m gaps + (m-1) full dashes + 2 half-dashes = m*P
+   m = max(1, round(L / P))
+   s = L / (m * P)
 
-END_INTERIOR / INTERIOR_END:
-  n = max(1, round((L / P) + 0.5))     # +0.5 to account for the half-dash overhang
-  s = L / ((n - 0.5) * P)
+EE — dash, gap, dash, ..., gap, dash
+   layout: m gaps + (m+1) full dashes = m*P + d
+   m = max(0, round((L - d) / P))
+   s = L / (m*P + d)
+
+EI / IE — dash, gap, ..., gap, dash, gap, half-dash  (or symmetric)
+   layout: m gaps + m full dashes + 1 half-dash = m*P + 0.5*d
+   m = max(1, round((L - 0.5*d) / P))
+   s = L / (m*P + 0.5*d)
 ```
 
-Edge case: `n = 0` would mean "fewer than one dash period fits" → snap
-to a single dash spanning the segment. Specifically: emit one dash
-covering the entire segment (between the two alignment points), no
-gap. This is rare in practice (very short segments at small dash
-sizes) and looks correct: the segment is "all dash".
+The `0.5*d` term reflects that the half-dash absorbed at an interior
+boundary is half a *dash* (not half a period). The earlier draft of
+this spec used `(n - 0.5) * P`, which only matched for d = P (a
+solid stroke). The corrected formulas above pass the per-language
+parity tests for all dash:gap ratios.
+
+Edge case: `m = 0` for II / EI / IE (or `m = 0` for EE with `d > L`)
+means the segment is shorter than one dash period. Snap to a single
+dash covering the entire segment (no gap). Rare in practice (very
+short segments at small dash sizes) and looks correct: the segment
+is "all dash".
 
 ### `walk_dashes`
 
