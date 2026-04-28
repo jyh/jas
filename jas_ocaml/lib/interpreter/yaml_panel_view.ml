@@ -96,6 +96,7 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "slider" -> render_slider ~packing ~ctx el
   | "number_input" -> render_number_input ~packing ~ctx el
   | "text_input" -> render_text_input ~packing ~ctx el
+  | "length_input" -> render_length_input ~packing ~ctx el
   | "select" -> render_select ~packing ~ctx el
   | "toggle" | "checkbox" -> render_toggle ~packing ~ctx el
   | "combo_box" -> render_combo_box ~packing ~ctx el
@@ -258,6 +259,49 @@ and render_text_input ~packing ~ctx el =
        _write_back_bind expr (`String entry#text);
        false))
    | None -> ())
+
+and render_length_input ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let unit = el |> member "unit" |> to_string_option |> Option.value ~default:"pt" in
+  let precision = el |> member "precision" |> to_int_option |> Option.value ~default:2 in
+  let placeholder = el |> member "placeholder" |> to_string_option |> Option.value ~default:"" in
+  let nullable = el |> member "nullable" |> to_bool_option |> Option.value ~default:false in
+  let min_clamp = el |> member "min" |> to_number_option in
+  let max_clamp = el |> member "max" |> to_number_option in
+  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  let pt_value : float option = match bind_expr with
+    | Some expr ->
+      (match Expr_eval.evaluate expr ctx with
+       | Expr_eval.Number n -> Some n
+       | Expr_eval.Null -> None
+       | _ -> None)
+    | None -> None in
+  let initial = Length.format pt_value ~unit ~precision in
+  let entry = GEdit.entry ~packing ~text:initial () in
+  if placeholder <> "" then entry#set_placeholder_text placeholder;
+  let commit () =
+    match bind_expr with
+    | None -> ()
+    | Some expr ->
+      let entered = entry#text in
+      let trimmed = String.trim entered in
+      if trimmed = "" then begin
+        if nullable then _write_back_bind expr `Null
+        (* Non-nullable empty: revert by re-displaying the bound value. *)
+        else entry#set_text initial
+      end else begin
+        match Length.parse entered ~default_unit:unit with
+        | None -> entry#set_text initial
+        | Some v ->
+          let v = match min_clamp with Some lo when v < lo -> lo | _ -> v in
+          let v = match max_clamp with Some hi when v > hi -> hi | _ -> v in
+          _write_back_bind expr (`Float v);
+          (* Reflect the clamped / re-formatted value back. *)
+          entry#set_text (Length.format (Some v) ~unit ~precision)
+      end
+  in
+  ignore (entry#connect#activate ~callback:commit);
+  ignore (entry#event#connect#focus_out ~callback:(fun _ -> commit (); false))
 
 and render_select ~packing ~ctx el =
   let open Yojson.Safe.Util in
