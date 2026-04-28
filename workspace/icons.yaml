@@ -349,19 +349,26 @@ icons:
       <path d="M3,5 L7,2 L7,4 L13,4 L13,6 L7,6 L7,8 Z" fill="currentColor"/>
       <path d="M13,11 L9,14 L9,12 L3,12 L3,10 L9,10 L9,8 Z" fill="currentColor"/>
 
-  dash_even:
+  dash_preserve:
     viewbox: "0 0 16 16"
     svg: >
-      <line x1="1" y1="8" x2="5" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
-      <line x1="7" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
-      <line x1="13" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="1" y1="6" x2="5" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="7" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="13" y1="6" x2="15" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <circle cx="2"  cy="11" r="1.2" fill="currentColor"/>
+      <circle cx="6"  cy="11" r="1.2" fill="currentColor"/>
+      <circle cx="11" cy="11" r="1.2" fill="currentColor"/>
+      <circle cx="14" cy="11" r="1.2" fill="currentColor"/>
 
-  dash_dot:
+  dash_align_anchors:
     viewbox: "0 0 16 16"
     svg: >
-      <line x1="1" y1="8" x2="5" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
-      <circle cx="8" cy="8" r="1" fill="currentColor"/>
-      <line x1="11" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="1" y1="6" x2="5" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="7" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="13" y1="6" x2="15" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <circle cx="3"  cy="11" r="1.2" fill="currentColor"/>
+      <circle cx="9"  cy="11" r="1.2" fill="currentColor"/>
+      <circle cx="14" cy="11" r="1.2" fill="currentColor"/>
 
   arrow_tip_at_end:
     viewbox: "0 0 16 16"
