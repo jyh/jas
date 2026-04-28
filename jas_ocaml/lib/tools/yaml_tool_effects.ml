@@ -749,6 +749,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
           stroke_miter_limit = 10.0;
           stroke_align = Center;
           stroke_dash_pattern = [];
+          stroke_dash_align_anchors = false;
           stroke_start_arrow = Arrow_none;
           stroke_end_arrow = Arrow_none;
           stroke_start_arrow_scale = 100.0;

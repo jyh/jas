@@ -78,6 +78,7 @@ let get_entry (key : string) : schema_entry option =
   | "stroke_arrow_align"        -> Some (mk (Enum stroke_arrow_align_values))
   | "stroke_profile"            -> Some (mk (Enum stroke_profile_values))
   | "stroke_profile_flipped"    -> Some (mk Bool)
+  | "stroke_dash_align_anchors" -> Some (mk Bool)
   | "fill_on_top" | "toolbar_visible" | "canvas_visible"
   | "dock_visible" | "canvas_maximized" | "dock_collapsed"
                                 -> Some (mk Bool)

@@ -533,6 +533,7 @@ let stroke_render_keys = [
   "stroke_align_stroke"; "stroke_start_arrowhead"; "stroke_end_arrowhead";
   "stroke_start_arrowhead_scale"; "stroke_end_arrowhead_scale";
   "stroke_arrow_align"; "stroke_profile"; "stroke_profile_flipped";
+  "stroke_dash_align_anchors";
 ]
 
 let json_to_float_opt = function
@@ -598,6 +599,8 @@ let apply_stroke_panel_to_selection (store : State_store.t)
   let arrow_align = match json_to_string_default "tip_at_end" (get "stroke_arrow_align") with
     | "center_at_end" -> Element.Center_at_end
     | _ -> Element.Tip_at_end in
+  let dash_align_anchors = json_to_bool_default false
+    (get "stroke_dash_align_anchors") in
   (* Get base stroke from selection or default *)
   let doc = ctrl#document in
   let base_stroke =
@@ -623,7 +626,8 @@ let apply_stroke_panel_to_selection (store : State_store.t)
     | Some ds -> ds.stroke_width
     | None -> base.stroke_width in
   let new_stroke = Element.make_stroke ~width ~linecap:cap ~linejoin:join
-    ~miter_limit ~align ~dash_pattern ~start_arrow ~end_arrow
+    ~miter_limit ~align ~dash_pattern ~dash_align_anchors
+    ~start_arrow ~end_arrow
     ~start_arrow_scale ~end_arrow_scale ~arrow_align
     ~opacity:base.stroke_opacity base.stroke_color in
   ctrl#model#set_default_stroke (Some new_stroke);
@@ -693,7 +697,9 @@ let sync_stroke_panel_from_selection (store : State_store.t)
         (`Float s.stroke_end_arrow_scale);
       let arrow_align_str = match s.stroke_arrow_align with
         | Tip_at_end -> "tip_at_end" | Center_at_end -> "center_at_end" in
-      State_store.set store "stroke_arrow_align" (`String arrow_align_str)
+      State_store.set store "stroke_arrow_align" (`String arrow_align_str);
+      State_store.set store "stroke_dash_align_anchors"
+        (`Bool s.stroke_dash_align_anchors)
 
 (** Check if a state key is a rendering-affecting stroke key. *)
 let is_stroke_render_key key =
