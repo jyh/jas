@@ -759,6 +759,39 @@ class SvgImportTest(absltest.TestCase):
     # rejects colon-prefixed attribute names without an explicit
     # namespace declaration on the SVG root.
 
+    # ── DASH_ALIGN.md §Persistence ─────────────────────────────
+
+    def test_dash_align_anchors_roundtrips_when_true(self):
+        stroke = Stroke(color=RgbColor(0, 0, 0), width=1.0,
+                        dash_align_anchors=True)
+        rect = Rect(x=0, y=0, width=100, height=60,
+                    fill=None, stroke=stroke)
+        doc = Document(layers=(Layer(children=(rect,)),))
+        svg = document_to_svg(doc)
+        self.assertIn('data-jas-dash-align-anchors="true"', svg)
+        doc2 = svg_to_document(svg)
+        r = doc2.layers[0].children[0]
+        self.assertIsInstance(r, Rect)
+        self.assertTrue(r.stroke.dash_align_anchors)
+
+    def test_dash_align_anchors_omitted_when_false(self):
+        stroke = Stroke(color=RgbColor(0, 0, 0), width=1.0)
+        rect = Rect(x=0, y=0, width=100, height=60,
+                    fill=None, stroke=stroke)
+        doc = Document(layers=(Layer(children=(rect,)),))
+        svg = document_to_svg(doc)
+        self.assertNotIn("data-jas-dash-align-anchors", svg)
+
+    def test_dash_align_anchors_defaults_false_on_import(self):
+        svg = ('<?xml version="1.0"?>'
+               '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
+               '<rect x="0" y="0" width="100" height="60" '
+               'stroke="black" stroke-width="1"/></svg>')
+        doc = svg_to_document(svg)
+        r = doc.layers[0].children[0]
+        self.assertIsInstance(r, Rect)
+        self.assertFalse(r.stroke.dash_align_anchors)
+
 
 if __name__ == "__main__":
     absltest.main()

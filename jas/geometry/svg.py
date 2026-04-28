@@ -64,6 +64,11 @@ def _stroke_attrs(stroke: Stroke | None) -> str:
         parts.append(f' stroke-linejoin="{stroke.linejoin.value}"')
     if stroke.opacity < 1.0:
         parts.append(f' stroke-opacity="{_fmt(stroke.opacity)}"')
+    # Workspace-private attribute — see DASH_ALIGN.md §Persistence.
+    # Identity-omitted when False; round-trips through jas-authored
+    # files; ignored on import from non-jas SVG.
+    if stroke.dash_align_anchors:
+        parts.append(' data-jas-dash-align-anchors="true"')
     return "".join(parts)
 
 
@@ -510,7 +515,10 @@ def _parse_stroke(node: ET.Element) -> Stroke | None:
     lc = {"butt": LineCap.BUTT, "round": LineCap.ROUND, "square": LineCap.SQUARE}.get(lc_str, LineCap.BUTT)
     lj = {"miter": LineJoin.MITER, "round": LineJoin.ROUND, "bevel": LineJoin.BEVEL}.get(lj_str, LineJoin.MITER)
     opacity = _safe_float(node.get("stroke-opacity"), 1.0)
-    return Stroke(c, width, lc, lj, opacity)
+    dash_align_raw = (node.get("data-jas-dash-align-anchors") or "").strip()
+    dash_align_anchors = dash_align_raw in ("true", "1")
+    return Stroke(c, width, lc, lj, opacity,
+                  dash_align_anchors=dash_align_anchors)
 
 
 def _parse_transform(node: ET.Element) -> Transform | None:
