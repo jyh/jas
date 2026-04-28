@@ -39,6 +39,7 @@ let black_stroke width : Element.stroke = {
   stroke_miter_limit = 4.0;
   stroke_align = Element.Center;
   stroke_dash_pattern = [];
+  stroke_dash_align_anchors = false;
   stroke_start_arrow = Element.Arrow_none;
   stroke_end_arrow = Element.Arrow_none;
   stroke_start_arrow_scale = 1.0;

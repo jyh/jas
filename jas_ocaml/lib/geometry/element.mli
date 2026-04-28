@@ -156,6 +156,11 @@ type stroke = {
   stroke_miter_limit : float;
   stroke_align : stroke_align;
   stroke_dash_pattern : float list;
+  (** When true, per-segment dash and gap lengths flex so a dash is
+      centered on every anchor and a full dash sits at each open path
+      end. When false (default), the dash pattern lays out by exact
+      length along the path. See [DASH_ALIGN.md]. *)
+  stroke_dash_align_anchors : bool;
   stroke_start_arrow : arrowhead;
   stroke_end_arrow : arrowhead;
   stroke_start_arrow_scale : float;
@@ -564,6 +569,7 @@ val make_color : ?a:float -> float -> float -> float -> color
 val make_fill : ?opacity:float -> color -> fill
 val make_stroke : ?width:float -> ?linecap:linecap -> ?linejoin:linejoin
   -> ?miter_limit:float -> ?align:stroke_align -> ?dash_pattern:float list
+  -> ?dash_align_anchors:bool
   -> ?start_arrow:arrowhead -> ?end_arrow:arrowhead
   -> ?start_arrow_scale:float -> ?end_arrow_scale:float
   -> ?arrow_align:arrow_align -> ?opacity:float -> color -> stroke

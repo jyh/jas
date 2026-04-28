@@ -605,6 +605,7 @@ let parse_stroke j =
            stroke_miter_limit = miter_limit;
            stroke_align = align;
            stroke_dash_pattern = dash_pattern;
+           stroke_dash_align_anchors = false;
            stroke_start_arrow = start_arrow;
            stroke_end_arrow = end_arrow;
            stroke_start_arrow_scale = start_arrow_scale;

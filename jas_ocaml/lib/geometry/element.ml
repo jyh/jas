@@ -430,6 +430,11 @@ type stroke = {
   stroke_miter_limit : float;
   stroke_align : stroke_align;
   stroke_dash_pattern : float list;
+  (* When true, per-segment dash and gap lengths flex so a dash is
+     centered on every anchor and a full dash sits at each open path
+     end. When false (default), the dash pattern lays out by exact
+     length along the path. See DASH_ALIGN.md. *)
+  stroke_dash_align_anchors : bool;
   stroke_start_arrow : arrowhead;
   stroke_end_arrow : arrowhead;
   stroke_start_arrow_scale : float;
@@ -1025,6 +1030,7 @@ let make_fill ?(opacity = 1.0) color = { fill_color = color; fill_opacity = opac
 
 let make_stroke ?(width = 1.0) ?(linecap = Butt) ?(linejoin = Miter)
     ?(miter_limit = 10.0) ?(align = Center) ?(dash_pattern = [])
+    ?(dash_align_anchors = false)
     ?(start_arrow = Arrow_none) ?(end_arrow = Arrow_none)
     ?(start_arrow_scale = 100.0) ?(end_arrow_scale = 100.0)
     ?(arrow_align = Tip_at_end) ?(opacity = 1.0) color =
@@ -1032,6 +1038,7 @@ let make_stroke ?(width = 1.0) ?(linecap = Butt) ?(linejoin = Miter)
     stroke_linecap = linecap; stroke_linejoin = linejoin;
     stroke_miter_limit = miter_limit; stroke_align = align;
     stroke_dash_pattern = dash_pattern;
+    stroke_dash_align_anchors = dash_align_anchors;
     stroke_start_arrow = start_arrow; stroke_end_arrow = end_arrow;
     stroke_start_arrow_scale = start_arrow_scale;
     stroke_end_arrow_scale = end_arrow_scale;

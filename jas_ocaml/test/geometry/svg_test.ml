@@ -787,4 +787,56 @@ let () =
         assert (contains {|urn:jas:1:hyphenate-bias="0.5"|});
         assert (contains {|urn:jas:1:hyphenate-capitalized="true"|}));
     ];
+    "dash_align_anchors", [
+      Alcotest.test_case "roundtrips when true" `Quick (fun () ->
+        let stroke = make_stroke ~dash_align_anchors:true
+          (make_color 0.0 0.0 0.0) in
+        let doc = make_document [|make_layer [|
+          make_rect ~stroke:(Some stroke) 0.0 0.0 100.0 60.0
+        |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains pat =
+          try let _ : int = Str.search_forward (Str.regexp_string pat) svg 0
+              in true
+          with Not_found -> false in
+        assert (contains {|data-jas-dash-align-anchors="true"|});
+        let doc2 = roundtrip doc in
+        let layers = doc2.layers in
+        assert (Array.length layers > 0);
+        match Array.get layers 0 with
+        | Layer { children; _ } ->
+          (match Array.get children 0 with
+           | Rect r ->
+             (match r.stroke with
+              | Some s -> assert s.stroke_dash_align_anchors
+              | None -> assert false)
+           | _ -> assert false)
+        | _ -> assert false);
+
+      Alcotest.test_case "omitted when false" `Quick (fun () ->
+        let stroke = make_stroke (make_color 0.0 0.0 0.0) in
+        let doc = make_document [|make_layer [|
+          make_rect ~stroke:(Some stroke) 0.0 0.0 100.0 60.0
+        |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let absent pat =
+          try let _ = Str.search_forward (Str.regexp_string pat) svg 0 in false
+          with Not_found -> true in
+        assert (absent "data-jas-dash-align-anchors"));
+
+      Alcotest.test_case "defaults false on import without attr" `Quick (fun () ->
+        let svg = {|<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="0" y="0" width="100" height="60" stroke="black" stroke-width="1"/></svg>|} in
+        let doc = Jas.Svg.svg_to_document svg in
+        let layers = doc.layers in
+        assert (Array.length layers > 0);
+        match Array.get layers 0 with
+        | Layer { children; _ } ->
+          (match Array.get children 0 with
+           | Rect r ->
+             (match r.stroke with
+              | Some s -> assert (not s.stroke_dash_align_anchors)
+              | None -> assert false)
+           | _ -> assert false)
+        | _ -> assert false);
+    ];
   ]

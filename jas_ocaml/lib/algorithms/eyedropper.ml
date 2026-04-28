@@ -259,6 +259,7 @@ let apply_stroke_with_subs
             stroke_miter_limit = 4.0;
             stroke_align = Element.Center;
             stroke_dash_pattern = [];
+            stroke_dash_align_anchors = false;
             stroke_start_arrow = Element.Arrow_none;
             stroke_end_arrow = Element.Arrow_none;
             stroke_start_arrow_scale = 1.0;
@@ -284,6 +285,7 @@ let apply_stroke_with_subs
         stroke_dash_pattern =
           if cfg.stroke_dash then s.stroke_dash_pattern
           else existing.stroke_dash_pattern;
+        stroke_dash_align_anchors = existing.stroke_dash_align_anchors;
         stroke_start_arrow =
           if cfg.stroke_arrowheads then s.stroke_start_arrow
           else existing.stroke_start_arrow;
@@ -475,6 +477,7 @@ let stroke_of_json : Yojson.Safe.t -> Element.stroke option = function
         (match get "dash_pattern" with
          | Some j -> dash_pattern_of_json j
          | None -> []);
+      stroke_dash_align_anchors = false;
       stroke_start_arrow =
         Element.arrowhead_of_string (string_of "start_arrow" "none");
       stroke_end_arrow =
