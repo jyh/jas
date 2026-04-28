@@ -471,6 +471,11 @@ public struct Stroke: Equatable, Hashable {
     public let miterLimit: Double
     public let align: StrokeAlign
     public let dashPattern: [Double]
+    /// When true, per-segment dash and gap lengths flex so a dash is
+    /// centered on every anchor and a full dash sits at each open path
+    /// end. When false (default), the dash pattern lays out by exact
+    /// length along the path. See DASH_ALIGN.md.
+    public let dashAlignAnchors: Bool
     public let startArrow: Arrowhead
     public let endArrow: Arrowhead
     public let startArrowScale: Double
@@ -480,7 +485,8 @@ public struct Stroke: Equatable, Hashable {
 
     public init(color: Color, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter,
                 miterLimit: Double = 10.0, align: StrokeAlign = .center,
-                dashPattern: [Double] = [], startArrow: Arrowhead = .none, endArrow: Arrowhead = .none,
+                dashPattern: [Double] = [], dashAlignAnchors: Bool = false,
+                startArrow: Arrowhead = .none, endArrow: Arrowhead = .none,
                 startArrowScale: Double = 100.0, endArrowScale: Double = 100.0,
                 arrowAlign: ArrowAlign = .tipAtEnd, opacity: Double = 1.0) {
         self.color = color
@@ -490,6 +496,7 @@ public struct Stroke: Equatable, Hashable {
         self.miterLimit = miterLimit
         self.align = align
         self.dashPattern = dashPattern
+        self.dashAlignAnchors = dashAlignAnchors
         self.startArrow = startArrow
         self.endArrow = endArrow
         self.startArrowScale = startArrowScale
