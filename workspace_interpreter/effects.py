@@ -989,10 +989,14 @@ def apply_stroke_panel_to_selection(store: StateStore, controller) -> None:
                        "center_at_end": ArrowAlign.CENTER_AT_END}
     arrow_align = arrow_align_map.get(arrow_align_str, ArrowAlign.TIP_AT_END)
 
+    dash_align_anchors = bool(store.get("stroke_dash_align_anchors"))
+
     stroke = Stroke(
         color=color, width=width, linecap=linecap, linejoin=linejoin,
         opacity=opacity, miter_limit=miter_limit, align=align,
-        dash_pattern=dash_pattern, start_arrow=start_arrow,
+        dash_pattern=dash_pattern,
+        dash_align_anchors=dash_align_anchors,
+        start_arrow=start_arrow,
         end_arrow=end_arrow, start_arrow_scale=start_arrow_scale,
         end_arrow_scale=end_arrow_scale, arrow_align=arrow_align,
     )

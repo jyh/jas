@@ -123,6 +123,8 @@ def _pack_stroke(stroke: Stroke | None):
         stroke.start_arrow_scale,
         stroke.end_arrow_scale,
         _ARROWALIGN_TO_INT[stroke.arrow_align],
+        # Element 13: dash_align_anchors (added with DASH_ALIGN.md).
+        bool(stroke.dash_align_anchors),
     ]
 
 
@@ -418,6 +420,10 @@ def _unpack_stroke(v) -> Stroke | None:
         base['start_arrow_scale'] = float(v[10])
         base['end_arrow_scale'] = float(v[11])
         base['arrow_align'] = _INT_TO_ARROWALIGN.get(v[12], ArrowAlign.TIP_AT_END)
+    # Element 13: dash_align_anchors (added later — backward
+    # compatible with older files that had 13 elements).
+    if len(v) > 13:
+        base['dash_align_anchors'] = bool(v[13])
     return Stroke(**base)
 
 
