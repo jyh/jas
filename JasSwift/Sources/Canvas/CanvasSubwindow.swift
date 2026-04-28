@@ -210,7 +210,11 @@ private func setStroke(_ ctx: CGContext, _ stroke: Stroke?) -> (Double, StrokeAl
     case .bevel: ctx.setLineJoin(.bevel)
     }
     ctx.setMiterLimit(CGFloat(stroke.miterLimit))
-    if !stroke.dashPattern.isEmpty {
+    // When dash_align_anchors is on, the renderer expands the dashed
+    // stroke into solid sub-paths via DashRenderer and draws each as
+    // a solid stroke — so the platform's dash pattern must be empty
+    // here. See DASH_ALIGN.md §Algorithm.
+    if !stroke.dashPattern.isEmpty && !stroke.dashAlignAnchors {
         ctx.setLineDash(phase: 0, lengths: stroke.dashPattern.map { CGFloat($0) })
     } else {
         ctx.setLineDash(phase: 0, lengths: [])
@@ -1013,6 +1017,30 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                 renderVariableWidthPath(ctx, cmds: strokeCmds,
                                        widthPoints: v.widthPoints,
                                        strokeColor: cgColor(s.color), linecap: s.linecap)
+            } else if let s = v.stroke,
+                      s.dashAlignAnchors,
+                      !s.dashPattern.isEmpty,
+                      v.fillGradient == nil,
+                      v.strokeGradient == nil {
+                // Anchor-aligned dashing: fill (if any) with the original
+                // path, then expand into solid sub-paths via DashRenderer
+                // and stroke each. setStroke already cleared the platform's
+                // dash array. Falls back to fillStrokeOrOutline when
+                // gradients are involved (gradient stroke goes through
+                // replacePathWithStrokedPath which doesn't support our
+                // sub-path expansion yet).
+                if v.fill != nil {
+                    setFill(ctx, v.fill)
+                    buildPath(ctx, v.d)
+                    ctx.fillPath()
+                }
+                let (_, align) = setStroke(ctx, s)
+                let expanded = DashRenderer.expandDashedStroke(
+                    path: strokeCmds, dashArray: s.dashPattern, alignAnchors: true)
+                for sub in expanded {
+                    buildPath(ctx, sub)
+                    strokeAligned(ctx, align)
+                }
             } else {
                 // Normal fill+stroke (gradient-aware via fillStrokeOrOutline).
                 buildPath(ctx, strokeCmds)
