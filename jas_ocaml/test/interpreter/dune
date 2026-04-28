@@ -4,6 +4,11 @@
  (libraries jas alcotest))
 
 (test
+ (name length_test)
+ (modules length_test)
+ (libraries jas alcotest))
+
+(test
  (name effects_test)
  (modules effects_test)
  (libraries jas alcotest))

@@ -15760,9 +15760,10 @@
               },
               {
                 "id": "stk_weight",
-                "type": "number_input",
+                "type": "length_input",
+                "unit": "pt",
                 "summary": "Stroke weight",
-                "description": "Stroke weight in points. Accepts any non-negative value including decimals. Committed on Enter or focus loss.\n",
+                "description": "Stroke weight as a length. Bare numbers and decimals are interpreted in pt; a unit suffix overrides (`12 px`, `0.5 mm`, `1 in`, `2 pc`). Committed on Enter or focus loss.\n",
                 "min": 0,
                 "max": 1000,
                 "style": {
@@ -15770,13 +15771,6 @@
                 },
                 "bind": {
                   "value": "panel.weight"
-                }
-              },
-              {
-                "type": "text",
-                "content": "pt",
-                "style": {
-                  "font_size": 10
                 }
               }
             ]
@@ -16333,9 +16327,10 @@
                 "children": [
                   {
                     "id": "stk_dash_1",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
                     "summary": "Dash 1",
-                    "description": "Dash length for pair 1, in points. 0 produces a dot with round caps.",
+                    "description": "Dash length for pair 1. Bare values and decimals are interpreted in pt; a unit suffix overrides (`12 px`, `0.5 mm`, `1 in`, `2 pc`). 0 produces a dot with round caps.\n",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16366,9 +16361,10 @@
                 "children": [
                   {
                     "id": "stk_gap_1",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
                     "summary": "Gap 1",
-                    "description": "Gap length for pair 1, in points.",
+                    "description": "Gap length for pair 1. Same unit grammar as the dash inputs.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16399,9 +16395,11 @@
                 "children": [
                   {
                     "id": "stk_dash_2",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Dash 2",
-                    "description": "Dash length for pair 2, in points. Blank means unused.",
+                    "description": "Dash length for pair 2. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16432,9 +16430,11 @@
                 "children": [
                   {
                     "id": "stk_gap_2",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Gap 2",
-                    "description": "Gap length for pair 2, in points. Blank means unused.",
+                    "description": "Gap length for pair 2. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16465,9 +16465,11 @@
                 "children": [
                   {
                     "id": "stk_dash_3",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Dash 3",
-                    "description": "Dash length for pair 3, in points. Blank means unused.",
+                    "description": "Dash length for pair 3. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16498,9 +16500,11 @@
                 "children": [
                   {
                     "id": "stk_gap_3",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Gap 3",
-                    "description": "Gap length for pair 3, in points. Blank means unused.",
+                    "description": "Gap length for pair 3. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
