@@ -1046,6 +1046,7 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
         "gap_2" => { sp.gap_2 = val.as_f64(); }
         "dash_3" => { sp.dash_3 = val.as_f64(); }
         "gap_3" => { sp.gap_3 = val.as_f64(); }
+        "dash_align_anchors" => { if let Some(b) = val.as_bool() { sp.dash_align_anchors = b; } }
         "start_arrowhead" => { if let Some(s) = val.as_str() { sp.start_arrowhead = s.into(); } }
         "end_arrowhead" => { if let Some(s) = val.as_str() { sp.end_arrowhead = s.into(); } }
         "start_arrowhead_scale" => { if let Some(n) = val.as_f64() { sp.start_arrowhead_scale = n; } }

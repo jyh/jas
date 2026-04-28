@@ -241,6 +241,7 @@ pub(crate) struct StrokePanelState {
     pub gap_2: Option<f64>,
     pub dash_3: Option<f64>,
     pub gap_3: Option<f64>,
+    pub dash_align_anchors: bool,
     pub start_arrowhead: String,
     pub end_arrowhead: String,
     pub start_arrowhead_scale: f64,
@@ -265,6 +266,7 @@ impl Default for StrokePanelState {
             gap_2: None,
             dash_3: None,
             gap_3: None,
+            dash_align_anchors: false,
             start_arrowhead: "none".into(),
             end_arrowhead: "none".into(),
             start_arrowhead_scale: 100.0,
@@ -1033,6 +1035,7 @@ impl AppState {
                     },
                     dash_pattern,
                     dash_len,
+                    dash_align_anchors: sp.dash_align_anchors,
                     start_arrow: Arrowhead::from_str(&sp.start_arrowhead),
                     end_arrow: Arrowhead::from_str(&sp.end_arrowhead),
                     start_arrow_scale: sp.start_arrowhead_scale,
@@ -1085,6 +1088,7 @@ impl AppState {
                 LineJoin::Round => "round",
                 LineJoin::Bevel => "bevel",
             }.into();
+            self.stroke_panel.dash_align_anchors = s.dash_align_anchors;
             // Update default stroke to match selection
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 tab.model.default_stroke = Some(s);
