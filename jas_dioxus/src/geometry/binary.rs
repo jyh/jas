@@ -142,6 +142,8 @@ fn pack_stroke(stroke: &Option<Stroke>) -> Value {
                 start_arrow, end_arrow,
                 vf64(s.start_arrow_scale), vf64(s.end_arrow_scale),
                 vint(arrow_align),
+                // Element 13: dash_align_anchors (added with DASH_ALIGN.md).
+                vbool(s.dash_align_anchors),
             ])
         }
     }
@@ -566,6 +568,13 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
         (10.0, StrokeAlign::Center, [0.0; 6], 0,
          Arrowhead::None, Arrowhead::None, 100.0, 100.0, ArrowAlign::TipAtEnd)
     };
+    // Element 13: dash_align_anchors (added later — backward compatible
+    // with older files that had 13 elements).
+    let dash_align_anchors = if arr.len() > 13 {
+        as_bool(&arr[13])
+    } else {
+        false
+    };
     Some(Stroke {
         color: unpack_color(&arr[0]),
         width: as_f64(&arr[1]),
@@ -575,6 +584,7 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
         align,
         dash_pattern,
         dash_len,
+        dash_align_anchors,
         start_arrow,
         end_arrow,
         start_arrow_scale,

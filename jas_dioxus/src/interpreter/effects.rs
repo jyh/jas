@@ -6877,6 +6877,7 @@ mod tests {
                 linecap: LineCap::Butt, linejoin: LineJoin::Miter,
                 miter_limit: 10.0, align: StrokeAlign::Center,
                 dash_pattern: [0.0; 6], dash_len: 0,
+                dash_align_anchors: false,
                 start_arrow: Arrowhead::None, end_arrow: Arrowhead::None,
                 start_arrow_scale: 100.0, end_arrow_scale: 100.0,
                 arrow_align: ArrowAlign::TipAtEnd, opacity: 1.0,
