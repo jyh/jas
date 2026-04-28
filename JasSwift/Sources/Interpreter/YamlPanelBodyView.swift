@@ -59,6 +59,8 @@ struct YamlElementView: View {
                 renderNumberInput()
             case "text_input":
                 renderTextInput()
+            case "length_input":
+                renderLengthInput()
             case "select":
                 renderSelect()
             case "toggle", "checkbox":
@@ -520,6 +522,69 @@ struct YamlElementView: View {
                 if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
             }
         ))
+            .textFieldStyle(.roundedBorder)
+    }
+
+    // MARK: - Length Input
+
+    /// Unit-aware text input for length-valued fields. Display goes
+    /// through `Length.format`; commit goes through `Length.parse` and
+    /// honors `min` / `max` clamps and the `nullable` flag. The bound
+    /// state and committed value are pt-valued; conversion happens at
+    /// the widget edge.
+    @ViewBuilder
+    private func renderLengthInput() -> some View {
+        let unit = element["unit"] as? String ?? "pt"
+        let precision = element["precision"] as? Int ?? 2
+        let placeholder = element["placeholder"] as? String ?? ""
+        let nullable = element["nullable"] as? Bool ?? false
+        let minClamp = (element["min"] as? Double)
+            ?? (element["min"] as? Int).map(Double.init)
+        let maxClamp = (element["max"] as? Double)
+            ?? (element["max"] as? Int).map(Double.init)
+
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
+        let ptValue: Double? = {
+            guard let e = valueExpr else { return nil }
+            let result = evaluate(e, context: context)
+            switch result {
+            case .number(let n): return n
+            case .null: return nil
+            default: return nil
+            }
+        }()
+        let displayValue = Length.format(ptValue, unit: unit, precision: precision)
+        let writeKey = writeBackKey(valueExpr)
+
+        // Identity-coupled key forces remount when the bound pt value
+        // changes (clamp-on-commit, external writes), pulling the
+        // displayed string back in lockstep.
+        let keyValue = ptValue.map { String(format: "%.6f", $0) } ?? "null"
+        let stableId = "\(element["id"] as? String ?? "")-\(keyValue)"
+
+        TextField(placeholder, text: Binding<String>(
+            get: { displayValue },
+            set: { newVal in
+                guard let key = writeKey else { return }
+                let trimmed = newVal.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty {
+                    if nullable {
+                        commitPanelWrite(key: key, value: nil as Any?)
+                    }
+                    // Non-nullable empty: drop the edit; the remount on
+                    // any subsequent write will redisplay the prior value.
+                    return
+                }
+                guard var newPt = Length.parse(newVal, defaultUnit: unit) else {
+                    return
+                }
+                if let lo = minClamp, newPt < lo { newPt = lo }
+                if let hi = maxClamp, newPt > hi { newPt = hi }
+                commitPanelWrite(key: key, value: newPt)
+            }
+        ))
+            .id(stableId)
             .textFieldStyle(.roundedBorder)
     }
 

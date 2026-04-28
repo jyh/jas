@@ -222,6 +222,78 @@ def _render_text_input(el, store, ctx, dispatch_fn):
     return edit
 
 
+def _render_length_input(el, store, ctx, dispatch_fn):
+    """Unit-aware text input for length-valued fields. Mirrors the
+    Flask + Rust + Swift + OCaml implementation — see UNIT_INPUTS.md.
+
+    Display goes through ``Length.format``; commit on Enter / focus
+    loss goes through ``Length.parse`` and honors ``min``/``max``
+    clamps and the ``nullable`` flag. The bound state and committed
+    value are pt-valued; conversion happens at the widget edge.
+    """
+    from workspace_interpreter.length import format_length, parse_length
+
+    edit = QLineEdit()
+    placeholder = el.get("placeholder", "")
+    if placeholder:
+        edit.setPlaceholderText(str(placeholder))
+    unit = el.get("unit", "pt")
+    precision = int(el.get("precision", 2))
+    nullable = bool(el.get("nullable", False))
+    min_clamp = el.get("min")
+    max_clamp = el.get("max")
+    # Stash format params on the widget so _set_widget_value can route
+    # the reactive bind.value updates through length_format rather
+    # than the default str() conversion.
+    edit._jas_length_unit = unit
+    edit._jas_length_precision = precision
+
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value")
+    if not isinstance(value_expr, str):
+        return edit
+
+    # Resolve the panel-scoped write target from a `panel.<key>`
+    # binding. Computed expressions (anything else) commit nowhere —
+    # the field is read-only in that case.
+    write_key = None
+    if value_expr.startswith("panel."):
+        rest = value_expr[len("panel."):]
+        if rest and rest.replace("_", "").isalnum():
+            write_key = rest
+
+    def _commit():
+        if write_key is None:
+            return
+        panel_id = store.get_active_panel_id()
+        if panel_id is None:
+            return
+        entered = edit.text()
+        trimmed = entered.strip()
+        prior = store.get_panel(panel_id, write_key)
+        if not trimmed:
+            if nullable:
+                store.set_panel(panel_id, write_key, None)
+            else:
+                # Revert to prior display.
+                edit.setText(format_length(prior, unit, precision))
+            return
+        new_val = parse_length(entered, unit)
+        if new_val is None:
+            edit.setText(format_length(prior, unit, precision))
+            return
+        if min_clamp is not None and new_val < float(min_clamp):
+            new_val = float(min_clamp)
+        if max_clamp is not None and new_val > float(max_clamp):
+            new_val = float(max_clamp)
+        store.set_panel(panel_id, write_key, new_val)
+        # Reflect the clamped / re-formatted value back.
+        edit.setText(format_length(new_val, unit, precision))
+
+    edit.editingFinished.connect(_commit)
+    return edit
+
+
 def _render_toggle(el, store, ctx, dispatch_fn):
     label = el.get("label", "")
     cb = QCheckBox(label)
@@ -1724,7 +1796,17 @@ def _set_widget_value(widget: QWidget, value):
         except (TypeError, ValueError):
             pass
     elif isinstance(widget, QLineEdit):
-        widget.setText(str(value) if value is not None else "")
+        # length_input stashes unit / precision so the displayed text
+        # routes through Length.format instead of plain str().
+        unit = getattr(widget, "_jas_length_unit", None)
+        if unit is not None:
+            from workspace_interpreter.length import format_length
+            precision = getattr(widget, "_jas_length_precision", 2)
+            widget.setText(format_length(
+                value if isinstance(value, (int, float)) else None,
+                unit, precision))
+        else:
+            widget.setText(str(value) if value is not None else "")
     elif isinstance(widget, QLabel):
         widget.setText(str(value) if value is not None else "")
 
@@ -1811,6 +1893,7 @@ _RENDERERS = {
     "slider": _render_slider,
     "number_input": _render_number_input,
     "text_input": _render_text_input,
+    "length_input": _render_length_input,
     "toggle": _render_toggle,
     "checkbox": _render_checkbox,
     "select": _render_select,

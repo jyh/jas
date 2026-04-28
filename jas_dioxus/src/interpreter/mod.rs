@@ -17,6 +17,7 @@ pub mod point_buffers;
 pub mod anchor_buffers;
 pub mod schema;
 pub mod scope;
+pub mod length;
 pub mod workspace;
 
 #[cfg(feature = "web")]

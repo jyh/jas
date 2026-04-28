@@ -4634,8 +4634,8 @@
       "svg": "<circle cx=\"11\" cy=\"11\" r=\"6.5\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"2\"/>\n<line x1=\"15.5\" y1=\"15.5\" x2=\"22.5\" y2=\"22.5\"\n  stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\"/>\n"
     },
     "hand": {
-      "viewbox": "0 0 28 28",
-      "svg": "<line x1=\"10\" y1=\"14\" x2=\"10\" y2=\"5\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"13\" y1=\"14\" x2=\"13\" y2=\"3\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"16\" y1=\"14\" x2=\"16\" y2=\"4\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<line x1=\"19\" y1=\"14\" x2=\"19\" y2=\"6\"\n  stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n<path d=\"M9,14 L4,18 L4,22 Q5,25 9,25 L19,25 Q22,25 22,22 L22,14\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"
+      "viewbox": "0 0 256 256",
+      "svg": "<path fill=\"currentColor\" d=\"M0,242.21,201.29,109.51c-38.67,76.35-22.52,97.77-70.85,95.92-17.41-.67-22.83-13.86-33.95-29.17-10.61-14.6-48.58-45.21-35.58-50.06,2.18-.81,7.52-1.22,10.13.03l34.72,16.59c3.14-23.5-23.26-60.36-9.16-70.87,2.27-1.69,10.83,2.29,11.95,5.31l13.71,36.84,2.85-46.1c.18-2.89,3.31-8.22,5.18-9.83,2.35-2.03,11.34,3.32,11.52,6.63l2.8,52.77c13.37-13.74,3.51-35.18,16.16-49.64,2.42-2.77,12.87,3.69,12.5,7.84l-4.82,53.59,19.44-28.39c1.81-2.65,7.35-5.67,10.05-5.82,3.36-.18,5.46,10.22,3.36,14.35Z\"/>\n"
     },
     "artboard": {
       "viewbox": "0 0 28 28",
@@ -6183,6 +6183,15 @@
                 "background": "{{theme.colors.window_bg}}"
               },
               "children": [
+                {
+                  "id": "drawing_canvas",
+                  "type": "canvas",
+                  "summary": "Drawing canvas",
+                  "description": "Interactive drawing surface. Tool dispatch reads pointer events on this element and routes them to the active tool's on_mouse* handlers via engine/tools.mjs::dispatchEvent. The Model (with undo/redo) drives re-render of the document layer on every mutation.\n",
+                  "style": {
+                    "background": "{{theme.colors.window_bg}}"
+                  }
+                },
                 {
                   "id": "canvas_brand_logo",
                   "type": "brand_logo",
@@ -15751,9 +15760,10 @@
               },
               {
                 "id": "stk_weight",
-                "type": "number_input",
+                "type": "length_input",
+                "unit": "pt",
                 "summary": "Stroke weight",
-                "description": "Stroke weight in points. Accepts any non-negative value including decimals. Committed on Enter or focus loss.\n",
+                "description": "Stroke weight as a length. Bare numbers and decimals are interpreted in pt; a unit suffix overrides (`12 px`, `0.5 mm`, `1 in`, `2 pc`). Committed on Enter or focus loss.\n",
                 "min": 0,
                 "max": 1000,
                 "style": {
@@ -15761,13 +15771,6 @@
                 },
                 "bind": {
                   "value": "panel.weight"
-                }
-              },
-              {
-                "type": "text",
-                "content": "pt",
-                "style": {
-                  "font_size": 10
                 }
               }
             ]
@@ -16324,9 +16327,10 @@
                 "children": [
                   {
                     "id": "stk_dash_1",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
                     "summary": "Dash 1",
-                    "description": "Dash length for pair 1, in points. 0 produces a dot with round caps.",
+                    "description": "Dash length for pair 1. Bare values and decimals are interpreted in pt; a unit suffix overrides (`12 px`, `0.5 mm`, `1 in`, `2 pc`). 0 produces a dot with round caps.\n",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16357,9 +16361,10 @@
                 "children": [
                   {
                     "id": "stk_gap_1",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
                     "summary": "Gap 1",
-                    "description": "Gap length for pair 1, in points.",
+                    "description": "Gap length for pair 1. Same unit grammar as the dash inputs.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16390,9 +16395,11 @@
                 "children": [
                   {
                     "id": "stk_dash_2",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Dash 2",
-                    "description": "Dash length for pair 2, in points. Blank means unused.",
+                    "description": "Dash length for pair 2. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16423,9 +16430,11 @@
                 "children": [
                   {
                     "id": "stk_gap_2",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Gap 2",
-                    "description": "Gap length for pair 2, in points. Blank means unused.",
+                    "description": "Gap length for pair 2. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16456,9 +16465,11 @@
                 "children": [
                   {
                     "id": "stk_dash_3",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Dash 3",
-                    "description": "Dash length for pair 3, in points. Blank means unused.",
+                    "description": "Dash length for pair 3. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
@@ -16489,9 +16500,11 @@
                 "children": [
                   {
                     "id": "stk_gap_3",
-                    "type": "number_input",
+                    "type": "length_input",
+                    "unit": "pt",
+                    "nullable": true,
                     "summary": "Gap 3",
-                    "description": "Gap length for pair 3, in points. Blank means unused.",
+                    "description": "Gap length for pair 3. Same unit grammar as pair 1; blank means unused.",
                     "min": 0,
                     "style": {
                       "width": "100%"
