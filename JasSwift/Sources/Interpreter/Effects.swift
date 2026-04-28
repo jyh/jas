@@ -642,6 +642,7 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
             dashPattern.append(contentsOf: [d3.doubleValue, g3.doubleValue])
         }
     }
+    let dashAlignAnchors = s["stroke_dash_align_anchors"] as? Bool ?? false
     let startArrow = Arrowhead(fromString: s["stroke_start_arrowhead"] as? String ?? "none")
     let endArrow = Arrowhead(fromString: s["stroke_end_arrowhead"] as? String ?? "none")
     let startArrowScale = (s["stroke_start_arrowhead_scale"] as? NSNumber)?.doubleValue ?? 100.0
@@ -665,6 +666,7 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
     let width = controller.model.defaultStroke?.width ?? base.width
     let newStroke = Stroke(color: base.color, width: width, linecap: cap, linejoin: join,
                            miterLimit: miterLimit, align: align, dashPattern: dashPattern,
+                           dashAlignAnchors: dashAlignAnchors,
                            startArrow: startArrow, endArrow: endArrow,
                            startArrowScale: startArrowScale, endArrowScale: endArrowScale,
                            arrowAlign: arrowAlign, opacity: base.opacity)
@@ -706,6 +708,7 @@ func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
         store.set("stroke_dash_3", s.dashPattern[4])
         store.set("stroke_gap_3", s.dashPattern[5])
     }
+    store.set("stroke_dash_align_anchors", s.dashAlignAnchors)
     store.set("stroke_start_arrowhead", s.startArrow.name)
     store.set("stroke_end_arrowhead", s.endArrow.name)
     store.set("stroke_start_arrowhead_scale", s.startArrowScale)
