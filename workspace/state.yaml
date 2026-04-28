@@ -89,6 +89,15 @@ state:
     nullable: true
     description: "Active stroke gap length for pair 3 (null = unused)"
 
+  stroke_dash_align_anchors:
+    type: bool
+    default: false
+    description: >
+      When true, dash and gap lengths flex per-segment so a dash is
+      centered on every anchor and a full dash sits at each open path
+      end. When false (default), the dash pattern lays out by exact
+      length along the path. See DASH_ALIGN.md.
+
   stroke_start_arrowhead:
     type: enum
     values: [none, simple_arrow, open_arrow, closed_arrow, stealth_arrow,

@@ -1021,11 +1021,11 @@ class TestStrokePanelSpec:
     def test_dashed_checkbox_is_checkbox(self, panel_html):
         assert 'type="checkbox"' in panel_html
 
-    def test_dash_preset_even_present(self, panel_html):
-        assert "stk_preset_even_dash" in panel_html
+    def test_dash_preserve_button_present(self, panel_html):
+        assert "stk_dash_preserve" in panel_html
 
-    def test_dash_preset_dot_present(self, panel_html):
-        assert "stk_preset_dash_dot" in panel_html
+    def test_dash_align_anchors_button_present(self, panel_html):
+        assert "stk_dash_align_anchors" in panel_html
 
     # ── Dash/gap inputs ──
     def test_dash_1_present(self, panel_html):

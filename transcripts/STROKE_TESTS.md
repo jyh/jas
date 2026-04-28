@@ -293,7 +293,7 @@ If any P0 here fails, stop and flag.
 
 ---
 
-## Session E — Dashed checkbox + presets (~6 min)
+## Session E — Dashed checkbox + alignment mode (~6 min)
 
 - [ ] **STR-070** [wired] Default Dashed is unchecked.
       Expect: `stk_dashed` unchecked; stroke renders as a solid line.
@@ -310,28 +310,39 @@ If any P0 here fails, stop and flag.
               12 defaults); pairs 2–3 also enabled but empty.
       — last: —
 
-- [ ] **STR-073** [wired] Dashed preset Even Dash applies 12 / 12 in one click.
-      Setup: Dashed unchecked.
-      Do: Click `stk_preset_even_dash`.
-      Expect: Dashed becomes checked; pair 1 = 12 / 12; pairs 2–3 cleared
-              (null); canvas shows even dashes.
+- [ ] **STR-073** [wired] Default dash alignment is Preserve.
+      Setup: Default state.
+      Expect: `stk_dash_preserve` shown active; `stk_dash_align_anchors`
+              shown inactive. State field
+              `stroke_dash_align_anchors = false`.
       — last: —
 
-- [ ] **STR-074** [wired] Dashed preset Dash-Dot applies 12 / 6 / 0 / 6.
-      Setup: Dashed unchecked.
-      Do: Click `stk_preset_dash_dot`.
-      Expect: Dashed becomes checked; values dash₁=12, gap₁=6, dash₂=0,
-              gap₂=6; pair 3 cleared.
+- [ ] **STR-074** [wired] Click Align-to-anchors toggles the mode.
+      Setup: Default (Preserve active).
+      Do: Click `stk_dash_align_anchors`.
+      Expect: `stk_dash_align_anchors` shown active; `stk_dash_preserve`
+              inactive. State field `stroke_dash_align_anchors = true`;
+              SVG attr `data-jas-dash-align-anchors="true"` written on
+              the active stroked element. Round-trip: re-opening the
+              file preserves the setting.
       — last: —
 
-- [ ] **STR-075** [wired] Dot from dash=0 renders only with round / square caps.
-      Setup: Dash-dot preset, Round Cap.
+- [ ] **STR-075** [wired] Click Preserve from Align mode toggles back.
+      Setup: STR-074 state (Align active).
+      Do: Click `stk_dash_preserve`.
+      Expect: `stk_dash_preserve` active again; SVG attr
+              `data-jas-dash-align-anchors` is removed (not just set to
+              false — it's identity-omitted when false).
+      — last: —
+
+- [ ] **STR-076** [wired] Dot from dash=0 renders only with round / square caps.
+      Setup: Dashed on, dash₁=0, gap₁=6, Round Cap.
       Expect: The 0-length dashes render as visible dots at the round cap
               radius. Switch cap to Butt → dots disappear (zero-length
               with butt cap is invisible).
       — last: —
 
-- [ ] **STR-076** [wired] Toggling Dashed off preserves the input values.
+- [ ] **STR-077** [wired] Toggling Dashed off preserves the input values.
       Setup: Dashed on, custom values entered (e.g. 4 / 8).
       Do: Uncheck `stk_dashed`. Re-check.
       Expect: 4 / 8 (and any other entered values) still present in the
@@ -708,10 +719,16 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Python     last: —
       - [ ] Flask      last: —
 
-- **STR-302** [wired] Dashed preset Dash-Dot writes the 4-element array.
-      Setup: Dashed off.
-      Do: Click `stk_preset_dash_dot`.
-      Expect: SVG `stroke-dasharray="12 6 0 6"`.
+- **STR-302** [wired] Dash alignment toggle round-trips through SVG.
+      Setup: Closed rectangle selected, Dashed on, dash₁=12, gap₁=6,
+             dash₂=0, gap₂=6.
+      Do: Click `stk_dash_align_anchors`. Save the file. Reopen.
+      Expect: `stk_dash_align_anchors` shown active; the saved SVG has
+              `data-jas-dash-align-anchors="true"` plus the literal
+              `stroke-dasharray="12 6 0 6"`. After Phase 3+ ships, the
+              rendered canvas shows dashes centered on each rectangle
+              corner anchor and a dash spanning each anchor seamlessly
+              (no cap-seams).
       - [ ] Rust       last: —
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
