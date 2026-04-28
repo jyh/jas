@@ -87,6 +87,7 @@ fn render_el(
         "slider" => render_slider(el, ctx, rctx),
         "number_input" => render_number_input(el, ctx, rctx),
         "text_input" => render_text_input(el, ctx, rctx),
+        "length_input" => render_length_input(el, ctx, rctx),
         "select" => render_select(el, ctx, rctx),
         "icon_select" => render_icon_select(el, ctx, rctx),
         "toggle" | "checkbox" => render_toggle(el, ctx, rctx),
@@ -3609,6 +3610,189 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             dialog_signal.set(Some(ds));
                         }
                     }
+                    revision += 1;
+                },
+            }
+        }
+    }
+}
+
+/// Unit-aware length input — see UNIT_INPUTS.md.
+///
+/// Stored value is a `f64` in pt; the input displays it formatted with
+/// the field's `unit:` suffix. On change the entered string is parsed
+/// (any supported unit), validated against `min:` / `max:` (in pt),
+/// and routed to the same per-panel dispatch as `number_input`. An
+/// empty entry on a `nullable: true` widget commits `None`; on a
+/// non-nullable widget it reverts.
+fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    use super::length;
+
+    let id = get_id(el);
+    let unit = el.get("unit").and_then(|u| u.as_str()).unwrap_or("pt").to_string();
+    let precision = el
+        .get("precision")
+        .and_then(|p| p.as_u64())
+        .map(|p| p as usize)
+        .unwrap_or(2);
+    let placeholder = el.get("placeholder").and_then(|p| p.as_str()).unwrap_or("").to_string();
+    let nullable = el.get("nullable").and_then(|n| n.as_bool()).unwrap_or(false);
+    let min_clamp = el.get("min").and_then(|m| m.as_f64());
+    let max_clamp = el.get("max").and_then(|m| m.as_f64());
+    let style = build_style(el, ctx);
+
+    let bind_expr = el
+        .get("bind")
+        .and_then(|b| b.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let pt_value: Option<f64> = if !bind_expr.is_empty() {
+        match expr::eval(bind_expr, ctx) {
+            Value::Number(n) => Some(n),
+            Value::Null => None,
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let display_value = length::format(pt_value, &unit, precision);
+
+    let bind_target = classify_bind(bind_expr);
+    let panel_kind = rctx.panel_kind;
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+
+    // Identity-coupled key forces remount when the underlying pt value
+    // changes (clamp-on-commit, external writes), pulling the displayed
+    // string back in lockstep — same trick `render_number_input` uses.
+    let key_value = pt_value
+        .map(|n| format!("{n:.6}"))
+        .unwrap_or_else(|| "null".into());
+    let key = format!("{id}-{key_value}");
+
+    // Prebuild the per-frame closure inputs so the handler doesn't
+    // close over the whole RenderCtx.
+    let panel_handler = if let BindTarget::Panel(ref field) = bind_target {
+        let f = field.clone();
+        let app = app.clone();
+        let unit = unit.clone();
+        let mut revision = revision;
+        Some(EventHandler::new(move |evt: Event<FormData>| {
+            let entered = evt.value();
+            // Empty / whitespace path.
+            let trimmed = entered.trim();
+            if trimmed.is_empty() {
+                if !nullable {
+                    // Revert via revision bump — re-render reads the
+                    // bound state's current value back into the input.
+                    revision += 1;
+                    return;
+                }
+                // Nullable: write None via the same per-panel dispatch
+                // as a numeric write below.
+                let f = f.clone();
+                let app = app.clone();
+                let mut revision = revision;
+                spawn(async move {
+                    {
+                        let mut st = app.borrow_mut();
+                        match panel_kind {
+                            Some(PanelKind::Stroke) | None => {
+                                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::Value::Null);
+                                st.apply_stroke_panel_to_selection();
+                            }
+                            _ => {}
+                        }
+                    }
+                    revision += 1;
+                });
+                return;
+            }
+            let Some(mut new_val) = length::parse(&entered, &unit) else {
+                // Reject — bump revision so the input redisplays the
+                // bound state's current value.
+                revision += 1;
+                return;
+            };
+            if let Some(lo) = min_clamp { if new_val < lo { new_val = lo; } }
+            if let Some(hi) = max_clamp { if new_val > hi { new_val = hi; } }
+            let f = f.clone();
+            let app = app.clone();
+            let mut revision = revision;
+            spawn(async move {
+                {
+                    let mut st = app.borrow_mut();
+                    match panel_kind {
+                        Some(PanelKind::Character) => {
+                            set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
+                            st.apply_character_panel_to_selection();
+                        }
+                        Some(PanelKind::Paragraph) => {
+                            st.sync_paragraph_panel_from_selection();
+                            set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(new_val));
+                            st.apply_paragraph_panel_to_selection();
+                        }
+                        Some(PanelKind::Stroke) | None => {
+                            // Weight is the canonical "stroke width"
+                            // path — mirror the number_input branch's
+                            // app_default_stroke / per-tab.default_stroke
+                            // sync so newly-drawn strokes inherit the
+                            // edited weight.
+                            if f == "weight" {
+                                if let Some(ref mut stroke) = st.app_default_stroke {
+                                    stroke.width = new_val;
+                                }
+                                let idx = st.active_tab;
+                                if let Some(tab) = st.tabs.get_mut(idx) {
+                                    if let Some(ref mut stroke) = tab.model.default_stroke {
+                                        stroke.width = new_val;
+                                    }
+                                }
+                            } else {
+                                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                            }
+                            st.apply_stroke_panel_to_selection();
+                        }
+                        Some(PanelKind::Opacity) => {
+                            set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
+                        }
+                        _ => {}
+                    }
+                }
+                revision += 1;
+            });
+        }))
+    } else {
+        None
+    };
+
+    if panel_handler.is_some() {
+        rsx! {
+            input {
+                key: "{key}",
+                id: "{id}",
+                r#type: "text",
+                placeholder: "{placeholder}",
+                value: "{display_value}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                onchange: move |evt: Event<FormData>| {
+                    if let Some(ref h) = panel_handler { h.call(evt); }
+                },
+            }
+        }
+    } else {
+        // Non-panel binding (dialog, none) — render read-only display.
+        // Dialog support for length_input lands when the first dialog
+        // length field needs it; for now treat as a passive display.
+        rsx! {
+            input {
+                id: "{id}",
+                r#type: "text",
+                placeholder: "{placeholder}",
+                value: "{display_value}",
+                readonly: true,
+                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                oninput: move |_evt: Event<FormData>| {
                     revision += 1;
                 },
             }
