@@ -583,7 +583,11 @@ def _apply_stroke(painter: QPainter, stroke: Stroke | None,
         pen.setCapStyle(_CAP_MAP[stroke.linecap])
         pen.setJoinStyle(_JOIN_MAP[stroke.linejoin])
         pen.setMiterLimit(stroke.miter_limit)
-        if stroke.dash_pattern:
+        # When dash_align_anchors is on, the renderer expands the
+        # dashed stroke into solid sub-paths via dash_renderer and
+        # draws each as a solid stroke — so the platform's dash
+        # pattern stays unset here. See DASH_ALIGN.md §Algorithm.
+        if stroke.dash_pattern and not stroke.dash_align_anchors:
             pen.setDashPattern([float(x) for x in stroke.dash_pattern])
         painter.setPen(pen)
         return (stroke.opacity, stroke.align)
@@ -1126,6 +1130,56 @@ def _draw_element_body(painter: QPainter, elem: Element,
                     render_variable_width_path(painter, stroke_cmds,
                                               wp, _qcolor(stroke.color),
                                               stroke.linecap)
+                elif (stroke is not None
+                      and stroke.dash_align_anchors
+                      and stroke.dash_pattern
+                      and getattr(elem, "fill_gradient", None) is None
+                      and getattr(elem, "stroke_gradient", None) is None):
+                    # Anchor-aligned dashing: fill (if any) with the
+                    # original path, then expand the stroke into solid
+                    # sub-paths via dash_renderer and stroke each.
+                    # _apply_stroke already cleared the platform's
+                    # dash pattern.
+                    from workspace_interpreter.dash_renderer import expand_dashed_stroke
+                    if fill is not None:
+                        _apply_fill(painter, fill)
+                        painter.setPen(QPen(0))
+                        painter.drawPath(_build_path(d))
+                    stroke_opacity, stroke_align = _apply_stroke(painter, stroke)
+                    if stroke_opacity < 1.0:
+                        painter.setOpacity(painter.opacity() * stroke_opacity)
+                    # Convert PathCommand objects to the dasher's
+                    # tuple-based representation (lines-only).
+                    cmds_for_dasher: list[tuple] = []
+                    for c in stroke_cmds:
+                        if isinstance(c, MoveTo):
+                            cmds_for_dasher.append(("M", c.x, c.y))
+                        elif isinstance(c, LineTo):
+                            cmds_for_dasher.append(("L", c.x, c.y))
+                        elif isinstance(c, ClosePath):
+                            cmds_for_dasher.append(("Z",))
+                        # Curves silently dropped for Phase 4 lines-only.
+                        else:
+                            ep = c.endpoint if hasattr(c, "endpoint") else None
+                            if ep is not None:
+                                cmds_for_dasher.append(("L", ep[0], ep[1]))
+                    expanded = expand_dashed_stroke(
+                        tuple(cmds_for_dasher),
+                        tuple(float(x) for x in stroke.dash_pattern),
+                        True,
+                    )
+                    for sub in expanded:
+                        qsub = QPainterPath()
+                        for cmd in sub:
+                            if cmd[0] == "M":
+                                qsub.moveTo(cmd[1], cmd[2])
+                            elif cmd[0] == "L":
+                                qsub.lineTo(cmd[1], cmd[2])
+                        if stroke_align == StrokeAlign.CENTER:
+                            painter.drawPath(qsub)
+                        else:
+                            painter.setBrush(QBrush())
+                            _stroke_aligned(painter, qsub, stroke_align)
                 else:
                     # Normal fill+stroke (gradient-aware).
                     b = elem.bounds()
