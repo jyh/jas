@@ -290,6 +290,55 @@
     hex: function (c) { var rgb = parseColor(c); return ((1<<24)+(rgb.r<<16)+(rgb.g<<8)+rgb.b).toString(16).slice(1); },
   };
 
+  // ── Length-unit conversion ────────────────────────────────────
+  //
+  // Mirror of workspace_interpreter/length.py and (next on the
+  // propagation list) jas_dioxus/src/interpreter/length.rs. Keep all
+  // three implementations in lockstep — the round-trip parity tests
+  // assume identical conversion factors and rounding behaviour. See
+  // UNIT_INPUTS.md for the spec.
+  var PT_PER_LENGTH_UNIT = {
+    pt: 1.0,
+    // CSS reference 96 dpi: 1 px = 1/96 in, 1 pt = 1/72 in
+    // ⇒ 1 px = 72/96 = 0.75 pt.
+    px: 0.75,
+    "in": 72.0,
+    mm: 72.0 / 25.4,
+    cm: 720.0 / 25.4,
+    pc: 12.0,
+  };
+  var _LENGTH_RE = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*([A-Za-z]+)?\s*$/;
+
+  function parseLength(s, defaultUnit) {
+    if (typeof s !== "string") return null;
+    if (s.trim() === "") return null;
+    var m = _LENGTH_RE.exec(s);
+    if (m === null) return null;
+    var num = parseFloat(m[1]);
+    if (!isFinite(num)) return null;
+    var unit = (m[2] || defaultUnit || "pt").toLowerCase();
+    var factor = PT_PER_LENGTH_UNIT[unit];
+    if (factor === undefined) return null;
+    return num * factor;
+  }
+
+  function formatLength(pt, unit, precision) {
+    if (pt === null || pt === undefined || (typeof pt === "number" && !isFinite(pt))) return "";
+    if (precision === undefined || precision === null) precision = 2;
+    var u = (typeof unit === "string") ? unit.toLowerCase() : "pt";
+    var factor = PT_PER_LENGTH_UNIT[u];
+    if (factor === undefined) { u = "pt"; factor = 1.0; }
+    var value = (typeof pt === "number" ? pt : parseFloat(pt)) / factor;
+    var fixed = value.toFixed(precision);
+    // Trim trailing zeros and a stranded decimal point.
+    if (fixed.indexOf(".") !== -1) {
+      fixed = fixed.replace(/0+$/, "").replace(/\.$/, "");
+    }
+    // Normalize -0 to 0.
+    if (fixed === "-0") fixed = "0";
+    return fixed + " " + u;
+  }
+
   // ── Interpolation engine ───────────────────────────────────
 
   // Known namespace prefixes for expression-context detection
@@ -513,11 +562,22 @@
     if (key === "fill_color" || key === "stroke_color" || key === "fill_on_top") {
       syncPanelColorState();
     }
-    // Generic data-bind-value: set input value
+    // Generic data-bind-value: set input value.
+    // Skip the element when the user is actively typing in it —
+    // otherwise updateBindings clobbers their in-flight keystrokes.
     document.querySelectorAll("[data-bind-value]").forEach(function (el) {
+      if (el === document.activeElement) return;
       var expr = el.getAttribute("data-bind-value");
       var val = resolve(expr, {});
-      if (val !== null && val !== undefined) el.value = val;
+      if (val === null || val === undefined) return;
+      var lenUnit = el.getAttribute && el.getAttribute("data-length-unit");
+      if (lenUnit) {
+        var prec = parseInt(el.getAttribute("data-length-precision") || "2", 10);
+        var num = (typeof val === "number") ? val : parseFloat(val);
+        el.value = formatLength(num, lenUnit, prec);
+      } else {
+        el.value = val;
+      }
     });
     // Generic data-bind-disabled: enable/disable input
     document.querySelectorAll("[data-bind-disabled]").forEach(function (el) {
@@ -2045,6 +2105,10 @@
     // Wire panel slider/input → live color update and commit
     document.addEventListener("input", function (e) {
       var el = e.target;
+      // Length inputs commit on `change` / Enter, never on `input`.
+      // Calling parseFloat on a partial entry like "12 p" would pin
+      // the value at 12 mid-typing and overwrite the user's keystroke.
+      if (el.classList && el.classList.contains("app-length-input")) return;
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
       if (!bindVal) return;
       var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
@@ -2061,9 +2125,62 @@
 
     document.addEventListener("change", function (e) {
       var el = e.target;
+      // Length inputs route through commitLengthInput below — keep
+      // them off the color-commit path even on change events.
+      if (el.classList && el.classList.contains("app-length-input")) {
+        commitLengthInput(el);
+        return;
+      }
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
       if (!bindVal || !(bindVal.match(/^\{\{panel\.\w+\}\}$/) || bindVal.match(/^panel\.\w+$/))) return;
       dispatch("set_active_color", { color: panelStateToColor() });
+    });
+
+    // Length input commit on Enter (also commits via the change /
+    // blur path above). On reject, restore the displayed value from
+    // the bound state field — the spec's "revert" behaviour.
+    function commitLengthInput(el) {
+      var unit = el.getAttribute("data-length-unit");
+      if (!unit) return;
+      var bindVal = el.getAttribute("data-bind-value");
+      if (!bindVal) return;
+      var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
+      if (!pm) return;
+      var field = pm[1];
+      var precision = parseInt(el.getAttribute("data-length-precision") || "2", 10);
+      var entered = el.value;
+      function revert() {
+        el.value = formatLength(panelState[field], unit, precision);
+      }
+      // Empty / whitespace input — commit null only when the field
+      // is declared nullable (data-length-nullable on the input).
+      if (entered.trim() === "") {
+        if (el.getAttribute("data-length-nullable") === "true") {
+          panelState[field] = null;
+          el.value = "";
+          updateBindings(null, null);
+          return;
+        }
+        revert();
+        return;
+      }
+      var pt = parseLength(entered, unit);
+      if (pt === null) { revert(); return; }
+      var minS = el.getAttribute("data-length-min");
+      var maxS = el.getAttribute("data-length-max");
+      if (minS !== null && minS !== "" && pt < parseFloat(minS)) { revert(); return; }
+      if (maxS !== null && maxS !== "" && pt > parseFloat(maxS)) { revert(); return; }
+      panelState[field] = pt;
+      el.value = formatLength(pt, unit, precision);
+      updateBindings(null, null);
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      var el = e.target;
+      if (!el || !el.classList || !el.classList.contains("app-length-input")) return;
+      commitLengthInput(el);
+      el.blur();
     });
 
     // Hex input commit on Enter

@@ -648,6 +648,7 @@ recommended for every element.
 | `text` | Static or interpolated text | `content`: text string (with `{{expr}}`) |
 | `text_input` | Text entry field | `placeholder`, `bind` |
 | `number_input` | Numeric entry | `min`, `max`, `step`, `bind` |
+| `length_input` | Unit-aware length entry (pt / px / mm / cm / in / pc) | `unit`, `min`, `max`, `precision`, `placeholder`, `nullable`, `bind`. See `UNIT_INPUTS.md`. |
 | `color_swatch` | Color display square | `bind.color`, `hollow`: bool |
 | `gradient_tile` | Gradient preview tile (applies on click) | `bind.gradient`, `size`: `small`/`medium`/`large` |
 | `gradient_slider` | 1-D color-stops editor (drag stops, add on bar-click, drag-off to delete, double-click opens color picker) | `bind.stops`, `bind.selected_stop_index`, `bind.selected_midpoint_index` |

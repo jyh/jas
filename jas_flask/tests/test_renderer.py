@@ -1533,3 +1533,158 @@ class TestGradientPrimitivesFixture:
             if isinstance(item, dict) and item.get("type") == "gradient_slider"
         )
         assert slider_count >= 1
+
+
+class TestRenderLengthInput:
+    """Unit-aware length input — see UNIT_INPUTS.md."""
+
+    def test_emits_text_input_with_length_class(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "id": "stk_weight",
+            "unit": "pt",
+            "bind": {"value": "panel.weight"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'type="text"' in html
+        assert "app-length-input" in html
+        # number-input spinners no longer apply.
+        assert 'type="number"' not in html
+
+    def test_data_length_unit_attr(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "mm",
+            "bind": {"value": "panel.foo"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'data-length-unit="mm"' in html
+
+    def test_data_length_precision_default_is_two(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "bind": {"value": "panel.foo"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'data-length-precision="2"' in html
+
+    def test_data_length_precision_override(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "precision": 4,
+            "bind": {"value": "panel.foo"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'data-length-precision="4"' in html
+
+    def test_min_max_emitted_as_data_attrs(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "min": 0,
+            "max": 100,
+            "bind": {"value": "panel.foo"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'data-length-min="0"' in html
+        assert 'data-length-max="100"' in html
+
+    def test_placeholder_passes_through(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "placeholder": "0 pt",
+            "bind": {"value": "panel.foo"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'placeholder="0 pt"' in html
+
+    def test_panel_bind_not_prefilled(self, theme, state):
+        """panel.* lives in app.js's panelState, not in server state —
+        renderer leaves the value blank for the first updateBindings."""
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "bind": {"value": "panel.dash_1"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        # No `value="..."` on the rendered input.
+        assert ' value="' not in html
+
+    def test_state_bind_prefilled_with_formatted_value(self, theme):
+        from renderer import render_element
+        # Walk through the renderer's normal init so _initial_state is
+        # primed; the renderer module reads from a module-level
+        # _initial_state set during render_panel.
+        import renderer as r
+        prior = r._initial_state
+        try:
+            r._initial_state = {"stroke_width": 4.0}
+            el = {
+                "type": "length_input",
+                "unit": "pt",
+                "bind": {"value": "state.stroke_width"},
+            }
+            html = str(render_element(el, {}, {"stroke_width": 4.0}, mode="normal"))
+        finally:
+            r._initial_state = prior
+        assert 'value="4 pt"' in html
+
+    def test_state_bind_prefilled_in_alt_unit(self, theme):
+        from renderer import render_element
+        import renderer as r
+        prior = r._initial_state
+        try:
+            # 72 pt = 1 in
+            r._initial_state = {"stroke_width": 72.0}
+            el = {
+                "type": "length_input",
+                "unit": "in",
+                "bind": {"value": "state.stroke_width"},
+            }
+            html = str(render_element(el, {}, {"stroke_width": 72.0}, mode="normal"))
+        finally:
+            r._initial_state = prior
+        assert 'value="1 in"' in html
+
+    def test_data_bind_value_emitted(self, theme, state):
+        """Reactive update path — app.js's updateBindings reads
+        data-bind-value to refresh on state change."""
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "bind": {"value": "panel.weight"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'data-bind-value="panel.weight"' in html
+
+    def test_nullable_emits_data_attr(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "nullable": True,
+            "bind": {"value": "panel.dash_2"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert 'data-length-nullable="true"' in html
+
+    def test_nullable_default_omits_attr(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "bind": {"value": "panel.dash_1"},
+        }
+        html = str(render_element(el, theme, state, mode="normal"))
+        assert "data-length-nullable" not in html

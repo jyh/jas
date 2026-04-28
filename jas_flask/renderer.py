@@ -756,6 +756,67 @@ def _render_number_input(el, theme, state):
     )
 
 
+def _render_length_input(el, theme, state):
+    """Render a unit-aware length input — see UNIT_INPUTS.md.
+
+    Stored value is a number in pt; the input displays it formatted
+    with the field's `unit:` suffix (e.g. `"12 pt"`). Client-side
+    parser in app.js converts user-typed entries (any supported unit)
+    back to pt on commit. Server-side prefill uses
+    `workspace_interpreter.length.format_length` so the initial DOM
+    matches whatever app.js will compute on the next updateBindings
+    pass.
+
+    `min:` / `max:` are emitted as data attrs (in pt) for the JS
+    validator; native `min` / `max` HTML attrs are skipped because the
+    browser's number-input clamping doesn't apply to a text input.
+    """
+    from workspace_interpreter.length import format_length
+
+    unit = el.get("unit", "pt")
+    precision = int(el.get("precision", 2))
+    placeholder = escape(el.get("placeholder", ""))
+
+    # Prefill the text input's `value` attribute from the bound state
+    # field when one is reachable at render time. panel.* references
+    # are client-only (panelState lives in app.js), so we leave those
+    # blank and let the first updateBindings tick fill them in.
+    bind = el.get("bind", {})
+    if isinstance(bind, str):
+        bind = {"value": bind}
+    elif not isinstance(bind, dict):
+        bind = {}
+    value_expr = bind.get("value", "") or ""
+    initial_value_attr = ""
+    if isinstance(value_expr, str) and value_expr.startswith("state."):
+        from loader import resolve_interpolation as _ri
+        resolved = _ri("{{" + value_expr + "}}", {}, _initial_state or {})
+        try:
+            pt_value = float(resolved) if resolved not in ("", "null", "None") else None
+        except (TypeError, ValueError):
+            pt_value = None
+        formatted = format_length(pt_value, unit, precision)
+        if formatted:
+            initial_value_attr = f' value="{escape(formatted)}"'
+
+    extra_data = (
+        f' data-length-unit="{escape(unit)}"'
+        f' data-length-precision="{precision}"'
+    )
+    if "min" in el:
+        extra_data += f' data-length-min="{el["min"]}"'
+    if "max" in el:
+        extra_data += f' data-length-max="{el["max"]}"'
+    if el.get("nullable"):
+        extra_data += ' data-length-nullable="true"'
+
+    return Markup(
+        f'<input{_id_attr(el)} type="text" class="form-control form-control-sm app-length-input"'
+        f'{initial_value_attr} placeholder="{placeholder}"'
+        f'{_style_str(el, theme, state)}{extra_data}{_data_attrs(el)}>'
+    )
+
+
 def _render_color_swatch(el, theme, state):
     bind = el.get("bind", {})
     if isinstance(bind, str):
@@ -1525,6 +1586,7 @@ _RENDERERS = {
     "text": _render_text,
     "text_input": _render_text_input,
     "number_input": _render_number_input,
+    "length_input": _render_length_input,
     "color_swatch": _render_color_swatch,
     "gradient_tile": _render_gradient_tile,
     "gradient_slider": _render_gradient_slider,
