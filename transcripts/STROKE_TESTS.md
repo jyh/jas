@@ -747,7 +747,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-29  · note: extracted the sync logic out of canvas_bootstrap into engine/stroke_sync.elementToStateWrites (pure, returns the {key, value} pairs the listener should fire). Added 8 unit tests covering flat / legacy-object stroke shapes, explicit-null fill / stroke, cap / join / miterlimit / dasharray mirror, default fall-back when attrs are missing, dasharray-empty / "none" mapping to stroke_dashed=false, and a round-trip switching selection between two elements.
 
 - **STR-306** [wired] Identity-omission on weight default.
       Setup: Element with `stroke-width="5"`.
@@ -758,7 +758,7 @@ user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-29  · note: renderer.styleAttrs now drops stroke-width="1" from the SVG output (matching the existing identity-omission rules for stroke-linecap=butt / stroke-linejoin=miter / stroke-miterlimit=4 / empty stroke-dasharray). Both encodings — flat `stroke-width` field and legacy `{stroke: {color, width}}` object — are covered. Width=2 still emits; width=0 still emits (zero is not the default).
 
 ---
 

@@ -32,6 +32,9 @@ import {
   groupSelection, ungroupSelection,
 } from "/static/js/engine/effects.mjs";
 import { saveSession, loadSession } from "/static/js/engine/session.mjs";
+import {
+  elementToStateWrites, buildDasharray,
+} from "/static/js/engine/stroke_sync.mjs";
 
 const SESSION_AUTOSAVE_MS = 30000;
 
@@ -457,81 +460,17 @@ function walkPath(doc, path) {
   return cur || null;
 }
 
-// Element → state mirror. Skips writes when the value matches what
-// the global state already has (so we don't loop with the
-// PANEL_TO_ATTR writer further down). Mirrors via APP_SET_STATE so
-// app.js's panelState (and any data-bind UI) refreshes.
-function syncStateFromElement(elem) {
-  if (!elem) return;
+// Element → state mirror. Reads the selected element's stroke attrs
+// via [elementToStateWrites] (engine/stroke_sync) and writes each
+// (key, value) through APP_SET_STATE so app.js's panelState (and any
+// data-bind UI) refreshes. The pure helper lives in engine/ so node
+// tests can exercise it without DOM globals.
+export function syncStateFromElement(elem) {
   const setState = globalThis.APP_SET_STATE;
   if (typeof setState !== "function") return;
-  if (typeof elem.fill === "string" || elem.fill === null) {
-    setState("fill_color", elem.fill === null ? null : elem.fill);
+  for (const { key, value } of elementToStateWrites(elem)) {
+    setState(key, value);
   }
-  if (typeof elem.stroke === "string" || elem.stroke === null) {
-    setState("stroke_color", elem.stroke === null ? null : elem.stroke);
-  } else if (elem.stroke && typeof elem.stroke === "object" && elem.stroke.color) {
-    setState("stroke_color", elem.stroke.color);
-  }
-  if (typeof elem["stroke-width"] === "number") {
-    setState("stroke_width", elem["stroke-width"]);
-  } else if (elem.stroke && typeof elem.stroke === "object"
-             && typeof elem.stroke.width === "number") {
-    setState("stroke_width", elem.stroke.width);
-  }
-  // Stroke shape attributes — mirror back so the Stroke panel's
-  // cap / join / dash buttons reflect the active selection.
-  if (typeof elem["stroke-linecap"] === "string") {
-    setState("stroke_cap", elem["stroke-linecap"]);
-  } else {
-    setState("stroke_cap", "butt"); // default
-  }
-  if (typeof elem["stroke-linejoin"] === "string") {
-    setState("stroke_join", elem["stroke-linejoin"]);
-  } else {
-    setState("stroke_join", "miter");
-  }
-  if (typeof elem["stroke-miterlimit"] === "number") {
-    setState("stroke_miter_limit", elem["stroke-miterlimit"]);
-  }
-  if (typeof elem["stroke-dasharray"] === "string") {
-    setState("stroke_dasharray", elem["stroke-dasharray"]);
-  } else {
-    setState("stroke_dasharray", "");
-  }
-  // Derive the boolean stroke_dashed flag from the dasharray string.
-  // A non-empty, non-"none" value means the stroke is dashed; an
-  // empty or absent attribute means it is not. Without this the
-  // dashed checkbox can drift out of sync with the actual element.
-  const dashStr = elem["stroke-dasharray"];
-  const isDashed = typeof dashStr === "string"
-    && dashStr !== "" && dashStr !== "none";
-  setState("stroke_dashed", isDashed);
-}
-
-// Build the SVG `stroke-dasharray` string from the Stroke panel's
-// individual dash / gap fields. Returns "" when stroke_dashed is
-// off, signalling "no dasharray" to the renderer (which omits the
-// attribute entirely).
-//
-// Walk the three (dash_N, gap_N) pairs in order. Each pair
-// contributes both numbers as long as both are present (numbers,
-// including zero); a pair with either side null/undefined ends the
-// pattern. This yields "12 6 0 6" for the Dash-Dot preset
-// (d1=12, g1=6, d2=0, g2=6, d3=null, g3=null).
-function buildDasharray(state) {
-  if (!state || !state.stroke_dashed) return "";
-  const parts = [];
-  for (const i of [1, 2, 3]) {
-    const d = state[`stroke_dash_${i}`];
-    const g = state[`stroke_gap_${i}`];
-    // Number.isFinite rejects null, undefined, NaN, and +/-Infinity —
-    // matching the panel semantics where a blank input or a cleared
-    // pair ends the pattern.
-    if (!Number.isFinite(d) || !Number.isFinite(g)) break;
-    parts.push(String(d), String(g));
-  }
-  return parts.join(" ");
 }
 
 // Map the YAML tool's `cursor:` field to a CSS cursor value and
