@@ -4679,10 +4679,46 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         })
         .unwrap_or_default();
 
+    // bind.selected_in: <list-expr> — when present, the renderer
+    // evaluates both the list and the widget's per-item identity (read
+    // from the click behavior's first `select.target` so authors don't
+    // have to repeat it). If the identity is in the list, draw a 2px
+    // accent outline. Falls back to the regular border otherwise.
+    let selected = el.get("bind")
+        .and_then(|b| b.get("selected_in"))
+        .and_then(|v| v.as_str())
+        .map(|list_expr| {
+            let list_val = expr::eval(list_expr, ctx);
+            let id_expr = el.get("behavior")
+                .and_then(|b| b.as_array())
+                .and_then(|behaviors| {
+                    behaviors.iter().find_map(|b| {
+                        let effects = b.get("effects").and_then(|v| v.as_array())?;
+                        effects.iter().find_map(|e| {
+                            e.get("select")
+                                .and_then(|s| s.get("target"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        })
+                    })
+                });
+            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
+            list_contains_value(&list_val, id_val.as_ref())
+        })
+        .unwrap_or(false);
+
+    // Selected: 2px accent outline replacing the 1px border. Shifted
+    // border via box-shadow keeps the visual size consistent.
+    let final_border = if selected {
+        "2px solid var(--jas-accent,#4a90d9)"
+    } else {
+        border
+    };
+
     let style = if hollow {
         format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {bg};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
     } else {
-        format!("width:{size}px;height:{size}px;background:{bg};border:{border};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
+        format!("width:{size}px;height:{size}px;background:{bg};border:{final_border};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
     };
 
     let on_click = build_click_handler(el, ctx, rctx);
@@ -4691,10 +4727,22 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     rsx! {
         div {
             id: "{id}",
+            class: "jas-swatch-tile",
             style: "{style}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
         }
+    }
+}
+
+/// Test whether `id` is a member of the list `list`. Used by the
+/// `selected_in` bind on `color_swatch` and other tile widgets.
+fn list_contains_value(list: &Value, id: Option<&Value>) -> bool {
+    let Some(id) = id else { return false; };
+    let id_json = super::effects::value_to_json(id);
+    match list {
+        Value::List(items) => items.iter().any(|item| item == &id_json),
+        _ => false,
     }
 }
 
