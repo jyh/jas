@@ -424,6 +424,18 @@ private func runOne(
         return
     }
 
+    // select: { target, list, scope, scope_value, mode } — generic
+    // tile-selection effect for swatch / brush / row panels. Plain
+    // click replaces panel.{list} with [target] and resets
+    // panel.{scope} to scope_value. Mode "auto" reads
+    // event.shift / event.ctrl / event.meta from the click ctx for
+    // shift-extend / ctrl-toggle behaviors. Mirrors the Rust
+    // apply_select_effect.
+    if let spec = effect["select"] as? [String: Any] {
+        applySelectEffect(spec, ctx: ctx, store: store)
+        return
+    }
+
     // set_panel_state: { key, value, panel? }
     if let sps = effect["set_panel_state"] as? [String: Any] {
         let key = sps["key"] as? String ?? ""
@@ -1962,6 +1974,86 @@ private func _fmtNum(_ n: Double) -> String {
 /// ALIGN.md §Panel menu Reset Panel. Writes through both the
 /// global `state.align_*` surface (StateStore.set) and the
 /// panel-local mirrors (StateStore.setPanel).
+/// Apply a `select: { target, list, scope, scope_value, mode }` effect
+/// to the active panel's state. Used by tile-style panels (swatches,
+/// brushes) for click-to-select semantics with optional shift / ctrl
+/// modifiers. Writes through `store.setPanel(activePanelId, ...)`;
+/// mirrors the Rust `apply_select_effect`.
+public func applySelectEffect(_ spec: [String: Any], ctx: [String: Any], store: StateStore) {
+    guard let panelId = store.getActivePanelId() else { return }
+    let listField = spec["list"] as? String ?? ""
+    guard !listField.isEmpty else { return }
+    let scopeField = spec["scope"] as? String ?? ""
+    let mode = spec["mode"] as? String ?? "auto"
+
+    let target = valueToAny(evalExpr(spec["target"], store: store, ctx: ctx))
+    let scopeValue = valueToAny(evalExpr(spec["scope_value"], store: store, ctx: ctx))
+
+    // Read modifier state from the event ctx for mode "auto".
+    let event = ctx["event"] as? [String: Any]
+    let shift = (event?["shift"] as? Bool) ?? false
+    let ctrlOrMeta = ((event?["ctrl"] as? Bool) ?? false)
+        || ((event?["meta"] as? Bool) ?? false)
+    let effectiveMode: String
+    switch mode {
+    case "auto":
+        if shift { effectiveMode = "extend" }
+        else if ctrlOrMeta { effectiveMode = "toggle" }
+        else { effectiveMode = "single" }
+    default: effectiveMode = mode
+    }
+
+    // Scope check — clicking into a different scope clears and resets.
+    if !scopeField.isEmpty {
+        let curScope = store.getPanel(panelId, scopeField)
+        if !anyEqual(curScope, scopeValue) {
+            store.setPanel(panelId, scopeField, scopeValue)
+            store.setPanel(panelId, listField, [target as Any])
+            return
+        }
+    }
+
+    let curList = (store.getPanel(panelId, listField) as? [Any]) ?? []
+    let newList: [Any]
+    switch effectiveMode {
+    case "toggle":
+        if curList.contains(where: { anyEqual($0, target) }) {
+            newList = curList.filter { !anyEqual($0, target) }
+        } else {
+            newList = curList + [target as Any]
+        }
+    case "extend":
+        if let anchor = curList.first, let a = anchor as? Int, let t = target as? Int {
+            let lo = min(a, t), hi = max(a, t)
+            newList = (lo...hi).map { $0 as Any }
+        } else if let anchorN = (curList.first as? NSNumber)?.intValue,
+                  let targetN = (target as? NSNumber)?.intValue {
+            let lo = min(anchorN, targetN), hi = max(anchorN, targetN)
+            newList = (lo...hi).map { $0 as Any }
+        } else {
+            newList = [target as Any]
+        }
+    default: newList = [target as Any]
+    }
+    store.setPanel(panelId, listField, newList)
+}
+
+/// Loose equality for `Any` values used in select-effect comparisons —
+/// covers the common types stored in panel state (strings, ints, doubles,
+/// bools, NSNull).
+private func anyEqual(_ a: Any?, _ b: Any?) -> Bool {
+    switch (a, b) {
+    case (nil, nil): return true
+    case (is NSNull, is NSNull): return true
+    case (let x as String, let y as String): return x == y
+    case (let x as Bool, let y as Bool): return x == y
+    case (let x as Int, let y as Int): return x == y
+    case (let x as Double, let y as Double): return x == y
+    case (let x as NSNumber, let y as NSNumber): return x == y
+    default: return false
+    }
+}
+
 /// Read fill_color / stroke_color from the global store and apply the
 /// active one (per fill_on_top) to the selected canvas element. Used
 /// by the apply_active_color platform-effect hook so the YAML
