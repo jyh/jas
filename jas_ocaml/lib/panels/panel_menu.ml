@@ -32,6 +32,17 @@ let paragraph_store_ref : State_store.t option ref = ref None
     menu. *)
 let opacity_store_ref : State_store.t option ref = ref None
 
+(** Single source of truth for the four Opacity-panel toggle
+    commands: command name to (state-store key, default value). Used
+    by both panel_dispatch and panel_is_checked so the two cannot
+    drift out of sync when a new toggle is added. *)
+let opacity_toggle_table : (string * (string * bool)) list = [
+  "toggle_opacity_thumbnails", ("thumbnails_hidden", false);
+  "toggle_opacity_options", ("options_shown", false);
+  "toggle_new_masks_clipping", ("new_masks_clipping", true);
+  "toggle_new_masks_inverted", ("new_masks_inverted", false);
+]
+
 (** Read a bool from the Opacity panel's state store, falling back
     to [default] when the ref isn't set or the key is missing /
     non-bool. Used by [make_opacity_mask] dispatch and
@@ -1137,21 +1148,11 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
   (* Opacity panel-local toggles flip the stored bool in the
      State_store so subsequent [make_opacity_mask] dispatches and
      the menu's [checked_when] predicates see the live value. *)
-  | ("toggle_opacity_thumbnails" | "toggle_opacity_options"
-     | "toggle_new_masks_clipping" | "toggle_new_masks_inverted")
-    when kind = Opacity ->
+  | cmd when kind = Opacity && List.mem_assoc cmd opacity_toggle_table ->
     (match !opacity_store_ref with
      | None -> ()
      | Some store ->
-       let key = match cmd with
-         | "toggle_opacity_thumbnails" -> "thumbnails_hidden"
-         | "toggle_opacity_options" -> "options_shown"
-         | "toggle_new_masks_clipping" -> "new_masks_clipping"
-         | "toggle_new_masks_inverted" -> "new_masks_inverted"
-         | _ -> assert false in
-       let default = match key with
-         | "new_masks_clipping" -> true
-         | _ -> false in
+       let (key, default) = List.assoc cmd opacity_toggle_table in
        let cur = _opacity_store_bool key ~default in
        State_store.set_panel store "opacity_panel_content"
          key (`Bool (not cur)))
@@ -1162,13 +1163,6 @@ let panel_is_checked _kind cmd layout =
   match color_panel_mode_of_command cmd with
   | Some mode -> layout.color_panel_mode = mode
   | None ->
-    match cmd with
-    | "toggle_opacity_thumbnails" ->
-      _opacity_store_bool "thumbnails_hidden" ~default:false
-    | "toggle_opacity_options" ->
-      _opacity_store_bool "options_shown" ~default:false
-    | "toggle_new_masks_clipping" ->
-      _opacity_store_bool "new_masks_clipping" ~default:true
-    | "toggle_new_masks_inverted" ->
-      _opacity_store_bool "new_masks_inverted" ~default:false
-    | _ -> false
+    match List.assoc_opt cmd opacity_toggle_table with
+    | Some (key, default) -> _opacity_store_bool key ~default
+    | None -> false

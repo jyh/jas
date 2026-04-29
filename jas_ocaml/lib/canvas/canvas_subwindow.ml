@@ -465,21 +465,21 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
   | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; fill_gradient; stroke_gradient; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    let dasher_active = match stroke with
+    let dasher_stroke = match stroke with
       | Some s when s.stroke_dash_align_anchors
                     && s.stroke_dash_pattern <> []
                     && rx = 0.0 && ry = 0.0
                     && fill_gradient = None
                     && stroke_gradient = None
-                    && not outline -> true
-      | _ -> false
+                    && not outline -> Some s
+      | _ -> None
     in
-    if dasher_active then begin
+    (match dasher_stroke with
+     | Some s ->
       (* Anchor-aligned dashing for non-rounded rect: fill (if any)
          with the rect path, then expand the stroke into solid
          sub-paths via Dash_renderer and stroke each. apply_stroke
          already cleared the platform Cairo dash. *)
-      let s = match stroke with Some s -> s | None -> assert false in
       (match fill with
        | Some f ->
          let (r, g, b, a) = Element.color_to_rgba f.fill_color in
@@ -501,7 +501,7 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
         build_path cr sub;
         stroke_aligned cr align
       ) expanded
-    end else begin
+     | None ->
       if rx > 0.0 || ry > 0.0 then
         rounded_rect cr x y width height rx ry
       else
@@ -510,8 +510,7 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
         apply_outline_style cr;
         Cairo.stroke cr
       end else
-        fill_stroke_gradient_full cr fill stroke fill_gradient stroke_gradient (x, y, width, height);
-    end;
+        fill_stroke_gradient_full cr fill stroke fill_gradient stroke_gradient (x, y, width, height));
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
