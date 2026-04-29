@@ -946,6 +946,7 @@ fn apply_set_panel_state_with_ctx(
             "link_arrowhead_scale": sp.link_arrowhead_scale,
             "arrow_align": sp.arrow_align, "profile": sp.profile,
             "profile_flipped": sp.profile_flipped,
+            "dash_align_anchors": sp.dash_align_anchors,
         });
         let ctx = serde_json::json!({"panel": panel_json, "state": {}});
         let result = super::expr::eval(expr_str, &ctx);
@@ -970,6 +971,7 @@ fn apply_set_panel_state_with_ctx(
     // Propagate rendering-affecting changes to selected elements
     if matches!(key, "cap" | "join" | "weight" | "miter_limit" |
                 "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3" |
+                "dash_align_anchors" |
                 "align_stroke" | "start_arrowhead" | "end_arrowhead" |
                 "start_arrowhead_scale" | "end_arrowhead_scale" | "arrow_align" |
                 "profile" | "profile_flipped") {
@@ -1000,6 +1002,7 @@ fn get_stroke_field(sp: &crate::workspace::app_state::StrokePanelState, key: &st
         "arrow_align" => J::String(sp.arrow_align.clone()),
         "profile" => J::String(sp.profile.clone()),
         "profile_flipped" => J::Bool(sp.profile_flipped),
+        "dash_align_anchors" => J::Bool(sp.dash_align_anchors),
         _ => J::Null,
     }
 }
