@@ -465,15 +465,53 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
   | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; fill_gradient; stroke_gradient; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    if rx > 0.0 || ry > 0.0 then
-      rounded_rect cr x y width height rx ry
-    else
-      Cairo.rectangle cr x y ~w:width ~h:height;
-    if outline then begin
-      apply_outline_style cr;
-      Cairo.stroke cr
-    end else
-      fill_stroke_gradient_full cr fill stroke fill_gradient stroke_gradient (x, y, width, height);
+    let dasher_active = match stroke with
+      | Some s when s.stroke_dash_align_anchors
+                    && s.stroke_dash_pattern <> []
+                    && rx = 0.0 && ry = 0.0
+                    && fill_gradient = None
+                    && stroke_gradient = None
+                    && not outline -> true
+      | _ -> false
+    in
+    if dasher_active then begin
+      (* Anchor-aligned dashing for non-rounded rect: fill (if any)
+         with the rect path, then expand the stroke into solid
+         sub-paths via Dash_renderer and stroke each. apply_stroke
+         already cleared the platform Cairo dash. *)
+      let s = match stroke with Some s -> s | None -> assert false in
+      (match fill with
+       | Some f ->
+         let (r, g, b, a) = Element.color_to_rgba f.fill_color in
+         Cairo.set_source_rgba cr r g b a;
+         Cairo.rectangle cr x y ~w:width ~h:height;
+         Cairo.fill cr
+       | None -> ());
+      let cmds = [
+        MoveTo (x, y);
+        LineTo (x +. width, y);
+        LineTo (x +. width, y +. height);
+        LineTo (x, y +. height);
+        ClosePath;
+      ] in
+      let (_, align) = apply_stroke cr (Some s) in
+      let expanded = Dash_renderer.expand_dashed_stroke
+        cmds s.stroke_dash_pattern true in
+      List.iter (fun sub ->
+        build_path cr sub;
+        stroke_aligned cr align
+      ) expanded
+    end else begin
+      if rx > 0.0 || ry > 0.0 then
+        rounded_rect cr x y width height rx ry
+      else
+        Cairo.rectangle cr x y ~w:width ~h:height;
+      if outline then begin
+        apply_outline_style cr;
+        Cairo.stroke cr
+      end else
+        fill_stroke_gradient_full cr fill stroke fill_gradient stroke_gradient (x, y, width, height);
+    end;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
