@@ -990,21 +990,6 @@ actions:
       - set_panel_state: { panel: stroke, key: dashed, value: "not panel.dashed" }
       - set: { stroke_dashed: "not state.stroke_dashed" }
 
-  apply_dash_preset:
-    description: >
-      Apply a dash pattern preset, enabling dashing and filling in the
-      dash/gap fields. The even_dash preset sets 12pt dash, 12pt gap
-      (pair 1 only). The dash_dot preset sets 12pt dash, 6pt gap, 0pt
-      dash (dot), 6pt gap (pairs 1 and 2). Updates both panel state
-      and global state.
-    category: stroke
-    params:
-      preset: { type: enum, values: [even_dash, dash_dot] }
-    effects:
-      - set_panel_state: { panel: stroke, key: dashed, value: true }
-      - set: { stroke_dashed: true }
-      - log: "apply_dash_preset: {{param.preset}}"
-
   swap_arrowheads:
     description: >
       Swap the start and end arrowhead selections, including both the

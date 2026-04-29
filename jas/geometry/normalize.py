@@ -24,10 +24,23 @@ def _normalize_fill(fill: Fill) -> Fill:
 
 
 def _normalize_stroke(stroke: Stroke) -> Stroke:
+    # Preserve every Stroke field — only the color alpha is folded
+    # into opacity. Earlier versions of this function dropped
+    # dash_pattern, miter_limit, align, arrows, and dash_align_anchors,
+    # silently losing them on every SVG round-trip.
     alpha = stroke.color.alpha
     return Stroke(color=stroke.color.with_alpha(1.0), width=stroke.width,
                   linecap=stroke.linecap, linejoin=stroke.linejoin,
-                  opacity=stroke.opacity * alpha)
+                  opacity=stroke.opacity * alpha,
+                  miter_limit=stroke.miter_limit,
+                  align=stroke.align,
+                  dash_pattern=stroke.dash_pattern,
+                  dash_align_anchors=stroke.dash_align_anchors,
+                  start_arrow=stroke.start_arrow,
+                  end_arrow=stroke.end_arrow,
+                  start_arrow_scale=stroke.start_arrow_scale,
+                  end_arrow_scale=stroke.end_arrow_scale,
+                  arrow_align=stroke.arrow_align)
 
 
 def _normalize_element(elem):

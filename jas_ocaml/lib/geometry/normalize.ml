@@ -13,9 +13,27 @@ and normalize_fill (f : Element.fill) =
   Element.make_fill ~opacity:(f.fill_opacity *. alpha) (Element.color_with_alpha 1.0 f.fill_color)
 
 and normalize_stroke (s : Element.stroke) =
+  (* Preserve every Stroke field — only the color alpha is folded
+     into opacity. Earlier versions of this function dropped
+     stroke_dash_pattern, stroke_miter_limit, stroke_align, arrows,
+     and stroke_dash_align_anchors, silently losing them on every
+     SVG round-trip. *)
   let alpha = Element.color_alpha s.stroke_color in
-  Element.make_stroke ~width:s.stroke_width ~linecap:s.stroke_linecap ~linejoin:s.stroke_linejoin
-    ~opacity:(s.stroke_opacity *. alpha) (Element.color_with_alpha 1.0 s.stroke_color)
+  Element.make_stroke
+    ~width:s.stroke_width
+    ~linecap:s.stroke_linecap
+    ~linejoin:s.stroke_linejoin
+    ~miter_limit:s.stroke_miter_limit
+    ~align:s.stroke_align
+    ~dash_pattern:s.stroke_dash_pattern
+    ~dash_align_anchors:s.stroke_dash_align_anchors
+    ~start_arrow:s.stroke_start_arrow
+    ~end_arrow:s.stroke_end_arrow
+    ~start_arrow_scale:s.stroke_start_arrow_scale
+    ~end_arrow_scale:s.stroke_end_arrow_scale
+    ~arrow_align:s.stroke_arrow_align
+    ~opacity:(s.stroke_opacity *. alpha)
+    (Element.color_with_alpha 1.0 s.stroke_color)
 
 and normalize_element = function
   | Element.Line e ->

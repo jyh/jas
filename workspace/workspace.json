@@ -1460,36 +1460,6 @@
         }
       ]
     },
-    "apply_dash_preset": {
-      "description": "Apply a dash pattern preset, enabling dashing and filling in the dash/gap fields. The even_dash preset sets 12pt dash, 12pt gap (pair 1 only). The dash_dot preset sets 12pt dash, 6pt gap, 0pt dash (dot), 6pt gap (pairs 1 and 2). Updates both panel state and global state.\n",
-      "category": "stroke",
-      "params": {
-        "preset": {
-          "type": "enum",
-          "values": [
-            "even_dash",
-            "dash_dot"
-          ]
-        }
-      },
-      "effects": [
-        {
-          "set_panel_state": {
-            "panel": "stroke",
-            "key": "dashed",
-            "value": true
-          }
-        },
-        {
-          "set": {
-            "stroke_dashed": true
-          }
-        },
-        {
-          "log": "apply_dash_preset: {{param.preset}}"
-        }
-      ]
-    },
     "swap_arrowheads": {
       "description": "Swap the start and end arrowhead selections, including both the shape and the scale values. Updates both panel state and global state.\n",
       "category": "stroke",
@@ -4753,13 +4723,13 @@
       "viewbox": "0 0 16 16",
       "svg": "<path d=\"M3,5 L7,2 L7,4 L13,4 L13,6 L7,6 L7,8 Z\" fill=\"currentColor\"/> <path d=\"M13,11 L9,14 L9,12 L3,12 L3,10 L9,10 L9,8 Z\" fill=\"currentColor\"/>\n"
     },
-    "dash_even": {
+    "dash_preserve": {
       "viewbox": "0 0 16 16",
-      "svg": "<line x1=\"1\" y1=\"8\" x2=\"5\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <line x1=\"7\" y1=\"8\" x2=\"11\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <line x1=\"13\" y1=\"8\" x2=\"15\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/>\n"
+      "svg": "<line x1=\"1\" y1=\"6\" x2=\"5\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <line x1=\"7\" y1=\"6\" x2=\"11\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <line x1=\"13\" y1=\"6\" x2=\"15\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <circle cx=\"2\"  cy=\"11\" r=\"1.2\" fill=\"currentColor\"/> <circle cx=\"6\"  cy=\"11\" r=\"1.2\" fill=\"currentColor\"/> <circle cx=\"11\" cy=\"11\" r=\"1.2\" fill=\"currentColor\"/> <circle cx=\"14\" cy=\"11\" r=\"1.2\" fill=\"currentColor\"/>\n"
     },
-    "dash_dot": {
+    "dash_align_anchors": {
       "viewbox": "0 0 16 16",
-      "svg": "<line x1=\"1\" y1=\"8\" x2=\"5\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <circle cx=\"8\" cy=\"8\" r=\"1\" fill=\"currentColor\"/> <line x1=\"11\" y1=\"8\" x2=\"15\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/>\n"
+      "svg": "<line x1=\"1\" y1=\"6\" x2=\"5\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <line x1=\"7\" y1=\"6\" x2=\"11\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <line x1=\"13\" y1=\"6\" x2=\"15\" y2=\"6\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"butt\"/> <circle cx=\"3\"  cy=\"11\" r=\"1.2\" fill=\"currentColor\"/> <circle cx=\"9\"  cy=\"11\" r=\"1.2\" fill=\"currentColor\"/> <circle cx=\"14\" cy=\"11\" r=\"1.2\" fill=\"currentColor\"/>\n"
     },
     "arrow_tip_at_end": {
       "viewbox": "0 0 16 16",
@@ -7315,6 +7285,11 @@
       "default": null,
       "nullable": true,
       "description": "Active stroke gap length for pair 3 (null = unused)"
+    },
+    "stroke_dash_align_anchors": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, dash and gap lengths flex per-segment so a dash is centered on every anchor and a full dash sits at each open path end. When false (default), the dash pattern lays out by exact length along the path. See DASH_ALIGN.md.\n"
     },
     "stroke_start_arrowhead": {
       "type": "enum",
@@ -15487,7 +15462,7 @@
       "id": "stroke_panel_content",
       "type": "panel",
       "summary": "Stroke",
-      "description": "Stroke attribute controls for the selected path(s). The panel provides controls for stroke weight, endpoint cap style, corner join style with miter limit, stroke alignment relative to the path, dashed line patterns, arrowheads with independent start/end shape and scale, arrow alignment mode, and variable-width stroke profiles.\nLayout (top to bottom):\nRow 1 \u2014 Weight. A label and a number input for the stroke weight in points. Accepts any non-negative value including decimals.\nRow 2 \u2014 Cap. Three mutually exclusive icon toggle buttons for line endpoint style: butt (flat at the endpoint), round (semicircular beyond the endpoint), and square (extends beyond the endpoint by half the stroke width). Default is butt.\nRow 3 \u2014 Corner. Three mutually exclusive icon toggle buttons for line join style: miter (sharp corner), round (circular arc), and bevel (flat diagonal). Followed by a miter limit label and numeric input. The miter limit controls when a miter join auto-converts to bevel on acute angles; the value is the ratio of miter length to stroke width. Default miter limit is 10. The miter limit field is disabled when the join style is round or bevel.\nRow 4 \u2014 Align Stroke. Three mutually exclusive icon toggle buttons controlling where the stroke is drawn relative to the path: center (stroke straddles the path, the default), inside (stroke drawn inside closed paths), or outside (stroke drawn outside closed paths). Inside and outside behave the same as center on open paths.\nRow 5 \u2014 Dashed Line. A checkbox to enable dashing, plus two preset buttons: even dash (12pt/12pt) and dash-dot (12pt/6pt/0pt/6pt). Clicking a preset enables dashing and fills in the dash/gap fields.\nRow 6 \u2014 Dash/gap pattern. Six numeric inputs arranged as three dash/gap pairs. Pair 1 defaults to 12pt/12pt. Pairs 2 and 3 default to blank (unused \u2014 not part of the pattern). A value of 0 in a dash position produces a zero-length segment (a dot with round caps). The effective dash array is built left to right from non-blank pairs. All six fields are disabled (grayed out) when the dashed line checkbox is unchecked. The values persist and reappear when re-checked.\nRow 7 \u2014 Arrowheads. A label, two dropdowns (start and end) selecting from 15 arrowhead shapes, and a swap button that exchanges start and end arrowhead selections (both shape and scale). Both dropdowns share the same shape list. The renderer flips the shape based on which end it is placed on.\nArrowhead shapes: none (default), simple_arrow (filled triangle), open_arrow (unfilled triangle), closed_arrow (filled triangle with bar at base), stealth_arrow (sharp swept-back chevron, filled), barbed_arrow (curved swept-back, filled), half_arrow_upper (upper half of filled triangle), half_arrow_lower (lower half of filled triangle), circle (filled), open_circle (outline), square (filled), open_square (outline), diamond (filled diamond/rhombus), open_diamond (outline diamond), slash (perpendicular line across the path).\nRow 8 \u2014 Scale. A label, two editable combo boxes (start and end) for arrowhead scale as a percentage, and a link/unlink toggle button (chain icon). Preset dropdown values: 50%, 75%, 100%, 150%, 200%, 300%, 400%. The user can also type any positive value (minimum 1%). Default is 100%. Scale is relative to the stroke weight. When the link button is active, changing either scale updates both. Default is unlinked.\nRow 9 \u2014 Arrow Align. A label and two mutually exclusive icon toggle buttons: tip-at-end (the arrowhead tip sits exactly at the path endpoint; the body extends inward along the path) and center-at-end (the arrowhead center sits at the path endpoint; the tip extends beyond). Default is tip-at-end.\nRow 10 \u2014 Profile. A dropdown selecting a variable-width stroke profile, plus flip and reset buttons. Profiles: uniform (constant width, the default), taper_both (tapers at both ends), taper_start (tapers at start), taper_end (tapers at end), bulge (wider in the middle), pinch (narrower in the middle). Flip mirrors the profile along the path. Reset restores uniform.\n",
+      "description": "Stroke attribute controls for the selected path(s). The panel provides controls for stroke weight, endpoint cap style, corner join style with miter limit, stroke alignment relative to the path, dashed line patterns, arrowheads with independent start/end shape and scale, arrow alignment mode, and variable-width stroke profiles.\nLayout (top to bottom):\nRow 1 \u2014 Weight. A label and a number input for the stroke weight in points. Accepts any non-negative value including decimals.\nRow 2 \u2014 Cap. Three mutually exclusive icon toggle buttons for line endpoint style: butt (flat at the endpoint), round (semicircular beyond the endpoint), and square (extends beyond the endpoint by half the stroke width). Default is butt.\nRow 3 \u2014 Corner. Three mutually exclusive icon toggle buttons for line join style: miter (sharp corner), round (circular arc), and bevel (flat diagonal). Followed by a miter limit label and numeric input. The miter limit controls when a miter join auto-converts to bevel on acute angles; the value is the ratio of miter length to stroke width. Default miter limit is 10. The miter limit field is disabled when the join style is round or bevel.\nRow 4 \u2014 Align Stroke. Three mutually exclusive icon toggle buttons controlling where the stroke is drawn relative to the path: center (stroke straddles the path, the default), inside (stroke drawn inside closed paths), or outside (stroke drawn outside closed paths). Inside and outside behave the same as center on open paths.\nRow 5 \u2014 Dashed Line. A checkbox to enable dashing, plus two mutually-exclusive icon buttons that select how the dash pattern is applied to the path: preserve (the default \u2014 dashes lay out by exact length along the path; corners and ends fall wherever the math lands) and align-to-anchors (per-segment dash/gap lengths flex slightly so a dash is centered on every anchor, and a full dash sits at each open path end). The full algorithm and persistence model are documented in DASH_ALIGN.md.\nRow 6 \u2014 Dash/gap pattern. Six numeric inputs arranged as three dash/gap pairs. Pair 1 defaults to 12pt/12pt. Pairs 2 and 3 default to blank (unused \u2014 not part of the pattern). A value of 0 in a dash position produces a zero-length segment (a dot with round caps). The effective dash array is built left to right from non-blank pairs. All six fields are disabled (grayed out) when the dashed line checkbox is unchecked. The values persist and reappear when re-checked.\nRow 7 \u2014 Arrowheads. A label, two dropdowns (start and end) selecting from 15 arrowhead shapes, and a swap button that exchanges start and end arrowhead selections (both shape and scale). Both dropdowns share the same shape list. The renderer flips the shape based on which end it is placed on.\nArrowhead shapes: none (default), simple_arrow (filled triangle), open_arrow (unfilled triangle), closed_arrow (filled triangle with bar at base), stealth_arrow (sharp swept-back chevron, filled), barbed_arrow (curved swept-back, filled), half_arrow_upper (upper half of filled triangle), half_arrow_lower (lower half of filled triangle), circle (filled), open_circle (outline), square (filled), open_square (outline), diamond (filled diamond/rhombus), open_diamond (outline diamond), slash (perpendicular line across the path).\nRow 8 \u2014 Scale. A label, two editable combo boxes (start and end) for arrowhead scale as a percentage, and a link/unlink toggle button (chain icon). Preset dropdown values: 50%, 75%, 100%, 150%, 200%, 300%, 400%. The user can also type any positive value (minimum 1%). Default is 100%. Scale is relative to the stroke weight. When the link button is active, changing either scale updates both. Default is unlinked.\nRow 9 \u2014 Arrow Align. A label and two mutually exclusive icon toggle buttons: tip-at-end (the arrowhead tip sits exactly at the path endpoint; the body extends inward along the path) and center-at-end (the arrowhead center sits at the path endpoint; the tip extends beyond). Default is tip-at-end.\nRow 10 \u2014 Profile. A dropdown selecting a variable-width stroke profile, plus flip and reset buttons. Profiles: uniform (constant width, the default), taper_both (tapers at both ends), taper_start (tapers at start), taper_end (tapers at end), bulge (wider in the middle), pinch (narrower in the middle). Flip mirrors the profile along the path. Reset restores uniform.\n",
       "state": {
         "weight": {
           "type": "number",
@@ -15567,6 +15542,11 @@
           "default": null,
           "nullable": true,
           "description": "Gap length for pair 3, in points. Null means unused."
+        },
+        "dash_align_anchors": {
+          "type": "bool",
+          "default": false,
+          "description": "When true, per-segment dash and gap lengths flex so a dash is centered on every anchor and a full dash sits at each open path end. When false (default), the dash pattern lays out by exact length along the path. Mutually exclusive with the preserve mode represented by the alternate Row 5 button. See DASH_ALIGN.md.\n"
         },
         "start_arrowhead": {
           "type": "enum",
@@ -15675,7 +15655,8 @@
         "link_arrowhead_scale": "state.stroke_link_arrowhead_scale",
         "arrow_align": "state.stroke_arrow_align",
         "profile": "state.stroke_profile",
-        "profile_flipped": "state.stroke_profile_flipped"
+        "profile_flipped": "state.stroke_profile_flipped",
+        "dash_align_anchors": "state.stroke_dash_align_anchors"
       },
       "menu": [
         {
@@ -16167,13 +16148,16 @@
                 ]
               },
               {
-                "id": "stk_preset_even_dash",
+                "id": "stk_dash_preserve",
                 "type": "icon_button",
-                "icon": "dash_even",
-                "summary": "Even dash preset",
-                "description": "Sets dash/gap pattern to 12pt dash, 12pt gap (pair 1 only) and enables dashing.\n",
+                "icon": "dash_preserve",
+                "summary": "Preserve dash and gap lengths",
+                "description": "Dashes lay out by exact length along the path; corners and path ends fall wherever the math lands. Matches plain SVG semantics.\n",
                 "style": {
                   "size": 16
+                },
+                "bind": {
+                  "checked": "not panel.dash_align_anchors"
                 },
                 "behavior": [
                   {
@@ -16181,55 +16165,13 @@
                     "effects": [
                       {
                         "set_panel_state": {
-                          "key": "dashed",
-                          "value": true
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "dash_1",
-                          "value": 12
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "gap_1",
-                          "value": 12
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "dash_2",
-                          "value": null
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "gap_2",
-                          "value": null
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "dash_3",
-                          "value": null
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "gap_3",
-                          "value": null
+                          "key": "dash_align_anchors",
+                          "value": false
                         }
                       },
                       {
                         "set": {
-                          "stroke_dashed": true,
-                          "stroke_dash_1": 12,
-                          "stroke_gap_1": 12,
-                          "stroke_dash_2": null,
-                          "stroke_gap_2": null,
-                          "stroke_dash_3": null,
-                          "stroke_gap_3": null
+                          "stroke_dash_align_anchors": false
                         }
                       }
                     ]
@@ -16237,13 +16179,16 @@
                 ]
               },
               {
-                "id": "stk_preset_dash_dot",
+                "id": "stk_dash_align_anchors",
                 "type": "icon_button",
-                "icon": "dash_dot",
-                "summary": "Dash-dot preset",
-                "description": "Sets dash/gap pattern to 12pt dash, 6pt gap, 0pt dash (dot), 6pt gap (pairs 1 and 2) and enables dashing.\n",
+                "icon": "dash_align_anchors",
+                "summary": "Align dashes to corners and path ends",
+                "description": "Per-segment dash/gap lengths flex slightly so a dash is centered on every anchor and a full dash sits at each open path end. Anchor means any path node, smooth or corner. See DASH_ALIGN.md for the algorithm.\n",
                 "style": {
                   "size": 16
+                },
+                "bind": {
+                  "checked": "panel.dash_align_anchors"
                 },
                 "behavior": [
                   {
@@ -16251,55 +16196,13 @@
                     "effects": [
                       {
                         "set_panel_state": {
-                          "key": "dashed",
+                          "key": "dash_align_anchors",
                           "value": true
                         }
                       },
                       {
-                        "set_panel_state": {
-                          "key": "dash_1",
-                          "value": 12
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "gap_1",
-                          "value": 6
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "dash_2",
-                          "value": 0
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "gap_2",
-                          "value": 6
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "dash_3",
-                          "value": null
-                        }
-                      },
-                      {
-                        "set_panel_state": {
-                          "key": "gap_3",
-                          "value": null
-                        }
-                      },
-                      {
                         "set": {
-                          "stroke_dashed": true,
-                          "stroke_dash_1": 12,
-                          "stroke_gap_1": 6,
-                          "stroke_dash_2": 0,
-                          "stroke_gap_2": 6,
-                          "stroke_dash_3": null,
-                          "stroke_gap_3": null
+                          "stroke_dash_align_anchors": true
                         }
                       }
                     ]
@@ -18542,12 +18445,12 @@
           },
           {
             "set": {
-              "tool.ellipse.start_x": "event.x"
+              "tool.ellipse.start_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.ellipse.start_y": "event.y"
+              "tool.ellipse.start_y": "event.doc_y"
             }
           },
           {
@@ -18560,8 +18463,8 @@
               "parent": "[0]",
               "element": {
                 "type": "ellipse",
-                "cx": "event.x",
-                "cy": "event.y",
+                "cx": "event.doc_x",
+                "cy": "event.doc_y",
                 "rx": "0",
                 "ry": "0",
                 "fill": "'#d94ad9'"
@@ -18577,28 +18480,28 @@
                 "doc.set_attr": {
                   "path": "[0, layer_length([0]) - 1]",
                   "attr": "cx",
-                  "value": "(tool.ellipse.start_x + event.x) / 2"
+                  "value": "(tool.ellipse.start_x + event.doc_x) / 2"
                 }
               },
               {
                 "doc.set_attr": {
                   "path": "[0, layer_length([0]) - 1]",
                   "attr": "cy",
-                  "value": "(tool.ellipse.start_y + event.y) / 2"
+                  "value": "(tool.ellipse.start_y + event.doc_y) / 2"
                 }
               },
               {
                 "doc.set_attr": {
                   "path": "[0, layer_length([0]) - 1]",
                   "attr": "rx",
-                  "value": "abs(event.x - tool.ellipse.start_x) / 2"
+                  "value": "abs(event.doc_x - tool.ellipse.start_x) / 2"
                 }
               },
               {
                 "doc.set_attr": {
                   "path": "[0, layer_length([0]) - 1]",
                   "attr": "ry",
-                  "value": "abs(event.y - tool.ellipse.start_y) / 2"
+                  "value": "abs(event.doc_y - tool.ellipse.start_y) / 2"
                 }
               }
             ]
@@ -18876,6 +18779,18 @@
         "marquee_end_y": {
           "default": 0
         },
+        "doc_marquee_start_x": {
+          "default": 0
+        },
+        "doc_marquee_start_y": {
+          "default": 0
+        },
+        "doc_marquee_end_x": {
+          "default": 0
+        },
+        "doc_marquee_end_y": {
+          "default": 0
+        },
         "drag_start_x": {
           "default": 0
         },
@@ -18907,7 +18822,7 @@
         "on_mousedown": [
           {
             "let": {
-              "hit": "hit_test_deep(event.x, event.y)"
+              "hit": "hit_test_deep(event.doc_x, event.doc_y)"
             },
             "in": [
               {
@@ -18945,6 +18860,26 @@
                     "set": {
                       "tool.interior_selection.marquee_end_y": "event.y"
                     }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.doc_marquee_start_x": "event.doc_x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.doc_marquee_start_y": "event.doc_y"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.doc_marquee_end_x": "event.doc_x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.doc_marquee_end_y": "event.doc_y"
+                    }
                   }
                 ],
                 "else": [
@@ -18975,12 +18910,12 @@
                   },
                   {
                     "set": {
-                      "tool.interior_selection.drag_start_x": "event.x"
+                      "tool.interior_selection.drag_start_x": "event.doc_x"
                     }
                   },
                   {
                     "set": {
-                      "tool.interior_selection.drag_start_y": "event.y"
+                      "tool.interior_selection.drag_start_y": "event.doc_y"
                     }
                   },
                   {
@@ -19011,6 +18946,16 @@
                 "set": {
                   "tool.interior_selection.marquee_end_y": "event.y"
                 }
+              },
+              {
+                "set": {
+                  "tool.interior_selection.doc_marquee_end_x": "event.doc_x"
+                }
+              },
+              {
+                "set": {
+                  "tool.interior_selection.doc_marquee_end_y": "event.doc_y"
+                }
               }
             ]
           },
@@ -19022,8 +18967,8 @@
                 "then": [
                   {
                     "doc.copy_selection": {
-                      "dx": "event.x - tool.interior_selection.drag_start_x",
-                      "dy": "event.y - tool.interior_selection.drag_start_y"
+                      "dx": "event.doc_x - tool.interior_selection.drag_start_x",
+                      "dy": "event.doc_y - tool.interior_selection.drag_start_y"
                     }
                   },
                   {
@@ -19035,20 +18980,20 @@
                 "else": [
                   {
                     "doc.translate_selection": {
-                      "dx": "event.x - tool.interior_selection.drag_start_x",
-                      "dy": "event.y - tool.interior_selection.drag_start_y"
+                      "dx": "event.doc_x - tool.interior_selection.drag_start_x",
+                      "dy": "event.doc_y - tool.interior_selection.drag_start_y"
                     }
                   }
                 ]
               },
               {
                 "set": {
-                  "tool.interior_selection.drag_start_x": "event.x"
+                  "tool.interior_selection.drag_start_x": "event.doc_x"
                 }
               },
               {
                 "set": {
-                  "tool.interior_selection.drag_start_y": "event.y"
+                  "tool.interior_selection.drag_start_y": "event.doc_y"
                 }
               }
             ]
@@ -19060,10 +19005,10 @@
             "then": [
               {
                 "doc.partial_select_in_rect": {
-                  "x1": "min(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)",
-                  "y1": "min(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)",
-                  "x2": "max(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)",
-                  "y2": "max(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)",
+                  "x1": "min(tool.interior_selection.doc_marquee_start_x, tool.interior_selection.doc_marquee_end_x)",
+                  "y1": "min(tool.interior_selection.doc_marquee_start_y, tool.interior_selection.doc_marquee_end_y)",
+                  "x2": "max(tool.interior_selection.doc_marquee_start_x, tool.interior_selection.doc_marquee_end_x)",
+                  "y2": "max(tool.interior_selection.doc_marquee_start_y, tool.interior_selection.doc_marquee_end_y)",
                   "additive": "event.modifiers.shift"
                 }
               }
@@ -19272,6 +19217,12 @@
         },
         "cur_y": {
           "default": 0
+        },
+        "doc_start_x": {
+          "default": 0
+        },
+        "doc_start_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -19314,6 +19265,16 @@
             "set": {
               "tool.line.cur_y": "event.y"
             }
+          },
+          {
+            "set": {
+              "tool.line.doc_start_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.line.doc_start_y": "event.doc_y"
+            }
           }
         ],
         "on_mousemove": [
@@ -19347,10 +19308,10 @@
                     "doc.add_element": {
                       "element": {
                         "type": "line",
-                        "x1": "tool.line.start_x",
-                        "y1": "tool.line.start_y",
-                        "x2": "event.x",
-                        "y2": "event.y"
+                        "x1": "tool.line.doc_start_x",
+                        "y1": "tool.line.doc_start_y",
+                        "x2": "event.doc_x",
+                        "y2": "event.doc_y"
                       }
                     }
                   }
@@ -19677,6 +19638,18 @@
         "marquee_cur_y": {
           "default": 0
         },
+        "doc_marquee_start_x": {
+          "default": 0
+        },
+        "doc_marquee_start_y": {
+          "default": 0
+        },
+        "doc_marquee_cur_x": {
+          "default": 0
+        },
+        "doc_marquee_cur_y": {
+          "default": 0
+        },
         "drag_start_x": {
           "default": 0
         },
@@ -19726,8 +19699,8 @@
         "on_mousedown": [
           {
             "doc.path.probe_partial_hit": {
-              "x": "event.x",
-              "y": "event.y",
+              "x": "event.doc_x",
+              "y": "event.doc_y",
               "hit_radius": "8",
               "shift": "event.modifiers.shift"
             }
@@ -19754,6 +19727,26 @@
                 "set": {
                   "tool.partial_selection.marquee_cur_y": "event.y"
                 }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.doc_marquee_start_x": "event.doc_x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.doc_marquee_start_y": "event.doc_y"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.doc_marquee_cur_x": "event.doc_x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.doc_marquee_cur_y": "event.doc_y"
+                }
               }
             ]
           },
@@ -19762,22 +19755,22 @@
             "then": [
               {
                 "set": {
-                  "tool.partial_selection.drag_start_x": "event.x"
+                  "tool.partial_selection.drag_start_x": "event.doc_x"
                 }
               },
               {
                 "set": {
-                  "tool.partial_selection.drag_start_y": "event.y"
+                  "tool.partial_selection.drag_start_y": "event.doc_y"
                 }
               },
               {
                 "set": {
-                  "tool.partial_selection.drag_last_x": "event.x"
+                  "tool.partial_selection.drag_last_x": "event.doc_x"
                 }
               },
               {
                 "set": {
-                  "tool.partial_selection.drag_last_y": "event.y"
+                  "tool.partial_selection.drag_last_y": "event.doc_y"
                 }
               },
               {
@@ -19811,6 +19804,16 @@
                 "set": {
                   "tool.partial_selection.marquee_cur_y": "event.y"
                 }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.doc_marquee_cur_x": "event.doc_x"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.doc_marquee_cur_y": "event.doc_y"
+                }
               }
             ]
           },
@@ -19818,7 +19821,7 @@
             "if": "tool.partial_selection.mode == 'moving_pending' or tool.partial_selection.mode == 'moving'",
             "then": [
               {
-                "if": "not tool.partial_selection.snapshotted and hypot(event.x - tool.partial_selection.drag_start_x, event.y - tool.partial_selection.drag_start_y) > 4",
+                "if": "not tool.partial_selection.snapshotted and hypot(event.doc_x - tool.partial_selection.drag_start_x, event.doc_y - tool.partial_selection.drag_start_y) > 4",
                 "then": [
                   {
                     "doc.snapshot": {}
@@ -19843,8 +19846,8 @@
                     "then": [
                       {
                         "doc.copy_selection": {
-                          "dx": "event.x - tool.partial_selection.drag_last_x",
-                          "dy": "event.y - tool.partial_selection.drag_last_y"
+                          "dx": "event.doc_x - tool.partial_selection.drag_last_x",
+                          "dy": "event.doc_y - tool.partial_selection.drag_last_y"
                         }
                       },
                       {
@@ -19856,20 +19859,20 @@
                     "else": [
                       {
                         "doc.translate_selection": {
-                          "dx": "event.x - tool.partial_selection.drag_last_x",
-                          "dy": "event.y - tool.partial_selection.drag_last_y"
+                          "dx": "event.doc_x - tool.partial_selection.drag_last_x",
+                          "dy": "event.doc_y - tool.partial_selection.drag_last_y"
                         }
                       }
                     ]
                   },
                   {
                     "set": {
-                      "tool.partial_selection.drag_last_x": "event.x"
+                      "tool.partial_selection.drag_last_x": "event.doc_x"
                     }
                   },
                   {
                     "set": {
-                      "tool.partial_selection.drag_last_y": "event.y"
+                      "tool.partial_selection.drag_last_y": "event.doc_y"
                     }
                   }
                 ]
@@ -19880,7 +19883,7 @@
             "if": "tool.partial_selection.mode == 'handle'",
             "then": [
               {
-                "if": "not tool.partial_selection.snapshotted and hypot(event.x - tool.partial_selection.drag_start_x, event.y - tool.partial_selection.drag_start_y) > 0.5",
+                "if": "not tool.partial_selection.snapshotted and hypot(event.doc_x - tool.partial_selection.drag_start_x, event.doc_y - tool.partial_selection.drag_start_y) > 0.5",
                 "then": [
                   {
                     "doc.snapshot": {}
@@ -19897,18 +19900,18 @@
                 "then": [
                   {
                     "doc.move_path_handle": {
-                      "dx": "event.x - tool.partial_selection.drag_last_x",
-                      "dy": "event.y - tool.partial_selection.drag_last_y"
+                      "dx": "event.doc_x - tool.partial_selection.drag_last_x",
+                      "dy": "event.doc_y - tool.partial_selection.drag_last_y"
                     }
                   },
                   {
                     "set": {
-                      "tool.partial_selection.drag_last_x": "event.x"
+                      "tool.partial_selection.drag_last_x": "event.doc_x"
                     }
                   },
                   {
                     "set": {
-                      "tool.partial_selection.drag_last_y": "event.y"
+                      "tool.partial_selection.drag_last_y": "event.doc_y"
                     }
                   }
                 ]
@@ -19922,10 +19925,10 @@
             "then": [
               {
                 "doc.path.commit_partial_marquee": {
-                  "x1": "tool.partial_selection.marquee_start_x",
-                  "y1": "tool.partial_selection.marquee_start_y",
-                  "x2": "tool.partial_selection.marquee_cur_x",
-                  "y2": "tool.partial_selection.marquee_cur_y",
+                  "x1": "tool.partial_selection.doc_marquee_start_x",
+                  "y1": "tool.partial_selection.doc_marquee_start_y",
+                  "x2": "tool.partial_selection.doc_marquee_cur_x",
+                  "y2": "tool.partial_selection.doc_marquee_cur_y",
                   "additive": "event.modifiers.shift"
                 }
               }
@@ -20105,7 +20108,7 @@
         ],
         "on_mousedown": [
           {
-            "if": "anchor_buffer_close_hit('pen', event.x, event.y, 8)",
+            "if": "anchor_buffer_close_hit('pen', event.doc_x, event.doc_y, 8)",
             "then": [
               {
                 "doc.snapshot": {}
@@ -20139,8 +20142,8 @@
               {
                 "anchor.push": {
                   "buffer": "pen",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               },
               {
@@ -20154,12 +20157,12 @@
         "on_mousemove": [
           {
             "set": {
-              "tool.pen.mouse_x": "event.x"
+              "tool.pen.mouse_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.pen.mouse_y": "event.y"
+              "tool.pen.mouse_y": "event.doc_y"
             }
           },
           {
@@ -20168,8 +20171,8 @@
               {
                 "anchor.set_last_out": {
                   "buffer": "pen",
-                  "hx": "event.x",
-                  "hy": "event.y"
+                  "hx": "event.doc_x",
+                  "hy": "event.doc_y"
                 }
               }
             ]
@@ -20307,8 +20310,8 @@
           {
             "buffer.push": {
               "buffer": "pencil",
-              "x": "event.x",
-              "y": "event.y"
+              "x": "event.doc_x",
+              "y": "event.doc_y"
             }
           },
           {
@@ -20324,8 +20327,8 @@
               {
                 "buffer.push": {
                   "buffer": "pencil",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               }
             ]
@@ -20338,8 +20341,8 @@
               {
                 "buffer.push": {
                   "buffer": "pencil",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               },
               {
@@ -20411,6 +20414,12 @@
         },
         "cur_y": {
           "default": 0
+        },
+        "doc_start_x": {
+          "default": 0
+        },
+        "doc_start_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -20453,6 +20462,16 @@
             "set": {
               "tool.polygon.cur_y": "event.y"
             }
+          },
+          {
+            "set": {
+              "tool.polygon.doc_start_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.polygon.doc_start_y": "event.doc_y"
+            }
           }
         ],
         "on_mousemove": [
@@ -20486,10 +20505,10 @@
                     "doc.add_element": {
                       "element": {
                         "type": "polygon",
-                        "x1": "tool.polygon.start_x",
-                        "y1": "tool.polygon.start_y",
-                        "x2": "event.x",
-                        "y2": "event.y",
+                        "x1": "tool.polygon.doc_start_x",
+                        "y1": "tool.polygon.doc_start_y",
+                        "x2": "event.doc_x",
+                        "y2": "event.doc_y",
                         "sides": "5"
                       }
                     }
@@ -20554,6 +20573,12 @@
         },
         "cur_y": {
           "default": 0
+        },
+        "doc_start_x": {
+          "default": 0
+        },
+        "doc_start_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -20596,6 +20621,16 @@
             "set": {
               "tool.rect.cur_y": "event.y"
             }
+          },
+          {
+            "set": {
+              "tool.rect.doc_start_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.rect.doc_start_y": "event.doc_y"
+            }
           }
         ],
         "on_mousemove": [
@@ -20629,10 +20664,10 @@
                     "doc.add_element": {
                       "element": {
                         "type": "rect",
-                        "x": "min(tool.rect.start_x, event.x)",
-                        "y": "min(tool.rect.start_y, event.y)",
-                        "width": "abs(event.x - tool.rect.start_x)",
-                        "height": "abs(event.y - tool.rect.start_y)"
+                        "x": "min(tool.rect.doc_start_x, event.doc_x)",
+                        "y": "min(tool.rect.doc_start_y, event.doc_y)",
+                        "width": "abs(event.doc_x - tool.rect.doc_start_x)",
+                        "height": "abs(event.doc_y - tool.rect.doc_start_y)"
                       }
                     }
                   }
@@ -20927,6 +20962,12 @@
         },
         "cur_y": {
           "default": 0
+        },
+        "doc_start_x": {
+          "default": 0
+        },
+        "doc_start_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -20969,6 +21010,16 @@
             "set": {
               "tool.rounded_rect.cur_y": "event.y"
             }
+          },
+          {
+            "set": {
+              "tool.rounded_rect.doc_start_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.rounded_rect.doc_start_y": "event.doc_y"
+            }
           }
         ],
         "on_mousemove": [
@@ -21002,10 +21053,10 @@
                     "doc.add_element": {
                       "element": {
                         "type": "rect",
-                        "x": "min(tool.rounded_rect.start_x, event.x)",
-                        "y": "min(tool.rounded_rect.start_y, event.y)",
-                        "width": "abs(event.x - tool.rounded_rect.start_x)",
-                        "height": "abs(event.y - tool.rounded_rect.start_y)",
+                        "x": "min(tool.rounded_rect.doc_start_x, event.doc_x)",
+                        "y": "min(tool.rounded_rect.doc_start_y, event.doc_y)",
+                        "width": "abs(event.doc_x - tool.rounded_rect.doc_start_x)",
+                        "height": "abs(event.doc_y - tool.rounded_rect.doc_start_y)",
                         "rx": "10",
                         "ry": "10"
                       }
@@ -21306,6 +21357,18 @@
         "marquee_end_y": {
           "default": 0
         },
+        "doc_marquee_start_x": {
+          "default": 0
+        },
+        "doc_marquee_start_y": {
+          "default": 0
+        },
+        "doc_marquee_end_x": {
+          "default": 0
+        },
+        "doc_marquee_end_y": {
+          "default": 0
+        },
         "drag_start_x": {
           "default": 0
         },
@@ -21337,7 +21400,7 @@
         "on_mousedown": [
           {
             "let": {
-              "hit": "hit_test(event.x, event.y)"
+              "hit": "hit_test(event.doc_x, event.doc_y)"
             },
             "in": [
               {
@@ -21375,6 +21438,26 @@
                     "set": {
                       "tool.selection.marquee_end_y": "event.y"
                     }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.doc_marquee_start_x": "event.doc_x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.doc_marquee_start_y": "event.doc_y"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.doc_marquee_end_x": "event.doc_x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.doc_marquee_end_y": "event.doc_y"
+                    }
                   }
                 ],
                 "else": [
@@ -21405,12 +21488,12 @@
                   },
                   {
                     "set": {
-                      "tool.selection.drag_start_x": "event.x"
+                      "tool.selection.drag_start_x": "event.doc_x"
                     }
                   },
                   {
                     "set": {
-                      "tool.selection.drag_start_y": "event.y"
+                      "tool.selection.drag_start_y": "event.doc_y"
                     }
                   },
                   {
@@ -21441,6 +21524,16 @@
                 "set": {
                   "tool.selection.marquee_end_y": "event.y"
                 }
+              },
+              {
+                "set": {
+                  "tool.selection.doc_marquee_end_x": "event.doc_x"
+                }
+              },
+              {
+                "set": {
+                  "tool.selection.doc_marquee_end_y": "event.doc_y"
+                }
               }
             ]
           },
@@ -21452,8 +21545,8 @@
                 "then": [
                   {
                     "doc.copy_selection": {
-                      "dx": "event.x - tool.selection.drag_start_x",
-                      "dy": "event.y - tool.selection.drag_start_y"
+                      "dx": "event.doc_x - tool.selection.drag_start_x",
+                      "dy": "event.doc_y - tool.selection.drag_start_y"
                     }
                   },
                   {
@@ -21465,20 +21558,20 @@
                 "else": [
                   {
                     "doc.translate_selection": {
-                      "dx": "event.x - tool.selection.drag_start_x",
-                      "dy": "event.y - tool.selection.drag_start_y"
+                      "dx": "event.doc_x - tool.selection.drag_start_x",
+                      "dy": "event.doc_y - tool.selection.drag_start_y"
                     }
                   }
                 ]
               },
               {
                 "set": {
-                  "tool.selection.drag_start_x": "event.x"
+                  "tool.selection.drag_start_x": "event.doc_x"
                 }
               },
               {
                 "set": {
-                  "tool.selection.drag_start_y": "event.y"
+                  "tool.selection.drag_start_y": "event.doc_y"
                 }
               }
             ]
@@ -21490,10 +21583,10 @@
             "then": [
               {
                 "doc.select_in_rect": {
-                  "x1": "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)",
-                  "y1": "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)",
-                  "x2": "max(tool.selection.marquee_start_x, tool.selection.marquee_end_x)",
-                  "y2": "max(tool.selection.marquee_start_y, tool.selection.marquee_end_y)",
+                  "x1": "min(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)",
+                  "y1": "min(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)",
+                  "x2": "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)",
+                  "y2": "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)",
                   "additive": "event.modifiers.shift"
                 }
               }
@@ -21846,6 +21939,12 @@
         },
         "cur_y": {
           "default": 0
+        },
+        "doc_start_x": {
+          "default": 0
+        },
+        "doc_start_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -21888,6 +21987,16 @@
             "set": {
               "tool.star.cur_y": "event.y"
             }
+          },
+          {
+            "set": {
+              "tool.star.doc_start_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.star.doc_start_y": "event.doc_y"
+            }
           }
         ],
         "on_mousemove": [
@@ -21921,10 +22030,10 @@
                     "doc.add_element": {
                       "element": {
                         "type": "star",
-                        "x1": "tool.star.start_x",
-                        "y1": "tool.star.start_y",
-                        "x2": "event.x",
-                        "y2": "event.y",
+                        "x1": "tool.star.doc_start_x",
+                        "y1": "tool.star.doc_start_y",
+                        "x2": "event.doc_x",
+                        "y2": "event.doc_y",
                         "points": "5"
                       }
                     }

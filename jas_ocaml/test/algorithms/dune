@@ -1,52 +1,69 @@
 (test
  (name boolean_test)
+ (modules boolean_test)
  (libraries jas alcotest))
 
 (test
  (name fit_curve_test)
+ (modules fit_curve_test)
  (libraries jas alcotest))
 
 (test
  (name hit_test_test)
+ (modules hit_test_test)
  (libraries jas alcotest))
 
 (test
  (name path_text_layout_test)
+ (modules path_text_layout_test)
  (libraries jas alcotest))
 
 (test
  (name planar_test)
+ (modules planar_test)
  (libraries jas alcotest))
 
 (test
  (name shape_recognize_test)
+ (modules shape_recognize_test)
  (libraries jas alcotest))
 
 (test
  (name text_layout_test)
+ (modules text_layout_test)
  (libraries jas alcotest))
 
 (test
  (name hyphenator_test)
+ (modules hyphenator_test)
  (libraries jas alcotest))
 
 (test
  (name knuth_plass_test)
+ (modules knuth_plass_test)
  (libraries jas alcotest))
 
 (test
  (name align_test)
+ (modules align_test)
  (libraries jas alcotest))
 
 (test
  (name align_fixture_test)
+ (modules align_fixture_test)
  (libraries jas alcotest yojson))
 
 (test
  (name magic_wand_test)
+ (modules magic_wand_test)
  (libraries jas alcotest))
 
 (test
  (name eyedropper_test)
  (modules eyedropper_test)
+ (libraries jas alcotest))
+
+(test
+ (name dash_renderer_test)
+ (modules dash_renderer_test)
  (libraries jas alcotest))

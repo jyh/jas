@@ -493,9 +493,25 @@ fn run_effects(
     st: &mut crate::workspace::app_state::AppState,
 ) -> Vec<serde_json::Value> {
     let mut dialog_effects = Vec::new();
+    // Build an evaluation context once per call. Set-effect values are
+    // expression strings (e.g. "not state.stroke_dashed"); they must
+    // be evaluated before the schema validator looks at them, or the
+    // unevaluated string is passed to the Bool / Number coercer and
+    // the schema rejects it as a type_mismatch. Mirrors the
+    // run_yaml_effects path.
+    let eval_ctx = build_appstate_ctx(&serde_json::Map::new(), st);
     for effect in effects {
         if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
-            apply_set_effects(set_map, st);
+            let mut evaluated = serde_json::Map::new();
+            for (k, v) in set_map {
+                let val = if let Some(expr_str) = v.as_str() {
+                    super::effects::value_to_json(&super::expr::eval(expr_str, &eval_ctx))
+                } else {
+                    v.clone()
+                };
+                evaluated.insert(k.clone(), val);
+            }
+            apply_set_effects(&evaluated, st);
         }
         // set_panel_state: { key, value }
         if let Some(sps) = effect.get("set_panel_state").and_then(|v| v.as_object()) {
@@ -930,6 +946,7 @@ fn apply_set_panel_state_with_ctx(
             "link_arrowhead_scale": sp.link_arrowhead_scale,
             "arrow_align": sp.arrow_align, "profile": sp.profile,
             "profile_flipped": sp.profile_flipped,
+            "dash_align_anchors": sp.dash_align_anchors,
         });
         let ctx = serde_json::json!({"panel": panel_json, "state": {}});
         let result = super::expr::eval(expr_str, &ctx);
@@ -954,6 +971,7 @@ fn apply_set_panel_state_with_ctx(
     // Propagate rendering-affecting changes to selected elements
     if matches!(key, "cap" | "join" | "weight" | "miter_limit" |
                 "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3" |
+                "dash_align_anchors" |
                 "align_stroke" | "start_arrowhead" | "end_arrowhead" |
                 "start_arrowhead_scale" | "end_arrowhead_scale" | "arrow_align" |
                 "profile" | "profile_flipped") {
@@ -984,6 +1002,7 @@ fn get_stroke_field(sp: &crate::workspace::app_state::StrokePanelState, key: &st
         "arrow_align" => J::String(sp.arrow_align.clone()),
         "profile" => J::String(sp.profile.clone()),
         "profile_flipped" => J::Bool(sp.profile_flipped),
+        "dash_align_anchors" => J::Bool(sp.dash_align_anchors),
         _ => J::Null,
     }
 }
@@ -1046,6 +1065,7 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
         "gap_2" => { sp.gap_2 = val.as_f64(); }
         "dash_3" => { sp.dash_3 = val.as_f64(); }
         "gap_3" => { sp.gap_3 = val.as_f64(); }
+        "dash_align_anchors" => { if let Some(b) = val.as_bool() { sp.dash_align_anchors = b; } }
         "start_arrowhead" => { if let Some(s) = val.as_str() { sp.start_arrowhead = s.into(); } }
         "end_arrowhead" => { if let Some(s) = val.as_str() { sp.end_arrowhead = s.into(); } }
         "start_arrowhead_scale" => { if let Some(n) = val.as_f64() { sp.start_arrowhead_scale = n; } }
@@ -1208,11 +1228,41 @@ fn build_appstate_ctx(
         None => serde_json::Value::Null,
         Some(s) => serde_json::Value::String(format!("#{}", s.color.to_hex())),
     };
+    // Expose every stroke-panel field that appears in YAML state.*
+    // expressions (workspace/panels/stroke.yaml's state map at the
+    // bottom of the file enumerates them). Without these,
+    // "not state.stroke_dashed" evaluates against a null and toggling
+    // is impossible. See AppState::stroke_panel for the canonical
+    // source of truth on these values.
+    let sp = &st.stroke_panel;
+    let stroke_width = st.app_default_stroke.as_ref()
+        .map(|s| s.width).unwrap_or(1.0);
     let state = serde_json::json!({
         "fill_on_top": st.fill_on_top,
         "fill_color": fill_color,
         "stroke_color": stroke_color,
         "active_tool": tool_name,
+        "stroke_width": stroke_width,
+        "stroke_cap": sp.cap,
+        "stroke_join": sp.join,
+        "stroke_miter_limit": sp.miter_limit,
+        "stroke_align": sp.align,
+        "stroke_dashed": sp.dashed,
+        "stroke_dash_1": sp.dash_1,
+        "stroke_gap_1": sp.gap_1,
+        "stroke_dash_2": sp.dash_2,
+        "stroke_gap_2": sp.gap_2,
+        "stroke_dash_3": sp.dash_3,
+        "stroke_gap_3": sp.gap_3,
+        "stroke_dash_align_anchors": sp.dash_align_anchors,
+        "stroke_start_arrowhead": sp.start_arrowhead,
+        "stroke_end_arrowhead": sp.end_arrowhead,
+        "stroke_start_arrowhead_scale": sp.start_arrowhead_scale,
+        "stroke_end_arrowhead_scale": sp.end_arrowhead_scale,
+        "stroke_link_arrowhead_scale": sp.link_arrowhead_scale,
+        "stroke_arrow_align": sp.arrow_align,
+        "stroke_profile": sp.profile,
+        "stroke_profile_flipped": sp.profile_flipped,
     });
     // Panel namespace: expose layers_panel_selection as a list of path
     // markers so YAML actions (delete/duplicate_layer_selection) can

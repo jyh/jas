@@ -494,6 +494,11 @@ pub struct Stroke {
     /// Unused slots are 0.0. `dash_len` indicates how many values are active.
     pub dash_pattern: [f64; 6],
     pub dash_len: u8,
+    /// When true, per-segment dash and gap lengths flex so a dash is
+    /// centered on every anchor and a full dash sits at each open path
+    /// end. When false (default), the dash pattern lays out by exact
+    /// length along the path. See DASH_ALIGN.md.
+    pub dash_align_anchors: bool,
     pub start_arrow: Arrowhead,
     pub end_arrow: Arrowhead,
     pub start_arrow_scale: f64,
@@ -513,6 +518,7 @@ impl Stroke {
             align: StrokeAlign::Center,
             dash_pattern: [0.0; 6],
             dash_len: 0,
+            dash_align_anchors: false,
             start_arrow: Arrowhead::None,
             end_arrow: Arrowhead::None,
             start_arrow_scale: 100.0,

@@ -59,6 +59,11 @@ let stroke_attrs = function
      | Element.Bevel -> parts := " stroke-linejoin=\"bevel\"" :: !parts);
     if s.stroke_opacity < 1.0 then
       parts := Printf.sprintf " stroke-opacity=\"%s\"" (fmt s.stroke_opacity) :: !parts;
+    (* Workspace-private attribute — see DASH_ALIGN.md §Persistence.
+       Identity-omitted when false; round-trips through jas-authored
+       files; ignored on import from non-jas SVG. *)
+    if s.stroke_dash_align_anchors then
+      parts := " data-jas-dash-align-anchors=\"true\"" :: !parts;
     String.concat "" (List.rev !parts)
 
 let transform_attr = function
@@ -456,7 +461,13 @@ let parse_stroke attrs =
         | Some "bevel" -> Element.Bevel
         | _ -> Element.Miter in
       let opacity = get_attr_f attrs "stroke-opacity" 1.0 in
-      Some (Element.make_stroke ~width ~linecap ~linejoin ~opacity c)
+      let dash_align_anchors = match get_attr attrs "data-jas-dash-align-anchors" with
+        | Some s ->
+          let trimmed = String.trim s in
+          trimmed = "true" || trimmed = "1"
+        | None -> false in
+      Some (Element.make_stroke ~width ~linecap ~linejoin ~opacity
+              ~dash_align_anchors c)
 
 let parse_transform attrs =
   match get_attr attrs "transform" with

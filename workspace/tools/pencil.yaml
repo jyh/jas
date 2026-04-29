@@ -33,13 +33,13 @@ handlers:
   on_mousedown:
     - "doc.snapshot": {}
     - "buffer.clear": { buffer: "pencil" }
-    - "buffer.push": { buffer: "pencil", x: "event.x", y: "event.y" }
+    - "buffer.push": { buffer: "pencil", x: "event.doc_x", y: "event.doc_y" }
     - set: { tool.pencil.mode: "'drawing'" }
 
   on_mousemove:
     - if: "tool.pencil.mode == 'drawing'"
       then:
-        - "buffer.push": { buffer: "pencil", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "pencil", x: "event.doc_x", y: "event.doc_y" }
 
   on_mouseup:
     - if: "tool.pencil.mode == 'drawing'"
@@ -47,7 +47,7 @@ handlers:
         # Final point on release, same as native — without this a
         # click (press+release at same point) would leave a 1-point
         # buffer that fit_curve rejects.
-        - "buffer.push": { buffer: "pencil", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "pencil", x: "event.doc_x", y: "event.doc_y" }
         - "doc.add_path_from_buffer":
             buffer: "pencil"
             fit_error: "4"

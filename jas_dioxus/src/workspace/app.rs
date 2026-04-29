@@ -670,7 +670,12 @@ pub fn App() -> Element {
             href: "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css",
         }
         style { r#"
-            html, body {{ margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; }}
+            /* Anchor the base font-size at 12px so panel widgets inherit
+               consistently. Bootstrap defaults body to 1rem (16px), which
+               makes form inputs render large while labels (which set
+               font_size explicitly via YAML) look right — see the
+               UNIT_INPUTS visual on stroke.yaml dash/gap row. */
+            html, body {{ margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; font-family: sans-serif; font-size: 12px; }}
             #main {{ height: 100%; }}
             .jas-menu-title:hover {{ background: {THEME_BG_ACTIVE}; }}
             .jas-menu-item:hover {{ background: {THEME_BG_ACTIVE}; }}

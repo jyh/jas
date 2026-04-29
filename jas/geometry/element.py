@@ -465,6 +465,11 @@ class Stroke:
     miter_limit: float = 10.0
     align: StrokeAlign = StrokeAlign.CENTER
     dash_pattern: tuple[float, ...] = ()
+    # When True, per-segment dash and gap lengths flex so a dash is
+    # centered on every anchor and a full dash sits at each open path
+    # end. When False (default), the dash pattern lays out by exact
+    # length along the path. See DASH_ALIGN.md.
+    dash_align_anchors: bool = False
     start_arrow: Arrowhead = Arrowhead.NONE
     end_arrow: Arrowhead = Arrowhead.NONE
     start_arrow_scale: float = 100.0
