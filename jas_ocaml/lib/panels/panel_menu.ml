@@ -678,17 +678,13 @@ let dispatch_yaml_action
                 (match Expr_eval.evaluate value_expr eval_ctx with
                  | Expr_eval.Color c | Expr_eval.Str c
                    when String.length c > 0 ->
-                   push_recent_color c m;
-                   (* Mirror the post-push list into the calling
-                      panel's recent_colors so foreach bindings
-                      re-render immediately. *)
-                   (match State_store.get_active_panel_id store with
-                    | Some pid ->
-                      let rc_json =
-                        `List (List.map (fun s -> `String s)
-                                 m#recent_colors) in
-                      State_store.set_panel store pid "recent_colors" rc_json
-                    | None -> ())
+                   (* Push to model — registered listeners (the
+                      Yaml_panel_view recent_colors bridge) mirror
+                      the new list into every panel.recent_colors
+                      that is initialized, so the calling panel and
+                      any sibling panel both update reactively. *)
+                   ignore store;
+                   push_recent_color c m
                  | _ -> ())
               end
             | _ -> ());

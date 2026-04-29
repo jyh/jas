@@ -10,6 +10,13 @@ let () =
      Jas.Canvas_subwindow.set_brush_libraries (Jas.Workspace_loader.brush_libraries ws)
    | None -> ());
 
+  (* Install the recent_colors bridge: mirrors model.recent_colors
+     into every registered panel.recent_colors after a Panel_menu
+     push, so native Color Panel pushes flow into the Swatches Panel
+     YAML state and YAML Swatches Panel pushes flow back into the
+     Color Panel state. *)
+  Jas.Yaml_panel_view.install_recent_colors_bridge ();
+
   let dummy_model = Jas.Model.create () in
   let active_model = ref dummy_model in
   let active_canvas = ref None in
