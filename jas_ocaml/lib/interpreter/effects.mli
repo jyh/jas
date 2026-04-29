@@ -172,6 +172,14 @@ val subscribe_character_panel :
 val subscribe_stroke_panel :
   State_store.t -> (unit -> Controller.controller) -> unit
 
+(** Subscribe a write-back to the canvas selection on every global
+    write to [fill_color] or [stroke_color]. The Color Panel calls
+    [Panel_menu.set_active_color] directly; the YAML route through
+    [set: { fill_color: ... }] needs this subscription so the
+    selection follows the active-color change. *)
+val subscribe_active_color :
+  State_store.t -> (unit -> Controller.controller) -> unit
+
 (** Push the YAML-stored paragraph panel state onto every paragraph
     wrapper tspan inside the selection. Per the identity-value rule,
     attrs equal to their default are omitted (set to [None]). The
