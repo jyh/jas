@@ -492,6 +492,19 @@ fn run_effects(
     effects: &[serde_json::Value],
     st: &mut crate::workspace::app_state::AppState,
 ) -> Vec<serde_json::Value> {
+    run_effects_with_ctx(effects, None, st)
+}
+
+/// As [`run_effects`] but with a caller-provided eval context (e.g. the
+/// foreach-aware ctx captured at click time). Anything the caller
+/// passes is merged into the AppState ctx so foreach iterator
+/// variables (like `swatch._index`) resolve in `select.target`,
+/// `set:` value expressions, etc.
+fn run_effects_with_ctx(
+    effects: &[serde_json::Value],
+    extra_ctx: Option<&serde_json::Value>,
+    st: &mut crate::workspace::app_state::AppState,
+) -> Vec<serde_json::Value> {
     let mut dialog_effects = Vec::new();
     // Build an evaluation context once per call. Set-effect values are
     // expression strings (e.g. "not state.stroke_dashed"); they must
@@ -499,7 +512,16 @@ fn run_effects(
     // unevaluated string is passed to the Bool / Number coercer and
     // the schema rejects it as a type_mismatch. Mirrors the
     // run_yaml_effects path.
-    let eval_ctx = build_appstate_ctx(&serde_json::Map::new(), st);
+    let mut eval_ctx = build_appstate_ctx(&serde_json::Map::new(), st);
+    if let Some(extra) = extra_ctx {
+        if let (serde_json::Value::Object(base), serde_json::Value::Object(more))
+            = (&mut eval_ctx, extra)
+        {
+            for (k, v) in more {
+                base.insert(k.clone(), v.clone());
+            }
+        }
+    }
     for effect in effects {
         if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
             let mut evaluated = serde_json::Map::new();
@@ -2886,9 +2908,13 @@ fn build_mouse_event_handler(
                             continue;
                         }
                     }
-                    // Run effects (returns deferred dialog effects)
+                    // Run effects (returns deferred dialog effects).
+                    // Pass the click-time ctx so foreach iterator
+                    // vars (e.g. `swatch._index`) resolve in select
+                    // targets / scope_value / set: expressions.
                     if !effects.is_empty() {
-                        let dialog_effs = run_effects(effects, &mut st);
+                        let dialog_effs = run_effects_with_ctx(
+                            effects, Some(&ctx_snap), &mut st);
                         deferred_dialog_effects.extend(dialog_effs);
                     }
                     // Dispatch action
