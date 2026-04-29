@@ -502,7 +502,7 @@ private func artboardOptionsJson(_ opts: ArtboardOptions) -> String {
 /// byte-for-byte contract with legacy Python fixtures (which predate
 /// the artboards feature) still holds. Native docs authored with
 /// artboards or non-default options serialize them explicitly.
-public func documentToTestJson(_ doc: Document) -> String {
+package func documentToTestJson(_ doc: Document) -> String {
     let layers = doc.layers.map { elementJson(.layer($0)) }
     let o = JsonObj()
     if doc.artboardOptions != .default {
@@ -698,7 +698,7 @@ private func parseTextDecorationField(_ v: Any?) -> String {
     return "none"
 }
 
-public func parseElement(_ v: Any?) -> Element {
+package func parseElement(_ v: Any?) -> Element {
     guard let d = v as? [String: Any] else { fatalError("Expected JSON object for element") }
     let typ = d["type"] as? String ?? ""
     let (opacity, transform, locked, visibility) = parseCommon(d)
@@ -860,7 +860,7 @@ private func parseArtboardOptions(_ v: Any?) -> ArtboardOptions {
 /// Parse canonical test JSON into a Document.
 ///
 /// This is the inverse of ``documentToTestJson(_:)``.
-public func testJsonToDocument(_ json: String) -> Document {
+package func testJsonToDocument(_ json: String) -> Document {
     let data = json.data(using: .utf8)!
     let v = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
     let layerValues = v["layers"] as? [Any] ?? []
