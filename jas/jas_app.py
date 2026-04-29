@@ -298,6 +298,16 @@ class MainWindow(QMainWindow):
         from panels.paragraph_panel_state import subscribe as _subscribe_paragraph_panel
         _subscribe_paragraph_panel(self._yaml_state, self.active_model)
 
+        # Stroke panel → selection apply pipeline. Subscribes to
+        # global writes on stroke render-keys (set: { stroke_X: ... }
+        # YAML effect path); mirrors the OCaml subscribe_stroke_panel
+        # wiring. The Controller is constructed per-call so it always
+        # references the live model.
+        from workspace_interpreter.effects import subscribe_stroke_panel as _subscribe_stroke_panel
+        from document.controller import Controller as _Controller
+        _subscribe_stroke_panel(self._yaml_state,
+                                lambda: _Controller(self.active_model()))
+
         # Dock pane
         self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model,
                                           state_store=self._yaml_state)

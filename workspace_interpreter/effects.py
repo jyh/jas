@@ -1007,3 +1007,35 @@ def apply_stroke_panel_to_selection(store: StateStore, controller) -> None:
     flipped = bool(store.get("stroke_width_profile_flipped"))
     wp = profile_to_width_points(profile, width, flipped)
     controller.set_selection_width_profile(wp)
+
+
+# Rendering-affecting stroke state keys. Mirrors OCaml's
+# stroke_render_keys list — when any of these change in the global
+# store, subscribe_stroke_panel fires apply_stroke_panel_to_selection.
+STROKE_RENDER_KEYS: list[str] = [
+    "stroke_cap", "stroke_join", "stroke_weight", "stroke_miter_limit",
+    "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
+    "stroke_dash_2", "stroke_gap_2", "stroke_dash_3", "stroke_gap_3",
+    "stroke_dash_align_anchors",
+    "stroke_align", "stroke_start_arrowhead", "stroke_end_arrowhead",
+    "stroke_start_arrowhead_scale", "stroke_end_arrowhead_scale",
+    "stroke_arrow_align", "stroke_profile", "stroke_profile_flipped",
+]
+
+
+def subscribe_stroke_panel(store: StateStore, controller_getter) -> None:
+    """Wire ``apply_stroke_panel_to_selection`` to fire after any
+    write into the global state for one of ``STROKE_RENDER_KEYS``.
+
+    ``controller_getter`` is a zero-arg callable returning the live
+    Controller (the app rotates models across tabs, so we can't
+    capture a fixed reference). Mirrors OCaml's
+    ``Effects.subscribe_stroke_panel``.
+    """
+    keys_set = set(STROKE_RENDER_KEYS)
+
+    def _on_change(key, _value):
+        if key in keys_set:
+            apply_stroke_panel_to_selection(store, controller_getter())
+
+    store.subscribe(STROKE_RENDER_KEYS, _on_change)

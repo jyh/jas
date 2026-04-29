@@ -1038,17 +1038,50 @@ def _draw_element_body(painter: QPainter, elem: Element,
 
         case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry,
                   fill=fill, stroke=stroke):
-            if outline:
-                _apply_outline_style(painter)
+            if (not outline and rx == 0 and ry == 0 and stroke is not None
+                    and stroke.dash_align_anchors and stroke.dash_pattern
+                    and getattr(elem, "fill_gradient", None) is None
+                    and getattr(elem, "stroke_gradient", None) is None):
+                # Anchor-aligned dashing for non-rounded rect: fill (if
+                # any) with the rect path, then expand the stroke into
+                # solid sub-paths via dash_renderer and stroke each.
+                # _apply_stroke already cleared the platform's QPen
+                # dash pattern.
+                from workspace_interpreter.dash_renderer import expand_dashed_stroke
+                if fill is not None:
+                    _apply_fill(painter, fill)
+                    painter.setPen(QPen(0))
+                    painter.drawRect(QRectF(x, y, w, h))
+                _apply_stroke(painter, stroke)
+                cmds = (
+                    ("M", x, y),
+                    ("L", x + w, y),
+                    ("L", x + w, y + h),
+                    ("L", x, y + h),
+                    ("Z",),
+                )
+                expanded = expand_dashed_stroke(
+                    cmds, tuple(float(v) for v in stroke.dash_pattern), True)
+                for sub in expanded:
+                    qsub = QPainterPath()
+                    for cmd in sub:
+                        if cmd[0] == "M":
+                            qsub.moveTo(cmd[1], cmd[2])
+                        elif cmd[0] == "L":
+                            qsub.lineTo(cmd[1], cmd[2])
+                    painter.strokePath(qsub, painter.pen())
             else:
-                bbox = (x, y, w, h)
-                _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), bbox)
-                _apply_stroke(painter, stroke,
-                              getattr(elem, "stroke_gradient", None), bbox)
-            if rx > 0 or ry > 0:
-                painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
-            else:
-                painter.drawRect(QRectF(x, y, w, h))
+                if outline:
+                    _apply_outline_style(painter)
+                else:
+                    bbox = (x, y, w, h)
+                    _apply_fill(painter, fill, getattr(elem, "fill_gradient", None), bbox)
+                    _apply_stroke(painter, stroke,
+                                  getattr(elem, "stroke_gradient", None), bbox)
+                if rx > 0 or ry > 0:
+                    painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
+                else:
+                    painter.drawRect(QRectF(x, y, w, h))
 
         case Circle(cx=cx, cy=cy, r=r, fill=fill, stroke=stroke):
             if outline:
