@@ -6,7 +6,7 @@ import os
 from flask import Flask, render_template, request, jsonify
 
 from loader import load_workspace, find_element_by_id, resolve_appearance, list_appearances
-from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state, set_brand, set_panels
+from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state, set_brand, set_panels, set_workspace_data
 
 
 def _safe_join(root: str, rel: str) -> str | None:
@@ -22,6 +22,19 @@ def _safe_join(root: str, rel: str) -> str | None:
     if candidate != root_abs and not candidate.startswith(root_abs + os.sep):
         return None
     return candidate
+
+
+# Top-level workspace keys exposed to YAML expressions under the
+# `data.*` scope (e.g. data.swatch_libraries[lib.id].swatches).
+# Driven by app.py rather than living inside the renderer so the
+# generic-Flask boundary stays clean — no jas-specific names hardcoded
+# in renderer.py.
+_DATA_KEYS = ("swatch_libraries", "brush_libraries")
+
+
+def _collect_workspace_data(ws: dict) -> dict:
+    """Gather the workspace top-level keys exposed to YAML data scope."""
+    return {k: ws[k] for k in _DATA_KEYS if k in ws}
 
 
 def _resolve_brand(ws: dict, workspace_path: str | None) -> None:
@@ -97,6 +110,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
             set_panels(_cached_ws.get("panels", {}))
             _resolve_brand(_cached_ws, workspace_path)
             set_brand(_cached_ws.get("app", {}).get("brand", {}))
+            set_workspace_data(_collect_workspace_data(_cached_ws))
 
         return _cached_ws
 
@@ -107,6 +121,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
     set_panels(ws_init.get("panels", {}))
     _resolve_brand(ws_init, workspace_path)
     set_brand(ws_init.get("app", {}).get("brand", {}))
+    set_workspace_data(_collect_workspace_data(ws_init))
 
     def _state_defaults(ws: dict) -> dict:
         """Extract default values from state definitions."""
