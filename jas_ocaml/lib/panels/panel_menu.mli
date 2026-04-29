@@ -20,16 +20,25 @@ type panel_menu_item =
   | Radio of { label : string; command : string; group : string }
   | Separator
 
-(* ── Panel back-pointers ──────────────────────────────────── *)
+(* ── Panel-store registry ────────────────────────────────── *)
 
-(** Set by [Yaml_panel_view] when the Paragraph panel mounts so menu
-    commands can reach back into its [State_store]. [None] when the
-    panel is not currently mounted. *)
-val paragraph_store_ref : State_store.t option ref
+(** Register (or replace) the live State_store for a panel id.
+    Yaml_panel_view calls this on every panel mount so menu commands
+    and cross-panel bridges can reach the live store. *)
+val register_panel_store : string -> State_store.t -> unit
 
-(** Set by [Yaml_panel_view] when the Opacity panel mounts. Same
-    pattern as [paragraph_store_ref]. *)
-val opacity_store_ref : State_store.t option ref
+(** Drop the registered store for a panel id. Call from the
+    yaml_panel_view destroy hook so menu commands targeting an
+    unmounted panel see [None] rather than a stale handle. *)
+val unregister_panel_store : string -> unit
+
+(** Look up a panel store by id; [None] when the panel is not
+    currently mounted. *)
+val lookup_panel_store : string -> State_store.t option
+
+(** Iterate every registered panel store. Cross-panel bridges
+    (recent_colors etc.) use this to fan out a write to siblings. *)
+val iter_panel_stores : (string -> State_store.t -> unit) -> unit
 
 (* ── Menu rendering ───────────────────────────────────────── *)
 
