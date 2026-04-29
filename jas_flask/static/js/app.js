@@ -2321,6 +2321,11 @@
     document.addEventListener("input", function (e) {
       var el = e.target;
       if (el.type === "text" || el.type === "" || el.tagName === "TEXTAREA") return;
+      // Selects fire both `input` and `change`; the change handler
+      // routes string-valued fields (arrowhead shape, etc.) through
+      // PANEL_FIELD_TO_STATE. Skip them here so parseFloat doesn't
+      // poison panelState with NaN for non-numeric values.
+      if (el.tagName === "SELECT") return;
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
       if (!bindVal) return;
       var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
