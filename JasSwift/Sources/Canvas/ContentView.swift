@@ -93,6 +93,29 @@ public class WorkspaceState: ObservableObject {
         self.appConfig = config
         self.workspaceLayout = WorkspaceLayout.loadOrMigrateWorkspace(config: config)
         self.theme = resolveAppearance(config.activeAppearance)
+        WorkspaceState.installRecentColorsBridge()
+    }
+
+    /// Mirror model.recentColors into the YAML panel.recent_colors of
+    /// every panel that defines it. Fires after any
+    /// ColorPanel.pushRecentColor commit so a native-code push (Color
+    /// Panel slider/hex/recent click) flows into the Swatches Panel
+    /// YAML state, and a YAML push (Swatches Panel swatch click via
+    /// list_push) flows back into the Color Panel via the listener
+    /// the list_push handler triggers. Mirrors Python jas
+    /// _setup_recent_colors_bridge.
+    private static var _recentColorsBridgeInstalled = false
+    private static func installRecentColorsBridge() {
+        if _recentColorsBridgeInstalled { return }
+        _recentColorsBridgeInstalled = true
+        ColorPanel.addRecentColorsListener { model, _ in
+            for pid in ["color_panel_content", "swatches_panel_content"] {
+                if model.stateStore.getPanel(pid, "recent_colors") != nil {
+                    model.stateStore.setPanel(
+                        pid, "recent_colors", model.recentColors)
+                }
+            }
+        }
     }
 
     public func switchAppearance(_ name: String) {

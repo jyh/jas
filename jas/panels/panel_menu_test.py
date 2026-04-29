@@ -6,7 +6,80 @@ from workspace.workspace_layout import (
 from panels.panel_menu import (
     panel_label, panel_menu, panel_dispatch, panel_is_checked,
     PanelMenuItemKind,
+    push_recent_color, add_recent_colors_listener,
+    _recent_colors_listeners,
 )
+
+
+def test_push_recent_color_basic():
+    class _M:
+        recent_colors = []
+
+    m = _M()
+    m.recent_colors = []
+    push_recent_color("#ff0000", m)
+    assert m.recent_colors == ["#ff0000"]
+    push_recent_color("#00ff00", m)
+    assert m.recent_colors == ["#00ff00", "#ff0000"]
+    push_recent_color("#ff0000", m)  # move-to-front dedup
+    assert m.recent_colors == ["#ff0000", "#00ff00"]
+
+
+def test_push_recent_color_caps_at_10():
+    class _M:
+        recent_colors = []
+
+    m = _M()
+    m.recent_colors = []
+    for i in range(15):
+        push_recent_color(f"#0000{i:02x}", m)
+    assert len(m.recent_colors) == 10
+    # Newest first
+    assert m.recent_colors[0] == "#00000e"
+
+
+def test_recent_colors_listener_fires():
+    class _M:
+        recent_colors = []
+
+    seen = []
+
+    def _listener(model, hex_str):
+        seen.append((id(model), hex_str, list(model.recent_colors)))
+
+    add_recent_colors_listener(_listener)
+    try:
+        m = _M()
+        m.recent_colors = []
+        push_recent_color("#abcdef", m)
+        assert seen == [(id(m), "#abcdef", ["#abcdef"])]
+    finally:
+        _recent_colors_listeners.remove(_listener)
+
+
+def test_recent_colors_listener_exception_swallowed():
+    """A buggy listener must not break push_recent_color for others."""
+    class _M:
+        recent_colors = []
+
+    def _bad(_model, _hex):
+        raise RuntimeError("boom")
+
+    seen = []
+
+    def _good(_model, hex_str):
+        seen.append(hex_str)
+
+    add_recent_colors_listener(_bad)
+    add_recent_colors_listener(_good)
+    try:
+        m = _M()
+        m.recent_colors = []
+        push_recent_color("#123456", m)
+        assert seen == ["#123456"]
+    finally:
+        _recent_colors_listeners.remove(_bad)
+        _recent_colors_listeners.remove(_good)
 
 
 def test_panel_label_all_kinds():

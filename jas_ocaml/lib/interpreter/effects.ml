@@ -327,6 +327,14 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
        | _ -> ())
   | _ ->
 
+  (* select: { target, list, scope, scope_value, mode } — generic
+     tile-selection effect for swatch / brush / row panels.
+     Mirrors the Rust apply_select_effect. *)
+  (match mem "select" with
+   | Some (`Assoc spec) ->
+     apply_select_effect spec ctx store
+   | _ -> ());
+
   (* set_panel_state: { key, value, panel? } *)
   match mem "set_panel_state" with
   | Some (`Assoc sps) ->
@@ -508,6 +516,81 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
   match mem "log" with
   | Some _ -> ()
   | None -> ())
+
+(** Apply a [select: { target, list, scope, scope_value, mode }]
+    effect to the active panel's state. Mirrors the Rust
+    apply_select_effect. Used by tile-style panels (swatches /
+    brushes) to update the panel-state list of selected items on
+    click. *)
+and apply_select_effect (spec : (string * Yojson.Safe.t) list)
+    (ctx : (string * Yojson.Safe.t) list)
+    (store : State_store.t) : unit =
+  match State_store.get_active_panel_id store with
+  | None -> ()
+  | Some pid ->
+    let list_field = match List.assoc_opt "list" spec with
+      | Some (`String s) -> s | _ -> "" in
+    if list_field = "" then ()
+    else begin
+      let scope_field = match List.assoc_opt "scope" spec with
+        | Some (`String s) -> s | _ -> "" in
+      let mode = match List.assoc_opt "mode" spec with
+        | Some (`String s) -> s | _ -> "auto" in
+      let target_expr = match List.assoc_opt "target" spec with
+        | Some v -> v | None -> `String "" in
+      let scope_value_expr = match List.assoc_opt "scope_value" spec with
+        | Some v -> v | None -> `String "" in
+      let target = value_to_json (eval_expr target_expr store ctx) in
+      let scope_value = value_to_json (eval_expr scope_value_expr store ctx) in
+
+      let event = match List.assoc_opt "event" ctx with
+        | Some (`Assoc e) -> e | _ -> [] in
+      let bool_at name =
+        match List.assoc_opt name event with
+        | Some (`Bool b) -> b
+        | _ -> false in
+      let shift = bool_at "shift" in
+      let ctrl_or_meta = bool_at "ctrl" || bool_at "meta" in
+      let effective_mode =
+        if mode = "auto" then
+          if shift then "extend"
+          else if ctrl_or_meta then "toggle"
+          else "single"
+        else mode in
+
+      let scope_changed =
+        if scope_field <> "" then begin
+          let cur_scope = State_store.get_panel store pid scope_field in
+          if cur_scope <> scope_value then begin
+            State_store.set_panel store pid scope_field scope_value;
+            State_store.set_panel store pid list_field (`List [target]);
+            true
+          end else false
+        end else false
+      in
+      if not scope_changed then begin
+        let cur_list = match State_store.get_panel store pid list_field with
+          | `List l -> l | _ -> [] in
+        let new_list = match effective_mode with
+          | "toggle" ->
+            if List.exists (fun v -> v = target) cur_list then
+              List.filter (fun v -> v <> target) cur_list
+            else cur_list @ [target]
+          | "extend" ->
+            (match cur_list with
+             | first :: _ ->
+               (match first, target with
+                | `Int a, `Int b ->
+                  let lo = min a b and hi = max a b in
+                  let rec mk n acc =
+                    if n > hi then List.rev acc else mk (n+1) (`Int n :: acc) in
+                  mk lo []
+                | _ -> [target])
+             | [] -> [target])
+          | _ -> [target] in
+        State_store.set_panel store pid list_field (`List new_list)
+      end
+    end
 
 let run_effects
     ?(actions : Yojson.Safe.t = `Null)

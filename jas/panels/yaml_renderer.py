@@ -44,7 +44,7 @@ def render_element(el: dict, store: StateStore, ctx: dict,
     native = widget_registry.create(etype, el, store, ctx)
     if native is not None:
         _apply_style(native, el.get("style", {}), store, ctx)
-        _apply_bindings(native, el.get("bind", {}), store, ctx)
+        _apply_bindings(native, el, store, ctx)
         _apply_behaviors(native, el.get("behavior", []), store, ctx, dispatch_fn)
         return native
 
@@ -56,7 +56,7 @@ def render_element(el: dict, store: StateStore, ctx: dict,
         return None
 
     _apply_style(widget, el.get("style", {}), store, ctx)
-    _apply_bindings(widget, el.get("bind", {}), store, ctx)
+    _apply_bindings(widget, el, store, ctx)
     _apply_behaviors(widget, el.get("behavior", []), store, ctx, dispatch_fn)
 
     return widget
@@ -362,8 +362,40 @@ def _render_color_swatch(el, store, ctx, dispatch_fn):
     size = el.get("style", {}).get("size", 16)
     btn.setFixedSize(int(size), int(size))
     btn.setFlat(True)
-    # Color is set by binding
+    # Color and selected_in highlight are applied via _apply_bindings
+    # (bind.color sets the background; bind.selected_in sets the
+    # accent border, with a panel-state subscription to track
+    # selection changes).
     return btn
+
+
+def _selected_in_target_expr(el):
+    """Find the per-item identity expression on a tile widget by looking
+    at its click behavior list and returning the first select.target.
+    Used by the bind.selected_in path so authors don't restate the
+    target. Returns None if no select.target is declared."""
+    for b in (el.get("behavior") or []):
+        if not isinstance(b, dict):
+            continue
+        for e in (b.get("effects") or []):
+            if isinstance(e, dict):
+                sel = e.get("select")
+                if isinstance(sel, dict):
+                    t = sel.get("target")
+                    if isinstance(t, str) and t:
+                        return t
+    return None
+
+
+def _selected_in_loose_eq(a, b):
+    """Loose equality used for selected_in membership tests."""
+    if a is None and b is None:
+        return True
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a == b
+    return a == b
 
 
 _GRADIENT_TILE_SIZES = {"small": 16, "medium": 32, "large": 64}
@@ -1726,19 +1758,49 @@ def _parse_padding(val) -> tuple[int, int, int, int]:
 # ── Bindings ─────────────────────────────────────────────────
 
 
-def _apply_bindings(widget: QWidget, bindings: dict, store: StateStore, ctx: dict):
+def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
     """Apply reactive bindings to a widget.
 
-    Sets initial values and subscribes to state changes.
+    Sets initial values and subscribes to state changes. Reads
+    [el.bind] for the binding map, plus [el.behavior] for the
+    selected_in path (which needs the click select.target to
+    determine per-item identity).
     """
+    bindings = el.get("bind") or {}
     if not bindings:
         return
+
+    selected_target_expr = _selected_in_target_expr(el)
+
+    def _is_selected_in(eval_ctx) -> bool:
+        list_expr = bindings.get("selected_in")
+        if not isinstance(list_expr, str) or not list_expr or not selected_target_expr:
+            return False
+        list_result = evaluate(list_expr, eval_ctx)
+        items = list_result.value if isinstance(list_result.value, list) else None
+        if items is None:
+            return False
+        id_result = evaluate(selected_target_expr, eval_ctx)
+        target = id_result.value
+        return any(_selected_in_loose_eq(it, target) for it in items)
+
+    def _color_stylesheet(color, selected: bool) -> str:
+        if selected:
+            border = "border: 2px solid #4a90d9"
+        else:
+            border = "border: 1px solid #666"
+        if color and isinstance(color, str) and color.startswith("#"):
+            return f"background: {color}; {border}"
+        return f"background: transparent; {border.replace('solid', 'dashed').replace('#666', '#555')}"
 
     eval_ctx = store.eval_context(ctx)
 
     for prop, expr in bindings.items():
         if not isinstance(expr, str):
             continue
+
+        if prop == "selected_in":
+            continue  # handled jointly with color below
 
         result = evaluate(expr, eval_ctx)
 
@@ -1749,13 +1811,9 @@ def _apply_bindings(widget: QWidget, bindings: dict, store: StateStore, ctx: dic
         elif prop == "value":
             _set_widget_value(widget, result.value)
         elif prop == "color":
-            color = result.value
-            if color and isinstance(color, str) and color.startswith("#"):
-                widget.setStyleSheet(
-                    widget.styleSheet() + f"; background: {color}; border: 1px solid #666")
-            else:
-                widget.setStyleSheet(
-                    widget.styleSheet() + "; background: transparent; border: 1px dashed #555")
+            selected = _is_selected_in(eval_ctx)
+            widget.setStyleSheet(
+                widget.styleSheet() + "; " + _color_stylesheet(result.value, selected))
         elif prop == "checked":
             if hasattr(widget, "setChecked"):
                 widget.setChecked(result.to_bool())
@@ -1766,6 +1824,8 @@ def _apply_bindings(widget: QWidget, bindings: dict, store: StateStore, ctx: dic
         for prop, expr in bindings.items():
             if not isinstance(expr, str):
                 continue
+            if prop == "selected_in":
+                continue
             r = evaluate(expr, new_ctx)
             if prop == "visible":
                 widget.setVisible(r.to_bool())
@@ -1774,13 +1834,26 @@ def _apply_bindings(widget: QWidget, bindings: dict, store: StateStore, ctx: dic
             elif prop == "value":
                 _set_widget_value(widget, r.value)
             elif prop == "color":
-                c = r.value
-                if c and isinstance(c, str) and c.startswith("#"):
-                    widget.setStyleSheet(f"background: {c}; border: 1px solid #666")
-                else:
-                    widget.setStyleSheet("background: transparent; border: 1px dashed #555")
+                selected = _is_selected_in(new_ctx)
+                widget.setStyleSheet(_color_stylesheet(r.value, selected))
 
     store.subscribe(None, _update_bindings)
+
+    # Panel-state changes don't go through the global subscribe above
+    # (set_panel only fires panel subscribers). When any binding
+    # references panel.* — color, selected_in, visible, disabled,
+    # checked, value — also subscribe to the active panel's state so
+    # those bindings re-evaluate when panel state changes (e.g.
+    # panel.recent_colors getting a new entry, or
+    # panel.selected_swatches toggling).
+    has_panel_binding = any(
+        isinstance(e, str) and "panel." in e
+        for e in bindings.values()
+    )
+    if has_panel_binding:
+        panel_id = store.get_active_panel_id()
+        if panel_id:
+            store.subscribe_panel(panel_id, _update_bindings)
 
 
 def _set_widget_value(widget: QWidget, value):

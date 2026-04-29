@@ -289,6 +289,16 @@ class DockPanelWidget(QWidget):
                 # uniformly. Mirrors `build_selection_predicates` in
                 # jas_dioxus.
                 ctx.update(build_selection_predicates(model))
+                # document namespace — exposes per-document fields the
+                # YAML reads but the StateStore has no native source
+                # for. Currently just recent_colors, used by panel
+                # init expressions (color, swatches) so the recent
+                # strip seeds with the model's actual recent colors
+                # rather than the YAML default of [].
+                if model is not None:
+                    ctx["document"] = {
+                        "recent_colors": list(getattr(model, "recent_colors", [])),
+                    }
             return YamlPanelView(
                 panel_spec=panel_spec,
                 store=self._state_store,

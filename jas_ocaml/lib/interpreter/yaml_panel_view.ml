@@ -19,6 +19,45 @@ let _current_store : State_store.t option ref = ref None
     [_current_store]. *)
 let _current_panel_id : string option ref = ref None
 
+(** Registry of (panel_id, store) for every panel mounted via
+    [create_panel_body]. Used by cross-panel bridges (recent_colors,
+    etc.) so a write from one panel's effect handler can fan out to
+    siblings. Remount of the same panel id replaces its entry. *)
+let _panel_stores : (string * State_store.t) list ref = ref []
+
+(** Look up a previously registered panel store by content id, or None
+    if no panel with that id has mounted yet. *)
+let panel_store_of_id (id : string) : State_store.t option =
+  List.assoc_opt id !_panel_stores
+
+(** Iterate every registered panel store. Cross-panel bridges use
+    this in [Panel_menu.add_recent_colors_listener] callbacks so a
+    push reaches all visible panels in one pass. *)
+let iter_panel_stores (f : string -> State_store.t -> unit) : unit =
+  List.iter (fun (id, store) -> f id store) !_panel_stores
+
+(** Wire the recent_colors bridge listener that mirrors model
+    recent_colors into every registered panel that defines a
+    recent_colors key. Apps call this once at startup. Safe to call
+    multiple times — the listener is idempotent and the registry
+    in [Panel_menu] dedupes nothing, so subsequent calls would add
+    duplicate listeners. The [_bridge_installed] guard prevents that. *)
+let _bridge_installed = ref false
+
+let install_recent_colors_bridge () =
+  if !_bridge_installed then () else begin
+    _bridge_installed := true;
+    Panel_menu.add_recent_colors_listener (fun model _hex ->
+      let rc_json =
+        `List (List.map (fun s -> `String s) model#recent_colors) in
+      iter_panel_stores (fun pid store ->
+        if pid = "color_panel_content" || pid = "swatches_panel_content" then
+          match State_store.get_panel store pid "recent_colors" with
+          | `Null -> ()  (* panel hasn't seeded recent_colors *)
+          | _ ->
+            State_store.set_panel store pid "recent_colors" rc_json))
+  end
+
 (** Parse a bind expression like "panel.X" or "state.X" and write
     [value] into the appropriate scope of [_current_store]. Silent
     no-op when either ref is unset or the expression doesn't match
@@ -419,15 +458,62 @@ and render_color_swatch ~packing ~ctx el =
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Color c -> c | Expr_eval.Str s -> s | _ -> "")
     | None -> "" in
+  let selected = is_selected_in_list el ctx in
+  let border_css =
+    if selected then "2px solid #4a90d9"
+    else "1px solid #666" in
   let btn = GButton.button ~packing () in
   btn#misc#set_size_request ~width:size ~height:size ();
   if String.length color_str > 0 then begin
-    let css = Printf.sprintf "* { background-color: %s; border: 1px solid #666; min-width: %dpx; min-height: %dpx; padding: 0; }"
-      color_str size size in
+    let css = Printf.sprintf
+      "* { background-color: %s; border: %s; min-width: %dpx; min-height: %dpx; padding: 0; }"
+      color_str border_css size size in
     let provider = GObj.css_provider () in
     provider#load_from_data css;
     btn#misc#style_context#add_provider provider 800
   end
+
+(** Evaluate [bind.selected_in] against the per-item identity read
+    from the click behavior's first [select.target] (so authors don't
+    repeat themselves) and return whether this item is currently
+    selected. Mirrors the Rust implementation in renderer.rs. *)
+and is_selected_in_list (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
+  let open Yojson.Safe.Util in
+  match el |> member "bind" |> safe_member "selected_in" |> to_string_option with
+  | None -> false
+  | Some list_expr ->
+    let list_val = Expr_eval.evaluate list_expr ctx in
+    (match list_val with
+     | Expr_eval.List items ->
+       (* Find the first select.target expression in any click behavior. *)
+       let id_expr =
+         match el |> member "behavior" with
+         | `List behaviors ->
+           List.fold_left (fun acc b ->
+             match acc with
+             | Some _ -> acc
+             | None ->
+               match b |> member "effects" with
+               | `List effects ->
+                 List.fold_left (fun acc' e ->
+                   match acc' with
+                   | Some _ -> acc'
+                   | None ->
+                     (match e |> member "select" |> safe_member "target" with
+                      | `String s -> Some s
+                      | _ -> None))
+                   None effects
+               | _ -> None)
+             None behaviors
+         | _ -> None
+       in
+       (match id_expr with
+        | None -> false
+        | Some expr ->
+          let id_val = Expr_eval.evaluate expr ctx in
+          let id_json = Expr_eval.value_to_json id_val in
+          List.exists (fun item -> item = id_json) items)
+     | _ -> false)
 
 (* Gradient primitives.
 
@@ -1768,12 +1854,27 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       let selection_preds =
         Active_document_view.build_selection_predicates (get_model ())
       in
+      (* document namespace — exposes per-document fields the YAML
+         reads but the StateStore has no native source for. Currently
+         just recent_colors, used by panel init expressions (color,
+         swatches) so the recent-color strip seeds with the model's
+         actual recent colors rather than the YAML default of []. *)
+      let document_view =
+        match get_model () with
+        | Some m ->
+          `Assoc [
+            ("recent_colors",
+             `List (List.map (fun s -> `String s) m#recent_colors));
+          ]
+        | None -> `Assoc [("recent_colors", `List [])]
+      in
       let ctx = `Assoc ([
         ("state", state_obj);
         ("panel", `Assoc panel_defaults);
         ("icons", icons_obj);
         ("data", data_obj);
         ("active_document", active_document_view);
+        ("document", document_view);
         ("_get_model", `Null)  (* Placeholder; actual model passed via closure *)
       ] @ selection_preds) in
       (* Panel-local state store: seeded with the yaml-declared
@@ -1785,6 +1886,12 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       State_store.init_panel store content_id panel_defaults;
       _current_store := Some store;
       _current_panel_id := Some content_id;
+      (* Register the new panel store for cross-panel bridges
+         (recent_colors etc). Replace any existing entry for the same
+         panel id so a remount swaps in the fresh store. *)
+      _panel_stores :=
+        (content_id, store) ::
+        List.filter (fun (id, _) -> id <> content_id) !_panel_stores;
       (* Store get_model in a ref accessible from render_tree_view *)
       _get_model_ref := get_model;
       (* Wire the Character-panel apply pipeline. [get_model] is

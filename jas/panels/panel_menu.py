@@ -711,8 +711,27 @@ def set_active_color_live(color, model) -> None:
         model.default_stroke = Stroke(color=color, width=width)
 
 
+_recent_colors_listeners: list = []
+
+
+def add_recent_colors_listener(callback) -> None:
+    """Register a callback fired after model.recent_colors is updated.
+
+    Receives (model, hex_str) so listeners can mirror the new value into
+    other state stores (e.g. YAML panel state) without having to
+    monkey-patch the model. Used by jas_app to propagate native-code
+    Color Panel pushes into Swatches Panel YAML state.
+    """
+    _recent_colors_listeners.append(callback)
+
+
 def push_recent_color(hex_str: str, model) -> None:
     """Push a hex color to recent colors (move-to-front dedup, max 10)."""
     rc = [c for c in model.recent_colors if c != hex_str]
     rc.insert(0, hex_str)
     model.recent_colors = rc[:10]
+    for cb in _recent_colors_listeners:
+        try:
+            cb(model, hex_str)
+        except Exception:
+            pass
