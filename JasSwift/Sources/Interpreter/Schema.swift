@@ -101,6 +101,8 @@ func getSchemaEntry(_ key: String) -> SchemaEntry? {
         return SchemaEntry(fieldType: .enumType(strokeProfileValues), nullable: false, writable: true)
     case "stroke_profile_flipped":
         return SchemaEntry(fieldType: .bool, nullable: false, writable: true)
+    case "stroke_dash_align_anchors":
+        return SchemaEntry(fieldType: .bool, nullable: false, writable: true)
     case "fill_on_top", "toolbar_visible", "canvas_visible", "dock_visible",
          "canvas_maximized", "dock_collapsed":
         return SchemaEntry(fieldType: .bool, nullable: false, writable: true)
