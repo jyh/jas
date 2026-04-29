@@ -43,8 +43,15 @@ cases)
   hit-test priority, marquee, drag-move, Alt-drag copy, Escape-cancel,
   Shift-click toggle, CP-marquee (partial), handle-drag (partial).
 
-**Flask — no coverage.** Canvas tool runtime is native-apps-only; Flask
-renders the workspace generically without a selection tool surface.
+**Flask — `jas_flask/tests/js/test_phase9.mjs`,
+`tests/js/test_phase12.mjs`, `tests/js/test_canvas.mjs`** (~20 tests
+spread across files)
+- doc.translate_selection incl. partial-CP path anchor moves;
+  doc.copy_selection (alt-drag).
+- doc.path.probe_partial_hit (CP hits, handle hits, miss → marquee);
+  doc.path.commit_partial_marquee (replace + additive); doc.move_path_handle
+  (smooth-anchor reflection).
+- Selection HUD render (bbox + handles, partial-CP fill state).
 
 The manual suite below covers what auto-tests cannot reach: marquee
 overlay appearance, cursor switching, keyboard focus, appearance theming,
@@ -626,6 +633,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-26
 
 - **SEL-301** [wired] Shift-click toggles selection identically across
   apps.
@@ -637,6 +645,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-26
 
 - **SEL-302** [wired] Marquee result matches across apps.
       Do: Drag a marquee from (-5,-5) to (12,12) on 3-rect fixture.
@@ -646,6 +655,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-26  · note: fixture's rect A is at (50,50), not origin; ran with marquee (40,40)→(95,95)
 
 - **SEL-303** [wired] Drag-move produces same final coordinates.
       Do: Select middle rect (at 150,100); drag by (+30, +40).
@@ -655,6 +665,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-26
 
 - **SEL-304** [wired] Alt-drag produces identical copy count.
       Do: Select middle rect; Alt-drag by 100 px right.
@@ -664,6 +675,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-26
 
 - **SEL-305** [wired] Interior Selection picks the leaf inside a
   group.
@@ -674,6 +686,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27  · note: implemented Group / Ungroup actions (JAS.groupSelection / ungroupSelection routed through app.js dispatch), split hit_test into a flat layer-children variant + recursive hit_test_deep, and dispatched doc.partial_select_in_rect for the marquee. Interior Selection tool has no shortcut binding; set `state.active_tool='interior_selection'` via devtools.
 
 - **SEL-306** [wired] Partial Selection handle-drag cusp semantics.
       Do: Curved path; Partial Selection; drag a smooth anchor's
@@ -684,6 +697,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27  · note: Flask + Rust both implement smooth-symmetric reflection (geometry::move_path_handle), not cusp; spec text and wiring disagree across all apps. Surfaced cubic/quadratic-Bezier-extrema gap in path bounds (fixed); selection HUD now draws Bezier handle indicators for partial-selected anchors.
 
 - **SEL-307** [wired] Escape during marquee leaves selection
   untouched.
@@ -693,6 +707,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 ---
 
@@ -704,5 +719,14 @@ _No retired tests yet._
 
 ## Enhancements
 
-_No outstanding enhancement ideas. Append `ENH-NNN` entries here when manual
-testing surfaces non-blocking follow-ups._
+- **ENH-001** Alt-drag-copy should respond to Alt **at any point during the
+  drag**, not only when Alt was held at mousedown. Today
+  `selection.yaml::on_mousedown` latches `tool.selection.alt_held =
+  event.modifiers.alt`; on_mousemove checks the latched value and never
+  re-reads `event.modifiers.alt`. So pressing Alt after the drag begins
+  does nothing. The user's natural workflow is "start dragging, then decide
+  to copy" — should fire the same `doc.copy_selection` if Alt is held when
+  the next mousemove fires (and `copied == false`). Same gap exists in
+  `partial_selection.yaml`. Cross-cutting yaml change; behaviour applies
+  to all 5 apps.
+  _Raised during SEL-304 on 2026-04-26._

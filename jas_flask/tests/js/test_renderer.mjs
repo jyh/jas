@@ -23,6 +23,22 @@ describe("renderer — leaf elements", () => {
     assert.match(svg, /fill="#ff0000"/);
   });
 
+  it("rect with rx / ry emits the corner-radius attrs (rounded rect)", () => {
+    const svg = renderElement(mkRect({
+      x: 0, y: 0, width: 100, height: 100, rx: 10, ry: 10,
+    }));
+    assert.match(svg, /rx="10"/);
+    assert.match(svg, /ry="10"/);
+  });
+
+  it("rect with rx=0 / ry=0 omits the attrs (sharp corners)", () => {
+    const svg = renderElement(mkRect({
+      x: 0, y: 0, width: 100, height: 100, rx: 0, ry: 0,
+    }));
+    assert.doesNotMatch(svg, /rx=/);
+    assert.doesNotMatch(svg, /ry=/);
+  });
+
   it("circle", () => {
     const svg = renderElement(mkCircle({ cx: 50, cy: 50, r: 10 }));
     assert.match(svg, /<circle/);
@@ -73,6 +89,24 @@ describe("renderer — styles", () => {
     }));
     assert.match(svg, /stroke="#000000"/);
     assert.match(svg, /stroke-width="2"/);
+  });
+
+  it("stroke as a string + stroke-width attribute → SVG stroke", () => {
+    // The Color/Stroke panels and doc.add_element's defaults write
+    // stroke as a flat string and stroke-width as a separate field
+    // (see canvas_bootstrap.mjs PANEL_TO_ATTR). The renderer needs
+    // to honour that shape, not just the legacy {color, width} obj.
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 1, height: 1,
+      stroke: "#000000", "stroke-width": 2,
+    });
+    assert.match(svg, /stroke="#000000"/);
+    assert.match(svg, /stroke-width="2"/);
+  });
+
+  it("stroke: null → stroke=\"none\"", () => {
+    const svg = renderElement(mkRect({ stroke: null }));
+    assert.match(svg, /stroke="none"/);
   });
 
   it("opacity emits when !== 1", () => {
@@ -261,5 +295,99 @@ describe("renderer — brushed paths", () => {
     });
     const svg = renderElement(p);
     assert.equal(svg, "");
+  });
+});
+
+// STR-304 — arrowhead rendering. Verify marker-start / marker-end
+// attributes land on elements that carry the jas-* arrowhead state,
+// and that renderDocument prepends a matching <defs> block.
+describe("renderer — arrowhead markers (STR-304)", () => {
+  it("element with jas-stroke-end-arrowhead emits marker-end", () => {
+    const svg = renderElement({
+      type: "path", d: [{ type: "M", x: 0, y: 0 }],
+      "jas-stroke-end-arrowhead": "simple_arrow",
+    });
+    assert.match(svg, /marker-end="url\(#jas-arr-end-simple_arrow-100\)"/);
+  });
+
+  it("element with start-arrowhead emits marker-start", () => {
+    const svg = renderElement({
+      type: "path", d: [{ type: "M", x: 0, y: 0 }],
+      "jas-stroke-start-arrowhead": "diamond",
+      "jas-stroke-start-arrowhead-scale": 75,
+    });
+    assert.match(svg, /marker-start="url\(#jas-arr-start-diamond-75\)"/);
+  });
+
+  it("none / empty arrowhead does not emit a marker attribute", () => {
+    const svg = renderElement({
+      type: "path", d: [{ type: "M", x: 0, y: 0 }],
+      "jas-stroke-start-arrowhead": "none",
+      "jas-stroke-end-arrowhead": "",
+    });
+    assert.doesNotMatch(svg, /marker-start=/);
+    assert.doesNotMatch(svg, /marker-end=/);
+  });
+
+  it("renderDocument prepends a <defs> block when arrowheads are used", () => {
+    const doc = {
+      layers: [{
+        type: "path", d: [{ type: "M", x: 0, y: 0 }],
+        "jas-stroke-end-arrowhead": "closed_arrow",
+        "jas-stroke-end-arrowhead-scale": 200,
+      }],
+    };
+    const svg = renderDocument(doc);
+    assert.match(svg, /^<defs>/);
+    assert.match(svg, /<marker id="jas-arr-end-closed_arrow-200"/);
+    // The path body comes after the defs block.
+    assert.match(svg, /<\/defs><path/);
+  });
+
+  it("renderDocument omits the <defs> block when no arrowheads exist", () => {
+    const doc = {
+      layers: [{ type: "rect", x: 0, y: 0, width: 10, height: 10 }],
+    };
+    const svg = renderDocument(doc);
+    assert.doesNotMatch(svg, /<defs>/);
+  });
+});
+
+// STR-306 — identity-omission for stroke-width=1 (the SVG default).
+// The native apps drop the attr from serialized output when the
+// element carries the default width; the Flask renderer needs to
+// match so cross-app SVG output stays byte-identical.
+describe("renderer — stroke-width identity-omission (STR-306)", () => {
+  it("stroke-width=1 (flat) is omitted", () => {
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 10, height: 10,
+      stroke: "#000000", "stroke-width": 1,
+    });
+    assert.match(svg, /stroke="#000000"/);
+    assert.doesNotMatch(svg, /stroke-width=/);
+  });
+
+  it("stroke-width=1 in legacy {color, width} object is omitted", () => {
+    const svg = renderElement(mkRect({
+      stroke: { color: "#000000", width: 1 },
+    }));
+    assert.match(svg, /stroke="#000000"/);
+    assert.doesNotMatch(svg, /stroke-width=/);
+  });
+
+  it("stroke-width=2 still emits", () => {
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 10, height: 10,
+      stroke: "#000000", "stroke-width": 2,
+    });
+    assert.match(svg, /stroke-width="2"/);
+  });
+
+  it("stroke-width=0 still emits (zero is not the default)", () => {
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 10, height: 10,
+      stroke: "#000000", "stroke-width": 0,
+    });
+    assert.match(svg, /stroke-width="0"/);
   });
 });

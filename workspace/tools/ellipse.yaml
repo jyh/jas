@@ -31,6 +31,10 @@ handlers:
     - set: { tool.ellipse.start_x: "event.doc_x" }
     - set: { tool.ellipse.start_y: "event.doc_y" }
     - set: { tool.ellipse.mode: "'drawing'" }
+    # Fill / stroke intentionally omitted — doc.add_element folds in
+    # the active state.fill_color / stroke_color via the engine's
+    # shape-default pipeline. Matches Rect / Line / Pen / Pencil
+    # convention.
     - "doc.add_element":
         parent: "[0]"
         element:
@@ -39,7 +43,6 @@ handlers:
           cy: "event.doc_y"
           rx: "0"
           ry: "0"
-          fill: "'#d94ad9'"
 
   on_mousemove:
     - if: "tool.ellipse.mode == 'drawing'"

@@ -17,6 +17,89 @@ import { isContainer } from "./document.mjs";
  * Groups / layers return the union of their children's bounds.
  * Unknown / degenerate elements return a zero-size box.
  */
+/**
+ * Anchor positions used to draw selection handles, mirroring
+ * `jas_dioxus/src/geometry/element.rs::control_points`. Returns an
+ * array of `[x, y]` pairs in document coordinates.
+ *
+ * Per-type:
+ *   - line   → both endpoints
+ *   - rect   → 4 corners (TL, TR, BR, BL)
+ *   - circle → 4 cardinal points (top, right, bottom, left)
+ *   - ellipse→ 4 cardinals using rx/ry
+ *   - polygon→ all points, in order
+ *   - path   → anchor of each command (Z contributes none)
+ *   - else   → bounding-box corners
+ */
+export function controlPoints(elem) {
+  if (!elem || typeof elem !== "object") return [];
+  switch (elem.type) {
+    case "line":
+      return [[elem.x1, elem.y1], [elem.x2, elem.y2]];
+    case "rect":
+      return [
+        [elem.x, elem.y],
+        [elem.x + elem.width, elem.y],
+        [elem.x + elem.width, elem.y + elem.height],
+        [elem.x, elem.y + elem.height],
+      ];
+    case "circle":
+      return [
+        [elem.cx, elem.cy - elem.r],
+        [elem.cx + elem.r, elem.cy],
+        [elem.cx, elem.cy + elem.r],
+        [elem.cx - elem.r, elem.cy],
+      ];
+    case "ellipse":
+      return [
+        [elem.cx, elem.cy - elem.ry],
+        [elem.cx + elem.rx, elem.cy],
+        [elem.cx, elem.cy + elem.ry],
+        [elem.cx - elem.rx, elem.cy],
+      ];
+    case "polygon":
+    case "polyline":
+      return (elem.points || []).map((p) =>
+        Array.isArray(p) ? [p[0], p[1]] : [p.x, p.y]);
+    case "path":
+      return pathAnchorPoints(elem.d || []);
+    default: {
+      const b = elementBounds(elem);
+      return [
+        [b.x, b.y],
+        [b.x + b.width, b.y],
+        [b.x + b.width, b.y + b.height],
+        [b.x, b.y + b.height],
+      ];
+    }
+  }
+}
+
+function pathAnchorPoints(commands) {
+  const pts = [];
+  for (const cmd of commands) {
+    switch (cmd.type) {
+      case "M":
+      case "L":
+      case "T":
+      case "C":
+      case "S":
+      case "Q":
+      case "A":
+        pts.push([cmd.x, cmd.y]);
+        break;
+      case "H":
+        pts.push([cmd.x, pts.length ? pts[pts.length - 1][1] : 0]);
+        break;
+      case "V":
+        pts.push([pts.length ? pts[pts.length - 1][0] : 0, cmd.y]);
+        break;
+      // Z contributes no anchor.
+    }
+  }
+  return pts;
+}
+
 export function elementBounds(elem) {
   if (!elem || typeof elem !== "object") {
     return { x: 0, y: 0, width: 0, height: 0 };
@@ -79,41 +162,132 @@ function pointsBounds(points) {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-// Path bounds from endpoint coordinates only — approximation, matches
-// the Python / Rust / Swift / OCaml behavior we shipped on
-// codebase-review-tier1 (arc extrema is a known cross-language gap,
-// documented in project_arc_extrema_gap memory).
+// Path bounds, including Bezier extrema for C and Q commands.
+// Mirrors jas_dioxus/src/geometry/element.rs::path_bounds. Arc
+// extrema (A command) is still endpoint-only — that's the known
+// cross-language gap from codebase-review-tier1, fixed in a future
+// pass.
 function pathBoundsApprox(commands) {
   if (!commands || commands.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const xs = [], ys = [];
   let cx = 0, cy = 0, sx = 0, sy = 0;
+  let prevX2 = 0, prevY2 = 0, prevIsCurve = false;
   for (const cmd of commands) {
-    const { type } = cmd;
-    let nx = cx, ny = cy;
-    switch (type) {
-      case "M": case "L": case "T":
-        nx = cmd.x; ny = cmd.y; break;
+    const t = cmd.type;
+    let advanceCurve = false;
+    switch (t) {
+      case "M":
+        xs.push(cmd.x); ys.push(cmd.y);
+        cx = cmd.x; cy = cmd.y; sx = cmd.x; sy = cmd.y;
+        break;
+      case "L":
+      case "T":
+        xs.push(cmd.x); ys.push(cmd.y);
+        cx = cmd.x; cy = cmd.y;
+        break;
       case "H":
-        nx = cmd.x; break;
+        xs.push(cmd.x); ys.push(cy);
+        cx = cmd.x;
+        break;
       case "V":
-        ny = cmd.y; break;
+        xs.push(cx); ys.push(cmd.y);
+        cy = cmd.y;
+        break;
       case "C":
-      case "S":
+        xs.push(cx, cmd.x); ys.push(cy, cmd.y);
+        for (const tx of cubicExtrema(cx, cmd.x1, cmd.x2, cmd.x)) {
+          xs.push(cubicEval(cx, cmd.x1, cmd.x2, cmd.x, tx));
+        }
+        for (const ty of cubicExtrema(cy, cmd.y1, cmd.y2, cmd.y)) {
+          ys.push(cubicEval(cy, cmd.y1, cmd.y2, cmd.y, ty));
+        }
+        prevX2 = cmd.x2; prevY2 = cmd.y2;
+        cx = cmd.x; cy = cmd.y;
+        advanceCurve = true;
+        break;
+      case "S": {
+        const rx1 = prevIsCurve ? 2 * cx - prevX2 : cx;
+        const ry1 = prevIsCurve ? 2 * cy - prevY2 : cy;
+        xs.push(cx, cmd.x); ys.push(cy, cmd.y);
+        for (const tx of cubicExtrema(cx, rx1, cmd.x2, cmd.x)) {
+          xs.push(cubicEval(cx, rx1, cmd.x2, cmd.x, tx));
+        }
+        for (const ty of cubicExtrema(cy, ry1, cmd.y2, cmd.y)) {
+          ys.push(cubicEval(cy, ry1, cmd.y2, cmd.y, ty));
+        }
+        prevX2 = cmd.x2; prevY2 = cmd.y2;
+        cx = cmd.x; cy = cmd.y;
+        advanceCurve = true;
+        break;
+      }
       case "Q":
+        xs.push(cx, cmd.x); ys.push(cy, cmd.y);
+        for (const tx of quadraticExtremum(cx, cmd.x1, cmd.x)) {
+          xs.push(quadraticEval(cx, cmd.x1, cmd.x, tx));
+        }
+        for (const ty of quadraticExtremum(cy, cmd.y1, cmd.y)) {
+          ys.push(quadraticEval(cy, cmd.y1, cmd.y, ty));
+        }
+        cx = cmd.x; cy = cmd.y;
+        break;
       case "A":
-        nx = cmd.x; ny = cmd.y; break;
+        xs.push(cmd.x); ys.push(cmd.y);
+        cx = cmd.x; cy = cmd.y;
+        break;
       case "Z":
-        nx = sx; ny = sy; break;
+        cx = sx; cy = sy;
+        break;
     }
-    if (type === "M") { sx = nx; sy = ny; }
-    if (nx < minX) minX = nx;
-    if (ny < minY) minY = ny;
-    if (nx > maxX) maxX = nx;
-    if (ny > maxY) maxY = ny;
-    cx = nx; cy = ny;
+    prevIsCurve = advanceCurve;
   }
-  if (minX === Infinity) return { x: 0, y: 0, width: 0, height: 0 };
+  if (xs.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+// Real roots in (0, 1) of d/dt B(t) for a cubic Bezier with the
+// given 1D endpoints + control points. Used to find extrema of x(t)
+// and y(t) independently. Matches jas_dioxus cubic_extrema.
+function cubicExtrema(p0, p1, p2, p3) {
+  const a = -3 * p0 + 9 * p1 - 9 * p2 + 3 * p3;
+  const b = 6 * p0 - 12 * p1 + 6 * p2;
+  const c = -3 * p0 + 3 * p1;
+  const ts = [];
+  if (Math.abs(a) < 1e-12) {
+    if (Math.abs(b) > 1e-12) {
+      const t = -c / b;
+      if (t > 0 && t < 1) ts.push(t);
+    }
+  } else {
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const sq = Math.sqrt(disc);
+      for (const t of [(-b + sq) / (2 * a), (-b - sq) / (2 * a)]) {
+        if (t > 0 && t < 1) ts.push(t);
+      }
+    }
+  }
+  return ts;
+}
+
+function quadraticExtremum(p0, p1, p2) {
+  const denom = p0 - 2 * p1 + p2;
+  if (Math.abs(denom) < 1e-12) return [];
+  const t = (p0 - p1) / denom;
+  return t > 0 && t < 1 ? [t] : [];
+}
+
+function cubicEval(p0, p1, p2, p3, t) {
+  const u = 1 - t;
+  return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+}
+
+function quadraticEval(p0, p1, p2, t) {
+  const u = 1 - t;
+  return u * u * p0 + 2 * u * t * p1 + t * t * p2;
 }
 
 function estimateTextWidth(elem) {
@@ -176,6 +350,29 @@ export function hitTest(doc, px, py) {
     if (layerHidden(layer)) continue;
     const hit = recurseHitTest(layer, [li], px, py);
     if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Flat hit-test — stops at direct layer children. Returns
+ * `[li, ci]` on hit, or null. Used by the regular Selection tool,
+ * which wants click-on-group-child to select the group itself.
+ * Mirrors `jas_dioxus/src/interpreter/doc_primitives.rs::hit_test`
+ * (the flat sibling of the recursive hit_test_deep).
+ */
+export function hitTestFlat(doc, px, py) {
+  if (!doc || !Array.isArray(doc.layers)) return null;
+  for (let li = doc.layers.length - 1; li >= 0; li--) {
+    const layer = doc.layers[li];
+    if (layerHidden(layer)) continue;
+    const children = layer.children || [];
+    for (let ci = children.length - 1; ci >= 0; ci--) {
+      const child = children[ci];
+      if (elemHidden(child)) continue;
+      const b = elementBounds(child);
+      if (pointInRect(px, py, b)) return [li, ci];
+    }
   }
   return null;
 }

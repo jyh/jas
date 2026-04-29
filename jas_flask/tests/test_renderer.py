@@ -385,15 +385,18 @@ class TestRenderUnknown:
 
 
 class TestRenderCanvas:
-    """Drawing-surface canvas widget — emits the 3-layer SVG stack
+    """Drawing-surface canvas widget — emits the layered SVG stack
     that engine/canvas.mjs renders into. Phase 1 of the Flask
-    document-model integration."""
+    document-model integration; the artboard fill + decoration layers
+    were added when Flask gained per-artboard rendering."""
 
-    def test_emits_three_svg_layers(self, theme, state):
+    def test_emits_all_svg_layers(self, theme, state):
         from renderer import render_element
         el = {"type": "canvas", "id": "drawing_canvas"}
         html = render_element(el, theme, state, mode="normal")
+        assert 'id="canvas-artboard-fill"' in html
         assert 'id="canvas-doc"' in html
+        assert 'id="canvas-artboard-deco"' in html
         assert 'id="canvas-sel"' in html
         assert 'id="canvas-overlay"' in html
 
@@ -404,20 +407,37 @@ class TestRenderCanvas:
         from renderer import render_element
         el = {"type": "canvas", "id": "c1"}
         html = render_element(el, theme, state, mode="normal")
+        assert 'data-canvas-layer="artboard-fill"' in html
         assert 'data-canvas-layer="doc"' in html
+        assert 'data-canvas-layer="artboard-deco"' in html
         assert 'data-canvas-layer="selection"' in html
         assert 'data-canvas-layer="overlay"' in html
 
-    def test_selection_and_overlay_layers_block_no_pointer_events(
+    def test_only_doc_layer_takes_pointer_events(
             self, theme, state):
-        """Selection HUD and tool overlay layers must not intercept
-        mouse events — the document layer is the hit-test target."""
+        """Every layer except the document layer must carry
+        pointer-events:none so the document is the unambiguous
+        hit-test target. With five layers, four are pointerless."""
         from renderer import render_element
         el = {"type": "canvas", "id": "c1"}
         html = render_element(el, theme, state, mode="normal")
-        # Crude but adequate: count `pointer-events:none` occurrences.
-        # canvas-sel + canvas-overlay each carry it; canvas-doc must not.
-        assert html.count("pointer-events:none") == 2
+        assert html.count("pointer-events:none") == 4
+
+    def test_artboard_layer_stack_order(self, theme, state):
+        """Paint order matters: artboard-fill below doc, artboard-deco
+        above doc but below selection / overlay."""
+        from renderer import render_element
+        el = {"type": "canvas", "id": "c1"}
+        html = render_element(el, theme, state, mode="normal")
+        order = [
+            ('canvas-artboard-fill', html.index('canvas-artboard-fill')),
+            ('canvas-doc', html.index('canvas-doc')),
+            ('canvas-artboard-deco', html.index('canvas-artboard-deco')),
+            ('canvas-sel', html.index('canvas-sel')),
+            ('canvas-overlay', html.index('canvas-overlay')),
+        ]
+        positions = [p for _, p in order]
+        assert positions == sorted(positions), order
 
     def test_viewport_container_has_transform_origin(self, theme, state):
         """Pan/zoom is applied via CSS transform on the viewport

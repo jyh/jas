@@ -364,7 +364,7 @@ layout:
                     action: select_tool
                     params: { tool: rect }
                 bind:
-                  checked: 'mem(state.active_tool, ["rect", "rounded_rect", "polygon", "star"])'
+                  checked: 'mem(state.active_tool, ["rect", "rounded_rect", "ellipse", "polygon", "star"])'
                 alternates:
                   menu_id: shape_alternates
                   items:
@@ -372,6 +372,8 @@ layout:
                         description: "Draw rectangles and squares" }
                     - { id: rounded_rect, label: "Rounded Rectangle", icon: "rounded_rect",
                         description: "Draw rectangles with rounded corners" }
+                    - { id: ellipse,      label: "Ellipse",           icon: "ellipse",
+                        description: "Draw ellipses and circles" }
                     - { id: polygon,      label: "Polygon",           icon: "polygon",
                         description: "Draw regular polygons" }
                     - { id: star,         label: "Star",              icon: "star",
@@ -583,34 +585,21 @@ layout:
             description: >
               Container for document canvases, filling the space below the
               tab bar. Each open document gets a canvas element here via
-              create_child. Only the canvas matching active_tab is visible;
-              the rest are hidden. Starts empty. The visible canvas is the
-              interactive drawing surface where tools operate.
+              create_child (see actions.yaml::new_document, ::open_file).
+              Only the canvas matching active_tab is visible; the rest are
+              hidden. Starts empty — the brand logo below acts as the
+              visual placeholder until the first document is opened. The
+              visible canvas is the interactive drawing surface where
+              tools operate; canvas_bootstrap.mjs binds a Model (with
+              undo/redo) to each new canvas-stack as it appears in the
+              DOM and the engine renders the matching document into its
+              5-layer SVG stack.
             layout: column
             style:
               flex: 1
               min_height: 200
               background: "{{theme.colors.window_bg}}"
             children:
-              # Drawing canvas — the 3-layer SVG stack the
-              # client-side engine (static/js/engine/) renders into.
-              # Document, selection HUD and tool overlay are
-              # rendered as siblings under a viewport container that
-              # owns the pan/zoom CSS transform. See
-              # FLASK_PARITY.md §7 and FLASK_INTEGRATION_GAPS.md
-              # Phase 1 for the integration plan.
-              - id: drawing_canvas
-                type: canvas
-                summary: "Drawing canvas"
-                description: >
-                  Interactive drawing surface. Tool dispatch reads
-                  pointer events on this element and routes them to
-                  the active tool's on_mouse* handlers via
-                  engine/tools.mjs::dispatchEvent. The Model (with
-                  undo/redo) drives re-render of the document layer
-                  on every mutation.
-                style:
-                  background: "{{theme.colors.window_bg}}"
               - id: canvas_brand_logo
                 type: brand_logo
                 summary: "Brand logo placeholder"

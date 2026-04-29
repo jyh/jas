@@ -101,6 +101,12 @@ icons:
       <rect fill="gray" stroke="currentColor" stroke-miterlimit="10" stroke-width="8"
         x="23.33" y="58.26" width="212.06" height="139.47"/>
 
+  ellipse:
+    viewbox: "0 0 256 256"
+    svg: >
+      <ellipse fill="gray" stroke="currentColor" stroke-miterlimit="10" stroke-width="8"
+        cx="128" cy="128" rx="106" ry="70"/>
+
   rounded_rect:
     viewbox: "0 0 256 256"
     svg: >

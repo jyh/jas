@@ -40,7 +40,7 @@
                 }
               ],
               "bind": {
-                "active": "state.active_tab == prop.index"
+                "active": "state.active_tab == {{prop.index}}"
               },
               "children": [
                 {
@@ -82,10 +82,10 @@
               "tier": 3,
               "style": {
                 "flex": 1,
-                "background": "#ffffff"
+                "background": "{{theme.colors.window_bg}}"
               },
               "bind": {
-                "visible": "state.active_tab == prop.index"
+                "visible": "state.active_tab == {{prop.index}}"
               }
             }
           }
@@ -4583,6 +4583,10 @@
       "viewbox": "0 0 256 256",
       "svg": "<rect fill=\"gray\" stroke=\"currentColor\" stroke-miterlimit=\"10\" stroke-width=\"8\"\n  x=\"23.33\" y=\"58.26\" width=\"212.06\" height=\"139.47\"/>\n"
     },
+    "ellipse": {
+      "viewbox": "0 0 256 256",
+      "svg": "<ellipse fill=\"gray\" stroke=\"currentColor\" stroke-miterlimit=\"10\" stroke-width=\"8\"\n  cx=\"128\" cy=\"128\" rx=\"106\" ry=\"70\"/>\n"
+    },
     "rounded_rect": {
       "viewbox": "0 0 256 256",
       "svg": "<rect fill=\"gray\" x=\"23.33\" y=\"58.26\" width=\"212.06\" height=\"139.47\" rx=\"30\" ry=\"30\"/> <rect fill=\"none\" stroke=\"currentColor\" stroke-miterlimit=\"10\" stroke-width=\"8\"\n  x=\"23.33\" y=\"58.26\" width=\"212.06\" height=\"139.47\" rx=\"30\" ry=\"30\"/>\n"
@@ -5672,7 +5676,7 @@
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"rect\", \"rounded_rect\", \"polygon\", \"star\"])"
+                    "checked": "mem(state.active_tool, [\"rect\", \"rounded_rect\", \"ellipse\", \"polygon\", \"star\"])"
                   },
                   "alternates": {
                     "menu_id": "shape_alternates",
@@ -5688,6 +5692,12 @@
                         "label": "Rounded Rectangle",
                         "icon": "rounded_rect",
                         "description": "Draw rectangles with rounded corners"
+                      },
+                      {
+                        "id": "ellipse",
+                        "label": "Ellipse",
+                        "icon": "ellipse",
+                        "description": "Draw ellipses and circles"
                       },
                       {
                         "id": "polygon",
@@ -6145,7 +6155,7 @@
               "id": "drawing_surface",
               "type": "container",
               "summary": "Drawing surface",
-              "description": "Container for document canvases, filling the space below the tab bar. Each open document gets a canvas element here via create_child. Only the canvas matching active_tab is visible; the rest are hidden. Starts empty. The visible canvas is the interactive drawing surface where tools operate.\n",
+              "description": "Container for document canvases, filling the space below the tab bar. Each open document gets a canvas element here via create_child (see actions.yaml::new_document, ::open_file). Only the canvas matching active_tab is visible; the rest are hidden. Starts empty \u2014 the brand logo below acts as the visual placeholder until the first document is opened. The visible canvas is the interactive drawing surface where tools operate; canvas_bootstrap.mjs binds a Model (with undo/redo) to each new canvas-stack as it appears in the DOM and the engine renders the matching document into its 5-layer SVG stack.\n",
               "layout": "column",
               "style": {
                 "flex": 1,
@@ -18466,8 +18476,7 @@
                 "cx": "event.doc_x",
                 "cy": "event.doc_y",
                 "rx": "0",
-                "ry": "0",
-                "fill": "'#d94ad9'"
+                "ry": "0"
               }
             }
           }
@@ -29769,6 +29778,33 @@
                   {
                     "set": {
                       "active_tool": "\"rounded_rect\""
+                    }
+                  },
+                  {
+                    "close_dialog": null
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "icon_button",
+            "icon": "ellipse",
+            "label": "Ellipse",
+            "summary": "Draw ellipses and circles",
+            "style": {
+              "width": "100%",
+              "justify": "start",
+              "gap": 8,
+              "padding": "4 8"
+            },
+            "behavior": [
+              {
+                "event": "click",
+                "effects": [
+                  {
+                    "set": {
+                      "active_tool": "\"ellipse\""
                     }
                   },
                   {

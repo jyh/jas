@@ -80,6 +80,77 @@ describe("doc.add_element", () => {
     );
     assert.equal(model.document.layers[0].children.length, 0);
   });
+
+  it("applies state.fill_color / stroke_color defaults to a shape", () => {
+    // Drawing tools (rect.yaml etc.) intentionally omit fill / stroke
+    // from add_element so the engine fills in the active panel
+    // colors. Without this, every shape would render with the SVG
+    // default black fill regardless of what the user picked.
+    const model = new Model(emptyDocument());
+    const store = new StateStore({
+      state: { fill_color: "#ffffff", stroke_color: "#000000", stroke_width: 1 },
+    });
+    runEffects(
+      [{
+        "doc.add_element": {
+          parent: "[0]",
+          element: {
+            type: "rect", x: "10", y: "20", width: "30", height: "40",
+          },
+        },
+      }],
+      store.asContext(), store, { model },
+    );
+    const rect = model.document.layers[0].children[0];
+    assert.equal(rect.fill, "#ffffff");
+    assert.equal(rect.stroke, "#000000");
+    assert.equal(rect["stroke-width"], 1);
+  });
+
+  it("explicit fill/stroke in the spec override the state defaults", () => {
+    const model = new Model(emptyDocument());
+    const store = new StateStore({
+      state: { fill_color: "#ffffff", stroke_color: "#000000" },
+    });
+    runEffects(
+      [{
+        "doc.add_element": {
+          parent: "[0]",
+          element: {
+            type: "rect", x: "0", y: "0", width: "1", height: "1",
+            fill: "'#ff0000'",
+          },
+        },
+      }],
+      store.asContext(), store, { model },
+    );
+    const rect = model.document.layers[0].children[0];
+    assert.equal(rect.fill, "#ff0000");
+    // Stroke wasn't specified, so the state default still applies.
+    assert.equal(rect.stroke, "#000000");
+  });
+
+  it("does not apply shape defaults to non-shape types", () => {
+    // Layers / groups don't have fill/stroke; the defaults must not
+    // pollute their fields.
+    const model = new Model(emptyDocument());
+    const store = new StateStore({
+      state: { fill_color: "#ffffff", stroke_color: "#000000" },
+    });
+    runEffects(
+      [{
+        "doc.add_element": {
+          parent: "[0]",
+          element: { type: "group" },
+        },
+      }],
+      store.asContext(), store, { model },
+    );
+    const g = model.document.layers[0].children[0];
+    assert.equal(g.type, "group");
+    assert.equal(g.fill, undefined);
+    assert.equal(g.stroke, undefined);
+  });
 });
 
 describe("doc.set_attr", () => {
@@ -111,6 +182,335 @@ describe("doc.set_attr", () => {
       store.asContext(), store, { model },
     );
     assert.equal(getElement(model.document, [0, 0]).width, 100);
+  });
+});
+
+describe("doc.path.probe_partial_hit", () => {
+  function makeDoc() {
+    return {
+      layers: [mkLayer({ children: [
+        { type: "rect", x: 10, y: 10, width: 100, height: 80,
+          visibility: "preview", locked: false, opacity: 1 },
+      ] })],
+      selection: [],
+      artboards: [],
+    };
+  }
+
+  it("clicking a CP without shift replaces the partial selection with that CP", async () => {
+    const { partialCpsForPath } = await import("../../static/js/engine/document.mjs");
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "10", y: "10", radius: "6", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    // CP 0 (TL corner) is at (10, 10) — exact hit.
+    assert.deepEqual(model.document.selection, [[0, 0]]);
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0]);
+    assert.equal(store.get("tool.partial_selection.mode"), "moving_pending");
+  });
+
+  it("shift-clicking a CP toggles it in the partial set", async () => {
+    const { partialCpsForPath, setSelection, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [0]); // TL already partial
+    const model = new Model(doc);
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    // Shift-click on TR (110, 10).
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "110", y: "10", radius: "6", shift: "true",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0, 1]);
+  });
+
+  it("clicking empty space sets mode to marquee", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "500", y: "500", radius: "6", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(store.get("tool.partial_selection.mode"), "marquee");
+    // No selection change.
+    assert.equal(model.document.selection.length, 0);
+  });
+});
+
+describe("doc.path.commit_partial_marquee", () => {
+  function makeDoc() {
+    return {
+      layers: [mkLayer({ children: [
+        // Rect from (0,0) to (100,80). CPs: TL(0,0), TR(100,0),
+        // BR(100,80), BL(0,80).
+        { type: "rect", x: 0, y: 0, width: 100, height: 80,
+          visibility: "preview", locked: false, opacity: 1 },
+      ] })],
+      selection: [],
+      artboards: [],
+    };
+  }
+
+  it("CPs inside the rect become partial-selected; element joins selection", async () => {
+    const { partialCpsForPath } = await import("../../static/js/engine/document.mjs");
+    const model = new Model(makeDoc());
+    const store = new StateStore();
+    // Marquee that covers the top edge: TL (0,0) and TR (100,0).
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "-5", y1: "-5", x2: "105", y2: "5", additive: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.deepEqual(model.document.selection, [[0, 0]]);
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0, 1]);
+  });
+
+  it("non-additive replaces an existing partial set", async () => {
+    const { partialCpsForPath, setSelection, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [3]); // BL pre-selected
+    const model = new Model(doc);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "-5", y1: "-5", x2: "5", y2: "5", additive: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    // Marquee covers only TL → replaces [3] with [0].
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0]);
+  });
+
+  it("additive merges into the existing partial set", async () => {
+    const { partialCpsForPath, setSelection, setPartialCps } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    doc = setPartialCps(doc, [0, 0], [3]); // BL pre-selected
+    const model = new Model(doc);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "-5", y1: "-5", x2: "5", y2: "5", additive: "true",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.deepEqual(partialCpsForPath(model.document, [0, 0]), [0, 3]);
+  });
+
+  it("empty marquee with non-additive clears the selection", async () => {
+    const { partialCpsForPath, setSelection } =
+      await import("../../static/js/engine/document.mjs");
+    let doc = makeDoc();
+    doc = setSelection(doc, [[0, 0]]);
+    const model = new Model(doc);
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.path.commit_partial_marquee": {
+        x1: "200", y1: "200", x2: "300", y2: "300", additive: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(model.document.selection.length, 0);
+  });
+});
+
+describe("Bezier handle hits + doc.move_path_handle", () => {
+  // Path with one cubic between (0,0) and (100,0). The C command's
+  // (x1,y1)=(20,-30) is anchor 0's out-handle; (x2,y2)=(80,-30) is
+  // anchor 1's in-handle.
+  function makeDoc() {
+    const path = {
+      type: "path",
+      visibility: "preview", locked: false, opacity: 1,
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "C", x1: 20, y1: -30, x2: 80, y2: -30, x: 100, y: 0 },
+      ],
+    };
+    return {
+      layers: [mkLayer({ children: [path] })],
+      selection: [[0, 0]],
+      artboards: [],
+    };
+  }
+
+  it("probe_partial_hit latches an in-handle hit on a selected path", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "80", y: "-30", hit_radius: "8", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(store.get("tool.partial_selection.mode"), "handle");
+    assert.equal(store.get("tool.partial_selection.handle_type"), "in");
+    assert.equal(store.get("tool.partial_selection.handle_anchor_idx"), 1);
+    assert.deepEqual(store.get("tool.partial_selection.handle_path"), [0, 0]);
+  });
+
+  it("probe_partial_hit latches an out-handle hit on a selected path", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.path.probe_partial_hit": {
+        x: "20", y: "-30", hit_radius: "8", shift: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(store.get("tool.partial_selection.mode"), "handle");
+    assert.equal(store.get("tool.partial_selection.handle_type"), "out");
+    assert.equal(store.get("tool.partial_selection.handle_anchor_idx"), 0);
+  });
+
+  it("doc.move_path_handle moves the latched in-handle and reflects the out", () => {
+    const model = new Model(makeDoc());
+    const store = new StateStore({ tool: { partial_selection: {
+      mode: "handle",
+      handle_path: [0, 0],
+      handle_anchor_idx: 1,
+      handle_type: "in",
+    } } });
+    runEffects(
+      [{ "doc.move_path_handle": { dx: "0", dy: "10" } }],
+      store.asContext(), store, { model },
+    );
+    const after = getElement(model.document, [0, 0]);
+    // In-handle of anchor 1 (= cmd[1].x2,y2) shifted by (0, 10).
+    assert.equal(after.d[1].x2, 80);
+    assert.equal(after.d[1].y2, -20);
+    // Out-handle of anchor 1 doesn't exist on this path (only 2
+    // anchors, no command after cmd[1]) — there's no opposite to
+    // reflect. The other end's out (cmd[1].x1,y1) belongs to
+    // anchor 0, so it stays put.
+    assert.equal(after.d[1].x1, 20);
+    assert.equal(after.d[1].y1, -30);
+  });
+
+  it("doc.move_path_handle no-op when no handle is latched", () => {
+    const model = new Model(makeDoc());
+    const before = model.document;
+    const store = new StateStore({ tool: { partial_selection: { mode: "idle" } } });
+    runEffects(
+      [{ "doc.move_path_handle": { dx: "5", dy: "5" } }],
+      store.asContext(), store, { model },
+    );
+    assert.equal(model.document, before);
+  });
+});
+
+describe("Pen tool effects", () => {
+  it("anchor.push appends a corner anchor", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_push");
+    const store = new StateStore();
+    runEffects(
+      [{ "anchor.push": { buffer: "test_pen_push", x: "10", y: "20" } }],
+      store.asContext(), store, {},
+    );
+    assert.equal(ab.length("test_pen_push"), 1);
+    ab.clear("test_pen_push");
+  });
+
+  it("anchor.set_last_out flips smooth and mirrors in-handle", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_smooth");
+    const store = new StateStore();
+    runEffects(
+      [
+        { "anchor.push": { buffer: "test_pen_smooth", x: "50", y: "50" } },
+        { "anchor.set_last_out": { buffer: "test_pen_smooth", hx: "60", hy: "50" } },
+      ],
+      store.asContext(), store, {},
+    );
+    const [a] = ab.anchors("test_pen_smooth");
+    assert.equal(a.hout_x, 60);
+    assert.equal(a.hin_x, 40);
+    assert.equal(a.smooth, true);
+    ab.clear("test_pen_smooth");
+  });
+
+  it("anchor_buffer_length / anchor_buffer_close_hit primitives evaluate in YAML guards", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    const { evaluate } = await import("../../static/js/engine/expr.mjs");
+    const { Scope } = await import("../../static/js/engine/scope.mjs");
+    const { toBool, toJson } = await import("../../static/js/engine/value.mjs");
+    ab.clear("test_pen_p");
+    ab.push("test_pen_p", 100, 100);
+    ab.push("test_pen_p", 200, 200);
+    const scope = new Scope({});
+    assert.equal(
+      toJson(evaluate("anchor_buffer_length('test_pen_p')", scope)), 2);
+    assert.equal(
+      toBool(evaluate("anchor_buffer_close_hit('test_pen_p', 102, 102, 8)", scope)),
+      true);
+    assert.equal(
+      toBool(evaluate("anchor_buffer_close_hit('test_pen_p', 200, 200, 8)", scope)),
+      false); // last anchor isn't first
+    ab.clear("test_pen_p");
+  });
+
+  it("doc.add_path_from_anchor_buffer appends a Path with CurveTos", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_add");
+    ab.push("test_pen_add", 0, 0);
+    ab.push("test_pen_add", 50, 50);
+    ab.push("test_pen_add", 100, 0);
+    const model = new Model(emptyDocument());
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.add_path_from_anchor_buffer": {
+        buffer: "test_pen_add", closed: "false",
+      } }],
+      store.asContext(), store, { model },
+    );
+    const elem = model.document.layers[0].children[0];
+    assert.equal(elem.type, "path");
+    // 1 MoveTo + 2 CurveTos.
+    assert.equal(elem.d.length, 3);
+    assert.equal(elem.d[0].type, "M");
+    assert.equal(elem.d[1].type, "C");
+    assert.equal(elem.d[2].type, "C");
+    // Last command lands at the third anchor (100, 0).
+    assert.equal(elem.d[2].x, 100);
+    assert.equal(elem.d[2].y, 0);
+    // Open paths default fill=null so they don't trap a filled hairline.
+    assert.equal(elem.fill, null);
+    ab.clear("test_pen_add");
+  });
+
+  it("doc.add_path_from_anchor_buffer with closed=true emits CurveTo + Z", async () => {
+    const ab = await import("../../static/js/engine/anchor_buffers.mjs");
+    ab.clear("test_pen_closed");
+    ab.push("test_pen_closed", 0, 0);
+    ab.push("test_pen_closed", 100, 0);
+    ab.push("test_pen_closed", 50, 80);
+    const model = new Model(emptyDocument());
+    const store = new StateStore();
+    runEffects(
+      [{ "doc.add_path_from_anchor_buffer": {
+        buffer: "test_pen_closed", closed: "true",
+      } }],
+      store.asContext(), store, { model },
+    );
+    const elem = model.document.layers[0].children[0];
+    // M + 2 CurveTos + closing CurveTo + Z = 5 commands.
+    assert.equal(elem.d.length, 5);
+    assert.equal(elem.d[4].type, "Z");
+    ab.clear("test_pen_closed");
   });
 });
 

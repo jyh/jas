@@ -8,6 +8,7 @@ import {
   isContainer, emptyDocument, getElement, cloneDocument,
   docToJson, docFromJson,
   setSelection, addToSelection, toggleSelection, clearSelection,
+  partialCpsForPath, setPartialCps, togglePartialCp,
 } from "../../static/js/engine/document.mjs";
 
 import { Model } from "../../static/js/engine/model.mjs";
@@ -72,6 +73,41 @@ describe("Document / getElement", () => {
     const d = emptyDocument();
     assert.equal(d.layers.length, 1);
     assert.equal(d.selection.length, 0);
+  });
+
+  it("emptyDocument seeds one Letter-sized white artboard", () => {
+    // Cross-app contract: every observable document has at least one
+    // artboard (jas_dioxus/src/document/artboard.rs §invariant). Flask
+    // overrides the Rust struct's transparent default with white so a
+    // freshly created document shows a visible "page" against the dark
+    // pasteboard (see actions.yaml::new_document and the bootstrap).
+    const d = emptyDocument();
+    assert.equal(d.artboards.length, 1);
+    const ab = d.artboards[0];
+    assert.equal(ab.name, "Artboard 1");
+    assert.equal(ab.x, 0);
+    assert.equal(ab.y, 0);
+    assert.equal(ab.width, 612);
+    assert.equal(ab.height, 792);
+    assert.equal(ab.fill, "#ffffff");
+    assert.equal(typeof ab.id, "string");
+    assert.equal(ab.id.length, 8);
+    assert.equal(ab.show_center_mark, false);
+    assert.equal(ab.show_cross_hairs, false);
+    assert.equal(ab.show_video_safe_areas, false);
+    assert.equal(ab.video_ruler_pixel_aspect_ratio, 1.0);
+  });
+
+  it("emptyDocument has artboard_options with fade on by default", () => {
+    const d = emptyDocument();
+    assert.equal(d.artboard_options.fade_region_outside_artboard, true);
+    assert.equal(d.artboard_options.update_while_dragging, true);
+  });
+
+  it("emptyDocument generates a fresh artboard id each call", () => {
+    const a = emptyDocument();
+    const b = emptyDocument();
+    assert.notEqual(a.artboards[0].id, b.artboards[0].id);
   });
 
   it("getElement walks single-level path", () => {
@@ -189,6 +225,61 @@ describe("selection mutations", () => {
     let d = setSelection(makeDoc(), [[0, 0], [0, 1]]);
     d = clearSelection(d);
     assert.equal(d.selection.length, 0);
+  });
+
+  it("partialCpsForPath returns null when no partial entry exists", () => {
+    // No partial entry → SelectionKind::All semantics. Caller treats
+    // null as "every CP is selected".
+    const d = setSelection(makeDoc(), [[0, 0]]);
+    assert.equal(partialCpsForPath(d, [0, 0]), null);
+  });
+
+  it("setPartialCps stores indices for a path; partialCpsForPath reads them", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [0, 2]);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [0, 2]);
+  });
+
+  it("setPartialCps with empty array clears the partial entry", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [1]);
+    d = setPartialCps(d, [0, 0], []);
+    assert.equal(partialCpsForPath(d, [0, 0]), null);
+  });
+
+  it("togglePartialCp adds an absent index", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = togglePartialCp(d, [0, 0], 2);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [2]);
+  });
+
+  it("togglePartialCp removes a present index", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [0, 2]);
+    d = togglePartialCp(d, [0, 0], 0);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [2]);
+  });
+
+  it("togglePartialCp leaves indices sorted ascending", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = togglePartialCp(d, [0, 0], 3);
+    d = togglePartialCp(d, [0, 0], 1);
+    d = togglePartialCp(d, [0, 0], 2);
+    assert.deepEqual(partialCpsForPath(d, [0, 0]), [1, 2, 3]);
+  });
+
+  it("clearSelection drops partial entries too", () => {
+    let d = setSelection(makeDoc(), [[0, 0]]);
+    d = setPartialCps(d, [0, 0], [1]);
+    d = clearSelection(d);
+    assert.equal(partialCpsForPath(d, [0, 0]), null);
+  });
+
+  it("setSelection drops partial entries for paths no longer selected", () => {
+    let d = setSelection(makeDoc(), [[0, 0], [0, 1]]);
+    d = setPartialCps(d, [0, 1], [0]);
+    d = setSelection(d, [[0, 0]]);
+    assert.equal(partialCpsForPath(d, [0, 1]), null);
   });
 
   it("mutations don't alter input", () => {

@@ -39,7 +39,10 @@ _Last synced: 2026-04-23_
 - Reference implementation. Line handler exercised by inline cases for
   press/drag/release pipeline and zero-length suppression.
 
-**Flask — no coverage.** Canvas tool runtime is native-apps-only.
+**Flask — covered indirectly via shared Rect-shape pipeline.** Line's
+runtime uses the same engine effects exercised by `tests/js/test_phase12.mjs`
+(doc.add_element, fill / stroke defaults). No Line-specific JS unit
+suite yet; the parity block below relies on manual passes.
 
 The manual suite below covers what auto-tests cannot reach: overlay
 appearance, cursor glyph, stroke default picked up live, cross-tool
@@ -259,6 +262,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 - **LIN-201** [wired] Zero-length click is suppressed in every app.
       Do: Press and release without moving.
@@ -267,6 +271,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 - **LIN-202** [wired] Hypot-2 boundary matches in every app.
       Do: Press (100,100); drag to (101,101); release.
@@ -275,6 +280,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 - **LIN-203** [wired] Escape during drag leaves the document unchanged.
       Do: Begin a drag; press Esc.
@@ -283,6 +289,7 @@ If any P0 here fails, stop and flag.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 ---
 
