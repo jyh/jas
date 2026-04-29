@@ -79,6 +79,151 @@ class TestResolveInterpolation:
         result = resolve_interpolation("{{theme.colors.nonexistent}}", {"colors": {}}, {})
         assert "nonexistent" not in result or result == ""
 
+    def test_data_path_simple_key(self):
+        # data.* expansion walks the renderer._workspace_data namespace
+        # populated via set_workspace_data. This branch was previously
+        # broken (referenced a non-existent resolve_data_path); the
+        # fix added the implementation in renderer.py.
+        from loader import resolve_interpolation
+        from renderer import set_workspace_data
+        set_workspace_data({"top_color": "#abcdef"})
+        try:
+            result = resolve_interpolation("{{data.top_color}}", {}, {})
+            assert result == "#abcdef"
+        finally:
+            set_workspace_data({})
+
+    def test_data_path_nested_dict(self):
+        from loader import resolve_interpolation
+        from renderer import set_workspace_data
+        set_workspace_data({"libs": {"swatch": {"name": "Default"}}})
+        try:
+            result = resolve_interpolation("{{data.libs.swatch.name}}", {}, {})
+            assert result == "Default"
+        finally:
+            set_workspace_data({})
+
+    def test_data_path_list_index(self):
+        from loader import resolve_interpolation
+        from renderer import set_workspace_data
+        set_workspace_data({"items": [{"id": "a"}, {"id": "b"}, {"id": "c"}]})
+        try:
+            result = resolve_interpolation("{{data.items.1.id}}", {}, {})
+            assert result == "b"
+        finally:
+            set_workspace_data({})
+
+    def test_data_path_missing_returns_empty(self):
+        from loader import resolve_interpolation
+        from renderer import set_workspace_data
+        set_workspace_data({"foo": "bar"})
+        try:
+            result = resolve_interpolation("{{data.nope}}", {}, {})
+            assert result == ""
+        finally:
+            set_workspace_data({})
+
+
+class TestRendererContextSetters:
+    """Tests for the renderer module-level setters that thread workspace
+    data into the renderer without per-render disk I/O. These setters
+    are also the seam Flask tests use to inject synthetic fixtures."""
+
+    def test_set_icons_replaces(self):
+        from renderer import set_icons, _icons
+        set_icons({"alpha": {"path": "M0 0"}})
+        from renderer import _icons as icons_after
+        assert "alpha" in icons_after
+        # Replacement, not merge.
+        set_icons({"beta": {"path": "M1 1"}})
+        from renderer import _icons as icons_after2
+        assert "alpha" not in icons_after2
+        assert "beta" in icons_after2
+        set_icons({})
+
+    def test_set_initial_state_extracts_defaults(self):
+        from renderer import set_initial_state
+        # State definitions are objects with `.default` keys; the
+        # setter flattens to {name: default}.
+        set_initial_state({
+            "active_tool": {"default": "pen"},
+            "fill_color": {"default": "#ff0000"},
+        })
+        from renderer import _initial_state
+        assert _initial_state["active_tool"] == "pen"
+        assert _initial_state["fill_color"] == "#ff0000"
+        set_initial_state({})
+
+    def test_set_panels_replaces(self):
+        from renderer import set_panels
+        set_panels({"color_panel_content": {"id": "color_panel_content"}})
+        from renderer import _panels
+        assert "color_panel_content" in _panels
+        set_panels({})
+        from renderer import _panels as p_after
+        assert p_after == {}
+
+    def test_set_brand_replaces(self):
+        from renderer import set_brand
+        set_brand({"logo_svg": "<svg/>", "color": "#fff"})
+        from renderer import _brand
+        assert _brand["color"] == "#fff"
+        set_brand({})
+
+    def test_set_workspace_data_replaces(self):
+        from renderer import set_workspace_data
+        set_workspace_data({"swatch_libraries": [{"id": "lib1"}]})
+        from renderer import _workspace_data
+        assert _workspace_data["swatch_libraries"][0]["id"] == "lib1"
+        set_workspace_data({})
+
+    def test_set_none_treated_as_empty(self):
+        # All five setters accept None as "clear" rather than erroring.
+        from renderer import set_icons, set_initial_state, set_panels, set_brand, set_workspace_data
+        set_icons(None)
+        set_initial_state(None)
+        set_panels(None)
+        set_brand(None)
+        set_workspace_data(None)
+
+
+class TestResolveDataPath:
+    """Direct tests for renderer.resolve_data_path — the dotted-path
+    walker that loader.resolve_interpolation calls for {{data.*}}."""
+
+    def test_empty_path_returns_full_data(self):
+        from renderer import resolve_data_path, set_workspace_data
+        set_workspace_data({"a": 1, "b": 2})
+        try:
+            assert resolve_data_path("") == {"a": 1, "b": 2}
+        finally:
+            set_workspace_data({})
+
+    def test_dict_then_list_then_dict(self):
+        from renderer import resolve_data_path, set_workspace_data
+        set_workspace_data({"libs": [{"colors": ["#aaa", "#bbb"]}]})
+        try:
+            assert resolve_data_path("libs.0.colors.1") == "#bbb"
+        finally:
+            set_workspace_data({})
+
+    def test_invalid_list_index_returns_none(self):
+        from renderer import resolve_data_path, set_workspace_data
+        set_workspace_data({"items": [1, 2]})
+        try:
+            assert resolve_data_path("items.99") is None
+            assert resolve_data_path("items.notnum") is None
+        finally:
+            set_workspace_data({})
+
+    def test_descent_through_scalar_returns_none(self):
+        from renderer import resolve_data_path, set_workspace_data
+        set_workspace_data({"foo": 42})
+        try:
+            assert resolve_data_path("foo.bar") is None
+        finally:
+            set_workspace_data({})
+
 
 class TestFindElementById:
     def test_find_root(self, sample_workspace):

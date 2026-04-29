@@ -596,7 +596,7 @@ let menu_tests = [
        ("new_masks_inverted", `Bool false);
        ("thumbnails_hidden", `Bool false);
        ("options_shown", `Bool false)];
-    Jas.Panel_menu.opacity_store_ref := Some store;
+    Jas.Panel_menu.register_panel_store "opacity_panel_content" store;
     assert (panel_is_checked Opacity "toggle_new_masks_clipping" l);
     panel_dispatch Opacity "toggle_new_masks_clipping" addr l
       ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ();
@@ -604,7 +604,7 @@ let menu_tests = [
     panel_dispatch Opacity "toggle_new_masks_clipping" addr l
       ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ();
     assert (panel_is_checked Opacity "toggle_new_masks_clipping" l);
-    Jas.Panel_menu.opacity_store_ref := None);
+    Jas.Panel_menu.unregister_panel_store "opacity_panel_content");
 
   Alcotest.test_case "opacity_make_mask_reads_live_new_masks_flags" `Quick (fun () ->
     let l = default_layout () in
@@ -617,7 +617,7 @@ let menu_tests = [
     Jas.State_store.init_panel store "opacity_panel_content"
       [("new_masks_clipping", `Bool false);
        ("new_masks_inverted", `Bool true)];
-    Jas.Panel_menu.opacity_store_ref := Some store;
+    Jas.Panel_menu.register_panel_store "opacity_panel_content" store;
     (* Seed a single rect selected at [0;0]. *)
     let m = Jas.Model.create () in
     let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
@@ -637,7 +637,7 @@ let menu_tests = [
       | None -> failwith "make_opacity_mask did not create a mask" in
     assert (mask.Jas.Element.clip = false);
     assert (mask.Jas.Element.invert = true);
-    Jas.Panel_menu.opacity_store_ref := None);
+    Jas.Panel_menu.unregister_panel_store "opacity_panel_content");
 ]
 
 (* ================================================================== *)

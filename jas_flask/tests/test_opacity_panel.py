@@ -1,9 +1,18 @@
-"""Tests against the real workspace Opacity panel spec.
+"""Integration tests of the jas workspace Opacity panel spec.
+
+NOTE — scope. These are NOT generic Flask renderer tests. They assert
+fields specific to workspace/panels/opacity.yaml (mode dropdown,
+opacity input, mask checkboxes, etc.). The Flask app itself is generic
+per the project CLAUDE.md; these tests live here only because the
+Flask renderer is the easiest currently-available driver for exercising
+the full panel spec end-to-end.
+
+When a workspace-level test home is created, these tests should
+migrate there. Until then they live alongside the renderer.
 
 Flask's phase-1 scope for Opacity is yaml wiring only — the document
 model for per-element opacity, per-element blend mode, and opacity
-masks lands in later phases in the native apps (same posture as
-Artboards / Boolean / Align). Phase-1 behavior:
+masks lands in later phases in the native apps. Phase-1 behavior:
 
   - MODE_DROPDOWN and OPACITY_INPUT are functional (bind to panel-local
     state).

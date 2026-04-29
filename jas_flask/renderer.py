@@ -11,6 +11,11 @@ _icons: dict = {}
 _initial_state: dict = {}
 _brand: dict = {}
 _panels: dict = {}
+# Workspace `data` namespace — top-level keys exposed to YAML expressions
+# under the `data.*` scope (e.g. data.swatch_libraries, data.brush_libraries).
+# Populated by app.py from the loaded workspace; tests can populate it
+# directly with synthetic fixtures.
+_workspace_data: dict = {}
 
 
 def set_icons(icons: dict) -> None:
@@ -35,6 +40,41 @@ def set_panels(panels: dict) -> None:
     """Set the panel specs keyed by panel content id (e.g. 'color_panel_content')."""
     global _panels
     _panels = panels or {}
+
+
+def set_workspace_data(data: dict) -> None:
+    """Set the workspace data namespace (swatch_libraries, brush_libraries, etc.).
+    Replaces the prior pattern of having renderers reach into the
+    workspace YAML file via path-guessing on each panel render."""
+    global _workspace_data
+    _workspace_data = data or {}
+
+
+def resolve_data_path(dotted: str):
+    """Walk the workspace data namespace by dotted path. Returns None
+    if any intermediate segment is missing or the final value is null.
+    Numeric segments index into lists; everything else looks up by key.
+    Used by `loader.resolve_interpolation` to expand `{{data.*}}`
+    references in CSS / template strings."""
+    cur = _workspace_data
+    if not dotted:
+        return cur
+    for part in dotted.split("."):
+        if isinstance(cur, list):
+            try:
+                idx = int(part)
+            except ValueError:
+                return None
+            if idx < 0 or idx >= len(cur):
+                return None
+            cur = cur[idx]
+        elif isinstance(cur, dict):
+            if part not in cur:
+                return None
+            cur = cur[part]
+        else:
+            return None
+    return cur
 
 
 def render_element(el: dict, theme: dict, state: dict, mode: str = "normal") -> str:
@@ -615,9 +655,7 @@ def _render_icon_button(el, theme, state):
         fallback = summary[0] if summary else (icon_name[0] if icon_name else "?")
         icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:var(--app-text,#ccc)">{escape(str(fallback))}</span>'
     # Small filled triangle in the lower-right corner indicating
-    # long-press alternates exist for this slot. Mirrors
-    # _draw_alternate_triangle in jas/tools/toolbar.py and the SVG
-    # glyph in jas_dioxus/src/workspace/icons.rs.
+    # long-press alternates exist for this slot.
     triangle_html = ""
     extra_attrs = ""
     if has_alternates:
@@ -1348,23 +1386,19 @@ def _render_dock_view(el, theme, state):
                         if panel_spec.get("init"):
                             body_attrs += f' data-panel-init="{escape(json.dumps(panel_spec["init"]))}"'
                         content_el = panel_spec.get("content")
-                        # Build a scope with panel defaults and data context
-                        # so repeat/expressions resolve without hardcoded name checks
+                        # Build a scope with panel defaults and the
+                        # workspace data namespace so repeat/expressions
+                        # over data.* (e.g. swatch_libraries) resolve.
+                        # Workspace data is populated by app.py at load
+                        # time via set_workspace_data — no per-render
+                        # path-guessing into workspace yaml files.
                         from workspace_interpreter.scope import Scope as _Scope
                         from workspace_interpreter.loader import panel_state_defaults as _psd
-                        panel_scope = _Scope({"state": state, "panel": _psd(panel_spec)})
-                        try:
-                            from workspace_interpreter.loader import load_workspace as _lw
-                            for _wp in ("workspace", "../workspace"):
-                                try:
-                                    _ws = _lw(_wp)
-                                    if _ws and "swatch_libraries" in _ws:
-                                        panel_scope = panel_scope | {"data": {"swatch_libraries": _ws["swatch_libraries"]}}
-                                        break
-                                except Exception:
-                                    continue
-                        except Exception:
-                            pass
+                        panel_scope = _Scope({
+                            "state": state,
+                            "panel": _psd(panel_spec),
+                            "data": _workspace_data,
+                        })
                         content_html = render_element(content_el, theme, panel_scope.to_dict(), mode="normal") if isinstance(content_el, dict) else ""
                         html += f'<div class="app-dock-panel-body{hidden_cls}"{body_attrs}>{content_html}</div>'
                     else:

@@ -141,6 +141,47 @@ impl ToolKind {
         }
     }
 
+    /// String name used to expose the active tool kind into YAML
+    /// expression context (e.g. `$state.active_tool`). Distinct from
+    /// the YAML file id used by the toolbar (see
+    /// `workspace::toolbar_grid::tool_yaml_id`): the file ids are
+    /// `add_anchor_point` / `delete_anchor_point` to match the
+    /// filenames in `workspace/tools/`, while panel-state names use
+    /// the shorter `add_anchor` / `delete_anchor` for the predicates
+    /// that panel and tool-options YAML have always written against.
+    pub fn panel_state_name(&self) -> &'static str {
+        match self {
+            ToolKind::Selection => "selection",
+            ToolKind::PartialSelection => "partial_selection",
+            ToolKind::InteriorSelection => "interior_selection",
+            ToolKind::MagicWand => "magic_wand",
+            ToolKind::Pen => "pen",
+            ToolKind::AddAnchorPoint => "add_anchor",
+            ToolKind::DeleteAnchorPoint => "delete_anchor",
+            ToolKind::AnchorPoint => "anchor_point",
+            ToolKind::Pencil => "pencil",
+            ToolKind::Paintbrush => "paintbrush",
+            ToolKind::BlobBrush => "blob_brush",
+            ToolKind::PathEraser => "path_eraser",
+            ToolKind::Smooth => "smooth",
+            ToolKind::Type => "type",
+            ToolKind::TypeOnPath => "type_on_path",
+            ToolKind::Line => "line",
+            ToolKind::Rect => "rect",
+            ToolKind::RoundedRect => "rounded_rect",
+            ToolKind::Polygon => "polygon",
+            ToolKind::Star => "star",
+            ToolKind::Lasso => "lasso",
+            ToolKind::Scale => "scale",
+            ToolKind::Rotate => "rotate",
+            ToolKind::Shear => "shear",
+            ToolKind::Hand => "hand",
+            ToolKind::Zoom => "zoom",
+            ToolKind::Artboard => "artboard",
+            ToolKind::Eyedropper => "eyedropper",
+        }
+    }
+
     pub fn shortcut(&self) -> Option<&'static str> {
         match self {
             ToolKind::Selection => Some("v"),

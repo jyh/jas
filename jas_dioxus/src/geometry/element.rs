@@ -1549,6 +1549,92 @@ fn quadratic_eval(p0: f64, p1: f64, p2: f64, t: f64) -> f64 {
     u * u * p0 + 2.0 * u * t * p1 + t * t * p2
 }
 
+/// Compute the candidate (x, y) extrema points for an SVG arc. The
+/// arc is parameterized as in SVG 1.1 §F.6: endpoint to endpoint with
+/// radii (rx, ry), x-axis rotation (degrees), and the two flags. The
+/// returned list always includes the two endpoints; it additionally
+/// includes any of the four cardinal-direction extrema of the rotated
+/// ellipse that fall within the arc's actual sweep range.
+///
+/// Used by path bounds to fix the well-known "ArcTo bbox skips the
+/// peak" gap (see project_arc_extrema_gap memory note). Degenerate
+/// arcs (zero radius) collapse to the endpoint pair.
+fn arc_extrema_points(
+    x0: f64, y0: f64,
+    rx: f64, ry: f64, x_rotation_deg: f64,
+    large_arc: bool, sweep: bool,
+    x: f64, y: f64,
+) -> Vec<(f64, f64)> {
+    if rx.abs() < 1e-12 || ry.abs() < 1e-12 {
+        return vec![(x0, y0), (x, y)];
+    }
+    let two_pi = 2.0 * std::f64::consts::PI;
+    let phi = x_rotation_deg.to_radians();
+    let cos_phi = phi.cos();
+    let sin_phi = phi.sin();
+
+    // SVG endpoint-to-center conversion, per F.6.5.
+    let dx = (x0 - x) / 2.0;
+    let dy = (y0 - y) / 2.0;
+    let x1p =  cos_phi * dx + sin_phi * dy;
+    let y1p = -sin_phi * dx + cos_phi * dy;
+    let mut rx_eff = rx.abs();
+    let mut ry_eff = ry.abs();
+    let lambda = (x1p * x1p) / (rx_eff * rx_eff) + (y1p * y1p) / (ry_eff * ry_eff);
+    if lambda > 1.0 {
+        let s = lambda.sqrt();
+        rx_eff *= s;
+        ry_eff *= s;
+    }
+    let sign = if large_arc == sweep { -1.0 } else { 1.0 };
+    let num = (rx_eff * rx_eff * ry_eff * ry_eff
+        - rx_eff * rx_eff * y1p * y1p
+        - ry_eff * ry_eff * x1p * x1p).max(0.0);
+    let den = rx_eff * rx_eff * y1p * y1p + ry_eff * ry_eff * x1p * x1p;
+    let factor = if den < 1e-12 { 0.0 } else { sign * (num / den).sqrt() };
+    let cxp =  factor * (rx_eff * y1p) / ry_eff;
+    let cyp = -factor * (ry_eff * x1p) / rx_eff;
+    let cx_arc = cos_phi * cxp - sin_phi * cyp + (x0 + x) / 2.0;
+    let cy_arc = sin_phi * cxp + cos_phi * cyp + (y0 + y) / 2.0;
+
+    let theta1 = ((y1p - cyp) / ry_eff).atan2((x1p - cxp) / rx_eff);
+    let theta2 = ((-y1p - cyp) / ry_eff).atan2((-x1p - cxp) / rx_eff);
+    let mut delta = theta2 - theta1;
+    if !sweep && delta > 0.0 { delta -= two_pi; }
+    else if sweep && delta < 0.0 { delta += two_pi; }
+
+    // x(t) = cx_arc + rx*cos(phi)*cos(t) - ry*sin(phi)*sin(t)
+    // dx/dt = 0  →  tan(t) = -ry*sin(phi) / (rx*cos(phi))
+    // y(t) = cy_arc + rx*sin(phi)*cos(t) + ry*cos(phi)*sin(t)
+    // dy/dt = 0  →  tan(t) =  ry*cos(phi) / (rx*sin(phi))
+    let tx = (-ry_eff * sin_phi).atan2(rx_eff * cos_phi);
+    let ty = (ry_eff * cos_phi).atan2(rx_eff * sin_phi);
+    let candidates = [tx, tx + std::f64::consts::PI, ty, ty + std::f64::consts::PI];
+
+    let in_sweep = |t: f64| -> bool {
+        let mut dt = t - theta1;
+        if delta >= 0.0 {
+            while dt < 0.0 { dt += two_pi; }
+            while dt > two_pi { dt -= two_pi; }
+            dt <= delta + 1e-9
+        } else {
+            while dt > 0.0 { dt -= two_pi; }
+            while dt < -two_pi { dt += two_pi; }
+            dt >= delta - 1e-9
+        }
+    };
+
+    let mut points = vec![(x0, y0), (x, y)];
+    for &t in &candidates {
+        if in_sweep(t) {
+            let px = cx_arc + rx_eff * cos_phi * t.cos() - ry_eff * sin_phi * t.sin();
+            let py = cy_arc + rx_eff * sin_phi * t.cos() + ry_eff * cos_phi * t.sin();
+            points.push((px, py));
+        }
+    }
+    points
+}
+
 fn path_bounds(d: &[PathCommand]) -> Bounds {
     let mut xs = Vec::new();
     let mut ys = Vec::new();
@@ -1611,8 +1697,13 @@ fn path_bounds(d: &[PathCommand]) -> Bounds {
                 xs.push(*x); ys.push(*y);
                 cx = *x; cy = *y;
             }
-            PathCommand::ArcTo { x, y, .. } => {
-                xs.push(*x); ys.push(*y);
+            PathCommand::ArcTo { rx, ry, x_rotation, large_arc, sweep, x, y } => {
+                for (px, py) in arc_extrema_points(
+                    cx, cy, *rx, *ry, *x_rotation, *large_arc, *sweep, *x, *y,
+                ) {
+                    xs.push(px);
+                    ys.push(py);
+                }
                 cx = *x; cy = *y;
             }
             PathCommand::ClosePath => {
@@ -3842,5 +3933,74 @@ mod tests {
         let back: Element = serde_json::from_value(json).unwrap();
         assert_eq!(elem, back);
         assert_eq!(back.mode(), BlendMode::Multiply);
+    }
+
+    /// Quarter circle from (10, 0) to (0, 10) sweeping through (0, 0):
+    /// rx=ry=10, large_arc=false, sweep=false (counterclockwise).
+    /// The arc passes through the origin which is the bbox min corner.
+    #[test]
+    fn arc_extrema_quarter_circle_through_origin() {
+        let path = vec![
+            PathCommand::MoveTo { x: 10.0, y: 0.0 },
+            PathCommand::ArcTo {
+                rx: 10.0, ry: 10.0, x_rotation: 0.0,
+                large_arc: false, sweep: false,
+                x: 0.0, y: 10.0,
+            },
+        ];
+        let (x, y, w, h) = path_bounds(&path);
+        // Without arc extrema, the bbox would be (0, 0, 10, 10) using
+        // only endpoints. With proper extrema this arc bulges into
+        // the negative quadrant: it sweeps through (0, 0) so x_min=0,
+        // y_min=0, but the OPPOSITE arc would reach (10-rx, 10-ry).
+        // Endpoints alone happen to give the right answer here, so we
+        // check the more interesting case below.
+        assert!((x - 0.0).abs() < 1e-6, "x={}", x);
+        assert!((y - 0.0).abs() < 1e-6, "y={}", y);
+        assert!((w - 10.0).abs() < 1e-6, "w={}", w);
+        assert!((h - 10.0).abs() < 1e-6, "h={}", h);
+    }
+
+    /// Long-way arc from (10, 0) to (0, 10) with large_arc=true,
+    /// sweep=true: SVG picks the center at (10, 10) and sweeps the
+    /// 3/4 of the circle that reaches (20, 10), (10, 20), and (0, 0).
+    /// The naive endpoint-only bbox would be (0, 0, 10, 10); the
+    /// correct extrema-aware bbox extends to (0, 0, 20, 20).
+    #[test]
+    fn arc_extrema_large_arc_reaches_far_corners() {
+        let path = vec![
+            PathCommand::MoveTo { x: 10.0, y: 0.0 },
+            PathCommand::ArcTo {
+                rx: 10.0, ry: 10.0, x_rotation: 0.0,
+                large_arc: true, sweep: true,
+                x: 0.0, y: 10.0,
+            },
+        ];
+        let (x, y, w, h) = path_bounds(&path);
+        assert!((x - 0.0).abs() < 1e-6, "x_min={}", x);
+        assert!((y - 0.0).abs() < 1e-6, "y_min={}", y);
+        assert!((w - 20.0).abs() < 1e-6,
+            "expected w=20 (arc reaches x=20), got w={}", w);
+        assert!((h - 20.0).abs() < 1e-6,
+            "expected h=20 (arc reaches y=20), got h={}", h);
+    }
+
+    /// Degenerate arc (zero radius) collapses to a line; bounds match
+    /// the endpoint pair.
+    #[test]
+    fn arc_extrema_zero_radius_is_line() {
+        let path = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::ArcTo {
+                rx: 0.0, ry: 0.0, x_rotation: 0.0,
+                large_arc: false, sweep: false,
+                x: 100.0, y: 50.0,
+            },
+        ];
+        let (x, y, w, h) = path_bounds(&path);
+        assert!((x - 0.0).abs() < 1e-6);
+        assert!((y - 0.0).abs() < 1e-6);
+        assert!((w - 100.0).abs() < 1e-6);
+        assert!((h - 50.0).abs() < 1e-6);
     }
 }
