@@ -19,6 +19,45 @@ let _current_store : State_store.t option ref = ref None
     [_current_store]. *)
 let _current_panel_id : string option ref = ref None
 
+(** Registry of (panel_id, store) for every panel mounted via
+    [create_panel_body]. Used by cross-panel bridges (recent_colors,
+    etc.) so a write from one panel's effect handler can fan out to
+    siblings. Remount of the same panel id replaces its entry. *)
+let _panel_stores : (string * State_store.t) list ref = ref []
+
+(** Look up a previously registered panel store by content id, or None
+    if no panel with that id has mounted yet. *)
+let panel_store_of_id (id : string) : State_store.t option =
+  List.assoc_opt id !_panel_stores
+
+(** Iterate every registered panel store. Cross-panel bridges use
+    this in [Panel_menu.add_recent_colors_listener] callbacks so a
+    push reaches all visible panels in one pass. *)
+let iter_panel_stores (f : string -> State_store.t -> unit) : unit =
+  List.iter (fun (id, store) -> f id store) !_panel_stores
+
+(** Wire the recent_colors bridge listener that mirrors model
+    recent_colors into every registered panel that defines a
+    recent_colors key. Apps call this once at startup. Safe to call
+    multiple times — the listener is idempotent and the registry
+    in [Panel_menu] dedupes nothing, so subsequent calls would add
+    duplicate listeners. The [_bridge_installed] guard prevents that. *)
+let _bridge_installed = ref false
+
+let install_recent_colors_bridge () =
+  if !_bridge_installed then () else begin
+    _bridge_installed := true;
+    Panel_menu.add_recent_colors_listener (fun model _hex ->
+      let rc_json =
+        `List (List.map (fun s -> `String s) model#recent_colors) in
+      iter_panel_stores (fun pid store ->
+        if pid = "color_panel_content" || pid = "swatches_panel_content" then
+          match State_store.get_panel store pid "recent_colors" with
+          | `Null -> ()  (* panel hasn't seeded recent_colors *)
+          | _ ->
+            State_store.set_panel store pid "recent_colors" rc_json))
+  end
+
 (** Parse a bind expression like "panel.X" or "state.X" and write
     [value] into the appropriate scope of [_current_store]. Silent
     no-op when either ref is unset or the expression doesn't match
@@ -1847,6 +1886,12 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       State_store.init_panel store content_id panel_defaults;
       _current_store := Some store;
       _current_panel_id := Some content_id;
+      (* Register the new panel store for cross-panel bridges
+         (recent_colors etc). Replace any existing entry for the same
+         panel id so a remount swaps in the fresh store. *)
+      _panel_stores :=
+        (content_id, store) ::
+        List.filter (fun (id, _) -> id <> content_id) !_panel_stores;
       (* Store get_model in a ref accessible from render_tree_view *)
       _get_model_ref := get_model;
       (* Wire the Character-panel apply pipeline. [get_model] is
