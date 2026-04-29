@@ -1039,3 +1039,55 @@ def subscribe_stroke_panel(store: StateStore, controller_getter) -> None:
             apply_stroke_panel_to_selection(store, controller_getter())
 
     store.subscribe(STROKE_RENDER_KEYS, _on_change)
+
+
+def subscribe_active_color(store: StateStore, controller_getter) -> None:
+    """Wire a write-back to the canvas selection on every global
+    write to ``fill_color`` or ``stroke_color``. The Color Panel
+    updates the selection directly; the YAML route through
+    ``set: { fill_color: ... }`` (used by the Swatches Panel's
+    set_active_color action) needs this subscription so the
+    selection follows the active-color change. Mirrors OCaml's
+    ``Effects.subscribe_active_color``.
+    """
+    from geometry.element import Color, Fill, Stroke
+
+    def _on_change(key, _value):
+        if key not in ("fill_color", "stroke_color"):
+            return
+        ctrl = controller_getter()
+        model = ctrl.model
+        fill_on_top = bool(store.get("fill_on_top"))
+        if fill_on_top and key == "fill_color":
+            raw = store.get("fill_color")
+            if isinstance(raw, str):
+                color = Color.from_hex(raw)
+                if color is None:
+                    return
+                fill = Fill(color=color)
+            elif raw is None:
+                fill = None
+            else:
+                return
+            model.default_fill = fill
+            if model.document.selection:
+                model.snapshot()
+                ctrl.set_selection_fill(fill)
+        elif (not fill_on_top) and key == "stroke_color":
+            raw = store.get("stroke_color")
+            existing_width = model.default_stroke.width if model.default_stroke else 1.0
+            if isinstance(raw, str):
+                color = Color.from_hex(raw)
+                if color is None:
+                    return
+                stroke = Stroke(color=color, width=existing_width)
+            elif raw is None:
+                stroke = None
+            else:
+                return
+            model.default_stroke = stroke
+            if model.document.selection:
+                model.snapshot()
+                ctrl.set_selection_stroke(stroke)
+
+    store.subscribe(["fill_color", "stroke_color"], _on_change)
