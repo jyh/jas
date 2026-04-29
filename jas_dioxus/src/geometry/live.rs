@@ -8,6 +8,10 @@
 //!
 //! See `transcripts/BOOLEAN.md` § Live element framework.
 
+// Module-wide allow: LiveElement framework infrastructure. Most of
+// the trait surface is reserved for future Live Effects (drop shadow,
+// blend, etc.) per project_live_element_framework; CompoundShape is
+// the only current conformer and wires only a subset.
 #![allow(dead_code)]
 
 use std::rc::Rc;
