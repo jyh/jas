@@ -1,13 +1,21 @@
-"""Tests against the real workspace Artboards panel spec.
+"""Integration tests of the jas workspace Artboards panel spec.
+
+NOTE — scope. These are NOT generic Flask renderer tests. They assert
+fields specific to workspace/panels/artboards.yaml (Artboards summary,
+artboards_panel_selection state slot, etc.). The Flask app itself is
+generic per the project CLAUDE.md; these tests live here only because
+the Flask renderer is the easiest currently-available driver for
+exercising the full panel spec end-to-end.
+
+When a workspace-level test home is created, these tests should
+migrate there. Until then they live alongside the renderer.
 
 Flask's phase-1 scope for Artboards is yaml wiring only — the document
-model and canvas don't exist server-side (same posture as Boolean /
-Align). These tests verify that the panel spec loads, has the required
-state and menu entries, and that its panel body + footer structure is
-present in the rendered HTML.
+model and canvas don't exist server-side. These tests verify that the
+panel spec loads, has the required state and menu entries, and that
+its panel body + footer structure is present in the rendered HTML.
 
 Spec source: workspace/panels/artboards.yaml.
-Design doc: transcripts/ARTBOARDS.md.
 """
 
 import os
