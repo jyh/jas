@@ -105,7 +105,7 @@ public class WorkspaceState: ObservableObject {
     /// the list_push handler triggers. Mirrors Python jas
     /// _setup_recent_colors_bridge.
     private static var _recentColorsBridgeInstalled = false
-    private static func installRecentColorsBridge() {
+    package static func installRecentColorsBridge() {
         if _recentColorsBridgeInstalled { return }
         _recentColorsBridgeInstalled = true
         ColorPanel.addRecentColorsListener { model, _ in
