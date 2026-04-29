@@ -9,9 +9,25 @@ complete example is `selection.yaml`.
 
 ## Status
 
-The tool-dispatcher runtime (JS side of the thick-client architecture)
-is **not yet implemented**. Tool YAMLs authored here are design-only
-until the runtime lands. See `FLASK_PARITY.md` §15 for staging.
+The tool-dispatcher runtime is implemented in all four native apps
+(jas_dioxus, JasSwift, jas_ocaml, jas). Each app has its own
+`tool_files` baseline of native tools (Type / TypeOnPath per
+NATIVE_BOUNDARY.md §6); every other tool here is YAML-driven.
+
+The Flask app does not yet implement a tool dispatcher. Tool YAMLs
+remain design-only on the Flask side; see `FLASK_PARITY.md` §15.
+
+**Unwired YAMLs.** A few tool specs in this directory are authored
+but not yet bound into any app's toolbar registry:
+
+- `ellipse.yaml` — no app currently lists Ellipse as a tool kind
+  (the existing oval-drawing happens through `polygon` / native
+  `Element.Ellipse` paths). Wiring requires adding the tool kind
+  in each app and a toolbar slot.
+
+Adding a new tool spec here does NOT automatically register the
+tool — each native app must add the tool kind to its enum/registry
+and place it in `workspace/toolbar.yaml`.
 
 ## Authoring a tool
 

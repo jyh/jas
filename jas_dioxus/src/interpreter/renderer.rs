@@ -68,8 +68,8 @@ fn render_el(
     rctx: &RenderCtx,
 ) -> Element {
     // Handle repeat directive: expand template for each item in source
-    if el.get("foreach").is_some() && el.get("do").is_some() {
-        return render_repeat(el, ctx, rctx);
+    if let (Some(repeat), Some(template)) = (el.get("foreach"), el.get("do")) {
+        return render_repeat(repeat, template, el, ctx, rctx);
     }
 
     // _template tag available for native widget overrides when needed.
@@ -128,9 +128,13 @@ fn render_children(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rende
 
 /// Expand a repeat directive: evaluate the source, then render the template
 /// once per item with the loop variable injected via Scope.
-fn render_repeat(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
-    let repeat = el.get("foreach").unwrap();
-    let template = el.get("do").unwrap();
+fn render_repeat(
+    repeat: &serde_json::Value,
+    template: &serde_json::Value,
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Element {
     let source_expr = repeat.get("source").and_then(|s| s.as_str()).unwrap_or("");
     let var_name = repeat.get("as").and_then(|s| s.as_str()).unwrap_or("item");
 
@@ -742,7 +746,6 @@ fn set_app_state_field(
     st: &mut crate::workspace::app_state::AppState,
 ) {
     use crate::geometry::element::{Color, Fill, Stroke};
-    use crate::tools::tool::ToolKind;
 
     match key {
         "fill_on_top" => {
@@ -1329,37 +1332,7 @@ fn build_appstate_ctx(
     params: &serde_json::Map<String, serde_json::Value>,
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
-    use crate::tools::tool::ToolKind;
-    let tool_name = match st.active_tool {
-        ToolKind::Selection => "selection",
-        ToolKind::PartialSelection => "partial_selection",
-        ToolKind::InteriorSelection => "interior_selection",
-        ToolKind::MagicWand => "magic_wand",
-        ToolKind::Pen => "pen",
-        ToolKind::AddAnchorPoint => "add_anchor",
-        ToolKind::DeleteAnchorPoint => "delete_anchor",
-        ToolKind::AnchorPoint => "anchor_point",
-        ToolKind::Pencil => "pencil",
-        ToolKind::Paintbrush => "paintbrush",
-        ToolKind::BlobBrush => "blob_brush",
-        ToolKind::PathEraser => "path_eraser",
-        ToolKind::Smooth => "smooth",
-        ToolKind::Type => "type",
-        ToolKind::TypeOnPath => "type_on_path",
-        ToolKind::Line => "line",
-        ToolKind::Rect => "rect",
-        ToolKind::RoundedRect => "rounded_rect",
-        ToolKind::Polygon => "polygon",
-        ToolKind::Star => "star",
-        ToolKind::Lasso => "lasso",
-        ToolKind::Scale => "scale",
-        ToolKind::Rotate => "rotate",
-        ToolKind::Shear => "shear",
-        ToolKind::Hand => "hand",
-        ToolKind::Zoom => "zoom",
-        ToolKind::Artboard => "artboard",
-        ToolKind::Eyedropper => "eyedropper",
-    };
+    let tool_name = st.active_tool.panel_state_name();
     let fill_color = match st.app_default_fill {
         None => serde_json::Value::Null,
         Some(f) => serde_json::Value::String(format!("#{}", f.color.to_hex())),
@@ -2751,7 +2724,6 @@ fn apply_doc_set_field(
 
 /// Read a top-level AppState field as a JSON value (for use with swap:).
 fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) -> serde_json::Value {
-    use crate::tools::tool::ToolKind;
     match key {
         "fill_color" => match st.app_default_fill {
             None => serde_json::Value::Null,
@@ -2763,37 +2735,7 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
         },
         "fill_on_top" => serde_json::Value::Bool(st.fill_on_top),
         "active_tool" => {
-            let name = match st.active_tool {
-                ToolKind::Selection => "selection",
-                ToolKind::PartialSelection => "partial_selection",
-                ToolKind::InteriorSelection => "interior_selection",
-                ToolKind::MagicWand => "magic_wand",
-                ToolKind::Pen => "pen",
-                ToolKind::AddAnchorPoint => "add_anchor",
-                ToolKind::DeleteAnchorPoint => "delete_anchor",
-                ToolKind::AnchorPoint => "anchor_point",
-                ToolKind::Pencil => "pencil",
-                ToolKind::Paintbrush => "paintbrush",
-                ToolKind::BlobBrush => "blob_brush",
-                ToolKind::PathEraser => "path_eraser",
-                ToolKind::Smooth => "smooth",
-                ToolKind::Type => "type",
-                ToolKind::TypeOnPath => "type_on_path",
-                ToolKind::Line => "line",
-                ToolKind::Rect => "rect",
-                ToolKind::RoundedRect => "rounded_rect",
-                ToolKind::Polygon => "polygon",
-                ToolKind::Star => "star",
-                ToolKind::Lasso => "lasso",
-                ToolKind::Scale => "scale",
-                ToolKind::Rotate => "rotate",
-                ToolKind::Shear => "shear",
-                ToolKind::Hand => "hand",
-                ToolKind::Zoom => "zoom",
-                ToolKind::Artboard => "artboard",
-                ToolKind::Eyedropper => "eyedropper",
-            };
-            serde_json::Value::String(name.to_string())
+            serde_json::Value::String(st.active_tool.panel_state_name().to_string())
         }
         _ => {
             // Delegate stroke panel fields (stroke_cap, stroke_join, etc.)
@@ -3089,12 +3031,10 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
 
 /// Build a CSS style string from the element's style properties.
 fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
-    let style = match el.get("style") {
-        Some(s) if s.is_object() => s,
-        _ => return String::new(),
+    let Some(map) = el.get("style").and_then(|s| s.as_object()) else {
+        return String::new();
     };
     let mut parts = Vec::new();
-    let map = style.as_object().unwrap();
 
     for (key, val) in map {
         let resolved = if let Some(s) = val.as_str() {

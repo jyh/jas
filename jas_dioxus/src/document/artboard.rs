@@ -23,6 +23,11 @@
 //! }
 //! ```
 
+// Module-wide allow: this is a foundational types module (Artboard,
+// ArtboardOptions, ID generation, JSON shape) most of whose surface
+// is consumed by tests, the test_json fixture pipeline, and panels
+// that read individual fields lazily. Per-item annotation would
+// approach one allow per public type.
 #![allow(dead_code)]
 
 const ARTBOARD_ID_ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";

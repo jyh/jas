@@ -15,6 +15,8 @@ use crate::geometry::element::Color;
 // ---------------------------------------------------------------------------
 
 /// Panel-local color mode.
+// Cmyk variant is reserved for the prepress mode toggle and not yet
+// reached by any code path that exercises it at runtime.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum ColorMode {

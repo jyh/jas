@@ -240,7 +240,7 @@ private func panelAddrJson(_ a: PanelAddr) -> String {
 ///
 /// Encodes the same slot grid defined in `tools/tool.rs` tests,
 /// producing a fixture that all four languages must match.
-public func toolbarStructureJson() -> String {
+package func toolbarStructureJson() -> String {
     let slots: [(Int, Int, [String])] = [
         (0, 0, ["selection"]),
         (0, 1, ["partial_selection", "interior_selection"]),
@@ -272,10 +272,10 @@ public func toolbarStructureJson() -> String {
 // MARK: - Menu bar data (mirrors Rust MENU_BAR)
 
 /// A menu item: (label, command, shortcut). Label "---" denotes a separator.
-public typealias MenuItem = (String, String, String)
+private typealias MenuItem = (String, String, String)
 
 /// Complete menu bar definition.
-public let menuBar: [(String, [MenuItem])] = [
+private let menuBar: [(String, [MenuItem])] = [
     ("File", [
         ("New", "new", "\u{2318}N"),
         ("Open...", "open", "\u{2318}O"),
@@ -333,7 +333,7 @@ public let menuBar: [(String, [MenuItem])] = [
 ///
 /// Encodes the same data as `workspace::menu::MENU_BAR`,
 /// producing a fixture that all four languages must match.
-public func menuStructureJson() -> String {
+package func menuStructureJson() -> String {
     let total = menuBar.reduce(0) { $0 + $1.1.count }
 
     let menuJsons = menuBar.map { (title, items) -> String in
@@ -364,7 +364,7 @@ public func menuStructureJson() -> String {
 
 // MARK: - State defaults (must match workspace/state.yaml)
 
-public func stateDefaultsJson() -> String {
+package func stateDefaultsJson() -> String {
     let vars: [(String, String, String)] = [
         ("active_tab", "number", "-1"),
         ("active_tool", "enum", "\"selection\""),
@@ -396,7 +396,7 @@ public func stateDefaultsJson() -> String {
 
 // MARK: - Shortcut structure (must match workspace/shortcuts.yaml)
 
-public func shortcutStructureJson() -> String {
+package func shortcutStructureJson() -> String {
     let shortcuts: [(String, String, (String, String)?)] = [
         ("Ctrl+N", "new_document", nil),
         ("Ctrl+O", "open_file", nil),
@@ -463,7 +463,7 @@ public func shortcutStructureJson() -> String {
 ///
 /// The output is a compact JSON string with sorted keys and normalized
 /// floats, suitable for byte-for-byte cross-language comparison.
-public func workspaceToTestJson(_ layout: WorkspaceLayout) -> String {
+package func workspaceToTestJson(_ layout: WorkspaceLayout) -> String {
     let o = JsonObj()
 
     // anchored: array of {dock, edge}
@@ -714,7 +714,7 @@ private func parsePanelAddr(_ v: Any?) -> PanelAddr {
 /// Parse canonical test JSON into a WorkspaceLayout.
 ///
 /// This is the inverse of ``workspaceToTestJson(_:)``.
-public func testJsonToWorkspace(_ json: String) -> WorkspaceLayout {
+package func testJsonToWorkspace(_ json: String) -> WorkspaceLayout {
     let data = json.data(using: .utf8)!
     let v = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
 
