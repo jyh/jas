@@ -7,6 +7,8 @@ pub mod hit_test;
 pub mod boolean_normalize;
 pub mod planar;
 pub mod path_text_layout;
+// Pencil shape recognition; consumed by the algorithm_roundtrip
+// cross-language test binary, not the main app lib.
 #[allow(dead_code)]
 pub mod shape_recognize;
 pub mod text_layout;
