@@ -746,7 +746,6 @@ fn set_app_state_field(
     st: &mut crate::workspace::app_state::AppState,
 ) {
     use crate::geometry::element::{Color, Fill, Stroke};
-    use crate::tools::tool::ToolKind;
 
     match key {
         "fill_on_top" => {
@@ -1333,37 +1332,7 @@ fn build_appstate_ctx(
     params: &serde_json::Map<String, serde_json::Value>,
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
-    use crate::tools::tool::ToolKind;
-    let tool_name = match st.active_tool {
-        ToolKind::Selection => "selection",
-        ToolKind::PartialSelection => "partial_selection",
-        ToolKind::InteriorSelection => "interior_selection",
-        ToolKind::MagicWand => "magic_wand",
-        ToolKind::Pen => "pen",
-        ToolKind::AddAnchorPoint => "add_anchor",
-        ToolKind::DeleteAnchorPoint => "delete_anchor",
-        ToolKind::AnchorPoint => "anchor_point",
-        ToolKind::Pencil => "pencil",
-        ToolKind::Paintbrush => "paintbrush",
-        ToolKind::BlobBrush => "blob_brush",
-        ToolKind::PathEraser => "path_eraser",
-        ToolKind::Smooth => "smooth",
-        ToolKind::Type => "type",
-        ToolKind::TypeOnPath => "type_on_path",
-        ToolKind::Line => "line",
-        ToolKind::Rect => "rect",
-        ToolKind::RoundedRect => "rounded_rect",
-        ToolKind::Polygon => "polygon",
-        ToolKind::Star => "star",
-        ToolKind::Lasso => "lasso",
-        ToolKind::Scale => "scale",
-        ToolKind::Rotate => "rotate",
-        ToolKind::Shear => "shear",
-        ToolKind::Hand => "hand",
-        ToolKind::Zoom => "zoom",
-        ToolKind::Artboard => "artboard",
-        ToolKind::Eyedropper => "eyedropper",
-    };
+    let tool_name = st.active_tool.panel_state_name();
     let fill_color = match st.app_default_fill {
         None => serde_json::Value::Null,
         Some(f) => serde_json::Value::String(format!("#{}", f.color.to_hex())),
@@ -2755,7 +2724,6 @@ fn apply_doc_set_field(
 
 /// Read a top-level AppState field as a JSON value (for use with swap:).
 fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) -> serde_json::Value {
-    use crate::tools::tool::ToolKind;
     match key {
         "fill_color" => match st.app_default_fill {
             None => serde_json::Value::Null,
@@ -2767,37 +2735,7 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
         },
         "fill_on_top" => serde_json::Value::Bool(st.fill_on_top),
         "active_tool" => {
-            let name = match st.active_tool {
-                ToolKind::Selection => "selection",
-                ToolKind::PartialSelection => "partial_selection",
-                ToolKind::InteriorSelection => "interior_selection",
-                ToolKind::MagicWand => "magic_wand",
-                ToolKind::Pen => "pen",
-                ToolKind::AddAnchorPoint => "add_anchor",
-                ToolKind::DeleteAnchorPoint => "delete_anchor",
-                ToolKind::AnchorPoint => "anchor_point",
-                ToolKind::Pencil => "pencil",
-                ToolKind::Paintbrush => "paintbrush",
-                ToolKind::BlobBrush => "blob_brush",
-                ToolKind::PathEraser => "path_eraser",
-                ToolKind::Smooth => "smooth",
-                ToolKind::Type => "type",
-                ToolKind::TypeOnPath => "type_on_path",
-                ToolKind::Line => "line",
-                ToolKind::Rect => "rect",
-                ToolKind::RoundedRect => "rounded_rect",
-                ToolKind::Polygon => "polygon",
-                ToolKind::Star => "star",
-                ToolKind::Lasso => "lasso",
-                ToolKind::Scale => "scale",
-                ToolKind::Rotate => "rotate",
-                ToolKind::Shear => "shear",
-                ToolKind::Hand => "hand",
-                ToolKind::Zoom => "zoom",
-                ToolKind::Artboard => "artboard",
-                ToolKind::Eyedropper => "eyedropper",
-            };
-            serde_json::Value::String(name.to_string())
+            serde_json::Value::String(st.active_tool.panel_state_name().to_string())
         }
         _ => {
             // Delegate stroke panel fields (stroke_cap, stroke_join, etc.)
