@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JasLib
 
@@ -151,4 +152,38 @@ import Testing
                 "flatten_artwork", "collect_in_new_layer"] {
         panelDispatch(.layers, cmd: cmd, addr: addr, layout: &layout)
     }
+}
+
+@Test func pushRecentColorMoveToFront() {
+    let m = Model()
+    m.recentColors = []
+    ColorPanel.pushRecentColor("#ff0000", model: m)
+    #expect(m.recentColors == ["#ff0000"])
+    ColorPanel.pushRecentColor("#00ff00", model: m)
+    #expect(m.recentColors == ["#00ff00", "#ff0000"])
+    ColorPanel.pushRecentColor("#ff0000", model: m)  // dedup, move to front
+    #expect(m.recentColors == ["#ff0000", "#00ff00"])
+}
+
+@Test func pushRecentColorCapsAtTen() {
+    let m = Model()
+    m.recentColors = []
+    for i in 0..<15 {
+        ColorPanel.pushRecentColor(String(format: "#0000%02x", i), model: m)
+    }
+    #expect(m.recentColors.count == 10)
+    #expect(m.recentColors[0] == "#00000e")
+}
+
+@Test func pushRecentColorListenerFires() {
+    // Use a sentinel hex unlikely to collide with other parallel tests.
+    let sentinel = "#abcdef"
+    let m = Model()
+    m.recentColors = []
+    let box = NSMutableArray()  // reference type so the closure mutates a shared array
+    ColorPanel.addRecentColorsListener { _, hex in
+        if hex == sentinel { box.add(hex) }
+    }
+    ColorPanel.pushRecentColor(sentinel, model: m)
+    #expect(box.count >= 1)
 }
