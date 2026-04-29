@@ -493,9 +493,25 @@ fn run_effects(
     st: &mut crate::workspace::app_state::AppState,
 ) -> Vec<serde_json::Value> {
     let mut dialog_effects = Vec::new();
+    // Build an evaluation context once per call. Set-effect values are
+    // expression strings (e.g. "not state.stroke_dashed"); they must
+    // be evaluated before the schema validator looks at them, or the
+    // unevaluated string is passed to the Bool / Number coercer and
+    // the schema rejects it as a type_mismatch. Mirrors the
+    // run_yaml_effects path.
+    let eval_ctx = build_appstate_ctx(&serde_json::Map::new(), st);
     for effect in effects {
         if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
-            apply_set_effects(set_map, st);
+            let mut evaluated = serde_json::Map::new();
+            for (k, v) in set_map {
+                let val = if let Some(expr_str) = v.as_str() {
+                    super::effects::value_to_json(&super::expr::eval(expr_str, &eval_ctx))
+                } else {
+                    v.clone()
+                };
+                evaluated.insert(k.clone(), val);
+            }
+            apply_set_effects(&evaluated, st);
         }
         // set_panel_state: { key, value }
         if let Some(sps) = effect.get("set_panel_state").and_then(|v| v.as_object()) {
