@@ -1815,12 +1815,27 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       let selection_preds =
         Active_document_view.build_selection_predicates (get_model ())
       in
+      (* document namespace — exposes per-document fields the YAML
+         reads but the StateStore has no native source for. Currently
+         just recent_colors, used by panel init expressions (color,
+         swatches) so the recent-color strip seeds with the model's
+         actual recent colors rather than the YAML default of []. *)
+      let document_view =
+        match get_model () with
+        | Some m ->
+          `Assoc [
+            ("recent_colors",
+             `List (List.map (fun s -> `String s) m#recent_colors));
+          ]
+        | None -> `Assoc [("recent_colors", `List [])]
+      in
       let ctx = `Assoc ([
         ("state", state_obj);
         ("panel", `Assoc panel_defaults);
         ("icons", icons_obj);
         ("data", data_obj);
         ("active_document", active_document_view);
+        ("document", document_view);
         ("_get_model", `Null)  (* Placeholder; actual model passed via closure *)
       ] @ selection_preds) in
       (* Panel-local state store: seeded with the yaml-declared
