@@ -189,6 +189,30 @@ let panel_menu = function
       Separator;
       Action { label = "Close Magic Wand"; command = "close_panel"; shortcut = "" } ]
 
+(** Listeners fired after a recent_colors push. Used by the
+    Color/Swatches panel YAML state bridge so a native push can be
+    mirrored into panel.recent_colors of every panel that exposes it. *)
+let _recent_colors_listeners : (Model.model -> string -> unit) list ref = ref []
+
+(** Register a callback fired after [push_recent_color] commits. *)
+let add_recent_colors_listener cb =
+  _recent_colors_listeners := cb :: !_recent_colors_listeners
+
+(** Push a hex color to the model's recent_colors with move-to-front
+    dedup and a max length of 10, then notify any registered
+    listeners. Extracted from [set_active_color] so the listener
+    behaviour stays in one place. *)
+let push_recent_color (hex : string) (m : Model.model) =
+  let rc = List.filter (fun c -> c <> hex) m#recent_colors in
+  let rc = hex :: rc in
+  let rc =
+    if List.length rc > 10 then List.filteri (fun i _ -> i < 10) rc else rc
+  in
+  m#set_recent_colors rc;
+  List.iter (fun cb ->
+    try cb m hex with _ -> ()
+  ) !_recent_colors_listeners
+
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =
   if fill_on_top then begin
@@ -208,10 +232,7 @@ let set_active_color color ~fill_on_top (m : Model.model) =
     end
   end;
   let hex = Element.color_to_hex color in
-  let rc = List.filter (fun c -> c <> hex) m#recent_colors in
-  let rc = hex :: rc in
-  let rc = if List.length rc > 10 then List.filteri (fun i _ -> i < 10) rc else rc in
-  m#set_recent_colors rc
+  push_recent_color hex m
 
 (** Set the active color without pushing to recent colors (live slider drag). *)
 let set_active_color_live color ~fill_on_top (m : Model.model) =
@@ -627,25 +648,48 @@ let dispatch_yaml_action
             | _ -> ());
            `Null
          in
-         (* list_push: {target: panel.isolation_stack, value: <path-expr>}.
-            Phase 3 Group D (enter_isolation_mode) — pushes the evaluated
-            path onto yaml_panel_view's isolation stack. Other targets
-            are ignored. *)
-         let list_push_h : Effects.platform_effect = fun spec call_ctx _ ->
+         (* list_push: special-case targets routed to native state.
+            - panel.isolation_stack — Phase 3 Group D
+              (enter_isolation_mode); pushes the evaluated path onto
+              yaml_panel_view's isolation stack.
+            - panel.recent_colors — Swatches Panel set_active_color
+              effect; routes the hex color into push_recent_color so
+              model.recent_colors stays the single source of truth.
+              Also mirrors the new recent_colors into the calling
+              panel's store so the recent strip updates immediately.
+              Cross-panel mirror to the sibling panel relies on the
+              listener registry exposed by [add_recent_colors_listener]. *)
+         let list_push_h : Effects.platform_effect = fun spec call_ctx store ->
            (match spec with
             | `Assoc pairs ->
               let target = match List.assoc_opt "target" pairs with
                 | Some (`String s) -> s | _ -> ""
               in
+              let value_expr = match List.assoc_opt "value" pairs with
+                | Some (`String s) -> s | _ -> "null"
+              in
+              let eval_ctx = `Assoc call_ctx in
               if target = "panel.isolation_stack" then begin
-                let value_expr = match List.assoc_opt "value" pairs with
-                  | Some (`String s) -> s | _ -> "null"
-                in
-                let eval_ctx = `Assoc call_ctx in
                 match Expr_eval.evaluate value_expr eval_ctx with
                 | Expr_eval.Path p ->
                   Layers_panel_state.push_isolation_level p
                 | _ -> ()
+              end else if target = "panel.recent_colors" then begin
+                (match Expr_eval.evaluate value_expr eval_ctx with
+                 | Expr_eval.Color c | Expr_eval.Str c
+                   when String.length c > 0 ->
+                   push_recent_color c m;
+                   (* Mirror the post-push list into the calling
+                      panel's recent_colors so foreach bindings
+                      re-render immediately. *)
+                   (match State_store.get_active_panel_id store with
+                    | Some pid ->
+                      let rc_json =
+                        `List (List.map (fun s -> `String s)
+                                 m#recent_colors) in
+                      State_store.set_panel store pid "recent_colors" rc_json
+                    | None -> ())
+                 | _ -> ())
               end
             | _ -> ());
            `Null
