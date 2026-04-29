@@ -616,6 +616,98 @@ fn apply_set_effects(
     }
 }
 
+/// Apply a `select: { target, list, scope, scope_value, mode }` effect
+/// to the active panel's state. Used by tile-style panels (swatches,
+/// brushes) for click-to-select semantics with optional shift / ctrl
+/// modifiers.
+///
+/// - `target`: expression for the list-item value to add (e.g. an
+///   index, a slug).
+/// - `list`: panel-state field name holding the selection list.
+/// - `scope`: panel-state field name holding the scope identifier
+///   (e.g. selected_library). Cleared and reset to `scope_value` if
+///   the click is in a different scope.
+/// - `scope_value`: expression for the new scope value.
+/// - `mode`: "auto" (default), "single", "toggle", "extend". `auto`
+///   reads `event.shift` / `event.ctrl` / `event.meta` to choose
+///   between single, toggle, and extend.
+fn apply_select_effect(
+    spec: &serde_json::Map<String, serde_json::Value>,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let target_expr = spec.get("target").and_then(|v| v.as_str()).unwrap_or("");
+    let list_field = spec.get("list").and_then(|v| v.as_str()).unwrap_or("");
+    let scope_field = spec.get("scope").and_then(|v| v.as_str()).unwrap_or("");
+    let scope_value_expr = spec.get("scope_value").and_then(|v| v.as_str()).unwrap_or("");
+    let mode = spec.get("mode").and_then(|v| v.as_str()).unwrap_or("auto");
+    if list_field.is_empty() {
+        return;
+    }
+    let target = super::effects::value_to_json(&super::expr::eval(target_expr, eval_ctx));
+    let scope_value = if scope_value_expr.is_empty() {
+        serde_json::Value::Null
+    } else {
+        super::effects::value_to_json(&super::expr::eval(scope_value_expr, eval_ctx))
+    };
+
+    // Read modifier state from the event ctx if mode is auto.
+    let event = eval_ctx.get("event");
+    let shift = event.and_then(|e| e.get("shift")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let ctrl_or_meta = event.and_then(|e| e.get("ctrl")).and_then(|v| v.as_bool()).unwrap_or(false)
+        || event.and_then(|e| e.get("meta")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let effective_mode = match mode {
+        "auto" => {
+            if shift { "extend" }
+            else if ctrl_or_meta { "toggle" }
+            else { "single" }
+        }
+        m => m,
+    };
+
+    // Currently the only typed panel that uses select: is Swatches.
+    // When other panels adopt it, add their typed-state branches
+    // here (or generalize via a panel-state trait).
+    let target_idx = target.as_i64();
+    if list_field == "selected_swatches" {
+        let sp = &mut st.swatches_panel;
+        // Scope check.
+        if !scope_field.is_empty() {
+            let new_scope = scope_value.as_str().unwrap_or("").to_string();
+            if !new_scope.is_empty() && new_scope != sp.selected_library {
+                sp.selected_library = new_scope;
+                if let Some(idx) = target_idx {
+                    sp.selected_swatches = vec![idx];
+                }
+                return;
+            }
+        }
+        let Some(idx) = target_idx else { return };
+        let cur = &sp.selected_swatches;
+        let new_list = match effective_mode {
+            "toggle" => {
+                if cur.contains(&idx) {
+                    cur.iter().copied().filter(|v| v != &idx).collect()
+                } else {
+                    let mut l = cur.clone();
+                    l.push(idx);
+                    l
+                }
+            }
+            "extend" => {
+                if let Some(&anchor) = cur.first() {
+                    let (lo, hi) = if anchor <= idx { (anchor, idx) } else { (idx, anchor) };
+                    (lo..=hi).collect()
+                } else {
+                    vec![idx]
+                }
+            }
+            _ => vec![idx],
+        };
+        sp.selected_swatches = new_list;
+    }
+}
+
 /// Write a single validated+coerced value to the appropriate AppState field.
 fn set_app_state_field(
     key: &str,
@@ -2198,6 +2290,18 @@ fn run_yaml_effect(
             evaluated.insert(k.clone(), val);
         }
         apply_set_effects(&evaluated, st);
+        return deferred;
+    }
+
+    // select: { target, list, scope, scope_value, mode } — generic
+    // list-selection effect for swatch / brush / row tile-style
+    // panels. Plain click replaces the list with [target] and sets
+    // the scope; mode "auto" reads event.shift / event.ctrl /
+    // event.meta from the click ctx for shift-extend / ctrl-toggle
+    // behaviors. The scope changes (panel.scope_field) reset the
+    // selection when the user clicks into a different scope.
+    if let Some(spec) = eff.get("select").and_then(|v| v.as_object()) {
+        apply_select_effect(spec, eval_ctx, st);
         return deferred;
     }
 
