@@ -2,7 +2,32 @@
 
     Walks a JSON element tree from the compiled workspace and creates
     corresponding GTK widgets. Uses the expression evaluator for
-    bind values and the workspace loader for panel specs. *)
+    bind values and the workspace loader for panel specs.
+
+    {1 Panel architecture}
+
+    This module is the generic renderer for {b every} panel. Adding a
+    new panel typically requires no new OCaml — the panel YAML in
+    [workspace/panels/] drives layout, bindings, and effects through
+    this interpreter.
+
+    Files in [lib/panels/] are reserved for irreducibly panel-specific
+    logic that cannot live in YAML:
+
+    - [layers_panel_state.ml] — singleton mutable state (isolation
+      stack, drag-and-drop, search filter) that the YAML view layer
+      reads but cannot itself own.
+    - [panel_menu.ml] — per-panel hamburger-menu definitions plus
+      menu-command dispatchers; centralized because menus span every
+      panel kind.
+    - [boolean_apply.ml] — the boolean compound-shape algorithm
+      shared by Boolean panel actions; pure logic, not panel UI.
+
+    The absence of [color_panel.ml] / [stroke_panel.ml] / etc. is by
+    design: those panels are entirely YAML-driven and need no native
+    helper. Reviewers comparing OCaml's [lib/panels/] count against
+    Rust's [src/panels/] count will see a large asymmetry — that's
+    architectural, not a parity gap. *)
 
 open Workspace_layout
 
