@@ -187,6 +187,18 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("profile_flipped".into(), J::Bool(sp.profile_flipped));
     m.insert("dash_align_anchors".into(), J::Bool(sp.dash_align_anchors));
 
+    // ── Swatches panel overrides ────────────────────────────
+    // Mirror SwatchesPanelState so the swatches panel's bind
+    // expressions (panel.selected_swatches, panel.selected_library,
+    // panel.open_libraries, panel.thumbnail_size) resolve against
+    // the live state instead of the YAML defaults.
+    let swp = &st.swatches_panel;
+    m.insert("selected_swatches".into(), serde_json::Value::Array(
+        swp.selected_swatches.iter().map(|&i| serde_json::json!(i)).collect()));
+    m.insert("selected_library".into(), J::String(swp.selected_library.clone()));
+    m.insert("open_libraries".into(), swp.open_libraries.clone());
+    m.insert("thumbnail_size".into(), J::String(swp.thumbnail_size.clone()));
+
     // ── Character panel overrides ───────────────────────────
     // Read font_family / font_size from the first selected
     // Text / TextPath element; fall back to panel state when no

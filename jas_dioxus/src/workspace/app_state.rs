@@ -164,6 +164,12 @@ pub(crate) struct AppState {
     /// `mode` and `opacity` are working values; `new_masks_*` are document
     /// preferences. See transcripts/OPACITY.md.
     pub(crate) opacity_panel: OpacityPanelState,
+    /// Swatches panel state — mirrors state in
+    /// `workspace/panels/swatches.yaml`. The select effect writes
+    /// `selected_library` and `selected_swatches`; the panel uses
+    /// `panel.selected_swatches.contains(swatch._index)` for the
+    /// selection-highlight binding.
+    pub(crate) swatches_panel: SwatchesPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -545,6 +551,36 @@ impl Default for OpacityPanelState {
     }
 }
 
+/// Swatches panel state. Tracks which library is the active scope
+/// for selection (`selected_library`), the indices of selected
+/// swatches within that library (`selected_swatches`), the list of
+/// open libraries with their collapsed state, and the panel-local
+/// thumbnail size. See `workspace/panels/swatches.yaml`.
+#[derive(Debug, Clone)]
+pub(crate) struct SwatchesPanelState {
+    pub thumbnail_size: String,
+    pub selected_library: String,
+    pub selected_swatches: Vec<i64>,
+    /// Each entry is { id: String, collapsed: bool }; serialized as
+    /// JSON to keep the renderer's `foreach` over `panel.open_libraries`
+    /// natural. We round-trip through serde_json::Value to avoid
+    /// repeating that shape in three more types.
+    pub open_libraries: serde_json::Value,
+}
+
+impl Default for SwatchesPanelState {
+    fn default() -> Self {
+        Self {
+            thumbnail_size: "small".into(),
+            selected_library: "web_colors".into(),
+            selected_swatches: Vec::new(),
+            open_libraries: serde_json::json!([
+                {"id": "web_colors", "collapsed": false}
+            ]),
+        }
+    }
+}
+
 impl AlignTo {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -637,6 +673,7 @@ impl AppState {
             align_panel: AlignPanelState::default(),
             boolean_panel: BooleanPanelState::default(),
             opacity_panel: OpacityPanelState::default(),
+            swatches_panel: SwatchesPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
