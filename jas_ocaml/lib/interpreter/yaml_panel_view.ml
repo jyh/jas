@@ -44,22 +44,18 @@ let _current_store : State_store.t option ref = ref None
     [_current_store]. *)
 let _current_panel_id : string option ref = ref None
 
-(** Registry of (panel_id, store) for every panel mounted via
-    [create_panel_body]. Used by cross-panel bridges (recent_colors,
-    etc.) so a write from one panel's effect handler can fan out to
-    siblings. Remount of the same panel id replaces its entry. *)
-let _panel_stores : (string * State_store.t) list ref = ref []
-
 (** Look up a previously registered panel store by content id, or None
-    if no panel with that id has mounted yet. *)
+    if no panel with that id has mounted yet. Thin wrapper over the
+    Panel_menu registry so callers in this module read symmetrically
+    with everywhere else. *)
 let panel_store_of_id (id : string) : State_store.t option =
-  List.assoc_opt id !_panel_stores
+  Panel_menu.lookup_panel_store id
 
 (** Iterate every registered panel store. Cross-panel bridges use
     this in [Panel_menu.add_recent_colors_listener] callbacks so a
     push reaches all visible panels in one pass. *)
 let iter_panel_stores (f : string -> State_store.t -> unit) : unit =
-  List.iter (fun (id, store) -> f id store) !_panel_stores
+  Panel_menu.iter_panel_stores f
 
 (** Wire the recent_colors bridge listener that mirrors model
     recent_colors into every registered panel that defines a
@@ -1912,11 +1908,10 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       _current_store := Some store;
       _current_panel_id := Some content_id;
       (* Register the new panel store for cross-panel bridges
-         (recent_colors etc). Replace any existing entry for the same
-         panel id so a remount swaps in the fresh store. *)
-      _panel_stores :=
-        (content_id, store) ::
-        List.filter (fun (id, _) -> id <> content_id) !_panel_stores;
+         (recent_colors etc.) AND for menu-command dispatchers that
+         reach back into panel state (paragraph / opacity menus). The
+         single registry replaces an earlier per-panel ref-cell pair. *)
+      Panel_menu.register_panel_store content_id store;
       (* Store get_model in a ref accessible from render_tree_view *)
       _get_model_ref := get_model;
       (* Wire the Character-panel apply pipeline. [get_model] is
@@ -1942,26 +1937,18 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          the YAML route catches up. *)
       (if kind = Color || kind = Swatches then
          Effects.subscribe_active_color store (make_ctrl_getter ()));
-      (* Paragraph panel — Phase 4. Stash the store handle in
-         panel_menu so the hamburger-menu commands
-         (toggle_hanging_punctuation, reset_paragraph_panel) can
-         reach it without creating a yaml_panel_view ↔ panel_menu
-         dep cycle. Also sync from the current selection so the
-         widgets reflect the selected paragraph attrs rather than
-         the YAML defaults. *)
+      (* Paragraph panel — Phase 4. The hamburger-menu commands
+         (toggle_hanging_punctuation, reset_paragraph_panel) and the
+         Opacity-panel toggle commands reach into the panel store via
+         Panel_menu.lookup_panel_store; the registration above already
+         covers them. Paragraph still needs a one-shot sync from the
+         current selection so the widgets reflect the selected
+         paragraph attrs rather than the YAML defaults. *)
       (if kind = Paragraph then begin
-         Panel_menu.paragraph_store_ref := Some store;
-         (match get_model () with
-          | Some m ->
-            let ctrl = new Controller.controller ~model:m () in
-            Effects.sync_paragraph_panel_from_selection store ctrl
-          | None -> ())
+         match get_model () with
+         | Some m ->
+           let ctrl = new Controller.controller ~model:m () in
+           Effects.sync_paragraph_panel_from_selection store ctrl
+         | None -> ()
        end);
-      (* Opacity panel — stash the store handle in panel_menu so
-         the hamburger-menu toggle commands
-         (toggle_new_masks_clipping / toggle_new_masks_inverted /
-         toggle_opacity_thumbnails / toggle_opacity_options) and
-         the [make_opacity_mask] dispatch can reach it. *)
-      (if kind = Opacity then
-         Panel_menu.opacity_store_ref := Some store);
       render_element ~packing ~ctx content
