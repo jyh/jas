@@ -316,6 +316,20 @@ class MainWindow(QMainWindow):
         _subscribe_active_color(self._yaml_state,
                                 lambda: _Controller(self.active_model()))
 
+        # recent_colors bridge — keep model.recent_colors and the
+        # YAML-driven panel.recent_colors of the Color and Swatches
+        # panels in sync. Mirrors the Rust strategy of treating
+        # model.recent_colors as the single source of truth, but on
+        # this side panel state is real (Python jas's panel-state
+        # subscriptions need real values). The bridge has two
+        # directions, both guarded by an _RC_MIRRORING flag to
+        # prevent loops:
+        #   1. Native push  (push_recent_color) → mirror into
+        #      every panel that defines recent_colors.
+        #   2. YAML push    (list_push panel.recent_colors) →
+        #      update model.recent_colors and mirror to siblings.
+        self._setup_recent_colors_bridge()
+
         # Dock pane
         self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model,
                                           state_store=self._yaml_state)
@@ -1095,6 +1109,97 @@ class MainWindow(QMainWindow):
             else:
                 fs.set_stroke_color(None)
             fs.set_fill_on_top(m.fill_on_top)
+
+    _RECENT_COLORS_PANELS = ("color_panel_content", "swatches_panel_content")
+
+    def _setup_recent_colors_bridge(self):
+        """Two-way sync between model.recent_colors and the YAML
+        panel.recent_colors of the Color and Swatches panels.
+
+        Direction 1 (native → YAML): registers a listener on
+        push_recent_color so any native-code push (Color Panel
+        slider/hex/swatch click) mirrors into every panel-state
+        bucket that holds recent_colors.
+
+        Direction 2 (YAML → native): subscribes to the panel state
+        of each panel that holds recent_colors so a list_push from a
+        YAML behavior (Swatches Panel swatch click → list_push
+        panel.recent_colors via the set_active_color action) flows
+        back into model.recent_colors and across to the sibling
+        panel.
+
+        Both directions go through the shared _RC_MIRRORING flag to
+        prevent the writes from echoing into infinite mirror loops.
+        """
+        from panels.panel_menu import add_recent_colors_listener
+
+        self._rc_mirroring = False
+
+        def _on_native_push(model, _hex):
+            if self._rc_mirroring:
+                return
+            self._rc_mirroring = True
+            try:
+                for pid in self._RECENT_COLORS_PANELS:
+                    if self._yaml_state.get_panel(pid, "recent_colors") is not None:
+                        self._yaml_state.set_panel(
+                            pid, "recent_colors", list(model.recent_colors))
+            finally:
+                self._rc_mirroring = False
+
+        add_recent_colors_listener(_on_native_push)
+
+        def _make_panel_listener(panel_id: str):
+            def _on_panel_change(key, value):
+                if self._rc_mirroring or key != "recent_colors":
+                    return
+                if not isinstance(value, list):
+                    return
+                model = self.active_model()
+                if model is None or list(model.recent_colors) == list(value):
+                    return
+                self._rc_mirroring = True
+                try:
+                    model.recent_colors = list(value)[:10]
+                    for pid in self._RECENT_COLORS_PANELS:
+                        if pid == panel_id:
+                            continue
+                        if self._yaml_state.get_panel(pid, "recent_colors") is not None:
+                            self._yaml_state.set_panel(
+                                pid, "recent_colors", list(model.recent_colors))
+                finally:
+                    self._rc_mirroring = False
+            return _on_panel_change
+
+        # Subscribe each panel's listener lazily — panel state may not
+        # be initialized yet at app startup. Wrap the StateStore's
+        # subscribe_panel call so we only register once a panel
+        # actually becomes visible (init_panel runs at panel mount).
+        self._rc_subscribed = set()
+
+        def _ensure_panel_subscribed(panel_id: str):
+            if panel_id in self._rc_subscribed:
+                return
+            if self._yaml_state.get_panel(panel_id, "recent_colors") is None:
+                return
+            self._yaml_state.subscribe_panel(panel_id, _make_panel_listener(panel_id))
+            self._rc_subscribed.add(panel_id)
+
+        # Hook the StateStore's init_panel to subscribe right after a
+        # panel boots, so the bridge wires up the moment each panel
+        # appears for the first time.
+        original_init_panel = self._yaml_state.init_panel
+
+        def _init_panel_hook(panel_id, defaults):
+            original_init_panel(panel_id, defaults)
+            if panel_id in self._RECENT_COLORS_PANELS:
+                _ensure_panel_subscribed(panel_id)
+
+        self._yaml_state.init_panel = _init_panel_hook
+
+        # Catch panels already initialized before this point.
+        for pid in self._RECENT_COLORS_PANELS:
+            _ensure_panel_subscribed(pid)
 
 
 def main():

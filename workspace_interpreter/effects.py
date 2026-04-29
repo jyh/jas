@@ -740,6 +740,58 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.set_panel(panel_id, key, value)
         return
 
+    # select: { target, list, scope, scope_value, mode } — generic
+    # tile-selection effect. Plain click replaces panel.{list} with
+    # [target] and resets panel.{scope} to scope_value. Mode "auto"
+    # reads event.shift / event.ctrl / event.meta from ctx for
+    # shift-extend / ctrl-toggle behaviors. Mirrors the Rust
+    # apply_select_effect.
+    if "select" in effect:
+        spec = effect["select"]
+        panel_id = store.get_active_panel_id()
+        list_field = spec.get("list", "")
+        if panel_id and list_field:
+            scope_field = spec.get("scope", "")
+            mode = spec.get("mode", "auto")
+            target = _eval(spec.get("target", ""), store, ctx)
+            scope_value = _eval(spec.get("scope_value", ""), store, ctx)
+            event = ctx.get("event") if isinstance(ctx, dict) else None
+            shift = bool((event or {}).get("shift", False))
+            ctrl_or_meta = bool((event or {}).get("ctrl", False)) \
+                or bool((event or {}).get("meta", False))
+            effective_mode = mode
+            if mode == "auto":
+                effective_mode = "extend" if shift \
+                    else "toggle" if ctrl_or_meta \
+                    else "single"
+            scope_changed = False
+            if scope_field:
+                cur_scope = store.get_panel(panel_id, scope_field)
+                if cur_scope != scope_value:
+                    store.set_panel(panel_id, scope_field, scope_value)
+                    store.set_panel(panel_id, list_field, [target])
+                    scope_changed = True
+            if not scope_changed:
+                cur_list = store.get_panel(panel_id, list_field) or []
+                if not isinstance(cur_list, list):
+                    cur_list = []
+                if effective_mode == "toggle":
+                    if target in cur_list:
+                        new_list = [v for v in cur_list if v != target]
+                    else:
+                        new_list = list(cur_list) + [target]
+                elif effective_mode == "extend":
+                    if cur_list and isinstance(cur_list[0], int) and isinstance(target, int):
+                        anchor = cur_list[0]
+                        lo, hi = sorted([anchor, target])
+                        new_list = list(range(lo, hi + 1))
+                    else:
+                        new_list = [target]
+                else:
+                    new_list = [target]
+                store.set_panel(panel_id, list_field, new_list)
+        return
+
     # pop: panel.field_name  or  pop: global_field_name
     if "pop" in effect:
         target = effect["pop"]

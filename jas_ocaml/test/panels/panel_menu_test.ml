@@ -644,8 +644,42 @@ let menu_tests = [
 (* Runner                                                             *)
 (* ================================================================== *)
 
+let recent_colors_tests = [
+  Alcotest.test_case "push_recent_color_basic" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_recent_colors [];
+    Jas.Panel_menu.push_recent_color "#ff0000" m;
+    assert (m#recent_colors = ["#ff0000"]);
+    Jas.Panel_menu.push_recent_color "#00ff00" m;
+    assert (m#recent_colors = ["#00ff00"; "#ff0000"]);
+    Jas.Panel_menu.push_recent_color "#ff0000" m;  (* dedup, move to front *)
+    assert (m#recent_colors = ["#ff0000"; "#00ff00"]));
+
+  Alcotest.test_case "push_recent_color_caps_at_10" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_recent_colors [];
+    for i = 0 to 14 do
+      Jas.Panel_menu.push_recent_color
+        (Printf.sprintf "#0000%02x" i) m
+    done;
+    assert (List.length m#recent_colors = 10);
+    assert (List.hd m#recent_colors = "#00000e"));
+
+  Alcotest.test_case "push_recent_color_listener_fires" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_recent_colors [];
+    let seen = ref [] in
+    let sentinel = "#abcdef" in
+    Jas.Panel_menu.add_recent_colors_listener
+      (fun _model hex ->
+         if hex = sentinel then seen := hex :: !seen);
+    Jas.Panel_menu.push_recent_color sentinel m;
+    assert (List.mem sentinel !seen));
+]
+
 let () =
   Alcotest.run "Panel menu" [
     "Labels", label_tests;
     "Menus", menu_tests;
+    "RecentColors", recent_colors_tests;
   ]

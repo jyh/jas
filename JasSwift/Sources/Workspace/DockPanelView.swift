@@ -240,6 +240,14 @@ public struct PanelGroupView: View {
             }
             return sel
         }()
+        // document namespace — exposes per-document fields the YAML
+        // reads but the StateStore has no native source for. Currently
+        // just recent_colors, used by panel init expressions (color,
+        // swatches) so the recent-color strip seeds with the model's
+        // actual recent colors rather than the YAML default of [].
+        let documentMap: [String: Any] = [
+            "recent_colors": model?.recentColors ?? []
+        ]
         var ctx: [String: Any] = [
             "state": stateMap,
             "panel": panelMap,
@@ -248,7 +256,8 @@ public struct PanelGroupView: View {
             "active_document": buildActiveDocumentView(
                 model: model,
                 layersPanelSelection: layersPanelSelection
-            )
+            ),
+            "document": documentMap
         ]
         // OPACITY.md § States predicates at top level so yaml
         // expressions like `bind.disabled: "!selection_has_mask"` and

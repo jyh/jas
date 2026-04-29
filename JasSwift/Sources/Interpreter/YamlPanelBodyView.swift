@@ -613,6 +613,8 @@ struct YamlElementView: View {
             return .clear
         }()
 
+        let selected = isSelectedInList()
+
         if hollow {
             Rectangle()
                 .stroke(SwiftUI.Color(nsColor: color), lineWidth: 3)
@@ -621,7 +623,59 @@ struct YamlElementView: View {
             Rectangle()
                 .fill(SwiftUI.Color(nsColor: color))
                 .frame(width: size, height: size)
-                .border(SwiftUI.Color.gray, width: 1)
+                .border(
+                    selected ? SwiftUI.Color.accentColor : SwiftUI.Color.gray,
+                    width: selected ? 2 : 1
+                )
+        }
+    }
+
+    /// Evaluate `bind.selected_in` against the per-item identity read
+    /// from the click behavior's first `select.target` (so authors don't
+    /// repeat themselves) and return whether this item is currently
+    /// selected. Mirrors the Rust implementation in renderer.rs.
+    private func isSelectedInList() -> Bool {
+        guard let bind = element["bind"] as? [String: Any],
+              let listExpr = bind["selected_in"] as? String
+        else { return false }
+        let listVal = evaluate(listExpr, context: context)
+        guard case .list(let items) = listVal else { return false }
+
+        guard let behaviors = element["behavior"] as? [[String: Any]] else { return false }
+        var idExpr: String? = nil
+        outer: for b in behaviors {
+            guard let effects = b["effects"] as? [[String: Any]] else { continue }
+            for e in effects {
+                if let sel = e["select"] as? [String: Any],
+                   let target = sel["target"] as? String {
+                    idExpr = target
+                    break outer
+                }
+            }
+        }
+        guard let expr = idExpr else { return false }
+        let idVal = evaluate(expr, context: context)
+        let idAny: Any? = idVal.toAny()
+        return items.contains { item in
+            selectedInIdEquals(item.value, idAny)
+        }
+    }
+
+    /// Loose typed equality used by `selected_in` lookup. Compares
+    /// numeric / string / bool values from list members (which are
+    /// stored as `Any`) against an evaluated identity value.
+    private func selectedInIdEquals(_ a: Any?, _ b: Any?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case (is NSNull, is NSNull): return true
+        case (let x as String, let y as String): return x == y
+        case (let x as Bool, let y as Bool): return x == y
+        case (let x as Int, let y as Int): return x == y
+        case (let x as Double, let y as Double): return x == y
+        case (let x as Int, let y as Double): return Double(x) == y
+        case (let x as Double, let y as Int): return x == Double(y)
+        case (let x as NSNumber, let y as NSNumber): return x == y
+        default: return false
         }
     }
 
