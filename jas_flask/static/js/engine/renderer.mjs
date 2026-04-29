@@ -257,11 +257,11 @@ function styleAttrs(elem) {
     parts.push(`stroke="${esc(elem.stroke)}"`);
   } else if (elem.stroke && typeof elem.stroke === "object") {
     if (elem.stroke.color) parts.push(`stroke="${esc(elem.stroke.color)}"`);
-    if (typeof elem.stroke.width === "number") {
+    if (typeof elem.stroke.width === "number" && elem.stroke.width !== 1) {
       parts.push(`stroke-width="${num(elem.stroke.width)}"`);
     }
   }
-  if (typeof elem["stroke-width"] === "number") {
+  if (typeof elem["stroke-width"] === "number" && elem["stroke-width"] !== 1) {
     parts.push(`stroke-width="${num(elem["stroke-width"])}"`);
   }
   // Stroke shape attributes (cap / join / miterlimit / dasharray /

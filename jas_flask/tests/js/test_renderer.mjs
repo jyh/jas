@@ -297,3 +297,42 @@ describe("renderer — brushed paths", () => {
     assert.equal(svg, "");
   });
 });
+
+// STR-306 — identity-omission for stroke-width=1 (the SVG default).
+// The native apps drop the attr from serialized output when the
+// element carries the default width; the Flask renderer needs to
+// match so cross-app SVG output stays byte-identical.
+describe("renderer — stroke-width identity-omission (STR-306)", () => {
+  it("stroke-width=1 (flat) is omitted", () => {
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 10, height: 10,
+      stroke: "#000000", "stroke-width": 1,
+    });
+    assert.match(svg, /stroke="#000000"/);
+    assert.doesNotMatch(svg, /stroke-width=/);
+  });
+
+  it("stroke-width=1 in legacy {color, width} object is omitted", () => {
+    const svg = renderElement(mkRect({
+      stroke: { color: "#000000", width: 1 },
+    }));
+    assert.match(svg, /stroke="#000000"/);
+    assert.doesNotMatch(svg, /stroke-width=/);
+  });
+
+  it("stroke-width=2 still emits", () => {
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 10, height: 10,
+      stroke: "#000000", "stroke-width": 2,
+    });
+    assert.match(svg, /stroke-width="2"/);
+  });
+
+  it("stroke-width=0 still emits (zero is not the default)", () => {
+    const svg = renderElement({
+      type: "rect", x: 0, y: 0, width: 10, height: 10,
+      stroke: "#000000", "stroke-width": 0,
+    });
+    assert.match(svg, /stroke-width="0"/);
+  });
+});
