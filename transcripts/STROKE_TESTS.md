@@ -729,7 +729,7 @@ user-visible bugs. Batch by app: run a full column at a time.
               rendered canvas shows dashes centered on each rectangle
               corner anchor and a dash spanning each anchor seamlessly
               (no cap-seams).
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-04-29
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
