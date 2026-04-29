@@ -5,6 +5,13 @@
 ///
 /// Flags bits 0-1: compression method (0=none, 1=raw deflate).
 /// Payload: MessagePack-encoded document using positional arrays.
+///
+/// Scope: this module is consumed only by cross-language fixture tests
+/// (Tests/CrossLanguageTests.swift). The real save path uses
+/// documentToSvg/svgToDocument; binary disk persistence is deferred
+/// (Sources/Document/Model.swift documents this as Phase 1). The
+/// fatalError sites below are appropriate for fixture parsing where
+/// corrupt input is a test bug, not a runtime concern.
 
 import Foundation
 import zlib
@@ -312,7 +319,7 @@ private func deflateDecompress(_ input: [UInt8]) throws -> [UInt8] {
 
 // MARK: - Errors
 
-public enum BinaryError: Error {
+package enum BinaryError: Error {
     case truncated
     case invalidMagic
     case unsupportedVersion(UInt16)
@@ -848,7 +855,7 @@ private func unpackDocument(_ v: MsgValue) -> Document {
 // MARK: - Public API
 
 /// Serialize a Document to the JAS binary format.
-public func documentToBinary(_ doc: Document, compress: Bool = true) -> Data {
+package func documentToBinary(_ doc: Document, compress: Bool = true) -> Data {
     let value = packDocument(doc)
     var raw = [UInt8]()
     encodeValue(value, to: &raw)
@@ -875,7 +882,7 @@ public func documentToBinary(_ doc: Document, compress: Bool = true) -> Data {
 }
 
 /// Deserialize a Document from the JAS binary format.
-public func binaryToDocument(_ data: Data) throws -> Document {
+package func binaryToDocument(_ data: Data) throws -> Document {
     let bytes = [UInt8](data)
     guard bytes.count >= headerSize else {
         throw BinaryError.truncated
