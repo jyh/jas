@@ -419,15 +419,62 @@ and render_color_swatch ~packing ~ctx el =
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Color c -> c | Expr_eval.Str s -> s | _ -> "")
     | None -> "" in
+  let selected = is_selected_in_list el ctx in
+  let border_css =
+    if selected then "2px solid #4a90d9"
+    else "1px solid #666" in
   let btn = GButton.button ~packing () in
   btn#misc#set_size_request ~width:size ~height:size ();
   if String.length color_str > 0 then begin
-    let css = Printf.sprintf "* { background-color: %s; border: 1px solid #666; min-width: %dpx; min-height: %dpx; padding: 0; }"
-      color_str size size in
+    let css = Printf.sprintf
+      "* { background-color: %s; border: %s; min-width: %dpx; min-height: %dpx; padding: 0; }"
+      color_str border_css size size in
     let provider = GObj.css_provider () in
     provider#load_from_data css;
     btn#misc#style_context#add_provider provider 800
   end
+
+(** Evaluate [bind.selected_in] against the per-item identity read
+    from the click behavior's first [select.target] (so authors don't
+    repeat themselves) and return whether this item is currently
+    selected. Mirrors the Rust implementation in renderer.rs. *)
+and is_selected_in_list (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
+  let open Yojson.Safe.Util in
+  match el |> member "bind" |> safe_member "selected_in" |> to_string_option with
+  | None -> false
+  | Some list_expr ->
+    let list_val = Expr_eval.evaluate list_expr ctx in
+    (match list_val with
+     | Expr_eval.List items ->
+       (* Find the first select.target expression in any click behavior. *)
+       let id_expr =
+         match el |> member "behavior" with
+         | `List behaviors ->
+           List.fold_left (fun acc b ->
+             match acc with
+             | Some _ -> acc
+             | None ->
+               match b |> member "effects" with
+               | `List effects ->
+                 List.fold_left (fun acc' e ->
+                   match acc' with
+                   | Some _ -> acc'
+                   | None ->
+                     (match e |> member "select" |> safe_member "target" with
+                      | `String s -> Some s
+                      | _ -> None))
+                   None effects
+               | _ -> None)
+             None behaviors
+         | _ -> None
+       in
+       (match id_expr with
+        | None -> false
+        | Some expr ->
+          let id_val = Expr_eval.evaluate expr ctx in
+          let id_json = Expr_eval.value_to_json id_val in
+          List.exists (fun item -> item = id_json) items)
+     | _ -> false)
 
 (* Gradient primitives.
 
