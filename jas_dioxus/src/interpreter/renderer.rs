@@ -517,6 +517,11 @@ fn run_effects(
         if let Some(sps) = effect.get("set_panel_state").and_then(|v| v.as_object()) {
             apply_set_panel_state(sps, st);
         }
+        // select: { target, list, scope, scope_value, mode } — generic
+        // tile-selection effect for swatch / brush / row panels.
+        if let Some(spec) = effect.get("select").and_then(|v| v.as_object()) {
+            apply_select_effect(spec, &eval_ctx, st);
+        }
         // swap_panel_state: [key_a, key_b]
         if let Some(serde_json::Value::Array(keys)) = effect.get("swap_panel_state") {
             if keys.len() == 2 {
