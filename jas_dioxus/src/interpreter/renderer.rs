@@ -68,8 +68,8 @@ fn render_el(
     rctx: &RenderCtx,
 ) -> Element {
     // Handle repeat directive: expand template for each item in source
-    if el.get("foreach").is_some() && el.get("do").is_some() {
-        return render_repeat(el, ctx, rctx);
+    if let (Some(repeat), Some(template)) = (el.get("foreach"), el.get("do")) {
+        return render_repeat(repeat, template, el, ctx, rctx);
     }
 
     // _template tag available for native widget overrides when needed.
@@ -128,9 +128,13 @@ fn render_children(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rende
 
 /// Expand a repeat directive: evaluate the source, then render the template
 /// once per item with the loop variable injected via Scope.
-fn render_repeat(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
-    let repeat = el.get("foreach").unwrap();
-    let template = el.get("do").unwrap();
+fn render_repeat(
+    repeat: &serde_json::Value,
+    template: &serde_json::Value,
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Element {
     let source_expr = repeat.get("source").and_then(|s| s.as_str()).unwrap_or("");
     let var_name = repeat.get("as").and_then(|s| s.as_str()).unwrap_or("item");
 
@@ -3089,12 +3093,10 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
 
 /// Build a CSS style string from the element's style properties.
 fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
-    let style = match el.get("style") {
-        Some(s) if s.is_object() => s,
-        _ => return String::new(),
+    let Some(map) = el.get("style").and_then(|s| s.as_object()) else {
+        return String::new();
     };
     let mut parts = Vec::new();
-    let map = style.as_object().unwrap();
 
     for (key, val) in map {
         let resolved = if let Some(s) = val.as_str() {
