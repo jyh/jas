@@ -674,6 +674,30 @@ class MainWindow(QMainWindow):
             self._edge_snapped_coord = None
             self._refresh_pane_positions()
 
+    def _abort_active_drag(self) -> None:
+        # Defensive: if the window loses focus mid-drag (e.g. cmd-tab
+        # while a pane is being moved) Qt may not deliver the matching
+        # mouseReleaseEvent, leaving drag state stuck. Drop pending
+        # operations and clear all drag bookkeeping. The mouse grab is
+        # released here too in case it survived the focus loss.
+        if not (self._pane_drag or self._border_drag or self._edge_drag):
+            return
+        self.releaseMouse()
+        self._pane_drag = None
+        self._border_drag = None
+        self._edge_drag = None
+        self._edge_snapped_coord = None
+        self._snap_preview = []
+        self._refresh_pane_positions()
+
+    def focusOutEvent(self, event):
+        self._abort_active_drag()
+        super().focusOutEvent(event)
+
+    def hideEvent(self, event):
+        self._abort_active_drag()
+        super().hideEvent(event)
+
     def _update_canvas_logo(self) -> None:
         """Show/hide the empty-state logo based on whether any tabs are open."""
         if self._canvas_logo_lbl is None:
