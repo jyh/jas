@@ -688,6 +688,10 @@ pub fn App() -> Element {
             .jas-border-handle:hover {{ background: rgba(74,144,217,0.3); }}
             .jas-border-handle:active {{ background: rgba(74,144,217,0.5); }}
             .jas-icon-toggle:hover {{ background: var(--jas-button-hover, #606060); }}
+            /* Swatches / brushes tile hover — subtle accent ring;
+               selection outline is set inline by render_color_swatch
+               and wins via the inline style precedence. */
+            .jas-swatch-tile:hover {{ outline: 1px solid var(--jas-accent, #4a90d9); outline-offset: -1px; }}
         "#  }
         div {
             tabindex: "0",

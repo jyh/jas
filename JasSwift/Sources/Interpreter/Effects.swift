@@ -300,6 +300,16 @@ private func runOne(
            let hook = platformEffects["apply_gradient_panel"] {
             _ = hook("", ctx, store)
         }
+        // Active-color writes (set_active_color YAML action et al.)
+        // need to propagate to the selected canvas element — the
+        // Color Panel does this directly via ColorPanel.setActiveColor;
+        // the YAML route writes through set: which lands here. Host
+        // registers "apply_active_color" if it wants the propagation.
+        let wroteActiveColor = pairs.keys.contains { $0 == "fill_color" || $0 == "stroke_color" }
+        if wroteActiveColor,
+           let hook = platformEffects["apply_active_color"] {
+            _ = hook("", ctx, store)
+        }
         // Stroke render-key writes also trigger the stroke apply
         // pipeline. The notify hook uses stroke_panel_content as the
         // panel id; notifyPanelStateChanged dispatches to
@@ -1952,6 +1962,49 @@ private func _fmtNum(_ n: Double) -> String {
 /// ALIGN.md §Panel menu Reset Panel. Writes through both the
 /// global `state.align_*` surface (StateStore.set) and the
 /// panel-local mirrors (StateStore.setPanel).
+/// Read fill_color / stroke_color from the global store and apply the
+/// active one (per fill_on_top) to the selected canvas element. Used
+/// by the apply_active_color platform-effect hook so the YAML
+/// set_active_color action — and any other set: write that touches
+/// fill_color or stroke_color — propagates to the selection. Mirrors
+/// the inline behavior of ColorPanel.setActiveColor.
+public func applyActiveColorFromStore(store: StateStore, model: Model) {
+    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+    let ctrl = Controller(model: model)
+    if fillOnTop {
+        let raw = store.get("fill_color")
+        if let hex = raw as? String, let color = Color.fromHex(hex) {
+            model.defaultFill = Fill(color: color)
+            if !model.document.selection.isEmpty {
+                model.snapshot()
+                ctrl.setSelectionFill(Fill(color: color))
+            }
+        } else if raw == nil || raw is NSNull {
+            model.defaultFill = nil
+            if !model.document.selection.isEmpty {
+                model.snapshot()
+                ctrl.setSelectionFill(nil)
+            }
+        }
+    } else {
+        let raw = store.get("stroke_color")
+        if let hex = raw as? String, let color = Color.fromHex(hex) {
+            let width = model.defaultStroke?.width ?? 1.0
+            model.defaultStroke = Stroke(color: color, width: width)
+            if !model.document.selection.isEmpty {
+                model.snapshot()
+                ctrl.setSelectionStroke(Stroke(color: color, width: width))
+            }
+        } else if raw == nil || raw is NSNull {
+            model.defaultStroke = nil
+            if !model.document.selection.isEmpty {
+                model.snapshot()
+                ctrl.setSelectionStroke(nil)
+            }
+        }
+    }
+}
+
 public func resetAlignPanel(store: StateStore) {
     let pid = "align_panel_content"
     store.set("align_to", "selection")
@@ -2159,6 +2212,15 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         },
         "reset_align_panel": { _, _, store in
             resetAlignPanel(store: store)
+            return nil
+        },
+        // Triggered when a YAML set: writes fill_color or stroke_color
+        // (e.g. via the set_active_color action dispatched from the
+        // Swatches Panel). Pushes the active-color change to the
+        // selected canvas element so the YAML route matches the
+        // direct ColorPanel.setActiveColor path.
+        "apply_active_color": { _, _, store in
+            applyActiveColorFromStore(store: store, model: model)
             return nil
         },
     ]
