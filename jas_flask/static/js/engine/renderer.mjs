@@ -11,6 +11,7 @@
 
 import { isContainer } from "./document.mjs";
 import { calligraphicOutline } from "./geometry.mjs";
+import { emitArrowDefs } from "./arrowheads.mjs";
 
 // Brush-library registry. Populated at app boot (or per-test) via
 // setBrushLibraries(); consumed by renderPath when an element carries
@@ -66,11 +67,17 @@ export function renderElement(elem) {
 }
 
 /**
- * Render an entire document to an SVG string.
+ * Render an entire document to an SVG string. Prepends a <defs>
+ * block containing the arrowhead markers referenced by elements in
+ * the tree (one <marker> per unique (shape, side, scale) trio); the
+ * block is empty when no element uses arrowheads, in which case it
+ * is omitted entirely.
  */
 export function renderDocument(doc) {
   if (!doc || !Array.isArray(doc.layers)) return "";
-  return doc.layers.map(renderElement).join("");
+  const defs = emitArrowDefs(doc);
+  const body = doc.layers.map(renderElement).join("");
+  return defs + body;
 }
 
 // ─── Per-type renderers ─────────────────────────────────────
@@ -288,6 +295,25 @@ function styleAttrs(elem) {
   if (typeof elem["stroke-dashoffset"] === "number"
       && elem["stroke-dashoffset"] !== 0) {
     parts.push(`stroke-dashoffset="${num(elem["stroke-dashoffset"])}"`);
+  }
+  // Arrowhead markers — emit marker-start / marker-end pointing to
+  // the per-document <defs> block built by emitArrowDefs. The
+  // jas-stroke-{start,end}-arrowhead element fields hold the shape
+  // name; jas-stroke-{start,end}-arrowhead-scale carries the per-side
+  // percent (default 100). collectArrowMarkerRefs walks the doc tree
+  // and registers the (shape, side, scale) trio so the marker is
+  // available by the time the path references it.
+  const startArr = elem["jas-stroke-start-arrowhead"];
+  if (typeof startArr === "string" && startArr !== "none" && startArr !== "") {
+    const scale = Number.isFinite(elem["jas-stroke-start-arrowhead-scale"])
+      ? elem["jas-stroke-start-arrowhead-scale"] : 100;
+    parts.push(`marker-start="url(#jas-arr-start-${startArr}-${scale | 0})"`);
+  }
+  const endArr = elem["jas-stroke-end-arrowhead"];
+  if (typeof endArr === "string" && endArr !== "none" && endArr !== "") {
+    const scale = Number.isFinite(elem["jas-stroke-end-arrowhead-scale"])
+      ? elem["jas-stroke-end-arrowhead-scale"] : 100;
+    parts.push(`marker-end="url(#jas-arr-end-${endArr}-${scale | 0})"`);
   }
   if (typeof elem.opacity === "number" && elem.opacity !== 1.0) {
     parts.push(`opacity="${num(elem.opacity)}"`);

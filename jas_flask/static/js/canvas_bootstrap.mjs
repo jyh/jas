@@ -131,6 +131,14 @@ export function bootstrap() {
     "state.stroke_miter_limit": "stroke-miterlimit",
     "state.stroke_dasharray": "stroke-dasharray",
     "state.stroke_dashoffset": "stroke-dashoffset",
+    // Arrowhead fields ride on jas-* element keys: SVG markers are
+    // built from the document tree at render time (engine/arrowheads
+    // emitArrowDefs), so they need to land on the element rather
+    // than be stripped to a CSS-style attribute.
+    "state.stroke_start_arrowhead": "jas-stroke-start-arrowhead",
+    "state.stroke_end_arrowhead": "jas-stroke-end-arrowhead",
+    "state.stroke_start_arrowhead_scale": "jas-stroke-start-arrowhead-scale",
+    "state.stroke_end_arrowhead_scale": "jas-stroke-end-arrowhead-scale",
   };
   // State fields that contribute to the derived stroke-dasharray
   // string. When any of them changes, recompute and apply.

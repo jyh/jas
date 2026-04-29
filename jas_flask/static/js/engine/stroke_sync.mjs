@@ -60,6 +60,23 @@ export function elementToStateWrites(elem) {
     && dashStr !== "" && dashStr !== "none";
   push("stroke_dashed", isDashed);
 
+  // Arrowhead state — mirror the jas-* fields back to global state so
+  // selecting an element with arrowheads updates the Stroke panel
+  // dropdowns. Falls back to "none" / 100 when the element doesn't
+  // carry arrowhead state, so the panel resets cleanly.
+  const startArr = elem["jas-stroke-start-arrowhead"];
+  push("stroke_start_arrowhead",
+    typeof startArr === "string" ? startArr : "none");
+  const endArr = elem["jas-stroke-end-arrowhead"];
+  push("stroke_end_arrowhead",
+    typeof endArr === "string" ? endArr : "none");
+  const startScale = elem["jas-stroke-start-arrowhead-scale"];
+  push("stroke_start_arrowhead_scale",
+    Number.isFinite(startScale) ? startScale : 100);
+  const endScale = elem["jas-stroke-end-arrowhead-scale"];
+  push("stroke_end_arrowhead_scale",
+    Number.isFinite(endScale) ? endScale : 100);
+
   return writes;
 }
 

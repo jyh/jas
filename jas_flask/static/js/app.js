@@ -612,6 +612,12 @@
     stroke_join: "join",
     stroke_miter_limit: "miter_limit",
     stroke_dashed: "dashed",
+    stroke_start_arrowhead: "start_arrowhead",
+    stroke_end_arrowhead: "end_arrowhead",
+    stroke_start_arrowhead_scale: "start_arrowhead_scale",
+    stroke_end_arrowhead_scale: "end_arrowhead_scale",
+    stroke_link_arrowhead_scale: "link_arrowhead_scale",
+    stroke_arrow_align: "arrow_align",
   };
 
   function setState(key, value) {
@@ -934,6 +940,30 @@
       var tmp = state[a];
       setState(a, state[b]);
       setState(b, tmp);
+      return;
+    }
+
+    // swap_panel_state: [key_a, key_b]  (active panel)
+    // swap_panel_state: { panel: <id>, keys: [a, b] }  (named panel)
+    // Used by the Stroke panel's swap_arrowheads button to exchange
+    // start/end shape and scale fields in one click.
+    if (effect.swap_panel_state) {
+      var sps = effect.swap_panel_state;
+      var swapKeyA, swapKeyB;
+      if (Array.isArray(sps) && sps.length === 2) {
+        swapKeyA = sps[0]; swapKeyB = sps[1];
+      } else if (sps && typeof sps === "object" && Array.isArray(sps.keys)
+                 && sps.keys.length === 2) {
+        // {panel, keys} form — Flask's panelState is the active
+        // panel's bucket; the panel field is informational only.
+        swapKeyA = sps.keys[0]; swapKeyB = sps.keys[1];
+      } else {
+        return;
+      }
+      var swapTmp = panelState[swapKeyA];
+      panelState[swapKeyA] = panelState[swapKeyB];
+      panelState[swapKeyB] = swapTmp;
+      updateBindings(null, null);
       return;
     }
 
@@ -2272,6 +2302,15 @@
       gap_2: "stroke_gap_2",
       dash_3: "stroke_dash_3",
       gap_3: "stroke_gap_3",
+      // Arrowhead dropdowns / scale combo boxes commit through the
+      // same path so changing the stk_start_arrowhead select reaches
+      // state.stroke_start_arrowhead (and from there, via PANEL_TO_ATTR
+      // in canvas_bootstrap, the active element's
+      // jas-stroke-start-arrowhead field that the renderer reads).
+      start_arrowhead: "stroke_start_arrowhead",
+      end_arrowhead: "stroke_end_arrowhead",
+      start_arrowhead_scale: "stroke_start_arrowhead_scale",
+      end_arrowhead_scale: "stroke_end_arrowhead_scale",
     };
 
     // Wire panel slider/input → live update and commit.
@@ -2307,7 +2346,33 @@
     document.addEventListener("change", function (e) {
       var el = e.target;
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
-      if (!bindVal || !(bindVal.match(/^\{\{panel\.\w+\}\}$/) || bindVal.match(/^panel\.\w+$/))) return;
+      if (!bindVal) return;
+      var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
+      if (!pm) return;
+      var changeField = pm[1];
+      // Direct-route fields (arrowhead selects, etc.) commit straight
+      // to global state via PANEL_FIELD_TO_STATE — skip the color
+      // dispatch path which is only meaningful for the Color panel.
+      var changeStateKey = PANEL_FIELD_TO_STATE[changeField];
+      if (changeStateKey) {
+        // Numeric inputs already routed through the input listener
+        // above; selects only fire change. Coerce numeric-looking
+        // string values back to numbers for fields whose state type
+        // is number (scale combo boxes); leave shape names as
+        // strings.
+        var raw = el.value;
+        var coerced = raw;
+        if (changeField === "start_arrowhead_scale"
+            || changeField === "end_arrowhead_scale") {
+          var n = parseFloat(raw);
+          coerced = Number.isFinite(n) ? n : raw;
+        }
+        panelState[changeField] = coerced;
+        setState(changeStateKey, coerced);
+        return;
+      }
+      // Color-panel fall-through: any panel.* change re-dispatches
+      // set_active_color so the slider / hex / preset value commits.
       dispatch("set_active_color", { color: panelStateToColor() });
     });
 

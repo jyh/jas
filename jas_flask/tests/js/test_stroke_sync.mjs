@@ -109,6 +109,29 @@ describe("elementToStateWrites — STR-305 selection sync", () => {
     assert.equal(pick(writesB, "stroke_cap"), "butt");
     assert.equal(pick(writesB, "stroke_width"), 1);
   });
+
+  it("STR-304: arrowhead state mirrors back to global state", () => {
+    const elem = {
+      type: "path",
+      "jas-stroke-start-arrowhead": "closed_arrow",
+      "jas-stroke-start-arrowhead-scale": 75,
+      "jas-stroke-end-arrowhead": "diamond",
+      "jas-stroke-end-arrowhead-scale": 200,
+    };
+    const writes = elementToStateWrites(elem);
+    assert.equal(pick(writes, "stroke_start_arrowhead"), "closed_arrow");
+    assert.equal(pick(writes, "stroke_start_arrowhead_scale"), 75);
+    assert.equal(pick(writes, "stroke_end_arrowhead"), "diamond");
+    assert.equal(pick(writes, "stroke_end_arrowhead_scale"), 200);
+  });
+
+  it("STR-304: missing arrowhead state falls back to none/100", () => {
+    const writes = elementToStateWrites({ type: "path" });
+    assert.equal(pick(writes, "stroke_start_arrowhead"), "none");
+    assert.equal(pick(writes, "stroke_end_arrowhead"), "none");
+    assert.equal(pick(writes, "stroke_start_arrowhead_scale"), 100);
+    assert.equal(pick(writes, "stroke_end_arrowhead_scale"), 100);
+  });
 });
 
 // buildDasharray powers STR-302 (Dash-Dot preset). Add coverage so
