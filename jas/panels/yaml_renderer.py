@@ -1839,22 +1839,21 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
 
     store.subscribe(None, _update_bindings)
 
-    # When bind.selected_in is present, also listen to active-panel
-    # state changes — the selected_swatches list lives on the panel,
-    # not in global state, so the global subscribe above wouldn't
-    # otherwise restyle this swatch when its selection toggles.
-    if isinstance(bindings.get("selected_in"), str) and selected_target_expr:
+    # Panel-state changes don't go through the global subscribe above
+    # (set_panel only fires panel subscribers). When any binding
+    # references panel.* — color, selected_in, visible, disabled,
+    # checked, value — also subscribe to the active panel's state so
+    # those bindings re-evaluate when panel state changes (e.g.
+    # panel.recent_colors getting a new entry, or
+    # panel.selected_swatches toggling).
+    has_panel_binding = any(
+        isinstance(e, str) and "panel." in e
+        for e in bindings.values()
+    )
+    if has_panel_binding:
         panel_id = store.get_active_panel_id()
         if panel_id:
-            def _on_panel(_key, _value):
-                new_ctx = store.eval_context(ctx)
-                color_expr = bindings.get("color")
-                color = None
-                if isinstance(color_expr, str) and color_expr:
-                    color = evaluate(color_expr, new_ctx).value
-                selected = _is_selected_in(new_ctx)
-                widget.setStyleSheet(_color_stylesheet(color, selected))
-            store.subscribe_panel(panel_id, _on_panel)
+            store.subscribe_panel(panel_id, _update_bindings)
 
 
 def _set_widget_value(widget: QWidget, value):
