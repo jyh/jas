@@ -107,6 +107,7 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "stroke_arrow_align" => Some(SchemaEntry::new(Enum(STROKE_ARROW_ALIGN_VALUES), false, true)),
         "stroke_profile" => Some(SchemaEntry::new(Enum(STROKE_PROFILE_VALUES), false, true)),
         "stroke_profile_flipped" => Some(SchemaEntry::new(Bool, false, true)),
+        "stroke_dash_align_anchors" => Some(SchemaEntry::new(Bool, false, true)),
         // Gradient panel state keys (Phase 5 follow-up).
         "gradient_type" => Some(SchemaEntry::new(Enum(GRADIENT_TYPE_VALUES), false, true)),
         "gradient_angle" => Some(SchemaEntry::new(Number, false, true)),

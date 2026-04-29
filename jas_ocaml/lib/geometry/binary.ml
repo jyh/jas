@@ -119,7 +119,9 @@ let pack_stroke = function
            vstr (string_of_arrowhead s.stroke_end_arrow);
            vf64 s.stroke_start_arrow_scale;
            vf64 s.stroke_end_arrow_scale;
-           vint arrow_align]
+           vint arrow_align;
+           (* Element 13: dash_align_anchors (added with DASH_ALIGN.md). *)
+           vbool s.stroke_dash_align_anchors]
 
 let pack_width_points pts =
   if pts = [] then Msgpck.Nil
@@ -417,11 +419,16 @@ let unpack_stroke v =
       let end_arrow_scale = as_f64 (List.nth arr 11) in
       let arrow_align = match as_int (List.nth arr 12) with
         | 1 -> Center_at_end | _ -> Tip_at_end in
+      (* Element 13: dash_align_anchors (added later — backward
+         compatible with older files that had 13 elements). *)
+      let dash_align_anchors =
+        if List.length arr > 13 then as_bool (List.nth arr 13) else false in
       Some { stroke_color = unpack_color (List.nth arr 0);
              stroke_width = as_f64 (List.nth arr 1);
              stroke_linecap = cap; stroke_linejoin = join;
              stroke_miter_limit = miter_limit; stroke_align = align;
              stroke_dash_pattern = dash_pattern;
+             stroke_dash_align_anchors = dash_align_anchors;
              stroke_start_arrow = start_arrow; stroke_end_arrow = end_arrow;
              stroke_start_arrow_scale = start_arrow_scale;
              stroke_end_arrow_scale = end_arrow_scale;
@@ -433,6 +440,7 @@ let unpack_stroke v =
              stroke_linecap = cap; stroke_linejoin = join;
              stroke_miter_limit = 10.0; stroke_align = Center;
              stroke_dash_pattern = [];
+             stroke_dash_align_anchors = false;
              stroke_start_arrow = Arrow_none; stroke_end_arrow = Arrow_none;
              stroke_start_arrow_scale = 100.0; stroke_end_arrow_scale = 100.0;
              stroke_arrow_align = Tip_at_end;

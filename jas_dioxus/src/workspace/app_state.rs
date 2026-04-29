@@ -241,6 +241,7 @@ pub(crate) struct StrokePanelState {
     pub gap_2: Option<f64>,
     pub dash_3: Option<f64>,
     pub gap_3: Option<f64>,
+    pub dash_align_anchors: bool,
     pub start_arrowhead: String,
     pub end_arrowhead: String,
     pub start_arrowhead_scale: f64,
@@ -265,6 +266,7 @@ impl Default for StrokePanelState {
             gap_2: None,
             dash_3: None,
             gap_3: None,
+            dash_align_anchors: false,
             start_arrowhead: "none".into(),
             end_arrowhead: "none".into(),
             start_arrowhead_scale: 100.0,
@@ -1033,6 +1035,7 @@ impl AppState {
                     },
                     dash_pattern,
                     dash_len,
+                    dash_align_anchors: sp.dash_align_anchors,
                     start_arrow: Arrowhead::from_str(&sp.start_arrowhead),
                     end_arrow: Arrowhead::from_str(&sp.end_arrowhead),
                     start_arrow_scale: sp.start_arrowhead_scale,
@@ -1085,6 +1088,7 @@ impl AppState {
                 LineJoin::Round => "round",
                 LineJoin::Bevel => "bevel",
             }.into();
+            self.stroke_panel.dash_align_anchors = s.dash_align_anchors;
             // Update default stroke to match selection
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 tab.model.default_stroke = Some(s);
@@ -1386,11 +1390,12 @@ impl AppState {
             Some(t) => t,
             None => return,
         };
-        // Layer 1: canvas background. Filled in screen-space here
-        // so it covers the viewport regardless of the view
-        // transform applied below. Per ZOOM_TOOL.md §Anchor and
-        // clamp math (rendering pipeline).
-        ctx.set_fill_style_str("white");
+        // Layer 1: canvas background (the pasteboard). Painted in
+        // screen-space so it covers the viewport regardless of the
+        // view transform applied below. Theme-pane gray matches the
+        // surrounding pane chrome; artboard rects paint white over
+        // the top of this in document-space.
+        ctx.set_fill_style_str("#3c3c3c");
         ctx.fill_rect(0.0, 0.0, w, h);
 
         // Apply view transform: zoom + pan. The renderer draws in

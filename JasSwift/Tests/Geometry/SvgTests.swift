@@ -931,3 +931,38 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(t.tspans[1].rotate == 90.0)
     #expect(t.tspans[2].rotate == 0.0)
 }
+
+// MARK: - DASH_ALIGN.md §Persistence
+
+@Test func dashAlignAnchorsRoundtripsWhenTrue() {
+    let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0,
+                        dashAlignAnchors: true)
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 100, height: 60, fill: nil, stroke: stroke))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("data-jas-dash-align-anchors=\"true\""))
+    let doc2 = svgToDocument(svg)
+    guard case .rect(let r) = doc2.layers[0].children[0] else {
+        Issue.record("expected Rect"); return
+    }
+    #expect(r.stroke?.dashAlignAnchors == true)
+}
+
+@Test func dashAlignAnchorsOmittedWhenFalse() {
+    let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 100, height: 60, fill: nil, stroke: stroke))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(!svg.contains("data-jas-dash-align-anchors"))
+}
+
+@Test func dashAlignAnchorsDefaultsFalseOnImport() {
+    let svg = "<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\"><rect x=\"0\" y=\"0\" width=\"100\" height=\"60\" stroke=\"black\" stroke-width=\"1\"/></svg>"
+    let doc = svgToDocument(svg)
+    guard case .rect(let r) = doc.layers[0].children[0] else {
+        Issue.record("expected Rect"); return
+    }
+    #expect(r.stroke?.dashAlignAnchors == false)
+}

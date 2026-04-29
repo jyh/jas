@@ -759,7 +759,7 @@ fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
         "bevel" => LineJoin::Bevel,
         _ => LineJoin::Miter,
     };
-    Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity: v["opacity"].as_f64().unwrap_or(1.0) })
+    Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors: false, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity: v["opacity"].as_f64().unwrap_or(1.0) })
 }
 
 fn parse_transform(v: &serde_json::Value) -> Option<Transform> {

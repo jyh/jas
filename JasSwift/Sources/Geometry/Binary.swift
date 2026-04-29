@@ -497,7 +497,9 @@ private func packStroke(_ stroke: Stroke?) -> MsgValue {
     return .array([packColor(s.color), vf64(s.width), vint(cap), vint(join), vf64(s.opacity),
                    vf64(s.miterLimit), vint(align), .array(dash),
                    vstr(s.startArrow.name), vstr(s.endArrow.name),
-                   vf64(s.startArrowScale), vf64(s.endArrowScale), vint(arrowAlign)])
+                   vf64(s.startArrowScale), vf64(s.endArrowScale), vint(arrowAlign),
+                   // Element 13: dash_align_anchors (added with DASH_ALIGN.md).
+                   vbool(s.dashAlignAnchors)])
 }
 
 private func packWidthPoints(_ pts: [StrokeWidthPoint]) -> MsgValue {
@@ -668,8 +670,12 @@ private func unpackStroke(_ v: MsgValue) -> Stroke? {
         let startArrowScale = asF64(arr[10])
         let endArrowScale = asF64(arr[11])
         let arrowAlign: ArrowAlign = switch asInt(arr[12]) { case 1: .centerAtEnd; default: .tipAtEnd }
+        // Element 13: dash_align_anchors (added later — backward
+        // compatible with older files that had 13 elements).
+        let dashAlignAnchors = arr.count > 13 ? asBool(arr[13]) : false
         return Stroke(color: unpackColor(arr[0]), width: asF64(arr[1]), linecap: cap, linejoin: join,
                       miterLimit: miterLimit, align: align, dashPattern: dashPattern,
+                      dashAlignAnchors: dashAlignAnchors,
                       startArrow: startArrow, endArrow: endArrow,
                       startArrowScale: startArrowScale, endArrowScale: endArrowScale,
                       arrowAlign: arrowAlign, opacity: asF64(arr[4]))

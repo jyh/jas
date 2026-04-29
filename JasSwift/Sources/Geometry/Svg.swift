@@ -60,6 +60,10 @@ private func strokeAttrs(_ stroke: Stroke?) -> String {
     case .bevel: s += " stroke-linejoin=\"bevel\""
     }
     if stroke.opacity < 1.0 { s += " stroke-opacity=\"\(fmt(stroke.opacity))\"" }
+    // Workspace-private attribute — see DASH_ALIGN.md §Persistence.
+    // Identity-omitted when false; round-trips through jas-authored
+    // files; ignored on import from non-jas SVG.
+    if stroke.dashAlignAnchors { s += " data-jas-dash-align-anchors=\"true\"" }
     return s
 }
 
@@ -754,7 +758,11 @@ private func parseStroke(_ node: XMLElement) -> Stroke? {
     let lc: LineCap = lcStr == "round" ? .round : lcStr == "square" ? .square : .butt
     let lj: LineJoin = ljStr == "round" ? .round : ljStr == "bevel" ? .bevel : .miter
     let opacity = Double(node.attribute(forName: "stroke-opacity")?.stringValue ?? "1") ?? 1.0
-    return Stroke(color: c, width: width, linecap: lc, linejoin: lj, opacity: opacity)
+    let dashAlign = (node.attribute(forName: "data-jas-dash-align-anchors")?.stringValue ?? "")
+        .trimmingCharacters(in: .whitespaces)
+    let dashAlignAnchors = (dashAlign == "true" || dashAlign == "1")
+    return Stroke(color: c, width: width, linecap: lc, linejoin: lj,
+                  dashAlignAnchors: dashAlignAnchors, opacity: opacity)
 }
 
 private func parseTransform(_ node: XMLElement) -> Transform? {

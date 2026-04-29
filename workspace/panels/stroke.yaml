@@ -32,9 +32,14 @@ description: >
   closed paths), or outside (stroke drawn outside closed paths). Inside
   and outside behave the same as center on open paths.
 
-  Row 5 — Dashed Line. A checkbox to enable dashing, plus two preset
-  buttons: even dash (12pt/12pt) and dash-dot (12pt/6pt/0pt/6pt).
-  Clicking a preset enables dashing and fills in the dash/gap fields.
+  Row 5 — Dashed Line. A checkbox to enable dashing, plus two
+  mutually-exclusive icon buttons that select how the dash pattern is
+  applied to the path: preserve (the default — dashes lay out by exact
+  length along the path; corners and ends fall wherever the math
+  lands) and align-to-anchors (per-segment dash/gap lengths flex
+  slightly so a dash is centered on every anchor, and a full dash sits
+  at each open path end). The full algorithm and persistence model
+  are documented in DASH_ALIGN.md.
 
   Row 6 — Dash/gap pattern. Six numeric inputs arranged as three
   dash/gap pairs. Pair 1 defaults to 12pt/12pt. Pairs 2 and 3 default
@@ -149,6 +154,15 @@ state:
     default: null
     nullable: true
     description: "Gap length for pair 3, in points. Null means unused."
+  dash_align_anchors:
+    type: bool
+    default: false
+    description: >
+      When true, per-segment dash and gap lengths flex so a dash is
+      centered on every anchor and a full dash sits at each open path
+      end. When false (default), the dash pattern lays out by exact
+      length along the path. Mutually exclusive with the preserve mode
+      represented by the alternate Row 5 button. See DASH_ALIGN.md.
   start_arrowhead:
     type: enum
     values: [none, simple_arrow, open_arrow, closed_arrow, stealth_arrow,
@@ -229,6 +243,7 @@ init:
   arrow_align: "state.stroke_arrow_align"
   profile: "state.stroke_profile"
   profile_flipped: "state.stroke_profile_flipped"
+  dash_align_anchors: "state.stroke_dash_align_anchors"
 
 menu:
   - label: "Butt Cap"
@@ -471,44 +486,39 @@ content:
               effects:
                 - set_panel_state: { key: dashed, value: "not panel.dashed" }
                 - set: { stroke_dashed: "not state.stroke_dashed" }
-        - id: stk_preset_even_dash
+        - id: stk_dash_preserve
           type: icon_button
-          icon: dash_even
-          summary: "Even dash preset"
+          icon: dash_preserve
+          summary: "Preserve dash and gap lengths"
           description: >
-            Sets dash/gap pattern to 12pt dash, 12pt gap (pair 1 only)
-            and enables dashing.
+            Dashes lay out by exact length along the path; corners and
+            path ends fall wherever the math lands. Matches plain SVG
+            semantics.
           style: { size: 16 }
+          bind:
+            checked: "not panel.dash_align_anchors"
           behavior:
             - event: click
               effects:
-                - set_panel_state: { key: dashed, value: true }
-                - set_panel_state: { key: dash_1, value: 12 }
-                - set_panel_state: { key: gap_1, value: 12 }
-                - set_panel_state: { key: dash_2, value: null }
-                - set_panel_state: { key: gap_2, value: null }
-                - set_panel_state: { key: dash_3, value: null }
-                - set_panel_state: { key: gap_3, value: null }
-                - set: { stroke_dashed: true, stroke_dash_1: 12, stroke_gap_1: 12, stroke_dash_2: null, stroke_gap_2: null, stroke_dash_3: null, stroke_gap_3: null }
-        - id: stk_preset_dash_dot
+                - set_panel_state: { key: dash_align_anchors, value: false }
+                - set: { stroke_dash_align_anchors: false }
+        - id: stk_dash_align_anchors
           type: icon_button
-          icon: dash_dot
-          summary: "Dash-dot preset"
+          icon: dash_align_anchors
+          summary: "Align dashes to corners and path ends"
           description: >
-            Sets dash/gap pattern to 12pt dash, 6pt gap, 0pt dash
-            (dot), 6pt gap (pairs 1 and 2) and enables dashing.
+            Per-segment dash/gap lengths flex slightly so a dash is
+            centered on every anchor and a full dash sits at each
+            open path end. Anchor means any path node, smooth or
+            corner. See DASH_ALIGN.md for the algorithm.
           style: { size: 16 }
+          bind:
+            checked: "panel.dash_align_anchors"
           behavior:
             - event: click
               effects:
-                - set_panel_state: { key: dashed, value: true }
-                - set_panel_state: { key: dash_1, value: 12 }
-                - set_panel_state: { key: gap_1, value: 6 }
-                - set_panel_state: { key: dash_2, value: 0 }
-                - set_panel_state: { key: gap_2, value: 6 }
-                - set_panel_state: { key: dash_3, value: null }
-                - set_panel_state: { key: gap_3, value: null }
-                - set: { stroke_dashed: true, stroke_dash_1: 12, stroke_gap_1: 6, stroke_dash_2: 0, stroke_gap_2: 6, stroke_dash_3: null, stroke_gap_3: null }
+                - set_panel_state: { key: dash_align_anchors, value: true }
+                - set: { stroke_dash_align_anchors: true }
 
     # ── Dash / Gap pattern ─────────────────────────────────
     - type: container

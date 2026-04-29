@@ -185,6 +185,7 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("arrow_align".into(), J::String(sp.arrow_align.clone()));
     m.insert("profile".into(), J::String(sp.profile.clone()));
     m.insert("profile_flipped".into(), J::Bool(sp.profile_flipped));
+    m.insert("dash_align_anchors".into(), J::Bool(sp.dash_align_anchors));
 
     // ── Character panel overrides ───────────────────────────
     // Read font_family / font_size from the first selected

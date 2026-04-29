@@ -20,10 +20,15 @@ state:
   mode:
     default: "idle"
     enum: [idle, drawing]
+  # Screen-space drag track for the dashed preview overlay.
   start_x: { default: 0 }
   start_y: { default: 0 }
   cur_x: { default: 0 }
   cur_y: { default: 0 }
+  # Document-space anchor captured at mousedown so the committed
+  # rect lands where the user drew it regardless of pan / zoom.
+  doc_start_x: { default: 0 }
+  doc_start_y: { default: 0 }
 
 handlers:
 
@@ -39,6 +44,8 @@ handlers:
     - set: { tool.rounded_rect.start_y: "event.y" }
     - set: { tool.rounded_rect.cur_x: "event.x" }
     - set: { tool.rounded_rect.cur_y: "event.y" }
+    - set: { tool.rounded_rect.doc_start_x: "event.doc_x" }
+    - set: { tool.rounded_rect.doc_start_y: "event.doc_y" }
 
   on_mousemove:
     - if: "tool.rounded_rect.mode == 'drawing'"
@@ -55,10 +62,10 @@ handlers:
             - "doc.add_element":
                 element:
                   type: rect
-                  x: "min(tool.rounded_rect.start_x, event.x)"
-                  y: "min(tool.rounded_rect.start_y, event.y)"
-                  width: "abs(event.x - tool.rounded_rect.start_x)"
-                  height: "abs(event.y - tool.rounded_rect.start_y)"
+                  x: "min(tool.rounded_rect.doc_start_x, event.doc_x)"
+                  y: "min(tool.rounded_rect.doc_start_y, event.doc_y)"
+                  width: "abs(event.doc_x - tool.rounded_rect.doc_start_x)"
+                  height: "abs(event.doc_y - tool.rounded_rect.doc_start_y)"
                   rx: "10"
                   ry: "10"
     - set: { tool.rounded_rect.mode: "'idle'" }

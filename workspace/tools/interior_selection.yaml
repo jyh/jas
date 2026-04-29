@@ -19,10 +19,17 @@ state:
   mode:
     default: "idle"
     enum: [idle, marquee, drag_move]
+  # Screen-space marquee track for the overlay.
   marquee_start_x: { default: 0 }
   marquee_start_y: { default: 0 }
   marquee_end_x: { default: 0 }
   marquee_end_y: { default: 0 }
+  # Document-space marquee for partial_select_in_rect commit.
+  doc_marquee_start_x: { default: 0 }
+  doc_marquee_start_y: { default: 0 }
+  doc_marquee_end_x: { default: 0 }
+  doc_marquee_end_y: { default: 0 }
+  # Document-space drag anchor for translate_selection.
   drag_start_x: { default: 0 }
   drag_start_y: { default: 0 }
   alt_held: { default: false }
@@ -39,8 +46,8 @@ handlers:
   on_mousedown:
     - let:
         # hit_test_deep recurses into groups — key difference from
-        # regular Selection's hit_test.
-        hit: "hit_test_deep(event.x, event.y)"
+        # regular Selection's hit_test. Tests against document-space.
+        hit: "hit_test_deep(event.doc_x, event.doc_y)"
       in:
         - if: "hit == null"
           then:
@@ -52,6 +59,10 @@ handlers:
             - set: { tool.interior_selection.marquee_start_y: "event.y" }
             - set: { tool.interior_selection.marquee_end_x: "event.x" }
             - set: { tool.interior_selection.marquee_end_y: "event.y" }
+            - set: { tool.interior_selection.doc_marquee_start_x: "event.doc_x" }
+            - set: { tool.interior_selection.doc_marquee_start_y: "event.doc_y" }
+            - set: { tool.interior_selection.doc_marquee_end_x: "event.doc_x" }
+            - set: { tool.interior_selection.doc_marquee_end_y: "event.doc_y" }
           else:
             - "doc.snapshot": {}
             - if: "event.modifiers.shift"
@@ -60,8 +71,8 @@ handlers:
               else:
                 - "doc.set_selection": { paths: [hit] }
             - set: { tool.interior_selection.mode: "'drag_move'" }
-            - set: { tool.interior_selection.drag_start_x: "event.x" }
-            - set: { tool.interior_selection.drag_start_y: "event.y" }
+            - set: { tool.interior_selection.drag_start_x: "event.doc_x" }
+            - set: { tool.interior_selection.drag_start_y: "event.doc_y" }
             - set: { tool.interior_selection.alt_held: "event.modifiers.alt" }
             - set: { tool.interior_selection.copied: "false" }
 
@@ -70,20 +81,22 @@ handlers:
       then:
         - set: { tool.interior_selection.marquee_end_x: "event.x" }
         - set: { tool.interior_selection.marquee_end_y: "event.y" }
+        - set: { tool.interior_selection.doc_marquee_end_x: "event.doc_x" }
+        - set: { tool.interior_selection.doc_marquee_end_y: "event.doc_y" }
     - if: "tool.interior_selection.mode == 'drag_move'"
       then:
         - if: "tool.interior_selection.alt_held and not tool.interior_selection.copied"
           then:
             - "doc.copy_selection":
-                dx: "event.x - tool.interior_selection.drag_start_x"
-                dy: "event.y - tool.interior_selection.drag_start_y"
+                dx: "event.doc_x - tool.interior_selection.drag_start_x"
+                dy: "event.doc_y - tool.interior_selection.drag_start_y"
             - set: { tool.interior_selection.copied: "true" }
           else:
             - "doc.translate_selection":
-                dx: "event.x - tool.interior_selection.drag_start_x"
-                dy: "event.y - tool.interior_selection.drag_start_y"
-        - set: { tool.interior_selection.drag_start_x: "event.x" }
-        - set: { tool.interior_selection.drag_start_y: "event.y" }
+                dx: "event.doc_x - tool.interior_selection.drag_start_x"
+                dy: "event.doc_y - tool.interior_selection.drag_start_y"
+        - set: { tool.interior_selection.drag_start_x: "event.doc_x" }
+        - set: { tool.interior_selection.drag_start_y: "event.doc_y" }
 
   on_mouseup:
     - if: "tool.interior_selection.mode == 'marquee'"
@@ -92,10 +105,10 @@ handlers:
         # whole elements — this is what makes Interior Selection
         # "interior."
         - "doc.partial_select_in_rect":
-            x1: "min(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)"
-            y1: "min(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)"
-            x2: "max(tool.interior_selection.marquee_start_x, tool.interior_selection.marquee_end_x)"
-            y2: "max(tool.interior_selection.marquee_start_y, tool.interior_selection.marquee_end_y)"
+            x1: "min(tool.interior_selection.doc_marquee_start_x, tool.interior_selection.doc_marquee_end_x)"
+            y1: "min(tool.interior_selection.doc_marquee_start_y, tool.interior_selection.doc_marquee_end_y)"
+            x2: "max(tool.interior_selection.doc_marquee_start_x, tool.interior_selection.doc_marquee_end_x)"
+            y2: "max(tool.interior_selection.doc_marquee_start_y, tool.interior_selection.doc_marquee_end_y)"
             additive: "event.modifiers.shift"
     - set: { tool.interior_selection.mode: "'idle'" }
 

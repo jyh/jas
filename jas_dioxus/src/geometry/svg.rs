@@ -72,6 +72,13 @@ fn stroke_attrs(stroke: &Option<Stroke>) -> String {
             if s.opacity < 1.0 {
                 parts.push(format!(" stroke-opacity=\"{}\"", fmt(s.opacity)));
             }
+            // Custom workspace-private attribute — see DASH_ALIGN.md
+            // §Persistence. Identity-omitted when false; round-trips
+            // through jas-authored files; ignored on import from
+            // non-jas SVG.
+            if s.dash_align_anchors {
+                parts.push(" data-jas-dash-align-anchors=\"true\"".to_string());
+            }
             parts.join("")
         }
     }
@@ -976,7 +983,11 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
         _ => LineJoin::Miter,
     };
     let opacity = get_f(node, "stroke-opacity", 1.0);
-    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity })
+    let dash_align_anchors = matches!(
+        get_s(node, "data-jas-dash-align-anchors", "").trim(),
+        "true" | "1"
+    );
+    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity })
 }
 
 fn parse_transform(node: &XmlNode) -> Option<Transform> {
@@ -2180,6 +2191,70 @@ mod tests {
             let f3 = r3.fill.unwrap();
             assert!((f2.opacity - f3.opacity).abs() < 1e-9);
             assert!((f2.color.alpha() - f3.color.alpha()).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn dash_align_anchors_roundtrips_when_true() {
+        // DASH_ALIGN.md §Persistence — when true, emit
+        // data-jas-dash-align-anchors="true". Reading it back must
+        // produce a Stroke with dash_align_anchors = true.
+        let mut stroke = Stroke::new(Color::rgb(0.0, 0.0, 0.0), 1.0);
+        stroke.dash_align_anchors = true;
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 60.0, rx: 0.0, ry: 0.0,
+            fill: None,
+            stroke: Some(stroke),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(
+            svg.contains("data-jas-dash-align-anchors=\"true\""),
+            "expected attr in emitted SVG, got: {svg}",
+        );
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.stroke.unwrap().dash_align_anchors, true);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn dash_align_anchors_omitted_when_false() {
+        // DASH_ALIGN.md §Persistence — identity-omitted when false.
+        let stroke = Stroke::new(Color::rgb(0.0, 0.0, 0.0), 1.0);
+        // dash_align_anchors defaults to false from Stroke::new.
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 60.0, rx: 0.0, ry: 0.0,
+            fill: None,
+            stroke: Some(stroke),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(
+            !svg.contains("data-jas-dash-align-anchors"),
+            "attr must be omitted when false, got: {svg}",
+        );
+    }
+
+    #[test]
+    fn dash_align_anchors_defaults_false_on_import() {
+        // Plain SVG (no jas-specific attrs) must parse to
+        // dash_align_anchors=false. This is the cross-tool round-trip
+        // guarantee per DASH_ALIGN.md §Persistence.
+        let svg = r#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="0" y="0" width="100" height="60" stroke="black" stroke-width="1"/></svg>"#;
+        let doc = svg_to_document(svg);
+        let children = doc.layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.stroke.unwrap().dash_align_anchors, false);
+        } else {
+            panic!("expected Rect");
         }
     }
 

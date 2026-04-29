@@ -20,8 +20,19 @@ private func normalizeFill(_ fill: Fill) -> Fill {
 }
 
 private func normalizeStroke(_ stroke: Stroke) -> Stroke {
+    // Preserve every Stroke field — only the color alpha is folded
+    // into opacity. Earlier versions of this function dropped
+    // dashPattern / miterLimit / align / arrows / dashAlignAnchors,
+    // silently losing them on every SVG round-trip.
     Stroke(color: stroke.color.withAlpha(1.0), width: stroke.width,
            linecap: stroke.linecap, linejoin: stroke.linejoin,
+           miterLimit: stroke.miterLimit, align: stroke.align,
+           dashPattern: stroke.dashPattern,
+           dashAlignAnchors: stroke.dashAlignAnchors,
+           startArrow: stroke.startArrow, endArrow: stroke.endArrow,
+           startArrowScale: stroke.startArrowScale,
+           endArrowScale: stroke.endArrowScale,
+           arrowAlign: stroke.arrowAlign,
            opacity: stroke.opacity * stroke.color.alpha)
 }
 

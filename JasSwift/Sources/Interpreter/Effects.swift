@@ -300,6 +300,17 @@ private func runOne(
            let hook = platformEffects["apply_gradient_panel"] {
             _ = hook("", ctx, store)
         }
+        // Stroke render-key writes also trigger the stroke apply
+        // pipeline. The notify hook uses stroke_panel_content as the
+        // panel id; notifyPanelStateChanged dispatches to
+        // applyStrokePanelToSelection (mirrors OCaml's
+        // subscribe_stroke_panel which fires on every stroke_* global
+        // write).
+        let wroteStroke = pairs.keys.contains { isStrokeRenderKey($0) }
+        if wroteStroke,
+           let hook = platformEffects["notify_panel_state_changed"] {
+            _ = hook("stroke_panel_content", ctx, store)
+        }
         return
     }
 
@@ -602,6 +613,7 @@ private let strokeRenderKeys: Set<String> = [
     "stroke_cap", "stroke_join", "stroke_weight", "stroke_miter_limit",
     "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
     "stroke_dash_2", "stroke_gap_2", "stroke_dash_3", "stroke_gap_3",
+    "stroke_dash_align_anchors",
     "stroke_align_stroke", "stroke_start_arrowhead", "stroke_end_arrowhead",
     "stroke_start_arrowhead_scale", "stroke_end_arrowhead_scale",
     "stroke_arrow_align", "stroke_profile", "stroke_profile_flipped",
@@ -642,6 +654,7 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
             dashPattern.append(contentsOf: [d3.doubleValue, g3.doubleValue])
         }
     }
+    let dashAlignAnchors = s["stroke_dash_align_anchors"] as? Bool ?? false
     let startArrow = Arrowhead(fromString: s["stroke_start_arrowhead"] as? String ?? "none")
     let endArrow = Arrowhead(fromString: s["stroke_end_arrowhead"] as? String ?? "none")
     let startArrowScale = (s["stroke_start_arrowhead_scale"] as? NSNumber)?.doubleValue ?? 100.0
@@ -665,6 +678,7 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
     let width = controller.model.defaultStroke?.width ?? base.width
     let newStroke = Stroke(color: base.color, width: width, linecap: cap, linejoin: join,
                            miterLimit: miterLimit, align: align, dashPattern: dashPattern,
+                           dashAlignAnchors: dashAlignAnchors,
                            startArrow: startArrow, endArrow: endArrow,
                            startArrowScale: startArrowScale, endArrowScale: endArrowScale,
                            arrowAlign: arrowAlign, opacity: base.opacity)
@@ -706,6 +720,7 @@ func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
         store.set("stroke_dash_3", s.dashPattern[4])
         store.set("stroke_gap_3", s.dashPattern[5])
     }
+    store.set("stroke_dash_align_anchors", s.dashAlignAnchors)
     store.set("stroke_start_arrowhead", s.startArrow.name)
     store.set("stroke_end_arrowhead", s.endArrow.name)
     store.set("stroke_start_arrowhead_scale", s.startArrowScale)
@@ -728,6 +743,7 @@ public let gradientRenderKeys: Set<String> = [
 public func isGradientRenderKey(_ key: String) -> Bool {
     gradientRenderKeys.contains(key)
 }
+
 
 // MARK: - Gradient panel writeback (Phase 5)
 
@@ -1910,6 +1926,8 @@ public func notifyPanelStateChanged(_ panelId: String, store: StateStore, model:
         applyCharacterPanelToSelection(store: store, controller: Controller(model: model))
     case "paragraph_panel_content":
         applyParagraphPanelToSelection(store: store, controller: Controller(model: model))
+    case "stroke_panel_content":
+        applyStrokePanelToSelection(store: store, controller: Controller(model: model))
     default:
         break
     }

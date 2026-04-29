@@ -295,7 +295,13 @@ fn apply_stroke_with_gradient(
             });
             ctx.set_miter_limit(s.miter_limit);
             let da = s.dash_array();
-            if !da.is_empty() {
+            // When dash_align_anchors is on, the renderer expands the
+            // dashed stroke into solid sub-paths via DashRenderer and
+            // draws each as a solid stroke — so the platform's dash
+            // attribute must be empty here. See DASH_ALIGN.md
+            // §Algorithm. Per-shape callers branch on
+            // s.dash_align_anchors to choose the dasher path.
+            if !da.is_empty() && !s.dash_align_anchors {
                 let js_array = js_sys::Array::new();
                 for &v in da {
                     js_array.push(&wasm_bindgen::JsValue::from_f64(v));
@@ -922,10 +928,31 @@ fn draw_element_body(
                 }
                 if has_stroke {
                     ctx.set_global_alpha(base_alpha * stroke_op);
-                    // Use path-based stroke for alignment support
-                    ctx.begin_path();
-                    ctx.rect(e.x, e.y, e.width, e.height);
-                    stroke_aligned(ctx, stroke_align);
+                    let dasher_active = e.stroke.as_ref()
+                        .map(|s| s.dash_align_anchors && !s.dash_array().is_empty())
+                        .unwrap_or(false);
+                    if dasher_active {
+                        let s = e.stroke.as_ref().unwrap();
+                        let cmds = vec![
+                            PathCommand::MoveTo { x: e.x, y: e.y },
+                            PathCommand::LineTo { x: e.x + e.width, y: e.y },
+                            PathCommand::LineTo { x: e.x + e.width, y: e.y + e.height },
+                            PathCommand::LineTo { x: e.x, y: e.y + e.height },
+                            PathCommand::ClosePath,
+                        ];
+                        let expanded = crate::algorithms::dash_renderer::expand_dashed_stroke(
+                            &cmds, s.dash_array(), true);
+                        for sub in &expanded {
+                            ctx.begin_path();
+                            build_path(ctx, sub);
+                            stroke_aligned(ctx, stroke_align);
+                        }
+                    } else {
+                        // Use path-based stroke for alignment support
+                        ctx.begin_path();
+                        ctx.rect(e.x, e.y, e.width, e.height);
+                        stroke_aligned(ctx, stroke_align);
+                    }
                 }
             }
         }
@@ -1090,6 +1117,23 @@ fn draw_element_body(
                         crate::algorithms::offset_path::render_variable_width_path(
                             ctx, stroke_cmds, &e.width_points, &color, s.linecap,
                         );
+                    }
+                } else if let Some(s) = e.stroke.as_ref() {
+                    if s.dash_align_anchors && !s.dash_array().is_empty() {
+                        // Anchor-aligned dashing: expand into solid
+                        // sub-paths and stroke each. apply_stroke
+                        // already cleared the platform's dash array.
+                        let expanded = crate::algorithms::dash_renderer::expand_dashed_stroke(
+                            stroke_cmds, s.dash_array(), true);
+                        for sub in &expanded {
+                            ctx.begin_path();
+                            build_path(ctx, sub);
+                            stroke_aligned(ctx, stroke_align);
+                        }
+                    } else {
+                        ctx.begin_path();
+                        build_path(ctx, stroke_cmds);
+                        stroke_aligned(ctx, stroke_align);
                     }
                 } else {
                     ctx.begin_path();
@@ -1746,7 +1790,11 @@ const ARTBOARD_LABEL_COLOR: &str = "rgb(200,200,200)";
 
 fn artboard_fill_css(fill: &ArtboardFill) -> Option<String> {
     match fill {
-        ArtboardFill::Transparent => None,
+        // Default-Transparent artboards visually appear white over
+        // the gray pasteboard — matching the convention in every
+        // vector-illustration app. A truly see-through artboard
+        // isn't a real-world use case here.
+        ArtboardFill::Transparent => Some("#ffffff".to_string()),
         ArtboardFill::Color(hex) => Some(hex.clone()),
     }
 }
@@ -1779,6 +1827,15 @@ fn draw_fade_overlay(
     width: f64,
     height: f64,
 ) {
+    // Disabled while the pasteboard is theme-gray and artboards are
+    // painted opaque white: this routine's destination-out punches
+    // alpha=0 holes through the white artboard fills, leaving
+    // canvas-DOM-bg gray inside the artboards. Reinstate when the
+    // fade can target only the pasteboard region (e.g. via a
+    // separate raster mask drawn before the artboard fill pass).
+    let _ = (ctx, doc, width, height);
+    return;
+    #[allow(unreachable_code)]
     if !doc.artboard_options.fade_region_outside_artboard {
         return;
     }
