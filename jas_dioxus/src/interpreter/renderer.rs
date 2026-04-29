@@ -740,6 +740,16 @@ fn set_app_state_field(
             st.app_default_fill = new_fill;
             if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                 tab.model.default_fill = new_fill;
+                // Propagate to canvas selection so a swatch / hex /
+                // color-bar click via the YAML set_active_color
+                // action updates the selected element's fill — same
+                // path AppState::set_active_color uses for the
+                // Color-panel slider commits.
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    crate::document::controller::Controller::set_selection_fill(
+                        &mut tab.model, new_fill);
+                }
             }
         }
         "stroke_color" => {
@@ -747,6 +757,11 @@ fn set_app_state_field(
                 st.app_default_stroke = None;
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                     tab.model.default_stroke = None;
+                    if !tab.model.document().selection.is_empty() {
+                        tab.model.snapshot();
+                        crate::document::controller::Controller::set_selection_stroke(
+                            &mut tab.model, None);
+                    }
                 }
             } else if let Some(color) = val.as_str().and_then(Color::from_hex) {
                 let width = st.app_default_stroke.map(|s| s.width).unwrap_or(1.0);
@@ -754,7 +769,13 @@ fn set_app_state_field(
                 st.app_default_stroke = new_stroke;
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                     let tab_width = tab.model.default_stroke.map(|s| s.width).unwrap_or(width);
-                    tab.model.default_stroke = Some(Stroke::new(color, tab_width));
+                    let tab_stroke = Some(Stroke::new(color, tab_width));
+                    tab.model.default_stroke = tab_stroke;
+                    if !tab.model.document().selection.is_empty() {
+                        tab.model.snapshot();
+                        crate::document::controller::Controller::set_selection_stroke(
+                            &mut tab.model, tab_stroke);
+                    }
                 }
             }
         }
