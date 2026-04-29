@@ -1225,11 +1225,41 @@ fn build_appstate_ctx(
         None => serde_json::Value::Null,
         Some(s) => serde_json::Value::String(format!("#{}", s.color.to_hex())),
     };
+    // Expose every stroke-panel field that appears in YAML state.*
+    // expressions (workspace/panels/stroke.yaml's state map at the
+    // bottom of the file enumerates them). Without these,
+    // "not state.stroke_dashed" evaluates against a null and toggling
+    // is impossible. See AppState::stroke_panel for the canonical
+    // source of truth on these values.
+    let sp = &st.stroke_panel;
+    let stroke_width = st.app_default_stroke.as_ref()
+        .map(|s| s.width).unwrap_or(1.0);
     let state = serde_json::json!({
         "fill_on_top": st.fill_on_top,
         "fill_color": fill_color,
         "stroke_color": stroke_color,
         "active_tool": tool_name,
+        "stroke_width": stroke_width,
+        "stroke_cap": sp.cap,
+        "stroke_join": sp.join,
+        "stroke_miter_limit": sp.miter_limit,
+        "stroke_align": sp.align,
+        "stroke_dashed": sp.dashed,
+        "stroke_dash_1": sp.dash_1,
+        "stroke_gap_1": sp.gap_1,
+        "stroke_dash_2": sp.dash_2,
+        "stroke_gap_2": sp.gap_2,
+        "stroke_dash_3": sp.dash_3,
+        "stroke_gap_3": sp.gap_3,
+        "stroke_dash_align_anchors": sp.dash_align_anchors,
+        "stroke_start_arrowhead": sp.start_arrowhead,
+        "stroke_end_arrowhead": sp.end_arrowhead,
+        "stroke_start_arrowhead_scale": sp.start_arrowhead_scale,
+        "stroke_end_arrowhead_scale": sp.end_arrowhead_scale,
+        "stroke_link_arrowhead_scale": sp.link_arrowhead_scale,
+        "stroke_arrow_align": sp.arrow_align,
+        "stroke_profile": sp.profile,
+        "stroke_profile_flipped": sp.profile_flipped,
     });
     // Panel namespace: expose layers_panel_selection as a list of path
     // markers so YAML actions (delete/duplicate_layer_selection) can
