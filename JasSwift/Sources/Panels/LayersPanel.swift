@@ -375,19 +375,40 @@ public enum LayersPanel {
             return nil
         }
 
-        // list_push: { target, value } — Phase 3 Group D: enter_isolation_mode.
-        // Only target=panel.isolation_stack is handled here; writes the
-        // evaluated Path value to model.layersIsolationStack.
-        let listPushHandler: PlatformEffect = { value, callCtx, _ in
+        // list_push: { target, value } — special-case routing.
+        // - panel.isolation_stack — Phase 3 Group D enter_isolation_mode;
+        //   writes the evaluated Path value to model.layersIsolationStack.
+        // - panel.recent_colors — Swatches Panel set_active_color
+        //   effect; routes the hex through ColorPanel.pushRecentColor
+        //   so model.recentColors stays the single source of truth, and
+        //   mirrors the post-push list back into the calling panel's
+        //   store so the recent strip updates immediately.
+        let listPushHandler: PlatformEffect = { value, callCtx, store in
             guard let spec = value as? [String: Any] else { return nil }
             let target = (spec["target"] as? String) ?? ""
-            guard target == "panel.isolation_stack" else { return nil }
             let valueExpr: String
             if let s = spec["value"] as? String { valueExpr = s }
             else { return nil }
-            let val = evaluate(valueExpr, context: callCtx)
-            guard case .path(let indices) = val else { return nil }
-            model.layersIsolationStack.append(indices)
+            if target == "panel.isolation_stack" {
+                let val = evaluate(valueExpr, context: callCtx)
+                guard case .path(let indices) = val else { return nil }
+                model.layersIsolationStack.append(indices)
+            } else if target == "panel.recent_colors" {
+                let val = evaluate(valueExpr, context: callCtx)
+                let hex: String?
+                switch val {
+                case .color(let c): hex = c
+                case .string(let s) where s.hasPrefix("#"): hex = s
+                default: hex = nil
+                }
+                if let h = hex, !h.isEmpty {
+                    ColorPanel.pushRecentColor(h, model: model)
+                    if let pid = store.getActivePanelId() {
+                        store.setPanel(
+                            pid, "recent_colors", model.recentColors)
+                    }
+                }
+            }
             return nil
         }
         // pop: "panel.isolation_stack" — Phase 3 Group D: exit_isolation_mode.

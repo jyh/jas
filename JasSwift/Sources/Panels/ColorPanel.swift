@@ -84,12 +84,27 @@ public enum ColorPanel {
         }
     }
 
+    /// Listeners fired after [pushRecentColor] commits. The Color and
+    /// Swatches panels register here so a native push (slider/hex/
+    /// recent click) flows into their YAML panel.recent_colors state
+    /// stores. Each listener receives (model, hex).
+    private static var _recentColorsListeners: [(Model, String) -> Void] = []
+
+    public static func addRecentColorsListener(
+        _ cb: @escaping (Model, String) -> Void
+    ) {
+        _recentColorsListeners.append(cb)
+    }
+
     /// Push a hex color to the recent colors list (move-to-front dedup, max 10).
     public static func pushRecentColor(_ hex: String, model: Model) {
         model.recentColors.removeAll { $0 == hex }
         model.recentColors.insert(hex, at: 0)
         if model.recentColors.count > 10 {
             model.recentColors = Array(model.recentColors.prefix(10))
+        }
+        for cb in _recentColorsListeners {
+            cb(model, hex)
         }
     }
 }
