@@ -304,8 +304,16 @@ class MainWindow(QMainWindow):
         # wiring. The Controller is constructed per-call so it always
         # references the live model.
         from workspace_interpreter.effects import subscribe_stroke_panel as _subscribe_stroke_panel
+        from workspace_interpreter.effects import subscribe_active_color as _subscribe_active_color
         from document.controller import Controller as _Controller
         _subscribe_stroke_panel(self._yaml_state,
+                                lambda: _Controller(self.active_model()))
+        # Active-color writes via the YAML set_active_color action
+        # (Swatches Panel swatch click, etc.) propagate to the canvas
+        # selection here. The Color Panel's direct set_active_color
+        # path already does the apply itself; this catches the YAML
+        # route which only updates global state.
+        _subscribe_active_color(self._yaml_state,
                                 lambda: _Controller(self.active_model()))
 
         # Dock pane

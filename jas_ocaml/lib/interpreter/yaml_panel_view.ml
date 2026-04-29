@@ -1802,6 +1802,14 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          widget changes reach the selected element. *)
       (if kind = Stroke then
          Effects.subscribe_stroke_panel store (make_ctrl_getter ()));
+      (* Active-color writes (set_active_color YAML action et al.)
+         must also propagate to the selected element. The Color
+         Panel calls Panel_menu.set_active_color directly; the YAML
+         route writes through set: which lands in
+         set_by_scoped_target. Subscribe via the global channel so
+         the YAML route catches up. *)
+      (if kind = Color || kind = Swatches then
+         Effects.subscribe_active_color store (make_ctrl_getter ()));
       (* Paragraph panel — Phase 4. Stash the store handle in
          panel_menu so the hamburger-menu commands
          (toggle_hanging_punctuation, reset_paragraph_panel) can

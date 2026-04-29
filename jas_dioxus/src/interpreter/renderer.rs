@@ -492,6 +492,19 @@ fn run_effects(
     effects: &[serde_json::Value],
     st: &mut crate::workspace::app_state::AppState,
 ) -> Vec<serde_json::Value> {
+    run_effects_with_ctx(effects, None, st)
+}
+
+/// As [`run_effects`] but with a caller-provided eval context (e.g. the
+/// foreach-aware ctx captured at click time). Anything the caller
+/// passes is merged into the AppState ctx so foreach iterator
+/// variables (like `swatch._index`) resolve in `select.target`,
+/// `set:` value expressions, etc.
+fn run_effects_with_ctx(
+    effects: &[serde_json::Value],
+    extra_ctx: Option<&serde_json::Value>,
+    st: &mut crate::workspace::app_state::AppState,
+) -> Vec<serde_json::Value> {
     let mut dialog_effects = Vec::new();
     // Build an evaluation context once per call. Set-effect values are
     // expression strings (e.g. "not state.stroke_dashed"); they must
@@ -499,7 +512,16 @@ fn run_effects(
     // unevaluated string is passed to the Bool / Number coercer and
     // the schema rejects it as a type_mismatch. Mirrors the
     // run_yaml_effects path.
-    let eval_ctx = build_appstate_ctx(&serde_json::Map::new(), st);
+    let mut eval_ctx = build_appstate_ctx(&serde_json::Map::new(), st);
+    if let Some(extra) = extra_ctx {
+        if let (serde_json::Value::Object(base), serde_json::Value::Object(more))
+            = (&mut eval_ctx, extra)
+        {
+            for (k, v) in more {
+                base.insert(k.clone(), v.clone());
+            }
+        }
+    }
     for effect in effects {
         if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
             let mut evaluated = serde_json::Map::new();
@@ -516,6 +538,11 @@ fn run_effects(
         // set_panel_state: { key, value }
         if let Some(sps) = effect.get("set_panel_state").and_then(|v| v.as_object()) {
             apply_set_panel_state(sps, st);
+        }
+        // select: { target, list, scope, scope_value, mode } — generic
+        // tile-selection effect for swatch / brush / row panels.
+        if let Some(spec) = effect.get("select").and_then(|v| v.as_object()) {
+            apply_select_effect(spec, &eval_ctx, st);
         }
         // swap_panel_state: [key_a, key_b]
         if let Some(serde_json::Value::Array(keys)) = effect.get("swap_panel_state") {
@@ -616,6 +643,98 @@ fn apply_set_effects(
     }
 }
 
+/// Apply a `select: { target, list, scope, scope_value, mode }` effect
+/// to the active panel's state. Used by tile-style panels (swatches,
+/// brushes) for click-to-select semantics with optional shift / ctrl
+/// modifiers.
+///
+/// - `target`: expression for the list-item value to add (e.g. an
+///   index, a slug).
+/// - `list`: panel-state field name holding the selection list.
+/// - `scope`: panel-state field name holding the scope identifier
+///   (e.g. selected_library). Cleared and reset to `scope_value` if
+///   the click is in a different scope.
+/// - `scope_value`: expression for the new scope value.
+/// - `mode`: "auto" (default), "single", "toggle", "extend". `auto`
+///   reads `event.shift` / `event.ctrl` / `event.meta` to choose
+///   between single, toggle, and extend.
+fn apply_select_effect(
+    spec: &serde_json::Map<String, serde_json::Value>,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let target_expr = spec.get("target").and_then(|v| v.as_str()).unwrap_or("");
+    let list_field = spec.get("list").and_then(|v| v.as_str()).unwrap_or("");
+    let scope_field = spec.get("scope").and_then(|v| v.as_str()).unwrap_or("");
+    let scope_value_expr = spec.get("scope_value").and_then(|v| v.as_str()).unwrap_or("");
+    let mode = spec.get("mode").and_then(|v| v.as_str()).unwrap_or("auto");
+    if list_field.is_empty() {
+        return;
+    }
+    let target = super::effects::value_to_json(&super::expr::eval(target_expr, eval_ctx));
+    let scope_value = if scope_value_expr.is_empty() {
+        serde_json::Value::Null
+    } else {
+        super::effects::value_to_json(&super::expr::eval(scope_value_expr, eval_ctx))
+    };
+
+    // Read modifier state from the event ctx if mode is auto.
+    let event = eval_ctx.get("event");
+    let shift = event.and_then(|e| e.get("shift")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let ctrl_or_meta = event.and_then(|e| e.get("ctrl")).and_then(|v| v.as_bool()).unwrap_or(false)
+        || event.and_then(|e| e.get("meta")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let effective_mode = match mode {
+        "auto" => {
+            if shift { "extend" }
+            else if ctrl_or_meta { "toggle" }
+            else { "single" }
+        }
+        m => m,
+    };
+
+    // Currently the only typed panel that uses select: is Swatches.
+    // When other panels adopt it, add their typed-state branches
+    // here (or generalize via a panel-state trait).
+    let target_idx = target.as_i64();
+    if list_field == "selected_swatches" {
+        let sp = &mut st.swatches_panel;
+        // Scope check.
+        if !scope_field.is_empty() {
+            let new_scope = scope_value.as_str().unwrap_or("").to_string();
+            if !new_scope.is_empty() && new_scope != sp.selected_library {
+                sp.selected_library = new_scope;
+                if let Some(idx) = target_idx {
+                    sp.selected_swatches = vec![idx];
+                }
+                return;
+            }
+        }
+        let Some(idx) = target_idx else { return };
+        let cur = &sp.selected_swatches;
+        let new_list = match effective_mode {
+            "toggle" => {
+                if cur.contains(&idx) {
+                    cur.iter().copied().filter(|v| v != &idx).collect()
+                } else {
+                    let mut l = cur.clone();
+                    l.push(idx);
+                    l
+                }
+            }
+            "extend" => {
+                if let Some(&anchor) = cur.first() {
+                    let (lo, hi) = if anchor <= idx { (anchor, idx) } else { (idx, anchor) };
+                    (lo..=hi).collect()
+                } else {
+                    vec![idx]
+                }
+            }
+            _ => vec![idx],
+        };
+        sp.selected_swatches = new_list;
+    }
+}
+
 /// Write a single validated+coerced value to the appropriate AppState field.
 fn set_app_state_field(
     key: &str,
@@ -643,6 +762,16 @@ fn set_app_state_field(
             st.app_default_fill = new_fill;
             if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                 tab.model.default_fill = new_fill;
+                // Propagate to canvas selection so a swatch / hex /
+                // color-bar click via the YAML set_active_color
+                // action updates the selected element's fill — same
+                // path AppState::set_active_color uses for the
+                // Color-panel slider commits.
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    crate::document::controller::Controller::set_selection_fill(
+                        &mut tab.model, new_fill);
+                }
             }
         }
         "stroke_color" => {
@@ -650,6 +779,11 @@ fn set_app_state_field(
                 st.app_default_stroke = None;
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                     tab.model.default_stroke = None;
+                    if !tab.model.document().selection.is_empty() {
+                        tab.model.snapshot();
+                        crate::document::controller::Controller::set_selection_stroke(
+                            &mut tab.model, None);
+                    }
                 }
             } else if let Some(color) = val.as_str().and_then(Color::from_hex) {
                 let width = st.app_default_stroke.map(|s| s.width).unwrap_or(1.0);
@@ -657,7 +791,13 @@ fn set_app_state_field(
                 st.app_default_stroke = new_stroke;
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                     let tab_width = tab.model.default_stroke.map(|s| s.width).unwrap_or(width);
-                    tab.model.default_stroke = Some(Stroke::new(color, tab_width));
+                    let tab_stroke = Some(Stroke::new(color, tab_width));
+                    tab.model.default_stroke = tab_stroke;
+                    if !tab.model.document().selection.is_empty() {
+                        tab.model.snapshot();
+                        crate::document::controller::Controller::set_selection_stroke(
+                            &mut tab.model, tab_stroke);
+                    }
                 }
             }
         }
@@ -2201,6 +2341,18 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // select: { target, list, scope, scope_value, mode } — generic
+    // list-selection effect for swatch / brush / row tile-style
+    // panels. Plain click replaces the list with [target] and sets
+    // the scope; mode "auto" reads event.shift / event.ctrl /
+    // event.meta from the click ctx for shift-extend / ctrl-toggle
+    // behaviors. The scope changes (panel.scope_field) reset the
+    // selection when the user clicks into a different scope.
+    if let Some(spec) = eff.get("select").and_then(|v| v.as_object()) {
+        apply_select_effect(spec, eval_ctx, st);
+        return deferred;
+    }
+
     // swap: [key_a, key_b]
     if let Some(serde_json::Value::Array(keys)) = eff.get("swap") {
         if keys.len() == 2 {
@@ -2228,7 +2380,15 @@ fn run_yaml_effect(
         if target == "panel.recent_colors" {
             let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
             let val = super::expr::eval(value_expr, eval_ctx);
-            if let super::expr_types::Value::Str(hex) = val {
+            // Accept both Value::Color (e.g. from a `Color`-typed
+            // bind) and Value::Str (already-stringified hex). The
+            // recent_colors list is a Vec<String>.
+            let hex_opt = match val {
+                super::expr_types::Value::Str(s) => Some(s),
+                super::expr_types::Value::Color(s) => Some(s),
+                _ => None,
+            };
+            if let Some(hex) = hex_opt {
                 let unique = lp.get("unique").and_then(|v| v.as_bool()).unwrap_or(false);
                 let max_len = lp.get("max_length").and_then(|v| v.as_u64()).map(|n| n as usize);
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
@@ -2756,9 +2916,13 @@ fn build_mouse_event_handler(
                             continue;
                         }
                     }
-                    // Run effects (returns deferred dialog effects)
+                    // Run effects (returns deferred dialog effects).
+                    // Pass the click-time ctx so foreach iterator
+                    // vars (e.g. `swatch._index`) resolve in select
+                    // targets / scope_value / set: expressions.
                     if !effects.is_empty() {
-                        let dialog_effs = run_effects(effects, &mut st);
+                        let dialog_effs = run_effects_with_ctx(
+                            effects, Some(&ctx_snap), &mut st);
                         deferred_dialog_effects.extend(dialog_effs);
                     }
                     // Dispatch action
@@ -4549,10 +4713,46 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         })
         .unwrap_or_default();
 
+    // bind.selected_in: <list-expr> — when present, the renderer
+    // evaluates both the list and the widget's per-item identity (read
+    // from the click behavior's first `select.target` so authors don't
+    // have to repeat it). If the identity is in the list, draw a 2px
+    // accent outline. Falls back to the regular border otherwise.
+    let selected = el.get("bind")
+        .and_then(|b| b.get("selected_in"))
+        .and_then(|v| v.as_str())
+        .map(|list_expr| {
+            let list_val = expr::eval(list_expr, ctx);
+            let id_expr = el.get("behavior")
+                .and_then(|b| b.as_array())
+                .and_then(|behaviors| {
+                    behaviors.iter().find_map(|b| {
+                        let effects = b.get("effects").and_then(|v| v.as_array())?;
+                        effects.iter().find_map(|e| {
+                            e.get("select")
+                                .and_then(|s| s.get("target"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        })
+                    })
+                });
+            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
+            list_contains_value(&list_val, id_val.as_ref())
+        })
+        .unwrap_or(false);
+
+    // Selected: 2px accent outline replacing the 1px border. Shifted
+    // border via box-shadow keeps the visual size consistent.
+    let final_border = if selected {
+        "2px solid var(--jas-accent,#4a90d9)"
+    } else {
+        border
+    };
+
     let style = if hollow {
         format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {bg};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
     } else {
-        format!("width:{size}px;height:{size}px;background:{bg};border:{border};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
+        format!("width:{size}px;height:{size}px;background:{bg};border:{final_border};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
     };
 
     let on_click = build_click_handler(el, ctx, rctx);
@@ -4561,10 +4761,22 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     rsx! {
         div {
             id: "{id}",
+            class: "jas-swatch-tile",
             style: "{style}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
         }
+    }
+}
+
+/// Test whether `id` is a member of the list `list`. Used by the
+/// `selected_in` bind on `color_swatch` and other tile widgets.
+fn list_contains_value(list: &Value, id: Option<&Value>) -> bool {
+    let Some(id) = id else { return false; };
+    let id_json = super::effects::value_to_json(id);
+    match list {
+        Value::List(items) => items.iter().any(|item| item == &id_json),
+        _ => false,
     }
 }
 
