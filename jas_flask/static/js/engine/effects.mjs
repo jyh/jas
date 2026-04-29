@@ -21,12 +21,15 @@
 import { evaluate } from "./expr.mjs";
 import { Scope } from "./scope.mjs";
 import { toBool, toJson, PATH } from "./value.mjs";
+import { registerPrimitive } from "./evaluator.mjs";
 import {
   setSelection, addToSelection, toggleSelection, clearSelection,
-  getElement, mkPath,
+  getElement, mkPath, mkGroup,
+  partialCpsForPath, setPartialCps,
 } from "./document.mjs";
-import { hitTestRect, translateElement } from "./geometry.mjs";
+import { hitTestRect, translateElement, controlPoints } from "./geometry.mjs";
 import * as pointBuffers from "./point_buffers.mjs";
+import * as anchorBuffers from "./anchor_buffers.mjs";
 import { fitCurve } from "./fit_curve.mjs";
 
 /**
@@ -305,6 +308,44 @@ function runEffect(effect, scope, store, options) {
     return;
   }
 
+  // ── Anchor-buffer mutations (Pen tool) ──────────────
+  if ("anchor.push" in effect) {
+    const spec = effect["anchor.push"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      const x = Number(toJson(evaluate(String(spec.x ?? "0"), scope))) || 0;
+      const y = Number(toJson(evaluate(String(spec.y ?? "0"), scope))) || 0;
+      if (name) anchorBuffers.push(name, x, y);
+    }
+    return;
+  }
+  if ("anchor.pop" in effect) {
+    const spec = effect["anchor.pop"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      if (name) anchorBuffers.pop(name);
+    }
+    return;
+  }
+  if ("anchor.clear" in effect) {
+    const spec = effect["anchor.clear"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      if (name) anchorBuffers.clear(name);
+    }
+    return;
+  }
+  if ("anchor.set_last_out" in effect) {
+    const spec = effect["anchor.set_last_out"];
+    if (spec && typeof spec === "object") {
+      const name = String(spec.buffer || "");
+      const hx = Number(toJson(evaluate(String(spec.hx ?? "0"), scope))) || 0;
+      const hy = Number(toJson(evaluate(String(spec.hy ?? "0"), scope))) || 0;
+      if (name) anchorBuffers.setLastOutHandle(name, hx, hy);
+    }
+    return;
+  }
+
   // ── Document mutations ───────────────────────────────
   // Routes through options.model (a Model from model.mjs) when
   // supplied; falls back to options.onDocEffect for test harnesses
@@ -370,6 +411,179 @@ function runEffect(effect, scope, store, options) {
           model.mutate(deleteSelectedElements);
           return;
         }
+        case "doc.copy_selection": {
+          // Spec: { dx, dy }
+          // Duplicate every selected element in place (translated by
+          // the given delta), insert each copy as a sibling right
+          // after its original, and replace the selection with the
+          // copies (as whole-element). Native: Controller::copy_selection.
+          // Iterates in reverse path order so sibling insertions don't
+          // shift the indices of yet-to-process originals.
+          const dx = Number(toJson(evaluate(String(spec.dx ?? "0"), scope))) || 0;
+          const dy = Number(toJson(evaluate(String(spec.dy ?? "0"), scope))) || 0;
+          model.mutate((d) => {
+            if (!d.selection || d.selection.length === 0) return d;
+            const sorted = d.selection.slice().sort((a, b) => {
+              for (let i = 0; i < Math.min(a.length, b.length); i++) {
+                if (a[i] !== b[i]) return b[i] - a[i];
+              }
+              return b.length - a.length;
+            });
+            const newSel = [];
+            let next = d;
+            for (const path of sorted) {
+              const elem = getElement(next, path);
+              if (!elem) continue;
+              const copy = translateElement(deepCloneElement(elem), dx, dy);
+              const copyPath = path.slice();
+              copyPath[copyPath.length - 1] += 1;
+              next = insertElementAt(next, copyPath, copy);
+              newSel.push(copyPath);
+            }
+            // Reset partial entries — copies are whole-selected.
+            return { ...next, selection: newSel, partial_cps: {} };
+          });
+          return;
+        }
+        case "doc.move_path_handle": {
+          // Reads tool.partial_selection.{handle_path,
+          // handle_anchor_idx, handle_type} and applies a handle
+          // move by (dx, dy). The opposite handle on the same anchor
+          // is reflected around the anchor with its original
+          // distance preserved — smooth-anchor symmetry. No-op if
+          // no handle is currently latched.
+          const dx = Number(toJson(evaluate(String(spec.dx ?? "0"), scope))) || 0;
+          const dy = Number(toJson(evaluate(String(spec.dy ?? "0"), scope))) || 0;
+          if (dx === 0 && dy === 0) return;
+          const hpath = store.get("tool.partial_selection.handle_path");
+          if (!Array.isArray(hpath) || hpath.length === 0) return;
+          const anchorIdx = Number(store.get("tool.partial_selection.handle_anchor_idx")) || 0;
+          const handleType = String(store.get("tool.partial_selection.handle_type") || "");
+          if (handleType !== "in" && handleType !== "out") return;
+          model.mutate((d) => {
+            const elem = getElement(d, hpath);
+            if (!elem || elem.type !== "path") return d;
+            const moved = movePathHandle(elem, anchorIdx, handleType, dx, dy);
+            const layers = d.layers.slice();
+            const [li, ...rest] = hpath;
+            layers[li] = replaceElementAt(layers[li], rest, () => moved);
+            return { ...d, layers };
+          });
+          return;
+        }
+        case "doc.path.commit_partial_marquee":
+        case "doc.partial_select_in_rect": {
+          // Spec: { x1, y1, x2, y2, additive }
+          // Walk every shape in the document; for each, list which
+          // CPs fall inside the marquee rect. additive = true merges
+          // into the existing partial set (and keeps the existing
+          // selection); additive = false replaces both. Element
+          // joins the selection iff at least one CP is hit.
+          // Both effect names share the same impl — Partial
+          // Selection's marquee commit and Interior Selection's
+          // partial-rect select are the same operation under the
+          // hood.
+          const x1 = Number(toJson(evaluate(String(spec.x1), scope))) || 0;
+          const y1 = Number(toJson(evaluate(String(spec.y1), scope))) || 0;
+          const x2 = Number(toJson(evaluate(String(spec.x2), scope))) || 0;
+          const y2 = Number(toJson(evaluate(String(spec.y2), scope))) || 0;
+          const additive = "additive" in spec
+            ? toBool(evaluate(String(spec.additive), scope)) : false;
+          const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+          const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
+          const hits = _cpsInRect(model.document, minX, minY, maxX, maxY);
+          model.mutate((d) => {
+            if (additive) {
+              let next = d;
+              for (const [pathKey, cps] of hits) {
+                const path = pathKey.split(",").map(Number);
+                const inSel = next.selection.some(
+                  (p) => p.length === path.length
+                    && p.every((v, i) => v === path[i]));
+                if (!inSel) {
+                  next = { ...next, selection: [...next.selection, path.slice()] };
+                }
+                const cur = partialCpsForPath(next, path) || [];
+                const merged = Array.from(new Set([...cur, ...cps]));
+                next = setPartialCps(next, path, merged);
+              }
+              return next;
+            }
+            // Non-additive: replace selection + partial map with the hits.
+            const newSel = [];
+            let next = { ...d, selection: newSel, partial_cps: {} };
+            for (const [pathKey, cps] of hits) {
+              const path = pathKey.split(",").map(Number);
+              newSel.push(path.slice());
+              next = setPartialCps(next, path, cps);
+            }
+            return { ...next, selection: newSel };
+          });
+          return;
+        }
+        case "doc.path.probe_partial_hit": {
+          // Partial Selection's press-time dispatcher. Hit-test
+          // priority (matches jas_dioxus path_probe_partial_hit):
+          //   1. Bezier handle on a selected Path → mode='handle',
+          //      latches handle_path / handle_anchor_idx / handle_type.
+          //   2. Control point on any element → mode='moving_pending',
+          //      replaces (or shift-toggles) the partial-CP set.
+          //   3. Miss → mode='marquee'.
+          const x = Number(toJson(evaluate(String(spec.x), scope))) || 0;
+          const y = Number(toJson(evaluate(String(spec.y), scope))) || 0;
+          // YAML uses hit_radius (matches Rust); accept the older
+          // 'radius' name too as a transition alias.
+          const radius = "hit_radius" in spec
+            ? (Number(toJson(evaluate(String(spec.hit_radius), scope))) || 8)
+            : ("radius" in spec
+                ? (Number(toJson(evaluate(String(spec.radius), scope))) || 8)
+                : 8);
+          const shift = "shift" in spec
+            ? toBool(evaluate(String(spec.shift), scope)) : false;
+
+          // 1. Bezier handle on a selected Path?
+          const hh = _hitTestPathHandle(model.document, x, y, radius);
+          if (hh) {
+            store.set("tool.partial_selection.mode", "handle");
+            store.set("tool.partial_selection.handle_anchor_idx", hh.anchor_idx);
+            store.set("tool.partial_selection.handle_type", hh.handle_type);
+            store.set("tool.partial_selection.handle_path", hh.path);
+            return;
+          }
+
+          // 2. Control point hit?
+          const hit = _hitTestCp(model.document, x, y, radius);
+          if (hit) {
+            model.snapshot();
+            model.mutate((d) => {
+              const cur = partialCpsForPath(d, hit.path) || [];
+              let nextCps;
+              let nextSel = d.selection;
+              const inSel = d.selection.some(
+                (p) => p.length === hit.path.length
+                  && p.every((v, i) => v === hit.path[i]));
+              if (!inSel) {
+                nextSel = [...d.selection, hit.path.slice()];
+              }
+              if (shift) {
+                const idx = cur.indexOf(hit.cp_index);
+                nextCps = idx >= 0
+                  ? cur.filter((i) => i !== hit.cp_index)
+                  : [...cur, hit.cp_index];
+              } else {
+                // No shift: replace with just this CP.
+                nextSel = [hit.path.slice()];
+                nextCps = [hit.cp_index];
+              }
+              const withSel = { ...d, selection: nextSel };
+              return setPartialCps(withSel, hit.path, nextCps);
+            });
+            store.set("tool.partial_selection.mode", "moving_pending");
+          } else {
+            store.set("tool.partial_selection.mode", "marquee");
+          }
+          return;
+        }
         case "doc.add_element": {
           // Spec: { parent?: <path expr>, element: <element-spec> }
           // The element-spec is a dict with `type:` + geometry fields.
@@ -388,6 +602,7 @@ function runEffect(effect, scope, store, options) {
             : [0];
           if (!parentPath) return;
           const resolved = resolveElementSpec(elemSpec, scope);
+          applyShapeDefaults(resolved, store);
           model.mutate((d) => addElementAt(d, parentPath, resolved));
           return;
         }
@@ -416,6 +631,55 @@ function runEffect(effect, scope, store, options) {
             }
             return next;
           });
+          return;
+        }
+        case "doc.add_path_from_anchor_buffer": {
+          // Spec: { buffer: <name>, closed?: <expr>,
+          //         stroke?: <expr>, fill?: <expr> }
+          // Walks the named anchor buffer; emits one CurveTo per
+          // consecutive pair of anchors (using prev.hout + curr.hin
+          // as control points — corner anchors collapse to straight
+          // lines automatically). When closed is true, adds a final
+          // CurveTo from the last anchor back to the first plus a
+          // ClosePath. Mirrors jas_dioxus PenTool::finish.
+          const name = String(spec.buffer || "");
+          if (!name) return;
+          const anchors = anchorBuffers.anchors(name);
+          if (anchors.length < 2) return;
+          const closed = "closed" in spec
+            ? toBool(evaluate(String(spec.closed), scope)) : false;
+          const cmds = [{ type: "M", x: anchors[0].x, y: anchors[0].y }];
+          for (let i = 1; i < anchors.length; i++) {
+            const prev = anchors[i - 1];
+            const curr = anchors[i];
+            cmds.push({
+              type: "C",
+              x1: prev.hout_x, y1: prev.hout_y,
+              x2: curr.hin_x,  y2: curr.hin_y,
+              x: curr.x, y: curr.y,
+            });
+          }
+          if (closed) {
+            const last = anchors[anchors.length - 1];
+            const first = anchors[0];
+            cmds.push({
+              type: "C",
+              x1: last.hout_x, y1: last.hout_y,
+              x2: first.hin_x, y2: first.hin_y,
+              x: first.x, y: first.y,
+            });
+            cmds.push({ type: "Z" });
+          }
+          const extra = {};
+          if ("stroke" in spec) extra.stroke = toJson(evaluate(String(spec.stroke), scope));
+          if ("fill" in spec) extra.fill = toJson(evaluate(String(spec.fill), scope));
+          const elem = mkPath({ d: cmds, ...extra });
+          // Open paths default to no fill (a free-standing curve is
+          // rarely meant to be filled). Closed paths fall through to
+          // the panel's fill colour.
+          if (!closed && !("fill" in spec)) elem.fill = null;
+          applyShapeDefaults(elem, store);
+          model.mutate((d) => addElementAt(d, [0], elem));
           return;
         }
         case "doc.add_path_from_buffer": {
@@ -467,6 +731,11 @@ function runEffect(effect, scope, store, options) {
           }
 
           const elem = mkPath({ d: cmds, ...extra });
+          // Pencil shouldn't inherit a default fill — a freehand
+          // stroke is rarely meant to be a filled region. Use null
+          // when the spec didn't specify a fill explicitly.
+          if (!("fill" in spec)) elem.fill = null;
+          applyShapeDefaults(elem, store);
           model.mutate((d) => addElementAt(d, [0], elem));
           return;
         }
@@ -629,17 +898,6 @@ function extractPathList(spec, scope) {
 function translateSelectedElements(doc, dx, dy) {
   if (!doc.selection || doc.selection.length === 0) return doc;
   const layers = doc.layers.slice();
-  const touchedTop = new Set();
-  for (const path of doc.selection) {
-    if (path.length === 0) continue;
-    const topIdx = path[0];
-    if (!touchedTop.has(topIdx)) {
-      touchedTop.add(topIdx);
-      layers[topIdx] = layers[topIdx];
-    }
-  }
-  // Build the new layers by walking each selected path and replacing
-  // the leaf element with its translated counterpart.
   const replaceAt = (layerIdx, subpath, replacer) => {
     if (subpath.length === 0) {
       layers[layerIdx] = replacer(layers[layerIdx]);
@@ -649,10 +907,66 @@ function translateSelectedElements(doc, dx, dy) {
   };
   for (const path of doc.selection) {
     if (path.length === 0) continue;
+    const partial = partialCpsForPath(doc, path);
     const [li, ...rest] = path;
-    replaceAt(li, rest, (e) => translateElement(e, dx, dy));
+    if (partial !== null) {
+      // Partial selection: translate only the listed anchors.
+      // Path elements get the per-anchor rewrite below; non-path
+      // elements would need conversion to a Path to express
+      // arbitrary anchor translation — defer that and treat
+      // partial-CP non-paths as whole-element translation.
+      replaceAt(li, rest, (e) => {
+        if (e && e.type === "path") {
+          return translatePathAnchors(e, partial, dx, dy);
+        }
+        return translateElement(e, dx, dy);
+      });
+    } else {
+      // SelectionKind::All — translate the whole element.
+      replaceAt(li, rest, (e) => translateElement(e, dx, dy));
+    }
   }
   return { ...doc, layers };
+}
+
+// Translate the listed anchor indices of a Path element by (dx, dy).
+// Anchor index `i` corresponds to non-Z command `i`; translating an
+// anchor shifts the command's destination plus the Bezier handles
+// attached to that anchor (the in-handle on this command's x2/y2 and
+// the out-handle on the next command's x1/y1) so smooth-curve shape
+// is preserved across the move.
+function translatePathAnchors(elem, anchorIndices, dx, dy) {
+  if (!elem.d || !Array.isArray(elem.d)) return elem;
+  const sel = new Set(anchorIndices);
+  const cmds = elem.d.map((c) => ({ ...c }));
+  // Map each non-Z command index back to its anchor index. (Z
+  // contributes no anchor.)
+  const anchorOf = [];
+  let ai = 0;
+  for (const c of cmds) {
+    anchorOf.push(c.type === "Z" ? -1 : ai);
+    if (c.type !== "Z") ai += 1;
+  }
+  for (let i = 0; i < cmds.length; i++) {
+    const a = anchorOf[i];
+    if (a < 0) continue;
+    if (sel.has(a)) {
+      // Destination of this command moves with anchor a.
+      if (typeof cmds[i].x === "number") cmds[i].x += dx;
+      if (typeof cmds[i].y === "number") cmds[i].y += dy;
+      // In-handle attached to anchor a (only present on C/S).
+      if (typeof cmds[i].x2 === "number") cmds[i].x2 += dx;
+      if (typeof cmds[i].y2 === "number") cmds[i].y2 += dy;
+      // Out-handle attached to anchor a lives on the NEXT
+      // command's x1/y1 (C/S/Q).
+      if (i + 1 < cmds.length) {
+        const next = cmds[i + 1];
+        if (typeof next.x1 === "number") next.x1 += dx;
+        if (typeof next.y1 === "number") next.y1 += dy;
+      }
+    }
+  }
+  return { ...elem, d: cmds };
 }
 
 function replaceElementAt(elem, subpath, replacer) {
@@ -670,7 +984,101 @@ function replaceElementAt(elem, subpath, replacer) {
  * happen deepest-first (paths sorted by descending length, then by
  * descending last-index) so index shifts don't invalidate other paths.
  */
-function deleteSelectedElements(doc) {
+/**
+ * Wrap the current selection in a new Group at the position of the
+ * frontmost (first-in-document-order) selected element. Requires
+ * 2+ siblings sharing the same parent path; otherwise returns the
+ * doc unchanged. Selection becomes the new group.
+ *
+ * Mirrors jas_dioxus Controller::group_selection. The Selection
+ * tool calls this via JAS.groupSelection from app.js's dispatch
+ * (the `group` action's effects are a yaml log-only stub).
+ */
+export function groupSelection(doc) {
+  if (!doc || !Array.isArray(doc.selection) || doc.selection.length < 2) {
+    return doc;
+  }
+  const sorted = doc.selection.slice().sort(comparePaths);
+  const first = sorted[0];
+  const parent = first.slice(0, -1);
+  // All paths must share the same parent + same depth.
+  for (const p of sorted) {
+    if (p.length !== first.length) return doc;
+    for (let i = 0; i < parent.length; i++) {
+      if (p[i] !== parent[i]) return doc;
+    }
+  }
+  // Gather elements in document order.
+  const elems = sorted.map((p) => getElement(doc, p));
+  if (elems.some((e) => !e)) return doc;
+  // Delete in reverse so earlier indices stay valid.
+  let layers = doc.layers.slice();
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    layers = deleteAtPath(layers, sorted[i]);
+  }
+  let next = { ...doc, layers, selection: [], partial_cps: {} };
+  // Insert a fresh Group with the gathered elements as children at
+  // the first selected position. Top-level (length-1 path) inserts
+  // into doc.layers; nested paths go through the container helper.
+  const groupElem = mkGroup({ children: elems });
+  next = insertElementAtAnyDepth(next, first, groupElem);
+  return { ...next, selection: [first.slice()] };
+}
+
+/**
+ * Inverse of groupSelection: replace each selected Group with its
+ * children at the group's z-order position. Non-group elements in
+ * the selection are left untouched. Selection becomes the union of
+ * the children that were promoted.
+ */
+export function ungroupSelection(doc) {
+  if (!doc || !Array.isArray(doc.selection) || doc.selection.length === 0) {
+    return doc;
+  }
+  // Walk groups in reverse so promotions don't shift unprocessed paths.
+  const targets = doc.selection
+    .map((p) => ({ path: p, elem: getElement(doc, p) }))
+    .filter(({ elem }) => elem && elem.type === "group")
+    .sort((a, b) => comparePaths(b.path, a.path));
+  if (targets.length === 0) return doc;
+  let next = doc;
+  const newSelection = [];
+  for (const { path, elem } of targets) {
+    const kids = Array.isArray(elem.children) ? elem.children : [];
+    let layers = next.layers.slice();
+    layers = deleteAtPath(layers, path);
+    next = { ...next, layers };
+    // Insert children in order at the group's old position.
+    const baseIdx = path[path.length - 1];
+    for (let i = 0; i < kids.length; i++) {
+      const childPath = [...path.slice(0, -1), baseIdx + i];
+      next = insertElementAtAnyDepth(next, childPath, kids[i]);
+      newSelection.push(childPath.slice());
+    }
+  }
+  // Drop the original group paths from selection; replace with
+  // promoted-children paths.
+  return { ...next, selection: newSelection, partial_cps: {} };
+}
+
+function comparePaths(a, b) {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
+
+function insertElementAtAnyDepth(doc, path, elem) {
+  if (path.length === 1) {
+    const layers = doc.layers.slice();
+    const idx = Math.max(0, Math.min(path[0], layers.length));
+    layers.splice(idx, 0, elem);
+    return { ...doc, layers };
+  }
+  return insertElementAt(doc, path, elem);
+}
+
+export function deleteSelectedElements(doc) {
   if (!doc.selection || doc.selection.length === 0) return doc;
   const sorted = doc.selection.slice().sort((a, b) => {
     if (a.length !== b.length) return b.length - a.length;
@@ -735,6 +1143,39 @@ function resolveElementSpec(spec, scope) {
  * targets the top layer; `[0, 2]` targets group-index-2 inside that
  * layer. Returns a new Document; input is not mutated.
  */
+// Deep clone via structuredClone — handles paths/groups/etc.
+function deepCloneElement(elem) {
+  return JSON.parse(JSON.stringify(elem));
+}
+
+// Insert `elem` as a sibling at `path` (the existing element at
+// `path` shifts right by one). `path` must end at a child slot, not
+// a layer root.
+function insertElementAt(doc, path, elem) {
+  if (!Array.isArray(path) || path.length < 2) return doc;
+  const layers = doc.layers.slice();
+  const [li, ...rest] = path;
+  if (li < 0 || li >= layers.length) return doc;
+  layers[li] = insertInContainer(layers[li], rest, elem);
+  return { ...doc, layers };
+}
+
+function insertInContainer(container, subpath, elem) {
+  if (!container || !Array.isArray(container.children)) return container;
+  if (subpath.length === 1) {
+    const idx = subpath[0];
+    const children = container.children.slice();
+    const clamped = Math.max(0, Math.min(idx, children.length));
+    children.splice(clamped, 0, elem);
+    return { ...container, children };
+  }
+  const [head, ...rest] = subpath;
+  const children = container.children.slice();
+  if (head < 0 || head >= children.length) return container;
+  children[head] = insertInContainer(children[head], rest, elem);
+  return { ...container, children };
+}
+
 function addElementAt(doc, parentPath, elem) {
   if (!Array.isArray(parentPath) || !elem) return doc;
   const layers = doc.layers.slice();
@@ -780,4 +1221,203 @@ export function setElementAttr(doc, path, attr, value) {
   if (li < 0 || li >= layers.length) return doc;
   layers[li] = replaceElementAt(layers[li], rest, (e) => ({ ...e, [attr]: value }));
   return { ...doc, layers };
+}
+
+// Pen-tool primitives. Registered at module load so YAML guards
+// like `anchor_buffer_length('pen') >= 2` work without dispatcher
+// wiring per call. Both look up the named anchor buffer directly;
+// no model needed.
+registerPrimitive("anchor_buffer_length", (args) => {
+  const name = args[0] && args[0].kind === "string" ? args[0].value : "";
+  return { kind: "number", value: anchorBuffers.length(name) };
+});
+registerPrimitive("anchor_buffer_close_hit", (args) => {
+  const name = args[0] && args[0].kind === "string" ? args[0].value : "";
+  const x = args[1] && args[1].kind === "number" ? args[1].value : 0;
+  const y = args[2] && args[2].kind === "number" ? args[2].value : 0;
+  const r = args[3] && args[3].kind === "number" ? args[3].value : 8;
+  return { kind: "bool", value: anchorBuffers.closeHit(name, x, y, r) };
+});
+
+// Hit-test for a control point under (x, y) within `radius`.
+// Walks every shape in the document (top-down, last child wins for
+// overlap) and returns the first CP within radius. Returns
+// `{ path, cp_index }` on hit, null on miss. Recurses into groups
+// and layers.
+function _hitTestCp(doc, x, y, radius) {
+  if (!doc || !Array.isArray(doc.layers)) return null;
+  const r2 = radius * radius;
+  function recur(elem, path) {
+    if (!elem) return null;
+    if (elem.type === "layer" || elem.type === "group") {
+      const kids = elem.children || [];
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const hit = recur(kids[i], [...path, i]);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    const cps = controlPoints(elem);
+    for (let i = 0; i < cps.length; i++) {
+      const dx = cps[i][0] - x, dy = cps[i][1] - y;
+      if (dx * dx + dy * dy <= r2) return { path, cp_index: i };
+    }
+    return null;
+  }
+  for (let li = doc.layers.length - 1; li >= 0; li--) {
+    const hit = recur(doc.layers[li], [li]);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// Move a single handle (in or out) of an anchor on a Path. The
+// opposite handle is reflected through the anchor while preserving
+// its original distance — keeps smooth anchors smooth. Mirrors
+// jas_dioxus/src/geometry/element.rs::move_path_handle.
+function movePathHandle(elem, anchorIdx, handleType, dx, dy) {
+  if (!elem || !Array.isArray(elem.d)) return elem;
+  // Map anchor index → command index.
+  const idxs = [];
+  for (let i = 0; i < elem.d.length; i++) {
+    if (elem.d[i].type !== "Z") idxs.push(i);
+  }
+  if (anchorIdx >= idxs.length) return elem;
+  const ci = idxs[anchorIdx];
+  const cmd = elem.d[ci];
+  const ax = typeof cmd.x === "number" ? cmd.x : 0;
+  const ay = typeof cmd.y === "number" ? cmd.y : 0;
+  const cmds = elem.d.map((c) => ({ ...c }));
+  const reflect = (newHx, newHy, oppHx, oppHy) => {
+    const distNew = Math.hypot(newHx - ax, newHy - ay);
+    const distOpp = Math.hypot(oppHx - ax, oppHy - ay);
+    if (distNew < 1e-6) return [oppHx, oppHy];
+    const scale = -distOpp / distNew;
+    return [ax + (newHx - ax) * scale, ay + (newHy - ay) * scale];
+  };
+
+  if (handleType === "in") {
+    if (typeof cmd.x2 !== "number" || typeof cmd.y2 !== "number") return elem;
+    const newHx = cmd.x2 + dx, newHy = cmd.y2 + dy;
+    cmds[ci].x2 = newHx;
+    cmds[ci].y2 = newHy;
+    const next = ci + 1 < cmds.length ? cmds[ci + 1] : null;
+    if (next && typeof next.x1 === "number" && typeof next.y1 === "number") {
+      const [rx, ry] = reflect(newHx, newHy, next.x1, next.y1);
+      next.x1 = rx;
+      next.y1 = ry;
+    }
+  } else if (handleType === "out") {
+    const next = ci + 1 < cmds.length ? cmds[ci + 1] : null;
+    if (!next || typeof next.x1 !== "number" || typeof next.y1 !== "number") return elem;
+    const newHx = next.x1 + dx, newHy = next.y1 + dy;
+    next.x1 = newHx;
+    next.y1 = newHy;
+    if (typeof cmd.x2 === "number" && typeof cmd.y2 === "number") {
+      const [rx, ry] = reflect(newHx, newHy, cmd.x2, cmd.y2);
+      cmds[ci].x2 = rx;
+      cmds[ci].y2 = ry;
+    }
+  }
+  return { ...elem, d: cmds };
+}
+
+// Hit-test for a Bezier handle (in or out) on a selected Path.
+// Returns { path, anchor_idx, handle_type } on hit, null otherwise.
+// A handle counts only when it's non-coincident with its anchor —
+// otherwise corner anchors would expose phantom handles at the
+// anchor position and make CP hits impossible.
+function _hitTestPathHandle(doc, x, y, radius) {
+  if (!doc || !Array.isArray(doc.selection)) return null;
+  const r2 = radius * radius;
+  for (const path of doc.selection) {
+    const elem = getElement(doc, path);
+    if (!elem || elem.type !== "path" || !Array.isArray(elem.d)) continue;
+    const cmds = elem.d;
+    // Walk anchors, mapping each non-Z command index to anchor index.
+    let ai = 0;
+    for (let i = 0; i < cmds.length; i++) {
+      const c = cmds[i];
+      if (c.type === "Z") continue;
+      const anchorX = typeof c.x === "number" ? c.x : 0;
+      const anchorY = typeof c.y === "number" ? c.y : 0;
+      // In-handle on this command's x2/y2 (C/S only).
+      if (typeof c.x2 === "number" && typeof c.y2 === "number") {
+        const dx = c.x2 - anchorX, dy = c.y2 - anchorY;
+        if (dx * dx + dy * dy > 0.01) {
+          const hx = c.x2, hy = c.y2;
+          if ((hx - x) * (hx - x) + (hy - y) * (hy - y) <= r2) {
+            return { path: path.slice(), anchor_idx: ai, handle_type: "in" };
+          }
+        }
+      }
+      // Out-handle on the NEXT command's x1/y1 (C/S/Q).
+      if (i + 1 < cmds.length) {
+        const next = cmds[i + 1];
+        if (typeof next.x1 === "number" && typeof next.y1 === "number") {
+          const dx = next.x1 - anchorX, dy = next.y1 - anchorY;
+          if (dx * dx + dy * dy > 0.01) {
+            const hx = next.x1, hy = next.y1;
+            if ((hx - x) * (hx - x) + (hy - y) * (hy - y) <= r2) {
+              return { path: path.slice(), anchor_idx: ai, handle_type: "out" };
+            }
+          }
+        }
+      }
+      ai += 1;
+    }
+  }
+  return null;
+}
+
+// Find every control point inside the rect. Returns a Map keyed by
+// pathKey ("0,2,1") with values being arrays of CP indices for that
+// element. Visits all layers/groups recursively.
+function _cpsInRect(doc, minX, minY, maxX, maxY) {
+  const hits = new Map();
+  if (!doc || !Array.isArray(doc.layers)) return hits;
+  function recur(elem, path) {
+    if (!elem) return;
+    if (elem.type === "layer" || elem.type === "group") {
+      const kids = elem.children || [];
+      for (let i = 0; i < kids.length; i++) recur(kids[i], [...path, i]);
+      return;
+    }
+    const cps = controlPoints(elem);
+    const inside = [];
+    for (let i = 0; i < cps.length; i++) {
+      const [px, py] = cps[i];
+      if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
+        inside.push(i);
+      }
+    }
+    if (inside.length > 0) hits.set(path.join(","), inside);
+  }
+  for (let li = 0; li < doc.layers.length; li++) {
+    recur(doc.layers[li], [li]);
+  }
+  return hits;
+}
+
+// Drawing tool yamls (rect, ellipse, line, …) intentionally omit fill
+// and stroke from their add_element specs and rely on the engine to
+// fold in the user's current panel colors. Without this, every
+// freshly drawn shape would render with the SVG default black fill.
+const SHAPE_TYPES = new Set([
+  "rect", "circle", "ellipse", "line",
+  "polygon", "polyline", "path",
+]);
+
+function applyShapeDefaults(elem, store) {
+  if (!elem || !SHAPE_TYPES.has(elem.type)) return;
+  const state = store && store.state ? store.state : {};
+  if (!("fill" in elem) && state.fill_color !== undefined) {
+    elem.fill = state.fill_color;
+  }
+  if (!("stroke" in elem) && state.stroke_color !== undefined) {
+    elem.stroke = state.stroke_color;
+  }
+  if (!("stroke-width" in elem) && state.stroke_width !== undefined) {
+    elem["stroke-width"] = state.stroke_width;
+  }
 }

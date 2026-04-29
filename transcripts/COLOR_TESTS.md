@@ -736,7 +736,7 @@ produces user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced + fixed: the generic panel-input listener parseFloat'd every keystroke into the hex field, immediately overwriting it via updateBindings — text inputs now skip that path and commit only via the dedicated keydown-Enter handler.
 
 - **CLR-301** [wired] Mode switch from HSB → RGB preserves the underlying color.
       Do: HSB → set fill `#ff6600` → menu RGB.
@@ -745,7 +745,7 @@ produces user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **CLR-302** [wired] None swatch sets `fill="none"` on selection.
       Do: Selection with explicit fill → click `cp_none_swatch`.
@@ -754,7 +754,7 @@ produces user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **CLR-303** [wired] Recent-colors list grows on commit, dedupes to front.
       Do: Commit `#ff0000`, `#00ff00`, `#ff0000` in that order.
@@ -765,7 +765,7 @@ produces user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: — (same)
       - [ ] OCaml      last: — (same)
       - [ ] Python     last: — (same)
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: passes on Flask while natives are still known-broken (per-doc storage not yet wired there).
 
 - **CLR-304** [wired] Color bar click commits a color from the gradient.
       Do: Click the rightmost-top of the color bar.
@@ -775,7 +775,7 @@ produces user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 - **CLR-305** [wired] Web Safe RGB mode snaps a non-web hex on commit.
       Do: Web Safe RGB mode → type `abcdef` + Enter into hex.
@@ -785,7 +785,7 @@ produces user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27  · note: surfaced + fixed: hex-Enter handler always took the typed value verbatim — now snaps when panelState.mode is web_safe_rgb. Also added a Flask-specific QoL: switching mode to web_safe_rgb snaps the current fill/stroke colors so off-grid leftovers don't survive the view change.
 
 - **CLR-306** [wired] Fill/Stroke widget swap exchanges values.
       Setup: Fill = `#ff0000`, stroke = `#000000`.
@@ -795,7 +795,7 @@ produces user-visible bugs. Batch by app: run a full column at a time.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
-      - [ ] Flask      last: —
+      - [x] Flask      last: 2026-04-27
 
 ---
 

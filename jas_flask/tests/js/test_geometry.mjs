@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   elementBounds, pointInRect, rectsIntersect,
   hitTest, hitTestRect, translateElement,
-  calligraphicOutline,
+  calligraphicOutline, controlPoints,
 } from "../../static/js/engine/geometry.mjs";
 import {
   mkRect, mkCircle, mkEllipse, mkLine, mkPath, mkText,
@@ -43,6 +43,52 @@ describe("elementBounds — leaf types", () => {
       ],
     }));
     assert.deepEqual(b, { x: 0, y: 0, width: 100, height: 50 });
+  });
+
+  it("path bounds include cubic-Bezier extrema, not just endpoints", () => {
+    // Symmetric cubic from (0,0) to (100,0) with both control
+    // points at y=-100 — the curve dips below the endpoints. The
+    // analytical extremum lies on y, at t=0.5; cubic_eval gives
+    //   y = 3 · 0.5 · 0.5² · (-100) + 3 · 0.5² · 0.5 · (-100)
+    //     = -75
+    // So bounds should include y down to -75. (Old endpoint-only
+    // bounds would have y = 0, missing the dip entirely.)
+    const b = elementBounds(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "C", x1: 0, y1: -100, x2: 100, y2: -100, x: 100, y: 0 },
+      ],
+    }));
+    assert.equal(b.x, 0);
+    assert.equal(b.width, 100);
+    // Allow a hair of float slop.
+    assert.ok(Math.abs(b.y - (-75)) < 1e-6, `expected y≈-75, got ${b.y}`);
+    assert.ok(Math.abs(b.height - 75) < 1e-6, `expected height≈75, got ${b.height}`);
+  });
+
+  it("path bounds include quadratic-Bezier extrema", () => {
+    // Q from (0,0) to (100,0) with control at (50,100). Apex at
+    // t=0.5: y = 2·0.5·0.5·100 = 50. (Endpoint-only bounds would
+    // miss it.)
+    const b = elementBounds(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "Q", x1: 50, y1: 100, x: 100, y: 0 },
+      ],
+    }));
+    assert.ok(Math.abs(b.height - 50) < 1e-6, `expected height≈50, got ${b.height}`);
+  });
+
+  it("path bounds: cubic with no internal extrema doesn't grow past endpoints", () => {
+    // Monotonic cubic — control points stay inside the endpoint
+    // span on x and y. No internal extrema; bounds match endpoints.
+    const b = elementBounds(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "C", x1: 30, y1: 30, x2: 70, y2: 70, x: 100, y: 100 },
+      ],
+    }));
+    assert.deepEqual(b, { x: 0, y: 0, width: 100, height: 100 });
   });
 
   it("text estimates width from content", () => {
@@ -398,5 +444,53 @@ describe("calligraphicOutline", () => {
     // tangent angle; at the cubic's endpoints the perpendicular drop is
     // ~half-width · cos(tangent) — well below zero but not the full -2.
     assert.ok(Math.min(...ys) < -0.5, "outline should dip below path baseline");
+  });
+});
+
+describe("controlPoints", () => {
+  // Mirrors jas_dioxus/src/geometry/element.rs::control_points so
+  // selection handles match the native apps.
+  it("rect → four corners (TL, TR, BR, BL)", () => {
+    const cps = controlPoints(mkRect({ x: 10, y: 20, width: 30, height: 40 }));
+    assert.deepEqual(cps, [
+      [10, 20], [40, 20], [40, 60], [10, 60],
+    ]);
+  });
+
+  it("line → two endpoints", () => {
+    const cps = controlPoints(mkLine({ x1: 5, y1: 5, x2: 25, y2: 35 }));
+    assert.deepEqual(cps, [[5, 5], [25, 35]]);
+  });
+
+  it("circle → four cardinal points (top, right, bottom, left)", () => {
+    const cps = controlPoints(mkCircle({ cx: 100, cy: 100, r: 20 }));
+    assert.deepEqual(cps, [[100, 80], [120, 100], [100, 120], [80, 100]]);
+  });
+
+  it("ellipse → four cardinals using rx / ry", () => {
+    const cps = controlPoints(mkEllipse({ cx: 50, cy: 50, rx: 30, ry: 10 }));
+    assert.deepEqual(cps, [[50, 40], [80, 50], [50, 60], [20, 50]]);
+  });
+
+  it("path → anchor points at each command's destination", () => {
+    const cps = controlPoints(mkPath({
+      d: [
+        { type: "M", x: 0, y: 0 },
+        { type: "L", x: 10, y: 0 },
+        { type: "C", x1: 12, y1: 0, x2: 12, y2: 5, x: 10, y: 10 },
+        { type: "Z" },
+      ],
+    }));
+    // Z contributes no anchor.
+    assert.deepEqual(cps, [[0, 0], [10, 0], [10, 10]]);
+  });
+
+  it("group falls back to bounding-box corners", () => {
+    const g = mkGroup({ children: [
+      mkRect({ x: 0, y: 0, width: 10, height: 10 }),
+      mkRect({ x: 30, y: 20, width: 5, height: 5 }),
+    ] });
+    const cps = controlPoints(g);
+    assert.deepEqual(cps, [[0, 0], [35, 0], [35, 25], [0, 25]]);
   });
 });

@@ -179,6 +179,16 @@ button.app-tool-btn.active {
     border: 1px solid var(--app-border, #555);
 }
 
+/* Active document tab — actions.yaml::new_document creates each tab
+   button as a div with id "canvas_tab_<n>" and bind:active toggles
+   the .active class on it. The element's inline style sets a base
+   background (#4a4a4a), so the active rule needs !important to win
+   the cascade. */
+[id^="canvas_tab_"].active {
+    background: var(--app-button-checked, #505050) !important;
+    border-color: var(--app-button-checked, #505050) !important;
+}
+
 /* Panel */
 .app-panel {
     border-bottom: 1px solid var(--app-border, #555);

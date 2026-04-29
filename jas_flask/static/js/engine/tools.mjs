@@ -12,7 +12,7 @@
 import { runEffects } from "./effects.mjs";
 import { Scope } from "./scope.mjs";
 import { registerPrimitive } from "./evaluator.mjs";
-import { hitTest as hitTestImpl } from "./geometry.mjs";
+import { hitTest as hitTestImpl, hitTestFlat } from "./geometry.mjs";
 import { mkNull, NUMBER } from "./value.mjs";
 
 // Tool id → tool spec (as loaded from workspace.json).
@@ -71,6 +71,23 @@ export function dispatchEvent(toolId, event, store, options = {}) {
   const handler = tool.handlers && tool.handlers[handlerName];
   if (!Array.isArray(handler)) return;
 
+  // Default doc_x / doc_y to x / y when the caller didn't supply
+  // them. Flask V1 has no canvas pan / zoom so doc-space and
+  // screen-space coincide; tests construct event payloads with just
+  // x / y and would otherwise fail YAML expressions that read
+  // event.doc_x (rect / line / ellipse / pencil all do, for shape
+  // creation coords that survive a panned canvas in the native
+  // apps). Production canvas_bootstrap.payload sets doc_x = x for
+  // the same reason; this default keeps test ergonomics aligned.
+  const ev = (event && typeof event === "object"
+              && (event.doc_x === undefined || event.doc_y === undefined))
+    ? {
+        ...event,
+        doc_x: event.doc_x !== undefined ? event.doc_x : event.x,
+        doc_y: event.doc_y !== undefined ? event.doc_y : event.y,
+      }
+    : event;
+
   // Build the outer scope: store namespaces + $event + tool-specific
   // defaults. Scope wraps references so effects can read the live
   // store values and see each other's writes within the dispatch.
@@ -78,7 +95,7 @@ export function dispatchEvent(toolId, event, store, options = {}) {
     state: store.state,
     panel: store.panel,
     tool: store.tool,
-    event,
+    event: ev,
     platform: options.platform || {},
     features: options.features || {},
     config: options.config || {},
@@ -100,7 +117,19 @@ export function dispatchEvent(toolId, event, store, options = {}) {
 
 function registerDocumentPrimitives(model) {
   const offs = [];
+  // Flat hit-test: stops at direct layer children (Selection tool's
+  // "click-group-child selects the group" semantic).
   offs.push(registerPrimitive("hit_test", (args) => {
+    if (args.length < 2 || args[0].kind !== NUMBER || args[1].kind !== NUMBER) {
+      return mkNull();
+    }
+    const path = hitTestFlat(model.document, args[0].value, args[1].value);
+    if (!path) return mkNull();
+    return { kind: "path", value: path };
+  }));
+  // Deep hit-test: recurses into groups, returns the leaf path.
+  // Interior Selection's hit_test_deep call.
+  offs.push(registerPrimitive("hit_test_deep", (args) => {
     if (args.length < 2 || args[0].kind !== NUMBER || args[1].kind !== NUMBER) {
       return mkNull();
     }

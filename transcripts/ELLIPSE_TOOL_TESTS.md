@@ -41,7 +41,10 @@ because the tool isn't registered.
 
 **Rust — none.**
 
-**Flask — no coverage.**
+**Flask — covered indirectly via shared Rect-shape pipeline.**
+Ellipse uses doc.add_element + doc.set_attr (live-edit during the
+drag, not overlay→commit) — both are exercised by
+`tests/js/test_phase12.mjs`. No Ellipse-specific JS unit suite yet.
 
 The yaml spec itself is validated by workspace loader tests in every
 app. The tool semantics would borrow the rect validation flow once
@@ -195,6 +198,7 @@ All blocked until wiring lands. Retain IDs for post-wire regression.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27  · note: Ellipse newly surfaced via shape-toolbar alternates; surfaced + fixed hardcoded `#d94ad9` magenta fill in ellipse.yaml — now uses state.fill_color / stroke_color via doc.add_element shape defaults.
 
 - **ELL-201** [placeholder] Overlay previews in every app.
       Do: Begin a drag.
@@ -204,6 +208,7 @@ All blocked until wiring lands. Retain IDs for post-wire regression.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27  · note: Flask uses ellipse.yaml's live-edit pattern (real element grows during drag), not the overlay-then-commit pattern Rect uses. Visual feedback present; "dashed preview" semantics don't apply.
 
 ---
 

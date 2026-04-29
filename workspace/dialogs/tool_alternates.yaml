@@ -199,6 +199,16 @@ shape_alternates:
               - set: { active_tool: '"rounded_rect"' }
               - close_dialog: null
       - type: icon_button
+        icon: "ellipse"
+        label: "Ellipse"
+        summary: "Draw ellipses and circles"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"ellipse"' }
+              - close_dialog: null
+      - type: icon_button
         icon: "polygon"
         label: "Polygon"
         summary: "Draw regular polygons"

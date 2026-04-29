@@ -11,6 +11,7 @@
 
 import { isContainer } from "./document.mjs";
 import { calligraphicOutline } from "./geometry.mjs";
+import { emitArrowDefs } from "./arrowheads.mjs";
 
 // Brush-library registry. Populated at app boot (or per-test) via
 // setBrushLibraries(); consumed by renderPath when an element carries
@@ -66,11 +67,17 @@ export function renderElement(elem) {
 }
 
 /**
- * Render an entire document to an SVG string.
+ * Render an entire document to an SVG string. Prepends a <defs>
+ * block containing the arrowhead markers referenced by elements in
+ * the tree (one <marker> per unique (shape, side, scale) trio); the
+ * block is empty when no element uses arrowheads, in which case it
+ * is omitted entirely.
  */
 export function renderDocument(doc) {
   if (!doc || !Array.isArray(doc.layers)) return "";
-  return doc.layers.map(renderElement).join("");
+  const defs = emitArrowDefs(doc);
+  const body = doc.layers.map(renderElement).join("");
+  return defs + body;
 }
 
 // ─── Per-type renderers ─────────────────────────────────────
@@ -81,6 +88,8 @@ function renderRect(e) {
     `y="${num(e.y)}"`,
     `width="${num(e.width)}"`,
     `height="${num(e.height)}"`,
+    typeof e.rx === "number" && e.rx > 0 ? `rx="${num(e.rx)}"` : "",
+    typeof e.ry === "number" && e.ry > 0 ? `ry="${num(e.ry)}"` : "",
     styleAttrs(e),
   ].filter(Boolean).join(" ");
   return `<rect ${attrs}/>`;
@@ -245,13 +254,66 @@ function styleAttrs(elem) {
   } else if (typeof elem.fill === "string") {
     parts.push(`fill="${esc(elem.fill)}"`);
   }
+  // Stroke supports two encodings: a flat string (the form panel
+  // writes use, paired with a separate `stroke-width` field) or a
+  // legacy {color, width} object. Plus the explicit-null sentinel
+  // for "no stroke".
   if (elem.stroke === null) {
     parts.push('stroke="none"');
+  } else if (typeof elem.stroke === "string") {
+    parts.push(`stroke="${esc(elem.stroke)}"`);
   } else if (elem.stroke && typeof elem.stroke === "object") {
     if (elem.stroke.color) parts.push(`stroke="${esc(elem.stroke.color)}"`);
-    if (typeof elem.stroke.width === "number") {
+    if (typeof elem.stroke.width === "number" && elem.stroke.width !== 1) {
       parts.push(`stroke-width="${num(elem.stroke.width)}"`);
     }
+  }
+  if (typeof elem["stroke-width"] === "number" && elem["stroke-width"] !== 1) {
+    parts.push(`stroke-width="${num(elem["stroke-width"])}"`);
+  }
+  // Stroke shape attributes (cap / join / miterlimit / dasharray /
+  // dashoffset). Emit only when non-default so the serialized output
+  // matches the native apps' identity-omission convention (e.g. cap
+  // = "butt" is the default and is left off the SVG).
+  if (typeof elem["stroke-linecap"] === "string"
+      && elem["stroke-linecap"] !== "butt") {
+    parts.push(`stroke-linecap="${esc(elem["stroke-linecap"])}"`);
+  }
+  if (typeof elem["stroke-linejoin"] === "string"
+      && elem["stroke-linejoin"] !== "miter") {
+    parts.push(`stroke-linejoin="${esc(elem["stroke-linejoin"])}"`);
+  }
+  if (typeof elem["stroke-miterlimit"] === "number"
+      && elem["stroke-miterlimit"] !== 4) {
+    parts.push(`stroke-miterlimit="${num(elem["stroke-miterlimit"])}"`);
+  }
+  if (typeof elem["stroke-dasharray"] === "string"
+      && elem["stroke-dasharray"] !== ""
+      && elem["stroke-dasharray"] !== "none") {
+    parts.push(`stroke-dasharray="${esc(elem["stroke-dasharray"])}"`);
+  }
+  if (typeof elem["stroke-dashoffset"] === "number"
+      && elem["stroke-dashoffset"] !== 0) {
+    parts.push(`stroke-dashoffset="${num(elem["stroke-dashoffset"])}"`);
+  }
+  // Arrowhead markers — emit marker-start / marker-end pointing to
+  // the per-document <defs> block built by emitArrowDefs. The
+  // jas-stroke-{start,end}-arrowhead element fields hold the shape
+  // name; jas-stroke-{start,end}-arrowhead-scale carries the per-side
+  // percent (default 100). collectArrowMarkerRefs walks the doc tree
+  // and registers the (shape, side, scale) trio so the marker is
+  // available by the time the path references it.
+  const startArr = elem["jas-stroke-start-arrowhead"];
+  if (typeof startArr === "string" && startArr !== "none" && startArr !== "") {
+    const scale = Number.isFinite(elem["jas-stroke-start-arrowhead-scale"])
+      ? elem["jas-stroke-start-arrowhead-scale"] : 100;
+    parts.push(`marker-start="url(#jas-arr-start-${startArr}-${scale | 0})"`);
+  }
+  const endArr = elem["jas-stroke-end-arrowhead"];
+  if (typeof endArr === "string" && endArr !== "none" && endArr !== "") {
+    const scale = Number.isFinite(elem["jas-stroke-end-arrowhead-scale"])
+      ? elem["jas-stroke-end-arrowhead-scale"] : 100;
+    parts.push(`marker-end="url(#jas-arr-end-${endArr}-${scale | 0})"`);
   }
   if (typeof elem.opacity === "number" && elem.opacity !== 1.0) {
     parts.push(`opacity="${num(elem.opacity)}"`);

@@ -80,14 +80,74 @@ export function isContainer(elem) {
 // ─── Document ───────────────────────────────────────────────
 
 /**
- * Create an empty Document with a single empty layer. Matches the
- * native apps' default shape so fresh docs are interchangeable.
+ * Create an empty Document with a single empty layer and a single
+ * Letter-sized artboard. The artboard structure matches the native
+ * apps' Document::default (jas_dioxus/src/document/document.rs); the
+ * fill diverges intentionally — Flask defaults to white so the page
+ * is visible against the dark pasteboard, whereas the Rust struct
+ * default is transparent (it sits on a white canvas).
  */
 export function emptyDocument() {
   return {
     layers: [mkLayer({ name: "Layer 1" })],
     selection: [],
-    artboards: [],
+    artboards: [makeDefaultArtboard({ fill: "#ffffff" })],
+    artboard_options: {
+      fade_region_outside_artboard: true,
+      update_while_dragging: true,
+    },
+  };
+}
+
+const ARTBOARD_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/** Mint an 8-char base36 id matching the Rust artboard id format. */
+export function generateArtboardId() {
+  let s = "";
+  for (let i = 0; i < 8; i++) {
+    const idx = Math.floor(Math.random() * ARTBOARD_ID_ALPHABET.length);
+    s += ARTBOARD_ID_ALPHABET[idx];
+  }
+  return s;
+}
+
+/**
+ * Patch a document loaded from session / SVG / wherever so it
+ * satisfies the cross-app invariants: at least one artboard, the
+ * artboard_options block present, layers/selection arrays. Mutates
+ * in place and returns the doc. Use whenever a document arrives
+ * from a source that may predate a schema bump (notably old saved
+ * sessions in localStorage).
+ */
+export function ensureDocumentInvariants(doc) {
+  if (!doc || typeof doc !== "object") return doc;
+  if (!Array.isArray(doc.layers)) doc.layers = [mkLayer({ name: "Layer 1" })];
+  if (!Array.isArray(doc.selection)) doc.selection = [];
+  if (!Array.isArray(doc.artboards) || doc.artboards.length === 0) {
+    doc.artboards = [makeDefaultArtboard({ fill: "#ffffff" })];
+  }
+  if (!doc.artboard_options || typeof doc.artboard_options !== "object") {
+    doc.artboard_options = {
+      fade_region_outside_artboard: true,
+      update_while_dragging: true,
+    };
+  }
+  return doc;
+}
+
+/** Canonical default artboard — Letter 612x792 at origin, transparent
+ * fill, all display toggles off. */
+export function makeDefaultArtboard(over = {}) {
+  return {
+    id: generateArtboardId(),
+    name: "Artboard 1",
+    x: 0, y: 0, width: 612, height: 792,
+    fill: "transparent",
+    show_center_mark: false,
+    show_cross_hairs: false,
+    show_video_safe_areas: false,
+    video_ruler_pixel_aspect_ratio: 1.0,
+    ...over,
   };
 }
 
@@ -140,11 +200,13 @@ export function docFromJson(json) {
 
 /**
  * Replace the selection with a given list of path-arrays. Paths that
- * don't resolve to elements are silently dropped.
+ * don't resolve to elements are silently dropped. Drops any partial-
+ * CP entries for paths no longer selected.
  */
 export function setSelection(doc, paths) {
   const valid = paths.filter((p) => getElement(doc, p) !== null);
-  return { ...doc, selection: valid.map((p) => p.slice()) };
+  const next = { ...doc, selection: valid.map((p) => p.slice()) };
+  return _trimPartialCps(next);
 }
 
 /** Add a path to the selection, if not already present. */
@@ -153,21 +215,82 @@ export function addToSelection(doc, path) {
   return { ...doc, selection: [...doc.selection, path.slice()] };
 }
 
-/** Toggle a path's membership in the selection. */
+/** Toggle a path's membership in the selection. Removes the path's
+ * partial-CP entry too when the path leaves the selection. */
 export function toggleSelection(doc, path) {
   const hasIt = doc.selection.some((p) => arraysEqual(p, path));
   if (hasIt) {
-    return {
+    const next = {
       ...doc,
       selection: doc.selection.filter((p) => !arraysEqual(p, path)),
     };
+    return _trimPartialCps(next);
   }
   return addToSelection(doc, path);
 }
 
-/** Clear the selection. */
+/** Clear the selection (and any partial-CP entries). */
 export function clearSelection(doc) {
-  return { ...doc, selection: [] };
+  return { ...doc, selection: [], partial_cps: {} };
+}
+
+// ─── Partial control-point selection ─────────────────────
+//
+// Mirrors jas_dioxus' SelectionKind::Partial. Storage shape:
+//   doc.partial_cps: { [pathKey: string]: number[] }
+// where pathKey is the path joined by commas ("0,2,1"). Missing key
+// (or a clearSelection) means SelectionKind::All — every CP of the
+// element is "selected" and the renderer fills its handles solid.
+// Presence means Partial: only the listed CP indices are filled
+// solid, the others render as white squares with a selection-blue
+// outline.
+
+/** Return the array of selected CP indices for `path`, or null when
+ * the path has no Partial entry (i.e. the element is whole-selected /
+ * SelectionKind::All). */
+export function partialCpsForPath(doc, path) {
+  if (!doc || !doc.partial_cps) return null;
+  const cps = doc.partial_cps[_pathKey(path)];
+  return Array.isArray(cps) ? cps.slice() : null;
+}
+
+/** Replace the partial-CP set for `path`. An empty array removes the
+ * entry (back to SelectionKind::All). Indices are sorted ascending. */
+export function setPartialCps(doc, path, cps) {
+  const map = { ...(doc.partial_cps || {}) };
+  const key = _pathKey(path);
+  if (!Array.isArray(cps) || cps.length === 0) {
+    delete map[key];
+  } else {
+    map[key] = cps.slice().sort((a, b) => a - b);
+  }
+  return { ...doc, partial_cps: map };
+}
+
+/** Toggle a single CP index in the partial-CP set for `path`.
+ * Adding the first index implicitly converts All → Partial; removing
+ * the last drops the entry back to All. */
+export function togglePartialCp(doc, path, cpIndex) {
+  const cur = partialCpsForPath(doc, path) || [];
+  const idx = cur.indexOf(cpIndex);
+  const next = idx >= 0
+    ? cur.filter((i) => i !== cpIndex)
+    : [...cur, cpIndex];
+  return setPartialCps(doc, path, next);
+}
+
+function _pathKey(path) {
+  return Array.isArray(path) ? path.join(",") : String(path);
+}
+
+function _trimPartialCps(doc) {
+  if (!doc.partial_cps) return doc;
+  const live = new Set(doc.selection.map((p) => _pathKey(p)));
+  const map = {};
+  for (const k of Object.keys(doc.partial_cps)) {
+    if (live.has(k)) map[k] = doc.partial_cps[k];
+  }
+  return { ...doc, partial_cps: map };
 }
 
 function arraysEqual(a, b) {

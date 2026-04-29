@@ -38,7 +38,13 @@ _Last synced: 2026-04-23_
 **Rust — `jas_dioxus/src/tools/yaml_tool.rs` (#[cfg(test)])**
 - Reference implementation; pencil pipeline inline.
 
-**Flask — no coverage.**
+**Flask — `jas_flask/tests/js/test_canvas.mjs`,
+`tests/js/test_phase12.mjs`** (~5 tests across files)
+- buffer_polyline overlay rendering (live polyline tracking the
+  drag, no-op when buffer empty or guard false).
+- doc.add_path_from_buffer fit + Path commit, applies state
+  fill/stroke defaults; Pencil-specific fill=null (a freehand
+  hairline shouldn't trap a fill).
 
 The manual suite below covers overlay rendering (buffer_polyline
 preview), fit smoothness intuition, cross-tool interaction, undo, and
@@ -228,6 +234,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PNC-201** [wired] FIT_ERROR = 4.0 identical across apps.
       Do: Inspect the yaml `doc.add_path_from_buffer` call.
@@ -236,6 +243,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27  · pencil.yaml has `fit_error: "4"` (string-typed numeric 4); Flask's effects.mjs evaluates → Number(4) = 4.0.
 
 - **PNC-202** [wired] Esc during drag leaves document unchanged.
       Do: Begin a drag; press Esc.
@@ -244,6 +252,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 - **PNC-203** [wired] Undo removes the last pencil path in every app.
       Do: Draw curve; Ctrl/Cmd-Z.
@@ -252,6 +261,7 @@ Full pass: ~35 min.
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
+      - [x] Flask      last: 2026-04-27
 
 ---
 

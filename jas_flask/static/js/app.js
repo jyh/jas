@@ -345,6 +345,41 @@
   var _NAMESPACES = ["state", "panel", "dialog", "param", "prop", "event",
                      "self", "active_document", "document", "workspace", "theme", "data"];
 
+  // Coerce a resolved value to a comparison-safe string. Treats null
+  // and undefined as "" but preserves 0 / false as "0" / "false".
+  function _toCmpStr(v) {
+    if (v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  // Split `s` on every occurrence of `sep` that sits at the top level —
+  // outside double / single quotes and outside any (), [], or {}
+  // brackets. Used by evalCondition to split " or " / " and " without
+  // tripping over operators that appear inside string literals or
+  // nested function calls.
+  function _splitTopLevel(s, sep) {
+    var parts = [];
+    var depth = 0, inDQ = false, inSQ = false;
+    var start = 0;
+    var sepLen = sep.length;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      if (inDQ) { if (ch === '"') inDQ = false; continue; }
+      if (inSQ) { if (ch === "'") inSQ = false; continue; }
+      if (ch === '"') { inDQ = true; continue; }
+      if (ch === "'") { inSQ = true; continue; }
+      if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+      if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+      if (depth === 0 && s.substr(i, sepLen) === sep) {
+        parts.push(s.substring(start, i));
+        start = i + sepLen;
+        i += sepLen - 1;
+      }
+    }
+    parts.push(s.substring(start));
+    return parts;
+  }
+
   function resolve(template, ctx) {
     if (template === null || template === undefined) return null;
     if (typeof template === "number" || typeof template === "boolean") return template;
@@ -362,15 +397,59 @@
       var condBool = (cond === true || cond === "true" || (cond && cond !== "false" && cond !== "0" && cond !== "null" && cond !== ""));
       return condBool ? resolve(ternMatch[2].trim(), ctx) : resolve(ternMatch[3].trim(), ctx);
     }
+    // Top-level `or` / `and`. Split BEFORE the comparison handler
+    // below — its lazy `.+?` lhs match would otherwise grab the
+    // operator and the second comparand as a single rhs string,
+    // turning "a != b or c != d" into a single garbled compare.
+    var orPartsR = _splitTopLevel(s, " or ");
+    if (orPartsR.length > 1) {
+      for (var oj = 0; oj < orPartsR.length; oj++) {
+        if (evalCondition(orPartsR[oj].trim(), ctx)) return true;
+      }
+      return false;
+    }
+    var andPartsR = _splitTopLevel(s, " and ");
+    if (andPartsR.length > 1) {
+      for (var aj = 0; aj < andPartsR.length; aj++) {
+        if (!evalCondition(andPartsR[aj].trim(), ctx)) return false;
+      }
+      return true;
+    }
+    // Logical NOT: "not X" → boolean negation of resolve(X). Without
+    // this handler, `set: { foo: "not state.foo" }` writes the literal
+    // string "not state.foo" instead of toggling foo's boolean — and
+    // that string then poisons every later data-bind-checked
+    // evaluation (evalCondition recurses on the "not " prefix forever).
+    if (s.length > 4 && s.substring(0, 4) === "not ") {
+      var notInner = resolve(s.substring(4).trim(), ctx);
+      var notBool = (notInner === true || notInner === "true"
+        || (notInner && notInner !== "false" && notInner !== "0"
+            && notInner !== "null" && notInner !== ""));
+      return !notBool;
+    }
     // Comparison operators: resolve each side separately
     var compMatch = s.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
     if (compMatch) {
-      var lhs = String(resolve(compMatch[1].trim(), ctx) || "");
-      var rhs = compMatch[3].trim();
+      // Literal-`null` rhs is its own case — resolve coerces null
+      // through _toCmpStr to "" while a literal "null" string keeps
+      // its quotes, so naive string compare reports inequality even
+      // when both sides are nullish (e.g. `state.stroke_brush != null`
+      // with no brush set).
+      var rhsRaw = compMatch[3].trim();
+      if (rhsRaw === "null") {
+        var lhsValN = resolve(compMatch[1].trim(), ctx);
+        var nullEq = lhsValN === null || lhsValN === undefined || lhsValN === "null";
+        return compMatch[2] === "==" ? nullEq : !nullEq;
+      }
+      // Use _toCmpStr instead of `String(x || "")` — `|| ""` collapses
+      // 0 and false to the empty string, which silently broke
+      // numeric comparisons like `state.active_tab == 0`.
+      var lhs = _toCmpStr(resolve(compMatch[1].trim(), ctx));
+      var rhs = rhsRaw;
       if (rhs.length >= 2 && rhs.charAt(0) === '"' && rhs.charAt(rhs.length - 1) === '"') {
         rhs = rhs.substring(1, rhs.length - 1);
       } else {
-        rhs = String(resolve(rhs, ctx) || "");
+        rhs = _toCmpStr(resolve(rhs, ctx));
       }
       return compMatch[2] === "==" ? lhs === rhs : lhs !== rhs;
     }
@@ -484,6 +563,26 @@
   function evalCondition(condStr, ctx) {
     if (condStr === false) return false;
     if (!condStr) return true;
+    // Top-level `or` / `and`. Must be split BEFORE resolve, because
+    // resolve's comparison handler is unaware of the operators and
+    // grabs the rest of the line as the rhs of `!=` / `==`, mangling
+    // disabled bindings like `panel.join != "miter" or state.foo != null`.
+    if (typeof condStr === "string") {
+      var orParts = _splitTopLevel(condStr, " or ");
+      if (orParts.length > 1) {
+        for (var oi = 0; oi < orParts.length; oi++) {
+          if (evalCondition(orParts[oi].trim(), ctx)) return true;
+        }
+        return false;
+      }
+      var andParts = _splitTopLevel(condStr, " and ");
+      if (andParts.length > 1) {
+        for (var ai = 0; ai < andParts.length; ai++) {
+          if (!evalCondition(andParts[ai].trim(), ctx)) return false;
+        }
+        return true;
+      }
+    }
     // Resolve the expression (handles both {{}} and bare expressions)
     var resolved = resolve(condStr, ctx);
     // Simple boolean evaluation
@@ -497,9 +596,18 @@
         ? evalCondition(ternaryMatch[2].trim(), ctx)
         : evalCondition(ternaryMatch[3].trim(), ctx);
     }
-    // Handle "not X"
-    if (typeof resolved === "string" && resolved.startsWith("not ")) {
-      return !evalCondition(resolved.substring(4), ctx);
+    // Handle "not X" — resolve the inner expression rather than
+    // recursing into evalCondition. evalCondition would re-resolve
+    // the same name, and if the underlying state value is itself a
+    // literal "not X" string (a recurring shape when "not"-prefixed
+    // values get stored as plain strings), the recursion never
+    // terminates and the page locks up.
+    if (typeof resolved === "string" && resolved.substring(0, 4) === "not ") {
+      var notInner2 = resolve(resolved.substring(4).trim(), ctx);
+      var notBool2 = (notInner2 === true || notInner2 === "true"
+        || (notInner2 && notInner2 !== "false" && notInner2 !== "0"
+            && notInner2 !== "null" && notInner2 !== ""));
+      return !notBool2;
     }
     // Handle "X == Y" (strip quotes from string literals for comparison)
     var eqMatch = typeof resolved === "string" ? resolved.match(/^(.+?)\s*==\s*(.+)$/) : null;
@@ -543,6 +651,24 @@
 
   // ── State mutation + reactive update ───────────────────────
 
+  // Inverse of PANEL_FIELD_TO_STATE — when global state.* changes
+  // (e.g. selection-sync from canvas_bootstrap pushes the active
+  // element's stroke-width onto state.stroke_width), mirror it back
+  // into the panel-local field driving the UI input.
+  var STATE_TO_PANEL_FIELD = {
+    stroke_width: "weight",
+    stroke_cap: "cap",
+    stroke_join: "join",
+    stroke_miter_limit: "miter_limit",
+    stroke_dashed: "dashed",
+    stroke_start_arrowhead: "start_arrowhead",
+    stroke_end_arrowhead: "end_arrowhead",
+    stroke_start_arrowhead_scale: "start_arrowhead_scale",
+    stroke_end_arrowhead_scale: "end_arrowhead_scale",
+    stroke_link_arrowhead_scale: "link_arrowhead_scale",
+    stroke_arrow_align: "arrow_align",
+  };
+
   function setState(key, value) {
     var old = state[key];
     state[key] = value;
@@ -553,6 +679,11 @@
       // remains the canonical state holder for panels.
       var mirror = (globalThis.JAS && globalThis.JAS.mirrorState);
       if (typeof mirror === "function") mirror(key, value);
+      // Reflect into panel-local state so any input bound to
+      // panel.<field> picks up the new value at the next
+      // updateBindings tick.
+      var panelField = STATE_TO_PANEL_FIELD[key];
+      if (panelField) panelState[panelField] = value;
       updateBindings(key, value);
     }
   }
@@ -872,6 +1003,30 @@
       return;
     }
 
+    // swap_panel_state: [key_a, key_b]  (active panel)
+    // swap_panel_state: { panel: <id>, keys: [a, b] }  (named panel)
+    // Used by the Stroke panel's swap_arrowheads button to exchange
+    // start/end shape and scale fields in one click.
+    if (effect.swap_panel_state) {
+      var sps = effect.swap_panel_state;
+      var swapKeyA, swapKeyB;
+      if (Array.isArray(sps) && sps.length === 2) {
+        swapKeyA = sps[0]; swapKeyB = sps[1];
+      } else if (sps && typeof sps === "object" && Array.isArray(sps.keys)
+                 && sps.keys.length === 2) {
+        // {panel, keys} form — Flask's panelState is the active
+        // panel's bucket; the panel field is informational only.
+        swapKeyA = sps.keys[0]; swapKeyB = sps.keys[1];
+      } else {
+        return;
+      }
+      var swapTmp = panelState[swapKeyA];
+      panelState[swapKeyA] = panelState[swapKeyB];
+      panelState[swapKeyB] = swapTmp;
+      updateBindings(null, null);
+      return;
+    }
+
     // increment: { key, by }
     if (effect.increment) {
       var incKey = effect.increment.key;
@@ -902,6 +1057,31 @@
       var psKey = resolve(effect.set_panel_state.key, ctx);
       var psVal = resolve(effect.set_panel_state.value, ctx);
       panelState[psKey] = psVal;
+      // QoL: switching the Color panel into Web Safe RGB also snaps
+      // the active fill / stroke colors. Strict spec says mode change
+      // doesn't touch the color, but every channel slider shown in
+      // Web Safe RGB rounds to steps of 51, so leaving an off-grid
+      // color behind is just confusing.
+      if (psKey === "mode" && psVal === "web_safe_rgb") {
+        var snap = function (hex) {
+          if (typeof hex !== "string" || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+          var r = parseInt(hex.slice(1, 3), 16);
+          var g = parseInt(hex.slice(3, 5), 16);
+          var b = parseInt(hex.slice(5, 7), 16);
+          r = Math.min(255, Math.round(r / 51) * 51);
+          g = Math.min(255, Math.round(g / 51) * 51);
+          b = Math.min(255, Math.round(b / 51) * 51);
+          var h2 = function (n) { var s = n.toString(16); return s.length === 1 ? "0" + s : s; };
+          return "#" + h2(r) + h2(g) + h2(b);
+        };
+        var fc = state.fill_color;
+        var sc = state.stroke_color;
+        var snappedFC = snap(fc);
+        var snappedSC = snap(sc);
+        if (typeof fc === "string" && snappedFC !== fc) setState("fill_color", snappedFC);
+        if (typeof sc === "string" && snappedSC !== sc) setState("stroke_color", snappedSC);
+        syncPanelColorState();
+      }
       updateBindings(null, null);
       return;
     }
@@ -1661,11 +1841,36 @@
         el.textContent = iconName;
       }
     } else if (type === "canvas") {
-      el.className = "app-canvas";
-      styles.push("display:flex", "align-items:center", "justify-content:center",
-                   "color:#999", "font-size:14px", "min-height:200px");
+      // Per-tab canvas: emit the 5-layer SVG stack the engine renders
+      // into. Mirror of renderer.py::_render_canvas so a runtime-
+      // created canvas (via create_child) is structurally identical to
+      // a server-rendered one. canvas_bootstrap.mjs binds a Model with
+      // a fresh emptyDocument() (one default artboard) to each new
+      // app-canvas-stack as it lands in the DOM.
+      el.className = "app-canvas-stack";
+      var canvasId = el.id || "canvas";
+      var bg = (s.background ? resolve(s.background, ctx) : "var(--app-window-bg)");
+      styles.push(
+        "flex:1", "position:relative", "background:" + bg,
+        "min-height:200px", "overflow:hidden"
+      );
       el.style.cssText = styles.join(";");
-      el.textContent = (spec.summary || "Canvas") + " (tier 3)";
+      var layerStyle = "position:absolute;inset:0;width:100%;height:100%;overflow:visible;";
+      var pointerless = "pointer-events:none;";
+      el.innerHTML =
+        '<div class="app-canvas-viewport" data-canvas-id="' + canvasId +
+        '" style="position:absolute;inset:0;transform-origin:0 0;">' +
+        '<svg data-canvas-layer="artboard-fill"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '<svg data-canvas-layer="doc"' +
+        ' style="' + layerStyle + '"></svg>' +
+        '<svg data-canvas-layer="artboard-deco"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '<svg data-canvas-layer="selection"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '<svg data-canvas-layer="overlay"' +
+        ' style="' + layerStyle + pointerless + '"></svg>' +
+        '</div>';
     } else if (type === "placeholder") {
       el.className = "app-placeholder";
       styles.push("border:1px dashed #666", "padding:12px", "color:#888",
@@ -1705,19 +1910,31 @@
       }
     }
 
-    // Wire behaviors — resolve prop.* only, keep state.* reactive
+    // Wire behaviors — resolve prop.* only, keep state.* reactive.
+    // Pass through ctx.props (captured at creation time by the
+    // create_child effect) so behavior expressions like
+    // `set: { active_tab: "prop.index" }` see the right value when
+    // the click later fires.
     if (spec.behavior) {
       var resolvedBehavior = resolveProps(spec.behavior);
       el.setAttribute("data-behaviors", JSON.stringify(resolvedBehavior));
-      wireBehaviors(el);
+      wireBehaviors(el, ctx && ctx.props);
     }
 
     return el;
   }
 
-  function wireBehaviors(el) {
+  function wireBehaviors(el, props) {
     var behaviors;
     try { behaviors = JSON.parse(el.getAttribute("data-behaviors")); } catch (ex) { return; }
+    var capturedProps = props || null;
+    // Tag this element so the DOMContentLoaded [data-behaviors] scan
+    // doesn't re-wire it. Otherwise dynamically-created elements get
+    // both this rich-context wiring (with capturedProps) AND the
+    // generic post-load wiring, which fires the action a second
+    // time without props — manifested as e.g. close_tab firing once
+    // with the right index then again with index="".
+    el.setAttribute("data-behaviors-wired", "1");
     behaviors.forEach(function (b) {
       var domEvent = eventMap[b.event];
       if (!domEvent) return;
@@ -1732,7 +1949,8 @@
             shift: e.shiftKey, alt: e.altKey,
             value: e.target.value
           },
-          self: { id: el.id, type: el.getAttribute("data-element-type") || "" }
+          self: { id: el.id, type: el.getAttribute("data-element-type") || "" },
+          props: capturedProps
         };
         if (b.condition && !evalCondition(resolve(b.condition, ctx), ctx)) return;
         if (b.prevent_default) e.preventDefault();
@@ -1785,6 +2003,26 @@
         globalThis.JAS.redo();
         return;
       }
+      if (actionId === "select_all"
+          && typeof globalThis.JAS.selectAll === "function") {
+        globalThis.JAS.selectAll();
+        return;
+      }
+      if (actionId === "delete_selection"
+          && typeof globalThis.JAS.deleteSelection === "function") {
+        globalThis.JAS.deleteSelection();
+        return;
+      }
+      if (actionId === "group"
+          && typeof globalThis.JAS.groupSelection === "function") {
+        globalThis.JAS.groupSelection();
+        return;
+      }
+      if (actionId === "ungroup"
+          && typeof globalThis.JAS.ungroupSelection === "function") {
+        globalThis.JAS.ungroupSelection();
+        return;
+      }
     }
     var def = actions[actionId];
     if (!def) {
@@ -1819,6 +2057,12 @@
       runEffects(def.effects, ctx);
     }
   }
+
+  // Expose for the engine bootstrap (canvas_bootstrap.mjs) so it
+  // can replay actions on startup — specifically, dispatching
+  // new_document once per saved tab to rehydrate the workspace.
+  globalThis.APP_DISPATCH = dispatch;
+  globalThis.APP_SET_STATE = setState;
 
   // ── Dynamic workspace menu ──────────────────────────────────
 
@@ -2025,8 +2269,11 @@
       dispatch(action, params);
     });
 
-    // Wire behavior data attributes — group by event, first matching condition wins
-    document.querySelectorAll("[data-behaviors]").forEach(function (el) {
+    // Wire behavior data attributes — group by event, first matching condition wins.
+    // Skip elements already wired by createElementFromSpec (those carry
+    // the data-behaviors-wired marker and were given proper ctx.props
+    // in their listener closure).
+    document.querySelectorAll("[data-behaviors]:not([data-behaviors-wired])").forEach(function (el) {
       var behaviors;
       try { behaviors = JSON.parse(el.getAttribute("data-behaviors")); } catch (ex) { return; }
       // Group behaviors by event type
@@ -2102,20 +2349,62 @@
       } catch (e) {}
     });
 
-    // Wire panel slider/input → live color update and commit
+    // Map panel-local field → global state key. Inputs bound to a
+    // listed field route their commit straight to setState (which
+    // canvas_bootstrap.mjs's PANEL_TO_ATTR mirror picks up to
+    // mutate the active selection), bypassing the Color-panel-
+    // specific colorize path below.
+    var PANEL_FIELD_TO_STATE = {
+      weight: "stroke_width",
+      dash_1: "stroke_dash_1",
+      gap_1: "stroke_gap_1",
+      dash_2: "stroke_dash_2",
+      gap_2: "stroke_gap_2",
+      dash_3: "stroke_dash_3",
+      gap_3: "stroke_gap_3",
+      // Arrowhead dropdowns / scale combo boxes commit through the
+      // same path so changing the stk_start_arrowhead select reaches
+      // state.stroke_start_arrowhead (and from there, via PANEL_TO_ATTR
+      // in canvas_bootstrap, the active element's
+      // jas-stroke-start-arrowhead field that the renderer reads).
+      start_arrowhead: "stroke_start_arrowhead",
+      end_arrowhead: "stroke_end_arrowhead",
+      start_arrowhead_scale: "stroke_start_arrowhead_scale",
+      end_arrowhead_scale: "stroke_end_arrowhead_scale",
+    };
+
+    // Wire panel slider/input → live update and commit.
+    // Text inputs (e.g. the hex field) are skipped — parseFloat
+    // their value would corrupt panel state, and the surrounding
+    // updateBindings would overwrite the user's keystrokes. They
+    // commit through the keydown-on-Enter handler below instead.
     document.addEventListener("input", function (e) {
       var el = e.target;
       // Length inputs commit on `change` / Enter, never on `input`.
       // Calling parseFloat on a partial entry like "12 p" would pin
       // the value at 12 mid-typing and overwrite the user's keystroke.
       if (el.classList && el.classList.contains("app-length-input")) return;
+      if (el.type === "text" || el.type === "" || el.tagName === "TEXTAREA") return;
+      // Selects fire both `input` and `change`; the change handler
+      // routes string-valued fields (arrowhead shape, etc.) through
+      // PANEL_FIELD_TO_STATE. Skip them here so parseFloat doesn't
+      // poison panelState with NaN for non-numeric values.
+      if (el.tagName === "SELECT") return;
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
       if (!bindVal) return;
       var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
       if (!pm) return;
       var field = pm[1];
+      var v = parseFloat(el.value);
+      panelState[field] = v;
+      // Direct-route fields (stroke weight, etc.) skip the color
+      // recompute and write straight to global state.
+      var stateKey = PANEL_FIELD_TO_STATE[field];
+      if (stateKey) {
+        setState(stateKey, v);
+        return;
+      }
       panelColorSyncLocked = true;
-      panelState[field] = parseFloat(el.value);
       var newColor = panelStateToColor();
       panelState.hex = colorFunctions.hex(newColor);
       setState(state.fill_on_top ? "fill_color" : "stroke_color", newColor);
@@ -2132,7 +2421,33 @@
         return;
       }
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
-      if (!bindVal || !(bindVal.match(/^\{\{panel\.\w+\}\}$/) || bindVal.match(/^panel\.\w+$/))) return;
+      if (!bindVal) return;
+      var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
+      if (!pm) return;
+      var changeField = pm[1];
+      // Direct-route fields (arrowhead selects, etc.) commit straight
+      // to global state via PANEL_FIELD_TO_STATE — skip the color
+      // dispatch path which is only meaningful for the Color panel.
+      var changeStateKey = PANEL_FIELD_TO_STATE[changeField];
+      if (changeStateKey) {
+        // Numeric inputs already routed through the input listener
+        // above; selects only fire change. Coerce numeric-looking
+        // string values back to numbers for fields whose state type
+        // is number (scale combo boxes); leave shape names as
+        // strings.
+        var raw = el.value;
+        var coerced = raw;
+        if (changeField === "start_arrowhead_scale"
+            || changeField === "end_arrowhead_scale") {
+          var n = parseFloat(raw);
+          coerced = Number.isFinite(n) ? n : raw;
+        }
+        panelState[changeField] = coerced;
+        setState(changeStateKey, coerced);
+        return;
+      }
+      // Color-panel fall-through: any panel.* change re-dispatches
+      // set_active_color so the slider / hex / preset value commits.
       dispatch("set_active_color", { color: panelStateToColor() });
     });
 
@@ -2192,7 +2507,22 @@
       if (hexBind !== "{{panel.hex}}" && hexBind !== "panel.hex") return;
       var raw = el.value.replace(/^#/, "").trim();
       if (/^[0-9a-fA-F]{6}$/.test(raw)) {
-        var newColor = "#" + raw.toLowerCase();
+        var r = parseInt(raw.slice(0, 2), 16);
+        var g = parseInt(raw.slice(2, 4), 16);
+        var b = parseInt(raw.slice(4, 6), 16);
+        // Web Safe RGB mode snaps each channel to the nearest of
+        // 0/51/102/153/204/255 — Rust / Swift / OCaml / Python all
+        // do this on commit.
+        if (panelState.mode === "web_safe_rgb") {
+          r = Math.min(255, Math.round(r / 51) * 51);
+          g = Math.min(255, Math.round(g / 51) * 51);
+          b = Math.min(255, Math.round(b / 51) * 51);
+        }
+        var hex2 = function (n) {
+          var s = n.toString(16);
+          return s.length === 1 ? "0" + s : s;
+        };
+        var newColor = "#" + hex2(r) + hex2(g) + hex2(b);
         panelColorSyncLocked = true;
         setState(state.fill_on_top ? "fill_color" : "stroke_color", newColor);
         panelColorSyncLocked = false;
@@ -2506,7 +2836,11 @@
     if (e.shiftKey) parts.push("shift");
     var key = e.key;
     if (key === " ") key = "space";
-    if (key.length === 1) key = key.toLowerCase();
+    // Lowercase always — normalizeKey lowercases the YAML side
+    // unconditionally, so multi-char keys like "Delete" / "Backspace"
+    // / "Enter" / "Tab" / "F2" must too. Only lowercasing the
+    // single-char case left those broken.
+    key = key.toLowerCase();
     parts.push(key);
     return parts.sort().join("+");
   }
@@ -2864,7 +3198,7 @@
       // Chevron
       var chevron = document.createElement("button");
       chevron.className = "btn btn-sm app-dock-chevron p-0";
-      chevron.style.cssText = "color:#888;background:transparent;border:none;font-size:18px;line-height:1";
+      chevron.style.cssText = "color:#888;background:transparent;border:none;font-size:21px;line-height:1";
       chevron.textContent = groupCollapsed ? "\u00bb" : "\u00ab";
       chevron.addEventListener("click", function () {
         model.groups[gi].collapsed = !model.groups[gi].collapsed;
@@ -2877,12 +3211,57 @@
         var hbDiv = document.createElement("div");
         hbDiv.className = "dropdown d-inline-block";
         var hbBtn = document.createElement("button");
-        hbBtn.className = "btn btn-sm p-0 dropdown-toggle";
+        // Match the server-side renderer in renderer.py: no
+        // `dropdown-toggle` class. That class triggers Bootstrap's
+        // .dropdown-toggle::after caret, leaving a vestigial down-
+        // pointing triangle next to the hamburger ≡ that adds nothing
+        // (the ≡ already signals "menu opens here") and crowds the
+        // header. The dropdown itself still works via
+        // data-bs-toggle="dropdown" on the wrapper.
+        hbBtn.className = "btn btn-sm p-0";
         hbBtn.setAttribute("data-bs-toggle", "dropdown");
-        hbBtn.style.cssText = "color:#888;background:transparent;border:none;font-size:14px";
+        hbBtn.style.cssText = "color:#888;background:transparent;border:none;font-size:21px;line-height:1";
         hbBtn.textContent = "\u2261";
         var hbMenu = document.createElement("ul");
         hbMenu.className = "dropdown-menu";
+        // Mirror the server-side render in renderer.py: merge the
+        // active panel's own menu items first (HSB / RGB / Show
+        // Recent Colors / etc.), then a separator, then the
+        // per-panel "Close X" items at the bottom.
+        var activeName = panels[Math.min(active, panels.length - 1)];
+        var panelMenus = (typeof APP_PANEL_MENUS !== "undefined") ? APP_PANEL_MENUS : {};
+        var activeMenu = panelMenus[activeName + "_panel_content"] || [];
+        activeMenu.forEach(function (item) {
+          var li = document.createElement("li");
+          if (item === "separator") {
+            var hr = document.createElement("hr");
+            hr.className = "dropdown-divider";
+            li.appendChild(hr);
+            hbMenu.appendChild(li);
+            return;
+          }
+          if (!item || typeof item !== "object" || !item.label) return;
+          var a = document.createElement("a");
+          a.className = "dropdown-item";
+          a.href = "#";
+          a.textContent = item.label;
+          if (item.disabled) a.classList.add("disabled");
+          if (item.action && !item.disabled) {
+            a.setAttribute("data-action", item.action);
+            if (item.params) {
+              a.setAttribute("data-action-params", JSON.stringify(item.params));
+            }
+          }
+          li.appendChild(a);
+          hbMenu.appendChild(li);
+        });
+        if (activeMenu.length > 0 && panels.length > 0) {
+          var sepLi = document.createElement("li");
+          var sepHr = document.createElement("hr");
+          sepHr.className = "dropdown-divider";
+          sepLi.appendChild(sepHr);
+          hbMenu.appendChild(sepLi);
+        }
         panels.forEach(function (panelName) {
           var li = document.createElement("li");
           var a = document.createElement("a");
@@ -3357,6 +3736,122 @@
   var _origDOMReady = null;
   document.addEventListener("DOMContentLoaded", function () {
     initDockModels();
+  });
+
+  // ── Auto-save / restore current workspace ────────────────
+  //
+  // Persists the live pane layout (positions, dock models, floating
+  // docks, layout-state vars, active appearance) to localStorage on
+  // every page unload. On the next load, after the dock and pane
+  // wiring has finished, apply the snapshot — equivalent to invoking
+  // the load_layout effect on a named workspace, except this one is
+  // unnamed and tracks the user's working state automatically.
+  //
+  // Distinct from the explicit "Save Workspace…" feature (which uses
+  // STORAGE_KEY = "workspace_layouts") and from the document session
+  // save in canvas_bootstrap.mjs (which persists per-tab Models).
+  var LIVE_LAYOUT_KEY = "jas_flask_live_layout";
+
+  function snapshotLiveLayout() {
+    var configs = typeof APP_PANE_CONFIGS !== "undefined" ? APP_PANE_CONFIGS : {};
+    var snapshot = {
+      panes: {}, state: {}, dock: {}, floating: [],
+      appearance: activeAppearanceName,
+    };
+    document.querySelectorAll(".app-pane").forEach(function (p) {
+      if (!p.id) return;
+      snapshot.panes[p.id] = {
+        left: p.offsetLeft, top: p.offsetTop,
+        width: p.offsetWidth, height: p.offsetHeight,
+      };
+      var cfg = configs[p.id];
+      if (cfg && cfg.layout_state) {
+        cfg.layout_state.forEach(function (key) {
+          if (state.hasOwnProperty(key)) snapshot.state[key] = state[key];
+        });
+      }
+    });
+    for (var dockId in dockModels) {
+      if (!dockModels.hasOwnProperty(dockId)) continue;
+      if (dockId.indexOf("floating_dock_") === 0) {
+        var paneId = dockId.replace("_view", "");
+        var paneEl = document.getElementById(paneId);
+        snapshot.floating.push({
+          dockViewId: dockId,
+          groups: dockModels[dockId].groups,
+          x: paneEl ? paneEl.offsetLeft : 0,
+          y: paneEl ? paneEl.offsetTop : 0,
+          width: paneEl ? paneEl.offsetWidth : 220,
+          height: paneEl ? paneEl.offsetHeight : 300,
+        });
+      } else {
+        snapshot.dock[dockId] = { groups: dockModels[dockId].groups };
+      }
+    }
+    return snapshot;
+  }
+
+  function applyLiveLayout(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    var panes = snapshot.panes || {};
+    for (var paneId in panes) {
+      if (!panes.hasOwnProperty(paneId)) continue;
+      var el = document.getElementById(paneId);
+      if (!el) continue;
+      var pos = panes[paneId];
+      el.style.left = pos.left + "px";
+      el.style.top = pos.top + "px";
+      el.style.width = pos.width + "px";
+      el.style.height = pos.height + "px";
+      el.classList.remove("d-none");
+    }
+    if (snapshot.state) {
+      for (var key in snapshot.state) {
+        if (snapshot.state.hasOwnProperty(key)) {
+          setState(key, snapshot.state[key]);
+        }
+      }
+    }
+    if (snapshot.dock) {
+      for (var dockId in snapshot.dock) {
+        if (!snapshot.dock.hasOwnProperty(dockId)) continue;
+        if (dockModels[dockId]) {
+          dockModels[dockId].groups = snapshot.dock[dockId].groups;
+          rerenderDockView(dockId);
+        }
+      }
+    }
+    document.querySelectorAll("[id^='floating_dock_']").forEach(function (el) { el.remove(); });
+    for (var dk in dockModels) {
+      if (dk.indexOf("floating_dock_") === 0) delete dockModels[dk];
+    }
+    if (Array.isArray(snapshot.floating)) {
+      snapshot.floating.forEach(function (fd) {
+        createFloatingDock(fd.groups, fd.x, fd.y);
+      });
+    }
+    if (snapshot.appearance) applyAppearance(snapshot.appearance);
+  }
+
+  window.addEventListener("beforeunload", function () {
+    try {
+      localStorage.setItem(LIVE_LAYOUT_KEY, JSON.stringify(snapshotLiveLayout()));
+    } catch (e) { /* QuotaExceededError, security errors — best-effort */ }
+  });
+
+  // Defer the restore until after every DOMContentLoaded handler in
+  // this IIFE has run (initDockModels populates dockModels, panel
+  // bindings get their initial values, etc.). setTimeout 0 hops past
+  // the current task — the saved snapshot then lands on a fully-
+  // wired DOM.
+  document.addEventListener("DOMContentLoaded", function () {
+    setTimeout(function () {
+      var raw;
+      try { raw = localStorage.getItem(LIVE_LAYOUT_KEY); } catch (e) { return; }
+      if (!raw) return;
+      try { applyLiveLayout(JSON.parse(raw)); }
+      catch (e) { console.warn("[live-layout] restore failed:", e); }
+    }, 0);
   });
 
 })();

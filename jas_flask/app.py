@@ -170,6 +170,14 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         # dispatchEvent can find on_<event> handlers when DOM events
         # land on the canvas.
         tools_json = json.dumps(ws.get("tools", {}))
+        # Per-panel menu items so the JS dock-view rerenderer can
+        # rebuild the hamburger menu identically to the server's
+        # initial render. Send only the `menu:` slice — full panel
+        # specs are large and the JS only needs the menu items.
+        panels_dict = ws.get("panels", {})
+        panel_menus = {k: v.get("menu", []) for k, v in panels_dict.items()
+                       if isinstance(v, dict) and v.get("menu")}
+        panel_menus_json = json.dumps(panel_menus)
 
         template = "wireframe.html" if mode == "wireframe" else "normal.html"
         return render_template(template, ws=ws_for_template,
@@ -187,14 +195,8 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                                all_appearances_json=all_appearances_json,
                                base_theme_json=base_theme_json,
                                metrics_json=metrics_json,
-                               tools_json=tools_json)
-
-    @app.route("/canvas")
-    def canvas_demo():
-        """Minimal demo of the JS engine — loads workspace.json, mounts the
-        selection tool, and shows a document with two rectangles. Uses the
-        engine modules under /static/js/engine/. See FLASK_PARITY.md §7."""
-        return render_template("canvas_demo.html")
+                               tools_json=tools_json,
+                               panel_menus_json=panel_menus_json)
 
     @app.route("/api/workspace")
     def workspace_json():
