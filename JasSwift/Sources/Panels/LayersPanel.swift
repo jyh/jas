@@ -402,11 +402,12 @@ public enum LayersPanel {
                 default: hex = nil
                 }
                 if let h = hex, !h.isEmpty {
+                    // Push to model — registered listeners
+                    // (WorkspaceState.installRecentColorsBridge) mirror
+                    // the new list into every panel.recent_colors that
+                    // is initialized, so the calling panel and any
+                    // sibling panel both update reactively.
                     ColorPanel.pushRecentColor(h, model: model)
-                    if let pid = store.getActivePanelId() {
-                        store.setPanel(
-                            pid, "recent_colors", model.recentColors)
-                    }
                 }
             }
             return nil
