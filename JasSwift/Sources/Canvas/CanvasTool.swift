@@ -114,60 +114,62 @@ func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (
 
 // MARK: - Tool registry
 
-/// Load a YamlTool by id from the compiled workspace.json. Returns
-/// nil when the workspace can't be loaded or the tool spec is
-/// missing — callers fall back to the native implementation in that
-/// case so tests stay green when the workspace file is unavailable.
-func loadYamlTool(_ id: String) -> YamlTool? {
-    guard let ws = WorkspaceData.load(),
-          let tools = ws.data["tools"] as? [String: Any],
+/// Look up a tool spec inside an already-loaded workspace and build
+/// a YamlTool from it. Returns nil only when the spec is missing or
+/// malformed — workspace failure is reported by [loadWorkspaceTools]
+/// up-front, not per call. The dispatcher in CanvasSubwindow keys
+/// the tool dict with optional chaining (tools[currentTool]?), so a
+/// missing tool downgrades to a no-op rather than a crash.
+func loadYamlTool(_ id: String, in ws: WorkspaceData) -> YamlTool? {
+    guard let tools = ws.data["tools"] as? [String: Any],
           let spec = tools[id] as? [String: Any] else {
         return nil
     }
     return YamlTool.fromWorkspaceTool(spec)
 }
 
-/// Create one instance of each tool, keyed by Tool enum.
+/// Load workspace tools and assemble the registry. Tiered failure
+/// modes:
+///   * Workspace nil → fatalError. The whole app cannot run without
+///     workspace.json; failing fast is correct.
+///   * Per-tool nil → log + omit. Other tools still load, the omitted
+///     tool just won't activate when chosen. This is the right
+///     trade-off because adding a new tool spec shouldn't be able to
+///     brick the app.
+/// Native-only tools (Type / TypeOnPath per NATIVE_BOUNDARY.md §6)
+/// are added unconditionally.
 func createTools() -> [Tool: CanvasTool] {
-    // Tools migrated to YAML per SWIFT_TOOL_RUNTIME.md Phase 7.
-    // Require the workspace to load — a missing workspace.json means
-    // the whole app is non-functional anyway.
-    guard let rectTool = loadYamlTool("rect"),
-          let roundedRectTool = loadYamlTool("rounded_rect"),
-          let lineTool = loadYamlTool("line"),
-          let polygonTool = loadYamlTool("polygon"),
-          let starTool = loadYamlTool("star"),
-          let selectionTool = loadYamlTool("selection"),
-          let interiorSelectionTool = loadYamlTool("interior_selection"),
-          let lassoTool = loadYamlTool("lasso"),
-          let pencilTool = loadYamlTool("pencil"),
-          let penTool = loadYamlTool("pen"),
-          let addAnchorPointTool = loadYamlTool("add_anchor_point"),
-          let deleteAnchorPointTool = loadYamlTool("delete_anchor_point"),
-          let anchorPointTool = loadYamlTool("anchor_point"),
-          let partialSelectionTool = loadYamlTool("partial_selection"),
-          let pathEraserTool = loadYamlTool("path_eraser"),
-          let smoothTool = loadYamlTool("smooth") else {
-        fatalError("workspace/workspace.json missing or malformed — cannot load YAML tools")
+    guard let ws = WorkspaceData.load() else {
+        fatalError("workspace/workspace.json missing or malformed — cannot run without it")
     }
-    return [
-        .selection: selectionTool,
-        .partialSelection: partialSelectionTool,
-        .interiorSelection: interiorSelectionTool,
-        .pen: penTool,
-        .addAnchorPoint: addAnchorPointTool,
-        .deleteAnchorPoint: deleteAnchorPointTool,
-        .anchorPoint: anchorPointTool,
-        .pencil: pencilTool,
-        .pathEraser: pathEraserTool,
-        .smooth: smoothTool,
-        .typeTool: TypeTool(),
-        .typeOnPath: TypeOnPathTool(),
-        .line: lineTool,
-        .rect: rectTool,
-        .roundedRect: roundedRectTool,
-        .polygon: polygonTool,
-        .star: starTool,
-        .lasso: lassoTool,
+    let yamlTools: [(Tool, String)] = [
+        (.selection,           "selection"),
+        (.partialSelection,    "partial_selection"),
+        (.interiorSelection,   "interior_selection"),
+        (.pen,                 "pen"),
+        (.addAnchorPoint,      "add_anchor_point"),
+        (.deleteAnchorPoint,   "delete_anchor_point"),
+        (.anchorPoint,         "anchor_point"),
+        (.pencil,              "pencil"),
+        (.pathEraser,          "path_eraser"),
+        (.smooth,              "smooth"),
+        (.line,                "line"),
+        (.rect,                "rect"),
+        (.roundedRect,         "rounded_rect"),
+        (.polygon,             "polygon"),
+        (.star,                "star"),
+        (.lasso,               "lasso"),
     ]
+    var registry: [Tool: CanvasTool] = [
+        .typeTool:   TypeTool(),
+        .typeOnPath: TypeOnPathTool(),
+    ]
+    for (kind, id) in yamlTools {
+        if let tool = loadYamlTool(id, in: ws) {
+            registry[kind] = tool
+        } else {
+            NSLog("[Jas] tool \"%@\" not loaded — workspace.json missing the spec", id)
+        }
+    }
+    return registry
 }
