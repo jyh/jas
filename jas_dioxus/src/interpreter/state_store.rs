@@ -141,26 +141,23 @@ impl StateStore {
             self.data = serde_json::Value::Object(serde_json::Map::new());
         }
         let segs: Vec<&str> = path.split('.').collect();
+        let Some((last, parents)) = segs.split_last() else { return };
         let mut cur = &mut self.data;
-        for seg in &segs[..segs.len() - 1] {
-            if !cur.is_object() {
-                if let Some(map) = cur.as_array_mut() {
-                    if let Ok(idx) = seg.parse::<usize>() {
-                        if idx < map.len() {
-                            cur = &mut map[idx];
-                            continue;
-                        }
-                    }
+        for seg in parents {
+            match cur {
+                serde_json::Value::Array(arr) => {
+                    let Ok(idx) = seg.parse::<usize>() else { return };
+                    if idx >= arr.len() { return }
+                    cur = &mut arr[idx];
                 }
-                return; // can't descend
+                serde_json::Value::Object(map) => {
+                    cur = map
+                        .entry(seg.to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                }
+                _ => return,
             }
-            let map = cur.as_object_mut().unwrap();
-            if !map.contains_key(*seg) {
-                map.insert(seg.to_string(), serde_json::json!({}));
-            }
-            cur = map.get_mut(*seg).unwrap();
         }
-        let last = segs.last().unwrap();
         if let Some(map) = cur.as_object_mut() {
             map.insert(last.to_string(), value);
         } else if let Some(arr) = cur.as_array_mut() {
