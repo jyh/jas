@@ -2380,7 +2380,15 @@ fn run_yaml_effect(
         if target == "panel.recent_colors" {
             let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
             let val = super::expr::eval(value_expr, eval_ctx);
-            if let super::expr_types::Value::Str(hex) = val {
+            // Accept both Value::Color (e.g. from a `Color`-typed
+            // bind) and Value::Str (already-stringified hex). The
+            // recent_colors list is a Vec<String>.
+            let hex_opt = match val {
+                super::expr_types::Value::Str(s) => Some(s),
+                super::expr_types::Value::Color(s) => Some(s),
+                _ => None,
+            };
+            if let Some(hex) = hex_opt {
                 let unique = lp.get("unique").and_then(|v| v.as_bool()).unwrap_or(false);
                 let max_len = lp.get("max_length").and_then(|v| v.as_u64()).map(|n| n as usize);
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
