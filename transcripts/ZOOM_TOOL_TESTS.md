@@ -403,19 +403,24 @@ These work regardless of which tool is active.
       center.
       — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-132** [wired] **P0.** `Cmd+0` fits the active
+- [x] **ZOOM-132** [wired] **P0.** `Cmd+0` fits the active
       artboard.
       Do: Zoom in to ~3x, then press `Cmd+0`.
       Expect: Artboard fills the viewport with `fit_padding_px`
       breathing room (default 20px). Centered.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-133** [wired] **P1.** `Cmd+Alt+0` fits all artboards.
-      Do: Add a second artboard (e.g. `Cmd+Shift+O` then drag a
-      new artboard). Press `Cmd+Alt+0`.
+- [x] **ZOOM-133** [wired] **P1.** `Cmd+Alt+0` fits all artboards.
+      Do: Add a second artboard (Shift+O activates Artboard, drag
+      a new one, switch back to Selection). Press `Cmd+Alt+0`.
       Expect: Both artboards visible; the union of their
       bounding boxes fills the viewport with padding.
-      — last: —
+      — last: 2026-04-30 (Rust). Required ~5 fixes to land:
+        Artboard tool registration (787aeef), Shift+O wiring
+        (7328205), viewport→doc coords on artboard effects
+        (97c6076), the dispatch_action param defaults
+        (456f668), and the Cmd+Alt+0 macOS "º" key fix
+        (12c239f).
 
 - [ ] **ZOOM-134** [wired] **P0.** `Cmd+1` jumps to 100%.
       Do: Zoom in to 4x, then press `Cmd+1`.
