@@ -54,11 +54,13 @@ impl Diagnostic {
 // Schema — mirrors workspace/state.yaml
 
 const ACTIVE_TOOL_VALUES: &[&str] = &[
-    "selection", "partial_selection", "interior_selection",
+    "selection", "partial_selection", "interior_selection", "magic_wand",
     "pen", "add_anchor", "delete_anchor", "anchor_point",
-    "pencil", "path_eraser", "smooth",
+    "pencil", "paintbrush", "blob_brush", "path_eraser", "smooth",
     "type", "type_on_path",
-    "line", "rect", "rounded_rect", "polygon", "star", "lasso",
+    "line", "rect", "rounded_rect", "ellipse", "polygon", "star", "lasso",
+    "scale", "rotate", "shear",
+    "hand", "zoom", "artboard", "eyedropper",
 ];
 
 const STROKE_CAP_VALUES: &[&str] = &["butt", "round", "square"];

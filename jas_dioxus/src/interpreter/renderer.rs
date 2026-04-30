@@ -3003,11 +3003,14 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
         "selection" => Some(ToolKind::Selection),
         "partial_selection" => Some(ToolKind::PartialSelection),
         "interior_selection" => Some(ToolKind::InteriorSelection),
+        "magic_wand" => Some(ToolKind::MagicWand),
         "pen" => Some(ToolKind::Pen),
         "add_anchor" => Some(ToolKind::AddAnchorPoint),
         "delete_anchor" => Some(ToolKind::DeleteAnchorPoint),
         "anchor_point" => Some(ToolKind::AnchorPoint),
         "pencil" => Some(ToolKind::Pencil),
+        "paintbrush" => Some(ToolKind::Paintbrush),
+        "blob_brush" => Some(ToolKind::BlobBrush),
         "path_eraser" => Some(ToolKind::PathEraser),
         "smooth" => Some(ToolKind::Smooth),
         "type" => Some(ToolKind::Type),
@@ -3015,6 +3018,7 @@ fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
         "line" => Some(ToolKind::Line),
         "rect" => Some(ToolKind::Rect),
         "rounded_rect" => Some(ToolKind::RoundedRect),
+        "ellipse" => Some(ToolKind::Ellipse),
         "polygon" => Some(ToolKind::Polygon),
         "star" => Some(ToolKind::Star),
         "lasso" => Some(ToolKind::Lasso),
@@ -3441,19 +3445,54 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         String::new()
     };
 
-    // Resolve the icon name. ``bind.icon`` (yaml expression) wins
-    // when present so widgets like the Opacity panel's
-    // op_link_indicator can flip between glyphs as mask.linked
-    // changes; falls back to the static ``icon`` field otherwise.
+    // Resolve the icon name. Resolution order:
+    //   1. ``bind.icon`` (yaml expression) — used by Opacity panel's
+    //      op_link_indicator to flip glyphs based on mask.linked.
+    //   2. ``alternates.items`` lookup by ``state.active_tool`` — for
+    //      toolbar slots that share a button with multiple tools
+    //      (shape / pen / pencil / arrow / text / hand). Without this
+    //      the slot stays stuck on the default icon after picking a
+    //      different alternate from the long-press menu.
+    //   3. The static ``icon`` field on the element.
+    let static_icon = el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string();
     let icon_name: String = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("icon")).and_then(|v| v.as_str()) {
         match expr::eval(expr_str, ctx) {
             Value::Str(s) => s,
-            _ => el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string(),
+            _ => static_icon.clone(),
         }
+    } else if let Some(items) = el.get("alternates").and_then(|a| a.get("items")).and_then(|i| i.as_array()) {
+        let active = match expr::eval("state.active_tool", ctx) {
+            Value::Str(s) => s,
+            _ => String::new(),
+        };
+        items.iter()
+            .find_map(|item| {
+                let id = item.get("id").and_then(|v| v.as_str())?;
+                let icon = item.get("icon").and_then(|v| v.as_str())?;
+                (id == active).then(|| icon.to_string())
+            })
+            .unwrap_or_else(|| static_icon.clone())
     } else {
-        el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string()
+        static_icon.clone()
     };
     let icon_name = icon_name.as_str();
+    // Resolve icon pixel size from style.size (default 32, matching
+    // Flask). The SVG renders at 0.75 × size so the icon has natural
+    // padding inside the button — without this the icon stretches to
+    // the button's content area, which balloons in dialogs that set
+    // width:"100%" with no height (e.g. tool_alternates entries).
+    let icon_size_px: f64 = el
+        .get("style")
+        .and_then(|s| s.get("size"))
+        .map(|v| {
+            if let Some(n) = v.as_f64() { n }
+            else if let Some(s) = v.as_str() {
+                let s = if s.contains("{{") { expr::eval_text(s, ctx) } else { s.to_string() };
+                s.trim_end_matches("px").parse::<f64>().unwrap_or(32.0)
+            } else { 32.0 }
+        })
+        .unwrap_or(32.0);
+    let svg_px = (icon_size_px * 0.75).round() as i64;
     // Look up icon from ctx first, then fall back to cached workspace
     let ws_for_icons = super::workspace::Workspace::load();
     let icon_svg = if !icon_name.is_empty() {
@@ -3462,13 +3501,18 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         if let Some(icon_def) = icon_from_ctx.or(icon_from_ws) {
             let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
             let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
-            format!(r#"<svg viewBox="{viewbox}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#)
+            format!(r#"<svg viewBox="{viewbox}" width="{svg_px}" height="{svg_px}" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#)
         } else {
             String::new()
         }
     } else {
         String::new()
     };
+    // Static label, rendered alongside the icon when present (the
+    // tool_alternates flyout buttons specify both `icon` and `label`
+    // and expect a row layout — see workspace/dialogs/tool_alternates.yaml).
+    // Toolbar buttons omit `label` entirely and stay icon-only.
+    let label_text = el.get("label").and_then(|l| l.as_str()).unwrap_or("").to_string();
 
     // Opacity panel: op_link_indicator click toggles mask.linked on
     // every selected mask via Controller. Same pattern as
@@ -3503,21 +3547,57 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         ""
     };
 
+    let layout_style = if !label_text.is_empty() {
+        // Icon + label flyout button (tool_alternates).
+        "display:flex;align-items:center;"
+    } else {
+        // Icon-only toolbar button — keep flex centering so the icon
+        // sits in the middle of the fixed-size button.
+        "display:flex;align-items:center;justify-content:center;"
+    };
+    // Toolbar slots that declare `alternates:` show a small filled
+    // triangle in the lower-right corner so the user knows long-press
+    // reveals more tools. Mirrors Flask _render_icon_button.
+    let has_alternates = el.get("alternates")
+        .map(|v| !v.is_null())
+        .unwrap_or(false);
+    let triangle_html: String = if has_alternates {
+        let tri = 5;
+        format!(
+            r#"<svg width="{tri}" height="{tri}" viewBox="0 0 {tri} {tri}" xmlns="http://www.w3.org/2000/svg"><path d="M {tri} {tri} L 0 {tri} L {tri} 0 Z" fill="var(--jas-text,#cccccc)"/></svg>"#
+        )
+    } else {
+        String::new()
+    };
+    let position_style = if has_alternates {
+        "position:relative;"
+    } else {
+        ""
+    };
     rsx! {
         div {
             id: "{id}",
-            style: "cursor:pointer;{disabled_style}{bg_style}{style}",
+            style: "{position_style}{layout_style}cursor:pointer;{disabled_style}{bg_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
             onmouseup: move |evt| { if let Some(ref h) = on_mouseup { h.call(evt); } },
             if !icon_svg.is_empty() {
                 div {
-                    style: "width:100%;height:100%;",
+                    style: "flex-shrink:0;display:inline-flex;",
                     dangerous_inner_html: "{icon_svg}",
                 }
-            } else {
+            }
+            if !label_text.is_empty() {
+                span { style: "font-size:12px;", "{label_text}" }
+            } else if icon_svg.is_empty() {
                 span { style: "font-size:10px;", "{summary}" }
+            }
+            if !triangle_html.is_empty() {
+                span {
+                    style: "position:absolute;right:0;bottom:0;line-height:0;pointer-events:none;",
+                    dangerous_inner_html: "{triangle_html}",
+                }
             }
         }
     }
@@ -8235,3 +8315,5 @@ mod tests {
         assert!(op.new_masks_clipping);
     }
 }
+
+

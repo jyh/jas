@@ -1,12 +1,13 @@
 state:
   active_tool:
     type: enum
-    values: [selection, partial_selection, interior_selection,
+    values: [selection, partial_selection, interior_selection, magic_wand,
              pen, add_anchor, delete_anchor, anchor_point,
-             pencil, path_eraser, smooth,
+             pencil, paintbrush, blob_brush, path_eraser, smooth,
              type, type_on_path,
-             line, rect, rounded_rect, polygon, star, lasso,
-             scale, rotate, shear]
+             line, rect, rounded_rect, ellipse, polygon, star, lasso,
+             scale, rotate, shear,
+             hand, zoom, artboard, eyedropper]
     default: selection
     description: "Currently selected drawing tool"
 
