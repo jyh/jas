@@ -333,7 +333,13 @@ pub(crate) fn make_keydown_handler(
                     );
                 }));
             }
-            Key::Character(ref c) if c == "0" && cmd => {
+            // Cmd+0 / Cmd+Alt+0 — fit active artboard / fit all
+            // artboards. macOS rewrites Option+0 to the degree
+            // sign "º", and other layouts produce other characters,
+            // so we can't just match on "0". Match by Code instead
+            // -- KeyCode 48 is the digit-0 row (always the same
+            // physical key regardless of modifiers / layout).
+            Key::Character(ref c) if (c == "0" || c == "º") && cmd => {
                 evt.prevent_default();
                 if mods.alt() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
