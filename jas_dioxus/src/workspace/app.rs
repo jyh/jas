@@ -454,11 +454,9 @@ pub fn App() -> Element {
         // App-level wheel handling. Modifier conventions, in priority
         // order:
         //   Alt   -> zoom in/out anchored at cursor
-        //   Ctrl  -> horizontal pan (artboard moves L/R)
-        //   Cmd   -> vertical pan (artboard moves U/D)
-        //   none  -> forward to active tool's on_wheel (no-op today;
-        //            reserved for tools that want their own wheel
-        //            gesture)
+        //   Cmd   -> horizontal pan (artboard moves L/R)
+        //   Ctrl  -> vertical pan (artboard moves U/D, same as plain)
+        //   none  -> vertical pan (conventional scroll)
         // Modifier-driven gestures work regardless of active tool so
         // the user gets consistent navigation everywhere.
         let act = act.clone();
@@ -497,8 +495,8 @@ pub fn App() -> Element {
                 }));
                 return;
             }
-            if km.ctrl {
-                // Ctrl + wheel: horizontal pan. Wheel-down conventionally
+            if km.meta {
+                // Cmd + wheel: horizontal pan. Wheel-down conventionally
                 // scrolls content up; the horizontal analogue scrolls
                 // content left, i.e. view_offset_x decreases by dy.
                 evt.prevent_default();
@@ -509,8 +507,8 @@ pub fn App() -> Element {
                 }));
                 return;
             }
-            // No modifier OR Cmd: vertical pan. Plain wheel mirrors
-            // Cmd+wheel since that matches the conventional "scroll"
+            // No modifier OR Ctrl: vertical pan. Plain wheel mirrors
+            // Ctrl+wheel since that matches the conventional "scroll"
             // behavior users expect from a mouse wheel.
             evt.prevent_default();
             (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
