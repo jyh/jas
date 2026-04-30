@@ -5,51 +5,51 @@ Follows the procedure in `MANUAL_TESTING.md`. Spec source:
 `transcripts/ELLIPSE_TOOL.md`.
 
 Primary platform for manual runs: **Rust (jas_dioxus)**. Other platforms
-covered in Session D parity sweep — **all currently deferred** pending
-wiring.
+covered in Session D parity sweep — auto-tests landed in all 5 apps;
+manual sweep across Swift / OCaml / Python / Flask still pending.
 
 ---
 
 ## Known broken
 
-_Last reviewed: 2026-04-23_
+_Last reviewed: 2026-04-30_
 
-- **ELL-001** [known-broken: ELLIPSE_TOOL.md §Status — not yet wired]
-  The Ellipse tool is specified in `workspace/tools/ellipse.yaml` but
-  the `ELLIPSE` enum variant is absent from the Toolbar in all four
-  native apps (Rust / Swift / OCaml / Python). The tool cannot be
-  invoked; every test in this suite is blocked on toolbar wiring + an
-  `ellipse` overlay render-type registration.
+_None remaining — both prior wiring blockers resolved by commit
+00567b5 (`ellipse-tool-spec` branch):_
 
-- **ELL-050** [known-broken: ELLIPSE_TOOL.md §Known gaps — no ellipse
-  overlay] Even with the Toolbar entry, the overlay renderer registry
-  lacks an `ellipse` case — preview would render nothing. Adding it is
-  straightforward per design doc but not yet done.
+- ~~**ELL-001** Ellipse tool not wired into any toolbar.~~ Resolved:
+  Ellipse variant + toolbar slot + factory entry added in Rust /
+  Swift / OCaml / Python; Flask reads workspace.tools generically.
+- ~~**ELL-050** No `ellipse` overlay renderer registered.~~ Resolved:
+  `draw_ellipse_overlay` added to each app's `yaml_tool` overlay
+  dispatch.
 
 ---
 
 ## Automation coverage
 
-_Last synced: 2026-04-23_
+_Last synced: 2026-04-30_
 
-**Python — none.** No `yaml_tool_test.py` cases reference ellipse
-because the tool isn't registered.
+**Python — `tools/yaml_tool_test.py::TestEllipseTool`** covers
+draw / zero-size / negative-drag against the workspace-loaded spec.
 
-**Swift — none.**
+**Swift — `JasSwift/Tests/Canvas/CanvasTests.swift`**:
+`ellipseToolCreatesEllipseElement`, `ellipseToolZeroSizeClickSuppressed`.
 
-**OCaml — none.**
+**OCaml — `jas_ocaml/test/tools/tool_interaction_test.ml`** has an
+"ellipse tool" suite parallel to the rect suite (draw, zero-size,
+negative drag).
 
-**Rust — none.**
+**Rust — `jas_dioxus/src/tools/yaml_tool.rs::tests`**: three
+`ellipse_parity_*` cases mirroring the rect parity tests.
 
-**Flask — covered indirectly via shared Rect-shape pipeline.**
-Ellipse uses doc.add_element + doc.set_attr (live-edit during the
-drag, not overlay→commit) — both are exercised by
-`tests/js/test_phase12.mjs`. No Ellipse-specific JS unit suite yet.
+**Flask — `jas_flask/tests/js/test_ellipse.mjs`**: 6 cases covering
+end-to-end commit, zero-size suppression, negative drag, undo, and
+Escape during drag.
 
 The yaml spec itself is validated by workspace loader tests in every
-app. The tool semantics would borrow the rect validation flow once
-wired — rect's press / drag / release / threshold pattern applies
-unchanged.
+app. The press / drag / release / threshold pattern is shared with
+rect.yaml unchanged.
 
 ---
 
@@ -62,9 +62,8 @@ Unless a session or test says otherwise:
 3. Appearance: **Dark**.
 4. Ellipse tool active (press `L`).
 
-**Every test below is [placeholder] — activation itself is blocked per
-ELL-001.** When the tool is wired, flip the tags from `[placeholder]`
-to `[wired]` and retest.
+**All tests below are [wired]** as of 2026-04-30 commit 00567b5
+(ellipse-tool-spec branch). Run the suite end-to-end before merging.
 
 ---
 
@@ -93,18 +92,18 @@ Full pass: ~25 min once wired.
 
 ## Session A — Smoke & lifecycle (~5 min)
 
-- [ ] **ELL-001** [placeholder] [known-broken: not yet wired] Ellipse
-  tool activates via `L` shortcut.
+- [ ] **ELL-001** [wired] Ellipse tool activates via `L` shortcut.
       Do: Press L.
-      Expect (target): Ellipse tool becomes active; cursor crosshair.
-      Expect (current): Shortcut is unbound or bound to a different
-              tool; nothing happens (or another tool activates).
+      Expect: Ellipse tool becomes active; cursor crosshair.
+              (Line moved to `\\` per its yaml.)
       — last: —
 
-- [ ] **ELL-002** [placeholder] Ellipse tool activates via toolbox icon.
-      Do: Click the Ellipse icon.
-      Expect (target): Active state on icon; crosshair.
-      Expect (current): No Ellipse icon present in the toolbox.
+- [ ] **ELL-002** [wired] Ellipse tool activates via toolbox icon.
+      Do: Long-press the shape slot; pick Ellipse from the alternates
+          menu (slots are Rect / RoundedRect / Ellipse / Polygon /
+          Star).
+      Expect: Ellipse becomes the visible alternate; active state on
+              icon; crosshair.
       — last: —
 
 ---
@@ -113,29 +112,29 @@ Full pass: ~25 min once wired.
 
 **P0**
 
-- [ ] **ELL-010** [placeholder] Press-drag-release commits an Ellipse.
+- [ ] **ELL-010** [wired] Press-drag-release commits an Ellipse.
       Do: Press at (100,100); drag to (300,200); release.
       Expect (target): Ellipse with cx=200, cy=150, rx=100, ry=50.
       — last: —
 
-- [ ] **ELL-011** [placeholder] Zero-size click is suppressed.
+- [ ] **ELL-011** [wired] Zero-size click is suppressed.
       Do: Press and release at the same point.
       Expect (target): No element created.
       — last: —
 
 **P1**
 
-- [ ] **ELL-012** [placeholder] Sub-1-pt bounding box is suppressed.
+- [ ] **ELL-012** [wired] Sub-1-pt bounding box is suppressed.
       Do: Press at (100,100); drag to (100.5,100.5).
       Expect (target): No element created.
       — last: —
 
-- [ ] **ELL-013** [placeholder] Up-and-left drag normalizes.
+- [ ] **ELL-013** [wired] Up-and-left drag normalizes.
       Do: Press (300,250); drag to (100,100); release.
       Expect (target): Ellipse with cx=200, cy=175, rx=100, ry=75.
       — last: —
 
-- [ ] **ELL-014** [placeholder] Successive ellipses accumulate.
+- [ ] **ELL-014** [wired] Successive ellipses accumulate.
       Do: Draw three ellipses in different positions.
       Expect (target): All three present.
       — last: —
@@ -146,40 +145,38 @@ Full pass: ~25 min once wired.
 
 **P1**
 
-- [ ] **ELL-030** [placeholder] Ellipse picks up default fill at commit.
+- [ ] **ELL-030** [wired] Ellipse picks up default fill at commit.
       Setup: Fill panel = orange.
       Do: Draw any ellipse.
       Expect (target): Orange fill on the new ellipse.
       — last: —
 
-- [ ] **ELL-031** [placeholder] Ellipse picks up default stroke.
+- [ ] **ELL-031** [wired] Ellipse picks up default stroke.
       Setup: Stroke panel = 4 pt black.
       Do: Draw any ellipse.
       Expect (target): 4 pt black stroke.
       — last: —
 
-- [ ] **ELL-032** [placeholder] Esc during drag cancels.
+- [ ] **ELL-032** [wired] Esc during drag cancels.
       Do: Begin a drag; press Esc.
       Expect (target): No element created.
       — last: —
 
-- [ ] **ELL-033** [placeholder] Undo removes the last ellipse.
+- [ ] **ELL-033** [wired] Undo removes the last ellipse.
       Do: Draw ellipse; Ctrl/Cmd-Z.
       Expect (target): Ellipse removed; redo restores.
       — last: —
 
 **P2**
 
-- [ ] **ELL-050** [placeholder] [known-broken: no ellipse overlay render
-  type] Overlay previews the ellipse shape during drag.
+- [ ] **ELL-050** [wired] Overlay previews the ellipse shape during drag.
       Do: Begin a drag.
-      Expect (target): Dashed ellipse preview inscribed in the current
-              bbox; style matches Rect preview otherwise.
-      Expect (current): No preview renders because `ellipse` isn't in
-              the overlay-renderer registry.
+      Expect: Dashed ellipse preview inscribed in the current bbox;
+              style matches Rect preview otherwise (1-px black at 50%
+              opacity, 4/4 dash, no fill).
       — last: —
 
-- [ ] **ELL-051** [placeholder] Cursor is crosshair over canvas.
+- [ ] **ELL-051** [wired] Cursor is crosshair over canvas.
       Do: Observe cursor.
       Expect (target): Crosshair.
       — last: —
@@ -190,7 +187,7 @@ Full pass: ~25 min once wired.
 
 All blocked until wiring lands. Retain IDs for post-wire regression.
 
-- **ELL-200** [placeholder] Ellipse commit produces matching cx / cy /
+- **ELL-200** [wired] Ellipse commit produces matching cx / cy /
   rx / ry across apps.
       Do: Press (100,100); drag to (300,200); release.
       Expect (target): Same ellipse geometry in every app.
@@ -200,7 +197,7 @@ All blocked until wiring lands. Retain IDs for post-wire regression.
       - [ ] Python     last: —
       - [x] Flask      last: 2026-04-27  · note: Ellipse newly surfaced via shape-toolbar alternates; surfaced + fixed hardcoded `#d94ad9` magenta fill in ellipse.yaml — now uses state.fill_color / stroke_color via doc.add_element shape defaults.
 
-- **ELL-201** [placeholder] Overlay previews in every app.
+- **ELL-201** [wired] Overlay previews in every app.
       Do: Begin a drag.
       Expect (target): Dashed ellipse preview in all four apps with
               matching style.
@@ -223,7 +220,7 @@ _No retired tests yet._
 - **ENH-001** Wire the Ellipse tool — add `ELLIPSE` Toolbar variant +
   toolbox icon in all four native apps; register `ellipse` in the
   overlay renderer registry in each app's `yaml_tool.<ext>`. Once
-  done, flip every `[placeholder]` in this doc to `[wired]`. _Raised
+  done, flip every `[wired]` in this doc to `[wired]`. _Raised
   during initial suite authoring on 2026-04-23._
 
 - **ENH-002** Shift-to-circle — constrain to a circle when Shift is
