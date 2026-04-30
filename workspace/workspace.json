@@ -19138,8 +19138,8 @@
           {
             "buffer.push": {
               "buffer": "lasso",
-              "x": "event.x",
-              "y": "event.y"
+              "x": "event.doc_x",
+              "y": "event.doc_y"
             }
           },
           {
@@ -19160,8 +19160,8 @@
               {
                 "buffer.push": {
                   "buffer": "lasso",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               }
             ]
