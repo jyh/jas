@@ -422,18 +422,20 @@ These work regardless of which tool is active.
         (456f668), and the Cmd+Alt+0 macOS "º" key fix
         (12c239f).
 
-- [ ] **ZOOM-134** [wired] **P0.** `Cmd+1` jumps to 100%.
+- [x] **ZOOM-134** [wired] **P0.** `Cmd+1` jumps to 100%.
       Do: Zoom in to 4x, then press `Cmd+1`.
       Expect: Zoom level = 1.0; pan unchanged (so whatever was
       under the viewport center stays approximately under it).
-      — last: —
+      — last: 2026-04-30 (Rust). Required ff4d46d (doc.zoom.set
+        recompute view_offset around viewport center, not literal
+        pan-unchanged).
 
-- [ ] **ZOOM-135** [wired] **P2.** Shortcuts work when text input
+- [x] **ZOOM-135** [wired] **P2.** Shortcuts work when text input
       doesn't have focus.
       Do: Click into a Layers panel rename field. Press `Cmd+0`.
       Expect: The shortcut still fires (Cmd is global); the
       rename's text wasn't replaced.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
