@@ -1080,18 +1080,12 @@ fn run_doc_effect(
         }
         "doc.artboard.resize_apply" => {
             // Live drag-to-resize per ARTBOARD_TOOL.md §Drag-to-resize.
-            // Idempotent — restores from the preview snapshot taken
-            // at the threshold latch, then re-applies the resize.
-            //
-            // Phase 1.3d ships basic resize with the opposite handle
-            // as the anchor. Modifiers (Shift = lock proportion,
-            // Alt = resize from center) land in P1.3e — today they
-            // are read but ignored.
-            //
-            // Resize targets the artboard whose handle was hit at
-            // mousedown (tool.artboard.hit_artboard_id). Multi-select
-            // resize is deferred per spec — handles render only when
-            // exactly one artboard is panel-selected.
+            // artboard.yaml feeds raw event.x / event.y (viewport
+            // pixels); convert to doc coords here so the resize math
+            // matches the doc-space artboard rect. Same conversion
+            // applies to every doc.artboard.* arm below; once
+            // artboard.yaml migrates to the rect.yaml pattern of
+            // emitting event.doc_x/y, these conversions fold away.
             if let serde_json::Value::Object(args) = spec {
                 let handle_pos = args
                     .get("handle_pos")
@@ -1116,8 +1110,9 @@ fn run_doc_effect(
                         }
                     })
                     .unwrap_or_default();
-                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
-                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let vp_cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let vp_cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let (cursor_x, cursor_y) = viewport_to_doc(model, vp_cursor_x, vp_cursor_y);
                 let shift_held = eval_bool(args.get("shift_held"), store, ctx);
                 let alt_held = eval_bool(args.get("alt_held"), store, ctx);
                 artboard_resize_apply(model, store, &handle_pos,
@@ -1133,17 +1128,12 @@ fn run_doc_effect(
             artboard_resize_commit(model, store);
         }
         "doc.artboard.probe_hover" => {
-            // Read-only hit-test for cursor-state classification.
-            // Sets tool.artboard.hover_kind to one of:
-            //   "handle:<dir>"  (8 directions)
-            //   "interior"
-            //   "empty"
-            // Called from the YAML on_mousemove handler so the
-            // dynamic cursor in cursor_css_override reflects what's
-            // currently under the cursor.
+            // Read-only hit-test for cursor-state classification. See
+            // resize_apply for the viewport→doc rationale.
             if let serde_json::Value::Object(args) = spec {
-                let x = eval_number(args.get("x"), store, ctx);
-                let y = eval_number(args.get("y"), store, ctx);
+                let vp_x = eval_number(args.get("x"), store, ctx);
+                let vp_y = eval_number(args.get("y"), store, ctx);
+                let (x, y) = viewport_to_doc(model, vp_x, vp_y);
                 artboard_probe_hover(model, store, x, y);
             }
         }
@@ -1181,14 +1171,14 @@ fn run_doc_effect(
         }
         "doc.artboard.duplicate_apply" => {
             // Translate the duplicate-in-progress by (cursor - press).
-            // Since duplicate_init updated tool.artboard.hit_artboard_id
-            // to point to the new duplicate, the move logic's
-            // single-target fallback path handles the translate.
+            // See resize_apply for the viewport→doc rationale.
             if let serde_json::Value::Object(args) = spec {
-                let press_x = eval_number(args.get("press_x"), store, ctx);
-                let press_y = eval_number(args.get("press_y"), store, ctx);
-                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
-                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let vp_press_x = eval_number(args.get("press_x"), store, ctx);
+                let vp_press_y = eval_number(args.get("press_y"), store, ctx);
+                let vp_cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let vp_cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let (press_x, press_y) = viewport_to_doc(model, vp_press_x, vp_press_y);
+                let (cursor_x, cursor_y) = viewport_to_doc(model, vp_cursor_x, vp_cursor_y);
                 artboard_move_apply(model, store, press_x, press_y,
                     cursor_x, cursor_y, false);
             }
@@ -1200,24 +1190,14 @@ fn run_doc_effect(
         }
         "doc.artboard.move_apply" => {
             // Live drag-to-move per ARTBOARD_TOOL.md §Drag-to-move.
-            // Runs on every mousemove during a drag; idempotent
-            // because it restores from doc.preview.capture (taken at
-            // the threshold latch) before applying the cumulative
-            // (cursor - press) displacement.
-            //
-            // Multi-select: all panel-selected artboards translate by
-            // the same delta. Shift constrains the displacement to
-            // the dominant axis (horizontal or vertical).
-            //
-            // Move/Copy Artwork element translation is hard-coded on
-            // per ARTBOARD_TOOL.md §Move/Copy Artwork; element
-            // translation lands in Phase 1.3c. Today: only the
-            // artboards translate; contained elements stay put.
+            // See resize_apply for the viewport→doc rationale.
             if let serde_json::Value::Object(args) = spec {
-                let press_x = eval_number(args.get("press_x"), store, ctx);
-                let press_y = eval_number(args.get("press_y"), store, ctx);
-                let cursor_x = eval_number(args.get("cursor_x"), store, ctx);
-                let cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let vp_press_x = eval_number(args.get("press_x"), store, ctx);
+                let vp_press_y = eval_number(args.get("press_y"), store, ctx);
+                let vp_cursor_x = eval_number(args.get("cursor_x"), store, ctx);
+                let vp_cursor_y = eval_number(args.get("cursor_y"), store, ctx);
+                let (press_x, press_y) = viewport_to_doc(model, vp_press_x, vp_press_y);
+                let (cursor_x, cursor_y) = viewport_to_doc(model, vp_cursor_x, vp_cursor_y);
                 let shift_held = eval_bool(args.get("shift_held"), store, ctx);
                 artboard_move_apply(model, store, press_x, press_y,
                     cursor_x, cursor_y, shift_held);
@@ -1235,24 +1215,14 @@ fn run_doc_effect(
         }
         "doc.artboard.create_commit" => {
             // Drag-to-create commit per ARTBOARD_TOOL.md §Drag-to-create.
-            // Builds a rect from the (x1, y1) - (x2, y2) drag, rounds
-            // to integer pt, clamps each dimension to a 1 pt minimum,
-            // mints a fresh id, picks the next "Artboard N" name, and
-            // appends to document.artboards. Defaults: transparent
-            // fill, all per-artboard display toggles off. The new
-            // artboard becomes the visually-on-top artboard for any
-            // overlap region (highest position in the list).
-            //
-            // Note: panel-selection is NOT updated here yet; that
-            // requires an AppState write path which lands in the
-            // Phase 1.3 panel-selection plumbing pass. Until then,
-            // the new artboard exists but the panel UI doesn't
-            // auto-select it.
+            // See resize_apply for the viewport→doc rationale.
             if let serde_json::Value::Object(args) = spec {
-                let x1 = eval_number(args.get("x1"), store, ctx);
-                let y1 = eval_number(args.get("y1"), store, ctx);
-                let x2 = eval_number(args.get("x2"), store, ctx);
-                let y2 = eval_number(args.get("y2"), store, ctx);
+                let vp_x1 = eval_number(args.get("x1"), store, ctx);
+                let vp_y1 = eval_number(args.get("y1"), store, ctx);
+                let vp_x2 = eval_number(args.get("x2"), store, ctx);
+                let vp_y2 = eval_number(args.get("y2"), store, ctx);
+                let (x1, y1) = viewport_to_doc(model, vp_x1, vp_y1);
+                let (x2, y2) = viewport_to_doc(model, vp_x2, vp_y2);
                 artboard_create_commit(model, x1, y1, x2, y2);
             }
         }
@@ -1286,10 +1256,11 @@ fn run_doc_effect(
             if let serde_json::Value::Object(args) = spec {
                 let vp_x = eval_number(args.get("x"), store, ctx);
                 let vp_y = eval_number(args.get("y"), store, ctx);
+                let (doc_x, doc_y) = viewport_to_doc(model, vp_x, vp_y);
                 let shift = eval_bool(args.get("shift"), store, ctx);
                 let cmd = eval_bool(args.get("cmd"), store, ctx);
                 let alt = eval_bool(args.get("alt"), store, ctx);
-                artboard_probe_hit(model, store, vp_x, vp_y, shift, cmd, alt);
+                artboard_probe_hit(model, store, doc_x, doc_y, shift, cmd, alt);
             }
         }
         "doc.path.probe_partial_hit" => {
@@ -2280,6 +2251,22 @@ fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
         .and_then(|v| v.get(key))
         .and_then(|n| n.as_f64())
         .unwrap_or(default)
+}
+
+/// Convert viewport-pixel coordinates to document-pixel coordinates
+/// using the model's current zoom + view-offset. Used by every
+/// `doc.artboard.*` effect dispatch site -- artboard.yaml feeds
+/// `event.x` / `event.y` (viewport space) but the artboard_*
+/// helpers compare against doc.artboards' .x / .y / .width /
+/// .height (document space). Falls through to the input pair when
+/// zoom is zero (defensive; the model never persists zoom = 0 but
+/// a degenerate Document::default() could).
+fn viewport_to_doc(model: &Model, x: f64, y: f64) -> (f64, f64) {
+    let z = model.zoom_level;
+    if z == 0.0 {
+        return (x, y);
+    }
+    ((x - model.view_offset_x) / z, (y - model.view_offset_y) / z)
 }
 
 /// Read a numeric tool.zoom.<key> from the StateStore. Used by
