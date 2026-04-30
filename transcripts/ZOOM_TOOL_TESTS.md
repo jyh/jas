@@ -342,28 +342,48 @@ in this session assume marquee mode.
 
 ---
 
-## Session E — Mouse wheel zoom (~3 min)
+## Session E — Mouse wheel navigation (~4 min)
 
-- [ ] **ZOOM-110** [wired] **P0.** `Ctrl/Cmd+wheel` up zooms in.
-      Do: With Zoom active, hover over the canvas, hold Ctrl
-      (Cmd on macOS), spin wheel up.
-      Expect: Zoom level increases by `zoom_step` per notch.
-      Cursor-anchored.
-      — last: —
+Spec change 2026-04-30: wheel modifiers are universal canvas
+navigation, not Zoom-tool-specific. They work regardless of
+active tool. Supersedes ZOOM-110 / 111 / 112 (graveyarded).
 
-- [ ] **ZOOM-111** [wired] **P1.** `Ctrl/Cmd+wheel` down zooms
-      out.
-      Do: Same setup, spin wheel down.
-      Expect: Zoom level divides by `zoom_step` per notch.
-      — last: —
+- [x] **ZOOM-113** [wired] **P0.** Plain wheel pans vertically.
+      Do: From any tool, spin the wheel up or down on the canvas.
+      Expect: Artboard scrolls vertically (down on wheel-up,
+      up on wheel-down — content "scrolls" in the conventional
+      direction).
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-112** [wired] **P2.** Plain wheel (no modifier) does
-      not zoom.
-      Do: Spin wheel without Ctrl / Cmd.
-      Expect: Reserved for canvas pan / scroll; Zoom tool does
-      nothing. (Plain-wheel pan is a separate feature outside
-      Zoom-tool Phase 1.)
-      — last: —
+- [x] **ZOOM-114** [wired] **P0.** Ctrl+wheel pans vertically
+      (same as plain wheel).
+      Do: Hold Ctrl, spin wheel.
+      Expect: Same as plain wheel — vertical pan. Ctrl is a
+      no-op modifier here; included so users with muscle memory
+      from other apps don't see surprising behavior.
+      — last: 2026-04-30 (Rust)
+
+- [x] **ZOOM-115** [wired] **P0.** Cmd+wheel pans horizontally.
+      Do: Hold Cmd (Meta), spin wheel.
+      Expect: Artboard scrolls horizontally (right on wheel-up,
+      left on wheel-down).
+      — last: 2026-04-30 (Rust)
+
+- [x] **ZOOM-116** [wired] **P0.** Alt+wheel up zooms in,
+      anchored at cursor.
+      Do: Hold Alt (Option), hover over a recognizable point,
+      spin wheel up.
+      Expect: Zoom in by `zoom_step` per notch. The document
+      point under the cursor stays under the cursor after the
+      zoom.
+      — last: 2026-04-30 (Rust)
+
+- [x] **ZOOM-117** [wired] **P1.** Alt+wheel down zooms out,
+      anchored at cursor.
+      Do: Hold Alt, spin wheel down.
+      Expect: Zoom out by `1 / zoom_step` per notch. Anchor
+      invariant holds.
+      — last: 2026-04-30 (Rust)
 
 ---
 
@@ -519,7 +539,17 @@ app — one full pass per app, not one pass per test.
 
 ## Graveyard
 
-_(Empty — no retired tests yet.)_
+- **ZOOM-110** [retired: spec changed 2026-04-30 — wheel modifiers
+      reworked into universal canvas-navigation gestures (see ZOOM-113
+      through ZOOM-117). Original spec called for Ctrl/Cmd+wheel = zoom
+      with cursor anchor. New spec moves zoom to Alt+wheel and gives
+      Ctrl/Cmd to pan.]
+
+- **ZOOM-111** [retired: spec changed 2026-04-30 — superseded by
+      ZOOM-117 (Alt+wheel down = zoom out).]
+
+- **ZOOM-112** [retired: spec changed 2026-04-30 — plain wheel is no
+      longer a no-op; it pans vertically (ZOOM-113).]
 
 ---
 
