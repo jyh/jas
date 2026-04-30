@@ -151,16 +151,18 @@ Full pass: ~51 min.
       the switch; tab 2 is at the freshly fit level.
       — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-005** [wired] **P1.** Closing and reopening the
+- [x] **ZOOM-005** [wired] **P1.** Closing and reopening the
       document resets view state to defaults.
       Do: Zoom in, save the document, close it (`Cmd+W`), reopen
       it.
       Expect: Zoom = 100%, current artboard centered. View state
       is not serialized (Phase 1).
-      — last: — · regression: Rust 2026-04-30 — reopen produced
-        a document with no artboard at all (Cmd+0 was a no-op).
-        Fixed in c37ce03 by calling `ensure_artboards_invariant`
-        in clipboard.rs's open-file callback. Awaiting re-test.
+      — last: 2026-04-30 (Rust). Fixed in c37ce03
+        (ensure_artboards_invariant on open) + 39ceb5f (artboard
+        round-trip via inkscape:page). Spec note "View state is
+        not serialized (Phase 1)" stays accurate (zoom + pan
+        defaults restored on reopen); artboards now ARE
+        persisted via Inkscape's namedview convention.
 
 ---
 
