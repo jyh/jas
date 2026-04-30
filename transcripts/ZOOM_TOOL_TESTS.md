@@ -223,64 +223,64 @@ Full pass: ~51 min.
 
 Default state: `preferences.viewport.scrubby_zoom = true`.
 
-- [ ] **ZOOM-050** [wired] **P0.** Drag-right zooms in
+- [x] **ZOOM-050** [wired] **P0.** Drag-right zooms in
       continuously.
       Do: Press, drag right ~150 px, hold.
       Expect: Zoom level increases smoothly during the drag (not
       step-by-step). The document point at mousedown stays glued
       to the press position throughout.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-051** [wired] **P0.** Drag-left zooms out
+- [x] **ZOOM-051** [wired] **P0.** Drag-left zooms out
       continuously.
       Do: From zoom 2.0, press and drag left ~150 px.
       Expect: Zoom level decreases smoothly; press anchor stable.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-052** [wired] **P1.** 100 px drag right doubles the
+- [x] **ZOOM-052** [wired] **P1.** 100 px drag right doubles the
       zoom factor (default gain 144).
       Do: Note current zoom. Press, drag right exactly 100 px,
       release.
       Expect: Final zoom ≈ initial × exp(100/144) ≈ initial × 2.0
       (within rendering precision).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-053** [wired] **P1.** Vertical drag is ignored.
+- [x] **ZOOM-053** [wired] **P1.** Vertical drag is ignored.
       Do: Press, drag straight down 100 px without horizontal
       movement.
       Expect: Zoom level unchanged.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-054** [wired] **P1.** Alt-held during drag flips
+- [x] **ZOOM-054** [wired] **P1.** Alt-held during drag flips
       direction.
       Do: Press, drag right 100 px while holding Alt.
       Expect: Zooms *out* (factor 0.5), not in.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-055** [wired] **P2.** Releasing Alt mid-drag flips
+- [x] **ZOOM-055** [wired] **P2.** Releasing Alt mid-drag flips
       direction back.
       Do: Press, drag right 50 px, hold Alt, drag another 50 px,
       release Alt, drag another 50 px.
       Expect: First 50 zooms in, middle 50 zooms back to near
       initial, last 50 zooms in again. Net: roughly factor 2.0
       from start.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-056** [wired] **P2.** Drag past `max_zoom` clamps;
+- [x] **ZOOM-056** [wired] **P2.** Drag past `max_zoom` clamps;
       reversing direction unclamps immediately.
       Do: Press, drag right far enough to hit max (64.0). Continue
       dragging right.
       Expect: Zoom stays at 64.0. Now drag back left.
       Expect: Zoom drops below 64.0 immediately (hard clamp; no
       rubber-band).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-057** [wired] **P2.** Escape during scrubby drag
+- [x] **ZOOM-057** [wired] **P2.** Escape during scrubby drag
       reverts to pre-drag zoom + pan.
       Do: Press, drag right 100 px, press Escape.
       Expect: Zoom and pan return to their pre-mousedown values.
       Drag does not commit.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
