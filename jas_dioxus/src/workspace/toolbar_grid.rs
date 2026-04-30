@@ -156,6 +156,12 @@ pub(crate) fn ToolbarGrid(
     let act = use_context::<Act>();
     let app = use_context::<AppHandle>();
     let yaml_dialog_sig = use_context::<crate::interpreter::dialog_view::DialogCtx>().0;
+    // Pending long-press setTimeout handle, kept so a fast double-
+    // click can cancel the popup before it appears (otherwise the
+    // alternates popup pops up under the cursor right after the
+    // dblclick action fires, and the natural mouseup over the
+    // first item silently switches the active tool).
+    let mut long_press_timer: Signal<Option<i32>> = use_signal(|| None);
 
     // If active tool is an alternate that's not currently visible, update the slot.
     // Collect updates first, then apply — writing to signals during render can cause
@@ -213,17 +219,27 @@ pub(crate) fn ToolbarGrid(
                         move |evt: Event<MouseData>| {
                             evt.stop_propagation();
                             if has_alternates {
-                                // Start long-press timer via setTimeout
+                                // Cancel any timer left over from a
+                                // previous mousedown -- a fast second
+                                // click should not stack a second
+                                // popup behind the dblclick.
+                                if let Some(handle) = long_press_timer.take() {
+                                    if let Some(window) = web_sys::window() {
+                                        window.clear_timeout_with_handle(handle);
+                                    }
+                                }
                                 let slot_idx = si;
                                 let mut popup = popup_slot;
                                 let Some(window) = web_sys::window() else { return; };
                                 let cb = Closure::once(move || {
                                     popup.set(Some(slot_idx));
                                 });
-                                window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                    cb.as_ref().unchecked_ref(), LONG_PRESS_MS
-                                ).ok();
+                                let handle = window
+                                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                                        cb.as_ref().unchecked_ref(), LONG_PRESS_MS
+                                    ).ok();
                                 cb.forget();
+                                long_press_timer.set(handle);
                             }
                             // Normal click: select this tool
                             (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -241,6 +257,14 @@ pub(crate) fn ToolbarGrid(
                         let mut dlg_sig = yaml_dialog_sig;
                         move |evt: Event<MouseData>| {
                             evt.stop_propagation();
+                            // Cancel any pending long-press timer so
+                            // the alternates popup does not pop up
+                            // after the dblclick action fires.
+                            if let Some(handle) = long_press_timer.take() {
+                                if let Some(window) = web_sys::window() {
+                                    window.clear_timeout_with_handle(handle);
+                                }
+                            }
                             // Three mutually-exclusive dispatch
                             // paths in priority order:
                             //   1. tool_options_panel  → show panel
