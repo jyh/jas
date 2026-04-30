@@ -428,56 +428,58 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **SEL-100** [wired] Click on an anchor selects the single CP.
+- [x] **SEL-100** [wired] Click on an anchor selects the single CP.
       Setup: Curved path fixture; Partial Selection active; path's CPs
              visible.
       Do: Click directly on one anchor square.
       Expect: Just that anchor is selected (highlighted/filled); other
               anchors on the path are unfilled.
-      — last: —
+      — last: 2026-04-30 (Rust). Required handle-overlay
+        viewport-transform fix in 97dbbb9 (handles were
+        rendering in raw doc coords, off-canvas).
 
-- [ ] **SEL-101** [wired] Click on empty space clears the CP selection.
+- [x] **SEL-101** [wired] Click on empty space clears the CP selection.
       Setup: SEL-100 state; one CP selected.
       Do: Click on empty canvas.
       Expect: CP selection clears; anchors all return to the unselected
               look; element remains "on canvas" with its anchors shown.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P1**
 
-- [ ] **SEL-102** [wired] Priority 1: handle-hit on a selected Path wins
+- [x] **SEL-102** [wired] Priority 1: handle-hit on a selected Path wins
   over CP.
       Setup: Select a curved path with its smooth anchor's handle near a
              control point.
       Do: Click on the handle endpoint.
       Expect: The handle latches (not the CP); subsequent drag moves just
               that handle.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-103** [wired] Priority 2: CP click designates the CP.
+- [x] **SEL-103** [wired] Priority 2: CP click designates the CP.
       Setup: Partial Selection active; curved path visible; no prior CP
              selection.
       Do: Click on an anchor.
       Expect: That anchor CP becomes the selection (handles under
               cursor aren't hit because no path was "selected" for the
               handle-priority rule yet).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-104** [wired] Shift+click on a CP toggles it in the selection.
+- [x] **SEL-104** [wired] Shift+click on a CP toggles it in the selection.
       Setup: One anchor already selected.
       Do: Shift-click a second anchor; then Shift-click the first one
           again.
       Expect: After first Shift-click, both anchors selected. After
               second Shift-click, only the second remains.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P2**
 
-- [ ] **SEL-105** [wired] Marquee selects CPs inside the rect.
+- [x] **SEL-105** [wired] Marquee selects CPs inside the rect.
       Setup: Partial Selection active; curved path with ≥ 4 anchors.
       Do: Marquee over 2 adjacent anchors on the path.
       Expect: Only those 2 anchors become selected CPs.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 - [ ] **SEL-106** [wired] Empty-ish marquee (<1px²) without Shift clears.
       Setup: One CP selected.
