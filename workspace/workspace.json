@@ -19654,7 +19654,7 @@
     },
     "partial_selection": {
       "id": "partial_selection",
-      "cursor": "arrow",
+      "cursor": "hollow_arrow",
       "menu_label": "Partial Selection Tool",
       "shortcut": "A",
       "state": {
