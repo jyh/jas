@@ -230,15 +230,24 @@ pub fn App() -> Element {
     // Macro-like helper: mutate state, then bump revision to trigger repaint.
     // Use `act` for state changes (color, tool, etc.) — panels re-render.
     // Use `layout_act` for pane drag/resize — only geometry re-renders.
+    //
+    // Layout persistence is conditional: workspace.rs's panel/dock
+    // mutators (show_panel, snap_to_dock, …) call `bump()` themselves,
+    // so we only hit localStorage when `f` actually mutated the
+    // layout. Without this guard every canvas event (mousedown,
+    // mousemove, mouseup for tool gestures, color picks) would
+    // synchronously serialize the full layout JSON and write it back
+    // — measurable as ~100ms+ per event in release WASM.
     let act = {
         let app = app.clone();
         move |f: Box<dyn FnOnce(&mut AppState)>| {
             {
                 let mut st = app.borrow_mut();
                 f(&mut st);
-                st.workspace_layout.bump();
-                st.save_workspace_layout();
-                st.workspace_layout.mark_saved();
+                if st.workspace_layout.needs_save() {
+                    st.save_workspace_layout();
+                    st.workspace_layout.mark_saved();
+                }
             }
             revision += 1;
         }
@@ -251,9 +260,10 @@ pub fn App() -> Element {
             {
                 let mut st = app.borrow_mut();
                 f(&mut st);
-                st.workspace_layout.bump();
-                st.save_workspace_layout();
-                st.workspace_layout.mark_saved();
+                if st.workspace_layout.needs_save() {
+                    st.save_workspace_layout();
+                    st.workspace_layout.mark_saved();
+                }
             }
             layout_revision += 1;  // does NOT bump revision
         }
