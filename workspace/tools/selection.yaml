@@ -87,7 +87,15 @@ handlers:
               then:
                 - "doc.toggle_selection": "hit"
               else:
-                - "doc.set_selection": { paths: [hit] }
+                # Only replace selection when the clicked element is
+                # NOT already part of it -- otherwise a click on any
+                # selected element after Cmd+A drops the rest of the
+                # selection and a multi-element drag becomes a
+                # single-element drag. Per SELECTION_TOOL.md
+                # §Click-on-selected-element.
+                - if: "not selection_contains(hit)"
+                  then:
+                    - "doc.set_selection": { paths: [hit] }
             - set: { tool.selection.mode: "'drag_move'" }
             - set: { tool.selection.drag_start_x: "event.doc_x" }
             - set: { tool.selection.drag_start_y: "event.doc_y" }
