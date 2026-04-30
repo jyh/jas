@@ -449,6 +449,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
 }
 
 const INKSCAPE_NS: &str = "http://www.inkscape.org/namespaces/inkscape";
+const SODIPODI_NS: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd";
 
 /// Convert a Document to an SVG string.
 pub fn document_to_svg(doc: &Document) -> String {
@@ -460,10 +461,30 @@ pub fn document_to_svg(doc: &Document) -> String {
     let mut lines = vec![
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>".to_string(),
         format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"{}\" viewBox=\"{}\" width=\"{}\" height=\"{}\">",
-            INKSCAPE_NS, vb, fmt(px(bw)), fmt(px(bh))
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"{}\" xmlns:sodipodi=\"{}\" viewBox=\"{}\" width=\"{}\" height=\"{}\">",
+            INKSCAPE_NS, SODIPODI_NS, vb, fmt(px(bw)), fmt(px(bh))
         ),
     ];
+    // Artboard persistence: SVG itself has no artboards concept, so
+    // we use Inkscape's <sodipodi:namedview> + <inkscape:page>
+    // convention. Renders correctly in Inkscape (their "pages" are
+    // our artboards) and lets us round-trip artboard geometry +
+    // names + ids without losing data on save/reopen. Skipped when
+    // the document has no artboards (matching Inkscape's behavior:
+    // a "no pages" file simply omits the namedview block).
+    if !doc.artboards.is_empty() {
+        lines.push("  <sodipodi:namedview id=\"namedview1\">".to_string());
+        for ab in &doc.artboards {
+            lines.push(format!(
+                "    <inkscape:page x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" id=\"{}\" inkscape:label=\"{}\"/>",
+                fmt(px(ab.x)), fmt(px(ab.y)),
+                fmt(px(ab.width)), fmt(px(ab.height)),
+                escape_xml(&ab.id),
+                escape_xml(&ab.name),
+            ));
+        }
+        lines.push("  </sodipodi:namedview>".to_string());
+    }
     for layer in &doc.layers {
         lines.push(element_svg(layer, "  "));
     }
@@ -1595,8 +1616,16 @@ pub fn svg_to_document(svg: &str) -> Document {
         Some(r) => r,
         None => return Document::default(),
     };
+    let artboards = parse_artboards(&root);
     let mut layers: Vec<Element> = Vec::new();
     for child in &root.children {
+        // Skip Inkscape's namedview block — it carries artboard
+        // (page) metadata which has been pulled out above by
+        // parse_artboards. parse_element returns None for it
+        // anyway; this short-circuit just makes the intent explicit.
+        if strip_ns(&child.tag) == "namedview" {
+            continue;
+        }
         let elem = match parse_element(child) {
             Some(e) => e,
             None => continue,
@@ -1640,7 +1669,7 @@ pub fn svg_to_document(svg: &str) -> Document {
     // load-time repair contract.
     if layers.is_empty() {
         let mut d = Document::default();
-        d.artboards = Vec::new();
+        d.artboards = artboards;
         d.artboard_options = crate::document::artboard::ArtboardOptions::default();
         return d;
     }
@@ -1648,10 +1677,55 @@ pub fn svg_to_document(svg: &str) -> Document {
         layers,
         selected_layer: 0,
         selection: Vec::new(),
-        artboards: Vec::new(),
+        artboards,
         artboard_options: crate::document::artboard::ArtboardOptions::default(),
     };
     normalize_document(&doc)
+}
+
+/// Parse <inkscape:page> children of any top-level
+/// <sodipodi:namedview> block into Artboard structs. Per the
+/// document_to_svg side, x/y/width/height are stored in px and
+/// converted back to internal pt units here. Returns an empty
+/// vec when no namedview / pages are present — callers (the open
+/// path in clipboard.rs, session restore in session.rs) repair
+/// the at-least-one-artboard invariant separately.
+fn parse_artboards(root: &XmlNode) -> Vec<crate::document::artboard::Artboard> {
+    use crate::document::artboard::{Artboard, ArtboardFill};
+    let mut out = Vec::new();
+    for child in &root.children {
+        if strip_ns(&child.tag) != "namedview" { continue; }
+        for page in &child.children {
+            if strip_ns(&page.tag) != "page" { continue; }
+            // inkscape:label carries the user-visible name; fall
+            // back to the id if absent (older Inkscape files
+            // sometimes omit the label).
+            let label = page.attrs.get("inkscape:label")
+                .or_else(|| page.attrs.get("label"))
+                .cloned()
+                .unwrap_or_default();
+            let id = page.attrs.get("id").cloned().unwrap_or_default();
+            let name = if label.is_empty() { id.clone() } else { label };
+            out.push(Artboard {
+                id,
+                name,
+                x: pt(get_f(page, "x", 0.0)),
+                y: pt(get_f(page, "y", 0.0)),
+                width: pt(get_f(page, "width", 0.0)),
+                height: pt(get_f(page, "height", 0.0)),
+                // Phase-1 jas-specific fields are not round-tripped
+                // through SVG; default them. Adding `jas:`-prefixed
+                // attributes for the on/off toggles is a follow-up
+                // when they become user-controllable.
+                fill: ArtboardFill::Transparent,
+                show_center_mark: false,
+                show_cross_hairs: false,
+                show_video_safe_areas: false,
+                video_ruler_pixel_aspect_ratio: 1.0,
+            });
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1966,6 +2040,102 @@ mod tests {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
         let doc = svg_to_document(svg);
         assert!(!doc.layers.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Artboard round-trip via Inkscape's <sodipodi:namedview> +
+    // <inkscape:page> convention. SVG itself has no artboards
+    // concept; using Inkscape's convention keeps documents
+    // interoperable with Inkscape and lets jas_dioxus reopen its
+    // own saves without losing artboard geometry.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn export_writes_inkscape_pages_for_each_artboard() {
+        use crate::document::artboard::{Artboard, ArtboardFill};
+        let mut doc = Document::default();
+        doc.artboards = vec![
+            Artboard {
+                id: "ab-a".into(), name: "Cover".into(),
+                x: 0.0, y: 0.0, width: 612.0, height: 792.0,
+                fill: ArtboardFill::Transparent,
+                show_center_mark: false, show_cross_hairs: false,
+                show_video_safe_areas: false,
+                video_ruler_pixel_aspect_ratio: 1.0,
+            },
+            Artboard {
+                id: "ab-b".into(), name: "Inside".into(),
+                x: 700.0, y: 0.0, width: 612.0, height: 792.0,
+                fill: ArtboardFill::Transparent,
+                show_center_mark: false, show_cross_hairs: false,
+                show_video_safe_areas: false,
+                video_ruler_pixel_aspect_ratio: 1.0,
+            },
+        ];
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<sodipodi:namedview"),
+                "missing namedview block:\n{svg}");
+        // Two pages, both with their labels, in the SVG order.
+        let pages: Vec<&str> = svg.matches("<inkscape:page").collect();
+        assert_eq!(pages.len(), 2, "expected 2 pages, svg:\n{svg}");
+        assert!(svg.contains("inkscape:label=\"Cover\""), "svg:\n{svg}");
+        assert!(svg.contains("inkscape:label=\"Inside\""), "svg:\n{svg}");
+    }
+
+    #[test]
+    fn round_trip_preserves_artboards_geometry_and_names() {
+        use crate::document::artboard::{Artboard, ArtboardFill};
+        let mut doc = Document::default();
+        doc.artboards = vec![
+            Artboard {
+                id: "ab-a".into(), name: "Cover".into(),
+                x: 0.0, y: 0.0, width: 612.0, height: 792.0,
+                fill: ArtboardFill::Transparent,
+                show_center_mark: false, show_cross_hairs: false,
+                show_video_safe_areas: false,
+                video_ruler_pixel_aspect_ratio: 1.0,
+            },
+            Artboard {
+                id: "ab-b".into(), name: "Inside".into(),
+                x: 700.0, y: 50.0, width: 400.0, height: 300.0,
+                fill: ArtboardFill::Transparent,
+                show_center_mark: false, show_cross_hairs: false,
+                show_video_safe_areas: false,
+                video_ruler_pixel_aspect_ratio: 1.0,
+            },
+        ];
+        let svg = document_to_svg(&doc);
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.artboards.len(), 2, "svg:\n{svg}");
+
+        // Ordering preserved.
+        let a = &parsed.artboards[0];
+        let b = &parsed.artboards[1];
+        assert_eq!(a.name, "Cover");
+        assert_eq!(b.name, "Inside");
+
+        // Geometry preserved within float tolerance (px<->pt round-trip).
+        let close = |x: f64, y: f64| (x - y).abs() < 0.01;
+        assert!(close(a.x, 0.0)   && close(a.y, 0.0));
+        assert!(close(a.width, 612.0) && close(a.height, 792.0));
+        assert!(close(b.x, 700.0) && close(b.y, 50.0));
+        assert!(close(b.width, 400.0) && close(b.height, 300.0));
+
+        // ids preserved (Inkscape uses `id="..."` on inkscape:page;
+        // round-tripping it lets the at-least-one-artboard repair on
+        // load skip when the saved file already provides one).
+        assert_eq!(a.id, "ab-a");
+        assert_eq!(b.id, "ab-b");
+    }
+
+    #[test]
+    fn import_svg_without_namedview_yields_empty_artboards() {
+        // Pre-existing contract: SVG without inkscape:page produces
+        // a Document with empty artboards, deferring to the caller's
+        // ensure_artboards_invariant repair. Don't break this.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>"#;
+        let doc = svg_to_document(svg);
+        assert!(doc.artboards.is_empty());
     }
 
     // -----------------------------------------------------------------------
