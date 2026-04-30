@@ -114,12 +114,16 @@ handlers:
         - set: { tool.selection.doc_marquee_end_y: "event.doc_y" }
     - if: "tool.selection.mode == 'drag_move'"
       then:
-        # Alt+drag copies the selection on the first move, then
-        # translates the copies on every subsequent move. After the
-        # copy, doc.copy_selection replaces the selection with the
-        # new copies, so translate_selection below moves the copies —
-        # the originals stay put.
-        - if: "tool.selection.alt_held and not tool.selection.copied"
+        # Alt-during-drag converts the gesture to a copy. We accept
+        # Alt at press time (alt_held, frozen for the gesture so
+        # releasing Alt mid-drag doesn't flip back -- SEL-053) OR
+        # Alt held right now (event.modifiers.alt, so a user who
+        # started a plain drag and then decides to press Alt
+        # mid-drag still ends up with a copy). After the copy fires
+        # once (`copied = true`), every subsequent move translates
+        # the new copies; the originals stay put at wherever they
+        # had been moved to before Alt was pressed.
+        - if: "(tool.selection.alt_held or event.modifiers.alt) and not tool.selection.copied"
           then:
             - "doc.copy_selection":
                 dx: "event.doc_x - tool.selection.drag_start_x"
@@ -141,6 +145,17 @@ handlers:
             x2: "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)"
             y2: "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)"
             additive: "event.modifiers.shift"
+    # Late Alt-detection: if the user pressed Alt during the drag
+    # but no mousemove fired after Alt was pressed (Alt held briefly
+    # then mouse released), the mousemove copy gate above never
+    # ran. Catch it at mouseup so the gesture still ends as a copy
+    # when Alt is held at release.
+    - if: "tool.selection.mode == 'drag_move' and event.modifiers.alt and not tool.selection.copied"
+      then:
+        - "doc.copy_selection":
+            dx: "0"
+            dy: "0"
+        - set: { tool.selection.copied: "true" }
     - set: { tool.selection.mode: "'idle'" }
 
   on_keydown:
