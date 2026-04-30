@@ -81,6 +81,14 @@ pub fn App() -> Element {
     let app = use_hook(|| Rc::new(RefCell::new(AppState::new())));
     let mut revision = use_signal(|| 0u64);
     let mut layout_revision = use_signal(|| 0u64);
+    // Drag-frame signal — bumped by tool mousemove handlers that only
+    // need a canvas repaint (overlay update). Avoids re-rendering the
+    // toolbar / dock / menu VDOM on every mousemove during a drag,
+    // which the global `revision` signal would otherwise trigger via
+    // every component that subscribes to it. The repaint use_effect
+    // below subscribes to this signal too, so canvas paint still
+    // fires.
+    let mut canvas_revision = use_signal(|| 0u64);
 
     // Repaint after each render. Also push the canvas widget's
     // current pixel dimensions into the active tab's Model so
@@ -88,7 +96,11 @@ pub fn App() -> Element {
     {
         let app = app.clone();
         use_effect(move || {
+            // Subscribe to both signals so the canvas repaints on
+            // canvas-only events (drag-frame mousemoves) AND on
+            // every global state change.
             let _rev = revision();
+            let _crev = canvas_revision();
             if let Ok(mut st) = app.try_borrow_mut() {
                 st.sync_viewport_dimensions();
             }
@@ -270,6 +282,35 @@ pub fn App() -> Element {
     };
     let layout_act = Rc::new(RefCell::new(layout_act));
 
+    // Canvas-frame helper: mutate state, bump only the
+    // canvas_revision signal so the repaint use_effect fires without
+    // forcing every revision-subscribing component (toolbar, dock,
+    // menu, etc.) to rebuild its VDOM. Used by tool mousemove
+    // dispatch where the only observable change is the overlay /
+    // canvas paint — panels don't depend on tool.<id>.cur_x or other
+    // drag-frame scratch state, so re-rendering them every frame is
+    // pure overhead.
+    //
+    // Anything that mutates document state, active_tool, panel
+    // overrides, fill / stroke, etc. must still go through `act` so
+    // panels see the change.
+    let act_canvas = {
+        let app = app.clone();
+        move |f: Box<dyn FnOnce(&mut AppState)>| {
+            {
+                let mut st = app.borrow_mut();
+                f(&mut st);
+                // No layout save — drag-frame mutations don't touch
+                // workspace_layout, and even if they did, persisting
+                // mid-drag would just churn localStorage. needs_save()
+                // remains true and the next `act` will pick up the
+                // pending save.
+            }
+            canvas_revision += 1;
+        }
+    };
+    let act_canvas = Rc::new(RefCell::new(act_canvas));
+
     // Provide shared state via context so child components can access them.
     use_context_provider(|| Act(act.clone()));
     use_context_provider(|| app.clone());
@@ -309,7 +350,19 @@ pub fn App() -> Element {
     };
 
     let on_mousemove = {
-        let act = act.clone();
+        // Mousemove during a tool gesture only needs the canvas to
+        // repaint (overlay tracks the cursor); panels don't depend
+        // on per-frame tool scratch state. Route through act_canvas
+        // so we skip the full Dioxus re-render of the toolbar / dock
+        // / menu VDOM ~60 times per second during a drag.
+        //
+        // Caveat: if a tool's mousemove ever queues panel writes via
+        // drain_pending_panel_writes, those WILL land via
+        // apply_pending_panel_writes, but the panel re-render won't
+        // happen until the next `act`. That's fine for current tools
+        // — pending writes today are an artboard-tool selection-sync
+        // that flushes on release, never mid-drag.
+        let act_canvas = act_canvas.clone();
         move |evt: Event<MouseData>| {
             let coords = evt.data().element_coordinates();
             let cx = coords.x;
@@ -318,7 +371,7 @@ pub fn App() -> Element {
             let shift = mods.shift();
             let alt = mods.alt();
             let dragging = evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary);
-            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+            (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
