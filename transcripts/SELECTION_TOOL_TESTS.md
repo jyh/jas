@@ -221,57 +221,57 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **SEL-030** [wired] Drag from empty space draws marquee and selects
+- [x] **SEL-030** [wired] Drag from empty space draws marquee and selects
   overlaps.
       Setup: 3-rect fixture; nothing selected.
       Do: Press on empty space to the upper-left; drag through all three
           rects; release.
       Expect: Marquee rectangle visible during drag; on release all three
               rects become selected.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-031** [wired] Marquee selects any element whose bbox intersects
+- [x] **SEL-031** [wired] Marquee selects any element whose bbox intersects
   the rectangle.
       Setup: 3-rect fixture; nothing selected.
       Do: Drag a marquee that crosses only the middle rect partially.
       Expect: Middle rect alone selects — even partial overlap counts.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P1**
 
-- [ ] **SEL-032** [wired] Marquee replaces the prior selection (no Shift).
+- [x] **SEL-032** [wired] Marquee replaces the prior selection (no Shift).
       Setup: Left rect selected.
       Do: Drag a marquee over the middle rect only.
       Expect: Left deselects, middle selects.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-033** [wired] Shift+marquee adds to the selection.
+- [x] **SEL-033** [wired] Shift+marquee adds to the selection.
       Setup: Left rect selected.
       Do: Hold Shift and marquee over the middle rect.
       Expect: Both left and middle selected.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-034** [wired] Dragging up-and-left still draws a valid marquee.
+- [x] **SEL-034** [wired] Dragging up-and-left still draws a valid marquee.
       Setup: Nothing selected.
       Do: Start a drag below-right of the rects; drag up-and-left through
           them.
       Expect: Marquee rect visible with correct normalization; rects select
               on release.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P2**
 
-- [ ] **SEL-035** [wired] Marquee on empty space with no overlap clears.
+- [x] **SEL-035** [wired] Marquee on empty space with no overlap clears.
       Setup: Left rect selected.
       Do: Drag a marquee far from any element.
       Expect: Selection cleared (0 elements match).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-036** [wired] Tiny marquee (<1px) on empty space clears.
+- [x] **SEL-036** [wired] Tiny marquee (<1px) on empty space clears.
       Setup: Left rect selected.
       Do: Press and release without moving on empty space.
       Expect: Selection cleared (matches SEL-012).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
