@@ -160,60 +160,60 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **SEL-010** [wired] Click on an element replaces the selection.
+- [x] **SEL-010** [wired] Click on an element replaces the selection.
       Setup: 3-rect fixture; nothing selected.
       Do: Click the middle rect.
       Expect: Only the middle rect is selected; selection bounds visible
               around it.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-011** [wired] Click on another element replaces again.
+- [x] **SEL-011** [wired] Click on another element replaces again.
       Setup: SEL-010 state.
       Do: Click the right rect.
       Expect: Middle rect deselects; right rect alone is selected.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-012** [wired] Click on empty space clears the selection.
+- [x] **SEL-012** [wired] Click on empty space clears the selection.
       Setup: 3-rect fixture; one rect selected.
       Do: Click far from any element.
       Expect: Selection cleared; no selection bounds visible.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P1**
 
-- [ ] **SEL-013** [wired] Shift-click adds a non-selected element to the
+- [x] **SEL-013** [wired] Shift-click adds a non-selected element to the
   selection.
       Setup: Left rect selected.
       Do: Shift-click the middle rect.
       Expect: Both left and middle are selected.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-014** [wired] Shift-click on a selected element removes it.
+- [x] **SEL-014** [wired] Shift-click on a selected element removes it.
       Setup: SEL-013 state (two rects selected).
       Do: Shift-click the left rect.
       Expect: Only the middle rect remains selected.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-015** [wired] Shift-click in empty space does NOT clear.
+- [x] **SEL-015** [wired] Shift-click in empty space does NOT clear.
       Setup: Middle rect selected.
       Do: Shift-click far from any element.
       Expect: Selection unchanged — middle rect still selected.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P2**
 
-- [ ] **SEL-016** [wired] Click on overlapping elements picks the topmost.
+- [x] **SEL-016** [wired] Click on overlapping elements picks the topmost.
       Setup: Two rects stacked, second-drawn on top.
       Do: Click the overlap region.
       Expect: The second-drawn rect selects (top of the z-order).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-017** [wired] Click on a locked element is ignored.
+- [x] **SEL-017** [wired] Click on a locked element is ignored.
       Setup: Lock the left rect via the Layers panel.
       Do: Click the left rect.
       Expect: Selection does NOT include the locked rect; selection goes
               to whatever is below (or clears).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
