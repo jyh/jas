@@ -1544,14 +1544,20 @@ fn run_doc_effect(
                 let z = model.zoom_level;
                 let px = model.view_offset_x;
                 let py = model.view_offset_y;
-                // Default-anchor convention: -1 means viewport center
-                // (no viewport size available here, so fall back to
-                // current anchor at (0,0) — the doc origin's screen
-                // position — which preserves the document origin's
-                // place. See followup commit for proper viewport
-                // plumbing.
-                let ax = if anchor_x_raw < 0.0 { px } else { anchor_x_raw };
-                let ay = if anchor_y_raw < 0.0 { py } else { anchor_y_raw };
+                // Default-anchor convention: -1 means viewport center.
+                // The model carries viewport_w / viewport_h (synced
+                // each frame from the canvas widget's pixel dims), so
+                // we can compute the center directly. Fall back to the
+                // document origin's screen position only if the
+                // viewport hasn't been measured yet.
+                let viewport_cx = if model.viewport_w > 0.0 {
+                    model.viewport_w / 2.0
+                } else { px };
+                let viewport_cy = if model.viewport_h > 0.0 {
+                    model.viewport_h / 2.0
+                } else { py };
+                let ax = if anchor_x_raw < 0.0 { viewport_cx } else { anchor_x_raw };
+                let ay = if anchor_y_raw < 0.0 { viewport_cy } else { anchor_y_raw };
                 let doc_ax = (ax - px) / z;
                 let doc_ay = (ay - py) / z;
                 let z_new = (z * factor).clamp(min_zoom, max_zoom);
@@ -7795,6 +7801,56 @@ mod tests {
         // since offset=0). So offset_new = 200 - 200*2 = -200.
         assert_eq!(model.view_offset_x, -200.0);
         assert_eq!(model.view_offset_y, -150.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_apply_default_anchor_is_viewport_center() {
+        // anchor_x = -1 (sentinel for "no explicit anchor") means
+        // anchor at the viewport center, computed from
+        // model.viewport_w / viewport_h. Used by the bare keyboard
+        // zoom shortcuts (Cmd+= / Cmd+-) when invoked without a
+        // cursor position. Pre-fix this fell through to the doc
+        // origin's screen position (zoom_in via Cmd+= would jump
+        // the artboard around the doc origin instead of around
+        // the visible center).
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        model.zoom_level    = 1.0;
+        model.viewport_w    = 800.0;
+        model.viewport_h    = 600.0;
+        // Centered Letter (612x792) would put the doc origin at
+        // ((800-612)/2, (600-792)/2) = (94, -96). Use those so
+        // the doc-origin-anchor bug would be visible if it returned.
+        model.view_offset_x = 94.0;
+        model.view_offset_y = -96.0;
+        let effects = vec![serde_json::json!({
+            "doc.zoom.apply": {
+                "factor":   "2.0",
+                "anchor_x": "-1",
+                "anchor_y": "-1",
+            }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert_eq!(model.zoom_level, 2.0);
+        // Anchor invariant for the viewport-center anchor: the
+        // document point currently under (400, 300) must still be
+        // under (400, 300) after the zoom. Pre-fix, the anchor
+        // point was (94, -96) and the offsets would land elsewhere.
+        let doc_under_center_before = (
+            (400.0 - 94.0) / 1.0,    // = 306
+            (300.0 - (-96.0)) / 1.0, // = 396
+        );
+        let doc_under_center_after = (
+            (400.0 - model.view_offset_x) / model.zoom_level,
+            (300.0 - model.view_offset_y) / model.zoom_level,
+        );
+        assert!(
+            (doc_under_center_before.0 - doc_under_center_after.0).abs() < 0.01
+            && (doc_under_center_before.1 - doc_under_center_after.1).abs() < 0.01,
+            "viewport-center anchor invariant broken: before={:?} after={:?}",
+            doc_under_center_before, doc_under_center_after,
+        );
     }
 
     #[test]
