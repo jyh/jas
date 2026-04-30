@@ -481,7 +481,34 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
     if let Some(ws) = ws {
         if let Some(action_def) = ws.actions().get(action) {
             if let Some(serde_json::Value::Array(effects)) = action_def.get("effects") {
-                let eval_ctx = build_appstate_ctx(params, st);
+                // Merge action-declared param defaults into the
+                // caller's params before building the eval ctx, so
+                // effects that reference `param.anchor_x` (etc.)
+                // resolve to the action spec's default rather than
+                // Null when the caller omits the param. Without this,
+                // `dispatch_action("zoom_in", &empty, ...)` -- the
+                // path that fires from Cmd+= and from the menu --
+                // sees param.anchor_x == Null in doc.zoom.apply, and
+                // the -1 sentinel for "anchor at viewport center"
+                // never fires; the action anchors at (0, 0) instead
+                // (visible to the user as the upper-left corner).
+                let mut merged: serde_json::Map<String, serde_json::Value>
+                    = params.clone();
+                if let Some(serde_json::Value::Object(action_params))
+                    = action_def.get("params")
+                {
+                    for (name, spec) in action_params {
+                        if merged.contains_key(name) { continue; }
+                        let default = match spec {
+                            serde_json::Value::Object(o) => o.get("default").cloned(),
+                            other => Some(other.clone()),
+                        };
+                        if let Some(default) = default {
+                            merged.insert(name.clone(), default);
+                        }
+                    }
+                }
+                let eval_ctx = build_appstate_ctx(&merged, st);
                 return run_yaml_effects(effects, &eval_ctx, st);
             }
         }
@@ -7019,6 +7046,52 @@ mod tests {
         dispatch_action("toggle_all_layers_lock", &params, &mut st);
         assert!(!tab_layer(&st, 0).common.locked);
         assert!(!tab_layer(&st, 1).common.locked);
+    }
+
+    #[test]
+    fn dispatch_action_supplies_action_param_defaults_when_caller_omits() {
+        // Ensures dispatch_action populates `param.<name>` with the
+        // action spec's `default` value for each param the caller
+        // didn't supply -- so effects like
+        //   doc.zoom.apply: { anchor_x: "param.anchor_x" }
+        // see the spec default (-1 = viewport center for zoom_in)
+        // instead of Null (which eval_number coerces to 0.0, putting
+        // the anchor at the canvas's upper-left corner).
+        let mut st = make_state_with_layers(vec![
+            ("L1".into(), Visibility::Preview, false),
+        ]);
+        let tab = &mut st.tabs[st.active_tab];
+        tab.model.viewport_w    = 800.0;
+        tab.model.viewport_h    = 600.0;
+        tab.model.zoom_level    = 1.0;
+        // Place the doc origin somewhere obviously off-center; the
+        // pre-fix code anchored at (0, 0) so view_offset would shift
+        // to a value derived from that anchor and we could check.
+        tab.model.view_offset_x = 94.0;
+        tab.model.view_offset_y = -96.0;
+
+        let params = serde_json::Map::new();
+        dispatch_action("zoom_in", &params, &mut st);
+
+        let m = &st.tabs[st.active_tab].model;
+        // Anchor at viewport center (400, 300): the document point
+        // currently under (400, 300) must remain under (400, 300)
+        // after the zoom. Pre-fix this would have anchored at (0, 0)
+        // and the doc point under viewport center would have shifted.
+        let doc_under_center = (
+            (400.0 - m.view_offset_x) / m.zoom_level,
+            (300.0 - m.view_offset_y) / m.zoom_level,
+        );
+        // Pre-zoom: doc point under (400,300) = (306, 396).
+        assert!(
+            (doc_under_center.0 - 306.0).abs() < 0.5
+            && (doc_under_center.1 - 396.0).abs() < 0.5,
+            "viewport-center anchor not preserved: doc point under \
+             screen (400, 300) is now {:?} (expected ≈ (306, 396)); \
+             view_offset=({}, {}), zoom={}",
+            doc_under_center,
+            m.view_offset_x, m.view_offset_y, m.zoom_level,
+        );
     }
 
     // ── Action dispatch routing Model-level doc.* effects ──────
