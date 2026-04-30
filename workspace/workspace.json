@@ -6164,15 +6164,6 @@
               },
               "children": [
                 {
-                  "id": "drawing_canvas",
-                  "type": "canvas",
-                  "summary": "Drawing canvas",
-                  "description": "Interactive drawing surface. Tool dispatch reads pointer events on this element and routes them to the active tool's on_mouse* handlers via engine/tools.mjs::dispatchEvent. The Model (with undo/redo) drives re-render of the document layer on every mutation.\n",
-                  "style": {
-                    "background": "{{theme.colors.window_bg}}"
-                  }
-                },
-                {
                   "id": "canvas_brand_logo",
                   "type": "brand_logo",
                   "summary": "Brand logo placeholder",
@@ -18432,6 +18423,18 @@
         },
         "start_y": {
           "default": 0
+        },
+        "cur_x": {
+          "default": 0
+        },
+        "cur_y": {
+          "default": 0
+        },
+        "doc_start_x": {
+          "default": 0
+        },
+        "doc_start_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -18451,33 +18454,38 @@
         ],
         "on_mousedown": [
           {
-            "doc.snapshot": {}
-          },
-          {
-            "set": {
-              "tool.ellipse.start_x": "event.doc_x"
-            }
-          },
-          {
-            "set": {
-              "tool.ellipse.start_y": "event.doc_y"
-            }
-          },
-          {
             "set": {
               "tool.ellipse.mode": "'drawing'"
             }
           },
           {
-            "doc.add_element": {
-              "parent": "[0]",
-              "element": {
-                "type": "ellipse",
-                "cx": "event.doc_x",
-                "cy": "event.doc_y",
-                "rx": "0",
-                "ry": "0"
-              }
+            "set": {
+              "tool.ellipse.start_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.ellipse.start_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.ellipse.cur_x": "event.x"
+            }
+          },
+          {
+            "set": {
+              "tool.ellipse.cur_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.ellipse.doc_start_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.ellipse.doc_start_y": "event.doc_y"
             }
           }
         ],
@@ -18486,37 +18494,43 @@
             "if": "tool.ellipse.mode == 'drawing'",
             "then": [
               {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "cx",
-                  "value": "(tool.ellipse.start_x + event.doc_x) / 2"
+                "set": {
+                  "tool.ellipse.cur_x": "event.x"
                 }
               },
               {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "cy",
-                  "value": "(tool.ellipse.start_y + event.doc_y) / 2"
-                }
-              },
-              {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "rx",
-                  "value": "abs(event.doc_x - tool.ellipse.start_x) / 2"
-                }
-              },
-              {
-                "doc.set_attr": {
-                  "path": "[0, layer_length([0]) - 1]",
-                  "attr": "ry",
-                  "value": "abs(event.doc_y - tool.ellipse.start_y) / 2"
+                "set": {
+                  "tool.ellipse.cur_y": "event.y"
                 }
               }
             ]
           }
         ],
         "on_mouseup": [
+          {
+            "if": "tool.ellipse.mode == 'drawing'",
+            "then": [
+              {
+                "if": "abs(event.x - tool.ellipse.start_x) > 1 and abs(event.y - tool.ellipse.start_y) > 1",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.add_element": {
+                      "element": {
+                        "type": "ellipse",
+                        "cx": "(tool.ellipse.doc_start_x + event.doc_x) / 2",
+                        "cy": "(tool.ellipse.doc_start_y + event.doc_y) / 2",
+                        "rx": "abs(event.doc_x - tool.ellipse.doc_start_x) / 2",
+                        "ry": "abs(event.doc_y - tool.ellipse.doc_start_y) / 2"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
           {
             "set": {
               "tool.ellipse.mode": "'idle'"
@@ -18535,6 +18549,17 @@
             ]
           }
         ]
+      },
+      "overlay": {
+        "if": "tool.ellipse.mode == 'drawing'",
+        "render": {
+          "type": "ellipse",
+          "cx": "(tool.ellipse.start_x + tool.ellipse.cur_x) / 2",
+          "cy": "(tool.ellipse.start_y + tool.ellipse.cur_y) / 2",
+          "rx": "abs(tool.ellipse.cur_x - tool.ellipse.start_x) / 2",
+          "ry": "abs(tool.ellipse.cur_y - tool.ellipse.start_y) / 2",
+          "style": "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"
+        }
       }
     },
     "eyedropper": {

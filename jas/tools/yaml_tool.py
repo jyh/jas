@@ -126,11 +126,24 @@ def tool_spec_from_workspace(spec: Any) -> ToolSpec | None:
 
 
 def _pointer_payload(event_type: str, x: float, y: float,
-                     shift: bool, alt: bool,
+                     shift: bool, alt: bool, model,
                      dragging: bool | None = None) -> dict:
+    """Build the ``$event`` scope passed to pointer-event handlers.
+
+    Includes document-space coordinates derived from the active view
+    transform. YAML drawing tools (rect / line / ellipse / pencil /
+    pen) read ``$event.doc_x`` / ``doc_y`` when committing element
+    geometry so a panned or zoomed canvas doesn't displace the new
+    shape. With ``zoom_level == 0`` (uninitialized) ``doc_x`` falls
+    back to ``x``; mirrors Rust's ``pointer_event_payload``.
+    """
+    z = model.zoom_level
+    doc_x = x if z == 0 else (x - model.view_offset_x) / z
+    doc_y = y if z == 0 else (y - model.view_offset_y) / z
     payload = {
         "type": event_type,
         "x": x, "y": y,
+        "doc_x": doc_x, "doc_y": doc_y,
         "modifiers": {
             "shift": shift, "alt": alt,
             "ctrl": False, "meta": False,
@@ -184,7 +197,7 @@ class YamlTool(CanvasTool):
     def on_press(self, ctx, x, y, shift=False, alt=False):
         self._dispatch(
             "on_mousedown",
-            _pointer_payload("mousedown", x, y, shift, alt),
+            _pointer_payload("mousedown", x, y, shift, alt, ctx.model),
             ctx,
         )
         ctx.request_update()
@@ -192,7 +205,8 @@ class YamlTool(CanvasTool):
     def on_move(self, ctx, x, y, shift=False, dragging=False):
         self._dispatch(
             "on_mousemove",
-            _pointer_payload("mousemove", x, y, shift, False, dragging=dragging),
+            _pointer_payload("mousemove", x, y, shift, False, ctx.model,
+                             dragging=dragging),
             ctx,
         )
         ctx.request_update()
@@ -200,7 +214,7 @@ class YamlTool(CanvasTool):
     def on_release(self, ctx, x, y, shift=False, alt=False):
         self._dispatch(
             "on_mouseup",
-            _pointer_payload("mouseup", x, y, shift, alt),
+            _pointer_payload("mouseup", x, y, shift, alt, ctx.model),
             ctx,
         )
         ctx.request_update()
@@ -276,6 +290,8 @@ class YamlTool(CanvasTool):
                 render_type = render.get("type", "")
                 if render_type == "rect":
                     _draw_rect_overlay(painter, render, eval_ctx)
+                elif render_type == "ellipse":
+                    _draw_ellipse_overlay(painter, render, eval_ctx)
                 elif render_type == "line":
                     _draw_line_overlay(painter, render, eval_ctx)
                 elif render_type == "polygon":
@@ -670,6 +686,27 @@ def _draw_rect_overlay(painter, render: dict, eval_ctx: dict) -> None:
             painter.drawPath(_rounded_rect_path(x, y, w, h, rx, ry))
         else:
             painter.drawRect(QRectF(x, y, w, h))
+
+
+def _draw_ellipse_overlay(painter, render: dict, eval_ctx: dict) -> None:
+    """Ellipse overlay (cx, cy, rx, ry, style). Used by the ellipse
+    drawing tool's drag preview; mirrors :func:`_draw_rect_overlay`'s
+    fill+stroke handling."""
+    cx = _eval_number_field(eval_ctx, render.get("cx"))
+    cy = _eval_number_field(eval_ctx, render.get("cy"))
+    rx = _eval_number_field(eval_ctx, render.get("rx"))
+    ry = _eval_number_field(eval_ctx, render.get("ry"))
+    if rx <= 0.0 or ry <= 0.0:
+        return
+    style = parse_style(render.get("style", ""))
+    from PySide6.QtCore import QRectF, QPointF
+    rect = QRectF(cx - rx, cy - ry, rx * 2, ry * 2)
+    if _apply_fill(painter, style):
+        _clear_pen(painter)
+        painter.drawEllipse(rect)
+    if _apply_stroke(painter, style):
+        _clear_brush(painter)
+        painter.drawEllipse(QPointF(cx, cy), rx, ry)
 
 
 def _draw_line_overlay(painter, render: dict, eval_ctx: dict) -> None:

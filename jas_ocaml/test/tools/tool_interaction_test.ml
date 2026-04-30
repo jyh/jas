@@ -101,6 +101,48 @@ let () =
         | _ -> assert false);
     ];
 
+    "ellipse tool", [
+      Alcotest.test_case "ellipse tool: draw ellipse" `Quick (fun () ->
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Ellipse in
+        let (ctx, model, _ctrl) = make_ctx () in
+        (* Drag (10,20)→(110,70) — bbox 100×50, ellipse fits with
+           cx=60, cy=45, rx=50, ry=25. *)
+        tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+        tool#on_release ctx 110.0 70.0 ~shift:false ~alt:false;
+        let children = layer_children model in
+        assert (Array.length children = 1);
+        match children.(0) with
+        | Ellipse { cx; cy; rx; ry; _ } ->
+          assert (cx = 60.0);
+          assert (cy = 45.0);
+          assert (rx = 50.0);
+          assert (ry = 25.0)
+        | _ -> assert false);
+
+      Alcotest.test_case "ellipse tool: zero-size not created" `Quick (fun () ->
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Ellipse in
+        let (ctx, model, _ctrl) = make_ctx () in
+        tool#on_press ctx 10.0 10.0 ~shift:false ~alt:false;
+        tool#on_release ctx 10.0 10.0 ~shift:false ~alt:false;
+        let children = layer_children model in
+        assert (Array.length children = 0));
+
+      Alcotest.test_case "ellipse tool: negative drag yields positive radii" `Quick (fun () ->
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Ellipse in
+        let (ctx, model, _ctrl) = make_ctx () in
+        tool#on_press ctx 100.0 80.0 ~shift:false ~alt:false;
+        tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
+        let children = layer_children model in
+        assert (Array.length children = 1);
+        match children.(0) with
+        | Ellipse { cx; cy; rx; ry; _ } ->
+          assert (cx = 55.0);
+          assert (cy = 50.0);
+          assert (rx = 45.0);
+          assert (ry = 30.0)
+        | _ -> assert false);
+    ];
+
     "rounded rect tool", [
       Alcotest.test_case "rounded rect tool: draw rounded rect" `Quick (fun () ->
         let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Rounded_rect in

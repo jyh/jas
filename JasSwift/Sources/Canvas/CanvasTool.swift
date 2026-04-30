@@ -156,6 +156,7 @@ func createTools() -> [Tool: CanvasTool] {
         (.line,                "line"),
         (.rect,                "rect"),
         (.roundedRect,         "rounded_rect"),
+        (.ellipse,             "ellipse"),
         (.polygon,             "polygon"),
         (.star,                "star"),
         (.lasso,               "lasso"),

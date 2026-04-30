@@ -1011,6 +1011,7 @@ class MainWindow(QMainWindow):
         Tool.LINE: "line",
         Tool.RECT: "rect",
         Tool.ROUNDED_RECT: "rounded_rect",
+        Tool.ELLIPSE: "ellipse",
         Tool.POLYGON: "polygon",
         Tool.STAR: "star",
         Tool.LASSO: "lasso",

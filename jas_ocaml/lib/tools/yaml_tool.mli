@@ -53,9 +53,12 @@ val parse_color : string -> (float * float * float * float) option
     Returns [] when the event has no declared handler. *)
 val handler : tool_spec -> string -> Yojson.Safe.t list
 
-(** Build a [$event] scope dict for a pointer event. *)
+(** Build a [$event] scope dict for a pointer event. Threads through
+    the [model] so the payload can include document-space coordinates
+    [doc_x] / [doc_y] derived from the active view transform. *)
 val pointer_payload :
   ?dragging:bool -> string ->
+  model:Model.model ->
   x:float -> y:float -> shift:bool -> alt:bool ->
   Yojson.Safe.t
 

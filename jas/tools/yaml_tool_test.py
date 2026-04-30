@@ -22,7 +22,7 @@ import pytest
 from document.controller import Controller
 from document.document import Document, ElementSelection
 from document.model import Model
-from geometry.element import Layer, Rect as RectElem
+from geometry.element import Ellipse, Layer, Rect as RectElem
 from tools.tool import KeyMods
 from tools.yaml_tool import (
     OverlayStyle, YamlTool, parse_color, parse_style,
@@ -235,6 +235,81 @@ class TestDispatch:
         ctx, _ = _ctx(model)
         tool.on_press(ctx, 5, 7)
         assert len(model.document.layers[0].children) == 1
+
+
+# ── Ellipse tool: end-to-end shape creation ────────────────
+
+
+def _load_ws_tool(tool_id: str) -> YamlTool | None:
+    ws_path = os.path.abspath(os.path.join(
+        _REPO_ROOT, "workspace", "workspace.json",
+    ))
+    if not os.path.exists(ws_path):
+        return None
+    with open(ws_path, "r") as f:
+        data = json.load(f)
+    tools = data.get("tools")
+    if not isinstance(tools, dict):
+        return None
+    spec = tools.get(tool_id)
+    return YamlTool.from_workspace_tool(spec) if spec else None
+
+
+class TestEllipseTool:
+    def test_loads_from_workspace(self):
+        tool = _load_ws_tool("ellipse")
+        if tool is None:
+            pytest.skip("workspace.json not available")
+        assert tool.spec.id == "ellipse"
+        assert tool.spec.shortcut == "L"
+
+    def test_drag_commits_ellipse(self):
+        tool = _load_ws_tool("ellipse")
+        if tool is None:
+            pytest.skip("workspace.json not available")
+        layer = Layer(name="L", children=())
+        model = Model(document=Document(layers=(layer,)))
+        ctx, _ = _ctx(model)
+        # Drag (10,20) → (110,70). Bbox 100×50 — ellipse fits with
+        # cx=60, cy=45, rx=50, ry=25.
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 110, 70)
+        children = model.document.layers[0].children
+        assert len(children) == 1
+        e = children[0]
+        assert isinstance(e, Ellipse)
+        assert e.cx == 60.0
+        assert e.cy == 45.0
+        assert e.rx == 50.0
+        assert e.ry == 25.0
+
+    def test_zero_size_click_suppressed(self):
+        tool = _load_ws_tool("ellipse")
+        if tool is None:
+            pytest.skip("workspace.json not available")
+        layer = Layer(name="L", children=())
+        model = Model(document=Document(layers=(layer,)))
+        ctx, _ = _ctx(model)
+        tool.on_press(ctx, 10, 10)
+        tool.on_release(ctx, 10, 10)
+        assert len(model.document.layers[0].children) == 0
+
+    def test_negative_drag_yields_positive_radii(self):
+        tool = _load_ws_tool("ellipse")
+        if tool is None:
+            pytest.skip("workspace.json not available")
+        layer = Layer(name="L", children=())
+        model = Model(document=Document(layers=(layer,)))
+        ctx, _ = _ctx(model)
+        # Press bottom-right, release top-left — bbox is positive.
+        tool.on_press(ctx, 100, 80)
+        tool.on_release(ctx, 10, 20)
+        e = model.document.layers[0].children[0]
+        assert isinstance(e, Ellipse)
+        assert e.cx == 55.0
+        assert e.cy == 50.0
+        assert e.rx == 45.0
+        assert e.ry == 30.0
 
 
 # ── Phase 6: Selection validation ───────────────────────

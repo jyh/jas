@@ -30,6 +30,7 @@ from geometry.element import (
     Color,
     CurveTo,
     Element,
+    Ellipse as EllipseElem,
     Fill,
     Group,
     Layer,
@@ -725,6 +726,14 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             n = raw if raw > 0 else 5
             pts = regular_shapes.star_points(x1, y1, x2, y2, n)
             return Polygon(points=tuple(pts), fill=fill, stroke=stroke)
+        if type_ == "ellipse":
+            return EllipseElem(
+                cx=eval_number(spec.get("cx"), s, c),
+                cy=eval_number(spec.get("cy"), s, c),
+                rx=eval_number(spec.get("rx"), s, c),
+                ry=eval_number(spec.get("ry"), s, c),
+                fill=fill, stroke=stroke,
+            )
         return None
 
     def _path_with_commands(pe: PathElem, cmds) -> PathElem:

@@ -144,16 +144,25 @@ final class YamlTool: CanvasTool {
 
     private func pointerPayload(
         _ type: String, x: Double, y: Double,
-        shift: Bool, alt: Bool, dragging: Bool? = nil
+        shift: Bool, alt: Bool, model: Model,
+        dragging: Bool? = nil
     ) -> [String: Any] {
-        var mods: [String: Any] = [
-            "shift": shift, "alt": alt,
-            "ctrl": false, "meta": false,
-        ]
-        _ = mods
+        // Document-space coords. View-transform conversion mirrors
+        // Rust's pointer_event_payload: doc-x = (x - viewOffsetX) /
+        // zoom. With zoom == 0 (uninitialized model) doc-x == x —
+        // the test scaffolding relies on this fallback so YAML tools
+        // commit elements at their drag coords without a canvas
+        // pan / zoom transform applied. Drawing tools (rect / line /
+        // ellipse / pencil / pen) read $event.doc_x / doc_y when
+        // committing geometry so a panned canvas doesn't displace
+        // the new shape.
+        let z = model.zoomLevel
+        let docX = z == 0 ? x : (x - model.viewOffsetX) / z
+        let docY = z == 0 ? y : (y - model.viewOffsetY) / z
         var p: [String: Any] = [
             "type": type,
             "x": x, "y": y,
+            "doc_x": docX, "doc_y": docY,
             "modifiers": [
                 "shift": shift, "alt": alt,
                 "ctrl": false, "meta": false,
@@ -188,7 +197,8 @@ final class YamlTool: CanvasTool {
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
         dispatch("on_mousedown",
                  payload: pointerPayload("mousedown", x: x, y: y,
-                                         shift: shift, alt: alt),
+                                         shift: shift, alt: alt,
+                                         model: ctx.model),
                  model: ctx.model)
         ctx.requestUpdate()
     }
@@ -197,6 +207,7 @@ final class YamlTool: CanvasTool {
         dispatch("on_mousemove",
                  payload: pointerPayload("mousemove", x: x, y: y,
                                          shift: shift, alt: false,
+                                         model: ctx.model,
                                          dragging: dragging),
                  model: ctx.model)
         ctx.requestUpdate()
@@ -205,7 +216,8 @@ final class YamlTool: CanvasTool {
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
         dispatch("on_mouseup",
                  payload: pointerPayload("mouseup", x: x, y: y,
-                                         shift: shift, alt: alt),
+                                         shift: shift, alt: alt,
+                                         model: ctx.model),
                  model: ctx.model)
         ctx.requestUpdate()
     }
@@ -260,6 +272,7 @@ final class YamlTool: CanvasTool {
             let type = render["type"] as? String ?? ""
             switch type {
             case "rect": drawRectOverlay(cgCtx, render, evalCtx)
+            case "ellipse": drawEllipseOverlay(cgCtx, render, evalCtx)
             case "line": drawLineOverlay(cgCtx, render, evalCtx)
             case "polygon": drawPolygonOverlay(cgCtx, render, evalCtx)
             case "star": drawStarOverlay(cgCtx, render, evalCtx)
@@ -558,6 +571,35 @@ private func drawRectOverlay(
             cgCtx.addRect(rect)
         }
         applyOverlayStyle(cgCtx, style)
+    }
+}
+
+/// Ellipse overlay (cx, cy, rx, ry, style). Used by the ellipse drawing
+/// tool's drag preview; mirrors drawRectOverlay's fill+stroke handling.
+private func drawEllipseOverlay(
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+) {
+    let cx = evalOverlayNumber(spec["cx"], ctx)
+    let cy = evalOverlayNumber(spec["cy"], ctx)
+    let rx = evalOverlayNumber(spec["rx"], ctx)
+    let ry = evalOverlayNumber(spec["ry"], ctx)
+    if rx <= 0 || ry <= 0 { return }
+    let style = parseOverlayStyle((spec["style"] as? String) ?? "")
+    let rect = CGRect(x: cx - rx, y: cy - ry, width: rx * 2, height: ry * 2)
+    if let fill = style.fill {
+        cgCtx.addEllipse(in: rect)
+        cgCtx.setFillColor(fill)
+        cgCtx.fillPath()
+    }
+    if let stroke = style.stroke {
+        cgCtx.addEllipse(in: rect)
+        cgCtx.setStrokeColor(stroke)
+        cgCtx.setLineWidth(style.strokeWidth)
+        if !style.dash.isEmpty {
+            cgCtx.setLineDash(phase: 0, lengths: style.dash)
+        }
+        cgCtx.strokePath()
+        cgCtx.setLineDash(phase: 0, lengths: [])
     }
 }
 

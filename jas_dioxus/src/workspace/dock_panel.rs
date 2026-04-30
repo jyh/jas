@@ -38,6 +38,7 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
         ToolKind::Line => "line",
         ToolKind::Rect => "rect",
         ToolKind::RoundedRect => "rounded_rect",
+        ToolKind::Ellipse => "ellipse",
         ToolKind::Polygon => "polygon",
         ToolKind::Star => "star",
         ToolKind::Lasso => "lasso",

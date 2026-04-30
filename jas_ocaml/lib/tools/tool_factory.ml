@@ -41,6 +41,8 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Rect -> (load_yaml_tool_or_fail "rect" :> Canvas_tool.canvas_tool)
   (* Phase 7.2 — RoundedRect migrated *)
   | Toolbar.Rounded_rect -> (load_yaml_tool_or_fail "rounded_rect" :> Canvas_tool.canvas_tool)
+  (* Ellipse — YAML-driven, matches the rect.yaml press-drag-release pattern. *)
+  | Toolbar.Ellipse -> (load_yaml_tool_or_fail "ellipse" :> Canvas_tool.canvas_tool)
   (* Phase 7.4 — Polygon migrated *)
   | Toolbar.Polygon -> (load_yaml_tool_or_fail "polygon" :> Canvas_tool.canvas_tool)
   (* Phase 7.5 — Star migrated *)

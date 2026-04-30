@@ -1,7 +1,23 @@
 # Ellipse tool.
 #
-# Mirrors the rect tool; drags out an ellipse centered between mousedown
-# and mouseup. Validated against schema/tool.schema.json.
+# Press-drag-release drawing: mousedown captures the starting corner of
+# the bounding rectangle, mousemove tracks the current corner (drives
+# the overlay preview), and mouseup commits a new ellipse fitted into
+# that bounding rectangle if the final box is at least 1 pixel in each
+# dimension. Zero-size boxes are suppressed so a stray click doesn't
+# deposit an invisible shape.
+#
+# The committed element is `ellipse` with cx, cy at the bounding-box
+# center and rx, ry as half the box dimensions. Holding Shift to
+# constrain to a circle and Alt to draw from the center are reserved
+# for a later phase — Phase 1 mirrors rect.yaml's straight drag.
+#
+# Fill and stroke are intentionally omitted from the add_element spec —
+# doc.add_element falls through to model.default_fill and
+# model.default_stroke (driven by the app's color panel). Matches
+# rect.yaml / line.yaml convention.
+#
+# Validated against schema/tool.schema.json.
 
 id: ellipse
 cursor: crosshair
@@ -13,10 +29,17 @@ state:
   mode:
     default: "idle"
     enum: [idle, drawing]
-  # Document-space anchor (event.doc_x/y) so the placed element's
-  # geometry matches where the user dragged regardless of pan / zoom.
+  # Screen-space (viewport-pixel) anchors. The overlay reads these
+  # to draw the dashed preview post-restore in screen-space.
   start_x: { default: 0 }
   start_y: { default: 0 }
+  cur_x: { default: 0 }
+  cur_y: { default: 0 }
+  # Document-space anchor captured at mousedown. Used at commit
+  # time so the new element lands at the correct location even
+  # when the canvas has a non-zero pan / zoom transform.
+  doc_start_x: { default: 0 }
+  doc_start_y: { default: 0 }
 
 handlers:
 
@@ -27,47 +50,54 @@ handlers:
     - set: { tool.ellipse.mode: "'idle'" }
 
   on_mousedown:
-    - "doc.snapshot": {}
-    - set: { tool.ellipse.start_x: "event.doc_x" }
-    - set: { tool.ellipse.start_y: "event.doc_y" }
     - set: { tool.ellipse.mode: "'drawing'" }
-    # Fill / stroke intentionally omitted — doc.add_element folds in
-    # the active state.fill_color / stroke_color via the engine's
-    # shape-default pipeline. Matches Rect / Line / Pen / Pencil
-    # convention.
-    - "doc.add_element":
-        parent: "[0]"
-        element:
-          type: ellipse
-          cx: "event.doc_x"
-          cy: "event.doc_y"
-          rx: "0"
-          ry: "0"
+    - set: { tool.ellipse.start_x: "event.x" }
+    - set: { tool.ellipse.start_y: "event.y" }
+    - set: { tool.ellipse.cur_x: "event.x" }
+    - set: { tool.ellipse.cur_y: "event.y" }
+    - set: { tool.ellipse.doc_start_x: "event.doc_x" }
+    - set: { tool.ellipse.doc_start_y: "event.doc_y" }
 
   on_mousemove:
     - if: "tool.ellipse.mode == 'drawing'"
       then:
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "cx"
-            value: "(tool.ellipse.start_x + event.doc_x) / 2"
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "cy"
-            value: "(tool.ellipse.start_y + event.doc_y) / 2"
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "rx"
-            value: "abs(event.doc_x - tool.ellipse.start_x) / 2"
-        - "doc.set_attr":
-            path: "[0, layer_length([0]) - 1]"
-            attr: "ry"
-            value: "abs(event.doc_y - tool.ellipse.start_y) / 2"
+        - set: { tool.ellipse.cur_x: "event.x" }
+        - set: { tool.ellipse.cur_y: "event.y" }
 
   on_mouseup:
+    - if: "tool.ellipse.mode == 'drawing'"
+      then:
+        # Zero-size suppression matches rect.yaml: a plain click
+        # (release at the same point as press) should not create a
+        # shape. 1-pixel threshold on both dimensions, screen-space.
+        - if: "abs(event.x - tool.ellipse.start_x) > 1 and abs(event.y - tool.ellipse.start_y) > 1"
+          then:
+            - "doc.snapshot": {}
+            - "doc.add_element":
+                element:
+                  type: ellipse
+                  cx: "(tool.ellipse.doc_start_x + event.doc_x) / 2"
+                  cy: "(tool.ellipse.doc_start_y + event.doc_y) / 2"
+                  rx: "abs(event.doc_x - tool.ellipse.doc_start_x) / 2"
+                  ry: "abs(event.doc_y - tool.ellipse.doc_start_y) / 2"
     - set: { tool.ellipse.mode: "'idle'" }
 
   on_keydown:
     - if: "event.key == 'Escape'"
       then:
         - set: { tool.ellipse.mode: "'idle'" }
+
+# Dashed preview ellipse tracking the current drag. Matches rect.yaml's
+# preview style: 1-px black stroke at 50% opacity, 4/4 dash, no fill.
+# Renders only while drawing is in progress. Computed cx/cy/rx/ry
+# place the ellipse inside the bounding box defined by the start and
+# current cursor positions.
+overlay:
+  if: "tool.ellipse.mode == 'drawing'"
+  render:
+    type: ellipse
+    cx: "(tool.ellipse.start_x + tool.ellipse.cur_x) / 2"
+    cy: "(tool.ellipse.start_y + tool.ellipse.cur_y) / 2"
+    rx: "abs(tool.ellipse.cur_x - tool.ellipse.start_x) / 2"
+    ry: "abs(tool.ellipse.cur_y - tool.ellipse.start_y) / 2"
+    style: "stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-dasharray: 4 4; fill: none;"

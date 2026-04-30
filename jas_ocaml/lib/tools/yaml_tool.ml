@@ -475,6 +475,35 @@ let draw_rect_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
     clear_dash_if_set cr style
   end
 
+(** Ellipse overlay (cx, cy, rx, ry, style). Used by the ellipse drawing
+    tool's drag preview; mirrors [draw_rect_overlay]'s fill+stroke. *)
+let draw_ellipse_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
+    (eval_ctx : Yojson.Safe.t) : unit =
+  let cx = eval_number_field eval_ctx (render_get render "cx") in
+  let cy = eval_number_field eval_ctx (render_get render "cy") in
+  let rx = eval_number_field eval_ctx (render_get render "rx") in
+  let ry = eval_number_field eval_ctx (render_get render "ry") in
+  if rx <= 0.0 || ry <= 0.0 then ()
+  else begin
+    let style = parse_style (render_string render "style") in
+    let build_path () =
+      Cairo.save cr;
+      Cairo.translate cr cx cy;
+      Cairo.scale cr rx ry;
+      Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+      Cairo.restore cr
+    in
+    if apply_fill_style cr style then begin
+      build_path ();
+      Cairo.fill cr
+    end;
+    if apply_stroke_style cr style then begin
+      build_path ();
+      Cairo.stroke cr;
+      clear_dash_if_set cr style
+    end
+  end
+
 let draw_line_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
     (eval_ctx : Yojson.Safe.t) : unit =
   let x1 = eval_number_field eval_ctx (render_get render "x1") in
@@ -1148,11 +1177,22 @@ let draw_cursor_color_chip_overlay (cr : Cairo.context)
 (* ═══════════════════════════════════════════════════════════════ *)
 
 (** Build the [$event] scope for a pointer event. *)
+(* Build the $event scope passed to pointer-event handlers. Includes
+   document-space coordinates derived from the active view transform —
+   YAML drawing tools (rect / line / ellipse / pencil / pen) read
+   $event.doc_x / doc_y when committing element geometry so a panned or
+   zoomed canvas doesn't displace the new shape. With zoom_level == 0
+   (uninitialized) doc-x falls back to x; mirrors Rust's
+   pointer_event_payload. *)
 let pointer_payload ?(dragging : bool option) (event_type : string)
-    ~x ~y ~shift ~alt : Yojson.Safe.t =
+    ~(model : Model.model) ~x ~y ~shift ~alt : Yojson.Safe.t =
+  let z = model#zoom_level in
+  let doc_x = if z = 0.0 then x else (x -. model#view_offset_x) /. z in
+  let doc_y = if z = 0.0 then y else (y -. model#view_offset_y) /. z in
   let base : (string * Yojson.Safe.t) list = [
     ("type", `String event_type);
     ("x", `Float x); ("y", `Float y);
+    ("doc_x", `Float doc_x); ("doc_y", `Float doc_y);
     ("modifiers", `Assoc [
       ("shift", `Bool shift); ("alt", `Bool alt);
       ("ctrl", `Bool false); ("meta", `Bool false);
@@ -1196,21 +1236,22 @@ class yaml_tool (spec : tool_spec) = object (_self)
   method on_press (ctx : Canvas_tool.tool_context)
       (x : float) (y : float) ~(shift : bool) ~(alt : bool) =
     _self#dispatch "on_mousedown"
-      (pointer_payload "mousedown" ~x ~y ~shift ~alt)
+      (pointer_payload "mousedown" ~model:ctx.model ~x ~y ~shift ~alt)
       ctx.controller;
     ctx.request_update ()
 
   method on_move (ctx : Canvas_tool.tool_context)
       (x : float) (y : float) ~(shift : bool) ~(dragging : bool) =
     _self#dispatch "on_mousemove"
-      (pointer_payload "mousemove" ~x ~y ~shift ~alt:false ~dragging)
+      (pointer_payload "mousemove" ~model:ctx.model ~x ~y
+                       ~shift ~alt:false ~dragging)
       ctx.controller;
     ctx.request_update ()
 
   method on_release (ctx : Canvas_tool.tool_context)
       (x : float) (y : float) ~(shift : bool) ~(alt : bool) =
     _self#dispatch "on_mouseup"
-      (pointer_payload "mouseup" ~x ~y ~shift ~alt)
+      (pointer_payload "mouseup" ~model:ctx.model ~x ~y ~shift ~alt)
       ctx.controller;
     ctx.request_update ()
 
@@ -1284,6 +1325,7 @@ class yaml_tool (spec : tool_spec) = object (_self)
         in
         match render_type with
         | "rect" -> draw_rect_overlay cr overlay.render eval_ctx
+        | "ellipse" -> draw_ellipse_overlay cr overlay.render eval_ctx
         | "line" -> draw_line_overlay cr overlay.render eval_ctx
         | "polygon" -> draw_regular_polygon_overlay cr overlay.render eval_ctx
         | "star" -> draw_star_overlay cr overlay.render eval_ctx

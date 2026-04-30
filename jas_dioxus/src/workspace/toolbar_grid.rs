@@ -31,6 +31,7 @@ fn tool_yaml_id(kind: ToolKind) -> Option<&'static str> {
         ToolKind::Line => "line",
         ToolKind::Rect => "rect",
         ToolKind::RoundedRect => "rounded_rect",
+        ToolKind::Ellipse => "ellipse",
         ToolKind::Polygon => "polygon",
         ToolKind::Star => "star",
         ToolKind::Lasso => "lasso",
@@ -121,7 +122,7 @@ pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (1, 1, &[ToolKind::Pencil, ToolKind::Paintbrush, ToolKind::BlobBrush, ToolKind::PathEraser, ToolKind::Smooth]),
     (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
     (2, 1, &[ToolKind::Line]),
-    (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
+    (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Ellipse, ToolKind::Polygon, ToolKind::Star]),
     (3, 1, &[ToolKind::Lasso]),
     // Transform-tool family: Scale (with Shear as long-press alternate)
     // and Rotate. All three share state.transform_reference_point and

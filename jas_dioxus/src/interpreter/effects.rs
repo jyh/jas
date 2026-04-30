@@ -16,7 +16,7 @@ use crate::document::document::ElementPath;
 use crate::document::model::Model;
 use crate::algorithms::fit_curve::fit_curve;
 use crate::geometry::element::{
-    Color, CommonProps, Element, Fill, LineElem, PathCommand, PathElem,
+    Color, CommonProps, Element, EllipseElem, Fill, LineElem, PathCommand, PathElem,
     PolygonElem, RectElem, Stroke,
 };
 use crate::geometry::regular_shapes::{regular_polygon_points, star_points};
@@ -2467,8 +2467,28 @@ fn build_element(
             }))
         }
 
-        // Other element types (ellipse, polygon, path, …) land
-        // alongside their tool ports.
+        "ellipse" => {
+            let cx = eval_number(spec.get("cx"), store, ctx);
+            let cy = eval_number(spec.get("cy"), store, ctx);
+            let rx = eval_number(spec.get("rx"), store, ctx);
+            let ry = eval_number(spec.get("ry"), store, ctx);
+            let fill = resolve_fill_field(spec.get("fill"), store, ctx, default_fill);
+            let stroke =
+                resolve_stroke_field(spec.get("stroke"), store, ctx, default_stroke);
+            Some(Element::Ellipse(EllipseElem {
+                cx,
+                cy,
+                rx,
+                ry,
+                fill,
+                stroke,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))
+        }
+
+        // Other element types (path, …) land alongside their tool ports.
         _ => None,
     }
 }

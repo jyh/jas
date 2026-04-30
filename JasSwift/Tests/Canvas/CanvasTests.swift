@@ -9,7 +9,7 @@ import AppKit
 
 @Test func toolEnumCases() {
     let tools = Tool.allCases
-    #expect(tools.count == 28)
+    #expect(tools.count == 29)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.partialSelection))
     #expect(tools.contains(.interiorSelection))
@@ -110,6 +110,46 @@ import AppKit
     } else {
         Issue.record("Expected a rect element")
     }
+}
+
+@Test func ellipseToolCreatesEllipseElement() {
+    let model = Model()
+    let controller = Controller(model: model)
+    let view = CanvasNSView()
+    view.document = model.document
+    view.controller = controller
+    view.currentTool = .ellipse
+    view.onToolRead = { .ellipse }
+
+    // Drag from (10,20) to (110,70) — bbox 100×50, ellipse fits with
+    // cx=60, cy=45, rx=50, ry=25.
+    view.simulateDrag(from: NSPoint(x: 10, y: 20), to: NSPoint(x: 110, y: 70))
+
+    let doc = model.document
+    #expect(doc.layers.count == 1)
+    if case .ellipse(let e) = doc.layers[0].children[0] {
+        #expect(e.cx == 60)
+        #expect(e.cy == 45)
+        #expect(e.rx == 50)
+        #expect(e.ry == 25)
+    } else {
+        Issue.record("Expected an ellipse element")
+    }
+}
+
+@Test func ellipseToolZeroSizeClickSuppressed() {
+    let model = Model()
+    let controller = Controller(model: model)
+    let view = CanvasNSView()
+    view.document = model.document
+    view.controller = controller
+    view.currentTool = .ellipse
+    view.onToolRead = { .ellipse }
+    // Mousedown == mouseup → no element committed.
+    view.simulateDrag(from: NSPoint(x: 10, y: 10), to: NSPoint(x: 10, y: 10))
+    let doc = model.document
+    #expect(doc.layers.count == 0 ||
+            (doc.layers.count >= 1 && doc.layers[0].children.isEmpty))
 }
 
 @Test func drawingAddsToExistingLayer() {

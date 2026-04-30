@@ -91,6 +91,10 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
             let _c = c;
             r##"<g transform="scale(0.109375)"><rect x="23.33" y="58.26" width="212.06" height="139.47" rx="30" ry="30" fill="none" stroke="rgb(204,204,204)" stroke-miterlimit="10" stroke-width="8"/></g>"##.to_string()
         },
+        // Ellipse (matches workspace/icons.yaml ellipse: rx > ry so
+        // it reads as an ellipse, not a circle, at this size).
+        ToolKind::Ellipse => format!(
+            r#"<ellipse cx="14" cy="14" rx="11" ry="7" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
         // Hexagon (cx=14, cy=14, r=11, 6 sides, -90° start)
         ToolKind::Polygon => format!(
             r#"<path d="M14,3 L23.5,8.5 L23.5,19.5 L14,25 L4.5,19.5 L4.5,8.5 Z" fill="none" stroke="{c}" stroke-width="1.5"/>"#),

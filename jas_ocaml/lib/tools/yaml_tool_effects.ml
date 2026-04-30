@@ -805,6 +805,12 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
          let n = if raw <= 0 then 5 else raw in
          let pts = Regular_shapes.star_points x1 y1 x2 y2 n in
          Some (Element.make_polygon ~fill ~stroke pts)
+       | Some (`String "ellipse") ->
+         let cx = eval_number (lookup "cx") store ctx in
+         let cy = eval_number (lookup "cy") store ctx in
+         let rx = eval_number (lookup "rx") store ctx in
+         let ry = eval_number (lookup "ry") store ctx in
+         Some (Element.make_ellipse ~fill ~stroke cx cy rx ry)
        | _ -> None)
     | _ -> None
   in

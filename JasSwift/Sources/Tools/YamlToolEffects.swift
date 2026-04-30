@@ -2117,6 +2117,13 @@ private func buildElement(
         let n = raw <= 0 ? 5 : raw
         let pts = starPoints(x1, y1, x2, y2, n)
         return .polygon(Polygon(points: pts, fill: fill, stroke: stroke))
+    case "ellipse":
+        let cx = evalNumber(spec["cx"], store: store, ctx: ctx)
+        let cy = evalNumber(spec["cy"], store: store, ctx: ctx)
+        let rx = evalNumber(spec["rx"], store: store, ctx: ctx)
+        let ry = evalNumber(spec["ry"], store: store, ctx: ctx)
+        return .ellipse(Ellipse(cx: cx, cy: cy, rx: rx, ry: ry,
+                                 fill: fill, stroke: stroke))
     default:
         return nil
     }
