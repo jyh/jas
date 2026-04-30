@@ -613,6 +613,13 @@ pub(crate) fn parse_style(s: &str) -> OverlayStyle {
         let key = key.trim();
         let value = value.trim();
         match key {
+            // SVG semantics: `fill: none` / `stroke: none` mean "skip
+            // this paint", not "paint with the literal string 'none'".
+            // Canvas2D's set_fill_style_str("none") silently fails and
+            // leaves the previous fillStyle in place — the next
+            // ctx.fill() then paints with whatever color was stale.
+            "fill" if value == "none" => style.fill = None,
+            "stroke" if value == "none" => style.stroke = None,
             "fill" => style.fill = Some(value.to_string()),
             "stroke" => style.stroke = Some(value.to_string()),
             "stroke-width" => style.stroke_width = value.parse().ok(),
