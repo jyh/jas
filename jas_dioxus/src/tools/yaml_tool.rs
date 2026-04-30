@@ -252,6 +252,23 @@ impl YamlTool {
     /// Registers the Model's document for doc-aware primitives, runs
     /// the handler's effects, then drops the registration. No-op when
     /// the event is not declared on the spec.
+    /// Build the `$active_document` scope dict for tool dispatch.
+    ///
+    /// Tools (notably Hand and Zoom) read view-state via
+    /// `active_document.view_offset_x` / `view_offset_y` /
+    /// `zoom_level` to capture pre-drag baselines. Without this
+    /// the dispatch ctx has no `active_document` namespace and
+    /// those references resolve to Null → 0.0, so the very first
+    /// pan/zoom drag jumps from offset 0 instead of the current
+    /// view position.
+    fn active_document_payload(model: &Model) -> serde_json::Value {
+        serde_json::json!({
+            "view_offset_x": model.view_offset_x,
+            "view_offset_y": model.view_offset_y,
+            "zoom_level":    model.zoom_level,
+        })
+    }
+
     fn dispatch(
         &mut self,
         event_name: &str,
@@ -262,7 +279,10 @@ impl YamlTool {
         if handler.is_empty() {
             return;
         }
-        let ctx = serde_json::json!({ "event": event_payload });
+        let ctx = serde_json::json!({
+            "event": event_payload,
+            "active_document": Self::active_document_payload(model),
+        });
         // Registration tears down on guard drop — handler panics still
         // leave the doc-primitive thread-local in a clean state.
         let _guard = doc_primitives::register_document(model.document().clone());
@@ -2178,6 +2198,51 @@ mod tests {
         });
         let tool = YamlTool::new(ToolSpec::from_workspace_tool(&raw).unwrap());
         assert_eq!(tool.cursor_css_override(), Some("crosshair".to_string()));
+    }
+
+    #[test]
+    fn hand_pan_uses_initial_view_offset_from_active_document() {
+        // Reproduces the hand-tool drag flow: on_mousedown captures
+        // active_document.view_offset_x as initial_offx; on_mousemove
+        // doc.pan.apply uses initial + (cursor - press). After a 30 px
+        // drag from a 100 px starting offset the new view_offset_x
+        // must be 130, not 30 (which would mean the dispatch ctx
+        // resolved active_document.view_offset_x to 0/Null).
+        let raw = serde_json::json!({
+            "id": "hand",
+            "state": {
+                "press_x":      { "default": 0.0 },
+                "initial_offx": { "default": 0.0 },
+            },
+            "handlers": {
+                "on_mousedown": [
+                    { "set": { "tool.hand.press_x":      "event.x" } },
+                    { "set": { "tool.hand.initial_offx": "active_document.view_offset_x" } }
+                ],
+                "on_mousemove": [
+                    { "doc.pan.apply": {
+                        "press_x":      "tool.hand.press_x",
+                        "press_y":      "0.0",
+                        "cursor_x":     "event.x",
+                        "cursor_y":     "0.0",
+                        "initial_offx": "tool.hand.initial_offx",
+                        "initial_offy": "0.0",
+                    }}
+                ]
+            }
+        });
+        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        model.view_offset_x = 100.0;
+
+        tool.on_press(&mut model, 50.0, 0.0, false, false);
+        tool.on_move(&mut model, 80.0, 0.0, false, false, true);
+
+        assert_eq!(
+            model.view_offset_x, 130.0,
+            "view_offset_x should be initial (100) + drag delta (30)",
+        );
     }
 
     #[test]

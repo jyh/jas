@@ -92,34 +92,34 @@ Full pass: ~28 min.
 
 ## Session A — Smoke & lifecycle (~4 min)
 
-- [ ] **HAND-001** [wired] **P0.** Hand tool activates from the
+- [x] **HAND-001** [wired] **P0.** Hand tool activates from the
       keyboard.
       Do: Press `H`.
       Expect: Active tool changes to Hand. Canvas cursor flips
       to `OpenHandCursor` (Rust / Swift / Python) or
       platform-default if cursor wiring is partial.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-002** [wired] **P0.** Hand tool activates from the
+- [x] **HAND-002** [wired] **P0.** Hand tool activates from the
       toolbar.
       Do: Click the navigation slot (default visible: Hand) in
       the toolbar.
       Expect: Hand becomes active.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-003** [wired] **P1.** Activating Hand does not
+- [x] **HAND-003** [wired] **P1.** Activating Hand does not
       modify document content.
       Do: Place a rect with Selection. Activate Hand.
       Expect: The rect is unchanged; selection unchanged; no
       undo entry pushed.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-004** [wired] **P2.** Switching back from Hand to
+- [x] **HAND-004** [wired] **P2.** Switching back from Hand to
       Selection preserves the selection.
       Do: Activate Selection, draw a rect, leave it selected.
       Switch to Hand. Switch back to Selection.
       Expect: The rect is still selected.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
