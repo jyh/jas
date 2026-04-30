@@ -352,25 +352,27 @@ If any P0 here fails, stop and flag.
 
 **P1**
 
-- [ ] **SEL-070** [wired] Esc during marquee cancels.
+- [x] **SEL-070** [wired] Esc during marquee cancels.
       Setup: Begin a marquee drag from empty space.
       Do: Press Esc while still dragging.
       Expect: Marquee overlay disappears; selection unchanged from pre-
               drag state.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-071** [wired] Esc during drag-move cancels.
+- [x] **SEL-071** [wired] Esc during drag-move cancels.
       Setup: Begin dragging a selected rect.
       Do: Press Esc while still dragging.
       Expect: Rect returns to its pre-drag position; selection unchanged.
-      — last: —
+      — last: 2026-04-30 (Rust). Required preview.restore on Esc
+        in b250ec1.
 
-- [ ] **SEL-072** [wired] Switching tools mid-drag doesn't corrupt state.
+- [x] **SEL-072** [wired] Switching tools mid-drag doesn't corrupt state.
       Setup: Begin dragging a selected rect.
       Do: Press V / P / L without releasing the mouse; then release.
       Expect: Rect either commits at current position or snaps back; no
               ghost element; no crash.
-      — last: —
+      — last: 2026-04-30 (Rust). on_leave snaps back via
+        preview.restore (b250ec1).
 
 ---
 
