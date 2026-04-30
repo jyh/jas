@@ -391,17 +391,17 @@ active tool. Supersedes ZOOM-110 / 111 / 112 (graveyarded).
 
 These work regardless of which tool is active.
 
-- [ ] **ZOOM-130** [wired] **P0.** `Cmd+=` (or `Ctrl+=`) zooms in.
+- [x] **ZOOM-130** [wired] **P0.** `Cmd+=` (or `Ctrl+=`) zooms in.
       Do: From Selection tool, press `Cmd+=`.
       Expect: Zoom level multiplies by 1.2, anchored at viewport
       center.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-131** [wired] **P0.** `Cmd+-` zooms out.
+- [x] **ZOOM-131** [wired] **P0.** `Cmd+-` zooms out.
       Do: Press `Cmd+-`.
       Expect: Zoom level divides by 1.2, anchored at viewport
       center.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 - [ ] **ZOOM-132** [wired] **P0.** `Cmd+0` fits the active
       artboard.
