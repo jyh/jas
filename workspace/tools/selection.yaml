@@ -228,14 +228,25 @@ handlers:
       then:
         - set: { tool.selection.mode: "'idle'" }
 
-# Tool-overlay rendering. Only drawn when the if-guard is truthy.
-# Rendered into the overlay-layer SVG by the canvas renderer.
+# Tool-overlay rendering. The overlay block accepts either a
+# single {if, render} entry or a list of them; using the list
+# form here so we can render the marquee rect AND the mid-drag
+# Alt-preview ghost from the same tool.
 overlay:
-  if: "tool.selection.mode == 'marquee'"
-  render:
-    type: rect
-    x: "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)"
-    y: "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)"
-    width: "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)"
-    height: "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)"
-    style: "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
+  - if: "tool.selection.mode == 'marquee'"
+    render:
+      type: rect
+      x: "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)"
+      y: "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)"
+      width: "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)"
+      height: "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)"
+      style: "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
+  # Mid-drag Alt-preview ghost: the originals snap back to the
+  # press position; this overlay shows where the would-be copies
+  # will land if the user releases the mouse with Alt still
+  # held. Translation = cursor - press, in document space.
+  - if: "tool.selection.mode == 'drag_move' and tool.selection.alt_preview"
+    render:
+      type: selection_translate_ghost
+      dx: "tool.selection.drag_start_x - tool.selection.press_doc_x"
+      dy: "tool.selection.drag_start_y - tool.selection.press_doc_y"
