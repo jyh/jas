@@ -528,6 +528,23 @@ impl CanvasTool for YamlTool {
         true
     }
 
+    fn on_key_up(&mut self, model: &mut Model, key: &str) -> bool {
+        // Mirrors on_key_event but for the matching keyup event. Used
+        // by tools that need to react when a modifier (e.g. Alt for
+        // the Zoom cursor) or other key is released. Modifiers aren't
+        // wired through the trait signature; if a YAML handler needs
+        // them, expose via on_key_up_event later.
+        if self.spec.handler("on_keyup").is_empty() {
+            return false;
+        }
+        let payload = serde_json::json!({
+            "type": "keyup",
+            "key": key,
+        });
+        self.dispatch("on_keyup", payload, model);
+        true
+    }
+
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
         if self.spec.overlay.is_empty() {
             return;
