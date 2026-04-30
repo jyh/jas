@@ -593,6 +593,9 @@ impl CanvasTool for YamlTool {
                 "marquee_rect" => {
                     draw_marquee_rect_overlay(ctx, render, &eval_ctx);
                 }
+                "selection_translate_ghost" => {
+                    draw_selection_translate_ghost(ctx, render, &eval_ctx, model);
+                }
                 "artboard_resize_handles" => {
                     draw_artboard_resize_handles(ctx, render, &eval_ctx, model);
                 }
@@ -757,6 +760,45 @@ fn draw_artboard_resize_handles(
 /// Phase 1.4 implementation: simple stroked rectangle in theme accent
 /// color; refinements (handle previews on the outline, dimension
 /// readout) are phase 2.
+/// Render dashed ghost outlines around each selected element,
+/// translated by (dx, dy) in document space. Used by the
+/// Selection tool's mid-drag Alt-preview to show where the
+/// would-be copy will land while the originals stay put at the
+/// press position.
+fn draw_selection_translate_ghost(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    model: &crate::document::model::Model,
+) {
+    let dx = eval_number_field(eval_ctx, render.get("dx"));
+    let dy = eval_number_field(eval_ctx, render.get("dy"));
+    let zoom = model.zoom_level;
+    let offx = model.view_offset_x;
+    let offy = model.view_offset_y;
+    let doc = model.document();
+    ctx.set_stroke_style_str("rgba(0, 120, 255, 0.9)");
+    ctx.set_line_width(1.0);
+    // 4 px on / 3 px off dash pattern -- distinct enough from the
+    // solid selection bounds without being noisy.
+    let dash = js_sys::Array::new();
+    dash.push(&wasm_bindgen::JsValue::from_f64(4.0));
+    dash.push(&wasm_bindgen::JsValue::from_f64(3.0));
+    let _ = ctx.set_line_dash(&dash);
+    for sel in &doc.selection {
+        let Some(elem) = doc.get_element(&sel.path) else { continue; };
+        let (bx, by, bw, bh) = elem.bounds();
+        let vx = (bx + dx) * zoom + offx;
+        let vy = (by + dy) * zoom + offy;
+        let vw = bw * zoom;
+        let vh = bh * zoom;
+        ctx.stroke_rect(vx, vy, vw, vh);
+    }
+    // Reset dash for subsequent overlay layers.
+    let empty = js_sys::Array::new();
+    let _ = ctx.set_line_dash(&empty);
+}
+
 fn draw_artboard_outline_preview(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
