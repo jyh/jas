@@ -70,11 +70,17 @@ handlers:
     - set: { tool.zoom.mode:         "'dragging'" }
 
   on_mousemove:
+    # Update alt_held on every mousemove (drag or not) so the
+    # idle cursor reflects modifier state as soon as the cursor
+    # moves. Per ZOOM_TOOL.md §Cursor states the idle Alt-flip
+    # is gated on real-time keyboard tracking; in lieu of that,
+    # any mouse motion with Alt held flips the cursor in time
+    # for the click.
+    - set: { tool.zoom.alt_held: "event.modifiers.alt" }
     - if: "tool.zoom.mode == 'dragging'"
       then:
         - set: { tool.zoom.cursor_x: "event.x" }
         - set: { tool.zoom.cursor_y: "event.y" }
-        - set: { tool.zoom.alt_held: "event.modifiers.alt" }
         - if: "abs(event.x - tool.zoom.press_x) > 4 || abs(event.y - tool.zoom.press_y) > 4"
           then:
             - set: { tool.zoom.moved: "true" }

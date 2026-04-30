@@ -400,17 +400,18 @@ impl CanvasTool for YamlTool {
             }
             "zoom" => {
                 let ctx = self.store.eval_context();
-                let mode = ctx.get("tool")
-                    .and_then(|t| t.get("zoom"))
-                    .and_then(|z| z.get("mode"))
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("");
                 let alt_held = ctx.get("tool")
                     .and_then(|t| t.get("zoom"))
                     .and_then(|z| z.get("alt_held"))
                     .and_then(|a| a.as_bool())
                     .unwrap_or(false);
-                if mode == "dragging" && alt_held {
+                // alt_held is updated on every on_mousemove (drag or
+                // idle), so the cursor flip tracks modifier state as
+                // soon as the cursor moves with Alt held -- not only
+                // during a scrubby drag. Mode is no longer part of
+                // the gate; both idle Alt-click and drag-with-Alt
+                // want the zoom-out glyph.
+                if alt_held {
                     Some("zoom-out".into())
                 } else {
                     self.spec.cursor.clone()
