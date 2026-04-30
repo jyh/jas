@@ -12,7 +12,7 @@
 # Validated against schema/tool.schema.json.
 
 id: interior_selection
-cursor: arrow
+cursor: hollow_arrow_plus
 menu_label: "Interior Selection Tool"
 
 state:

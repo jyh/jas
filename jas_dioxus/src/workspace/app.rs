@@ -53,8 +53,13 @@ fn yaml_cursor_to_css(name: &str) -> &str {
         // separate asset file. Hotspot at the arrow tip (1, 1).
         // Falls back to the platform default arrow if the SVG
         // can't be parsed.
-        "hollow_arrow" => HOLLOW_ARROW_CSS,
-        other         => other,
+        "hollow_arrow"      => HOLLOW_ARROW_CSS,
+        // Interior Selection adds a "+" badge to the hollow arrow
+        // to signal "drill into a group / select an interior
+        // element." Same shape, plus a small black "+" marker
+        // top-right of the tip.
+        "hollow_arrow_plus" => HOLLOW_ARROW_PLUS_CSS,
+        other               => other,
     }
 }
 
@@ -65,6 +70,17 @@ const HOLLOW_ARROW_CSS: &str = "url(\"data:image/svg+xml;utf8,\
     <svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'>\
     <path d='M1.5,1.5 L1.5,15 L5,11.5 L7.5,17 L10,16 L7.5,11 L13,11 Z' \
     fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='miter'/>\
+    </svg>\") 1 1, default";
+
+/// CSS `cursor` value for Interior Selection. Same hollow arrow
+/// as `HOLLOW_ARROW_CSS` plus a "+" badge at the upper-right
+/// (around 13, 4) signalling group-drill-in. Hotspot still at
+/// the arrow tip (1, 1).
+const HOLLOW_ARROW_PLUS_CSS: &str = "url(\"data:image/svg+xml;utf8,\
+    <svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'>\
+    <path d='M1.5,1.5 L1.5,15 L5,11.5 L7.5,17 L10,16 L7.5,11 L13,11 Z' \
+    fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='miter'/>\
+    <path d='M13,2 L13,8 M10,5 L16,5' stroke='black' stroke-width='1.5' stroke-linecap='square'/>\
     </svg>\") 1 1, default";
 
 /// Drain a tool's pending panel-state writes and apply each to
@@ -1330,6 +1346,11 @@ mod tests {
         // snake_case throughout.
         assert_eq!(yaml_cursor_to_css("zoom_in"),    "zoom-in");
         assert_eq!(yaml_cursor_to_css("zoom_out"),   "zoom-out");
+        // Custom inline-SVG cursors -- check that the prefix is
+        // present rather than the full data URL (less brittle if
+        // the SVG path / viewBox tunes).
+        assert!(yaml_cursor_to_css("hollow_arrow").starts_with("url("));
+        assert!(yaml_cursor_to_css("hollow_arrow_plus").starts_with("url("));
 
         // Already-valid CSS keywords pass through unchanged so the
         // many tools that declare `cursor: crosshair` / `none` /
