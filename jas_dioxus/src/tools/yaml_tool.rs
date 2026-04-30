@@ -2234,6 +2234,58 @@ mod tests {
     }
 
     #[test]
+    fn zoom_tool_scrubby_drag_uses_initial_view_state_from_tool_store() {
+        // doc.zoom.scrubby anchors the new zoom + pan at the
+        // pre-drag baseline, which it reads via
+        // read_tool_zoom_state(store, ...). Bug: previously it
+        // read from the dispatch ctx, which only carries
+        // {event, active_document, preferences} -- no `tool`
+        // namespace -- so initial_zoom defaulted to 1.0 and
+        // initial_offx/y to 0.0, regardless of the model's
+        // actual pre-drag view state. With view_offset != 0
+        // (always the case post-center_view_on_current_artboard)
+        // the very first scrubby move reanchored from the wrong
+        // origin and the artboard "jumped".
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load().expect("embedded workspace must parse");
+        let zoom_spec = ws.data().get("tools").and_then(|t| t.get("zoom"))
+            .expect("workspace must declare a zoom tool");
+        let spec = ToolSpec::from_workspace_tool(zoom_spec).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        // Centered Letter would land here; what matters is that
+        // these are the values the scrubby anchor must read back.
+        model.zoom_level    = 1.0;
+        model.view_offset_x = 100.0;
+        model.view_offset_y = 50.0;
+
+        tool.activate(&mut model);
+        // Press at (200, 200), then move 1 px to start a drag
+        // (still under the 4-px move threshold so no zoom yet),
+        // then move past the threshold to trigger scrubby.
+        tool.on_press(&mut model, 200.0, 200.0, false, false);
+        tool.on_move(&mut model, 210.0, 200.0, false, false, true);
+
+        // Sanity: the document point that was under the press
+        // (in initial coordinates) should still be near the press
+        // after the scrubby move. With initial_offx wrongly
+        // defaulted to 0.0 the press anchor would land hundreds of
+        // px off and the artboard "jumps".
+        let z = model.zoom_level;
+        let doc_x_under_press = (200.0 - model.view_offset_x) / z;
+        let initial_doc_x_under_press = (200.0 - 100.0) / 1.0; // = 100
+        assert!(
+            (doc_x_under_press - initial_doc_x_under_press).abs() < 0.5,
+            "scrubby should keep press anchored: doc_x under press now \
+             {doc_x_under_press} vs initial {initial_doc_x_under_press} \
+             (zoom={z}, off=({}, {}))",
+            model.view_offset_x, model.view_offset_y,
+        );
+    }
+
+    #[test]
     fn zoom_tool_click_dispatches_zoom_in_action() {
         // Reproduces the Zoom-tool click-to-zoom flow end-to-end:
         // on_mouseup with no significant motion fires
