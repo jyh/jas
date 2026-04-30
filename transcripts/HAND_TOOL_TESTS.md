@@ -256,16 +256,18 @@ Full pass: ~28 min.
       as `Cmd+0`.
       — last: — · regression: Rust 2026-04-30 — `Cmd+0`
         works (action dispatch fixed in this branch); the
-        toolbar slot's `ondoubleclick` handler does not fire
-        at all (instrumented log never appeared in console).
-        `onmousedown` on the slot does fire (it activates
-        Hand), so the click reaches the slot — only the
-        browser-level dblclick pairing is missing. Likely a
-        Dioxus 0.6 quirk: the first mousedown's `act` triggers
-        a re-render that replaces the slot's DOM node, so the
-        browser can't pair the two clicks. Workaround would be
-        a manual two-click detector in `onmousedown`. Out of
-        Tier-0 scope.
+        toolbar slot's dblclick path is dead. Earlier diagnosis
+        of "Dioxus dblclick quirk" was wrong: the actual
+        rendered toolbar comes from YamlToolbarContent →
+        render_element → layout.yaml's btn_hand_slot, which has
+        only `mouse_down` / `mouse_up` / `click` event handlers
+        and no `dblclick`. The yaml comment notes "Double-click
+        is dispatched by each app's toolbar dispatcher reading
+        the active tool's tool_options_action field" but no
+        such dispatcher exists in the yaml-rendered path. The
+        ToolbarGrid component in toolbar_grid.rs implements
+        this convention but isn't currently mounted. Same root
+        cause as ZOOM-163. Out of Tier-0 scope.
 
 ---
 

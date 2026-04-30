@@ -441,27 +441,27 @@ These work regardless of which tool is active.
 
 ## Session G — Cursor states + dblclick-icon (~4 min)
 
-- [ ] **ZOOM-160** [wired] **P1.** Idle cursor is the zoom-in
+- [x] **ZOOM-160** [wired] **P1.** Idle cursor is the zoom-in
       magnifier (or platform crosshair).
       Do: Activate Zoom; hover canvas without pressing.
       Expect: Cursor is `zoom-in` style on Rust + Swift; on Python
       / OCaml, may fall back to crosshair (no native magnifier
       cursor).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-161** [wired] **P2.** Cursor flips to zoom-out
+- [x] **ZOOM-161** [wired] **P2.** Cursor flips to zoom-out
       during Alt-held drag.
       Do: Press, drag right, hold Alt while dragging.
       Expect: Cursor flips to `zoom-out` (Rust + Swift). On other
       platforms cursor may stay the same.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-162** [wired] **P2.** Marquee cursor.
+- [x] **ZOOM-162** [wired] **P2.** Marquee cursor.
       Do: With `scrubby_zoom = false`, press and drag past the
       4px threshold.
       Expect: Cursor switches to the marquee-draw style
       (crosshair) for the duration of the drag.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 - [ ] **ZOOM-163** [wired] **P0.** Double-click on the Zoom
       toolbar icon zooms to 100%.
@@ -469,7 +469,20 @@ These work regardless of which tool is active.
       become the slot's visible icon. Double-click that icon.
       Expect: Zoom level jumps to 1.0 immediately. Same as
       `Cmd+1`.
-      — last: —
+      — last: — · regression: Rust 2026-04-30 — toolbar
+        rendered via YamlToolbarContent (yaml-driven layout) has
+        only `mouse_down` / `mouse_up` / `click` event handlers
+        in layout.yaml; no `dblclick` event is wired through
+        render_element. The yaml comment at btn_hand_slot
+        explicitly says "Double-click is dispatched by each
+        app's toolbar dispatcher reading the active tool's
+        tool_options_action field" -- but no such dispatcher
+        exists for the yaml-rendered path. Same root cause as
+        HAND-082. Needs render_element to grow a dblclick
+        behavior verb (or a tool_options_action shortcut) plus
+        the yaml to declare it. Out of Tier-0 scope; the hidden
+        ToolbarGrid component (toolbar_grid.rs) implements
+        this convention but isn't currently rendered.
 
 ---
 
