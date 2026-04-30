@@ -42,14 +42,14 @@ handlers:
     # so later decisions (click-without-drag clearing behavior) use
     # press-time state.
     - "buffer.clear": { buffer: "lasso" }
-    - "buffer.push": { buffer: "lasso", x: "event.x", y: "event.y" }
+    - "buffer.push": { buffer: "lasso", x: "event.doc_x", y: "event.doc_y" }
     - set: { tool.lasso.shift_held: "event.modifiers.shift" }
     - set: { tool.lasso.mode: "'drawing'" }
 
   on_mousemove:
     - if: "tool.lasso.mode == 'drawing'"
       then:
-        - "buffer.push": { buffer: "lasso", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "lasso", x: "event.doc_x", y: "event.doc_y" }
 
   on_mouseup:
     - if: "tool.lasso.mode == 'drawing'"
