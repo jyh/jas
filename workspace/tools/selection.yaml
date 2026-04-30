@@ -77,7 +77,19 @@ handlers:
     - set: { tool.selection.mode: "'idle'" }
 
   on_leave:
+    # Tool switched away mid-gesture. Revert any in-flight drag
+    # translation / copy via the preview snapshot, same as Escape.
+    # Without this, switching from Selection mid-drag would leave
+    # the rect at its dragged position and the tool's snapshot
+    # half-applied. Marquee mode has nothing to revert (selection
+    # only mutates on mouseup).
+    - if: "tool.selection.mode == 'drag_move'"
+      then:
+        - "doc.preview.restore": {}
+        - "doc.preview.clear": {}
     - set: { tool.selection.mode: "'idle'" }
+    - set: { tool.selection.alt_preview: "false" }
+    - set: { tool.selection.copied: "false" }
 
   on_mousedown:
     - let:
@@ -226,7 +238,18 @@ handlers:
   on_keydown:
     - if: "event.key == 'Escape'"
       then:
+        # Mid-drag cancel: if we're in drag_move, revert any
+        # translations / copies via the preview snapshot taken at
+        # mousedown so the document returns to its pre-drag state.
+        # Marquee mode has nothing to revert (selection isn't
+        # mutated until mouseup); just clear the overlay.
+        - if: "tool.selection.mode == 'drag_move'"
+          then:
+            - "doc.preview.restore": {}
+            - "doc.preview.clear": {}
         - set: { tool.selection.mode: "'idle'" }
+        - set: { tool.selection.alt_preview: "false" }
+        - set: { tool.selection.copied: "false" }
 
 # Tool-overlay rendering. The overlay block accepts either a
 # single {if, render} entry or a list of them; using the list

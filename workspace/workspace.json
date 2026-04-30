@@ -21443,8 +21443,29 @@
         ],
         "on_leave": [
           {
+            "if": "tool.selection.mode == 'drag_move'",
+            "then": [
+              {
+                "doc.preview.restore": {}
+              },
+              {
+                "doc.preview.clear": {}
+              }
+            ]
+          },
+          {
             "set": {
               "tool.selection.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.selection.alt_preview": "false"
+            }
+          },
+          {
+            "set": {
+              "tool.selection.copied": "false"
             }
           }
         ],
@@ -21758,8 +21779,29 @@
             "if": "event.key == 'Escape'",
             "then": [
               {
+                "if": "tool.selection.mode == 'drag_move'",
+                "then": [
+                  {
+                    "doc.preview.restore": {}
+                  },
+                  {
+                    "doc.preview.clear": {}
+                  }
+                ]
+              },
+              {
                 "set": {
                   "tool.selection.mode": "'idle'"
+                }
+              },
+              {
+                "set": {
+                  "tool.selection.alt_preview": "false"
+                }
+              },
+              {
+                "set": {
+                  "tool.selection.copied": "false"
                 }
               }
             ]
