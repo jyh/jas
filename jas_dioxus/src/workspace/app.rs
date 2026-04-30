@@ -47,11 +47,12 @@ fn yaml_cursor_to_css(name: &str) -> &str {
         // Eyedropper has no standard CSS cursor; crosshair is the
         // closest approximation until a custom SVG cursor lands.
         "eyedropper"  => "crosshair",
-        // Partial Selection's "white arrow" (Adobe-style hollow
-        // arrow with a black outline) -- inline SVG data URL so
-        // we don't need a separate asset file. Hotspot at the
-        // arrow tip (1, 1). Falls back to the platform default
-        // arrow if the SVG can't be parsed.
+        // Partial Selection's "white arrow" -- a hollow arrow
+        // with a black outline, distinct from Selection's solid
+        // arrow. Inlined as an SVG data URL so we don't need a
+        // separate asset file. Hotspot at the arrow tip (1, 1).
+        // Falls back to the platform default arrow if the SVG
+        // can't be parsed.
         "hollow_arrow" => HOLLOW_ARROW_CSS,
         other         => other,
     }
