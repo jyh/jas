@@ -118,38 +118,38 @@ Full pass: ~51 min.
 
 ## Session A — Smoke & lifecycle (~5 min)
 
-- [ ] **ZOOM-001** [wired] **P0.** Zoom tool activates from the
+- [x] **ZOOM-001** [wired] **P0.** Zoom tool activates from the
       keyboard.
       Do: Press `Z`.
       Expect: Active tool changes to Zoom. Canvas cursor flips to
       a magnifier-style cursor (zoom-in / crosshair depending on
       platform).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-002** [wired] **P0.** Zoom tool activates from the
+- [x] **ZOOM-002** [wired] **P0.** Zoom tool activates from the
       toolbar.
       Do: Long-press the navigation slot button (Hand by default),
       choose Zoom from the popup.
       Expect: Toolbar slot icon swaps to the magnifier; active
       tool is Zoom.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-003** [wired] **P0.** Document opens with current
+- [x] **ZOOM-003** [wired] **P0.** Document opens with current
       artboard centered in the viewport.
       Do: Open the app from a fresh launch (or `Cmd+N` for a new
       tab).
       Expect: The artboard rectangle is visually centered in the
       canvas pane; zoom level is 100% (the artboard fits without
       shrinking).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-004** [wired] **P0.** Switching tabs preserves each
+- [x] **ZOOM-004** [wired] **P0.** Switching tabs preserves each
       tab's view state.
       Do: Open two tabs (`Cmd+N`). In tab 1, press `Cmd+=` a few
       times. Switch to tab 2; press `Cmd+0`. Switch back to tab 1.
       Expect: Tab 1 is still at the zoomed-in level it was before
       the switch; tab 2 is at the freshly fit level.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 - [ ] **ZOOM-005** [wired] **P1.** Closing and reopening the
       document resets view state to defaults.
@@ -157,7 +157,10 @@ Full pass: ~51 min.
       it.
       Expect: Zoom = 100%, current artboard centered. View state
       is not serialized (Phase 1).
-      — last: —
+      — last: — · regression: Rust 2026-04-30 — reopen produced
+        a document with no artboard at all (Cmd+0 was a no-op).
+        Fixed in c37ce03 by calling `ensure_artboards_invariant`
+        in clipboard.rs's open-file callback. Awaiting re-test.
 
 ---
 
