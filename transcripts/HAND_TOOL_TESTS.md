@@ -125,32 +125,32 @@ Full pass: ~28 min.
 
 ## Session B — Drag-to-pan (~5 min)
 
-- [ ] **HAND-020** [wired] **P0.** Drag pans the canvas.
+- [x] **HAND-020** [wired] **P0.** Drag pans the canvas.
       Do: Activate Hand. Press at any canvas coordinate, drag
       down-right ~100 px, release.
       Expect: The document content shifts down-right by 100 px on
       screen. The artboard rectangle moves with the content.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-021** [wired] **P0.** Drag-to-pan keeps the
+- [x] **HAND-021** [wired] **P0.** Drag-to-pan keeps the
       mousedown point under the cursor.
       Do: Press exactly on a recognizable element. Drag without
       letting up.
       Expect: That element stays glued to the cursor for the
       entire drag (no slip, no acceleration).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-022** [wired] **P1.** Plain click without drag is a
+- [x] **HAND-022** [wired] **P1.** Plain click without drag is a
       no-op.
       Do: Click without moving the mouse (≤ 4 px).
       Expect: View doesn't change. No selection change either.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-023** [wired] **P1.** Pan is unbounded.
+- [x] **HAND-023** [wired] **P1.** Pan is unbounded.
       Do: Drag the canvas far past the artboard edge.
       Expect: View continues panning; no clamp at the edge. The
       artboard scrolls off-screen freely.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 - [ ] **HAND-024** [wired] **P2.** Mouseup outside the canvas
       pane still commits.
@@ -158,98 +158,103 @@ Full pass: ~28 min.
       the canvas pane (over the toolbar or the dock), release.
       Expect: The drag is captured; final pan reflects total
       drag delta even though release was outside the canvas.
-      — last: —
+      — last: — · regression: Rust 2026-04-30 — canvas's onmouseup
+        listener doesn't see release events outside its bounds, so
+        the pan never commits and the next mouse re-entry continues
+        the drag without a button held. Fix is to migrate to
+        pointer events + setPointerCapture on mousedown (or attach
+        a document-level mouseup fallback). Out of Tier-0 scope.
 
-- [ ] **HAND-025** [wired] **P2.** Escape during drag aborts.
+- [x] **HAND-025** [wired] **P2.** Escape during drag aborts.
       Do: Press, drag, press Escape.
       Expect: Pan reverts to the pre-drag offsets. (Note: in some
       apps Escape may also propagate to mask-isolation exit; the
       drag-revert path is checked separately.)
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
 ## Session C — Spacebar pass-through (~6 min)
 
-- [ ] **HAND-050** [wired] **P0.** Holding Space switches the
+- [x] **HAND-050** [wired] **P0.** Holding Space switches the
       active tool to Hand.
       Do: Activate Selection. Press and hold Space.
       Expect: Cursor flips to `OpenHandCursor`. The toolbar
       shows Hand as active (slot icon highlights).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-051** [wired] **P0.** Releasing Space restores the
+- [x] **HAND-051** [wired] **P0.** Releasing Space restores the
       prior tool.
       Do: With Selection active, press and hold Space, then
       release.
       Expect: Cursor and toolbar return to the Selection state.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-052** [wired] **P1.** Drag during Space-held pan
+- [x] **HAND-052** [wired] **P1.** Drag during Space-held pan
       pans the canvas.
       Do: Activate Selection. Hold Space, press and drag, then
       release the mouse, then release Space.
       Expect: Canvas pans during the drag. After Space release,
       Selection is restored.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-053** [wired] **P1.** Pressing Space when Hand is
+- [x] **HAND-053** [wired] **P1.** Pressing Space when Hand is
       already active is a no-op (no double save).
       Do: Activate Hand directly (`H`). Press and hold Space, then
       release.
       Expect: Active tool stays Hand throughout. No extra
       save / restore cycle.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-054** [wired] **P0.** Space pass-through is
+- [x] **HAND-054** [wired] **P0.** Space pass-through is
       suppressed when a text input has focus.
       Do: Click into a Layers panel rename or any text field.
       Press and hold Space.
       Expect: A literal space character is typed into the
       field. The active tool does not change.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-055** [wired] **P2.** App focus loss while Space is
+- [x] **HAND-055** [wired] **P2.** App focus loss while Space is
       held restores the prior tool.
       Do: Activate Selection. Hold Space. Cmd+Tab away to another
       app. Cmd+Tab back.
       Expect: When focus returns, Selection is the active tool
       (not Hand). Or — depending on platform — Space release on
       return restores cleanly. No stuck-in-Hand state.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-056** [wired] **P2.** Pressing other tool letters
+- [x] **HAND-056** [wired] **P2.** Pressing other tool letters
       during a Space-held pass-through is ignored.
       Do: Activate Selection. Hold Space (now in Hand). Press `Z`.
       Release Space.
       Expect: After Space release, Selection is restored — not
       Zoom.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
 ## Session D — Cursor states + dblclick-icon (~3 min)
 
-- [ ] **HAND-080** [wired] **P1.** Idle cursor is the open hand.
+- [x] **HAND-080** [wired] **P1.** Idle cursor is the open hand.
       Do: Activate Hand; hover canvas without pressing.
       Expect: Cursor is `OpenHandCursor` (Rust / Swift / Python).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-081** [wired] **P2.** Cursor flips to closed hand
+- [x] **HAND-081** [wired] **P2.** Cursor flips to closed hand
       during drag.
       Do: Press and hold the mouse button on the canvas.
       Expect: Cursor flips to `closedHand` for the duration of
       the press (Rust + Swift). On Python the cursor stays
       open-hand (deferred).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **HAND-082** [wired] **P0.** Double-click on the Hand
+- [x] **HAND-082** [wired] **P0.** Double-click on the Hand
       toolbar icon fits the active artboard.
       Do: With Hand visible as the navigation slot icon,
       double-click it.
       Expect: Zoom + pan jumps to fit_active_artboard — same
       as `Cmd+0`.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 

@@ -2427,6 +2427,33 @@ fn run_yaml_effect(
         deferred.push(resolved);
     }
 
+    // Fallback: route Model-level `doc.*` effects (doc.zoom.*,
+    // doc.pan.*, doc.translate_selection, doc.add_element, etc.) to
+    // the effects.rs dispatcher so view actions like
+    // fit_active_artboard / zoom_to_actual_size — which are dispatched
+    // from the menubar / shortcuts via dispatch_action and end up
+    // here, NOT via a tool's on_event — actually move the canvas. The
+    // AppState-level doc.* mutations above (create_artboard,
+    // wrap_in_group, …) have already returned by this point, so any
+    // unhandled `doc.*` key is by definition Model-level.
+    let has_unhandled_doc_effect = eff
+        .as_object()
+        .map(|m| m.keys().any(|k| k.starts_with("doc.")))
+        .unwrap_or(false);
+    if has_unhandled_doc_effect {
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            let mut store = super::state_store::StateStore::new();
+            super::effects::run_effects(
+                std::slice::from_ref(eff),
+                &*eval_ctx,
+                &mut store,
+                Some(&mut tab.model),
+                None,
+                None,
+            );
+        }
+    }
+
     deferred
 }
 
@@ -6992,6 +7019,50 @@ mod tests {
         dispatch_action("toggle_all_layers_lock", &params, &mut st);
         assert!(!tab_layer(&st, 0).common.locked);
         assert!(!tab_layer(&st, 1).common.locked);
+    }
+
+    // ── Action dispatch routing Model-level doc.* effects ──────
+    //
+    // Actions like fit_active_artboard / zoom_to_actual_size are
+    // dispatched from menubar / shortcuts via dispatch_action, NOT via
+    // a tool's on_event. Their effect lists contain `doc.zoom.*` keys
+    // that live in effects.rs (Model dispatch), not in renderer.rs's
+    // own AppState handlers. Without a fallback that bridges the two,
+    // these actions are silently no-ops -- visible to the user as
+    // Cmd+0 doing nothing and the Hand-icon dblclick doing nothing.
+
+    #[test]
+    fn fit_active_artboard_action_changes_view_state() {
+        // Default tab has at least one artboard (per the at-least-one
+        // invariant) and zoom_level = 1.0 with view_offset_x/y = 0.
+        // Set a known viewport so the fit math has something to work
+        // with, then dispatch the action and assert the model's view
+        // state actually changed -- the specific output isn't the
+        // point; that the model was touched at all is what proves the
+        // doc.zoom.fit_rect dispatch reached effects.rs.
+        let mut st = make_state_with_layers(vec![
+            ("L1".into(), Visibility::Preview, false),
+        ]);
+        let tab = &mut st.tabs[st.active_tab];
+        tab.model.viewport_w = 800.0;
+        tab.model.viewport_h = 600.0;
+        tab.model.zoom_level    = 0.5;
+        tab.model.view_offset_x = 999.0;
+        tab.model.view_offset_y = 999.0;
+
+        let params = serde_json::Map::new();
+        dispatch_action("fit_active_artboard", &params, &mut st);
+
+        let m = &st.tabs[st.active_tab].model;
+        let touched = m.zoom_level != 0.5
+            || m.view_offset_x != 999.0
+            || m.view_offset_y != 999.0;
+        assert!(
+            touched,
+            "fit_active_artboard must mutate Model view state \
+             (zoom={}, off=({},{}))",
+            m.zoom_level, m.view_offset_x, m.view_offset_y,
+        );
     }
 
     // ── Phase 3 Group B: doc.delete_at / doc.clone_at / doc.insert_after
