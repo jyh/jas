@@ -188,7 +188,18 @@ pub(crate) fn load_session() -> Option<(usize, Vec<(String, Document)>)> {
         };
 
         match binary_to_document(&bytes) {
-            Ok(doc) => restored.push((filename.to_string(), doc)),
+            Ok(mut doc) => {
+                // The binary format predates the artboards feature so
+                // unpack_document sets `artboards: Vec::new()`. Run the
+                // at-least-one-artboard repair here per ARTBOARDS.md
+                // §At-least-one-artboard invariant — without it the
+                // restored tab has no artboard and
+                // center_view_on_current_artboard early-returns,
+                // leaving the canvas blank.
+                crate::document::artboard::ensure_artboards_invariant(
+                    &mut doc.artboards, None);
+                restored.push((filename.to_string(), doc));
+            }
             Err(e) => {
                 log::warn!("session: binary decode failed for '{}': {}", key, e);
                 continue;

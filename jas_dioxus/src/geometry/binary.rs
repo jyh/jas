@@ -832,8 +832,12 @@ fn unpack_document(v: &Value) -> Document {
     let selected_layer = as_i64(&arr[1]) as usize;
     let selection = unpack_selection(&arr[2]);
     // Binary format predates the artboards feature — parsed docs
-    // start with empty artboards; the app's load-time repair adds a
-    // default later (ARTBOARDS.md §At-least-one-artboard invariant).
+    // start with empty artboards. Callers that hand the result to the
+    // app (session.rs::load_session) run
+    // ensure_artboards_invariant after unpack to satisfy
+    // ARTBOARDS.md §At-least-one-artboard invariant; the
+    // cross-language round-trip tests intentionally don't (they
+    // compare bytes, not semantics).
     Document {
         layers,
         selected_layer,
