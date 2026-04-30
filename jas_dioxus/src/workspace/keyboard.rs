@@ -112,6 +112,35 @@ pub(crate) fn make_keydown_handler(
         }
 
         match key {
+            // --- Modifier-key tracking for tools ---
+            // Modifier keys (Alt, Shift, Ctrl, Meta) by themselves don't
+            // dispatch through the standard tool key path, but tools
+            // that flip cursor / overlay state on modifier press want
+            // to know. Route bare Alt / Shift / Ctrl / Meta down to the
+            // active tool's on_keydown handler so YAML can react. The
+            // matching keyup case is in `make_keyup_handler`.
+            Key::Alt | Key::Shift | Key::Control | Key::Meta => {
+                let key_str: String = match &key {
+                    Key::Alt     => "Alt".into(),
+                    Key::Shift   => "Shift".into(),
+                    Key::Control => "Control".into(),
+                    Key::Meta    => "Meta".into(),
+                    _            => String::new(),
+                };
+                let km = crate::tools::tool::KeyMods {
+                    shift: mods.shift(),
+                    ctrl: mods.ctrl(),
+                    alt: mods.alt(),
+                    meta: mods.meta(),
+                };
+                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                    let kind = st.active_tool;
+                    if let Some(tab) = st.tab_mut()
+                        && let Some(tool) = tab.tools.get_mut(&kind) {
+                            tool.on_key_event(&mut tab.model, &key_str, km);
+                        }
+                }));
+            }
             // --- Panel focus navigation ---
             Key::Tab if !tool_captures => {
                 evt.prevent_default();
@@ -494,6 +523,25 @@ pub(crate) fn make_keyup_handler(
                     if let Some(tab) = st.tab_mut()
                         && let Some(tool) = tab.tools.get_mut(&kind) {
                             tool.on_key_up(&mut tab.model, " ");
+                        }
+                }));
+            }
+            // Mirror the keydown path: route bare modifier-key release
+            // to the active tool so cursor / overlay state can clear
+            // (e.g. Zoom cursor flips back to "+" on Alt release).
+            Key::Alt | Key::Shift | Key::Control | Key::Meta => {
+                let key_str: String = match &key {
+                    Key::Alt     => "Alt".into(),
+                    Key::Shift   => "Shift".into(),
+                    Key::Control => "Control".into(),
+                    Key::Meta    => "Meta".into(),
+                    _            => String::new(),
+                };
+                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                    let kind = st.active_tool;
+                    if let Some(tab) = st.tab_mut()
+                        && let Some(tool) = tab.tools.get_mut(&kind) {
+                            tool.on_key_up(&mut tab.model, &key_str);
                         }
                 }));
             }

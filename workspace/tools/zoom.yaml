@@ -132,6 +132,14 @@ handlers:
     - set: { tool.zoom.moved: "false" }
 
   on_keydown:
+    # Real-time Alt tracking so the cursor flips to zoom-out the
+    # moment Alt is held, even if the mouse is stationary. The
+    # mousemove handler also writes alt_held but only fires when
+    # the cursor moves — bare Alt-press without motion was the
+    # missing case.
+    - if: "event.key == 'Alt'"
+      then:
+        - set: { tool.zoom.alt_held: "true" }
     - if: "event.key == 'Escape' && tool.zoom.mode == 'dragging'"
       then:
         # Cancel drag — revert any scrubby zoom changes by restoring
@@ -142,6 +150,12 @@ handlers:
             offset_y: "tool.zoom.initial_offy"
         - set: { tool.zoom.mode:  "'idle'" }
         - set: { tool.zoom.moved: "false" }
+
+  on_keyup:
+    # Clear alt_held on Alt release; cursor flips back to zoom-in.
+    - if: "event.key == 'Alt'"
+      then:
+        - set: { tool.zoom.alt_held: "false" }
 
   on_wheel:
     # Ctrl+wheel = step zoom centered on cursor. Plain wheel is reserved
