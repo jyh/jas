@@ -1608,9 +1608,9 @@ fn run_doc_effect(
                 let gain = read_pref_number(ctx, "scrubby_zoom_gain", 144.0);
                 let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
                 let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
-                let initial_zoom = read_tool_zoom_state(ctx, "initial_zoom", 1.0);
-                let initial_offx = read_tool_zoom_state(ctx, "initial_offx", 0.0);
-                let initial_offy = read_tool_zoom_state(ctx, "initial_offy", 0.0);
+                let initial_zoom = read_tool_zoom_state(store, "initial_zoom", 1.0);
+                let initial_offx = read_tool_zoom_state(store, "initial_offx", 0.0);
+                let initial_offy = read_tool_zoom_state(store, "initial_offy", 0.0);
                 let dx = cursor_x - press_x;
                 let direction = if alt_at_press ^ alt_held { -1.0 } else { 1.0 };
                 let factor = (dx * direction / gain).exp();
@@ -2276,16 +2276,18 @@ fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
         .unwrap_or(default)
 }
 
-/// Read a numeric tool.zoom.<key> from the eval context. Used by
+/// Read a numeric tool.zoom.<key> from the StateStore. Used by
 /// doc.zoom.scrubby to recover the zoom + offset snapshot taken at
 /// mousedown so the continuous-drag zoom is computed idempotently
 /// from the press position, not accumulated per-event.
-fn read_tool_zoom_state(ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
-    ctx.get("tool")
-        .and_then(|t| t.get("zoom"))
-        .and_then(|z| z.get(key))
-        .and_then(|n| n.as_f64())
-        .unwrap_or(default)
+///
+/// Read from the store directly rather than from the dispatch ctx:
+/// YamlTool::dispatch only puts {event, active_document, preferences}
+/// in ctx -- the `tool` namespace lives on the store and is folded
+/// into the merged eval_ctx by `eval_expr`. Anyone reaching for tool
+/// state outside an eval_expr call must go through the store.
+fn read_tool_zoom_state(store: &StateStore, key: &str, default: f64) -> f64 {
+    store.get_tool("zoom", key).as_f64().unwrap_or(default)
 }
 
 fn eval_number(
