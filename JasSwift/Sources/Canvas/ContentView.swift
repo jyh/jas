@@ -23,6 +23,7 @@ public enum Tool: String, CaseIterable {
     case line
     case rect
     case roundedRect
+    case ellipse
     case polygon
     case star
     case lasso
@@ -58,6 +59,7 @@ func toolYamlId(_ tool: Tool) -> String? {
     case .line: return "line"
     case .rect: return "rect"
     case .roundedRect: return "rounded_rect"
+    case .ellipse: return "ellipse"
     case .polygon: return "polygon"
     case .star: return "star"
     case .lasso: return "lasso"
@@ -629,7 +631,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $shapeSlotTool,
-                        alternates: [.rect, .roundedRect, .polygon, .star],
+                        alternates: [.rect, .roundedRect, .ellipse, .polygon, .star],
                         onRequestOptions: onOpenToolOptions
                     )
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .lasso,

@@ -49,6 +49,7 @@ class Tool(Enum):
     LINE = auto()
     RECT = auto()
     ROUNDED_RECT = auto()
+    ELLIPSE = auto()
     POLYGON = auto()
     STAR = auto()
     LASSO = auto()
@@ -132,6 +133,8 @@ class ToolButton(QToolButton):
             self._draw_rect_tool(painter)
         elif self.tool == Tool.ROUNDED_RECT:
             self._draw_rounded_rect_tool(painter)
+        elif self.tool == Tool.ELLIPSE:
+            self._draw_ellipse_tool(painter)
         elif self.tool == Tool.PEN:
             self._draw_pen_tool(painter)
         elif self.tool == Tool.ADD_ANCHOR_POINT:
@@ -320,6 +323,14 @@ class ToolButton(QToolButton):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(QRectF(23.33, 58.26, 212.06, 139.47), 30.0, 30.0)
         painter.restore()
+
+    def _draw_ellipse_tool(self, painter):
+        # Ellipse icon: rx > ry so it reads as an ellipse, not a circle.
+        # Matches workspace/icons.yaml ellipse and the Rust toolbar icon.
+        from PySide6.QtCore import QRectF
+        painter.setPen(QPen(_icon_color(), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QRectF(3, 7, 22, 14))
 
     def _draw_pen_tool(self, painter):
         # Pen icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
@@ -1119,7 +1130,7 @@ _PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PAINTBRUSH, Tool.BLOB_BRUSH,
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TYPE, Tool.TYPE_ON_PATH}
 # Tools that share the rect/polygon slot
-_SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR}
+_SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.ELLIPSE, Tool.POLYGON, Tool.STAR}
 # Tools that share the scale/shear slot — Rotate has its own slot
 _TRANSFORM_SLOT_TOOLS = {Tool.SCALE, Tool.SHEAR}
 _LONG_PRESS_MS = LONG_PRESS_MS
@@ -1423,6 +1434,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.ROUNDED_RECT])
         self.buttons[Tool.STAR] = ToolButton(Tool.STAR, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.STAR])
+        self.buttons[Tool.ELLIPSE] = ToolButton(Tool.ELLIPSE, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.ELLIPSE])
         self.buttons[Tool.PAINTBRUSH] = ToolButton(Tool.PAINTBRUSH, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.PAINTBRUSH])
         self.buttons[Tool.BLOB_BRUSH] = ToolButton(Tool.BLOB_BRUSH, has_alternates=True)
@@ -1593,9 +1606,11 @@ class Toolbar(QWidget):
 
     def _show_shape_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR):
+        for tool in (Tool.RECT, Tool.ROUNDED_RECT, Tool.ELLIPSE,
+                     Tool.POLYGON, Tool.STAR):
             label = {Tool.RECT: "Rectangle",
                      Tool.ROUNDED_RECT: "Rounded Rectangle",
+                     Tool.ELLIPSE: "Ellipse",
                      Tool.POLYGON: "Polygon",
                      Tool.STAR: "Star"}[tool]
             action = menu.addAction(label)

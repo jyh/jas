@@ -2394,6 +2394,7 @@ class CanvasNSView: NSView {
                 case "p": onToolChange?(.pen)
                 case "t": onToolChange?(.typeTool)
                 case "\\": onToolChange?(.line)
+                case "l": onToolChange?(.ellipse)
                 case "m": onToolChange?(.rect)
                 case "q": onToolChange?(.lasso)
                 case "h": onToolChange?(.hand)

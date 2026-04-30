@@ -80,6 +80,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.LINE: _yaml_tool("line"),
         Tool.RECT: _yaml_tool("rect"),
         Tool.ROUNDED_RECT: _yaml_tool("rounded_rect"),
+        Tool.ELLIPSE: _yaml_tool("ellipse"),
         Tool.POLYGON: _yaml_tool("polygon"),
         Tool.STAR: _yaml_tool("star"),
         Tool.LASSO: _yaml_tool("lasso"),

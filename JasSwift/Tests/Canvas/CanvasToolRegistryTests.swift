@@ -45,7 +45,7 @@ import AppKit
         .selection, .partialSelection, .interiorSelection,
         .pen, .addAnchorPoint, .deleteAnchorPoint, .anchorPoint,
         .pencil, .pathEraser, .smooth,
-        .line, .rect, .roundedRect, .polygon, .star, .lasso,
+        .line, .rect, .roundedRect, .ellipse, .polygon, .star, .lasso,
     ]
     for tool in expected {
         #expect(registry[tool] != nil, "expected createTools() to include \(tool)")

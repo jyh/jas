@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Partial_selection | Interior_selection | Magic_wand | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Blob_brush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso | Scale | Rotate | Shear | Hand | Zoom | Artboard | Eyedropper
+type tool = Selection | Partial_selection | Interior_selection | Magic_wand | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Blob_brush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Ellipse | Polygon | Star | Lasso | Scale | Rotate | Shear | Hand | Zoom | Artboard | Eyedropper
 
 (** Map a tool variant to its workspace/tools/*.yaml filename stem.
     Returns [None] for native-only tools without a YAML spec. Used
@@ -23,6 +23,7 @@ let tool_yaml_id = function
   | Line -> Some "line"
   | Rect -> Some "rect"
   | Rounded_rect -> Some "rounded_rect"
+  | Ellipse -> Some "ellipse"
   | Polygon -> Some "polygon"
   | Star -> Some "star"
   | Lasso -> Some "lasso"
@@ -189,7 +190,7 @@ class toolbar ~title:(_title : string) ~x ~y
          pencil_slot_tool <- t
        | Type_tool | Type_on_path ->
          text_slot_tool <- t
-       | Rect | Rounded_rect | Polygon | Star ->
+       | Rect | Rounded_rect | Ellipse | Polygon | Star ->
          shape_slot_tool <- t
        | Scale | Shear ->
          transform_slot_tool <- t
@@ -407,6 +408,26 @@ class toolbar ~title:(_title : string) ~x ~y
            Cairo.stroke cr
          | [] -> ());
         Cairo.restore cr
+      in
+
+      let draw_ellipse_icon cr ~alloc =
+        (* Ellipse: rx > ry so it reads as an ellipse, not a circle.
+           Matches workspace/icons.yaml ellipse and the Rust toolbar
+           icon. *)
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let cx = ox +. 14.0 and cy = oy +. 14.0 in
+        let rx = 11.0 and ry = 7.0 in
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
+        Cairo.set_line_width cr 1.5;
+        Cairo.save cr;
+        Cairo.translate cr cx cy;
+        Cairo.scale cr rx ry;
+        Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+        Cairo.restore cr;
+        Cairo.stroke cr
       in
 
       let draw_polygon_icon cr ~alloc =
@@ -1176,6 +1197,7 @@ class toolbar ~title:(_title : string) ~x ~y
         (match shape_slot_tool with
          | Rect -> draw_rect_icon cr ~alloc
          | Rounded_rect -> draw_rounded_rect_icon cr ~alloc
+         | Ellipse -> draw_ellipse_icon cr ~alloc
          | Polygon -> draw_polygon_icon cr ~alloc
          | Star -> draw_star_icon cr ~alloc
          | _ -> ());
@@ -1781,6 +1803,7 @@ class toolbar ~title:(_title : string) ~x ~y
       in
       add_item "Rectangle" Rect;
       add_item "Rounded Rectangle" Rounded_rect;
+      add_item "Ellipse" Ellipse;
       add_item "Polygon" Polygon;
       add_item "Star" Star;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())

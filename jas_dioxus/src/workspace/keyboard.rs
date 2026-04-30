@@ -379,9 +379,16 @@ pub(crate) fn make_keydown_handler(
                     st.set_tool(ToolKind::Type);
                 }));
             }
-            Key::Character(ref c) if c == "l" || c == "L" => {
+            // Per line.yaml shortcut "\\" and ellipse.yaml shortcut "L".
+            // Backslash → Line; bare "l"/"L" → Ellipse.
+            Key::Character(ref c) if c == "\\" => {
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
                     st.set_tool(ToolKind::Line);
+                }));
+            }
+            Key::Character(ref c) if c == "l" || c == "L" => {
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    st.set_tool(ToolKind::Ellipse);
                 }));
             }
             Key::Character(ref c) if c == "m" || c == "M" => {

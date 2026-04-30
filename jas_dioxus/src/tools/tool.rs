@@ -41,6 +41,7 @@ pub enum ToolKind {
     Line,
     Rect,
     RoundedRect,
+    Ellipse,
     Polygon,
     Star,
     Lasso,
@@ -74,6 +75,7 @@ impl ToolKind {
             ToolKind::Line => "Line (L)",
             ToolKind::Rect => "Rectangle (M)",
             ToolKind::RoundedRect => "Rounded Rectangle",
+            ToolKind::Ellipse => "Ellipse (L)",
             ToolKind::Polygon => "Polygon",
             ToolKind::Star => "Star",
             ToolKind::Lasso => "Lasso (Q)",
@@ -169,6 +171,7 @@ impl ToolKind {
             ToolKind::Line => "line",
             ToolKind::Rect => "rect",
             ToolKind::RoundedRect => "rounded_rect",
+            ToolKind::Ellipse => "ellipse",
             ToolKind::Polygon => "polygon",
             ToolKind::Star => "star",
             ToolKind::Lasso => "lasso",
@@ -192,8 +195,9 @@ impl ToolKind {
             ToolKind::Paintbrush => Some("b"),
             ToolKind::BlobBrush => Some("B"), // Shift-B
             ToolKind::Type => Some("t"),
-            ToolKind::Line => Some("l"),
+            ToolKind::Line => Some("\\"),
             ToolKind::Rect => Some("m"),
+            ToolKind::Ellipse => Some("l"),
             ToolKind::AddAnchorPoint => Some("="),
             ToolKind::DeleteAnchorPoint => Some("-"),
             ToolKind::AnchorPoint => Some("C"),
@@ -307,6 +311,7 @@ mod tests {
             ToolKind::Line,
             ToolKind::Rect,
             ToolKind::RoundedRect,
+            ToolKind::Ellipse,
             ToolKind::Polygon,
             ToolKind::Star,
             ToolKind::Lasso,
@@ -317,7 +322,7 @@ mod tests {
             ToolKind::Zoom,
             ToolKind::Artboard,
         ];
-        assert_eq!(all.len(), 27);
+        assert_eq!(all.len(), 28);
     }
 
     #[test]
@@ -352,7 +357,7 @@ mod tests {
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::Paintbrush,
             ToolKind::BlobBrush, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
-            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
+            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Ellipse, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
             ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
             ToolKind::Hand, ToolKind::Zoom, ToolKind::Artboard,
@@ -360,7 +365,7 @@ mod tests {
         for t in &all {
             set.insert(*t);
         }
-        assert_eq!(set.len(), 27);
+        assert_eq!(set.len(), 28);
     }
 
     #[test]
@@ -372,7 +377,7 @@ mod tests {
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::Paintbrush,
             ToolKind::BlobBrush, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
-            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
+            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Ellipse, ToolKind::Polygon, ToolKind::Star,
             ToolKind::Lasso,
             ToolKind::Scale, ToolKind::Rotate, ToolKind::Shear,
             ToolKind::Hand, ToolKind::Zoom, ToolKind::Artboard,
@@ -468,7 +473,10 @@ mod tests {
         assert_eq!(ToolKind::Pen.shortcut(), Some("p"));
         assert_eq!(ToolKind::Pencil.shortcut(), Some("n"));
         assert_eq!(ToolKind::Type.shortcut(), Some("t"));
-        assert_eq!(ToolKind::Line.shortcut(), Some("l"));
+        // Line YAML declares shortcut "\\" (backslash); Ellipse YAML
+        // declares shortcut "L". Mirrors the YAML source-of-truth.
+        assert_eq!(ToolKind::Line.shortcut(), Some("\\"));
+        assert_eq!(ToolKind::Ellipse.shortcut(), Some("l"));
         assert_eq!(ToolKind::Rect.shortcut(), Some("m"));
         assert_eq!(ToolKind::Scale.shortcut(), Some("s"));
         assert_eq!(ToolKind::Rotate.shortcut(), Some("r"));
@@ -534,8 +542,11 @@ mod tests {
 
     #[test]
     fn shape_slot_alternates() {
-        let alternates = [ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star];
-        assert_eq!(alternates.len(), 4);
+        let alternates = [
+            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Ellipse,
+            ToolKind::Polygon, ToolKind::Star,
+        ];
+        assert_eq!(alternates.len(), 5);
     }
 
     #[test]

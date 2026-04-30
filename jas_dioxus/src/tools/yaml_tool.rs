@@ -519,6 +519,7 @@ impl CanvasTool for YamlTool {
                 .unwrap_or("");
             match render_type {
                 "rect" => draw_rect_overlay(ctx, render, &eval_ctx),
+                "ellipse" => draw_ellipse_overlay(ctx, render, &eval_ctx),
                 "line" => draw_line_overlay(ctx, render, &eval_ctx),
                 "polygon" => draw_regular_polygon_overlay(ctx, render, &eval_ctx),
                 "star" => draw_star_overlay(ctx, render, &eval_ctx),
@@ -825,6 +826,59 @@ fn draw_rect_overlay(
         // Reset dash if we set one, so subsequent native strokes aren't
         // unexpectedly dashed. CanvasRenderingContext2d is stateful, so
         // reset with an empty array.
+        if style.stroke_dasharray.is_some() {
+            let _ = ctx.set_line_dash(&js_sys::Array::new());
+        }
+    }
+}
+
+/// Draw an ellipse overlay. Fields: cx/cy/rx/ry (numbers or string
+/// expressions), style (CSS subset — fill, stroke, stroke-width,
+/// stroke-dasharray). Used by the ellipse drawing tool's drag preview
+/// and any other tool that wants an SVG-style ellipse on the overlay
+/// layer.
+fn draw_ellipse_overlay(
+    ctx: &CanvasRenderingContext2d,
+    render: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+) {
+    let cx = eval_number_field(eval_ctx, render.get("cx"));
+    let cy = eval_number_field(eval_ctx, render.get("cy"));
+    let rx = eval_number_field(eval_ctx, render.get("rx"));
+    let ry = eval_number_field(eval_ctx, render.get("ry"));
+    if rx <= 0.0 || ry <= 0.0 {
+        return;
+    }
+    let style_str = render
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let style = parse_style(style_str);
+
+    let build_path = || {
+        ctx.begin_path();
+        let _ = ctx.ellipse(cx, cy, rx, ry, 0.0, 0.0, std::f64::consts::TAU);
+    };
+
+    if let Some(fill) = &style.fill {
+        ctx.set_fill_style_str(fill);
+        build_path();
+        ctx.fill();
+    }
+    if let Some(stroke) = &style.stroke {
+        ctx.set_stroke_style_str(stroke);
+        if let Some(w) = style.stroke_width {
+            ctx.set_line_width(w);
+        }
+        if let Some(dash) = &style.stroke_dasharray {
+            let arr = js_sys::Array::new();
+            for d in dash {
+                arr.push(&wasm_bindgen::JsValue::from_f64(*d));
+            }
+            let _ = ctx.set_line_dash(&arr);
+        }
+        build_path();
+        ctx.stroke();
         if style.stroke_dasharray.is_some() {
             let _ = ctx.set_line_dash(&js_sys::Array::new());
         }
@@ -2671,6 +2725,86 @@ mod tests {
             assert_eq!(r.height, 60.0);
         } else {
             panic!("expected Rect");
+        }
+    }
+
+    // ── Ellipse tool behavioral tests ──────────────────────────────
+    //
+    // Mirror the rect parity cases against workspace/tools/ellipse.yaml.
+    // Ellipse fits the press→release bounding box: cx/cy at the center,
+    // rx/ry at half each dimension. Zero-size click suppressed.
+
+    fn ellipse_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("ellipse")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    #[test]
+    fn ellipse_parity_draw_ellipse() {
+        let Some(mut tool) = ellipse_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press at (10, 20), drag to (110, 70), release: bbox is
+        // 100×50; ellipse fits with cx=60, cy=45, rx=50, ry=25.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 110.0, 70.0, false, false, true);
+        tool.on_release(&mut model, 110.0, 70.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Ellipse(e) = &*children[0] {
+            assert_eq!(e.cx, 60.0);
+            assert_eq!(e.cy, 45.0);
+            assert_eq!(e.rx, 50.0);
+            assert_eq!(e.ry, 25.0);
+        } else {
+            panic!("expected Ellipse");
+        }
+    }
+
+    #[test]
+    fn ellipse_parity_zero_size_not_created() {
+        let Some(mut tool) = ellipse_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+        );
+    }
+
+    #[test]
+    fn ellipse_parity_negative_drag_yields_positive_radii() {
+        let Some(mut tool) = ellipse_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        // Press at (100, 80), drag back to (10, 20). Ellipse rx/ry must
+        // be positive (abs of the deltas).
+        tool.on_press(&mut model, 100.0, 80.0, false, false);
+        tool.on_move(&mut model, 10.0, 20.0, false, false, true);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Ellipse(e) = &*children[0] {
+            assert_eq!(e.cx, 55.0);
+            assert_eq!(e.cy, 50.0);
+            assert_eq!(e.rx, 45.0);
+            assert_eq!(e.ry, 30.0);
+        } else {
+            panic!("expected Ellipse");
         }
     }
 

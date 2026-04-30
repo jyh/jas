@@ -817,6 +817,14 @@ public struct ToolbarView {
                 let transformed = path.applying(transform)
                 context.stroke(transformed, with: .color(color), lineWidth: 8.0 * s)
 
+            case .ellipse:
+                // Ellipse icon: rx > ry so it reads as an ellipse, not a circle.
+                // Matches workspace/icons.yaml ellipse and the Rust toolbar icon.
+                let cx = ox + 14, cy = oy + 14, rx: CGFloat = 11, ry: CGFloat = 7
+                var path = SwiftUI.Path()
+                path.addEllipse(in: CGRect(x: cx - rx, y: cy - ry, width: rx * 2, height: ry * 2))
+                context.stroke(path, with: .color(color), lineWidth: 1.5)
+
             case .polygon:
                 let cx = ox + 14.0, cy = oy + 14.0, r = 11.0
                 let n = 6
@@ -1193,6 +1201,7 @@ private struct ArrowSlotButton: View {
         case .typeOnPath: return "Type on a Path"
         case .rect: return "Rectangle"
         case .roundedRect: return "Rounded Rectangle"
+        case .ellipse: return "Ellipse"
         case .polygon: return "Polygon"
         case .star: return "Star"
         case .lasso: return "Lasso"

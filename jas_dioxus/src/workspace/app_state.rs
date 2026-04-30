@@ -92,6 +92,7 @@ impl TabState {
         tools.insert(ToolKind::TypeOnPath, Box::new(TypeOnPathTool::new()));
         tools.insert(ToolKind::Rect, yaml_tool("rect"));
         tools.insert(ToolKind::RoundedRect, yaml_tool("rounded_rect"));
+        tools.insert(ToolKind::Ellipse, yaml_tool("ellipse"));
         tools.insert(ToolKind::Polygon, yaml_tool("polygon"));
         tools.insert(ToolKind::Star, yaml_tool("star"));
         tools.insert(ToolKind::Line, yaml_tool("line"));
