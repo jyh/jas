@@ -29,6 +29,24 @@ use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
 use crate::panels::panel_menu_state::{PanelMenuState, MenuBarState};
 use crate::panels::panel_menu_view::PanelMenuOverlay;
 
+/// Translate a yaml-declared cursor name into a value the browser
+/// recognizes as a CSS `cursor` keyword. Tool yaml uses semantic
+/// names (`open_hand`, `arrow`, `eyedropper`) that match each
+/// native app's cursor vocabulary; on the web those names aren't
+/// valid CSS and silently fall through to the default cursor. Map
+/// the known semantic names to their CSS equivalents and let
+/// already-valid CSS keywords pass through unchanged.
+fn yaml_cursor_to_css(name: &str) -> &str {
+    match name {
+        "open_hand"   => "grab",
+        "arrow"       => "default",
+        // Eyedropper has no standard CSS cursor; crosshair is the
+        // closest approximation until a custom SVG cursor lands.
+        "eyedropper"  => "crosshair",
+        other         => other,
+    }
+}
+
 /// Drain a tool's pending panel-state writes and apply each to
 /// AppState. Routes by panel id to the matching apply_*_panel_field
 /// function. Currently the only panel that canvas tools write to is
@@ -523,11 +541,17 @@ pub fn App() -> Element {
 
     // Per-frame cursor: tools may override (e.g. Type tool returns the
     // text-insertion SVG when hovering text, and "none" while editing).
+    // Yaml tools declare semantic cursor names (e.g. `open_hand`,
+    // `arrow`) that aren't valid CSS — translate them at this boundary
+    // so the browser sees a real CSS cursor keyword. Without this,
+    // Hand-idle and Selection-idle render with no `cursor:` value the
+    // browser recognizes, falling back to the platform default.
     let canvas_cursor: String = {
         let st = app.borrow();
-        st.tab()
+        let raw = st.tab()
             .and_then(|tab| tab.tools.get(&active_tool).and_then(|t| t.cursor_css_override()))
-            .unwrap_or_else(|| active_tool.cursor_css().to_string())
+            .unwrap_or_else(|| active_tool.cursor_css().to_string());
+        yaml_cursor_to_css(&raw).to_string()
     };
     // --- Tab bar ---
     let borrowed = app.borrow();
@@ -1196,5 +1220,30 @@ pub fn App() -> Element {
             // YAML-interpreted dialogs
             crate::interpreter::dialog_view::YamlDialogView { dialog_ctx: yaml_dialog }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yaml_cursor_to_css_translates_semantic_names_to_css_keywords() {
+        // Semantic names declared in tool yaml that aren't valid CSS
+        // cursor keywords on the web — the browser silently falls
+        // back to the platform default if these reach a `cursor:`
+        // CSS property unmapped.
+        assert_eq!(yaml_cursor_to_css("open_hand"), "grab");
+        assert_eq!(yaml_cursor_to_css("arrow"),     "default");
+        assert_eq!(yaml_cursor_to_css("eyedropper"), "crosshair");
+
+        // Already-valid CSS keywords pass through unchanged so the
+        // many tools that declare `cursor: crosshair` / `none` /
+        // `grabbing` don't regress.
+        assert_eq!(yaml_cursor_to_css("crosshair"), "crosshair");
+        assert_eq!(yaml_cursor_to_css("none"),      "none");
+        assert_eq!(yaml_cursor_to_css("grabbing"),  "grabbing");
+        assert_eq!(yaml_cursor_to_css("default"),   "default");
+        assert_eq!(yaml_cursor_to_css("move"),      "move");
     }
 }
