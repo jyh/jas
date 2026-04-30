@@ -21588,7 +21588,7 @@
             "if": "tool.selection.mode == 'drag_move'",
             "then": [
               {
-                "if": "tool.selection.alt_held and not tool.selection.copied",
+                "if": "(tool.selection.alt_held or event.modifiers.alt) and not tool.selection.copied",
                 "then": [
                   {
                     "doc.copy_selection": {
@@ -21635,6 +21635,22 @@
                   "x2": "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)",
                   "y2": "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)",
                   "additive": "event.modifiers.shift"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.selection.mode == 'drag_move' and event.modifiers.alt and not tool.selection.copied",
+            "then": [
+              {
+                "doc.copy_selection": {
+                  "dx": "0",
+                  "dy": "0"
+                }
+              },
+              {
+                "set": {
+                  "tool.selection.copied": "true"
                 }
               }
             ]
