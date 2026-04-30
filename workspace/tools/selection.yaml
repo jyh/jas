@@ -42,17 +42,33 @@ state:
   doc_marquee_end_y: { default: 0 }
   # Document-space drag anchor — translate_selection deltas work
   # in document-space (elements live there), so the running anchor
-  # has to as well.
+  # has to as well. drag_start_x/y is the LAST cursor position
+  # (updated each move) for incremental delta math. press_doc_x/y
+  # is the original mousedown position (frozen) — used by the
+  # mid-drag-Alt preview to revert with cumulative-from-press
+  # translation, and by the at-release commit to compute the
+  # copy offset.
   drag_start_x: { default: 0 }
   drag_start_y: { default: 0 }
-  # Was Alt held when the drag started? Frozen at mousedown — changes
-  # to the Alt state during the drag are intentionally ignored, so the
-  # first move cleanly decides "copy" vs "translate."
+  press_doc_x:   { default: 0 }
+  press_doc_y:   { default: 0 }
+  # Was Alt held when the drag started? Frozen at mousedown.
+  # alt_held=true uses the at-press semantics: copy on first move,
+  # then translate copies on subsequent moves (Alt-state changes
+  # mid-drag don't flip back to translate).
   alt_held: { default: false }
-  # Has the Alt+drag already produced a copy this drag? The first
-  # mousemove in drag_move with alt_held=true fires doc.copy_selection
-  # (which replaces selection with the new copies); subsequent moves
-  # translate those copies instead of copying again.
+  # Mid-drag Alt preview state: when the user starts a plain drag
+  # and presses Alt mid-drag, the original "snaps back" to the
+  # press position (preview-restored) and we hold a "potential
+  # copy" mode. Releasing Alt resumes normal move; releasing
+  # the mouse with Alt still held commits the copy at the
+  # cursor's release position.
+  alt_preview: { default: false }
+  # Has the Alt+drag already produced a copy this drag? Tracks
+  # the at-press path (alt_held=true): the first mousemove fires
+  # doc.copy_selection (which replaces selection with the new
+  # copies); subsequent moves translate those copies instead of
+  # copying again.
   copied: { default: false }
 
 handlers:
@@ -83,6 +99,7 @@ handlers:
             - set: { tool.selection.doc_marquee_end_y: "event.doc_y" }
           else:
             - "doc.snapshot": {}
+            - "doc.preview.capture": {}
             - if: "event.modifiers.shift"
               then:
                 - "doc.toggle_selection": "hit"
@@ -97,6 +114,9 @@ handlers:
                   then:
                     - "doc.set_selection": { paths: [hit] }
             - set: { tool.selection.mode: "'drag_move'" }
+            - set: { tool.selection.press_doc_x: "event.doc_x" }
+            - set: { tool.selection.press_doc_y: "event.doc_y" }
+            - set: { tool.selection.alt_preview: "false" }
             - set: { tool.selection.drag_start_x: "event.doc_x" }
             - set: { tool.selection.drag_start_y: "event.doc_y" }
             # Capture Alt at press time — if the user releases Alt
@@ -114,27 +134,66 @@ handlers:
         - set: { tool.selection.doc_marquee_end_y: "event.doc_y" }
     - if: "tool.selection.mode == 'drag_move'"
       then:
-        # Alt-during-drag converts the gesture to a copy. We accept
-        # Alt at press time (alt_held, frozen for the gesture so
-        # releasing Alt mid-drag doesn't flip back -- SEL-053) OR
-        # Alt held right now (event.modifiers.alt, so a user who
-        # started a plain drag and then decides to press Alt
-        # mid-drag still ends up with a copy). After the copy fires
-        # once (`copied = true`), every subsequent move translates
-        # the new copies; the originals stay put at wherever they
-        # had been moved to before Alt was pressed.
-        - if: "(tool.selection.alt_held or event.modifiers.alt) and not tool.selection.copied"
+        # Two distinct gesture flavors:
+        #
+        # (A) Alt held at mousedown -- "drag-to-copy" (existing
+        #     SEL-052 / SEL-053 path). First mousemove fires
+        #     doc.copy_selection (which replaces selection with
+        #     new copies); subsequent moves translate the copies.
+        #     Releasing Alt mid-drag doesn't flip back -- the
+        #     gesture started as copy and stays copy.
+        #
+        # (B) No Alt at mousedown -- normal move with mid-drag
+        #     Alt-preview support. Pressing Alt mid-drag snaps the
+        #     original back to the press position (preview restore)
+        #     and we wait. Releasing Alt resumes the move from
+        #     where the cursor is now. Releasing the mouse with Alt
+        #     still held commits a copy in on_mouseup.
+        - if: "tool.selection.alt_held"
           then:
-            - "doc.copy_selection":
-                dx: "event.doc_x - tool.selection.drag_start_x"
-                dy: "event.doc_y - tool.selection.drag_start_y"
-            - set: { tool.selection.copied: "true" }
+            # (A) at-press copy path
+            - if: "not tool.selection.copied"
+              then:
+                - "doc.copy_selection":
+                    dx: "event.doc_x - tool.selection.drag_start_x"
+                    dy: "event.doc_y - tool.selection.drag_start_y"
+                - set: { tool.selection.copied: "true" }
+              else:
+                - "doc.translate_selection":
+                    dx: "event.doc_x - tool.selection.drag_start_x"
+                    dy: "event.doc_y - tool.selection.drag_start_y"
+            - set: { tool.selection.drag_start_x: "event.doc_x" }
+            - set: { tool.selection.drag_start_y: "event.doc_y" }
           else:
-            - "doc.translate_selection":
-                dx: "event.doc_x - tool.selection.drag_start_x"
-                dy: "event.doc_y - tool.selection.drag_start_y"
-        - set: { tool.selection.drag_start_x: "event.doc_x" }
-        - set: { tool.selection.drag_start_y: "event.doc_y" }
+            # (B) no-alt-at-press: live preview transitions
+            - if: "event.modifiers.alt and not tool.selection.alt_preview"
+              then:
+                # Entering preview: revert any translations so the
+                # original snaps back to the press position. The
+                # cursor position is the would-be copy location.
+                - "doc.preview.restore": {}
+                - set: { tool.selection.alt_preview: "true" }
+            - if: "not event.modifiers.alt and tool.selection.alt_preview"
+              then:
+                # Exiting preview: re-apply the cumulative translate
+                # from press so the original lands at the cursor as
+                # if the preview never happened.
+                - "doc.translate_selection":
+                    dx: "event.doc_x - tool.selection.press_doc_x"
+                    dy: "event.doc_y - tool.selection.press_doc_y"
+                - set: { tool.selection.alt_preview: "false" }
+            - if: "not event.modifiers.alt and not tool.selection.alt_preview"
+              then:
+                # Normal move: incremental delta from last cursor.
+                - "doc.translate_selection":
+                    dx: "event.doc_x - tool.selection.drag_start_x"
+                    dy: "event.doc_y - tool.selection.drag_start_y"
+            # In preview mode (Alt held, alt_preview true) the
+            # original stays at start -- no translate this frame.
+            # Always update drag_start so the next "normal move"
+            # frame computes the right incremental delta.
+            - set: { tool.selection.drag_start_x: "event.doc_x" }
+            - set: { tool.selection.drag_start_y: "event.doc_y" }
 
   on_mouseup:
     - if: "tool.selection.mode == 'marquee'"
@@ -145,18 +204,24 @@ handlers:
             x2: "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)"
             y2: "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)"
             additive: "event.modifiers.shift"
-    # Late Alt-detection: if the user pressed Alt during the drag
-    # but no mousemove fired after Alt was pressed (Alt held briefly
-    # then mouse released), the mousemove copy gate above never
-    # ran. Catch it at mouseup so the gesture still ends as a copy
-    # when Alt is held at release.
-    - if: "tool.selection.mode == 'drag_move' and event.modifiers.alt and not tool.selection.copied"
+    # Mid-drag Alt commit: if we were in the no-alt-at-press path
+    # AND Alt is still held at release, commit a copy at the
+    # cursor's release position. The original is currently at the
+    # press position (preview-restored during the alt_preview
+    # transition); doc.copy_selection adds the new copies offset
+    # by (cursor - press) so they land at the cursor.
+    - if: "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt"
       then:
         - "doc.copy_selection":
-            dx: "0"
-            dy: "0"
-        - set: { tool.selection.copied: "true" }
+            dx: "event.doc_x - tool.selection.press_doc_x"
+            dy: "event.doc_y - tool.selection.press_doc_y"
+    # Always drop the preview snapshot on drag end -- it's no
+    # longer load-bearing once the gesture commits.
+    - if: "tool.selection.mode == 'drag_move'"
+      then:
+        - "doc.preview.clear": {}
     - set: { tool.selection.mode: "'idle'" }
+    - set: { tool.selection.alt_preview: "false" }
 
   on_keydown:
     - if: "event.key == 'Escape'"

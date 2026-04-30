@@ -21417,7 +21417,16 @@
         "drag_start_y": {
           "default": 0
         },
+        "press_doc_x": {
+          "default": 0
+        },
+        "press_doc_y": {
+          "default": 0
+        },
         "alt_held": {
+          "default": false
+        },
+        "alt_preview": {
           "default": false
         },
         "copied": {
@@ -21507,6 +21516,9 @@
                     "doc.snapshot": {}
                   },
                   {
+                    "doc.preview.capture": {}
+                  },
+                  {
                     "if": "event.modifiers.shift",
                     "then": [
                       {
@@ -21531,6 +21543,21 @@
                   {
                     "set": {
                       "tool.selection.mode": "'drag_move'"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.press_doc_x": "event.doc_x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.press_doc_y": "event.doc_y"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.alt_preview": "false"
                     }
                   },
                   {
@@ -21588,38 +21615,95 @@
             "if": "tool.selection.mode == 'drag_move'",
             "then": [
               {
-                "if": "(tool.selection.alt_held or event.modifiers.alt) and not tool.selection.copied",
+                "if": "tool.selection.alt_held",
                 "then": [
                   {
-                    "doc.copy_selection": {
-                      "dx": "event.doc_x - tool.selection.drag_start_x",
-                      "dy": "event.doc_y - tool.selection.drag_start_y"
+                    "if": "not tool.selection.copied",
+                    "then": [
+                      {
+                        "doc.copy_selection": {
+                          "dx": "event.doc_x - tool.selection.drag_start_x",
+                          "dy": "event.doc_y - tool.selection.drag_start_y"
+                        }
+                      },
+                      {
+                        "set": {
+                          "tool.selection.copied": "true"
+                        }
+                      }
+                    ],
+                    "else": [
+                      {
+                        "doc.translate_selection": {
+                          "dx": "event.doc_x - tool.selection.drag_start_x",
+                          "dy": "event.doc_y - tool.selection.drag_start_y"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "set": {
+                      "tool.selection.drag_start_x": "event.doc_x"
                     }
                   },
                   {
                     "set": {
-                      "tool.selection.copied": "true"
+                      "tool.selection.drag_start_y": "event.doc_y"
                     }
                   }
                 ],
                 "else": [
                   {
-                    "doc.translate_selection": {
-                      "dx": "event.doc_x - tool.selection.drag_start_x",
-                      "dy": "event.doc_y - tool.selection.drag_start_y"
+                    "if": "event.modifiers.alt and not tool.selection.alt_preview",
+                    "then": [
+                      {
+                        "doc.preview.restore": {}
+                      },
+                      {
+                        "set": {
+                          "tool.selection.alt_preview": "true"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "if": "not event.modifiers.alt and tool.selection.alt_preview",
+                    "then": [
+                      {
+                        "doc.translate_selection": {
+                          "dx": "event.doc_x - tool.selection.press_doc_x",
+                          "dy": "event.doc_y - tool.selection.press_doc_y"
+                        }
+                      },
+                      {
+                        "set": {
+                          "tool.selection.alt_preview": "false"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "if": "not event.modifiers.alt and not tool.selection.alt_preview",
+                    "then": [
+                      {
+                        "doc.translate_selection": {
+                          "dx": "event.doc_x - tool.selection.drag_start_x",
+                          "dy": "event.doc_y - tool.selection.drag_start_y"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "set": {
+                      "tool.selection.drag_start_x": "event.doc_x"
+                    }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.drag_start_y": "event.doc_y"
                     }
                   }
                 ]
-              },
-              {
-                "set": {
-                  "tool.selection.drag_start_x": "event.doc_x"
-                }
-              },
-              {
-                "set": {
-                  "tool.selection.drag_start_y": "event.doc_y"
-                }
               }
             ]
           }
@@ -21640,24 +21724,32 @@
             ]
           },
           {
-            "if": "tool.selection.mode == 'drag_move' and event.modifiers.alt and not tool.selection.copied",
+            "if": "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt",
             "then": [
               {
                 "doc.copy_selection": {
-                  "dx": "0",
-                  "dy": "0"
+                  "dx": "event.doc_x - tool.selection.press_doc_x",
+                  "dy": "event.doc_y - tool.selection.press_doc_y"
                 }
-              },
+              }
+            ]
+          },
+          {
+            "if": "tool.selection.mode == 'drag_move'",
+            "then": [
               {
-                "set": {
-                  "tool.selection.copied": "true"
-                }
+                "doc.preview.clear": {}
               }
             ]
           },
           {
             "set": {
               "tool.selection.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.selection.alt_preview": "false"
             }
           }
         ],
