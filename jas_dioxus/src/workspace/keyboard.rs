@@ -441,6 +441,12 @@ pub(crate) fn make_keydown_handler(
                     st.set_tool(ToolKind::Zoom);
                 }));
             }
+            // Lasso — Q per workspace/tools/lasso.yaml.
+            Key::Character(ref c) if c == "q" || c == "Q" => {
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    st.set_tool(ToolKind::Lasso);
+                }));
+            }
             // Artboard tool — Shift+O per workspace/tools/artboard.yaml.
             // The "O" comes through capital with Shift held on most
             // layouts (US / UK), so guard on Shift to avoid stealing
