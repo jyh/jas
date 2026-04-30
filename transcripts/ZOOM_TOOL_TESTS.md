@@ -291,54 +291,54 @@ edit flow varies per platform; for now flip it directly in
 workspace.json or the running preferences if exposed). All tests
 in this session assume marquee mode.
 
-- [ ] **ZOOM-080** [wired] **P0.** Drag draws a marquee
+- [x] **ZOOM-080** [wired] **P0.** Drag draws a marquee
       rectangle.
       Do: Press, drag to a different point.
       Expect: A thin dashed gray rectangle appears between press
       and current cursor, updating as the cursor moves.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-081** [wired] **P0.** Mouseup commits a fit-inside
+- [x] **ZOOM-081** [wired] **P0.** Mouseup commits a fit-inside
       zoom.
       Do: Press at one corner of a small region of artwork, drag
       diagonally to its opposite corner, release.
       Expect: Zoom level increases so the marquee region fills the
       viewport (letterboxed if aspect ratio differs). The marquee
       content is centered in the viewport.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-082** [wired] **P1.** Marquee aspect-ratio resolves
+- [x] **ZOOM-082** [wired] **P1.** Marquee aspect-ratio resolves
       fit-inside (letterbox).
       Do: At zoom 1.0, draw a 200 × 50 marquee in a 800 × 600
       viewport (with 0 padding for marquee — exact fit).
       Expect: Final zoom = min(800/200, 600/50) = 4.0. The marquee
       width fits exactly; there's vertical slack.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-083** [wired] **P2.** Marquee below 10 px in either
+- [x] **ZOOM-083** [wired] **P2.** Marquee below 10 px in either
       dimension is treated as a click.
       Do: Press, drag 5 px right and 50 px down, release.
       Expect: Step zoom by `zoom_step`, not a fit. (Cursor anchored
       at the click point.)
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-084** [wired] **P2.** Zero-area marquee (pure
+- [x] **ZOOM-084** [wired] **P2.** Zero-area marquee (pure
       vertical or horizontal) is a click.
       Do: Press, drag 0 px right and 100 px down, release.
       Expect: Same as click — step zoom.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-085** [wired] **P2.** Marquee that would exceed
+- [x] **ZOOM-085** [wired] **P2.** Marquee that would exceed
       `max_zoom` clamps zoom and centers on the marquee anyway.
       Do: Draw a 1 × 1 px marquee.
       Expect: Zoom clamps to 64.0; pan centers the marquee location
       in the viewport.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-086** [wired] **P2.** Escape mid-drag aborts.
+- [x] **ZOOM-086** [wired] **P2.** Escape mid-drag aborts.
       Do: Press, drag (overlay visible), press Escape.
       Expect: Overlay disappears; zoom + pan unchanged.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
