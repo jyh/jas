@@ -435,6 +435,15 @@ pub(crate) fn make_keydown_handler(
                     st.set_tool(ToolKind::Zoom);
                 }));
             }
+            // Artboard tool — Shift+O per workspace/tools/artboard.yaml.
+            // The "O" comes through capital with Shift held on most
+            // layouts (US / UK), so guard on Shift to avoid stealing
+            // a future plain "o" shortcut.
+            Key::Character(ref c) if (c == "o" || c == "O") && mods.shift() && !cmd => {
+                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    st.set_tool(ToolKind::Artboard);
+                }));
+            }
             // --- Spacebar pass-through to Hand (HAND_TOOL.md
             // §Spacebar pass-through) ---
             // On Space-down, if Hand isn't already active, save the
