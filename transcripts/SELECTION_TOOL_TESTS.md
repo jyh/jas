@@ -279,60 +279,72 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **SEL-050** [wired] Drag a selected element translates it.
+- [x] **SEL-050** [wired] Drag a selected element translates it.
       Setup: 3-rect fixture; select the middle rect.
       Do: Press on the middle rect; drag 50 px to the right; release.
       Expect: Middle rect visibly shifts right by the drag delta; other
               two don't move.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-051** [wired] Multi-element drag translates the whole
+- [x] **SEL-051** [wired] Multi-element drag translates the whole
   selection.
       Setup: 3-rect fixture; Ctrl/Cmd-A to select all.
       Do: Drag one of the rects 50 px right.
       Expect: All three rects shift by the same delta.
-      — last: —
+      — last: 2026-04-30 (Rust). Required selection-contains check
+        in 19f763a (don't drop other selected items when clicking
+        on an already-selected one).
 
 **P1**
 
-- [ ] **SEL-052** [wired] Alt+drag duplicates then translates the copies.
+- [x] **SEL-052** [wired] Alt+drag duplicates then translates the copies.
       Setup: 3-rect fixture; middle rect selected.
       Do: Alt-press on the middle rect; drag 50 px right; release.
       Expect: Original middle rect stays; a new rect appears at the drag
               endpoint; the new rect is the active selection.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-053** [wired] Alt released mid-drag doesn't flip copy to move.
+- [x] **SEL-053** [wired] Alt released mid-drag doesn't flip copy to move.
       Setup: Middle rect selected.
       Do: Alt-press, start dragging, release Alt keys (keep mouse
           pressed), continue drag, release.
       Expect: Still a copy — the Alt-at-press modifier is frozen for the
               gesture. Original stays; new copy at drag end.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-054** [wired] Drag records one undo step.
+- [x] **SEL-054** [wired] Drag records one undo step.
       Setup: Middle rect at x=150.
       Do: Drag it to x=250; then Ctrl/Cmd-Z.
       Expect: Rect returns to x=150; a single undo reverses the whole
               drag.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P2**
 
-- [ ] **SEL-055** [wired] Drag on a locked element is a no-op.
+- [x] **SEL-055** [wired] Drag on a locked element is a no-op.
       Setup: Select a locked rect (via Layers panel lock, then canvas
              click while partial-selection or interior rendering of
              "locked but selected").
       Do: Try to drag.
       Expect: No movement; no undo entry created.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-056** [wired] Alt+click without drag is treated as normal
+- [x] **SEL-056** [wired] Alt+click without drag is treated as normal
   click.
       Setup: 3-rect fixture; nothing selected.
       Do: Alt-click the middle rect and release without moving.
       Expect: Middle rect selects; no duplicate is created.
-      — last: —
+      — last: 2026-04-30 (Rust)
+
+## Enhancements raised in Session D
+
+- **ENH-001** Mid-drag Alt-toggle live-preview ghost: SEL-052/053 follow-up
+  added a dashed-cyan outline at the would-be copy position while Alt
+  is held mid-drag, with the original snapped back to the press point
+  via doc.preview.restore. Releasing Alt resumes the move; releasing
+  the mouse with Alt held commits a real copy. New overlay render
+  type `selection_translate_ghost` lives in yaml_tool.rs. _Raised
+  during SEL-052 follow-up on 2026-04-30._
 
 ---
 
