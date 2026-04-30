@@ -279,9 +279,24 @@ impl YamlTool {
         if handler.is_empty() {
             return;
         }
+        // Tools can `dispatch:` workspace actions from their handlers
+        // (e.g. zoom.yaml's on_mouseup fires `dispatch: { action:
+        // zoom_in, params: {...} }` for click-to-zoom). Without the
+        // actions catalog AND preferences in the eval ctx, those
+        // dispatches silently no-op (or, worse, evaluate
+        // `preferences.viewport.zoom_step` to Null/0.0 inside
+        // doc.zoom.apply and clamp the model to min_zoom). Loading
+        // here is cheap (Workspace::load() hits a OnceLock cache).
+        let workspace = crate::interpreter::workspace::Workspace::load();
+        let actions = workspace.as_ref().map(|ws| ws.actions());
+        let preferences = workspace
+            .as_ref()
+            .and_then(|ws| ws.data().get("preferences").cloned())
+            .unwrap_or(serde_json::Value::Null);
         let ctx = serde_json::json!({
             "event": event_payload,
             "active_document": Self::active_document_payload(model),
+            "preferences": preferences,
         });
         // Registration tears down on guard drop — handler panics still
         // leave the doc-primitive thread-local in a clean state.
@@ -294,7 +309,7 @@ impl YamlTool {
             &ctx,
             &mut self.store,
             Some(model),
-            None,
+            actions,
             None,
         );
     }
@@ -2198,6 +2213,40 @@ mod tests {
         });
         let tool = YamlTool::new(ToolSpec::from_workspace_tool(&raw).unwrap());
         assert_eq!(tool.cursor_css_override(), Some("crosshair".to_string()));
+    }
+
+    #[test]
+    fn zoom_tool_click_dispatches_zoom_in_action() {
+        // Reproduces the Zoom-tool click-to-zoom flow end-to-end:
+        // on_mouseup with no significant motion fires
+        // `dispatch: { action: zoom_in, params: {anchor_x, anchor_y} }`.
+        // Without the workspace actions catalog plumbed into
+        // YamlTool::dispatch, that dispatch silently no-ops and the
+        // model's zoom_level stays at 1.0.
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load().expect("embedded workspace must parse");
+        let zoom_spec = ws.data().get("tools").and_then(|t| t.get("zoom"))
+            .expect("workspace must declare a zoom tool");
+        let spec = ToolSpec::from_workspace_tool(zoom_spec).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let z_before = model.zoom_level;
+        assert_eq!(z_before, 1.0, "default zoom is 1.0");
+
+        // Activate the tool so on_enter seeds tool state defaults.
+        tool.activate(&mut model);
+        // Simulate a press-then-immediate-release at the same point
+        // (no motion → click branch in on_mouseup).
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_release(&mut model, 100.0, 100.0, false, false);
+
+        assert!(
+            model.zoom_level > z_before,
+            "click should zoom in; zoom_level={} (expected > 1.0)",
+            model.zoom_level,
+        );
     }
 
     #[test]
