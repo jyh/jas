@@ -1429,23 +1429,35 @@ fn draw_partial_selection_overlay(
     };
     let sel_color = "rgb(0,120,255)";
     let doc = model.document();
+    // Anchor + handle positions come back from control_points and
+    // path_handle_positions in document coordinates. The overlay
+    // context draws post-restore (identity transform), so map each
+    // point through the active view transform: viewport_x = doc_x *
+    // zoom + view_offset_x. Without this the handles render in raw
+    // doc coords and land far off-screen whenever view_offset != 0.
+    let zoom = model.zoom_level;
+    let offx = model.view_offset_x;
+    let offy = model.view_offset_y;
+    let to_vp = |x: f64, y: f64| (x * zoom + offx, y * zoom + offy);
     for es in &doc.selection {
         if let Some(Element::Path(pe)) = doc.get_element(&es.path) {
             let anchors = control_points(&Element::Path(pe.clone()));
             for (ai, &(ax, ay)) in anchors.iter().enumerate() {
                 let (h_in, h_out) = path_handle_positions(&pe.d, ai);
                 for h in [h_in, h_out].iter().flatten() {
+                    let (vax, vay) = to_vp(ax, ay);
+                    let (vhx, vhy) = to_vp(h.0, h.1);
                     ctx.set_stroke_style_str(sel_color);
                     ctx.set_line_width(1.0);
                     ctx.begin_path();
-                    ctx.move_to(ax, ay);
-                    ctx.line_to(h.0, h.1);
+                    ctx.move_to(vax, vay);
+                    ctx.line_to(vhx, vhy);
                     ctx.stroke();
 
                     ctx.set_fill_style_str("white");
                     ctx.set_stroke_style_str(sel_color);
                     ctx.begin_path();
-                    let _ = ctx.arc(h.0, h.1, 3.0, 0.0, std::f64::consts::TAU);
+                    let _ = ctx.arc(vhx, vhy, 3.0, 0.0, std::f64::consts::TAU);
                     ctx.fill();
                     ctx.stroke();
                 }
