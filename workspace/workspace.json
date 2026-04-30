@@ -22245,6 +22245,11 @@
         ],
         "on_mousemove": [
           {
+            "set": {
+              "tool.zoom.alt_held": "event.modifiers.alt"
+            }
+          },
+          {
             "if": "tool.zoom.mode == 'dragging'",
             "then": [
               {
@@ -22255,11 +22260,6 @@
               {
                 "set": {
                   "tool.zoom.cursor_y": "event.y"
-                }
-              },
-              {
-                "set": {
-                  "tool.zoom.alt_held": "event.modifiers.alt"
                 }
               },
               {
@@ -22354,6 +22354,16 @@
         ],
         "on_keydown": [
           {
+            "if": "event.key == 'Alt'",
+            "then": [
+              {
+                "set": {
+                  "tool.zoom.alt_held": "true"
+                }
+              }
+            ]
+          },
+          {
             "if": "event.key == 'Escape' && tool.zoom.mode == 'dragging'",
             "then": [
               {
@@ -22371,6 +22381,18 @@
               {
                 "set": {
                   "tool.zoom.moved": "false"
+                }
+              }
+            ]
+          }
+        ],
+        "on_keyup": [
+          {
+            "if": "event.key == 'Alt'",
+            "then": [
+              {
+                "set": {
+                  "tool.zoom.alt_held": "false"
                 }
               }
             ]
