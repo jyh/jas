@@ -40,6 +40,10 @@ fn yaml_cursor_to_css(name: &str) -> &str {
     match name {
         "open_hand"   => "grab",
         "arrow"       => "default",
+        // CSS spells these with a hyphen; yaml uses snake_case
+        // throughout. Map both directions of the Zoom-tool flip.
+        "zoom_in"     => "zoom-in",
+        "zoom_out"    => "zoom-out",
         // Eyedropper has no standard CSS cursor; crosshair is the
         // closest approximation until a custom SVG cursor lands.
         "eyedropper"  => "crosshair",
@@ -1233,9 +1237,13 @@ mod tests {
         // cursor keywords on the web — the browser silently falls
         // back to the platform default if these reach a `cursor:`
         // CSS property unmapped.
-        assert_eq!(yaml_cursor_to_css("open_hand"), "grab");
-        assert_eq!(yaml_cursor_to_css("arrow"),     "default");
+        assert_eq!(yaml_cursor_to_css("open_hand"),  "grab");
+        assert_eq!(yaml_cursor_to_css("arrow"),      "default");
         assert_eq!(yaml_cursor_to_css("eyedropper"), "crosshair");
+        // CSS uses hyphenated `zoom-in` / `zoom-out`; yaml is
+        // snake_case throughout.
+        assert_eq!(yaml_cursor_to_css("zoom_in"),    "zoom-in");
+        assert_eq!(yaml_cursor_to_css("zoom_out"),   "zoom-out");
 
         // Already-valid CSS keywords pass through unchanged so the
         // many tools that declare `cursor: crosshair` / `none` /
