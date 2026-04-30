@@ -509,24 +509,14 @@ pub fn App() -> Element {
                 }));
                 return;
             }
-            if km.meta {
-                // Cmd + wheel: vertical pan, same sign convention.
-                evt.prevent_default();
-                (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
-                    if let Some(tab) = st.tab_mut() {
-                        tab.model.view_offset_y -= dy;
-                    }
-                }));
-                return;
-            }
-            // No modifier: forward to active tool's on_wheel. Most
-            // tools no-op; reserved for future tool-specific gestures.
+            // No modifier OR Cmd: vertical pan. Plain wheel mirrors
+            // Cmd+wheel since that matches the conventional "scroll"
+            // behavior users expect from a mouse wheel.
+            evt.prevent_default();
             (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
-                let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut()
-                    && let Some(tool) = tab.tools.get_mut(&kind) {
-                        tool.on_wheel(&mut tab.model, cx, cy, dx, dy, km);
-                    }
+                if let Some(tab) = st.tab_mut() {
+                    tab.model.view_offset_y -= dy;
+                }
             }));
         }
     };

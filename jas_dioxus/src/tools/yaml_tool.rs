@@ -545,35 +545,6 @@ impl CanvasTool for YamlTool {
         true
     }
 
-    fn on_wheel(
-        &mut self,
-        model: &mut Model,
-        x: f64,
-        y: f64,
-        delta_x: f64,
-        delta_y: f64,
-        mods: KeyMods,
-    ) -> bool {
-        if self.spec.handler("on_wheel").is_empty() {
-            return false;
-        }
-        let payload = serde_json::json!({
-            "type": "wheel",
-            "x": x,
-            "y": y,
-            "delta_x": delta_x,
-            "delta_y": delta_y,
-            "modifiers": {
-                "shift": mods.shift,
-                "alt":   mods.alt,
-                "ctrl":  mods.ctrl,
-                "meta":  mods.meta,
-            },
-        });
-        self.dispatch("on_wheel", payload, model);
-        true
-    }
-
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
         if self.spec.overlay.is_empty() {
             return;
@@ -2260,34 +2231,6 @@ mod tests {
         });
         let tool = YamlTool::new(ToolSpec::from_workspace_tool(&raw).unwrap());
         assert_eq!(tool.cursor_css_override(), Some("crosshair".to_string()));
-    }
-
-    #[test]
-    fn yaml_tool_on_wheel_dispatches_when_handler_declared() {
-        // Direct test of the YamlTool::on_wheel plumbing: any tool
-        // YAML that declares an `on_wheel` handler receives the
-        // dispatch payload with delta + modifiers. Wheel modifier
-        // routing for the actual app (Alt zoom / Ctrl horizontal /
-        // Cmd vertical) is in app.rs's on_wheel closure, not here.
-        let raw = serde_json::json!({
-            "id": "wheel_probe",
-            "state": { "last_dy": { "default": 0.0 } },
-            "handlers": {
-                "on_wheel": [
-                    { "set": { "tool.wheel_probe.last_dy": "event.delta_y" } }
-                ]
-            }
-        });
-        let spec = ToolSpec::from_workspace_tool(&raw).unwrap();
-        let mut tool = YamlTool::new(spec);
-        let mut model = Model::default();
-        tool.on_wheel(&mut model, 0.0, 0.0, 0.0, -42.0, KeyMods::default());
-        let observed = tool.tool_state("last_dy").as_f64();
-        assert_eq!(
-            observed,
-            Some(-42.0),
-            "on_wheel must dispatch with event.delta_y in payload",
-        );
     }
 
     #[test]
