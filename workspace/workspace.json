@@ -18798,7 +18798,7 @@
     },
     "interior_selection": {
       "id": "interior_selection",
-      "cursor": "arrow",
+      "cursor": "hollow_arrow_plus",
       "menu_label": "Interior Selection Tool",
       "state": {
         "mode": {
