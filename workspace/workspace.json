@@ -21515,11 +21515,16 @@
                     ],
                     "else": [
                       {
-                        "doc.set_selection": {
-                          "paths": [
-                            "hit"
-                          ]
-                        }
+                        "if": "not selection_contains(hit)",
+                        "then": [
+                          {
+                            "doc.set_selection": {
+                              "paths": [
+                                "hit"
+                              ]
+                            }
+                          }
+                        ]
                       }
                     ]
                   },
