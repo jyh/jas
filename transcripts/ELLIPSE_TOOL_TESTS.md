@@ -92,19 +92,22 @@ Full pass: ~25 min once wired.
 
 ## Session A — Smoke & lifecycle (~5 min)
 
-- [ ] **ELL-001** [wired] Ellipse tool activates via `L` shortcut.
+- [x] **ELL-001** [wired] Ellipse tool activates via `L` shortcut.
       Do: Press L.
       Expect: Ellipse tool becomes active; cursor crosshair.
               (Line moved to `\\` per its yaml.)
-      — last: —
+      — last: 2026-04-30
 
-- [ ] **ELL-002** [wired] Ellipse tool activates via toolbox icon.
+- [x] **ELL-002** [wired] Ellipse tool activates via toolbox icon.
       Do: Long-press the shape slot; pick Ellipse from the alternates
           menu (slots are Rect / RoundedRect / Ellipse / Polygon /
           Star).
       Expect: Ellipse becomes the visible alternate; active state on
               icon; crosshair.
-      — last: —
+      — last: 2026-04-30  · note: surfaced flyout regressions (icon
+              size, missing triangle, missing alternate-icon swap,
+              state.active_tool enum, parse_tool_kind, fill:none).
+              Fixed in 1e3c62f.
 
 ---
 
@@ -112,32 +115,32 @@ Full pass: ~25 min once wired.
 
 **P0**
 
-- [ ] **ELL-010** [wired] Press-drag-release commits an Ellipse.
+- [x] **ELL-010** [wired] Press-drag-release commits an Ellipse.
       Do: Press at (100,100); drag to (300,200); release.
       Expect (target): Ellipse with cx=200, cy=150, rx=100, ry=50.
-      — last: —
+      — last: 2026-04-30
 
-- [ ] **ELL-011** [wired] Zero-size click is suppressed.
+- [x] **ELL-011** [wired] Zero-size click is suppressed.
       Do: Press and release at the same point.
       Expect (target): No element created.
-      — last: —
+      — last: 2026-04-30
 
 **P1**
 
-- [ ] **ELL-012** [wired] Sub-1-pt bounding box is suppressed.
+- [x] **ELL-012** [wired] Sub-1-pt bounding box is suppressed.
       Do: Press at (100,100); drag to (100.5,100.5).
       Expect (target): No element created.
-      — last: —
+      — last: 2026-04-30
 
-- [ ] **ELL-013** [wired] Up-and-left drag normalizes.
+- [x] **ELL-013** [wired] Up-and-left drag normalizes.
       Do: Press (300,250); drag to (100,100); release.
       Expect (target): Ellipse with cx=200, cy=175, rx=100, ry=75.
-      — last: —
+      — last: 2026-04-30
 
-- [ ] **ELL-014** [wired] Successive ellipses accumulate.
+- [x] **ELL-014** [wired] Successive ellipses accumulate.
       Do: Draw three ellipses in different positions.
       Expect (target): All three present.
-      — last: —
+      — last: 2026-04-30
 
 ---
 
@@ -145,41 +148,44 @@ Full pass: ~25 min once wired.
 
 **P1**
 
-- [ ] **ELL-030** [wired] Ellipse picks up default fill at commit.
+- [x] **ELL-030** [wired] Ellipse picks up default fill at commit.
       Setup: Fill panel = orange.
       Do: Draw any ellipse.
       Expect (target): Orange fill on the new ellipse.
-      — last: —
+      — last: 2026-04-30
 
-- [ ] **ELL-031** [wired] Ellipse picks up default stroke.
+- [x] **ELL-031** [wired] Ellipse picks up default stroke.
       Setup: Stroke panel = 4 pt black.
       Do: Draw any ellipse.
       Expect (target): 4 pt black stroke.
-      — last: —
+      — last: 2026-04-30
 
-- [ ] **ELL-032** [wired] Esc during drag cancels.
+- [x] **ELL-032** [wired] Esc during drag cancels.
       Do: Begin a drag; press Esc.
       Expect (target): No element created.
-      — last: —
+      — last: 2026-04-30
 
-- [ ] **ELL-033** [wired] Undo removes the last ellipse.
+- [x] **ELL-033** [wired] Undo removes the last ellipse.
       Do: Draw ellipse; Ctrl/Cmd-Z.
       Expect (target): Ellipse removed; redo restores.
-      — last: —
+      — last: 2026-04-30
 
 **P2**
 
-- [ ] **ELL-050** [wired] Overlay previews the ellipse shape during drag.
+- [x] **ELL-050** [wired] Overlay previews the ellipse shape during drag.
       Do: Begin a drag.
       Expect: Dashed ellipse preview inscribed in the current bbox;
               style matches Rect preview otherwise (1-px black at 50%
               opacity, 4/4 dash, no fill).
-      — last: —
+      — last: 2026-04-30  · note: surfaced parse_style "fill: none"
+              bug — Canvas2D set_fill_style_str("none") silently
+              fails so overlay was painting with stale fill. Fixed
+              in 1e3c62f.
 
-- [ ] **ELL-051** [wired] Cursor is crosshair over canvas.
+- [x] **ELL-051** [wired] Cursor is crosshair over canvas.
       Do: Observe cursor.
       Expect (target): Crosshair.
-      — last: —
+      — last: 2026-04-30
 
 ---
 
