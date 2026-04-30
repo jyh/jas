@@ -47,9 +47,24 @@ fn yaml_cursor_to_css(name: &str) -> &str {
         // Eyedropper has no standard CSS cursor; crosshair is the
         // closest approximation until a custom SVG cursor lands.
         "eyedropper"  => "crosshair",
+        // Partial Selection's "white arrow" (Adobe-style hollow
+        // arrow with a black outline) -- inline SVG data URL so
+        // we don't need a separate asset file. Hotspot at the
+        // arrow tip (1, 1). Falls back to the platform default
+        // arrow if the SVG can't be parsed.
+        "hollow_arrow" => HOLLOW_ARROW_CSS,
         other         => other,
     }
 }
+
+/// CSS `cursor` value for the Partial Selection tool. Inline
+/// SVG with a 2-color (white fill / black stroke) arrow shape;
+/// hotspot at the tip near (1, 1).
+const HOLLOW_ARROW_CSS: &str = "url(\"data:image/svg+xml;utf8,\
+    <svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'>\
+    <path d='M1.5,1.5 L1.5,15 L5,11.5 L7.5,17 L10,16 L7.5,11 L13,11 Z' \
+    fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='miter'/>\
+    </svg>\") 1 1, default";
 
 /// Drain a tool's pending panel-state writes and apply each to
 /// AppState. Routes by panel id to the matching apply_*_panel_field
