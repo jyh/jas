@@ -1540,14 +1540,30 @@ fn run_doc_effect(
             }
         }
         "doc.zoom.set" => {
-            // Set zoom_level absolutely; pan unchanged. Used by
-            // zoom_to_actual_size (level: 1.0). Clamps to
-            // [min_zoom, max_zoom].
+            // Set zoom_level absolutely, anchored at viewport center.
+            // Used by zoom_to_actual_size (level: 1.0). Per
+            // ZOOM_TOOL.md "whatever was under the viewport center
+            // stays approximately under it" — recompute view_offset
+            // around the viewport center so the visible doc point
+            // doesn't appear to lurch when zoom changes by a large
+            // factor (4x -> 1x previously walked off the visible
+            // area). Falls back to literal "pan unchanged" only when
+            // the viewport hasn't been measured.
             if let serde_json::Value::Object(args) = spec {
                 let level = eval_number(args.get("level"), store, ctx);
                 let min_zoom = read_pref_number(ctx, "min_zoom", 0.1);
                 let max_zoom = read_pref_number(ctx, "max_zoom", 64.0);
-                model.zoom_level = level.clamp(min_zoom, max_zoom);
+                let z_old = model.zoom_level;
+                let z_new = level.clamp(min_zoom, max_zoom);
+                if model.viewport_w > 0.0 && model.viewport_h > 0.0 && z_old != 0.0 {
+                    let cx = model.viewport_w / 2.0;
+                    let cy = model.viewport_h / 2.0;
+                    let doc_cx = (cx - model.view_offset_x) / z_old;
+                    let doc_cy = (cy - model.view_offset_y) / z_old;
+                    model.view_offset_x = cx - doc_cx * z_new;
+                    model.view_offset_y = cy - doc_cy * z_new;
+                }
+                model.zoom_level = z_new;
             }
         }
         "doc.zoom.set_full" => {
@@ -7715,21 +7731,47 @@ mod tests {
     // ─── Zoom + Pan effects ────────────────────────────────────
 
     #[test]
-    fn test_doc_zoom_set() {
+    fn test_doc_zoom_set_anchors_at_viewport_center() {
+        // doc.zoom.set used to leave pan literally unchanged, which
+        // visually walked the artboard off the visible canvas when
+        // the zoom factor changed by a lot. Per ZOOM_TOOL.md it
+        // should keep "whatever was under the viewport center
+        // approximately under it" -- recompute view_offset around
+        // the viewport center.
         let mut store = StateStore::new();
         let mut model = Model::default();
-        model.zoom_level = 2.5;
-        model.view_offset_x = 100.0;
-        model.view_offset_y = 50.0;
+        model.viewport_w    = 800.0;
+        model.viewport_h    = 600.0;
+        model.zoom_level    = 4.0;
+        // Place the doc origin somewhere off-center so the test
+        // would notice if pan stayed literally unchanged.
+        model.view_offset_x = 94.0;
+        model.view_offset_y = -96.0;
+
+        let doc_under_center_before = (
+            (400.0 - 94.0) / 4.0,        // = 76.5
+            (300.0 - (-96.0)) / 4.0,     // = 99.0
+        );
+
         let effects = vec![serde_json::json!({
             "doc.zoom.set": { "level": "1.0" }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
             Some(&mut model), None, None);
+
         assert_eq!(model.zoom_level, 1.0);
-        // Pan unchanged.
-        assert_eq!(model.view_offset_x, 100.0);
-        assert_eq!(model.view_offset_y, 50.0);
+        let doc_under_center_after = (
+            (400.0 - model.view_offset_x) / model.zoom_level,
+            (300.0 - model.view_offset_y) / model.zoom_level,
+        );
+        assert!(
+            (doc_under_center_before.0 - doc_under_center_after.0).abs() < 0.01
+            && (doc_under_center_before.1 - doc_under_center_after.1).abs() < 0.01,
+            "viewport center anchor not preserved: before={:?} after={:?} \
+             (offset = ({}, {}))",
+            doc_under_center_before, doc_under_center_after,
+            model.view_offset_x, model.view_offset_y,
+        );
     }
 
     #[test]
