@@ -119,37 +119,40 @@ A gates the rest.
 
 If any P0 here fails, stop and flag.
 
-- [ ] **SEL-001** [wired] Selection tool activates via toolbox icon.
+- [x] **SEL-001** [wired] Selection tool activates via toolbox icon.
       Do: Click the Selection (arrow) icon in the toolbox.
       Expect: Icon shows active state; cursor becomes arrow over the canvas.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-002** [wired] Selection tool activates via V shortcut.
+- [x] **SEL-002** [wired] Selection tool activates via V shortcut.
       Do: Press V.
       Expect: Selection tool becomes active regardless of previously-active
               tool.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-003** [wired] Partial Selection activates via A shortcut.
+- [x] **SEL-003** [wired] Partial Selection activates via A shortcut.
       Do: Press A.
       Expect: Partial Selection tool (white arrow) becomes active.
-      — last: —
+      — last: 2026-04-30 (Rust). Required hollow_arrow cursor in
+        4829eea.
 
-- [ ] **SEL-004** [wired] Interior Selection activates via toolbox icon.
+- [x] **SEL-004** [wired] Interior Selection activates via toolbox icon.
       Do: Click the Interior Selection icon (if present) or long-press
           Selection.
       Expect: Interior Selection tool becomes active with its own icon
               state.
-      — last: —
+      — last: 2026-04-30 (Rust). Required hollow_arrow_plus cursor
+        in 045887e.
 
-- [ ] **SEL-005** [wired] Switching tools mid-gesture commits or cancels
+- [x] **SEL-005** [wired] Switching tools mid-gesture commits or cancels
   cleanly.
       Setup: 3-rect fixture.
       Do: Start a Selection drag on empty space; while still dragging, press
           L (another tool).
       Expect: No crash; marquee overlay disappears; the new tool becomes
               active.
-      — last: —
+      — last: 2026-04-30 (Rust). Required Q-to-Lasso shortcut in
+        07e1e73 + lasso doc-coord fix in fbf5811.
 
 ---
 
