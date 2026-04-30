@@ -481,18 +481,18 @@ If any P0 here fails, stop and flag.
       Expect: Only those 2 anchors become selected CPs.
       — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-106** [wired] Empty-ish marquee (<1px²) without Shift clears.
+- [x] **SEL-106** [wired] Empty-ish marquee (<1px²) without Shift clears.
       Setup: One CP selected.
       Do: Partial-selection press-and-release on empty space.
       Expect: CP selection clears.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-107** [wired] Click hit radius for CP matches the design spec.
+- [x] **SEL-107** [wired] Click hit radius for CP matches the design spec.
       Setup: Curved path.
       Do: Click 7 px from an anchor, then 9 px from it.
       Expect: 7 px hit designates the CP; 9 px misses (8 px is the
               tolerance).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
