@@ -380,44 +380,47 @@ If any P0 here fails, stop and flag.
 
 **P1**
 
-- [ ] **SEL-080** [wired] Interior click into a group selects the leaf.
+- [x] **SEL-080** [wired] Interior click into a group selects the leaf.
       Setup: Group fixture.
       Do: With Interior Selection active, click the child rect inside
           the group.
       Expect: Just that child rect is selected (NOT the whole group).
               Selection bounds trace the child rect only.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-081** [wired] Selection tool on the same click selects the
+- [x] **SEL-081** [wired] Selection tool on the same click selects the
   whole group.
       Setup: Group fixture; nothing selected.
       Do: With plain Selection active, click the child rect inside.
       Expect: The whole group is selected (group bounds, not child bounds).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **SEL-082** [wired] Interior marquee selects individual CPs.
+- [x] **SEL-082** [wired] Interior marquee selects individual CPs.
       Setup: Group fixture with a path inside.
       Do: With Interior Selection active, marquee over some anchors of
           the path.
       Expect: On release, the enclosed control points become the
               selection (partial-selection semantics).
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 **P2**
 
-- [ ] **SEL-083** [wired] Interior drag moves the leaf, not the group.
+- [x] **SEL-083** [wired] Interior drag moves the leaf, not the group.
       Setup: SEL-080 state — child rect selected via Interior Selection.
       Do: Drag the child rect 50 px right.
       Expect: Only the child moves; its sibling in the group stays put.
               The group bounds update to reflect the new child position.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 - [ ] **SEL-084** [wired] Interior Selection on an empty Group falls
   through.
       Setup: Create an empty Group, then draw a rect outside it.
       Do: Click on the empty Group's region (there's nothing to hit).
       Expect: Selection clears — nothing leaf-level under the cursor.
-      — last: —
+      — last: — · regression: Rust 2026-04-30 — can't construct an
+        empty Group via the UI (Object → Group requires a non-empty
+        selection). Test bypass would need a fixture file or a
+        canvas-side "make empty group" action. Out of Tier-0 scope.
 
 ---
 
