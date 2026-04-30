@@ -248,13 +248,24 @@ Full pass: ~28 min.
       open-hand (deferred).
       — last: 2026-04-30 (Rust)
 
-- [x] **HAND-082** [wired] **P0.** Double-click on the Hand
+- [ ] **HAND-082** [wired] **P0.** Double-click on the Hand
       toolbar icon fits the active artboard.
       Do: With Hand visible as the navigation slot icon,
       double-click it.
       Expect: Zoom + pan jumps to fit_active_artboard — same
       as `Cmd+0`.
-      — last: 2026-04-30 (Rust)
+      — last: — · regression: Rust 2026-04-30 — `Cmd+0`
+        works (action dispatch fixed in this branch); the
+        toolbar slot's `ondoubleclick` handler does not fire
+        at all (instrumented log never appeared in console).
+        `onmousedown` on the slot does fire (it activates
+        Hand), so the click reaches the slot — only the
+        browser-level dblclick pairing is missing. Likely a
+        Dioxus 0.6 quirk: the first mousedown's `act` triggers
+        a re-render that replaces the slot's DOM node, so the
+        browser can't pair the two clicks. Workaround would be
+        a manual two-click detector in `onmousedown`. Out of
+        Tier-0 scope.
 
 ---
 
