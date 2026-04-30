@@ -451,11 +451,17 @@ pub fn App() -> Element {
     };
 
     let on_wheel = {
-        // Wheel events route to the active tool's on_wheel via
-        // act_canvas — wheel-zoom only changes view state, no panel
-        // writes, so a canvas-only repaint suffices. Tool yaml handlers
-        // (e.g. zoom.yaml's `on_wheel:` for Ctrl+wheel zoom) read
-        // event.delta_y and event.modifiers from the dispatch payload.
+        // App-level wheel handling. Modifier conventions, in priority
+        // order:
+        //   Alt   -> zoom in/out anchored at cursor
+        //   Ctrl  -> horizontal pan (artboard moves L/R)
+        //   Cmd   -> vertical pan (artboard moves U/D)
+        //   none  -> forward to active tool's on_wheel (no-op today;
+        //            reserved for tools that want their own wheel
+        //            gesture)
+        // Modifier-driven gestures work regardless of active tool so
+        // the user gets consistent navigation everywhere.
+        let act = act.clone();
         let act_canvas = act_canvas.clone();
         move |evt: Event<WheelData>| {
             let coords = evt.data().element_coordinates();
@@ -469,27 +475,52 @@ pub fn App() -> Element {
                 meta: mods.meta(),
             };
             let delta = evt.data().delta();
-            // delta() returns a WheelDelta enum tagged by unit. The
-            // tool only cares about a relative dy / dx for now;
-            // collapse all units to pixel-equivalent values (lines /
-            // pages get an arbitrary scale that matches typical
-            // browser native zoom behavior).
+            // Coalesce WheelDelta units into pixel-equivalent (dx, dy).
+            // Lines / pages get conventional scale factors so the user
+            // sees similar amplitude across input devices.
             use dioxus::html::geometry::WheelDelta;
             let (dx, dy) = match delta {
                 WheelDelta::Pixels(p)  => (p.x, p.y),
                 WheelDelta::Lines(p)   => (p.x * 16.0, p.y * 16.0),
                 WheelDelta::Pages(p)   => (p.x * 800.0, p.y * 800.0),
             };
-            // If a tool consumes the wheel (Zoom under Ctrl/Cmd),
-            // suppress the browser's default scroll/zoom behavior.
-            // We can't peek into the tool's return value before
-            // dispatch without an extra borrow, so prevent_default
-            // unconditionally when a modifier is held -- that's the
-            // gate the Zoom tool itself uses. Plain wheel falls
-            // through (reserved for future canvas pan).
-            if km.ctrl || km.meta {
+            if km.alt {
+                // Alt + wheel: zoom in (wheel up, dy < 0) or out
+                // (wheel down, dy > 0), anchored at the cursor.
                 evt.prevent_default();
+                let action = if dy < 0.0 { "zoom_in" } else { "zoom_out" };
+                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                    let mut params = serde_json::Map::new();
+                    params.insert("anchor_x".into(), serde_json::json!(cx));
+                    params.insert("anchor_y".into(), serde_json::json!(cy));
+                    crate::interpreter::renderer::dispatch_action(action, &params, st);
+                }));
+                return;
             }
+            if km.ctrl {
+                // Ctrl + wheel: horizontal pan. Wheel-down conventionally
+                // scrolls content up; the horizontal analogue scrolls
+                // content left, i.e. view_offset_x decreases by dy.
+                evt.prevent_default();
+                (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
+                    if let Some(tab) = st.tab_mut() {
+                        tab.model.view_offset_x -= dy;
+                    }
+                }));
+                return;
+            }
+            if km.meta {
+                // Cmd + wheel: vertical pan, same sign convention.
+                evt.prevent_default();
+                (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
+                    if let Some(tab) = st.tab_mut() {
+                        tab.model.view_offset_y -= dy;
+                    }
+                }));
+                return;
+            }
+            // No modifier: forward to active tool's on_wheel. Most
+            // tools no-op; reserved for future tool-specific gestures.
             (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
                 if let Some(tab) = st.tab_mut()

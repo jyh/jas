@@ -157,24 +157,11 @@ handlers:
       then:
         - set: { tool.zoom.alt_held: "false" }
 
-  on_wheel:
-    # Ctrl+wheel = step zoom centered on cursor. Plain wheel is reserved
-    # for canvas pan (handled by the canvas widget, not this tool).
-    - if: "event.modifiers.ctrl"
-      then:
-        - if: "event.delta_y > 0"
-          then:
-            - dispatch:
-                action: zoom_out
-                params:
-                  anchor_x: "event.x"
-                  anchor_y: "event.y"
-          else:
-            - dispatch:
-                action: zoom_in
-                params:
-                  anchor_x: "event.x"
-                  anchor_y: "event.y"
+  # Wheel handling lives in the app-level canvas widget, not on the
+  # tool: per the user's spec, Alt+wheel = zoom (anchored at cursor),
+  # Ctrl+wheel = horizontal pan, Cmd+wheel = vertical pan -- and those
+  # gestures should work regardless of the active tool. See the
+  # on_wheel handler in jas_dioxus/src/workspace/app.rs.
 
 # Marquee overlay — drawn during a drag when scrubby is off and the drag
 # has exceeded the click-vs-drag threshold. Native renderer composes the

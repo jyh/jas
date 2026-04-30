@@ -22397,38 +22397,6 @@
               }
             ]
           }
-        ],
-        "on_wheel": [
-          {
-            "if": "event.modifiers.ctrl",
-            "then": [
-              {
-                "if": "event.delta_y > 0",
-                "then": [
-                  {
-                    "dispatch": {
-                      "action": "zoom_out",
-                      "params": {
-                        "anchor_x": "event.x",
-                        "anchor_y": "event.y"
-                      }
-                    }
-                  }
-                ],
-                "else": [
-                  {
-                    "dispatch": {
-                      "action": "zoom_in",
-                      "params": {
-                        "anchor_x": "event.x",
-                        "anchor_y": "event.y"
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          }
         ]
       },
       "overlay": [
