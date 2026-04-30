@@ -168,54 +168,54 @@ Full pass: ~51 min.
 
 ## Session B — Click + Alt-click step zoom (~6 min)
 
-- [ ] **ZOOM-020** [wired] **P0.** Plain click zooms in by
+- [x] **ZOOM-020** [wired] **P0.** Plain click zooms in by
       `zoom_step`.
       Do: With Zoom active, click anywhere on the canvas.
       Expect: Zoom level multiplies by 1.2 (default `zoom_step`).
       The document point under the cursor at click time stays
       under the cursor after the zoom.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-021** [wired] **P1.** Click anchor invariant.
+- [x] **ZOOM-021** [wired] **P1.** Click anchor invariant.
       Do: At zoom 1.0, place a small rect at document (200, 150).
       Switch to Zoom. Click *exactly* on the rect.
       Expect: After the zoom, the rect is still under the cursor —
       it didn't drift relative to the cursor.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-022** [wired] **P0.** Alt-click zooms out by
+- [x] **ZOOM-022** [wired] **P0.** Alt-click zooms out by
       `1 / zoom_step`.
       Do: Press `Cmd+1` (zoom 1.0). Hold Alt and click.
       Expect: Zoom level becomes ~0.833 (1 / 1.2). Anchor
       invariant holds.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-023** [wired] **P2.** Multiple clicks compound.
+- [x] **ZOOM-023** [wired] **P2.** Multiple clicks compound.
       Do: Click 5 times.
       Expect: Zoom level becomes ~2.488 (1.2^5). Each step
       anchored at the *current* click coordinate, not the first.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-024** [wired] **P2.** Click at `max_zoom` is a silent
+- [x] **ZOOM-024** [wired] **P2.** Click at `max_zoom` is a silent
       no-op.
       Do: Click many times until the zoom hits the cap (default
       max 64.0). Click again.
       Expect: Nothing changes — no further zoom-in, no error
       flicker, no crash.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-025** [wired] **P2.** Alt-click at `min_zoom` is a
+- [x] **ZOOM-025** [wired] **P2.** Alt-click at `min_zoom` is a
       silent no-op.
       Do: Alt-click many times until the zoom hits 0.1. Alt-click
       again.
       Expect: Nothing changes.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
-- [ ] **ZOOM-026** [wired] **P2.** Click within the click-vs-drag
+- [x] **ZOOM-026** [wired] **P2.** Click within the click-vs-drag
       threshold (≤4 px movement) is treated as a click.
       Do: Press, move 2 px, release.
       Expect: Step zoom (1.2× factor); no marquee, no scrubby.
-      — last: —
+      — last: 2026-04-30 (Rust)
 
 ---
 
