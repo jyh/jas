@@ -241,6 +241,19 @@ pub trait CanvasTool {
     fn on_double_click(&mut self, _model: &mut Model, _x: f64, _y: f64) {}
     fn on_key(&mut self, _model: &mut Model, _key: &str) -> bool { false }
     fn on_key_up(&mut self, _model: &mut Model, _key: &str) -> bool { false }
+    /// Mouse-wheel / trackpad scroll. `delta_y` is positive for scroll
+    /// down (away from user); `delta_x` for horizontal. `(x, y)` is
+    /// the cursor position in viewport-local pixels at scroll time so
+    /// tools can anchor at the cursor (e.g. Zoom's wheel zoom).
+    fn on_wheel(
+        &mut self,
+        _model: &mut Model,
+        _x: f64,
+        _y: f64,
+        _delta_x: f64,
+        _delta_y: f64,
+        _mods: KeyMods,
+    ) -> bool { false }
     /// Receive a keyboard event with modifiers. Default implementation
     /// delegates to [`on_key`] with the bare key string. Tools that care
     /// about modifiers (e.g. text editor) should override this.
