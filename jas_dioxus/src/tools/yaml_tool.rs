@@ -545,6 +545,35 @@ impl CanvasTool for YamlTool {
         true
     }
 
+    fn on_wheel(
+        &mut self,
+        model: &mut Model,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        mods: KeyMods,
+    ) -> bool {
+        if self.spec.handler("on_wheel").is_empty() {
+            return false;
+        }
+        let payload = serde_json::json!({
+            "type": "wheel",
+            "x": x,
+            "y": y,
+            "delta_x": delta_x,
+            "delta_y": delta_y,
+            "modifiers": {
+                "shift": mods.shift,
+                "alt":   mods.alt,
+                "ctrl":  mods.ctrl,
+                "meta":  mods.meta,
+            },
+        });
+        self.dispatch("on_wheel", payload, model);
+        true
+    }
+
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
         if self.spec.overlay.is_empty() {
             return;
@@ -2231,6 +2260,39 @@ mod tests {
         });
         let tool = YamlTool::new(ToolSpec::from_workspace_tool(&raw).unwrap());
         assert_eq!(tool.cursor_css_override(), Some("crosshair".to_string()));
+    }
+
+    #[test]
+    fn zoom_tool_wheel_with_ctrl_dispatches_zoom_action() {
+        // Ctrl/Cmd + wheel up dispatches zoom_in via on_wheel.
+        // Wheel without modifier is a no-op (reserved for future
+        // canvas pan).
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load().expect("workspace must parse");
+        let zoom_spec = ws.data().get("tools").and_then(|t| t.get("zoom"))
+            .expect("workspace must declare zoom");
+        let spec = ToolSpec::from_workspace_tool(zoom_spec).unwrap();
+        let mut tool = YamlTool::new(spec);
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        tool.activate(&mut model);
+
+        // Plain wheel: no modifier -> no zoom.
+        let z_before = model.zoom_level;
+        tool.on_wheel(&mut model, 100.0, 100.0, 0.0, -120.0,
+                      KeyMods::default());
+        assert_eq!(model.zoom_level, z_before,
+                   "plain wheel must not zoom");
+
+        // Ctrl + wheel up (delta_y < 0): should zoom in.
+        let mods_ctrl = KeyMods { ctrl: true, ..KeyMods::default() };
+        tool.on_wheel(&mut model, 100.0, 100.0, 0.0, -120.0, mods_ctrl);
+        assert!(
+            model.zoom_level > z_before,
+            "Ctrl+wheel up should zoom in (was {z_before}, now {})",
+            model.zoom_level,
+        );
     }
 
     #[test]

@@ -450,6 +450,56 @@ pub fn App() -> Element {
         }
     };
 
+    let on_wheel = {
+        // Wheel events route to the active tool's on_wheel via
+        // act_canvas — wheel-zoom only changes view state, no panel
+        // writes, so a canvas-only repaint suffices. Tool yaml handlers
+        // (e.g. zoom.yaml's `on_wheel:` for Ctrl+wheel zoom) read
+        // event.delta_y and event.modifiers from the dispatch payload.
+        let act_canvas = act_canvas.clone();
+        move |evt: Event<WheelData>| {
+            let coords = evt.data().element_coordinates();
+            let cx = coords.x;
+            let cy = coords.y;
+            let mods = evt.data().modifiers();
+            let km = crate::tools::tool::KeyMods {
+                shift: mods.shift(),
+                ctrl: mods.ctrl(),
+                alt: mods.alt(),
+                meta: mods.meta(),
+            };
+            let delta = evt.data().delta();
+            // delta() returns a WheelDelta enum tagged by unit. The
+            // tool only cares about a relative dy / dx for now;
+            // collapse all units to pixel-equivalent values (lines /
+            // pages get an arbitrary scale that matches typical
+            // browser native zoom behavior).
+            use dioxus::html::geometry::WheelDelta;
+            let (dx, dy) = match delta {
+                WheelDelta::Pixels(p)  => (p.x, p.y),
+                WheelDelta::Lines(p)   => (p.x * 16.0, p.y * 16.0),
+                WheelDelta::Pages(p)   => (p.x * 800.0, p.y * 800.0),
+            };
+            // If a tool consumes the wheel (Zoom under Ctrl/Cmd),
+            // suppress the browser's default scroll/zoom behavior.
+            // We can't peek into the tool's return value before
+            // dispatch without an extra borrow, so prevent_default
+            // unconditionally when a modifier is held -- that's the
+            // gate the Zoom tool itself uses. Plain wheel falls
+            // through (reserved for future canvas pan).
+            if km.ctrl || km.meta {
+                evt.prevent_default();
+            }
+            (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
+                let kind = st.active_tool;
+                if let Some(tab) = st.tab_mut()
+                    && let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.on_wheel(&mut tab.model, cx, cy, dx, dy, km);
+                    }
+            }));
+        }
+    };
+
     // --- Keyboard events ---
     let on_keydown = make_keydown_handler(act.clone(), app.clone(), revision);
     let on_keyup = make_keyup_handler(act.clone());
@@ -1070,6 +1120,7 @@ pub fn App() -> Element {
                             onmousemove: on_mousemove,
                             onmouseup: on_mouseup,
                             ondoubleclick: on_dblclick,
+                            onwheel: on_wheel,
                         }
                     } else {
                         span {
