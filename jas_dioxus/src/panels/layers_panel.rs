@@ -72,8 +72,18 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         // actions catalog (workspace/actions.yaml). The actions
         // exist there but the dispatch path used to stub them out
         // with an eprintln, so clicking "New Layer" did nothing.
+        "new_group" => {
+            // Top-level slots hold Layers only — wrapping a Layer in
+            // a Group would put a Group at top-level. Refuse if any
+            // panel-selected path is at the top level.
+            let any_top_level = state.layers_panel_selection.iter()
+                .any(|p| p.len() == 1);
+            if !any_top_level {
+                let params = serde_json::Map::new();
+                crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+            }
+        }
         "new_layer"
-        | "new_group"
         | "toggle_all_layers_visibility"
         | "toggle_all_layers_outline"
         | "toggle_all_layers_lock"
