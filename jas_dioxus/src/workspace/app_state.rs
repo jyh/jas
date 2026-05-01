@@ -1454,6 +1454,7 @@ impl AppState {
         ctx.save();
         ctx.translate(tab.model.view_offset_x, tab.model.view_offset_y).ok();
         ctx.scale(tab.model.zoom_level, tab.model.zoom_level).ok();
+        let layers_isolation = self.layers_isolation_stack.last().map(|p| p.as_slice());
         render::render(
             &ctx,
             w,
@@ -1462,6 +1463,7 @@ impl AppState {
             self.boolean_panel.precision,
             &self.artboards_panel_selection,
             tab.model.mask_isolation_path.as_deref(),
+            layers_isolation,
             &self.brush_libraries,
         );
         ctx.restore();

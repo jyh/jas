@@ -1981,6 +1981,7 @@ pub fn render(
     precision: f64,
     panel_selected_artboards: &[String],
     mask_isolation_path: Option<&[usize]>,
+    layers_isolation_path: Option<&[usize]>,
     brush_libraries: &serde_json::Value,
 ) {
     // Install the brush registry for this render. Dropped on exit
@@ -2008,6 +2009,18 @@ pub fn render(
             if let Some(mask) = elem.common().mask.as_deref() {
                 draw_element(ctx, &mask.subtree, Visibility::Preview, precision);
             }
+        }
+    } else if let Some(iso_path) = layers_isolation_path {
+        // Layers-panel isolation: render the full document at low alpha
+        // (dimming non-isolated content per LYR-181), then re-render the
+        // isolated subtree on top at full alpha.
+        ctx.set_global_alpha(0.1);
+        for layer in &doc.layers {
+            draw_element(ctx, layer, Visibility::Preview, precision);
+        }
+        ctx.set_global_alpha(1.0);
+        if let Some(iso_elem) = doc.get_element(&iso_path.to_vec()) {
+            draw_element(ctx, iso_elem, Visibility::Preview, precision);
         }
     } else {
         for layer in &doc.layers {
