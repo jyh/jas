@@ -68,7 +68,10 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
         "close_panel" => state.workspace_layout.close_panel(addr),
-        // Tier-3 stubs: log only until document model is implemented.
+        // Forward Layers-panel hamburger-menu commands to the YAML
+        // actions catalog (workspace/actions.yaml). The actions
+        // exist there but the dispatch path used to stub them out
+        // with an eprintln, so clicking "New Layer" did nothing.
         "new_layer"
         | "new_group"
         | "toggle_all_layers_visibility"
@@ -78,8 +81,8 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         | "exit_isolation_mode"
         | "flatten_artwork"
         | "collect_in_new_layer" => {
-            #[cfg(debug_assertions)]
-            eprintln!("[layers_panel] dispatch: {cmd}");
+            let params = serde_json::Map::new();
+            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
         }
         _ => {}
     }
