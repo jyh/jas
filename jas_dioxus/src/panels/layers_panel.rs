@@ -93,6 +93,36 @@ pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
     false
 }
 
+/// Override the static menu label for commands whose displayed text
+/// depends on document state. Returns None to use the static label.
+pub fn dynamic_label(cmd: &str, state: &AppState) -> Option<String> {
+    use crate::geometry::element::{Element, Visibility};
+    let layers: Vec<&Element> = state.tab()
+        .map(|t| t.model.document().layers.iter().collect())
+        .unwrap_or_default();
+    if layers.is_empty() {
+        return None;
+    }
+    match cmd {
+        "toggle_all_layers_visibility" => {
+            // "Hide" if any layer is currently NOT invisible; else "Show".
+            let any_visible = layers.iter().any(|l| l.visibility() != Visibility::Invisible);
+            Some(if any_visible { "Hide All Layers".into() } else { "Show All Layers".into() })
+        }
+        "toggle_all_layers_outline" => {
+            // "Outline" if any layer is in preview; else "Preview".
+            let any_preview = layers.iter().any(|l| l.visibility() == Visibility::Preview);
+            Some(if any_preview { "Outline All Layers".into() } else { "Preview All Layers".into() })
+        }
+        "toggle_all_layers_lock" => {
+            // "Lock" if any layer is unlocked; else "Unlock".
+            let any_unlocked = layers.iter().any(|l| !l.locked());
+            Some(if any_unlocked { "Lock All Layers".into() } else { "Unlock All Layers".into() })
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
