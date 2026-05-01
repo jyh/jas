@@ -2754,17 +2754,26 @@ fn apply_doc_set_field(
         "common.locked" => {
             if let Value::Bool(b) = value {
                 elem.common_mut().locked = *b;
-                // Cascade: a Layer/Group's lock state also locks all
-                // direct children. Mirror semantics (no save+restore
-                // bookkeeping; the row-level lock-icon click handler
-                // does that for the panel UI). LYR-247: dialog Lock
-                // toggle should also lock children, not just the
-                // layer itself.
-                if let Some(children) = elem.children_mut() {
-                    for c in children.iter_mut() {
-                        std::rc::Rc::make_mut(c).common_mut().locked = *b;
+                // Cascade: a container's lock state propagates
+                // recursively to ALL descendants, not just direct
+                // children — locking a Layer that contains a Group
+                // should lock the Group AND the elements inside the
+                // Group. Mirror semantics (no save+restore bookkeeping;
+                // the row-level lock-icon click handler does that for
+                // the panel UI). LYR-247.
+                fn cascade_lock(
+                    el: &mut crate::geometry::element::Element,
+                    locked: bool,
+                ) {
+                    if let Some(children) = el.children_mut() {
+                        for c in children.iter_mut() {
+                            let inner = std::rc::Rc::make_mut(c);
+                            inner.common_mut().locked = locked;
+                            cascade_lock(inner, locked);
+                        }
                     }
                 }
+                cascade_lock(elem, *b);
                 true
             } else { false }
         }
