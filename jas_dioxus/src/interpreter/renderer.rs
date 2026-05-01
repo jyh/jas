@@ -5766,6 +5766,34 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let on_keydown = move |evt: Event<KeyboardData>| {
         let key = evt.data().key();
         let a = kb_app.clone();
+        // Skip the panel-level shortcuts when an inline rename input
+        // is active OR the key event is targeting an editable element
+        // (search box, text input). Without this guard, Backspace
+        // inside the rename input bubbles up here and runs
+        // delete_layer_selection — destroying the layer the user
+        // is renaming.
+        let active_is_input = {
+            #[cfg(target_arch = "wasm32")]
+            {
+                web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| d.active_element())
+                    .map(|el| {
+                        let tag = el.tag_name().to_uppercase();
+                        matches!(tag.as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                    })
+                    .unwrap_or(false)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            { false }
+        };
+        let skip_panel_shortcuts = {
+            let st = kb_app.borrow();
+            st.layers_renaming.is_some()
+        } || active_is_input;
+        if skip_panel_shortcuts {
+            return;
+        }
         match key {
             dioxus::prelude::Key::Delete | dioxus::prelude::Key::Backspace => {
                 spawn(async move {
