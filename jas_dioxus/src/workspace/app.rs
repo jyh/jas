@@ -38,70 +38,72 @@ use crate::panels::panel_menu_view::PanelMenuOverlay;
 /// without this the Appearance menu is empty and theme switching
 /// is a no-op. Mirrors the script block in assets/index.html.
 const APPEARANCE_BOOTSTRAP_JS: &str = r##"
-var JAS_BASE_THEME = {
-    colors: {
-        window_bg:"#2e2e2e", pane_bg:"#3c3c3c", pane_bg_dark:"#333333",
-        title_bar_bg:"#2a2a2a", title_bar_text:"#d9d9d9", border:"#555555",
-        text:"#cccccc", text_dim:"#999999", text_body:"#aaaaaa",
-        text_hint:"#777777", text_button:"#888888",
-        tab_active:"#4a4a4a", tab_inactive:"#353535", button_checked:"#505050",
-        accent:"#4a90d9", snap_preview:"rgba(50,120,220,200)",
-        handle_hover:"rgba(74,144,217,0.5)", pane_shadow:"rgba(0,0,0,0.3)"
-    }
-};
-var JAS_ALL_APPEARANCES = {
-    dark_gray: { label: "Dark Gray" },
-    medium_gray: {
-        label: "Medium Gray",
+(function() {
+    window.JAS_BASE_THEME = {
         colors: {
-            window_bg:"#484848", pane_bg:"#565656", pane_bg_dark:"#4d4d4d",
-            title_bar_bg:"#404040", title_bar_text:"#e0e0e0", border:"#6a6a6a",
-            text:"#dddddd", text_dim:"#aaaaaa", text_body:"#bbbbbb",
-            text_hint:"#888888", text_button:"#999999",
-            tab_active:"#606060", tab_inactive:"#505050", button_checked:"#686868",
-            accent:"#5a9ee6", snap_preview:"rgba(90,158,230,200)",
-            handle_hover:"rgba(90,158,230,0.5)", pane_shadow:"rgba(0,0,0,0.25)"
+            window_bg:"#2e2e2e", pane_bg:"#3c3c3c", pane_bg_dark:"#333333",
+            title_bar_bg:"#2a2a2a", title_bar_text:"#d9d9d9", border:"#555555",
+            text:"#cccccc", text_dim:"#999999", text_body:"#aaaaaa",
+            text_hint:"#777777", text_button:"#888888",
+            tab_active:"#4a4a4a", tab_inactive:"#353535", button_checked:"#505050",
+            accent:"#4a90d9", snap_preview:"rgba(50,120,220,200)",
+            handle_hover:"rgba(74,144,217,0.5)", pane_shadow:"rgba(0,0,0,0.3)"
         }
-    },
-    light_gray: {
-        label: "Light Gray",
-        colors: {
-            window_bg:"#ececec", pane_bg:"#f0f0f0", pane_bg_dark:"#e6e6e6",
-            title_bar_bg:"#e0e0e0", title_bar_text:"#1d1d1f", border:"#d1d1d1",
-            text:"#1d1d1f", text_dim:"#86868b", text_body:"#3d3d3f",
-            text_hint:"#aeaeb2", text_button:"#6e6e73",
-            tab_active:"#ffffff", tab_inactive:"#e8e8e8", button_checked:"#d4d4d8",
-            accent:"#007aff", snap_preview:"rgba(0,122,255,180)",
-            handle_hover:"rgba(0,122,255,0.3)", pane_shadow:"rgba(0,0,0,0.08)"
+    };
+    window.JAS_ALL_APPEARANCES = {
+        dark_gray: { label: "Dark Gray" },
+        medium_gray: {
+            label: "Medium Gray",
+            colors: {
+                window_bg:"#484848", pane_bg:"#565656", pane_bg_dark:"#4d4d4d",
+                title_bar_bg:"#404040", title_bar_text:"#e0e0e0", border:"#6a6a6a",
+                text:"#dddddd", text_dim:"#aaaaaa", text_body:"#bbbbbb",
+                text_hint:"#888888", text_button:"#999999",
+                tab_active:"#606060", tab_inactive:"#505050", button_checked:"#686868",
+                accent:"#5a9ee6", snap_preview:"rgba(90,158,230,200)",
+                handle_hover:"rgba(90,158,230,0.5)", pane_shadow:"rgba(0,0,0,0.25)"
+            }
+        },
+        light_gray: {
+            label: "Light Gray",
+            colors: {
+                window_bg:"#ececec", pane_bg:"#f0f0f0", pane_bg_dark:"#e6e6e6",
+                title_bar_bg:"#e0e0e0", title_bar_text:"#1d1d1f", border:"#d1d1d1",
+                text:"#1d1d1f", text_dim:"#86868b", text_body:"#3d3d3f",
+                text_hint:"#aeaeb2", text_button:"#6e6e73",
+                tab_active:"#ffffff", tab_inactive:"#e8e8e8", button_checked:"#d4d4d8",
+                accent:"#007aff", snap_preview:"rgba(0,122,255,180)",
+                handle_hover:"rgba(0,122,255,0.3)", pane_shadow:"rgba(0,0,0,0.08)"
+            }
         }
-    }
-};
-var JAS_APPEARANCES = [
-    { name: "dark_gray", label: "Dark Gray" },
-    { name: "medium_gray", label: "Medium Gray" },
-    { name: "light_gray", label: "Light Gray" }
-];
-var JAS_ACTIVE_APPEARANCE = "dark_gray";
-var activeAppearanceName = "dark_gray";
-function applyAppearance(name) {
-    var overrides = JAS_ALL_APPEARANCES[name];
-    if (!overrides) {
-        var userApps = JSON.parse(localStorage.getItem("jas_appearances") || "{}");
-        overrides = userApps[name] || {};
-    }
-    var resolved = Object.assign({}, JAS_BASE_THEME.colors, overrides.colors || {});
-    var root = document.documentElement;
-    for (var k in resolved) {
-        if (resolved.hasOwnProperty(k)) {
-            root.style.setProperty("--jas-" + k.replace(/_/g, "-"), resolved[k]);
+    };
+    window.JAS_APPEARANCES = [
+        { name: "dark_gray", label: "Dark Gray" },
+        { name: "medium_gray", label: "Medium Gray" },
+        { name: "light_gray", label: "Light Gray" }
+    ];
+    window.activeAppearanceName = window.activeAppearanceName || "dark_gray";
+    window.applyAppearance = function(name) {
+        var overrides = window.JAS_ALL_APPEARANCES[name];
+        if (!overrides) {
+            var userApps = JSON.parse(localStorage.getItem("jas_appearances") || "{}");
+            overrides = userApps[name] || {};
         }
-    }
-    activeAppearanceName = name;
-}
-function getActiveAppearance() { return activeAppearanceName; }
-function getAppearanceList() { return JSON.stringify(JAS_APPEARANCES); }
-function getAllAppearances() { return JSON.stringify(JAS_ALL_APPEARANCES); }
-applyAppearance(activeAppearanceName);
+        var resolved = Object.assign({}, window.JAS_BASE_THEME.colors, overrides.colors || {});
+        var root = document.documentElement;
+        for (var k in resolved) {
+            if (resolved.hasOwnProperty(k)) {
+                root.style.setProperty("--jas-" + k.replace(/_/g, "-"), resolved[k]);
+            }
+        }
+        window.activeAppearanceName = name;
+    };
+    window.getActiveAppearance = function() { return window.activeAppearanceName; };
+    window.getAppearanceList = function() { return JSON.stringify(window.JAS_APPEARANCES); };
+    window.getAllAppearances = function() { return JSON.stringify(window.JAS_ALL_APPEARANCES); };
+    window.applyAppearance(window.activeAppearanceName);
+    console.log("[jas] appearance bootstrap loaded:", window.JAS_APPEARANCES.length, "appearances");
+})();
 "##;
 
 /// Translate a yaml-declared cursor name into a value the browser
