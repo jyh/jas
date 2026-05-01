@@ -4651,13 +4651,21 @@ mod tests {
         tool.on_press(&mut model, 5.0, 5.0, false, false);
         tool.on_release(&mut model, 5.0, 5.0, false, false);
         let sel = &model.document().selection;
+        // Per the layers-panel selection-square convention, container
+        // hits expand to include the container plus all descendants.
+        // Group at [0, 0] + its single child rect at [0, 0, 0] → 2 entries.
         assert_eq!(
-            sel.len(), 1,
-            "click inside group should select exactly one element",
+            sel.len(), 2,
+            "click inside group should select group + all descendants; got {:?}",
+            sel.iter().map(|s| &s.path).collect::<Vec<_>>(),
         );
-        assert_eq!(
-            sel[0].path, vec![0, 0],
-            "click inside group should select the group, not the inner rect",
+        assert!(
+            sel.iter().any(|s| s.path == vec![0, 0]),
+            "selection should include the group path [0, 0]",
+        );
+        assert!(
+            sel.iter().any(|s| s.path == vec![0, 0, 0]),
+            "selection should include the inner rect path [0, 0, 0]",
         );
     }
 

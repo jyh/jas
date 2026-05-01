@@ -620,11 +620,35 @@ fn run_doc_effect(
             let doc = model.document();
             // Drop paths that don't resolve to an element. Matches
             // Flask's setSelection behavior for invalid paths.
-            let valid: Vec<ElementPath> = paths
-                .into_iter()
-                .filter(|p| doc.get_element(p).is_some())
-                .collect();
-            let selection = valid
+            // Expand containers to include all descendants — matches
+            // the Layers panel selection-square click behavior. Without
+            // this, a Selection-tool click on a group would put only
+            // the group in selection, and the Layers panel would
+            // highlight only the group row (not its children).
+            fn collect_descendants(
+                elem: &crate::geometry::element::Element,
+                path: &[usize],
+                out: &mut Vec<ElementPath>,
+            ) {
+                if let Some(children) = elem.children() {
+                    for (i, child) in children.iter().enumerate() {
+                        let mut child_path = path.to_vec();
+                        child_path.push(i);
+                        out.push(child_path.clone());
+                        collect_descendants(child, &child_path, out);
+                    }
+                }
+            }
+            let mut expanded: Vec<ElementPath> = Vec::new();
+            for p in paths {
+                if let Some(elem) = doc.get_element(&p) {
+                    expanded.push(p.clone());
+                    if elem.is_group_or_layer() {
+                        collect_descendants(elem, &p, &mut expanded);
+                    }
+                }
+            }
+            let selection = expanded
                 .into_iter()
                 .map(|p| crate::document::document::ElementSelection::all(p))
                 .collect();
