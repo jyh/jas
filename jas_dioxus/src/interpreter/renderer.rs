@@ -6499,11 +6499,21 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     let confirm_path = row.path.clone();
                                     let confirm_app = app.clone();
                                     let mut confirm_rev = revision;
+                                    let blur_path = row.path.clone();
+                                    let blur_app = app.clone();
+                                    let mut blur_rev = revision;
                                     let cancel_app = app.clone();
                                     let mut cancel_rev = revision;
                                     let initial_name = if row.is_named { row.display_name.clone() } else { String::new() };
+                                    let input_id = format!(
+                                        "lp_rename_{}",
+                                        row.path.iter().map(|i| i.to_string())
+                                            .collect::<Vec<_>>().join("_"),
+                                    );
+                                    let input_id_for_blur = input_id.clone();
                                     rsx! {
                                         input {
+                                            id: "{input_id}",
                                             r#type: "text",
                                             value: "{initial_name}",
                                             style: "flex:1;font-size:11px;background:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border:1px solid var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
@@ -6554,6 +6564,43 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                         cancel_rev += 1;
                                                     });
                                                 }
+                                            },
+                                            // Blur (focus loss) commits like Enter, per LYR-073.
+                                            // Read value from the input by id since
+                                            // active_element on blur is whatever the user
+                                            // just clicked, not the input.
+                                            onblur: move |_: Event<FocusData>| {
+                                                #[cfg(target_arch = "wasm32")]
+                                                {
+                                                    let p = blur_path.clone();
+                                                    let a = blur_app.clone();
+                                                    let id = input_id_for_blur.clone();
+                                                    let val_inner: String = web_sys::window()
+                                                        .and_then(|w| w.document())
+                                                        .and_then(|d| d.get_element_by_id(&id))
+                                                        .and_then(|el| {
+                                                            js_sys::Reflect::get(&el, &"value".into())
+                                                                .ok()
+                                                                .and_then(|v| v.as_string())
+                                                        })
+                                                        .unwrap_or_default();
+                                                    spawn(async move {
+                                                        let mut st = a.borrow_mut();
+                                                        if st.layers_renaming.as_ref() == Some(&p) {
+                                                            if let Some(tab) = st.tab_mut() {
+                                                                tab.model.snapshot();
+                                                                let doc = tab.model.document_mut();
+                                                                if let Some(crate::geometry::element::Element::Layer(le)) = doc.get_element_mut(&p) {
+                                                                    le.name = val_inner;
+                                                                }
+                                                            }
+                                                            st.layers_renaming = None;
+                                                            blur_rev += 1;
+                                                        }
+                                                    });
+                                                }
+                                                #[cfg(not(target_arch = "wasm32"))]
+                                                { let _ = (&blur_path, &blur_app, &input_id_for_blur); }
                                             },
                                         }
                                     }
