@@ -235,6 +235,47 @@ mod tests {
     }
 
     #[test]
+    fn hit_test_returns_group_path_when_clicking_child_rect() {
+        // Layer 0 contains Group 0 which contains a Rect at (10,10,20,20).
+        // Selection-tool hit_test stops at direct layer children — so
+        // clicking inside the rect's bounds must return the GROUP path
+        // (not the deeper rect path; that's hit_test_deep's job).
+        use crate::geometry::element::GroupElem;
+        let rect = Element::Rect(RectElem {
+            x: 10.0, y: 10.0, width: 20.0, height: 20.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0, selection: Vec::new(),
+            ..Document::default()
+        };
+        let _g = register_document(doc);
+        // Click inside the rect's bounds.
+        let hit = hit_test(15.0, 15.0);
+        assert_eq!(
+            hit, Value::Path(vec![0, 0]),
+            "click inside group's child rect should return the group path \
+             (layer 0 → group 0); got {:?}", hit,
+        );
+    }
+
+    #[test]
     fn hit_test_misses_element_outside_bounds() {
         let _g = register_document(doc_with_rect());
         assert_eq!(hit_test(100.0, 100.0), Value::Null);
