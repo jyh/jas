@@ -5892,13 +5892,18 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 });
             }
             dioxus::prelude::Key::Escape => {
-                // Cancel an in-progress drag (LYR-131). Clearing the
-                // source / target signals leaves the document untouched
-                // and removes the drop indicator.
+                // Priority: cancel an in-progress drag first (LYR-131);
+                // else pop one isolation level (LYR-186); else no-op.
                 spawn(async move {
                     let mut st = a.borrow_mut();
-                    st.layers_drag_source = None;
-                    st.layers_drag_target = None;
+                    let drag_active = st.layers_drag_source.is_some()
+                        || st.layers_drag_target.is_some();
+                    if drag_active {
+                        st.layers_drag_source = None;
+                        st.layers_drag_target = None;
+                    } else if !st.layers_isolation_stack.is_empty() {
+                        st.layers_isolation_stack.pop();
+                    }
                     kb_rev += 1;
                 });
             }
