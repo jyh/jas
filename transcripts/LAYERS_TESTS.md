@@ -358,56 +358,65 @@ If any P0 here fails, stop and flag.
 
 ## Session E — Inline rename + keyboard nav (~5 min)
 
-- [ ] **LYR-070** [wired] Double-click name starts inline rename.
+- [x] **LYR-070** [wired] Double-click name starts inline rename.
       Setup: Layer row.
       Do: Double-click the name label.
       Expect: Label transforms to a text_input pre-filled with the
               current name; cursor active; selection on the text.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-071** [wired] Enter confirms the rename.
+- [x] **LYR-071** [wired] Enter confirms the rename.
       Setup: Inline rename active, "Layer 1".
       Do: Type "Backgrounds", press Enter.
       Expect: Row label becomes "Backgrounds"; element name attr updates.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-072** [wired] Escape cancels the rename without committing.
+- [x] **LYR-072** [wired] Escape cancels the rename without committing.
       Setup: Rename active, type "Trash".
       Do: Press Escape.
       Expect: Label reverts to original; element unchanged.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-073** [wired] Blur (click elsewhere) confirms.
+- [x] **LYR-073** [wired] Blur (click elsewhere) confirms.
       Setup: Rename active, type "Foreground".
       Do: Click outside the input.
       Expect: Same as Enter — name updates.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: rename input had no onblur handler — clicking outside
+        left the input visible without committing. Added onblur that
+        reads the input value by id and commits like Enter.
 
-- [ ] **LYR-074** [wired] Empty rename reverts.
+- [x] **LYR-074** [wired] Empty rename reverts.
       Setup: Rename active.
       Do: Clear text, press Enter.
       Expect: Label reverts to the original (or to `<Type>` for unnamed
               elements).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-075** [wired] F2 starts rename on the focused row.
+- [x] **LYR-075** [wired] F2 starts rename on the focused row.
       Setup: A row focused.
       Do: Press F2.
       Expect: Inline rename starts.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: F2 had no handler — added a case that picks the last
+        panel-selected row (treated as the active row) and starts
+        rename when it is a layer.
 
-- [ ] **LYR-076** [wired] Arrow Up / Down navigates rows.
+- [x] **LYR-076** [wired] Arrow Up / Down navigates rows.
       Setup: Multi-row tree, one row focused.
       Do: Arrow Down twice.
       Expect: Focus moves down two rows.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: arrow keys had no handler — added handlers that
+        rebuild the visible-row path list and shift the panel
+        selection by ±1.
 
-- [ ] **LYR-077** [wired] Delete key removes panel selection.
+- [x] **LYR-077** [wired] Delete key removes panel selection.
       Setup: A row selected.
       Do: Press Delete.
       Expect: Element removed from document and panel (subject to
               "≥ 1 layer" guard for top-level).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
