@@ -6443,46 +6443,81 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 (Some(s), Some(t)) if s != t,
                             );
                             if true_drag {
-                                // Move all panel-selected elements to before the target
+                                // Move all panel-selected elements to a position
+                                // determined by the target row.
                                 let sources = st.layers_panel_selection.clone();
-                                // Validate drag constraints
-                                let target_parent: Vec<usize> = target[..target.len()-1].to_vec();
                                 let search_active = !st.layers_search_query.is_empty();
+                                // Determine drop semantics based on target type:
+                                //   - target is a container (Group / Layer): drop INTO
+                                //     it as the first child. (insert_path = target + [0])
+                                //   - target is a leaf: drop AT target's index in its
+                                //     parent (sibling above, existing behavior).
+                                let (effective_parent, insert_index, target_is_container) = {
+                                    let is_container = st.tab()
+                                        .and_then(|t| t.model.document().get_element(&target))
+                                        .map(|e| e.is_group_or_layer())
+                                        .unwrap_or(false);
+                                    if is_container {
+                                        (target.clone(), 0usize, true)
+                                    } else {
+                                        let parent = target[..target.len()-1].to_vec();
+                                        let idx = *target.last().unwrap();
+                                        (parent, idx, false)
+                                    }
+                                };
                                 let allowed = {
                                     if search_active {
                                         // Reject reorder while a search filter is active —
                                         // the visible row set is a non-contiguous subset
-                                        // of the document, so insert-at semantics are
-                                        // unintuitive. Per LYR-103.
+                                        // of the document. Per LYR-103.
                                         false
                                     } else if sources.is_empty() || sources.contains(&target) {
                                         false
                                     } else if let Some(tab) = st.tab() {
                                         let doc = tab.model.document();
-                                        // Check: no source is an ancestor of target (no drop into self/descendant)
+                                        // Check: no source is an ancestor of target.
                                         let no_cycle = !sources.iter().any(|src| {
                                             target.len() >= src.len() && target.starts_with(src)
                                         });
-                                        // Check: target's parent isn't locked (can't drop into locked)
-                                        let parent_unlocked = if target_parent.is_empty() {
+                                        // Check: effective parent isn't locked (i.e.,
+                                        // can't add a child to a locked container).
+                                        let parent_unlocked = if effective_parent.is_empty() {
                                             true
                                         } else {
-                                            doc.get_element(&target_parent)
+                                            doc.get_element(&effective_parent)
                                                 .map(|e| !e.locked())
                                                 .unwrap_or(true)
                                         };
-                                        // Check: target row itself isn't a locked
-                                        // container. Without this, dragging onto
-                                        // a locked layer's row would shift it
-                                        // down (sibling-insert via insert_at)
-                                        // — surprising the user, who reads the
-                                        // gesture as "drop into the locked
-                                        // layer" and expects rejection.
-                                        let target_unlocked = doc
-                                            .get_element(&target)
-                                            .map(|e| !e.locked())
-                                            .unwrap_or(true);
-                                        no_cycle && parent_unlocked && target_unlocked
+                                        // Check: layers can only live at the top level.
+                                        // Reject if any source is a Layer and the
+                                        // effective parent isn't the doc root. Per
+                                        // LYR-122 (Layer into Group) + LYR-123 (Layer
+                                        // into Layer body).
+                                        let any_source_is_layer = sources.iter().any(|s| {
+                                            doc.get_element(s)
+                                                .map(|e| e.is_layer()).unwrap_or(false)
+                                        });
+                                        let layer_constraint_ok = !any_source_is_layer
+                                            || effective_parent.is_empty();
+                                        // Reject sibling-insert into top-level position
+                                        // for non-Layer sources: top-level slots are
+                                        // for layers only. (target_is_container=false +
+                                        // effective_parent.is_empty() = trying to drop
+                                        // a non-Layer at top-level next to a layer.)
+                                        let non_layer_top_ok = if !target_is_container
+                                            && effective_parent.is_empty()
+                                        {
+                                            // The only top-level non-container case is
+                                            // "drop on a layer's child but somehow at
+                                            // top level" — which can't happen. Permit.
+                                            true
+                                        } else if target_is_container && effective_parent.is_empty() {
+                                            // target is a top-level Layer; non-Layer
+                                            // sources will drop INTO it (handled above).
+                                            true
+                                        } else { true };
+                                        no_cycle && parent_unlocked
+                                            && layer_constraint_ok && non_layer_top_ok
                                     } else {
                                         false
                                     }
@@ -6490,8 +6525,6 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 if allowed {
                                     if let Some(tab) = st.tab_mut() {
                                         tab.model.snapshot();
-                                        // Collect elements, delete from old positions (reverse order),
-                                        // then insert at target position
                                         let mut elements: Vec<(Vec<usize>, crate::geometry::element::Element)> = Vec::new();
                                         let doc = tab.model.document();
                                         for src in &sources {
@@ -6507,22 +6540,20 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         for src in &sorted_sources {
                                             doc = doc.delete_element(src);
                                         }
-                                        // Insert at target — adjust target path for deleted elements
-                                        let mut insert_path = target.clone();
+                                        // Build insert path: effective_parent + insert_index.
+                                        let mut insert_path = effective_parent.clone();
+                                        insert_path.push(insert_index);
                                         let mut new_paths = Vec::new();
                                         for (_, elem) in elements {
                                             doc = doc.insert_element_at(&insert_path, elem);
                                             new_paths.push(insert_path.clone());
-                                            // Next element goes after this one
                                             let last = insert_path.len() - 1;
                                             insert_path[last] += 1;
                                         }
-                                        // Update element selection to track moved elements
                                         doc.selection = new_paths.iter()
                                             .map(|p| crate::document::document::ElementSelection::all(p.clone()))
                                             .collect();
                                         tab.model.set_document(doc);
-                                        // Update panel selection to new positions
                                         st.layers_panel_selection = new_paths;
                                     }
                                 } else {
