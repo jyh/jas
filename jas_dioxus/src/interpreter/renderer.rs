@@ -2754,6 +2754,17 @@ fn apply_doc_set_field(
         "common.locked" => {
             if let Value::Bool(b) = value {
                 elem.common_mut().locked = *b;
+                // Cascade: a Layer/Group's lock state also locks all
+                // direct children. Mirror semantics (no save+restore
+                // bookkeeping; the row-level lock-icon click handler
+                // does that for the panel UI). LYR-247: dialog Lock
+                // toggle should also lock children, not just the
+                // layer itself.
+                if let Some(children) = elem.children_mut() {
+                    for c in children.iter_mut() {
+                        std::rc::Rc::make_mut(c).common_mut().locked = *b;
+                    }
+                }
                 true
             } else { false }
         }
