@@ -38,6 +38,8 @@ pub fn PanelMenuOverlay() -> Element {
             PanelMenuItem::Action { label, command, shortcut } => {
                 let act = act.clone();
                 let cmd = command;
+                let display_label = super::panel_dynamic_label(kind, cmd, &st)
+                    .unwrap_or_else(|| label.to_string());
                 rsx! {
                     div {
                         class: "jas-menu-item",
@@ -49,7 +51,7 @@ pub fn PanelMenuOverlay() -> Element {
                             }));
                             panel_menu.open.set(None);
                         },
-                        span { "{label}" }
+                        span { "{display_label}" }
                         if !shortcut.is_empty() {
                             span {
                                 style: "color:{THEME_TEXT_HINT}; margin-left:24px; font-size:12px;",
