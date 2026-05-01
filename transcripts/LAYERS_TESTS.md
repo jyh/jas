@@ -478,65 +478,75 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **LYR-120** [wired] Layer drops onto Layer (sibling reorder).
+- [x] **LYR-120** [wired] Layer drops onto Layer (sibling reorder).
       Setup: Two top-level layers A, B.
       Do: Drag A onto / past B.
       Expect: Order swaps; canvas re-renders accordingly.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P1**
 
-- [ ] **LYR-121** [wired] Element / Group drops into a Layer.
+- [x] **LYR-121** [wired] Element / Group drops into a Layer.
       Setup: Group inside Layer A; Layer B empty.
       Do: Drag group onto Layer B.
       Expect: Group reparents into Layer B; Layer A loses it.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: drop logic always treated target as a sibling-insert
+        position, so element-onto-layer added the element at top-level
+        rather than as a child of the layer. Now branches: container
+        target + non-Layer source → first-child insert (at last doc
+        index since panel renders children in reverse); else sibling-
+        insert. Drop indicator switched to bottom-border for container
+        drops.
 
-- [ ] **LYR-122** [wired] Layer cannot drop into a Group (constraint).
+- [x] **LYR-122** [wired] Layer cannot drop into a Group (constraint).
       Setup: Top-level layer + a top-level group.
       Do: Drag layer onto group.
       Expect: Drop refused (cursor reject icon); no reparenting.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-123** [wired] Layer cannot drop into a Layer (no nesting layers).
+- [x] **LYR-123** [wired] Layer cannot drop into a Layer (no nesting layers).
       Setup: Two top-level layers.
       Do: Drag layer A INTO layer B (drop on B body, not between
           siblings).
       Expect: Drop refused.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-124** [wired] Drop into self / descendant is refused.
+- [x] **LYR-124** [wired] Drop into self / descendant is refused.
       Setup: Group with children.
       Do: Drag the group onto one of its own children.
       Expect: Drop refused; no recursive structure created.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-125** [wired] Drop into a locked container is refused.
+- [x] **LYR-125** [wired] Drop into a locked container is refused.
       Setup: Locked layer + an unlocked element.
       Do: Drag element onto locked layer.
       Expect: Drop refused.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-126** [wired] Multi-select drag preserves relative order.
+- [x] **LYR-126** [wired] Multi-select drag preserves relative order.
       Setup: Select rows 1, 3, 5 (non-contiguous).
       Do: Drag the multi-selection to a new layer.
       Expect: All three move; their relative order preserved
               (1 before 3 before 5) at the destination.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P2**
 
-- [ ] **LYR-130** [wired] 500ms hover over a collapsed group auto-expands.
+- [x] **LYR-130** [wired] 500ms hover over a collapsed group auto-expands.
       Setup: Collapsed group target.
       Do: Drag a row over the group; pause 500ms without releasing.
       Expect: Group auto-expands; you can now drop into it.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-131** [wired] Cancel drag with Escape leaves tree unchanged.
+- [x] **LYR-131** [wired] Cancel drag with Escape leaves tree unchanged.
       Setup: Drag in progress.
       Do: Press Escape mid-drag.
       Expect: Drop indicator disappears; row stays at original position.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: Esc had no handler in the panels keydown — added a
+        case that clears layers_drag_source / target so on_mouseup
+        sees no drag and the document is untouched.
 
 ---
 
