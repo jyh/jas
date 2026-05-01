@@ -4609,6 +4609,86 @@ mod tests {
     }
 
     #[test]
+    fn selection_parity_undo_after_click_drag_keeps_new_selection() {
+        // Bug repro from manual SEL-170 follow-up: select element A,
+        // then click+drag element B, then undo. Expected: B at original
+        // position AND B selected (the click selected B before the
+        // drag, and undo should only revert the drag's mutation, not
+        // the selection change). Bug was: undo restored A as the
+        // selection because doc.snapshot was taken on mousedown
+        // BEFORE the click set the new selection.
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        // Two-rect fixture: rect A at (0, 0, 10, 10) and rect B at
+        // (50, 50, 20, 20). Both children of the same layer.
+        let mut model = {
+            use crate::document::document::Document;
+            use crate::geometry::element::{LayerElem, RectElem, Color, Fill};
+            let a = Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::BLACK)),
+                stroke: None, common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            });
+            let b = Element::Rect(RectElem {
+                x: 50.0, y: 50.0, width: 20.0, height: 20.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::BLACK)),
+                stroke: None, common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            });
+            let layer = Element::Layer(LayerElem {
+                name: "L".to_string(),
+                children: vec![std::rc::Rc::new(a), std::rc::Rc::new(b)],
+                isolated_blending: false, knockout_group: false,
+                common: CommonProps::default(),
+            });
+            Model::new(
+                Document {
+                    layers: vec![layer],
+                    selected_layer: 0,
+                    selection: Vec::new(),
+                    ..Document::default()
+                },
+                None,
+            )
+        };
+        // Pre-select A.
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert_eq!(model.document().selection[0].path, vec![0, 0],
+            "precondition: A selected");
+        // Click on B and drag 10 px right, then release.
+        tool.on_press(&mut model, 60.0, 60.0, false, false);
+        tool.on_move(&mut model, 70.0, 60.0, false, false, true);
+        tool.on_release(&mut model, 70.0, 60.0, false, false);
+        // After drag: B selected, B at (60, 50).
+        assert_eq!(model.document().selection[0].path, vec![0, 1],
+            "after click+drag: B selected");
+        if let Element::Rect(r) =
+            &**model.document().layers[0].children().unwrap().get(1).unwrap()
+        {
+            assert_eq!(r.x, 60.0, "B moved by drag delta");
+        } else { panic!("expected Rect at index 1"); }
+        // Undo.
+        model.undo();
+        // B at original position.
+        if let Element::Rect(r) =
+            &**model.document().layers[0].children().unwrap().get(1).unwrap()
+        {
+            assert_eq!(r.x, 50.0, "after undo: B back at original x");
+        } else { panic!("expected Rect at index 1"); }
+        // B still selected — NOT A. This is the bug fix assertion.
+        assert_eq!(
+            model.document().selection.len(), 1,
+            "after undo: still single-element selection",
+        );
+        assert_eq!(
+            model.document().selection[0].path,
+            vec![0, 1],
+            "after undo: B is selected (not A); the click's selection \
+             change is not coupled to the drag's undo step",
+        );
+    }
+
+    #[test]
     fn selection_parity_mid_drag_alt_preview_shows_real_copy() {
         // Selection-tool counterpart: during alt-preview, doc must
         // contain original (snapped to press) + real copy at cursor.

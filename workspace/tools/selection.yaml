@@ -70,6 +70,14 @@ state:
   # copies); subsequent moves translate those copies instead of
   # copying again.
   copied: { default: false }
+  # Has doc.snapshot + doc.preview.capture been taken for this
+  # drag yet? Deferred to the first mousemove (mirrors
+  # partial_selection.yaml) so a click without drag does not push
+  # an undo entry, AND so the snapshot captures the post-set_selection
+  # state — undo of a click+drag restores the dragged element at its
+  # original position with the dragged element still selected, not
+  # the previous selection.
+  snapshotted: { default: false }
 
 handlers:
 
@@ -110,8 +118,12 @@ handlers:
             - set: { tool.selection.doc_marquee_end_x: "event.doc_x" }
             - set: { tool.selection.doc_marquee_end_y: "event.doc_y" }
           else:
-            - "doc.snapshot": {}
-            - "doc.preview.capture": {}
+            # Selection change happens immediately so the user sees
+            # the click highlight; doc.snapshot is deferred until
+            # there is an actual drag (first mousemove). That way a
+            # pure click does not push an undo entry, and the
+            # snapshot captures the post-set_selection state — undo
+            # of a click+drag keeps the dragged element selected.
             - if: "event.modifiers.shift"
               then:
                 - "doc.toggle_selection": "hit"
@@ -136,6 +148,7 @@ handlers:
             # first move" because they started the drag with Alt.
             - set: { tool.selection.alt_held: "event.modifiers.alt" }
             - set: { tool.selection.copied: "false" }
+            - set: { tool.selection.snapshotted: "false" }
 
   on_mousemove:
     - if: "tool.selection.mode == 'marquee'"
@@ -146,6 +159,15 @@ handlers:
         - set: { tool.selection.doc_marquee_end_y: "event.doc_y" }
     - if: "tool.selection.mode == 'drag_move'"
       then:
+        # First mousemove of the drag — push the undo snapshot and
+        # capture the preview baseline. Deferred from on_mousedown
+        # so a click without drag is undo-free, and so undo of a
+        # click+drag preserves the new selection.
+        - if: "not tool.selection.snapshotted"
+          then:
+            - "doc.snapshot": {}
+            - "doc.preview.capture": {}
+            - set: { tool.selection.snapshotted: "true" }
         # Two distinct gesture flavors:
         #
         # (A) Alt held at mousedown -- "drag-to-copy" (existing
@@ -239,6 +261,14 @@ handlers:
     # cursor; nothing more to do.
     - if: "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt and not tool.selection.alt_preview"
       then:
+        # User pressed Alt without any prior mousemove — snapshot
+        # may not have been taken yet. Take it now so the copy
+        # is undoable.
+        - if: "not tool.selection.snapshotted"
+          then:
+            - "doc.snapshot": {}
+            - "doc.preview.capture": {}
+            - set: { tool.selection.snapshotted: "true" }
         - "doc.copy_selection":
             dx: "event.doc_x - tool.selection.press_doc_x"
             dy: "event.doc_y - tool.selection.press_doc_y"
