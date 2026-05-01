@@ -338,13 +338,14 @@ If any P0 here fails, stop and flag.
 
 ## Enhancements raised in Session D
 
-- **ENH-001** Mid-drag Alt-toggle live-preview ghost: SEL-052/053 follow-up
-  added a dashed-cyan outline at the would-be copy position while Alt
-  is held mid-drag, with the original snapped back to the press point
-  via doc.preview.restore. Releasing Alt resumes the move; releasing
-  the mouse with Alt held commits a real copy. New overlay render
-  type `selection_translate_ghost` lives in yaml_tool.rs. _Raised
-  during SEL-052 follow-up on 2026-04-30._
+- **ENH-001** Mid-drag Alt-toggle live preview: SEL-052/053 follow-up
+  on 2026-04-30 added a dashed outline at the would-be copy position
+  while Alt is held mid-drag, with the original snapped back to the
+  press point via doc.preview.restore. Releasing Alt resumes the
+  move; releasing the mouse with Alt held commits a real copy.
+  _Superseded 2026-05-01 by ENH-002 — the ghost overlay was replaced
+  with a real moving copy for visual parity with the at-press copy
+  path; selection_translate_ghost overlay type retired._
 
 ---
 
@@ -545,27 +546,32 @@ If any P0 here fails, stop and flag.
       Expect: One undo reverses the full translation.
       — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-136** [wired] Mid-drag Alt on a CP commits a copy of the
+- [x] **SEL-136** [wired] Mid-drag Alt on a CP commits a copy of the
   path on release (mirrors SEL-053 for Selection tool).
       Setup: Select all CPs of a path.
       Do: Press on an anchor WITHOUT Alt; drag past threshold; press
           Alt mid-drag; release with Alt still held.
       Expect: A copy is committed at the cursor's release position;
               the original stays at its press position
-              (preview-restored on the alt-press transition).
-      — last: —
+              (preview-restored on the alt-press transition). During
+              the preview phase the copy is a real rendered element
+              moving with the cursor (not a ghost outline).
+      — last: 2026-05-01 (Rust)
 
 ## Enhancements raised in Session H
 
-- **ENH-002** Mid-drag Alt copy on Partial Selection: SEL-132 follow-up
-  added the same mid-drag-Alt live preview pattern as Selection
-  (ENH-001) — pressing Alt mid-CP-drag snaps the path back to its
-  press position via doc.preview.restore; releasing the mouse with
-  Alt held commits a copy at the cursor; releasing Alt before mouseup
-  reverts to a normal move. Same fix landed on selection.yaml for a
-  latent exit-preview double-translate bug (sibling-if branches were
-  reading freshly-mutated state on the same frame). _Raised during
-  SEL-132 follow-up on 2026-05-01._
+- **ENH-002** Mid-drag Alt copy on Partial Selection + visual parity:
+  SEL-132 follow-up added the mid-drag-Alt live preview pattern on
+  partial_selection.yaml mirroring Selection's SEL-053. The preview
+  is a REAL moving copy of the selection (created via doc.copy_selection
+  on the alt-press transition, rolled back via doc.preview.restore on
+  alt-release), not a wireframe bounding-box ghost — visual parity
+  with the at-press copy path. Selection's earlier ghost overlay
+  (ENH-001) was retired for the same reason; the
+  selection_translate_ghost overlay type was removed. Same fix landed
+  on selection.yaml for a latent exit-preview double-translate bug
+  (sibling-if branches were reading freshly-mutated state on the same
+  frame). _Raised during SEL-132 follow-up on 2026-05-01._
 
 ---
 
