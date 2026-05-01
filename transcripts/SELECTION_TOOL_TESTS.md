@@ -621,30 +621,45 @@ If any P0 here fails, stop and flag.
 
 **P1**
 
-- [ ] **SEL-170** [wired] Drag-move is one undo step.
+- [x] **SEL-170** [wired] Drag-move is one undo step.
       Covered by SEL-054. Redo restores the moved position.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-171** [wired] Alt-drag copy is one undo step.
+- [x] **SEL-171** [wired] Alt-drag copy is one undo step.
       Setup: SEL-052 state (one copy created).
       Do: Ctrl/Cmd-Z.
       Expect: Copy is removed; original rect unchanged; selection
               reverts to the original.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-172** [wired] CP drag is one undo step.
+- [x] **SEL-172** [wired] CP drag is one undo step.
       Setup: SEL-130 state (one CP moved).
       Do: Ctrl/Cmd-Z.
       Expect: Anchor returns to prior position.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P2**
 
-- [ ] **SEL-173** [wired] Handle drag is one undo step.
+- [x] **SEL-173** [wired] Handle drag is one undo step.
       Setup: SEL-131 state.
       Do: Ctrl/Cmd-Z.
       Expect: Handle returns; curve shape restored on the affected side.
-      — last: —
+      — last: 2026-05-01 (Rust)
+
+- [x] **SEL-174** [wired] Click-drag a new element preserves the new
+  selection on undo (does not revert to the prior selection).
+      Setup: Element A selected via prior gesture.
+      Do: With Selection tool, click and drag a different element B
+          to a new position. Then Ctrl/Cmd-Z.
+      Expect: B returns to its original position AND B (not A)
+              remains the selection.
+      — last: 2026-05-01 (Rust)
+      regression: doc.snapshot was taken in on_mousedown BEFORE
+        set_selection, so undo restored the stale selection. Fix
+        defers snapshot+preview.capture to the first mousemove of
+        the drag (mirrors partial_selection.yaml's pattern); a
+        bonus benefit is that pure clicks no longer push a no-op
+        undo entry.
 
 ---
 
