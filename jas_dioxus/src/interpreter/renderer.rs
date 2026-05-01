@@ -5803,6 +5803,26 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     kb_rev += 1;
                 });
             }
+            dioxus::prelude::Key::F2 => {
+                // F2 starts inline rename on the active row. Without a
+                // separate focus concept, "active" is the last panel-
+                // selected row. Only layers are renameable today
+                // (matches the can_rename check on the row span).
+                spawn(async move {
+                    let mut st = a.borrow_mut();
+                    let target = st.layers_panel_selection.last().cloned();
+                    if let Some(path) = target {
+                        let is_layer = st.tab()
+                            .and_then(|t| t.model.document().get_element(&path))
+                            .map(|e| e.is_layer())
+                            .unwrap_or(false);
+                        if is_layer {
+                            st.layers_renaming = Some(path);
+                            kb_rev += 1;
+                        }
+                    }
+                });
+            }
             dioxus::prelude::Key::Character(c) if c == "a" || c == "A" => {
                 if evt.data().modifiers().meta() || evt.data().modifiers().ctrl() {
                     spawn(async move {
