@@ -579,37 +579,41 @@ If any P0 here fails, stop and flag.
 
 **P2**
 
-- [ ] **SEL-150** [wired] Selection marquee overlay is dashed blue with
+- [x] **SEL-150** [wired] Selection marquee overlay is dashed blue with
   8% fill.
       Do: Begin a marquee drag; observe the rectangle styling.
       Expect: Stroke reads as the design's `#4a90d9` dashed line; fill
               is a light blue tint; no solid-color fill.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-151** [wired] Partial Selection overlay shows anchors and
+- [x] **SEL-151** [wired] Partial Selection overlay shows anchors and
   handles.
       Setup: Select a curved path.
       Do: Observe the selected path's decorations.
       Expect: Anchor squares at each CP, handle bars for smooth
               anchors, handle dots at handle endpoints. Selected CP
               differs in fill vs unselected.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-152** [wired] Cursor is arrow for Selection, arrow for
-  Interior, arrow for Partial.
-      Do: Switch between V / A / Interior and observe the canvas
-          cursor.
-      Expect: All three show arrow-style cursors; no crosshair (those
-              belong to drawing tools).
-      — last: —
+- [x] **SEL-152** [wired] Cursor is arrow for Selection, hollow-arrow
+  for Partial, hollow-arrow-plus for Interior.
+      Do: Switch between V / A / Y and observe the canvas cursor.
+      Expect: V → solid arrow; A → hollow arrow; Y → hollow arrow with
+              a plus glyph. No crosshair (those belong to drawing
+              tools).
+      — last: 2026-05-01 (Rust)
+      regression: cursor mapping updated 2026-04-30 — Partial Selection
+        switched to hollow_arrow and Interior to hollow_arrow_plus per
+        user request; SVG cursors translated by yaml_cursor_to_css in
+        app.rs.
 
-- [ ] **SEL-153** [wired] Switching tools hides the prior tool's
+- [x] **SEL-153** [wired] Switching tools hides the prior tool's
   overlay immediately.
       Setup: Partial Selection active with CP overlay visible.
       Do: Press V.
       Expect: CP / handle decorations disappear; selection bounds for
               the path appear instead.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
