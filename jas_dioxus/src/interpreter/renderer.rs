@@ -5585,6 +5585,40 @@ fn tree_flatten_layers(
 
 // ──────────────────────────────────────────────────────────────
 
+/// Schedule a focus + select on the inline rename input for `path`,
+/// after Dioxus has rendered the input element. The input has
+/// `autofocus: true` but the browser blocks autofocus when another
+/// element already has focus (the layers panel container, in
+/// practice) — so we have to call .focus() explicitly. Uses
+/// requestAnimationFrame so the call lands after the next paint when
+/// the input element exists in the DOM.
+#[cfg(target_arch = "wasm32")]
+fn schedule_focus_rename_input(path: &[usize]) {
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+    let id = format!(
+        "lp_rename_{}",
+        path.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"),
+    );
+    let cb = Closure::once(Box::new(move || {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id(&id) {
+                if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() {
+                    let _ = input.focus();
+                    input.select();
+                }
+            }
+        }
+    }) as Box<dyn FnOnce()>);
+    if let Some(win) = web_sys::window() {
+        let _ = win.request_animation_frame(cb.as_ref().unchecked_ref());
+    }
+    cb.forget();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn schedule_focus_rename_input(_path: &[usize]) {}
+
 /// Render a tree_view widget showing the live document element tree.
 ///
 /// Reads the active document from AppState and renders each element as
@@ -5871,8 +5905,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             .map(|e| e.is_layer())
                             .unwrap_or(false);
                         if is_layer {
-                            st.layers_renaming = Some(path);
+                            st.layers_renaming = Some(path.clone());
                             kb_rev += 1;
+                            schedule_focus_rename_input(&path);
                         }
                     }
                 });
@@ -6693,8 +6728,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                     let p = name_path.clone();
                                                     let a = name_app.clone();
                                                     spawn(async move {
-                                                        a.borrow_mut().layers_renaming = Some(p);
+                                                        a.borrow_mut().layers_renaming = Some(p.clone());
                                                         name_rev += 1;
+                                                        schedule_focus_rename_input(&p);
                                                     });
                                                 }
                                             },
