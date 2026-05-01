@@ -1320,7 +1320,11 @@ pub fn App() -> Element {
                     if dock_config.collapsed_width.is_some() {
                         {
                             let act = act.clone();
-                            let chevron = if dock_collapsed { "\u{00BB}" } else { "\u{00AB}" }; // >> or <<
+                            // Chevron points the way the dock will move on click:
+                            // collapsed → « (click to expand back toward canvas);
+                            // expanded → » (click to collapse out to the edge).
+                            // Right-dock convention; mirror would need a per-side flip.
+                            let chevron = if dock_collapsed { "\u{00AB}" } else { "\u{00BB}" }; // << or >>
                             rsx! {
                                 div {
                                     style: "cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; padding:0 4px; line-height:1;",

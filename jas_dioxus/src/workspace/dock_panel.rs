@@ -804,7 +804,12 @@ pub(crate) fn build_dock_groups(
             nodes
         }).collect();
 
-        let chevron = if group_collapsed { "\u{00BB}" } else { "\u{00AB}" };
+        // Chevron points the way the panel will move on click: when
+        // collapsed it points back toward the canvas (« — click to
+        // expand inward); when expanded it points toward the dock
+        // edge (» — click to collapse outward). Assumes right-side
+        // dock placement, which is where panel groups live by default.
+        let chevron = if group_collapsed { "\u{00AB}" } else { "\u{00BB}" };
         let body_label = group.active_panel()
             .map(crate::panels::panel_label)
             .unwrap_or_default();
