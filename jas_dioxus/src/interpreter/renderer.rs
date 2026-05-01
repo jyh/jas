@@ -6575,14 +6575,37 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         });
                     };
 
-                    // Drop indicator
+                    // Drop indicator. The line position signals where the
+                    // dropped row will land:
+                    //   - Container target (Group / Layer): indicator appears
+                    //     just BELOW the row, signalling "drop into as the
+                    //     first child" (visually the new row appears just
+                    //     below the container's header, indented).
+                    //   - Leaf target: indicator appears at the TOP of the
+                    //     row, signalling "insert above as a sibling".
+                    // (Layer source on Layer target is a sibling reorder,
+                    // also drawn as a top-border per the leaf rule below.)
                     let is_drag_target = {
                         let st = rctx.app.borrow();
                         st.layers_drag_target.as_ref() == Some(&row.path) &&
                         !st.layers_panel_selection.contains(&row.path)
                     };
                     let drop_indicator = if is_drag_target {
-                        "border-top:2px solid var(--jas-accent,#3a7bd5);"
+                        let st = rctx.app.borrow();
+                        let any_source_is_layer = st.tab()
+                            .map(|t| {
+                                let doc = t.model.document();
+                                st.layers_panel_selection.iter().any(|s| {
+                                    doc.get_element(s)
+                                        .map(|e| e.is_layer()).unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false);
+                        if row.is_container && !any_source_is_layer {
+                            "border-bottom:2px solid var(--jas-accent,#3a7bd5);"
+                        } else {
+                            "border-top:2px solid var(--jas-accent,#3a7bd5);"
+                        }
                     } else {
                         ""
                     };
