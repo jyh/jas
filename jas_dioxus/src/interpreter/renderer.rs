@@ -6334,6 +6334,23 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 st.layers_panel_selection = vec![p];
                             }
                             st.layers_context_menu = None;
+                            // Sync doc.selected_layer to the top-level
+                            // ancestor of the most-recently selected
+                            // panel row. Controller::add_element appends
+                            // new shapes into doc.selected_layer, so this
+                            // makes "draw a rect" land in the layer the
+                            // user just clicked.
+                            if let Some(last) = st.layers_panel_selection.last().cloned() {
+                                if let Some(layer_idx) = last.first().copied() {
+                                    if let Some(tab) = st.tab_mut() {
+                                        let mut new_doc = tab.model.document().clone();
+                                        if layer_idx < new_doc.layers.len() {
+                                            new_doc.selected_layer = layer_idx;
+                                            tab.model.set_document(new_doc);
+                                        }
+                                    }
+                                }
+                            }
                             row_rev += 1;
                         });
                     };
