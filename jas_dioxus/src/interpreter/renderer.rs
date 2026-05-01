@@ -6447,8 +6447,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 let sources = st.layers_panel_selection.clone();
                                 // Validate drag constraints
                                 let target_parent: Vec<usize> = target[..target.len()-1].to_vec();
+                                let search_active = !st.layers_search_query.is_empty();
                                 let allowed = {
-                                    if sources.is_empty() || sources.contains(&target) {
+                                    if search_active {
+                                        // Reject reorder while a search filter is active —
+                                        // the visible row set is a non-contiguous subset
+                                        // of the document, so insert-at semantics are
+                                        // unintuitive. Per LYR-103.
+                                        false
+                                    } else if sources.is_empty() || sources.contains(&target) {
                                         false
                                     } else if let Some(tab) = st.tab() {
                                         let doc = tab.model.document();
