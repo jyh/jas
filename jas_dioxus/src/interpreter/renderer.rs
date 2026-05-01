@@ -5397,14 +5397,17 @@ fn tree_preview_svg(elem: &GeoElement) -> String {
     if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
         return String::new();
     }
+    // element_svg() applies a pt → px scale (96/72 ≈ 1.333) to every
+    // coordinate, since its primary callers export to standard SVG
+    // files. The viewBox needs the same scale so the inner geometry
+    // sits inside the declared box — otherwise content extends 1.333×
+    // past the right/bottom and the SVG viewport clips it to the
+    // upper-left of the thumbnail container.
+    const PT_TO_PX: f64 = 96.0 / 72.0;
+    let (x, y, w, h) = (x * PT_TO_PX, y * PT_TO_PX, w * PT_TO_PX, h * PT_TO_PX);
     let pad = (w.max(h) * 0.02).max(0.5);
     let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
     let inner = crate::geometry::svg::element_svg(elem, "");
-    // Style + width/height in CSS so the SVG scales to whatever the
-    // parent div sizes it to. The width="100%" / height="100%"
-    // attributes alone weren't laying out under dangerous_inner_html
-    // — the SVG rendered at its viewBox's natural size and got
-    // clipped to the container's upper-left corner.
     format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;">{inner}</svg>"#
     )
