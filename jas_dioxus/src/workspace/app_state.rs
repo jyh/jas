@@ -183,6 +183,11 @@ pub(crate) struct AppState {
     /// Active drag in the layers panel: drop target path and position.
     /// The drop inserts before the element at this path.
     pub(crate) layers_drag_target: Option<Vec<usize>>,
+    /// Row the layers-panel drag started on (set on mousedown). Used
+    /// by on_mouseup to distinguish a true drag (target != source —
+    /// at least one mouseenter on a different row fired) from a
+    /// pure click that never moved (target == source — no drop).
+    pub(crate) layers_drag_source: Option<Vec<usize>>,
     /// Context menu state: (screen_x, screen_y, right-clicked element path).
     pub(crate) layers_context_menu: Option<(f64, f64, Vec<usize>)>,
     /// Layers panel search query (case-insensitive name filter).
@@ -680,6 +685,7 @@ impl AppState {
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
             layers_drag_target: None,
+            layers_drag_source: None,
             layers_context_menu: None,
             layers_search_query: String::new(),
             layers_isolation_stack: Vec::new(),

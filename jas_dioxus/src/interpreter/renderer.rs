@@ -6129,7 +6129,11 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let on_row_click = move |evt: Event<MouseData>| {
                         let p = row_path.clone();
                         let a = row_app.clone();
-                        let meta = evt.data().modifiers().meta();
+                        // Accept either Cmd (macOS) or Ctrl (Windows /
+                        // Linux) for the toggle gesture; mirrors the
+                        // pattern used elsewhere in this file.
+                        let meta = evt.data().modifiers().meta()
+                            || evt.data().modifiers().ctrl();
                         let shift = evt.data().modifiers().shift();
                         let all_paths = row_all_paths.clone();
                         spawn(async move {
@@ -6188,8 +6192,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             let a = drag_down_app.clone();
                             let p = drag_down_path.clone();
                             spawn(async move {
-                                // Mark drag as active by setting target to the source path initially
-                                a.borrow_mut().layers_drag_target = Some(p);
+                                // Track the press row in BOTH source
+                                // and target. on_mouseenter overwrites
+                                // target to the new row when the mouse
+                                // crosses into a different row; if no
+                                // mouseenter fires (a pure click), the
+                                // target stays equal to source and
+                                // on_mouseup treats it as a no-drag.
+                                let mut st = a.borrow_mut();
+                                st.layers_drag_target = Some(p.clone());
+                                st.layers_drag_source = Some(p);
                             });
                         }
                     };
@@ -6252,7 +6264,20 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         let target = drag_up_path.clone();
                         spawn(async move {
                             let mut st = a.borrow_mut();
-                            if let Some(_drag_target) = st.layers_drag_target.take() {
+                            // Bail out if target == source: that means
+                            // the mouse never crossed into a different
+                            // row between mousedown and mouseup — it
+                            // was a click, not a drag. Without this,
+                            // a Cmd-click on an already-selected row
+                            // would invoke the drag-and-drop reorder
+                            // path and silently move siblings around.
+                            let source = st.layers_drag_source.take();
+                            let drag_target = st.layers_drag_target.take();
+                            let true_drag = matches!(
+                                (&source, &drag_target),
+                                (Some(s), Some(t)) if s != t,
+                            );
+                            if true_drag {
                                 // Move all panel-selected elements to before the target
                                 let sources = st.layers_panel_selection.clone();
                                 // Validate drag constraints

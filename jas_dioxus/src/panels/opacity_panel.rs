@@ -173,6 +173,7 @@ mod tests {
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
             layers_drag_target: None,
+            layers_drag_source: None,
             layers_context_menu: None,
             layers_search_query: String::new(),
             layers_isolation_stack: Vec::new(),
