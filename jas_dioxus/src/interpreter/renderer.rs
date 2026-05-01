@@ -6327,7 +6327,18 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                 .map(|e| !e.locked())
                                                 .unwrap_or(true)
                                         };
-                                        no_cycle && parent_unlocked
+                                        // Check: target row itself isn't a locked
+                                        // container. Without this, dragging onto
+                                        // a locked layer's row would shift it
+                                        // down (sibling-insert via insert_at)
+                                        // — surprising the user, who reads the
+                                        // gesture as "drop into the locked
+                                        // layer" and expects rejection.
+                                        let target_unlocked = doc
+                                            .get_element(&target)
+                                            .map(|e| !e.locked())
+                                            .unwrap_or(true);
+                                        no_cycle && parent_unlocked && target_unlocked
                                     } else {
                                         false
                                     }
