@@ -422,48 +422,55 @@ If any P0 here fails, stop and flag.
 
 ## Session F — Search + type filter (~8 min)
 
-- [ ] **LYR-090** [wired] Search input filters rows by case-insensitive name.
+- [x] **LYR-090** [wired] Search input filters rows by case-insensitive name.
       Setup: Layers named "Background", "Foreground", "BG-Effects".
       Do: Type "bg" into the search input.
       Expect: Rows whose name contains "bg" (case-insensitive) stay; the
               other rows hide.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 - [ ] **LYR-091** [wired] Ancestors of matches render dimmed.
       Setup: Group "FG" containing "fg-rect"; search "fg-rect".
       Expect: "fg-rect" highlighted; parent "FG" rendered dimmed; other
               top-level layers hidden.
       — last: —
+      regression: deferred 2026-05-01 — only Layers are renameable in
+        the current UI, so we can't construct a named non-layer
+        descendant inside a non-matching container. Revisit when
+        Group/element names land.
 
-- [ ] **LYR-092** [wired] Clearing the search restores the full tree.
+- [x] **LYR-092** [wired] Clearing the search restores the full tree.
       Setup: Search active.
       Do: Clear the input.
       Expect: All rows re-appear; dimming removed.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-100** [wired] Type filter dropdown lists 11 togglable types.
+- [x] **LYR-100** [wired] Type filter dropdown lists 11 togglable types.
       Do: Open `lp_filter_button`.
       Expect: Checkbox per: Layer, Group, Path, Rectangle, Circle,
               Ellipse, Polyline, Polygon, Text, Text Path, Line. All
               checked by default.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-101** [wired] Unchecking a type hides all matching rows.
+- [x] **LYR-101** [wired] Unchecking a type hides all matching rows.
       Setup: Tree with rectangles + circles. Filter dropdown open.
       Do: Uncheck Rectangle.
       Expect: Rectangle rows hide; circles remain.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-102** [wired] Type filter composes with search.
+- [x] **LYR-102** [wired] Type filter composes with search.
       Setup: Search "blue", filter excludes Rectangle.
       Expect: Only non-Rectangle rows whose name contains "blue" show.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-103** [wired] Drag-drop disabled while search is active.
+- [x] **LYR-103** [wired] Drag-drop disabled while search is active.
       Setup: Search active.
       Do: Try to drag a row.
       Expect: Drag refused or no-op; cursor doesn't show drop affordance.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: drop logic ignored search state and reordered rows
+        regardless. Added an early-bail in on_mouseup when
+        layers_search_query is non-empty.
 
 ---
 
