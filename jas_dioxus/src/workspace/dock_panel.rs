@@ -591,8 +591,15 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     }
     let collapsed_count = st.layers_collapsed.len();
     m.insert("_layers_collapsed_count".into(), serde_json::Value::Number(collapsed_count.into()));
+    // Include the FULL panel selection paths (not just the count) so
+    // clicking from one row to another with the same selection size
+    // invalidates the panel memo cache and the row highlights update.
     let panel_sel_count = st.layers_panel_selection.len();
     m.insert("_layers_panel_sel_count".into(), serde_json::Value::Number(panel_sel_count.into()));
+    m.insert(
+        "_layers_panel_selection".into(),
+        serde_json::json!(st.layers_panel_selection),
+    );
     if let Some(ref dt) = st.layers_drag_target {
         m.insert("_layers_drag_target".into(), serde_json::json!(dt));
     }
@@ -617,7 +624,7 @@ fn build_panel_state_subset(
     let keys: &[&str] = match panel_name {
         "stroke" => &["stroke_width", "stroke_color"],
         "color" | "swatches" => &["fill_color", "stroke_color", "fill_on_top"],
-        "layers" => &["_doc_generation", "_layers_renaming", "_layers_collapsed_count", "_layers_panel_sel_count", "_layers_drag_target", "_layers_context_menu", "_layers_search_query", "_layers_isolation_depth", "_layers_hidden_types_count", "_layers_filter_open"],
+        "layers" => &["_doc_generation", "_layers_renaming", "_layers_collapsed_count", "_layers_panel_sel_count", "_layers_panel_selection", "_layers_drag_target", "_layers_context_menu", "_layers_search_query", "_layers_isolation_depth", "_layers_hidden_types_count", "_layers_filter_open"],
         _ => &["fill_color", "stroke_color", "fill_on_top"],
     };
     let mut m = serde_json::Map::new();
