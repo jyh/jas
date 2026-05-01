@@ -621,85 +621,100 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **LYR-180** [wired] Enter Isolation Mode requires single container selection.
+- [x] **LYR-180** [wired] Enter Isolation Mode requires single container selection.
       Setup: No selection (or non-container selected).
       Expect: Menu → Enter Isolation Mode is dimmed.
       Setup: Select a single Layer or Group.
       Expect: Menu item enabled.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-181** [wired] Enter pushes the container onto the isolation stack.
+- [x] **LYR-181** [wired] Enter pushes the container onto the isolation stack.
       Setup: A Group selected.
       Do: Menu → Enter Isolation Mode.
       Expect: Breadcrumb bar appears at the panel header showing the
               isolated path; non-isolated content is dimmed (~10%
               opacity) on canvas.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: layers_isolation_stack reached AppState but never
+        the canvas renderer. Plumbed through render(); element draw now
+        multiplies parent globalAlpha so set_global_alpha(0.15) around
+        the non-isolated draw pass actually dims; isolated subtree
+        re-renders at full alpha on top. Artboard fills painted before
+        the dim stay full strength.
 
-- [ ] **LYR-182** [wired] Double-click container row also enters.
+- [x] **LYR-182** [wired] Double-click container row also enters.
       Setup: A Layer row.
-      Do: Double-click outside the name (e.g. on the row body).
+      Do: Double-click outside the name (e.g. on the row body / preview
+          thumbnail / lock cell).
       Expect: Same effect as menu Enter.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: row had no row-level dblclick handler; only the name
+        span did (for rename). Added ondoubleclick to the row div that
+        sets panel_selection then dispatches enter_isolation_mode for
+        container rows. The name spans dblclick now stops propagation
+        so renaming a layer name does not also enter isolation.
 
 **P1**
 
-- [ ] **LYR-183** [wired] Nested double-click stacks levels.
+- [x] **LYR-183** [wired] Nested double-click stacks levels.
       Setup: Isolated into Layer 1; a Group inside.
-      Do: Double-click the Group.
+      Do: Double-click the Group (outside the name).
       Expect: Breadcrumb extends with the Group; isolation stack length
               becomes 2.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-184** [wired] Breadcrumb shows the full path to current isolation.
+- [x] **LYR-184** [wired] Breadcrumb shows the full path to current isolation.
       Setup: Isolated into Layer 1 → Group A → Group B.
       Expect: Breadcrumb reads "Layer 1 > Group A > Group B".
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-185** [wired] Click breadcrumb segment exits to that level.
+- [x] **LYR-185** [wired] Click breadcrumb segment exits to that level.
       Setup: Isolated 3 levels deep.
       Do: Click "Layer 1" in the breadcrumb.
       Expect: Pops to Layer 1 isolation only; breadcrumb shrinks; deeper
               dimming removed.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-186** [wired] Escape pops one level.
+- [x] **LYR-186** [wired] Escape pops one level.
       Setup: Isolated 2 levels deep.
       Do: Press Escape.
       Expect: Pops one level; breadcrumb shortens.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: Esc handler only cleared drag state; added second-
+        priority case that pops layers_isolation_stack when no drag is
+        active.
 
-- [ ] **LYR-187** [wired] Exit Isolation Mode pops via menu.
+- [x] **LYR-187** [wired] Exit Isolation Mode pops via menu.
       Setup: Isolated.
       Do: Menu → Exit Isolation Mode.
       Expect: Pops one level (or fully exits; document the actual).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-188** [wired] Selection / drag / edit confined to isolated subtree.
+- [x] **LYR-188** [wired] Selection / drag / edit confined to isolated subtree.
       Setup: Isolated into Group A.
       Do: Click a non-isolated element on canvas.
       Expect: No selection; dimmed content is non-interactive.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-189** [wired] Visibility changes during isolation persist after exit.
+- [x] **LYR-189** [wired] Visibility changes during isolation persist after exit.
       Setup: Isolated into Group A; click a child eye → invisible.
       Do: Exit Isolation Mode.
       Expect: Child remains invisible after exit.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P2**
 
-- [ ] **LYR-190** [wired] New Layer disabled inside isolation.
+- [x] **LYR-190** [wired] New Layer disabled inside isolation.
       Setup: Isolated.
       Expect: Menu → New Layer… dimmed; new top-level layers can't be
               created from inside an isolated container.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-191** [wired] New Group works inside isolation (creates within).
+- [x] **LYR-191** [wired] New Group works inside isolation (creates within).
       Setup: Isolated into a Group, with selection.
       Do: Menu → New Group.
       Expect: New Group created inside the isolated parent.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
