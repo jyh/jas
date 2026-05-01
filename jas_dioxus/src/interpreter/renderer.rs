@@ -5803,6 +5803,60 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     kb_rev += 1;
                 });
             }
+            dioxus::prelude::Key::ArrowDown | dioxus::prelude::Key::ArrowUp => {
+                // Move panel selection to the next / previous visible row
+                // in display order (mirrors tree_flatten_layers' rev-order
+                // traversal so the visual top-to-bottom matches).
+                let dir_down = matches!(key, dioxus::prelude::Key::ArrowDown);
+                spawn(async move {
+                    let mut st = a.borrow_mut();
+                    fn collect_visible(
+                        elem: &crate::geometry::element::Element,
+                        path: &[usize],
+                        collapsed: &std::collections::HashSet<Vec<usize>>,
+                        out: &mut Vec<Vec<usize>>,
+                    ) {
+                        if let Some(children) = elem.children() {
+                            for (i, child) in children.iter().enumerate().rev() {
+                                let mut cp = path.to_vec();
+                                cp.push(i);
+                                out.push(cp.clone());
+                                if !collapsed.contains(&cp) {
+                                    collect_visible(child, &cp, collapsed, out);
+                                }
+                            }
+                        }
+                    }
+                    let visible: Vec<Vec<usize>> = {
+                        let collapsed = st.layers_collapsed.clone();
+                        let mut out = Vec::new();
+                        if let Some(tab) = st.tab() {
+                            let doc = tab.model.document();
+                            for (li, layer) in doc.layers.iter().enumerate().rev() {
+                                let p = vec![li];
+                                out.push(p.clone());
+                                if !collapsed.contains(&p) {
+                                    collect_visible(layer, &p, &collapsed, &mut out);
+                                }
+                            }
+                        }
+                        out
+                    };
+                    if visible.is_empty() {
+                        return;
+                    }
+                    let cur_idx = st.layers_panel_selection.last()
+                        .and_then(|p| visible.iter().position(|v| v == p));
+                    let next_idx = match (cur_idx, dir_down) {
+                        (Some(i), true) => (i + 1).min(visible.len() - 1),
+                        (Some(i), false) => i.saturating_sub(1),
+                        (None, true) => 0,
+                        (None, false) => visible.len() - 1,
+                    };
+                    st.layers_panel_selection = vec![visible[next_idx].clone()];
+                    kb_rev += 1;
+                });
+            }
             dioxus::prelude::Key::F2 => {
                 // F2 starts inline rename on the active row. Without a
                 // separate focus concept, "active" is the last panel-
