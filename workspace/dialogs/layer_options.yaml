@@ -246,7 +246,7 @@ layer_options:
                     type: number_input
                     min: 0
                     max: 100
-                    style: { width: 40 }
+                    style: { width: 60 }
                     bind:
                       value: "dialog.dim_percentage"
                       disabled: "not dialog.dim_images"
