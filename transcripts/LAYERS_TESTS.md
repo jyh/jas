@@ -159,67 +159,85 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **LYR-010** [wired] Each row renders 7 controls in expected order.
+- [x] **LYR-010** [wired] Each row renders 7 controls in expected order.
       Setup: Default Layer 1 + a Rectangle child.
       Do: Inspect a row.
       Expect: Eye, lock, twirl, 32px preview thumbnail, name label,
               selection square (12px). No truncation; consistent column
               widths.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-011** [wired] Twirl is hidden but space preserved on a leaf row.
+- [x] **LYR-011** [wired] Twirl is hidden but space preserved on a leaf row.
       Setup: A leaf rectangle row.
       Expect: No twirl glyph rendered; the row still aligns vertically
               with parent rows that DO have twirls.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P1**
 
-- [ ] **LYR-012** [wired] Click a row selects the element on canvas.
+- [x] **LYR-012** [wired] Click a row updates panel selection (not canvas
+  selection).
       Setup: Layer 1 with one Rectangle.
       Do: Click the Rectangle row.
-      Expect: Rectangle becomes selected on canvas (resize handles
-              appear); panel selection square fills with the layer color.
-      — last: —
+      Expect: Row gains the panel-selection highlight (background fills
+              with the layer color). Canvas selection is NOT changed —
+              menu operations referring to "selected" items act on
+              panel selection, per layers.yaml description. Resize
+              handles only appear if canvas-selection separately
+              follows (e.g., via LYR-013 reverse direction).
+      — last: 2026-05-01 (Rust)
+      regression: original spec conflated panel selection with canvas
+        selection; corrected 2026-05-01 to match layers.yaml.
 
-- [ ] **LYR-013** [wired] Selecting on canvas highlights the row.
+- [x] **LYR-013** [wired] Selecting on canvas highlights the row.
       Setup: Multiple rows.
       Do: Click a shape directly on canvas.
       Expect: Its row gains a selection highlight; row scrolls into view
               if off-screen; ancestor groups auto-expand.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-014** [wired] Shift-click extends panel selection (range).
+- [x] **LYR-014** [wired] Shift-click extends panel selection (range).
       Setup: 4 elements in one layer.
       Do: Click row 1; Shift-click row 4.
       Expect: Rows 1–4 all highlighted in the panel.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-015** [wired] Cmd / Ctrl-click toggles individual rows.
+- [x] **LYR-015** [wired] Cmd / Ctrl-click toggles individual rows.
       Setup: Multi-selection across non-contiguous rows.
       Do: Cmd/Ctrl-click an already-selected row.
       Expect: That row deselects; others remain.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: Cmd-click on an already-selected row used to invoke
+        the drag-and-drop reorder path because on_mousedown set
+        layers_drag_target unconditionally and on_mouseup treated any
+        non-None target as a completed drop. Added layers_drag_source
+        field; on_mouseup now bails when target == source (no
+        mouseenter on a different row → no drag).
 
 **P2**
 
-- [ ] **LYR-020** [wired] Plain click clears multi-selection.
+- [x] **LYR-020** [wired] Plain click clears multi-selection.
       Setup: 3 rows selected.
       Do: Plain click a 4th row.
       Expect: Only the 4th row remains selected.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-021** [wired] Element preview is a 32px thumbnail with white bg.
+- [x] **LYR-021** [wired] Element preview is a 32px thumbnail with white bg.
       Setup: A colored rectangle child.
       Do: Inspect the preview cell.
       Expect: Roughly 32px raster preview of the element on a white
               background.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: viewBox in tree_preview_svg used raw bounds; inner
+        geometry from element_svg is multiplied by pt-to-px (96/72), so
+        the rendered shape was 1.333x larger than the viewBox and the
+        SVG viewport clipped it to the upper-left of the container.
+        Fix scales the viewBox by the same factor.
 
-- [ ] **LYR-022** [wired] Empty / unnamed elements display `<Type>` as a fallback.
+- [x] **LYR-022** [wired] Empty / unnamed elements display `<Type>` as a fallback.
       Setup: A path with no name attribute.
       Expect: Row label shows "<Path>" (or similar bracket type fallback).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
