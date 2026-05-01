@@ -5431,6 +5431,7 @@ fn tree_flatten_rc_children(
     collapsed_paths: &TreeHashSet<Vec<usize>>,
     panel_selection: &[Vec<usize>],
     renaming_path: &Option<Vec<usize>>,
+    inherited_visibility: Visibility,
     rows: &mut Vec<TreeRow>,
 ) {
     for (i, child_rc) in children.iter().enumerate().rev() {
@@ -5451,12 +5452,19 @@ fn tree_flatten_rc_children(
             layer_color.to_string()
         };
 
-        let vis_str = match child.visibility() {
+        // Effective visibility = most restrictive of ancestor + self,
+        // matching Document::effective_visibility (Preview > Outline >
+        // Invisible). The eye icon and visibility_str reflect what the
+        // user actually sees on canvas, so a child of an invisible
+        // group renders an invisible eye even if the child's own
+        // setting is Preview.
+        let effective_vis = std::cmp::min(inherited_visibility, child.visibility());
+        let vis_str = match effective_vis {
             Visibility::Preview => "preview",
             Visibility::Outline => "outline",
             Visibility::Invisible => "invisible",
         };
-        let eye_icon = match child.visibility() {
+        let eye_icon = match effective_vis {
             Visibility::Preview => "eye_preview",
             Visibility::Outline => "eye_outline",
             Visibility::Invisible => "eye_invisible",
@@ -5492,7 +5500,11 @@ fn tree_flatten_rc_children(
 
         if !is_collapsed {
             if let Some(grandchildren) = child.children() {
-                tree_flatten_rc_children(grandchildren, depth + 1, &path, &current_layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, rows);
+                tree_flatten_rc_children(
+                    grandchildren, depth + 1, &path, &current_layer_color,
+                    selected_paths, collapsed_paths, panel_selection, renaming_path,
+                    effective_vis, rows,
+                );
             }
         }
     }
@@ -5556,7 +5568,15 @@ fn tree_flatten_layers(
 
         if !is_collapsed {
             if let Some(children) = elem.children() {
-                tree_flatten_rc_children(children, 1, &path, &layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, &mut rows);
+                // Inherit the layer's visibility into the child walk so
+                // descendants render the cascaded eye state (an
+                // invisible layer makes every child row's eye render
+                // invisible too).
+                tree_flatten_rc_children(
+                    children, 1, &path, &layer_color,
+                    selected_paths, collapsed_paths, panel_selection, renaming_path,
+                    elem.visibility(), &mut rows,
+                );
             }
         }
     }
