@@ -29,6 +29,81 @@ use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
 use crate::panels::panel_menu_state::{PanelMenuState, MenuBarState};
 use crate::panels::panel_menu_view::PanelMenuOverlay;
 
+/// JS bootstrap injected at App mount. Defines the appearance globals
+/// (JAS_BASE_THEME, JAS_ALL_APPEARANCES, JAS_APPEARANCES,
+/// activeAppearanceName) and the helper functions the menu_bar +
+/// app_state read via js_sys::eval (getAppearanceList,
+/// getActiveAppearance, applyAppearance, getAllAppearances). Dx
+/// ignores assets/index.html (see project_dioxus_assets memory), so
+/// without this the Appearance menu is empty and theme switching
+/// is a no-op. Mirrors the script block in assets/index.html.
+const APPEARANCE_BOOTSTRAP_JS: &str = r##"
+var JAS_BASE_THEME = {
+    colors: {
+        window_bg:"#2e2e2e", pane_bg:"#3c3c3c", pane_bg_dark:"#333333",
+        title_bar_bg:"#2a2a2a", title_bar_text:"#d9d9d9", border:"#555555",
+        text:"#cccccc", text_dim:"#999999", text_body:"#aaaaaa",
+        text_hint:"#777777", text_button:"#888888",
+        tab_active:"#4a4a4a", tab_inactive:"#353535", button_checked:"#505050",
+        accent:"#4a90d9", snap_preview:"rgba(50,120,220,200)",
+        handle_hover:"rgba(74,144,217,0.5)", pane_shadow:"rgba(0,0,0,0.3)"
+    }
+};
+var JAS_ALL_APPEARANCES = {
+    dark_gray: { label: "Dark Gray" },
+    medium_gray: {
+        label: "Medium Gray",
+        colors: {
+            window_bg:"#484848", pane_bg:"#565656", pane_bg_dark:"#4d4d4d",
+            title_bar_bg:"#404040", title_bar_text:"#e0e0e0", border:"#6a6a6a",
+            text:"#dddddd", text_dim:"#aaaaaa", text_body:"#bbbbbb",
+            text_hint:"#888888", text_button:"#999999",
+            tab_active:"#606060", tab_inactive:"#505050", button_checked:"#686868",
+            accent:"#5a9ee6", snap_preview:"rgba(90,158,230,200)",
+            handle_hover:"rgba(90,158,230,0.5)", pane_shadow:"rgba(0,0,0,0.25)"
+        }
+    },
+    light_gray: {
+        label: "Light Gray",
+        colors: {
+            window_bg:"#ececec", pane_bg:"#f0f0f0", pane_bg_dark:"#e6e6e6",
+            title_bar_bg:"#e0e0e0", title_bar_text:"#1d1d1f", border:"#d1d1d1",
+            text:"#1d1d1f", text_dim:"#86868b", text_body:"#3d3d3f",
+            text_hint:"#aeaeb2", text_button:"#6e6e73",
+            tab_active:"#ffffff", tab_inactive:"#e8e8e8", button_checked:"#d4d4d8",
+            accent:"#007aff", snap_preview:"rgba(0,122,255,180)",
+            handle_hover:"rgba(0,122,255,0.3)", pane_shadow:"rgba(0,0,0,0.08)"
+        }
+    }
+};
+var JAS_APPEARANCES = [
+    { name: "dark_gray", label: "Dark Gray" },
+    { name: "medium_gray", label: "Medium Gray" },
+    { name: "light_gray", label: "Light Gray" }
+];
+var JAS_ACTIVE_APPEARANCE = "dark_gray";
+var activeAppearanceName = "dark_gray";
+function applyAppearance(name) {
+    var overrides = JAS_ALL_APPEARANCES[name];
+    if (!overrides) {
+        var userApps = JSON.parse(localStorage.getItem("jas_appearances") || "{}");
+        overrides = userApps[name] || {};
+    }
+    var resolved = Object.assign({}, JAS_BASE_THEME.colors, overrides.colors || {});
+    var root = document.documentElement;
+    for (var k in resolved) {
+        if (resolved.hasOwnProperty(k)) {
+            root.style.setProperty("--jas-" + k.replace(/_/g, "-"), resolved[k]);
+        }
+    }
+    activeAppearanceName = name;
+}
+function getActiveAppearance() { return activeAppearanceName; }
+function getAppearanceList() { return JSON.stringify(JAS_APPEARANCES); }
+function getAllAppearances() { return JSON.stringify(JAS_ALL_APPEARANCES); }
+applyAppearance(activeAppearanceName);
+"##;
+
 /// Translate a yaml-declared cursor name into a value the browser
 /// recognizes as a CSS `cursor` keyword. Tool yaml uses semantic
 /// names (`open_hand`, `arrow`, `eyedropper`) that match each
@@ -132,6 +207,18 @@ fn YamlToolbarContent(revision: u64) -> Element {
 
 #[component]
 pub fn App() -> Element {
+    // Bootstrap the appearance JS that the index.html shipped, which
+    // dx ignores — see project_dioxus_assets memory note. Without this
+    // the Appearance menu is empty (getAppearanceList is undefined)
+    // and applyAppearance / getActiveAppearance are no-ops. Runs once
+    // at App mount, before any child components render.
+    use_hook(|| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = js_sys::eval(APPEARANCE_BOOTSTRAP_JS);
+        }
+    });
+
     let app = use_hook(|| Rc::new(RefCell::new(AppState::new())));
     let mut revision = use_signal(|| 0u64);
     let mut layout_revision = use_signal(|| 0u64);
