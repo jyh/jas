@@ -6469,7 +6469,17 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         })
                                         .unwrap_or(false);
                                     if is_container && !any_source_is_layer {
-                                        (target.clone(), 0usize, true)
+                                        // Container drop: indicator sits just below
+                                        // the row header; visually the new child
+                                        // appears at the top of the container's
+                                        // children. Children render in reverse doc
+                                        // order, so visually-top corresponds to the
+                                        // LAST index in the document children list.
+                                        let child_count = st.tab()
+                                            .and_then(|t| t.model.document().get_element(&target))
+                                            .and_then(|e| e.children().map(|c| c.len()))
+                                            .unwrap_or(0);
+                                        (target.clone(), child_count, true)
                                     } else {
                                         let parent = target[..target.len()-1].to_vec();
                                         let idx = *target.last().unwrap();
