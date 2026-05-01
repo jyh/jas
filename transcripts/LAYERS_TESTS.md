@@ -720,42 +720,42 @@ If any P0 here fails, stop and flag.
 
 ## Session J — Context menu (~5 min)
 
-- [ ] **LYR-210** [wired] Right-click a row opens the context menu.
+- [x] **LYR-210** [wired] Right-click a row opens the context menu.
       Do: Right-click any row.
       Expect: Menu appears with Options for Layer…, Duplicate, Delete
               Selection, Enter / Exit Isolation Mode, Flatten Artwork,
               Collect in New Layer.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-211** [wired] "Options for Layer…" enabled only on Layer rows.
+- [x] **LYR-211** [wired] "Options for Layer…" enabled only on Layer rows.
       Setup: Right-click a Group or Path row.
       Expect: Item dimmed.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-212** [wired] Duplicate clones panel selection in place.
+- [x] **LYR-212** [wired] Duplicate clones panel selection in place.
       Setup: A Rectangle selected.
       Do: Context → Duplicate.
       Expect: A copy appears immediately after; copy becomes the new
               selection.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-213** [wired] Delete Selection removes the selected rows.
+- [x] **LYR-213** [wired] Delete Selection removes the selected rows.
       Setup: 2 rows selected.
       Do: Context → Delete Selection.
       Expect: Both rows + descendants removed from document.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-214** [wired] Flatten Artwork enabled when selection has a Group.
+- [x] **LYR-214** [wired] Flatten Artwork enabled when selection has a Group.
       Setup: A Group selected.
       Expect: Item enabled.
       Setup: Only paths selected.
       Expect: Item dimmed.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-215** [wired] Collect in New Layer disabled inside isolation.
+- [x] **LYR-215** [wired] Collect in New Layer disabled inside isolation.
       Setup: Isolated.
       Expect: Item dimmed.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
