@@ -1432,9 +1432,11 @@ impl AppState {
         // Layer 1: canvas background (the pasteboard). Painted in
         // screen-space so it covers the viewport regardless of the
         // view transform applied below. Theme-pane gray matches the
-        // surrounding pane chrome; artboard rects paint white over
-        // the top of this in document-space.
-        ctx.set_fill_style_str("#3c3c3c");
+        // surrounding pane chrome (resolved from --jas-pane-bg so
+        // appearance switches propagate); artboard rects paint white
+        // over the top of this in document-space.
+        let pasteboard_bg = super::theme::css_var_value("jas-pane-bg", "#3c3c3c");
+        ctx.set_fill_style_str(&pasteboard_bg);
         ctx.fill_rect(0.0, 0.0, w, h);
 
         // Apply view transform: zoom + pan. The renderer draws in

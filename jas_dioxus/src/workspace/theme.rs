@@ -62,3 +62,25 @@ pub(crate) const THEME_WINDOW_BG: &str = "var(--jas-window-bg,#2e2e2e)";
 pub(crate) const THEME_TITLE_BAR_BG: &str = "var(--jas-title-bar-bg,#2a2a2a)";
 pub(crate) const THEME_TITLE_BAR_TEXT: &str = "var(--jas-title-bar-text,#d9d9d9)";
 pub(crate) const THEME_PANE_SHADOW: &str = "var(--jas-pane-shadow,rgba(0,0,0,0.3))";
+
+/// Resolve a CSS custom property name (without the leading `--`) to
+/// its current computed value on the document root, falling back to
+/// `default` when the variable is not set or we are not running in
+/// a browser. Used by canvas drawing code which can't pass `var()`
+/// to set_fill_style_str like the DOM can.
+pub(crate) fn css_var_value(name: &str, default: &str) -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let expr = format!(
+            "getComputedStyle(document.documentElement).getPropertyValue('--{}').trim()",
+            name,
+        );
+        if let Some(s) = js_sys::eval(&expr).ok().and_then(|v| v.as_string()) {
+            if !s.is_empty() {
+                return s;
+            }
+        }
+    }
+    let _ = name;
+    default.to_string()
+}
