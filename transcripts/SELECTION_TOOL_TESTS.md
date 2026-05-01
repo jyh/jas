@@ -667,26 +667,30 @@ If any P0 here fails, stop and flag.
 
 **P2**
 
-- [ ] **SEL-190** [wired] Marquee overlay contrasts on Dark appearance.
+- [x] **SEL-190** [wired] Marquee overlay contrasts on Dark appearance.
       Setup: Dark theme.
       Do: Begin a marquee drag.
       Expect: Blue dashed rectangle is clearly visible against dark
               canvas background.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: appearance menu was empty (assets/index.html ignored
+        by dx); now bootstrapped from app.rs. Pasteboard background was
+        hardcoded "#3c3c3c"; now reads --jas-pane-bg via theme::css_var_value
+        so it tracks the active appearance.
 
-- [ ] **SEL-191** [wired] CP overlay readable on Medium Gray.
+- [x] **SEL-191** [wired] CP overlay readable on Medium Gray.
       Setup: Switch to Medium Gray.
       Do: Select a curved path with Partial Selection.
       Expect: Anchor squares and handle bars remain visible; no
               unreadable same-color-on-same-color regressions.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-192** [wired] CP overlay readable on Light Gray.
+- [x] **SEL-192** [wired] CP overlay readable on Light Gray.
       Setup: Switch to Light Gray.
       Do: Select a curved path with Partial Selection.
       Expect: Same readability; selected-vs-unselected anchor
               distinction still clear.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
