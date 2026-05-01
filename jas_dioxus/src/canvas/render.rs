@@ -2011,14 +2011,25 @@ pub fn render(
             }
         }
     } else if let Some(iso_path) = layers_isolation_path {
-        // Layers-panel isolation: render the full document at low alpha
-        // (dimming non-isolated content per LYR-181), then re-render the
-        // isolated subtree on top at full alpha.
-        ctx.set_global_alpha(0.1);
+        // Layers-panel isolation: render the full document, paint a
+        // screen-space dim overlay over the whole viewport, then
+        // re-render the isolated subtree on top at full alpha. Per
+        // LYR-181 the visual is "non-isolated content dimmed ~10%".
+        // We can't use set_global_alpha around the first pass because
+        // draw_element_body resets globalAlpha to the element's own
+        // opacity for each element.
         for layer in &doc.layers {
             draw_element(ctx, layer, Visibility::Preview, precision);
         }
+        ctx.save();
+        ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+        ctx.set_global_alpha(0.85);
+        ctx.set_fill_style_str(
+            &super::super::workspace::theme::css_var_value("jas-pane-bg", "#3c3c3c")
+        );
+        ctx.fill_rect(0.0, 0.0, width, height);
         ctx.set_global_alpha(1.0);
+        ctx.restore();
         if let Some(iso_elem) = doc.get_element(&iso_path.to_vec()) {
             draw_element(ctx, iso_elem, Visibility::Preview, precision);
         }
