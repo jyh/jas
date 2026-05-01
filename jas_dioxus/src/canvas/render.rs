@@ -816,9 +816,15 @@ fn draw_element_body(
     }
     let outline = effective == Visibility::Outline;
 
+    // Capture the inherited alpha BEFORE save(); save+set replaces
+    // it, but we want this element's effective alpha to MULTIPLY into
+    // any outer alpha (parent group opacity, isolation dim) rather
+    // than replace it. ctx.save() saves the current alpha; ctx.restore()
+    // pops it back when this element finishes.
+    let parent_alpha = ctx.global_alpha();
     ctx.save();
     apply_transform(ctx, elem.transform());
-    let base_alpha = elem.opacity();
+    let base_alpha = parent_alpha * elem.opacity();
     ctx.set_global_alpha(base_alpha);
     ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
 
@@ -2012,28 +2018,16 @@ pub fn render(
         }
     } else if let Some(iso_path) = layers_isolation_path {
         // Layers-panel isolation visual (LYR-181):
-        //   1. Render full document.
-        //   2. Paint a screen-space dim overlay over the whole viewport.
-        //   3. Re-paint artboard fills so artboards stay un-dimmed
-        //      (the user reads the artboard rectangle as part of the
-        //      workspace chrome, not as content).
-        //   4. Re-render the isolated subtree on top at full alpha.
-        // Element-level globalAlpha doesn't compose through draw_element_body
-        // (it resets globalAlpha to each element's own opacity), so a
-        // composite overlay is the only viable dim approach.
+        //   - Non-isolated elements render at low alpha (parent_alpha
+        //     multiplies through draw_element_body).
+        //   - Isolated subtree paints over them at full alpha.
+        // Artboard fills (already painted above) stay full strength.
+        ctx.save();
+        ctx.set_global_alpha(0.15);
         for layer in &doc.layers {
             draw_element(ctx, layer, Visibility::Preview, precision);
         }
-        ctx.save();
-        ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-        ctx.set_global_alpha(0.85);
-        ctx.set_fill_style_str(
-            &super::super::workspace::theme::css_var_value("jas-pane-bg", "#3c3c3c")
-        );
-        ctx.fill_rect(0.0, 0.0, width, height);
-        ctx.set_global_alpha(1.0);
         ctx.restore();
-        draw_artboard_fills(ctx, doc);
         if let Some(iso_elem) = doc.get_element(&iso_path.to_vec()) {
             draw_element(ctx, iso_elem, Visibility::Preview, precision);
         }
