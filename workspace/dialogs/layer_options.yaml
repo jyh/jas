@@ -215,7 +215,8 @@ layer_options:
                   checked: "dialog.print"
                   disabled: "true"
 
-      # Preview + Dim Images to
+      # Preview (alone on its own row so it lines up with the Show /
+      # Print row above)
       - type: row
         children:
           - type: col
@@ -230,8 +231,16 @@ layer_options:
                 bind:
                   checked: "dialog.preview"
                   disabled: "not dialog.show"
+
+      # Dim Images to: ___ %  (own row — needs full width for toggle
+      # label + numeric input + "%" suffix)
+      - type: row
+        children:
           - type: col
             col: 3
+            children: []
+          - type: col
+            col: 9
             children:
               - type: container
                 layout: row
@@ -246,11 +255,10 @@ layer_options:
                     type: number_input
                     min: 0
                     max: 100
-                    # min_width prevents flex-shrink from collapsing the
-                    # input below the legible 3-digit + spinner width
-                    # when the parent row is space-constrained. width
-                    # alone wasn't enough — render_number_input applies
-                    # min-width:0 inline.
+                    # min_width + flex_shrink:0 keep the input legible
+                    # at 3 digits + spinner; width alone gets eaten by
+                    # the min-width:0 that render_number_input applies
+                    # inline.
                     style: { width: 60, min_width: 60, flex_shrink: 0 }
                     bind:
                       value: "dialog.dim_percentage"
