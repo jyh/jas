@@ -5891,6 +5891,17 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     kb_rev += 1;
                 });
             }
+            dioxus::prelude::Key::Escape => {
+                // Cancel an in-progress drag (LYR-131). Clearing the
+                // source / target signals leaves the document untouched
+                // and removes the drop indicator.
+                spawn(async move {
+                    let mut st = a.borrow_mut();
+                    st.layers_drag_source = None;
+                    st.layers_drag_target = None;
+                    kb_rev += 1;
+                });
+            }
             dioxus::prelude::Key::F2 => {
                 // F2 starts inline rename on the active row. Without a
                 // separate focus concept, "active" is the last panel-
