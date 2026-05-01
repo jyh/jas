@@ -26325,10 +26325,20 @@
                     }
                   }
                 ]
-              },
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
               {
                 "type": "col",
                 "col": 3,
+                "children": []
+              },
+              {
+                "type": "col",
+                "col": 9,
                 "children": [
                   {
                     "type": "container",
