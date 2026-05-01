@@ -3435,6 +3435,40 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         }
                         snap
                     });
+                    // Evaluate string-valued params against the dialog
+                    // state so `params: { show: "dialog.show" }` resolves
+                    // to the boolean (or whatever type) the dialog field
+                    // actually holds, not the literal expression text.
+                    // Without this the action sees param.show = "dialog.show"
+                    // (a non-empty string) which is always truthy — show=false
+                    // never propagated to the action's effects.
+                    let evaluated_params: serde_json::Map<String, serde_json::Value>
+                        = if let Some(ref snap) = dialog_snapshot {
+                            let mut dialog_obj = serde_json::Map::new();
+                            for (k, v) in snap {
+                                if !k.starts_with("_param_") {
+                                    dialog_obj.insert(k.clone(), v.clone());
+                                }
+                            }
+                            let eval_ctx = serde_json::json!({
+                                "dialog": dialog_obj,
+                                "param": params,
+                            });
+                            let mut out = serde_json::Map::new();
+                            for (k, v) in &params {
+                                let resolved = if let Some(s) = v.as_str() {
+                                    super::effects::value_to_json(
+                                        &super::expr::eval(s, &eval_ctx)
+                                    )
+                                } else {
+                                    v.clone()
+                                };
+                                out.insert(k.clone(), resolved);
+                            }
+                            out
+                        } else {
+                            params.clone()
+                        };
                     let mut deferred;
                     {
                         let mut st = app.borrow_mut();
@@ -3442,7 +3476,7 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         if let Some(ref snap) = dialog_snapshot {
                             apply_dialog_confirm(&action, snap, &mut st);
                         }
-                        deferred = dispatch_action(&action, &params, &mut st);
+                        deferred = dispatch_action(&action, &evaluated_params, &mut st);
                     }
                     for eff in &deferred {
                         if eff.get("close_dialog").is_some() {
@@ -7827,6 +7861,27 @@ mod tests {
         assert_eq!(layer.name, "Renamed");
         assert!(layer.common.locked);
         assert_eq!(layer.common.visibility, Visibility::Outline);
+    }
+
+    #[test]
+    fn layer_options_confirm_show_off_sets_invisible() {
+        // LYR-244: Show=false should set the layer's visibility to
+        // Invisible regardless of preview.
+        let mut st = make_state_with_layers(vec![
+            ("L".into(), Visibility::Preview, false),
+        ]);
+        let mut params = serde_json::Map::new();
+        params.insert("layer_id".into(), serde_json::Value::String("0".into()));
+        params.insert("name".into(), serde_json::Value::String("L".into()));
+        params.insert("lock".into(), serde_json::Value::Bool(false));
+        params.insert("show".into(), serde_json::Value::Bool(false));
+        params.insert("preview".into(), serde_json::Value::Bool(true));
+        dispatch_action("layer_options_confirm", &params, &mut st);
+        assert_eq!(
+            tab_layer(&st, 0).common.visibility,
+            Visibility::Invisible,
+            "show=false should map to Invisible visibility",
+        );
     }
 
     #[test]
