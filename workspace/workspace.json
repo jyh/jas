@@ -19933,8 +19933,22 @@
                                 "doc.preview.restore": {}
                               },
                               {
+                                "doc.copy_selection": {
+                                  "dx": "event.doc_x - tool.partial_selection.drag_start_x",
+                                  "dy": "event.doc_y - tool.partial_selection.drag_start_y"
+                                }
+                              },
+                              {
                                 "set": {
                                   "tool.partial_selection.alt_preview": "true"
+                                }
+                              }
+                            ],
+                            "else": [
+                              {
+                                "doc.translate_selection": {
+                                  "dx": "event.doc_x - tool.partial_selection.drag_last_x",
+                                  "dy": "event.doc_y - tool.partial_selection.drag_last_y"
                                 }
                               }
                             ]
@@ -19944,6 +19958,9 @@
                           {
                             "if": "tool.partial_selection.alt_preview",
                             "then": [
+                              {
+                                "doc.preview.restore": {}
+                              },
                               {
                                 "doc.translate_selection": {
                                   "dx": "event.doc_x - tool.partial_selection.drag_start_x",
@@ -20039,7 +20056,7 @@
             ]
           },
           {
-            "if": "tool.partial_selection.mode == 'moving' and not tool.partial_selection.alt_held and event.modifiers.alt",
+            "if": "tool.partial_selection.mode == 'moving' and not tool.partial_selection.alt_held and event.modifiers.alt and not tool.partial_selection.alt_preview",
             "then": [
               {
                 "doc.copy_selection": {
@@ -21770,8 +21787,22 @@
                             "doc.preview.restore": {}
                           },
                           {
+                            "doc.copy_selection": {
+                              "dx": "event.doc_x - tool.selection.press_doc_x",
+                              "dy": "event.doc_y - tool.selection.press_doc_y"
+                            }
+                          },
+                          {
                             "set": {
                               "tool.selection.alt_preview": "true"
+                            }
+                          }
+                        ],
+                        "else": [
+                          {
+                            "doc.translate_selection": {
+                              "dx": "event.doc_x - tool.selection.drag_start_x",
+                              "dy": "event.doc_y - tool.selection.drag_start_y"
                             }
                           }
                         ]
@@ -21781,6 +21812,9 @@
                       {
                         "if": "tool.selection.alt_preview",
                         "then": [
+                          {
+                            "doc.preview.restore": {}
+                          },
                           {
                             "doc.translate_selection": {
                               "dx": "event.doc_x - tool.selection.press_doc_x",
@@ -21835,7 +21869,7 @@
             ]
           },
           {
-            "if": "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt",
+            "if": "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt and not tool.selection.alt_preview",
             "then": [
               {
                 "doc.copy_selection": {
@@ -21898,27 +21932,17 @@
           }
         ]
       },
-      "overlay": [
-        {
-          "if": "tool.selection.mode == 'marquee'",
-          "render": {
-            "type": "rect",
-            "x": "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)",
-            "y": "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)",
-            "width": "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)",
-            "height": "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)",
-            "style": "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
-          }
-        },
-        {
-          "if": "tool.selection.mode == 'drag_move' and tool.selection.alt_preview",
-          "render": {
-            "type": "selection_translate_ghost",
-            "dx": "tool.selection.drag_start_x - tool.selection.press_doc_x",
-            "dy": "tool.selection.drag_start_y - tool.selection.press_doc_y"
-          }
+      "overlay": {
+        "if": "tool.selection.mode == 'marquee'",
+        "render": {
+          "type": "rect",
+          "x": "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)",
+          "y": "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)",
+          "width": "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)",
+          "height": "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)",
+          "style": "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
         }
-      ]
+      }
     },
     "shear": {
       "id": "shear",

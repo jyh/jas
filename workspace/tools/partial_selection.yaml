@@ -143,24 +143,38 @@ handlers:
                         dy: "event.doc_y - tool.partial_selection.drag_last_y"
               else:
                 # (B) no-alt-at-press: live preview transitions.
-                # Nested if/else (not three sibling ifs) so the "set"
-                # mutations inside a branch don't cause sibling branches
-                # to also fire in the same frame.
+                # The "preview" is a REAL copy of the selection in the
+                # document — same visual fidelity as the at-press copy
+                # path, not a wireframe ghost. preview.restore rolls
+                # back the copy on Alt-release; doc.snapshot taken at
+                # threshold makes the whole gesture one undo step.
                 - if: "event.modifiers.alt"
                   then:
                     - if: "not tool.partial_selection.alt_preview"
                       then:
-                        # Entering preview: revert any translations so
-                        # the original snaps back to the press position.
+                        # Entering preview: snap originals back to
+                        # press, then create a real copy at the cursor
+                        # so the user sees a moving rendered element.
+                        # copy_selection switches selection to the copy
+                        # so subsequent translates move the copy.
                         - "doc.preview.restore": {}
+                        - "doc.copy_selection":
+                            dx: "event.doc_x - tool.partial_selection.drag_start_x"
+                            dy: "event.doc_y - tool.partial_selection.drag_start_y"
                         - set: { tool.partial_selection.alt_preview: "true" }
-                    # else: already in preview — original stays put,
-                    # no translate this frame.
+                      else:
+                        # Steady-in-preview: translate the copy with
+                        # the cursor (delta from drag_last).
+                        - "doc.translate_selection":
+                            dx: "event.doc_x - tool.partial_selection.drag_last_x"
+                            dy: "event.doc_y - tool.partial_selection.drag_last_y"
                   else:
                     - if: "tool.partial_selection.alt_preview"
                       then:
-                        # Exiting preview: re-apply cumulative translate
-                        # from press so the original lands at the cursor.
+                        # Exiting preview: restore (removes copy,
+                        # original returns to press), then translate
+                        # original to current cursor.
+                        - "doc.preview.restore": {}
                         - "doc.translate_selection":
                             dx: "event.doc_x - tool.partial_selection.drag_start_x"
                             dy: "event.doc_y - tool.partial_selection.drag_start_y"
@@ -197,13 +211,13 @@ handlers:
             x2: "tool.partial_selection.doc_marquee_cur_x"
             y2: "tool.partial_selection.doc_marquee_cur_y"
             additive: "event.modifiers.shift"
-    # Mid-drag Alt commit: if the drag started without Alt and Alt is
-    # still held at release, commit a copy at the cursor's release
-    # position. The original is currently at the press position
-    # (preview-restored during the alt_preview transition); copy_selection
-    # adds the new copies offset by (cursor - press) so they land at
-    # the cursor.
-    - if: "tool.partial_selection.mode == 'moving' and not tool.partial_selection.alt_held and event.modifiers.alt"
+    # Mid-drag Alt commit edge case: user pressed Alt AFTER the last
+    # mousemove and released the mouse without moving — so alt_preview
+    # is still false (no transition fired) but Alt is held now. Create
+    # the copy here. If alt_preview is already true the copy was made
+    # on the alt-press transition and is now sitting at the cursor;
+    # nothing more to do.
+    - if: "tool.partial_selection.mode == 'moving' and not tool.partial_selection.alt_held and event.modifiers.alt and not tool.partial_selection.alt_preview"
       then:
         - "doc.copy_selection":
             dx: "event.doc_x - tool.partial_selection.drag_start_x"
