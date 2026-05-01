@@ -245,55 +245,59 @@ If any P0 here fails, stop and flag.
 
 **P1**
 
-- [ ] **LYR-030** [wired] Eye click cycles preview → outline → invisible → preview.
+- [x] **LYR-030** [wired] Eye click cycles preview → outline → invisible → preview.
       Setup: Element row, default visibility (preview).
       Do: Click eye three times.
       Expect: After 1st click: outline (canvas wireframe). After 2nd:
               invisible. After 3rd: back to preview.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-031** [wired] Outline mode renders a wireframe on canvas.
+- [x] **LYR-031** [wired] Outline mode renders a wireframe on canvas.
       Setup: Filled rectangle visible.
       Do: Cycle to outline.
       Expect: Fill disappears; only the path outline shows on canvas.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-032** [wired] Invisible mode hides the element on canvas.
+- [x] **LYR-032** [wired] Invisible mode hides the element on canvas.
       Setup: Element visible.
       Do: Cycle to invisible.
       Expect: Element disappears from canvas; row still in panel.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-033** [wired] Visibility cascade: container change applies to descendants.
+- [x] **LYR-033** [wired] Visibility cascade: container change applies to descendants.
       Setup: A Group containing 3 rectangles, all visible.
       Do: Click the group's eye to invisible.
       Expect: All 3 rectangles disappear from canvas; their row eyes
               reflect inherited invisibility.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: descendant row eyes used child.visibility() directly
+        instead of cascaded effective visibility, so the canvas hid
+        the children but the row eyes still showed preview. Fix passes
+        an inherited_visibility down through tree_flatten_rc_children.
 
-- [ ] **LYR-034** [wired] Alt-click eye solos the row's siblings.
+- [x] **LYR-034** [wired] Alt-click eye solos the row's siblings.
       Setup: 3 visible siblings.
       Do: Alt-click the second row's eye.
       Expect: Sibling 1 + 3 become invisible; previous visibility states
               saved internally for restore.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-035** [wired] Second Alt-click on the same row unsolos siblings.
+- [x] **LYR-035** [wired] Second Alt-click on the same row unsolos siblings.
       Setup: From LYR-034, sibling 1 + 3 solo-hidden.
       Do: Alt-click sibling 2's eye again.
       Expect: Siblings 1 + 3 restored to their pre-solo visibility.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-036** [wired] Manual visibility change during solo prevents auto-restore.
+- [x] **LYR-036** [wired] Manual visibility change during solo prevents auto-restore.
       Setup: From LYR-034, sibling 1 + 3 solo-hidden.
       Do: Click sibling 1's eye to visible. Then Alt-click sibling 2 again.
       Expect: Sibling 1 stays visible (manual change wins); sibling 3
               restores to its pre-solo state.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P2**
 
-- [ ] **LYR-040** [wired] Cycle works on group rows with cascade.
+- [x] **LYR-040** [wired] Cycle works on group rows with cascade.
       Setup: A group at preview.
       Do: Click group eye.
       Expect: Group → outline; descendants render in outline; cycle
