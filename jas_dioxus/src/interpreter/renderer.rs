@@ -3436,23 +3436,27 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         snap
                     });
                     // Evaluate string-valued params against the dialog
-                    // state so `params: { show: "dialog.show" }` resolves
-                    // to the boolean (or whatever type) the dialog field
-                    // actually holds, not the literal expression text.
-                    // Without this the action sees param.show = "dialog.show"
-                    // (a non-empty string) which is always truthy — show=false
-                    // never propagated to the action's effects.
+                    // state + the DIALOG's own params (not the button's
+                    // own params) so `params: { show: "dialog.show",
+                    // layer_id: "param.layer_id" }` resolves the strings
+                    // to the values the user actually selected. Without
+                    // this the action sees param.show = "dialog.show"
+                    // (a non-empty string), always truthy — show=false
+                    // never propagated.
                     let evaluated_params: serde_json::Map<String, serde_json::Value>
                         = if let Some(ref snap) = dialog_snapshot {
                             let mut dialog_obj = serde_json::Map::new();
+                            let mut dialog_params_obj = serde_json::Map::new();
                             for (k, v) in snap {
-                                if !k.starts_with("_param_") {
+                                if let Some(stripped) = k.strip_prefix("_param_") {
+                                    dialog_params_obj.insert(stripped.to_string(), v.clone());
+                                } else {
                                     dialog_obj.insert(k.clone(), v.clone());
                                 }
                             }
                             let eval_ctx = serde_json::json!({
                                 "dialog": dialog_obj,
-                                "param": params,
+                                "param": dialog_params_obj,
                             });
                             let mut out = serde_json::Map::new();
                             for (k, v) in &params {
