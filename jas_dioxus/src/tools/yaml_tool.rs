@@ -593,9 +593,6 @@ impl CanvasTool for YamlTool {
                 "marquee_rect" => {
                     draw_marquee_rect_overlay(ctx, render, &eval_ctx);
                 }
-                "selection_translate_ghost" => {
-                    draw_selection_translate_ghost(ctx, render, &eval_ctx, model);
-                }
                 "artboard_resize_handles" => {
                     draw_artboard_resize_handles(ctx, render, &eval_ctx, model);
                 }
@@ -760,45 +757,6 @@ fn draw_artboard_resize_handles(
 /// Phase 1.4 implementation: simple stroked rectangle in theme accent
 /// color; refinements (handle previews on the outline, dimension
 /// readout) are phase 2.
-/// Render dashed ghost outlines around each selected element,
-/// translated by (dx, dy) in document space. Used by the
-/// Selection tool's mid-drag Alt-preview to show where the
-/// would-be copy will land while the originals stay put at the
-/// press position.
-fn draw_selection_translate_ghost(
-    ctx: &CanvasRenderingContext2d,
-    render: &serde_json::Value,
-    eval_ctx: &serde_json::Value,
-    model: &crate::document::model::Model,
-) {
-    let dx = eval_number_field(eval_ctx, render.get("dx"));
-    let dy = eval_number_field(eval_ctx, render.get("dy"));
-    let zoom = model.zoom_level;
-    let offx = model.view_offset_x;
-    let offy = model.view_offset_y;
-    let doc = model.document();
-    ctx.set_stroke_style_str("rgba(0, 120, 255, 0.9)");
-    ctx.set_line_width(1.0);
-    // 4 px on / 3 px off dash pattern -- distinct enough from the
-    // solid selection bounds without being noisy.
-    let dash = js_sys::Array::new();
-    dash.push(&wasm_bindgen::JsValue::from_f64(4.0));
-    dash.push(&wasm_bindgen::JsValue::from_f64(3.0));
-    let _ = ctx.set_line_dash(&dash);
-    for sel in &doc.selection {
-        let Some(elem) = doc.get_element(&sel.path) else { continue; };
-        let (bx, by, bw, bh) = elem.bounds();
-        let vx = (bx + dx) * zoom + offx;
-        let vy = (by + dy) * zoom + offy;
-        let vw = bw * zoom;
-        let vh = bh * zoom;
-        ctx.stroke_rect(vx, vy, vw, vh);
-    }
-    // Reset dash for subsequent overlay layers.
-    let empty = js_sys::Array::new();
-    let _ = ctx.set_line_dash(&empty);
-}
-
 fn draw_artboard_outline_preview(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
@@ -3200,6 +3158,40 @@ mod tests {
     }
 
     #[test]
+    fn partial_selection_parity_mid_drag_alt_preview_shows_real_copy() {
+        // During the mid-drag alt-preview phase, the document should
+        // contain BOTH the original (snapped back to press) AND a real
+        // copy at the cursor — so the user sees a moving rendered
+        // element, not a bounding-box ghost. ENH-002 follow-up: the
+        // user requested visual parity with the at-press alt path.
+        let Some(mut tool) = partial_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_element();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let n_before =
+            model.document().layers[0].children().unwrap().len();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 5.0, 0.0, false, false, true);
+        // Alt pressed mid-drag — enter preview.
+        tool.on_move(&mut model, 30.0, 0.0, false, true, true);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            n_before + 1,
+            "during preview the document holds original + real copy",
+        );
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 0.0, "original snapped back to press");
+        } else {
+            panic!("expected Rect at index 0 (original)");
+        }
+        if let Element::Rect(r) = &*children[1] {
+            assert_eq!(r.x, 30.0, "copy at cursor delta from press");
+        } else {
+            panic!("expected Rect at index 1 (live copy)");
+        }
+    }
+
+    #[test]
     fn partial_selection_parity_mid_drag_alt_released_before_mouseup_no_copy() {
         // Press WITHOUT Alt, drag past threshold, press Alt mid-drag,
         // RELEASE Alt before mouseup. Should be a normal move — the
@@ -4613,6 +4605,44 @@ mod tests {
             assert_eq!(r.stroke, Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0)));
         } else {
             panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn selection_parity_mid_drag_alt_preview_shows_real_copy() {
+        // Selection-tool counterpart: during alt-preview, doc must
+        // contain original (snapped to press) + real copy at cursor.
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let n_before =
+            model.document().layers[0].children().unwrap().len();
+        tool.on_press(&mut model, 60.0, 60.0, false, false);
+        tool.on_move(&mut model, 65.0, 65.0, false, false, true);
+        // Alt pressed mid-drag — enter preview.
+        tool.on_move(&mut model, 80.0, 70.0, false, true, true);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            n_before + 1,
+            "during preview the document holds original + real copy",
+        );
+        // Original was at (50, 50); preview restores it to (50, 50).
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 50.0, "original snapped back to press");
+            assert_eq!(r.y, 50.0, "original y restored");
+        } else {
+            panic!("expected Rect at index 0 (original)");
+        }
+        // Copy at press(60,60) + (cursor - press)(20,10) = (70,60) but
+        // the rect's x/y is (50,50) + (cursor - press)(20,10)=(70,60).
+        // Press was at (60,60), cursor is (80,70), delta=(20,10).
+        // Original sits at (50,50); copy sits at (50+20, 50+10) = (70, 60).
+        if let Element::Rect(r) = &*children[1] {
+            assert_eq!(r.x, 70.0, "copy x at original + (cursor - press)");
+            assert_eq!(r.y, 60.0, "copy y at original + (cursor - press)");
+        } else {
+            panic!("expected Rect at index 1 (live copy)");
         }
     }
 

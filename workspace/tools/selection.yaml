@@ -178,27 +178,36 @@ handlers:
             - set: { tool.selection.drag_start_y: "event.doc_y" }
           else:
             # (B) no-alt-at-press: live preview transitions.
-            # Nested if/else (not three sibling ifs) so the "set"
-            # mutations inside one branch do not cause sibling
-            # branches to also fire in the same frame -- that bug
-            # caused exit-preview to apply both the cumulative
-            # translate AND a delta-from-last translate, doubling
-            # the move on the alt-release frame.
+            # The "preview" is a REAL copy of the selection in the
+            # document, not a wireframe ghost — visual parity with
+            # the at-press copy path. preview.restore rolls back the
+            # copy on Alt-release; doc.snapshot taken at mousedown
+            # makes the whole gesture one undo step.
             - if: "event.modifiers.alt"
               then:
                 - if: "not tool.selection.alt_preview"
                   then:
-                    # Entering preview: revert any translations so
-                    # the original snaps back to the press position.
+                    # Entering preview: snap originals back to press,
+                    # then create a real copy at the cursor so the
+                    # user sees a moving rendered element.
                     - "doc.preview.restore": {}
+                    - "doc.copy_selection":
+                        dx: "event.doc_x - tool.selection.press_doc_x"
+                        dy: "event.doc_y - tool.selection.press_doc_y"
                     - set: { tool.selection.alt_preview: "true" }
-                # else: already in preview -- original stays put.
+                  else:
+                    # Steady-in-preview: translate the copy with the
+                    # cursor (delta from drag_start).
+                    - "doc.translate_selection":
+                        dx: "event.doc_x - tool.selection.drag_start_x"
+                        dy: "event.doc_y - tool.selection.drag_start_y"
               else:
                 - if: "tool.selection.alt_preview"
                   then:
-                    # Exiting preview: re-apply cumulative translate
-                    # from press so the original lands at the cursor
-                    # as if the preview never happened.
+                    # Exiting preview: restore (removes copy, original
+                    # returns to press), then translate original to
+                    # current cursor.
+                    - "doc.preview.restore": {}
                     - "doc.translate_selection":
                         dx: "event.doc_x - tool.selection.press_doc_x"
                         dy: "event.doc_y - tool.selection.press_doc_y"
@@ -222,13 +231,13 @@ handlers:
             x2: "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)"
             y2: "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)"
             additive: "event.modifiers.shift"
-    # Mid-drag Alt commit: if we were in the no-alt-at-press path
-    # AND Alt is still held at release, commit a copy at the
-    # cursor's release position. The original is currently at the
-    # press position (preview-restored during the alt_preview
-    # transition); doc.copy_selection adds the new copies offset
-    # by (cursor - press) so they land at the cursor.
-    - if: "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt"
+    # Mid-drag Alt commit edge case: user pressed Alt AFTER the last
+    # mousemove and released the mouse without moving — alt_preview
+    # never transitioned to true so the live copy was never created.
+    # Create it here. If alt_preview is already true the copy was
+    # made on the alt-press transition and is now sitting at the
+    # cursor; nothing more to do.
+    - if: "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt and not tool.selection.alt_preview"
       then:
         - "doc.copy_selection":
             dx: "event.doc_x - tool.selection.press_doc_x"
@@ -257,25 +266,16 @@ handlers:
         - set: { tool.selection.alt_preview: "false" }
         - set: { tool.selection.copied: "false" }
 
-# Tool-overlay rendering. The overlay block accepts either a
-# single {if, render} entry or a list of them; using the list
-# form here so we can render the marquee rect AND the mid-drag
-# Alt-preview ghost from the same tool.
+# Tool-overlay rendering. Mid-drag Alt-preview now creates a real
+# moving copy in the document (see on_mousemove (B) branch) instead
+# of a wireframe ghost — visual parity with the at-press copy path —
+# so only the marquee rect needs an overlay block here.
 overlay:
-  - if: "tool.selection.mode == 'marquee'"
-    render:
-      type: rect
-      x: "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)"
-      y: "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)"
-      width: "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)"
-      height: "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)"
-      style: "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
-  # Mid-drag Alt-preview ghost: the originals snap back to the
-  # press position; this overlay shows where the would-be copies
-  # will land if the user releases the mouse with Alt still
-  # held. Translation = cursor - press, in document space.
-  - if: "tool.selection.mode == 'drag_move' and tool.selection.alt_preview"
-    render:
-      type: selection_translate_ghost
-      dx: "tool.selection.drag_start_x - tool.selection.press_doc_x"
-      dy: "tool.selection.drag_start_y - tool.selection.press_doc_y"
+  if: "tool.selection.mode == 'marquee'"
+  render:
+    type: rect
+    x: "min(tool.selection.marquee_start_x, tool.selection.marquee_end_x)"
+    y: "min(tool.selection.marquee_start_y, tool.selection.marquee_end_y)"
+    width: "abs(tool.selection.marquee_end_x - tool.selection.marquee_start_x)"
+    height: "abs(tool.selection.marquee_end_y - tool.selection.marquee_start_y)"
+    style: "stroke: #4a90d9; stroke-width: 1; stroke-dasharray: 4 4; fill: rgba(74,144,217,0.08);"
