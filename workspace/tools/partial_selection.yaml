@@ -47,6 +47,13 @@ state:
   snapshotted: { default: false }
   copied: { default: false }
   alt_held: { default: false }
+  # Mid-drag Alt preview state: when the user starts a plain CP drag
+  # and presses Alt mid-drag, the original "snaps back" to its press
+  # position via doc.preview.restore and we hold a "potential copy"
+  # mode. Releasing Alt resumes the move; releasing the mouse with
+  # Alt still held commits a copy at the cursor's release position.
+  # Mirrors selection.yaml's mid-drag-Alt flow.
+  alt_preview: { default: false }
   # Latched by probe_partial_hit when a handle is hit.
   handle_path: { default: null }
   handle_anchor_idx: { default: 0 }
@@ -86,6 +93,7 @@ handlers:
         - set: { tool.partial_selection.snapshotted: "false" }
         - set: { tool.partial_selection.copied: "false" }
         - set: { tool.partial_selection.alt_held: "event.modifiers.alt" }
+        - set: { tool.partial_selection.alt_preview: "false" }
 
   on_mousemove:
     - if: "tool.partial_selection.mode == 'marquee'"
@@ -98,23 +106,70 @@ handlers:
     - if: "tool.partial_selection.mode == 'moving_pending' or tool.partial_selection.mode == 'moving'"
       then:
         # First move past DRAG_THRESHOLD (4 px doc) snapshots + transitions.
+        # doc.preview.capture pairs with the snapshot so the mid-drag-Alt
+        # preview can revert just the live translation without touching
+        # the undo stack.
         - if: "not tool.partial_selection.snapshotted and hypot(event.doc_x - tool.partial_selection.drag_start_x, event.doc_y - tool.partial_selection.drag_start_y) > 4"
           then:
             - "doc.snapshot": {}
+            - "doc.preview.capture": {}
             - set: { tool.partial_selection.snapshotted: "true" }
             - set: { tool.partial_selection.mode: "'moving'" }
         - if: "tool.partial_selection.mode == 'moving'"
           then:
-            - if: "tool.partial_selection.alt_held and not tool.partial_selection.copied"
+            # Two gesture flavors mirror selection.yaml:
+            #
+            # (A) Alt held at mousedown — copy-on-first-move semantics.
+            #     Releasing Alt mid-drag does not flip back to translate.
+            #
+            # (B) No Alt at mousedown — normal translate with mid-drag
+            #     Alt-preview support. Pressing Alt mid-drag snaps the
+            #     original back to the press position via preview restore.
+            #     Releasing Alt resumes the translate from the cursor.
+            #     Releasing the mouse with Alt held commits the copy in
+            #     on_mouseup.
+            - if: "tool.partial_selection.alt_held"
               then:
-                - "doc.copy_selection":
-                    dx: "event.doc_x - tool.partial_selection.drag_last_x"
-                    dy: "event.doc_y - tool.partial_selection.drag_last_y"
-                - set: { tool.partial_selection.copied: "true" }
+                # (A) at-press copy path
+                - if: "not tool.partial_selection.copied"
+                  then:
+                    - "doc.copy_selection":
+                        dx: "event.doc_x - tool.partial_selection.drag_last_x"
+                        dy: "event.doc_y - tool.partial_selection.drag_last_y"
+                    - set: { tool.partial_selection.copied: "true" }
+                  else:
+                    - "doc.translate_selection":
+                        dx: "event.doc_x - tool.partial_selection.drag_last_x"
+                        dy: "event.doc_y - tool.partial_selection.drag_last_y"
               else:
-                - "doc.translate_selection":
-                    dx: "event.doc_x - tool.partial_selection.drag_last_x"
-                    dy: "event.doc_y - tool.partial_selection.drag_last_y"
+                # (B) no-alt-at-press: live preview transitions.
+                # Nested if/else (not three sibling ifs) so the "set"
+                # mutations inside a branch don't cause sibling branches
+                # to also fire in the same frame.
+                - if: "event.modifiers.alt"
+                  then:
+                    - if: "not tool.partial_selection.alt_preview"
+                      then:
+                        # Entering preview: revert any translations so
+                        # the original snaps back to the press position.
+                        - "doc.preview.restore": {}
+                        - set: { tool.partial_selection.alt_preview: "true" }
+                    # else: already in preview — original stays put,
+                    # no translate this frame.
+                  else:
+                    - if: "tool.partial_selection.alt_preview"
+                      then:
+                        # Exiting preview: re-apply cumulative translate
+                        # from press so the original lands at the cursor.
+                        - "doc.translate_selection":
+                            dx: "event.doc_x - tool.partial_selection.drag_start_x"
+                            dy: "event.doc_y - tool.partial_selection.drag_start_y"
+                        - set: { tool.partial_selection.alt_preview: "false" }
+                      else:
+                        # Normal move: incremental delta from last cursor.
+                        - "doc.translate_selection":
+                            dx: "event.doc_x - tool.partial_selection.drag_last_x"
+                            dy: "event.doc_y - tool.partial_selection.drag_last_y"
             - set: { tool.partial_selection.drag_last_x: "event.doc_x" }
             - set: { tool.partial_selection.drag_last_y: "event.doc_y" }
 
@@ -142,7 +197,23 @@ handlers:
             x2: "tool.partial_selection.doc_marquee_cur_x"
             y2: "tool.partial_selection.doc_marquee_cur_y"
             additive: "event.modifiers.shift"
+    # Mid-drag Alt commit: if the drag started without Alt and Alt is
+    # still held at release, commit a copy at the cursor's release
+    # position. The original is currently at the press position
+    # (preview-restored during the alt_preview transition); copy_selection
+    # adds the new copies offset by (cursor - press) so they land at
+    # the cursor.
+    - if: "tool.partial_selection.mode == 'moving' and not tool.partial_selection.alt_held and event.modifiers.alt"
+      then:
+        - "doc.copy_selection":
+            dx: "event.doc_x - tool.partial_selection.drag_start_x"
+            dy: "event.doc_y - tool.partial_selection.drag_start_y"
+    # Drop the preview snapshot on drag end — no longer load-bearing.
+    - if: "tool.partial_selection.mode == 'moving' or tool.partial_selection.mode == 'handle'"
+      then:
+        - "doc.preview.clear": {}
     - set: { tool.partial_selection.mode: "'idle'" }
+    - set: { tool.partial_selection.alt_preview: "false" }
 
 overlay:
   # Always render — draws selected-path handles regardless of mode,

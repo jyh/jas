@@ -19713,6 +19713,9 @@
         "alt_held": {
           "default": false
         },
+        "alt_preview": {
+          "default": false
+        },
         "handle_path": {
           "default": null
         },
@@ -19829,6 +19832,11 @@
                 "set": {
                   "tool.partial_selection.alt_held": "event.modifiers.alt"
                 }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.alt_preview": "false"
+                }
               }
             ]
           }
@@ -19869,6 +19877,9 @@
                     "doc.snapshot": {}
                   },
                   {
+                    "doc.preview.capture": {}
+                  },
+                  {
                     "set": {
                       "tool.partial_selection.snapshotted": "true"
                     }
@@ -19884,26 +19895,77 @@
                 "if": "tool.partial_selection.mode == 'moving'",
                 "then": [
                   {
-                    "if": "tool.partial_selection.alt_held and not tool.partial_selection.copied",
+                    "if": "tool.partial_selection.alt_held",
                     "then": [
                       {
-                        "doc.copy_selection": {
-                          "dx": "event.doc_x - tool.partial_selection.drag_last_x",
-                          "dy": "event.doc_y - tool.partial_selection.drag_last_y"
-                        }
-                      },
-                      {
-                        "set": {
-                          "tool.partial_selection.copied": "true"
-                        }
+                        "if": "not tool.partial_selection.copied",
+                        "then": [
+                          {
+                            "doc.copy_selection": {
+                              "dx": "event.doc_x - tool.partial_selection.drag_last_x",
+                              "dy": "event.doc_y - tool.partial_selection.drag_last_y"
+                            }
+                          },
+                          {
+                            "set": {
+                              "tool.partial_selection.copied": "true"
+                            }
+                          }
+                        ],
+                        "else": [
+                          {
+                            "doc.translate_selection": {
+                              "dx": "event.doc_x - tool.partial_selection.drag_last_x",
+                              "dy": "event.doc_y - tool.partial_selection.drag_last_y"
+                            }
+                          }
+                        ]
                       }
                     ],
                     "else": [
                       {
-                        "doc.translate_selection": {
-                          "dx": "event.doc_x - tool.partial_selection.drag_last_x",
-                          "dy": "event.doc_y - tool.partial_selection.drag_last_y"
-                        }
+                        "if": "event.modifiers.alt",
+                        "then": [
+                          {
+                            "if": "not tool.partial_selection.alt_preview",
+                            "then": [
+                              {
+                                "doc.preview.restore": {}
+                              },
+                              {
+                                "set": {
+                                  "tool.partial_selection.alt_preview": "true"
+                                }
+                              }
+                            ]
+                          }
+                        ],
+                        "else": [
+                          {
+                            "if": "tool.partial_selection.alt_preview",
+                            "then": [
+                              {
+                                "doc.translate_selection": {
+                                  "dx": "event.doc_x - tool.partial_selection.drag_start_x",
+                                  "dy": "event.doc_y - tool.partial_selection.drag_start_y"
+                                }
+                              },
+                              {
+                                "set": {
+                                  "tool.partial_selection.alt_preview": "false"
+                                }
+                              }
+                            ],
+                            "else": [
+                              {
+                                "doc.translate_selection": {
+                                  "dx": "event.doc_x - tool.partial_selection.drag_last_x",
+                                  "dy": "event.doc_y - tool.partial_selection.drag_last_y"
+                                }
+                              }
+                            ]
+                          }
+                        ]
                       }
                     ]
                   },
@@ -19977,8 +20039,32 @@
             ]
           },
           {
+            "if": "tool.partial_selection.mode == 'moving' and not tool.partial_selection.alt_held and event.modifiers.alt",
+            "then": [
+              {
+                "doc.copy_selection": {
+                  "dx": "event.doc_x - tool.partial_selection.drag_start_x",
+                  "dy": "event.doc_y - tool.partial_selection.drag_start_y"
+                }
+              }
+            ]
+          },
+          {
+            "if": "tool.partial_selection.mode == 'moving' or tool.partial_selection.mode == 'handle'",
+            "then": [
+              {
+                "doc.preview.clear": {}
+              }
+            ]
+          },
+          {
             "set": {
               "tool.partial_selection.mode": "'idle'"
+            }
+          },
+          {
+            "set": {
+              "tool.partial_selection.alt_preview": "false"
             }
           }
         ]
@@ -21675,42 +21761,46 @@
                 ],
                 "else": [
                   {
-                    "if": "event.modifiers.alt and not tool.selection.alt_preview",
+                    "if": "event.modifiers.alt",
                     "then": [
                       {
-                        "doc.preview.restore": {}
-                      },
-                      {
-                        "set": {
-                          "tool.selection.alt_preview": "true"
-                        }
+                        "if": "not tool.selection.alt_preview",
+                        "then": [
+                          {
+                            "doc.preview.restore": {}
+                          },
+                          {
+                            "set": {
+                              "tool.selection.alt_preview": "true"
+                            }
+                          }
+                        ]
                       }
-                    ]
-                  },
-                  {
-                    "if": "not event.modifiers.alt and tool.selection.alt_preview",
-                    "then": [
+                    ],
+                    "else": [
                       {
-                        "doc.translate_selection": {
-                          "dx": "event.doc_x - tool.selection.press_doc_x",
-                          "dy": "event.doc_y - tool.selection.press_doc_y"
-                        }
-                      },
-                      {
-                        "set": {
-                          "tool.selection.alt_preview": "false"
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    "if": "not event.modifiers.alt and not tool.selection.alt_preview",
-                    "then": [
-                      {
-                        "doc.translate_selection": {
-                          "dx": "event.doc_x - tool.selection.drag_start_x",
-                          "dy": "event.doc_y - tool.selection.drag_start_y"
-                        }
+                        "if": "tool.selection.alt_preview",
+                        "then": [
+                          {
+                            "doc.translate_selection": {
+                              "dx": "event.doc_x - tool.selection.press_doc_x",
+                              "dy": "event.doc_y - tool.selection.press_doc_y"
+                            }
+                          },
+                          {
+                            "set": {
+                              "tool.selection.alt_preview": "false"
+                            }
+                          }
+                        ],
+                        "else": [
+                          {
+                            "doc.translate_selection": {
+                              "dx": "event.doc_x - tool.selection.drag_start_x",
+                              "dy": "event.doc_y - tool.selection.drag_start_y"
+                            }
+                          }
+                        ]
                       }
                     ]
                   },
