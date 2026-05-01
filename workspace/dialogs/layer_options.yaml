@@ -246,7 +246,12 @@ layer_options:
                     type: number_input
                     min: 0
                     max: 100
-                    style: { width: 60 }
+                    # min_width prevents flex-shrink from collapsing the
+                    # input below the legible 3-digit + spinner width
+                    # when the parent row is space-constrained. width
+                    # alone wasn't enough — render_number_input applies
+                    # min-width:0 inline.
+                    style: { width: 60, min_width: 60, flex_shrink: 0 }
                     bind:
                       value: "dialog.dim_percentage"
                       disabled: "not dialog.dim_images"
