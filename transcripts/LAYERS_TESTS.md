@@ -308,45 +308,51 @@ If any P0 here fails, stop and flag.
 
 ## Session D — Lock cascade (~6 min)
 
-- [ ] **LYR-050** [wired] Lock toggle locks an element.
+- [x] **LYR-050** [wired] Lock toggle locks an element.
       Setup: Unlocked rectangle.
       Do: Click lock icon.
       Expect: Lock icon shows locked state; clicking the rectangle on
               canvas no longer selects / drags it.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-051** [wired] Locked element remains visible.
+- [x] **LYR-051** [wired] Locked element remains visible.
       Setup: Locked rectangle.
       Expect: Element still drawn on canvas.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-052** [wired] Locking a container cascades to all direct children.
+- [x] **LYR-052** [wired] Locking a container cascades to all direct children.
       Setup: A group with 3 unlocked children.
       Do: Click group lock icon.
       Expect: Group + all 3 children show locked icons; per-child state
               saved internally for restore.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-053** [wired] Unlocking a container restores per-child saved state.
+- [x] **LYR-053** [wired] Unlocking a container restores per-child saved state.
       Setup: From LYR-052, then manually unlock child 2 only.
       Do: Click group lock icon to unlock.
       Expect: Children 1 and 3 unlock; child 2 was already unlocked,
               stays so. (Restore from saved state, not blanket unlock.)
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-054** [wired] Locked elements remain draggable in the panel.
+- [x] **LYR-054** [wired] Locked elements remain draggable in the panel.
       Setup: Locked rectangle.
       Do: Drag the row up or down within its layer.
       Expect: Reorder succeeds (lock protects content edits, not
               positioning).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-055** [wired] Drop into a locked container is rejected.
+- [x] **LYR-055** [wired] Drop into a locked container is rejected.
       Setup: Layer A unlocked, Layer B locked.
       Do: Drag a row from A to B.
       Expect: Drop is refused (cursor / outline shows reject); row stays
               in A.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: drop validation only checked target's parent for
+        locked state; dragging onto a locked layer's own row passed
+        because target_parent was the doc root. Added a target_unlocked
+        check. Also: New Layer from the panel hamburger menu was a
+        stub — wired layers_panel::dispatch to call dispatch_action
+        for action commands so the LYR-055 fixture could be built.
 
 ---
 
