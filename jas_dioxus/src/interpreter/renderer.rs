@@ -6447,17 +6447,28 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 // determined by the target row.
                                 let sources = st.layers_panel_selection.clone();
                                 let search_active = !st.layers_search_query.is_empty();
-                                // Determine drop semantics based on target type:
-                                //   - target is a container (Group / Layer): drop INTO
-                                //     it as the first child. (insert_path = target + [0])
-                                //   - target is a leaf: drop AT target's index in its
-                                //     parent (sibling above, existing behavior).
+                                // Determine drop semantics based on target type AND
+                                // whether any source is a Layer (Layers always sibling-
+                                // insert because they can't nest inside containers):
+                                //   - non-Layer source + container target: drop INTO
+                                //     the container as the first child.
+                                //   - Layer source, OR leaf target: sibling-insert at
+                                //     target's index in its parent.
                                 let (effective_parent, insert_index, target_is_container) = {
                                     let is_container = st.tab()
                                         .and_then(|t| t.model.document().get_element(&target))
                                         .map(|e| e.is_group_or_layer())
                                         .unwrap_or(false);
-                                    if is_container {
+                                    let any_source_is_layer = st.tab()
+                                        .map(|t| {
+                                            let doc = t.model.document();
+                                            st.layers_panel_selection.iter().any(|s| {
+                                                doc.get_element(s)
+                                                    .map(|e| e.is_layer()).unwrap_or(false)
+                                            })
+                                        })
+                                        .unwrap_or(false);
+                                    if is_container && !any_source_is_layer {
                                         (target.clone(), 0usize, true)
                                     } else {
                                         let parent = target[..target.len()-1].to_vec();
