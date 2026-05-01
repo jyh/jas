@@ -2011,13 +2011,16 @@ pub fn render(
             }
         }
     } else if let Some(iso_path) = layers_isolation_path {
-        // Layers-panel isolation: render the full document, paint a
-        // screen-space dim overlay over the whole viewport, then
-        // re-render the isolated subtree on top at full alpha. Per
-        // LYR-181 the visual is "non-isolated content dimmed ~10%".
-        // We can't use set_global_alpha around the first pass because
-        // draw_element_body resets globalAlpha to the element's own
-        // opacity for each element.
+        // Layers-panel isolation visual (LYR-181):
+        //   1. Render full document.
+        //   2. Paint a screen-space dim overlay over the whole viewport.
+        //   3. Re-paint artboard fills so artboards stay un-dimmed
+        //      (the user reads the artboard rectangle as part of the
+        //      workspace chrome, not as content).
+        //   4. Re-render the isolated subtree on top at full alpha.
+        // Element-level globalAlpha doesn't compose through draw_element_body
+        // (it resets globalAlpha to each element's own opacity), so a
+        // composite overlay is the only viable dim approach.
         for layer in &doc.layers {
             draw_element(ctx, layer, Visibility::Preview, precision);
         }
@@ -2030,6 +2033,7 @@ pub fn render(
         ctx.fill_rect(0.0, 0.0, width, height);
         ctx.set_global_alpha(1.0);
         ctx.restore();
+        draw_artboard_fills(ctx, doc);
         if let Some(iso_elem) = doc.get_element(&iso_path.to_vec()) {
             draw_element(ctx, iso_elem, Visibility::Preview, precision);
         }
