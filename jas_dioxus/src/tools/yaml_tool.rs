@@ -4609,6 +4609,59 @@ mod tests {
     }
 
     #[test]
+    fn selection_parity_click_inside_group_selects_group() {
+        // Layer 0 → Group 0 → Rect (0, 0, 10, 10). Click at (5, 5)
+        // (inside the rect, inside the group). Selection-tool hit_test
+        // is the flat variant — stops at direct layer children — so the
+        // hit path should be the group's [0, 0]. set_selection must
+        // then make the group the selection.
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = {
+            use crate::document::document::Document;
+            use crate::geometry::element::{
+                LayerElem, GroupElem, RectElem, Color, Fill,
+            };
+            let rect = Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+                rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::BLACK)), stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            });
+            let group = Element::Group(GroupElem {
+                children: vec![std::rc::Rc::new(rect)],
+                isolated_blending: false, knockout_group: false,
+                common: CommonProps::default(),
+            });
+            let layer = Element::Layer(LayerElem {
+                name: "L".to_string(),
+                children: vec![std::rc::Rc::new(group)],
+                isolated_blending: false, knockout_group: false,
+                common: CommonProps::default(),
+            });
+            Model::new(
+                Document {
+                    layers: vec![layer],
+                    selected_layer: 0, selection: Vec::new(),
+                    ..Document::default()
+                },
+                None,
+            )
+        };
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+        let sel = &model.document().selection;
+        assert_eq!(
+            sel.len(), 1,
+            "click inside group should select exactly one element",
+        );
+        assert_eq!(
+            sel[0].path, vec![0, 0],
+            "click inside group should select the group, not the inner rect",
+        );
+    }
+
+    #[test]
     fn selection_parity_undo_after_click_drag_keeps_new_selection() {
         // Bug repro from manual SEL-170 follow-up: select element A,
         // then click+drag element B, then undo. Expected: B at original
