@@ -1724,16 +1724,20 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
         // the drawn glyphs; for TextPath it wraps the path the text
         // follows.
         let is_text_like = matches!(elem, Element::Text(_) | Element::TextPath(_));
-        // Group/Layer selection highlights are produced by their
-        // descendants, which are themselves in the selection when a
-        // Group is picked (see `select_element`); the container
-        // itself has nothing meaningful to outline.
+        // Containers (Group / Layer) are picked as whole elements by
+        // the Selection tool's hit_test (which stops at direct layer
+        // children). Per Illustrator convention, a selected Group is
+        // shown as a single bbox around its contents — not as
+        // individual descendant outlines — so we render the
+        // children-union bounds here.
         let is_container = matches!(elem, Element::Group(_) | Element::Layer(_));
 
-        if is_text_like {
+        if is_text_like || is_container {
             let (bx, by, bw, bh) = elem.bounds();
-            ctx.stroke_rect(bx, by, bw, bh);
-        } else if !is_container {
+            if bw > 0.0 && bh > 0.0 {
+                ctx.stroke_rect(bx, by, bw, bh);
+            }
+        } else {
             // Stroke the element's own path in bright blue.
             ctx.begin_path();
             trace_element_path(ctx, elem);
@@ -1758,7 +1762,6 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
                 ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
             }
         }
-        // Groups/Layers: nothing here.
     }
 }
 
