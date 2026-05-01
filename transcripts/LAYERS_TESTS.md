@@ -118,40 +118,40 @@ Full pass: ~110 min. A gates the rest; otherwise sessions stand alone.
 
 If any P0 here fails, stop and flag.
 
-- [ ] **LYR-001** [wired] Panel opens via Window menu.
+- [x] **LYR-001** [wired] Panel opens via Window menu.
       Do: Select Window → Layers.
       Expect: Layers panel appears in dock or floating; default "Layer 1"
               row is visible; no console error.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-002** [wired] All panel sections render without layout collapse.
+- [x] **LYR-002** [wired] All panel sections render without layout collapse.
       Do: Visually scan the open panel.
       Expect: Search input + filter dropdown header; tree body with at
               least one row; footer button row. No overlapping controls,
               no truncated names.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-003** [wired] Panel collapses and re-expands.
+- [x] **LYR-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no crash.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-004** [wired] Panel closes via context menu / X button.
+- [x] **LYR-004** [wired] Panel closes via context menu / X button.
       Do: Right-click header → Close, or click the close affordance.
       Expect: Panel disappears; Window → Layers reopens it.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-005** [wired] Panel floats out of the dock.
+- [x] **LYR-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Becomes a floating window; controls remain interactive;
               returns to dock on drag back.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-006** [wired] Default document has exactly one Layer 1.
+- [x] **LYR-006** [wired] Default document has exactly one Layer 1.
       Setup: Fresh document.
       Expect: Tree body shows one row labeled "Layer 1"; color square
               shows Light Blue (`#4a90d9`).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
