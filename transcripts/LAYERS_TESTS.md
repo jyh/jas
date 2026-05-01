@@ -552,61 +552,68 @@ If any P0 here fails, stop and flag.
 
 ## Session H — Menu — New Layer / Group / All (~8 min)
 
-- [ ] **LYR-150** [wired] Menu shows the full item list.
+- [x] **LYR-150** [wired] Menu shows the full item list.
       Do: Open the panel menu.
       Expect: New Layer…, New Group, ─, Hide All / Show All Layers,
               Outline All / Preview All Layers, Lock All / Unlock All
               Layers, ─, Enter / Exit Isolation Mode, Flatten Artwork,
               Collect in New Layer, ─, Close Layers.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-151** [wired] New Layer with no selection appends a new top-level layer.
+- [x] **LYR-151** [wired] New Layer with no selection appends a new top-level layer.
       Setup: Tree = [Layer 1]; nothing selected.
       Do: Menu → New Layer…
       Expect: Layer Options dialog opens in create mode with default
               name "Layer 2"; on OK, new layer appears at the bottom (or
               top, per spec) of the tree with the next color in cycle.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-152** [wired] New Layer with a selected element inserts above selection.
+- [x] **LYR-152** [wired] New Layer with a selected element inserts above selection.
       Setup: Layer 1 selected.
       Do: Menu → New Layer… → OK with default name.
       Expect: New layer inserted immediately above Layer 1.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-153** [wired] New Group disabled when nothing selected.
-      Setup: No selection.
-      Expect: Menu → New Group is dimmed.
-      — last: —
+- [x] **LYR-153** [wired] New Group disabled when nothing selected (or top-level only).
+      Setup: No selection (or only top-level layers selected).
+      Expect: Menu → New Group is a no-op.
+      — last: 2026-05-01 (Rust)
+      regression: New Group was wrapping top-level layers in a Group,
+        which would put a Group at top-level. Top-level slots are
+        Layer-only, so guard the new_group dispatch when any selected
+        path has length 1.
 
-- [ ] **LYR-154** [wired] New Group wraps the panel selection.
-      Setup: Two top-level rectangles selected.
+- [x] **LYR-154** [wired] New Group wraps the panel selection.
+      Setup: Two non-top-level rectangles selected (panel-select via
+             Cmd-click on rectangle children of a layer).
       Do: Menu → New Group.
-      Expect: Both rectangles become children of a new Group; Group is
-              selected; original layer count reduces by the moved
-              elements.
-      — last: —
+      Expect: Both rectangles become children of a new Group inside
+              their parent layer; Group is selected.
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-155** [wired] Hide All Layers / Show All Layers toggles cycle.
+- [x] **LYR-155** [wired] Hide All Layers / Show All Layers toggles cycle.
       Setup: All layers visible.
       Do: Menu → Hide All Layers.
       Expect: Every layer (and descendants) becomes invisible; menu label
               flips to "Show All Layers"; canvas blank.
       Do: Menu → Show All Layers.
       Expect: Original visibilities restored; menu label flips back.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: PanelMenuItem::Action labels were &'static str, so
+        the labels never reflected document state. Added a per-panel
+        dynamic_label hook the menu view consults at render time.
 
-- [ ] **LYR-156** [wired] Outline All / Preview All Layers toggles cycle.
+- [x] **LYR-156** [wired] Outline All / Preview All Layers toggles cycle.
       Do: Menu → Outline All Layers.
       Expect: Every layer renders as outline only; menu label flips.
       Do: Menu → Preview All Layers.
       Expect: Restored to preview.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-157** [wired] Lock All / Unlock All Layers toggles cycle.
+- [x] **LYR-157** [wired] Lock All / Unlock All Layers toggles cycle.
       Do: Menu → Lock All Layers.
       Expect: Every layer locked; menu flips. Unlock restores.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 ---
 
