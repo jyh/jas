@@ -177,31 +177,37 @@ handlers:
             - set: { tool.selection.drag_start_x: "event.doc_x" }
             - set: { tool.selection.drag_start_y: "event.doc_y" }
           else:
-            # (B) no-alt-at-press: live preview transitions
-            - if: "event.modifiers.alt and not tool.selection.alt_preview"
+            # (B) no-alt-at-press: live preview transitions.
+            # Nested if/else (not three sibling ifs) so the "set"
+            # mutations inside one branch do not cause sibling
+            # branches to also fire in the same frame -- that bug
+            # caused exit-preview to apply both the cumulative
+            # translate AND a delta-from-last translate, doubling
+            # the move on the alt-release frame.
+            - if: "event.modifiers.alt"
               then:
-                # Entering preview: revert any translations so the
-                # original snaps back to the press position. The
-                # cursor position is the would-be copy location.
-                - "doc.preview.restore": {}
-                - set: { tool.selection.alt_preview: "true" }
-            - if: "not event.modifiers.alt and tool.selection.alt_preview"
-              then:
-                # Exiting preview: re-apply the cumulative translate
-                # from press so the original lands at the cursor as
-                # if the preview never happened.
-                - "doc.translate_selection":
-                    dx: "event.doc_x - tool.selection.press_doc_x"
-                    dy: "event.doc_y - tool.selection.press_doc_y"
-                - set: { tool.selection.alt_preview: "false" }
-            - if: "not event.modifiers.alt and not tool.selection.alt_preview"
-              then:
-                # Normal move: incremental delta from last cursor.
-                - "doc.translate_selection":
-                    dx: "event.doc_x - tool.selection.drag_start_x"
-                    dy: "event.doc_y - tool.selection.drag_start_y"
-            # In preview mode (Alt held, alt_preview true) the
-            # original stays at start -- no translate this frame.
+                - if: "not tool.selection.alt_preview"
+                  then:
+                    # Entering preview: revert any translations so
+                    # the original snaps back to the press position.
+                    - "doc.preview.restore": {}
+                    - set: { tool.selection.alt_preview: "true" }
+                # else: already in preview -- original stays put.
+              else:
+                - if: "tool.selection.alt_preview"
+                  then:
+                    # Exiting preview: re-apply cumulative translate
+                    # from press so the original lands at the cursor
+                    # as if the preview never happened.
+                    - "doc.translate_selection":
+                        dx: "event.doc_x - tool.selection.press_doc_x"
+                        dy: "event.doc_y - tool.selection.press_doc_y"
+                    - set: { tool.selection.alt_preview: "false" }
+                  else:
+                    # Normal move: incremental delta from last cursor.
+                    - "doc.translate_selection":
+                        dx: "event.doc_x - tool.selection.drag_start_x"
+                        dy: "event.doc_y - tool.selection.drag_start_y"
             # Always update drag_start so the next "normal move"
             # frame computes the right incremental delta.
             - set: { tool.selection.drag_start_x: "event.doc_x" }

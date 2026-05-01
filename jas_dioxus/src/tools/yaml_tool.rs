@@ -3131,6 +3131,106 @@ mod tests {
         assert_eq!(sel[0].path, vec![0, 0]);
     }
 
+    #[test]
+    fn partial_selection_parity_at_press_alt_drag_copies_path() {
+        // SEL-132 at-press flow: with all CPs of the rect selected,
+        // press on a CP with Alt held, drag past threshold, release.
+        // doc.copy_selection should have inserted exactly one copy.
+        let Some(mut tool) = partial_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_element();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let n_before =
+            model.document().layers[0].children().unwrap().len();
+        tool.on_press(&mut model, 0.0, 0.0, false, true);
+        tool.on_move(&mut model, 5.0, 0.0, false, true, true);
+        tool.on_move(&mut model, 80.0, 0.0, false, true, true);
+        tool.on_release(&mut model, 80.0, 0.0, false, true);
+        let n_after =
+            model.document().layers[0].children().unwrap().len();
+        assert_eq!(
+            n_after,
+            n_before + 1,
+            "alt-at-press drag should produce exactly one copy",
+        );
+    }
+
+    #[test]
+    fn partial_selection_parity_mid_drag_alt_copies_path() {
+        // SEL-132 mid-drag flow: press WITHOUT Alt, drag past threshold,
+        // press Alt mid-drag, release WITH Alt held. Same outcome as
+        // at-press alt: exactly one copy inserted, original stays at
+        // its original position (preview-restored on the alt-press
+        // transition).
+        let Some(mut tool) = partial_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_element();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let n_before =
+            model.document().layers[0].children().unwrap().len();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        // Past 4-px threshold, no alt yet — snapshot fires, mode=moving,
+        // translate by (5,0).
+        tool.on_move(&mut model, 5.0, 0.0, false, false, true);
+        // Alt pressed mid-drag — entering preview: original snaps back
+        // to (0,0,10,10) via doc.preview.restore.
+        tool.on_move(&mut model, 10.0, 0.0, false, true, true);
+        tool.on_move(&mut model, 80.0, 0.0, false, true, true);
+        // Release with Alt still held — commit copy at cursor's
+        // release position relative to the press position.
+        tool.on_release(&mut model, 80.0, 0.0, false, true);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            n_before + 1,
+            "mid-drag alt + release-with-alt should commit exactly one copy",
+        );
+        // Original at (0,0) unchanged — preview snapped it back.
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 0.0, "original x preserved by preview restore");
+            assert_eq!(r.y, 0.0, "original y preserved by preview restore");
+        } else {
+            panic!("expected Rect at index 0 (original)");
+        }
+        // Copy at (80, 0) — translated by (cursor - press).
+        if let Element::Rect(r) = &*children[1] {
+            assert_eq!(r.x, 80.0, "copy at cursor x");
+            assert_eq!(r.y, 0.0, "copy at cursor y");
+        } else {
+            panic!("expected Rect at index 1 (copy)");
+        }
+    }
+
+    #[test]
+    fn partial_selection_parity_mid_drag_alt_released_before_mouseup_no_copy() {
+        // Press WITHOUT Alt, drag past threshold, press Alt mid-drag,
+        // RELEASE Alt before mouseup. Should be a normal move — the
+        // exit-preview transition re-applies the cumulative delta so
+        // the original lands at the cursor; no copy is created.
+        let Some(mut tool) = partial_selection_yaml_tool() else { return };
+        let mut model = model_with_rect_element();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let n_before =
+            model.document().layers[0].children().unwrap().len();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 5.0, 0.0, false, false, true);
+        tool.on_move(&mut model, 30.0, 0.0, false, true, true);
+        // Alt released before mouseup — exit preview: translate by
+        // cumulative-from-press to land original at the cursor.
+        tool.on_move(&mut model, 50.0, 0.0, false, false, true);
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            n_before,
+            "alt-released-before-mouseup is a normal move; no copy",
+        );
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 50.0, "original moved to cursor x");
+            assert_eq!(r.y, 0.0, "original y unchanged");
+        } else {
+            panic!("expected Rect at index 0");
+        }
+    }
+
     // ── Path Eraser tool behavioral tests ─────────────────────────
 
     fn path_eraser_yaml_tool() -> Option<YamlTool> {
@@ -4513,6 +4613,39 @@ mod tests {
             assert_eq!(r.stroke, Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0)));
         } else {
             panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn selection_parity_mid_drag_alt_released_before_mouseup_no_copy() {
+        // Selection-tool counterpart of the partial_selection test.
+        // Press WITHOUT Alt, drag, press Alt mid-drag, release Alt
+        // before mouseup. Should land original at the cursor with
+        // exactly one element (no copy).
+        let Some(mut tool) = selection_yaml_tool() else { return };
+        let mut model = selection_parity_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let n_before =
+            model.document().layers[0].children().unwrap().len();
+        tool.on_press(&mut model, 60.0, 60.0, false, false);
+        tool.on_move(&mut model, 65.0, 65.0, false, false, true);
+        tool.on_move(&mut model, 80.0, 65.0, false, true, true);
+        tool.on_move(&mut model, 100.0, 65.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 65.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            n_before,
+            "alt-released-before-mouseup is a normal move; no copy",
+        );
+        // Original was at (50, 50); press at (60, 60); release at
+        // (100, 65) → cursor delta from press = (40, 5) → original
+        // at (90, 55).
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.x, 90.0, "original at press + (cursor - press) x");
+            assert_eq!(r.y, 55.0, "original at press + (cursor - press) y");
+        } else {
+            panic!("expected Rect at index 0");
         }
     }
 
