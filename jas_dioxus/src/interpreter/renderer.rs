@@ -6632,6 +6632,30 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     };
 
                     let row_dom_id = format!("lp_row_{}", row.path.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"));
+                    // Row-level double-click: enter isolation mode for
+                    // container rows (Layer / Group). Per LYR-182. The
+                    // name span has its own dblclick handler that stops
+                    // propagation so it triggers rename instead.
+                    let dblclick_path = row.path.clone();
+                    let dblclick_app = app.clone();
+                    let mut dblclick_rev = revision;
+                    let dblclick_is_container = row.is_container;
+                    let on_row_dblclick = move |_: Event<MouseData>| {
+                        if !dblclick_is_container {
+                            return;
+                        }
+                        let p = dblclick_path.clone();
+                        let a = dblclick_app.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            // Make the target container the panel selection
+                            // so enter_isolation_mode resolves to it.
+                            st.layers_panel_selection = vec![p];
+                            let params = serde_json::Map::new();
+                            dispatch_action("enter_isolation_mode", &params, &mut st);
+                            dblclick_rev += 1;
+                        });
+                    };
                     rsx! {
                         div {
                             id: "{row_dom_id}",
@@ -6641,6 +6665,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             onmousedown: on_mousedown,
                             onmouseenter: on_mouseenter,
                             onmouseup: on_mouseup,
+                            ondoubleclick: on_row_dblclick,
                             // Indent
                             span { style: "{indent_style}" }
                             // Eye button
@@ -6816,7 +6841,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     rsx! {
                                         span {
                                             style: "{name_style}",
-                                            ondoubleclick: move |_: Event<MouseData>| {
+                                            ondoubleclick: move |evt: Event<MouseData>| {
+                                                // Stop propagation so the row-level
+                                                // dblclick (which enters isolation) does
+                                                // not also fire and immediately overwrite
+                                                // the rename state.
+                                                evt.stop_propagation();
                                                 if can_rename {
                                                     let p = name_path.clone();
                                                     let a = name_app.clone();
