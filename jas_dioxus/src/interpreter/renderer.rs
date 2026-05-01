@@ -5400,8 +5400,13 @@ fn tree_preview_svg(elem: &GeoElement) -> String {
     let pad = (w.max(h) * 0.02).max(0.5);
     let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
     let inner = crate::geometry::svg::element_svg(elem, "");
+    // Style + width/height in CSS so the SVG scales to whatever the
+    // parent div sizes it to. The width="100%" / height="100%"
+    // attributes alone weren't laying out under dangerous_inner_html
+    // — the SVG rendered at its viewBox's natural size and got
+    // clipped to the container's upper-left corner.
     format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">{inner}</svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;">{inner}</svg>"#
     )
 }
 
@@ -6416,7 +6421,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             } else {
                                 div { style: "width:16px;flex-shrink:0" }
                             }
-                            // Preview thumbnail — fitted SVG of the element
+                            // Preview thumbnail — fitted SVG of the element.
                             {
                                 let preview_svg = row.preview_svg.clone();
                                 rsx! {
