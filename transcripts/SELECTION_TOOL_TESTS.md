@@ -500,50 +500,72 @@ If any P0 here fails, stop and flag.
 
 **P1**
 
-- [ ] **SEL-130** [wired] Dragging a selected CP translates just that CP.
+- [x] **SEL-130** [wired] Dragging a selected CP translates just that CP.
       Setup: One anchor selected (SEL-100 state).
       Do: Drag the anchor 50 px right.
       Expect: Only that anchor moves; its neighbors remain; the two
               adjacent segments re-shape to accommodate the moved
               anchor.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-131** [wired] Dragging a latched handle moves only the
+- [x] **SEL-131** [wired] Dragging a latched handle moves only the
   single handle (cusp).
       Setup: SEL-102 state — handle latched.
       Do: Drag 40 px perpendicular to the tangent.
       Expect: The dragged handle moves; the opposite handle of the same
               anchor stays put (not mirrored). Curve shape changes on
               just one side.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-132** [wired] Alt+drag on a CP duplicates the path.
+- [x] **SEL-132** [wired] Alt+drag on a CP duplicates the path.
       Setup: Select all CPs of a path (Ctrl/Cmd-A while Partial
              Selection active).
       Do: Alt-drag one of the anchors 80 px right.
       Expect: A copy of the path is created translated by the drag
               delta; original stays.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P2**
 
-- [ ] **SEL-133** [wired] CP drag threshold is 4 px (DRAG_THRESHOLD).
+- [x] **SEL-133** [wired] CP drag threshold is 4 px (DRAG_THRESHOLD).
       Setup: Press on an anchor.
       Do: Move the mouse 3 px while pressed, then release.
       Expect: Treated as a click (CP selects); no move is committed.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-134** [wired] Handle drag threshold is 0.5 px.
+- [x] **SEL-134** [wired] Handle drag threshold is 0.5 px.
       Setup: Press on a handle endpoint.
       Do: Move 0.4 px, then release.
       Expect: Treated as a click (no handle move committed).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **SEL-135** [wired] Dragging past threshold snapshots once.
+- [x] **SEL-135** [wired] Dragging past threshold snapshots once.
       Setup: Start a CP drag past the 4 px threshold.
       Do: Drag across the canvas; release. Then Ctrl/Cmd-Z.
       Expect: One undo reverses the full translation.
+      — last: 2026-05-01 (Rust)
+
+- [ ] **SEL-136** [wired] Mid-drag Alt on a CP commits a copy of the
+  path on release (mirrors SEL-053 for Selection tool).
+      Setup: Select all CPs of a path.
+      Do: Press on an anchor WITHOUT Alt; drag past threshold; press
+          Alt mid-drag; release with Alt still held.
+      Expect: A copy is committed at the cursor's release position;
+              the original stays at its press position
+              (preview-restored on the alt-press transition).
       — last: —
+
+## Enhancements raised in Session H
+
+- **ENH-002** Mid-drag Alt copy on Partial Selection: SEL-132 follow-up
+  added the same mid-drag-Alt live preview pattern as Selection
+  (ENH-001) — pressing Alt mid-CP-drag snaps the path back to its
+  press position via doc.preview.restore; releasing the mouse with
+  Alt held commits a copy at the cursor; releasing Alt before mouseup
+  reverts to a normal move. Same fix landed on selection.yaml for a
+  latent exit-preview double-translate bug (sibling-if branches were
+  reading freshly-mutated state on the same frame). _Raised during
+  SEL-132 follow-up on 2026-05-01._
 
 ---
 
