@@ -21534,6 +21534,9 @@
         },
         "copied": {
           "default": false
+        },
+        "snapshotted": {
+          "default": false
         }
       },
       "handlers": {
@@ -21637,12 +21640,6 @@
                 ],
                 "else": [
                   {
-                    "doc.snapshot": {}
-                  },
-                  {
-                    "doc.preview.capture": {}
-                  },
-                  {
                     "if": "event.modifiers.shift",
                     "then": [
                       {
@@ -21703,6 +21700,11 @@
                     "set": {
                       "tool.selection.copied": "false"
                     }
+                  },
+                  {
+                    "set": {
+                      "tool.selection.snapshotted": "false"
+                    }
                   }
                 ]
               }
@@ -21738,6 +21740,22 @@
           {
             "if": "tool.selection.mode == 'drag_move'",
             "then": [
+              {
+                "if": "not tool.selection.snapshotted",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.preview.capture": {}
+                  },
+                  {
+                    "set": {
+                      "tool.selection.snapshotted": "true"
+                    }
+                  }
+                ]
+              },
               {
                 "if": "tool.selection.alt_held",
                 "then": [
@@ -21871,6 +21889,22 @@
           {
             "if": "tool.selection.mode == 'drag_move' and not tool.selection.alt_held and event.modifiers.alt and not tool.selection.alt_preview",
             "then": [
+              {
+                "if": "not tool.selection.snapshotted",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "doc.preview.capture": {}
+                  },
+                  {
+                    "set": {
+                      "tool.selection.snapshotted": "true"
+                    }
+                  }
+                ]
+              },
               {
                 "doc.copy_selection": {
                   "dx": "event.doc_x - tool.selection.press_doc_x",
