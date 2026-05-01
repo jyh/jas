@@ -763,91 +763,107 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **LYR-230** [wired] Edit-mode dialog pre-fills layer's current values.
+- [x] **LYR-230** [wired] Edit-mode dialog pre-fills layer's current values.
       Setup: A layer "Backgrounds", color = Red, locked, hidden.
       Do: Right-click row → Options for Layer…
       Expect: Dialog opens with Name = "Backgrounds", color preset = Red,
               swatch = `#cc0000` (or red token), Lock checked, Show
               unchecked, Preview disabled.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-231** [wired] Create-mode dialog defaults to "Layer N", next color in cycle.
+- [x] **LYR-231** [wired] Create-mode dialog defaults to "Layer N", next color in cycle.
       Setup: Tree has 2 layers (cycle index = 2).
       Do: Menu → New Layer…
       Expect: Dialog opens with Name = "Layer 3", preset = Green (3rd in
               cycle), Show + Preview checked.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P1**
 
-- [ ] **LYR-240** [wired] Color preset dropdown lists 9 names + Custom.
+- [x] **LYR-240** [wired] Color preset dropdown lists 9 names + Custom.
       Do: Open `lo_color_preset`.
       Expect: Items: Light Blue, Red, Green, Blue, Yellow, Magenta, Cyan,
               Light Gray, Dark Green, Custom.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-241** [wired] Selecting a preset cascades to the swatch.
+- [x] **LYR-241** [wired] Selecting a preset cascades to the swatch.
       Do: Pick Magenta from the preset.
       Expect: Swatch updates to magenta.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 - [ ] **LYR-242** [wired] Clicking the swatch opens the Color Picker.
       Do: Click `lo_color_swatch`.
       Expect: Modal Color Picker dialog opens; pick a custom color → OK.
       Expect: Preset dropdown shows "Custom"; swatch shows the new color.
       — last: —
+      regression: deferred 2026-05-01 — Color Picker dialog wiring not
+        functional from the Layer Options swatch. Revisit with a
+        broader Color Picker fix.
 
-- [ ] **LYR-243** [wired] Show off disables Preview toggle.
+- [x] **LYR-243** [wired] Show off disables Preview toggle.
       Setup: Show checked, Preview checked.
       Do: Uncheck Show.
       Expect: Preview becomes dimmed / non-interactive.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-244** [wired] Show off + OK results in invisible visibility.
+- [x] **LYR-244** [wired] Show off + OK results in invisible visibility.
       Setup: Dialog → Show unchecked → OK.
       Expect: Layer's eye state becomes invisible.
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: dialog button params (e.g. show: "dialog.show") were
+        passed as raw strings to dispatch_action; the action's
+        `if not param.show then ...` saw a truthy string and never
+        took the false branch. Fixed by evaluating string-valued
+        params against a dialog/param eval ctx before dispatch.
 
-- [ ] **LYR-245** [wired] Show on + Preview off → outline visibility.
+- [x] **LYR-245** [wired] Show on + Preview off → outline visibility.
       Setup: Dialog → Show on, Preview off → OK.
       Expect: Layer's eye state becomes outline.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-246** [wired] Show on + Preview on → preview visibility.
+- [x] **LYR-246** [wired] Show on + Preview on → preview visibility.
       Expect: Layer renders normally.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-247** [wired] Lock toggle persists.
+- [x] **LYR-247** [wired] Lock toggle persists.
       Setup: Dialog → Lock on → OK.
-      Expect: Layer locked in panel.
-      — last: —
+      Expect: Layer locked in panel + recursively in all descendants.
+      — last: 2026-05-01 (Rust)
+      regression: doc.set common.locked only updated the layer's own
+        flag; children stayed unlocked. Added a recursive cascade in
+        apply_doc_set_field so every descendant inherits the new
+        lock state.
 
-- [ ] **LYR-248** [wired] Dim Images toggle enables percent input.
+- [x] **LYR-248** [wired] Dim Images toggle enables percent input.
       Setup: Dim Images unchecked, percent dimmed.
       Do: Check Dim Images.
       Expect: `lo_dim_percentage` becomes interactive (0–100, default 50%
               or per spec).
-      — last: —
+      — last: 2026-05-01 (Rust)
+      regression: percent input was 1px wide because Dim Images shared
+        a 12-col row with Preview at col-3 (~85px). Moved Dim Images
+        to its own col-9 row + locked input width with min_width and
+        flex_shrink:0.
 
-- [ ] **LYR-249** [wired] OK persists changes.
+- [x] **LYR-249** [wired] OK persists changes.
       Setup: Edit dialog with several changes.
       Do: Click OK.
       Expect: Dialog closes; row reflects all changes (color square,
               eye state, lock).
-      — last: —
+      — last: 2026-05-01 (Rust)
 
-- [ ] **LYR-250** [wired] Cancel discards changes.
+- [x] **LYR-250** [wired] Cancel discards changes.
       Setup: Edit dialog with changes.
       Do: Click Cancel.
       Expect: Dialog closes; layer unchanged.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 **P2**
 
-- [ ] **LYR-260** [wired] Template toggle is disabled (not implemented).
+- [x] **LYR-260** [wired] Template toggle is disabled (not implemented).
       Do: Try to toggle `lo_template`.
       Expect: Disabled.
-      — last: —
+      — last: 2026-05-01 (Rust)
 
 - [ ] **LYR-261** [wired] Print toggle is disabled (not implemented).
       Do: Try to toggle `lo_print`.
