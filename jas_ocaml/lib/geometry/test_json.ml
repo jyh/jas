@@ -672,7 +672,7 @@ let rec parse_element j =
   let visibility = parse_visibility (j |> member "visibility") in
   match typ with
   | "line" ->
-    Line { x1 = j |> member "x1" |> to_num;
+    Line { name = None; x1 = j |> member "x1" |> to_num;
            y1 = j |> member "y1" |> to_num;
            x2 = j |> member "x2" |> to_num;
            y2 = j |> member "y2" |> to_num;
@@ -682,7 +682,7 @@ let rec parse_element j =
              stroke_gradient = None;
            }
   | "rect" ->
-    Rect { x = j |> member "x" |> to_num;
+    Rect { name = None; x = j |> member "x" |> to_num;
            y = j |> member "y" |> to_num;
            width = j |> member "width" |> to_num;
            height = j |> member "height" |> to_num;
@@ -695,7 +695,7 @@ let rec parse_element j =
              stroke_gradient = None;
            }
   | "circle" ->
-    Circle { cx = j |> member "cx" |> to_num;
+    Circle { name = None; cx = j |> member "cx" |> to_num;
              cy = j |> member "cy" |> to_num;
              r = j |> member "r" |> to_num;
              fill = parse_fill (j |> member "fill");
@@ -705,7 +705,7 @@ let rec parse_element j =
                stroke_gradient = None;
              }
   | "ellipse" ->
-    Ellipse { cx = j |> member "cx" |> to_num;
+    Ellipse { name = None; cx = j |> member "cx" |> to_num;
               cy = j |> member "cy" |> to_num;
               rx = j |> member "rx" |> to_num;
               ry = j |> member "ry" |> to_num;
@@ -716,7 +716,7 @@ let rec parse_element j =
                 stroke_gradient = None;
               }
   | "polyline" ->
-    Polyline { points = parse_points (j |> member "points");
+    Polyline { name = None; points = parse_points (j |> member "points");
                fill = parse_fill (j |> member "fill");
                stroke = parse_stroke (j |> member "stroke");
                opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
@@ -724,7 +724,7 @@ let rec parse_element j =
                  stroke_gradient = None;
                }
   | "polygon" ->
-    Polygon { points = parse_points (j |> member "points");
+    Polygon { name = None; points = parse_points (j |> member "points");
               fill = parse_fill (j |> member "fill");
               stroke = parse_stroke (j |> member "stroke");
               opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
@@ -732,7 +732,7 @@ let rec parse_element j =
                 stroke_gradient = None;
               }
   | "path" ->
-    Path { d = j |> member "d" |> to_list |> List.map parse_path_command;
+    Path { name = None; d = j |> member "d" |> to_list |> List.map parse_path_command;
            fill = parse_fill (j |> member "fill");
            stroke = parse_stroke (j |> member "stroke");
            width_points = [];
@@ -748,7 +748,7 @@ let rec parse_element j =
            }
   | "text" ->
     let content = parse_content_or_tspans j in
-    Text { x = j |> member "x" |> to_num;
+    Text { name = None; x = j |> member "x" |> to_num;
            y = j |> member "y" |> to_num;
            content;
            font_family = j |> member "font_family" |> to_string;
@@ -776,7 +776,7 @@ let rec parse_element j =
            tspans = tspans_from_content content }
   | "text_path" ->
     let content = parse_content_or_tspans j in
-    Text_path { d = j |> member "d" |> to_list |> List.map parse_path_command;
+    Text_path { name = None; d = j |> member "d" |> to_list |> List.map parse_path_command;
                 content;
                 start_offset = j |> member "start_offset" |> to_num;
                 font_family = j |> member "font_family" |> to_string;
@@ -803,7 +803,7 @@ let rec parse_element j =
   | "group" ->
     let children = j |> member "children" |> to_list
       |> List.map parse_element |> Array.of_list in
-    Group { children; opacity; transform; locked; visibility; blend_mode = Normal;
+    Group { name = None; children; opacity; transform; locked; visibility; blend_mode = Normal;
             mask = None;
             isolated_blending = false; knockout_group = false }
   | "layer" ->

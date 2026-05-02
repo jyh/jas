@@ -511,7 +511,7 @@ class controller ?(model = Model.create ()) () =
     method make_mask_on_selection ~clip ~invert =
       let doc = model#document in
       let empty_group =
-        Element.Group { children = [||]; opacity = 1.0; transform = None;
+        Element.Group { name = None; children = [||]; opacity = 1.0; transform = None;
                         locked = false; visibility = Element.Preview;
                         blend_mode = Element.Normal; mask = None;
                         isolated_blending = false; knockout_group = false }

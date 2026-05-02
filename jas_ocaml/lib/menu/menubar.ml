@@ -164,7 +164,7 @@ let rec translate_element elem dx dy =
     match elem with
     | Element.Group { children; opacity; transform; locked; visibility; blend_mode;
                       isolated_blending; knockout_group; _ } ->
-      Element.Group { children = Array.map (fun c -> translate_element c dx dy) children;
+      Element.Group { name = None; children = Array.map (fun c -> translate_element c dx dy) children;
                       opacity; transform; locked; visibility; blend_mode;
                       mask = None;
                       isolated_blending; knockout_group }

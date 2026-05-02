@@ -5,7 +5,7 @@
 open Jas
 
 let make_rect x y w h =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = w; height = h;
     rx = 0.0; ry = 0.0;
     fill = None; stroke = None;
@@ -260,7 +260,7 @@ let blob_brush_commit_tests = [
   Alcotest.test_case "commit_erasing_deletes_fully_covered_element" `Quick (fun () ->
     (* Small 4x2 blob-brush square fully inside the sweep's coverage
        area (sweep = 50pt horizontal, tip 10pt -> covers y in [-5, 5]). *)
-    let target = Element.Path {
+    let target = Element.Path { name = None;
       d = [ Element.MoveTo (23.0, -1.0);
             Element.LineTo (27.0, -1.0);
             Element.LineTo (27.0, 1.0);
@@ -299,7 +299,7 @@ let blob_brush_commit_tests = [
 
   Alcotest.test_case "commit_erasing_ignores_non_blob_brush" `Quick (fun () ->
     (* Same square but tool_origin = None. Erase must skip it. *)
-    let target = Element.Path {
+    let target = Element.Path { name = None;
       d = [ Element.MoveTo (20.0, -2.0);
             Element.LineTo (30.0, -2.0);
             Element.LineTo (30.0, 2.0);
@@ -340,7 +340,7 @@ let blob_brush_commit_tests = [
 (* Magic Wand effect *)
 
 let red_filled_rect x y =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = 10.0; height = 10.0;
     rx = 0.0; ry = 0.0;
     fill = Some (Element.make_fill (Element.color_rgb 1.0 0.0 0.0));
@@ -351,7 +351,7 @@ let red_filled_rect x y =
   }
 
 let blue_filled_rect x y =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = 10.0; height = 10.0;
     rx = 0.0; ry = 0.0;
     fill = Some (Element.make_fill (Element.color_rgb 0.0 0.0 1.0));

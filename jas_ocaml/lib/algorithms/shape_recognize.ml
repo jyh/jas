@@ -676,41 +676,41 @@ let recognized_to_element shape template =
   let a = template_appearance template in
   match shape with
   | Recognized_line { a = (x1, y1); b = (x2, y2) } ->
-    Element.Line { x1; y1; x2; y2; stroke = a.a_stroke; width_points = [];
+    Element.Line { name = None; x1; y1; x2; y2; stroke = a.a_stroke; width_points = [];
                    opacity = a.a_opacity;
                    transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                      stroke_gradient = None;
                    }
   | Recognized_triangle { pts = (p1, p2, p3) } ->
-    Element.Polygon { points = [p1; p2; p3]; fill = a.a_fill; stroke = a.a_stroke;
+    Element.Polygon { name = None; points = [p1; p2; p3]; fill = a.a_fill; stroke = a.a_stroke;
                       opacity = a.a_opacity; transform = a.a_transform;
                       locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                         fill_gradient = None;
                         stroke_gradient = None;
                       }
   | Recognized_rectangle { x; y; w; h } ->
-    Element.Rect { x; y; width = w; height = h; rx = 0.0; ry = 0.0;
+    Element.Rect { name = None; x; y; width = w; height = h; rx = 0.0; ry = 0.0;
                    fill = a.a_fill; stroke = a.a_stroke; opacity = a.a_opacity;
                    transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                      fill_gradient = None;
                      stroke_gradient = None;
                    }
   | Recognized_round_rect { x; y; w; h; r } ->
-    Element.Rect { x; y; width = w; height = h; rx = r; ry = r;
+    Element.Rect { name = None; x; y; width = w; height = h; rx = r; ry = r;
                    fill = a.a_fill; stroke = a.a_stroke; opacity = a.a_opacity;
                    transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                      fill_gradient = None;
                      stroke_gradient = None;
                    }
   | Recognized_circle { cx; cy; r } ->
-    Element.Circle { cx; cy; r; fill = a.a_fill; stroke = a.a_stroke;
+    Element.Circle { name = None; cx; cy; r; fill = a.a_fill; stroke = a.a_stroke;
                      opacity = a.a_opacity; transform = a.a_transform;
                      locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                        fill_gradient = None;
                        stroke_gradient = None;
                      }
   | Recognized_ellipse { cx; cy; rx; ry } ->
-    Element.Ellipse { cx; cy; rx; ry; fill = a.a_fill; stroke = a.a_stroke;
+    Element.Ellipse { name = None; cx; cy; rx; ry; fill = a.a_fill; stroke = a.a_stroke;
                       opacity = a.a_opacity; transform = a.a_transform;
                       locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                         fill_gradient = None;
@@ -732,14 +732,14 @@ let recognized_to_element shape template =
       p shaft_end shaft_half_width;
       p tail shaft_half_width;
     ] in
-    Element.Polygon { points; fill = a.a_fill; stroke = a.a_stroke;
+    Element.Polygon { name = None; points; fill = a.a_fill; stroke = a.a_stroke;
                       opacity = a.a_opacity; transform = a.a_transform;
                       locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                         fill_gradient = None;
                         stroke_gradient = None;
                       }
   | Recognized_scribble { points } ->
-    Element.Polyline { points; fill = None; stroke = a.a_stroke;
+    Element.Polyline { name = None; points; fill = None; stroke = a.a_stroke;
                        opacity = a.a_opacity; transform = a.a_transform;
                        locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;
                          fill_gradient = None;
@@ -757,7 +757,7 @@ let recognized_to_element shape template =
       if i = 0 then Element.MoveTo (x, y)
       else Element.LineTo (x, y)
     ) @ [Element.ClosePath] in
-    Element.Path { d; fill = a.a_fill; stroke = a.a_stroke;
+    Element.Path { name = None; d; fill = a.a_fill; stroke = a.a_stroke;
                    width_points = [];
                    opacity = a.a_opacity; transform = a.a_transform;
                    locked = a.a_locked; visibility = a.a_visibility; blend_mode = Element.Normal; mask = None;

@@ -5,7 +5,7 @@
 open Jas
 
 let make_rect x y w h =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = w; height = h;
     rx = 0.0; ry = 0.0;
     fill = None; stroke = None;
