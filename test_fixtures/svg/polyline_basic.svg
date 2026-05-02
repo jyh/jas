@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 128 96" width="128" height="96">
-  <g inkscape:label="Layer 1">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
     <polyline points="0,0 64,96 128,0" fill="none" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
   </g>
 </svg>

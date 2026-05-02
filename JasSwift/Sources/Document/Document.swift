@@ -190,7 +190,7 @@ public struct Document: Equatable {
     public let artboardOptions: ArtboardOptions
 
     public init(
-        layers: [Layer] = [Layer(children: [])],
+        layers: [Layer] = [Layer(name: "Layer", children: [])],
         selectedLayer: Int = 0,
         selection: Selection = [],
         artboards: [Artboard] = [],
@@ -213,7 +213,7 @@ public struct Document: Equatable {
         idGenerator: () -> String = generateArtboardId
     ) -> Document {
         Document(
-            layers: [Layer(children: [])],
+            layers: [Layer(name: "Layer", children: [])],
             artboards: ensureArtboardsInvariant([], idGenerator: idGenerator).artboards
         )
     }

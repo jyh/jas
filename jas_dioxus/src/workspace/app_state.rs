@@ -3400,11 +3400,13 @@ mod align_panel_state_tests {
             st.active_tab = 0;
         }
         let layer = Element::Layer(LayerElem {
-            name: "L".into(),
             children: rects.into_iter().map(std::rc::Rc::new).collect(),
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps {
+                name: Some("L".into()),
+                ..Default::default()
+            },
         });
         let selection: Vec<ElementSelection> = selected.into_iter()
             .map(ElementSelection::all)

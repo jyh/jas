@@ -158,6 +158,14 @@ def _visibility_str(v: Visibility) -> str:
 
 def _common_fields(o: _JsonObj, elem: Element):
     o.bool_("locked", elem.locked)
+    # After Layer.name → common-name merge, every element (Layer
+    # included) reads its name from common.name (Group.name is the
+    # parent definition; Layer inherits it).
+    n = getattr(elem, "name", None)
+    if n is None:
+        o.null("name")
+    else:
+        o.str("name", n)
     o.num("opacity", elem.opacity)
     o.raw("transform", _transform_json(elem.transform))
     o.str("visibility", _visibility_str(elem.visibility))
@@ -311,10 +319,11 @@ def _element_json(elem: Element) -> str:
     if isinstance(elem, Layer):
         # Layer must be checked before Group since Layer extends Group.
         o.str("type", "layer")
+        # After Layer.name → common-name merge, _common_fields emits
+        # name uniformly (no separate Layer "name" emit needed).
         _common_fields(o, elem)
         children = [_element_json(c) for c in elem.children]
         o.raw("children", _json_array(children))
-        o.str("name", elem.name)
     elif isinstance(elem, Group):
         o.str("type", "group")
         _common_fields(o, elem)
@@ -567,12 +576,15 @@ def _parse_transform(d) -> Transform | None:
 
 
 def _parse_common(d: dict) -> dict:
-    """Extract the common Element fields shared by all element types."""
+    """Extract the common Element fields shared by all element types,
+    including the optional ``name`` (None when the JSON value is
+    ``null`` or missing)."""
     return dict(
         locked=d["locked"],
         opacity=d["opacity"],
         transform=_parse_transform(d["transform"]),
         visibility=_VISIBILITY_MAP[d["visibility"]],
+        name=d.get("name"),
     )
 
 
@@ -688,8 +700,11 @@ def _parse_element(d: dict) -> Element:
     common = _parse_common(d)
 
     if typ == "layer":
+        # After Layer.name → common-name merge, Layer reads name from
+        # the common path like every other element (already in
+        # `common["name"]` if present).
         children = tuple(_parse_element(c) for c in d["children"])
-        return Layer(name=d["name"], children=children, **common)
+        return Layer(children=children, **common)
     elif typ == "group":
         children = tuple(_parse_element(c) for c in d["children"])
         return Group(children=children, **common)

@@ -725,6 +725,7 @@ class Line(Element):
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
     stroke_gradient: Gradient | None = None
+    name: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
@@ -758,6 +759,7 @@ class Rect(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    name: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
@@ -782,6 +784,7 @@ class Circle(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    name: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -809,6 +812,7 @@ class Ellipse(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    name: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -833,6 +837,7 @@ class Polyline(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    name: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -866,6 +871,7 @@ class Polygon(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    name: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -900,6 +906,7 @@ class Path(Element):
     mask: "Mask | None" = None
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
+    name: str | None = None
     # Active brush reference as "<library_slug>/<brush_slug>", or None
     # for plain native-stroke. Consumed by the canvas renderer's brush
     # dispatch. See transcripts/BRUSHES.md §Stroke styling interaction.
@@ -1082,6 +1089,7 @@ class Text(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    name: str | None = None
     # Sentinel default: an empty tuple means "derive from content in
     # __post_init__". Late-import avoids the geometry.element <->
     # geometry.tspan circular dep.
@@ -1131,6 +1139,7 @@ class TextPath(Element):
     """
     d: tuple[MoveTo | LineTo | CurveTo | QuadTo | SmoothCurveTo
              | SmoothQuadTo | ArcTo | ClosePath, ...] = ()
+    name: str | None = None
     content: str = "Lorem Ipsum"
     start_offset: float = 0.0
     font_family: str = "sans-serif"
@@ -1182,6 +1191,7 @@ class Group(Element):
     visibility: Visibility = Visibility.PREVIEW
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
+    name: str | None = None
     # Opacity panel "Page Isolated Blending" flag. Storage-only in Phase 2;
     # renderer support is deferred. Inherited by Layer.
     isolated_blending: bool = False
@@ -1212,8 +1222,15 @@ class Group(Element):
 
 @dataclass(frozen=True)
 class Layer(Group):
-    """A named group (layer) of elements."""
-    name: str = "Layer"
+    """A top-level container.
+
+    After the Layer.name → common-name merge, Layer carries no extra
+    fields beyond Group. The Layer/Group distinction survives at the
+    type level so the layers panel can still tell "top-level
+    container" from "nested container", and so the SVG codec can
+    emit ``inkscape:groupmode="layer"`` for Layers only.
+    """
+    pass
 
 
 # ─── LiveElement framework ─────────────────────────────────────

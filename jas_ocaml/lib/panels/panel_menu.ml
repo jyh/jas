@@ -361,7 +361,9 @@ let dispatch_yaml_action
                     Element.set_locked b elem
                   | "name", Expr_eval.Str s ->
                     (match elem with
-                     | Element.Layer le -> Element.Layer { le with name = s }
+                     | Element.Layer le ->
+                       let new_name = if s = "" then None else Some s in
+                       Element.Layer { le with name = new_name }
                      | _ -> elem)
                   | _ -> elem
                 in

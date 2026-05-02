@@ -290,6 +290,7 @@ type path_command =
 (** SVG element types. All elements are immutable. *)
 type element =
   | Line of {
+      name : string option;
       x1 : float; y1 : float;
       x2 : float; y2 : float;
       stroke : stroke option;
@@ -303,6 +304,7 @@ type element =
       stroke_gradient : gradient option;
     }
   | Rect of {
+      name : string option;
       x : float; y : float;
       width : float; height : float;
       rx : float; ry : float;
@@ -318,6 +320,7 @@ type element =
       stroke_gradient : gradient option;
     }
   | Circle of {
+      name : string option;
       cx : float; cy : float; r : float;
       fill : fill option;
       stroke : stroke option;
@@ -331,6 +334,7 @@ type element =
       stroke_gradient : gradient option;
     }
   | Ellipse of {
+      name : string option;
       cx : float; cy : float;
       rx : float; ry : float;
       fill : fill option;
@@ -345,6 +349,7 @@ type element =
       stroke_gradient : gradient option;
     }
   | Polyline of {
+      name : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -358,6 +363,7 @@ type element =
       stroke_gradient : gradient option;
     }
   | Polygon of {
+      name : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -371,6 +377,7 @@ type element =
       stroke_gradient : gradient option;
     }
   | Path of {
+      name : string option;
       d : path_command list;
       fill : fill option;
       stroke : stroke option;
@@ -393,6 +400,7 @@ type element =
       tool_origin : string option;
     }
   | Text of {
+      name : string option;
       x : float; y : float;
       content : string;
       font_family : string;
@@ -431,6 +439,7 @@ type element =
       tspans : tspan array;
     }
   | Text_path of {
+      name : string option;
       d : path_command list;
       content : string;
       start_offset : float;
@@ -462,6 +471,7 @@ type element =
       tspans : tspan array;
     }
   | Group of {
+      name : string option;
       children : element array;
       opacity : float;
       transform : transform option;
@@ -477,7 +487,9 @@ type element =
       knockout_group : bool;
     }
   | Layer of {
-      name : string;
+      name : string option;
+      (** Optional after the Layer.name → common-name merge: None means
+          an unnamed layer; the layers panel substitutes "Layer N". *)
       children : element array;
       opacity : float;
       transform : transform option;
@@ -647,6 +659,12 @@ val with_mask : element -> mask option -> element
 (** Return the opacity mask attached to [elem], if any. *)
 val get_mask : element -> mask option
 val with_width_points : element -> stroke_width_point list -> element
+
+(** Set the user-visible name on any element. None clears the name
+    (Layer treats this as the empty string since its name field is
+    required). *)
+val with_name : element -> string option -> element
+
 val color_to_hex : color -> string
 val color_from_hex : string -> color option
 

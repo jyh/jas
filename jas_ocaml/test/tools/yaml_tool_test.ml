@@ -231,7 +231,7 @@ let dispatch_tests = [
     | Some tool ->
       let model = Model.create () in
       let layer = Element.Layer {
-        name = "L"; children = [||];
+        name = Some "L"; children = [||];
         transform = None; locked = false; opacity = 1.0;
         visibility = Preview; blend_mode = Normal; mask = None;
         isolated_blending = false; knockout_group = false;

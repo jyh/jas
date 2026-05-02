@@ -1249,7 +1249,7 @@ let preview_snapshot_tests = [
 
 let _make_rect_with_gradient ~fill_gradient =
   let fill = Some (Jas.Element.make_fill Jas.Element.black) in
-  let rect = Jas.Element.Rect {
+  let rect = Jas.Element.Rect { name = None;
     x = 0.0; y = 0.0; width = 100.0; height = 50.0;
     rx = 0.0; ry = 0.0;
     fill; stroke = None;

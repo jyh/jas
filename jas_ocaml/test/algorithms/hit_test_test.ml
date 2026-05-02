@@ -6,7 +6,7 @@ let make_line ?(x1=0.0) ?(y1=0.0) ?(x2=10.0) ?(y2=10.0) () : Jas.Element.element
   Jas.Element.make_line x1 y1 x2 y2
 
 let make_rect ?(x=0.0) ?(y=0.0) ?(width=10.0) ?(height=10.0) () : Jas.Element.element =
-  Jas.Element.Rect {
+  Jas.Element.Rect { name = None;
     x; y; width; height; rx = 0.0; ry = 0.0;
     fill = None; stroke = None;
     opacity = 1.0; transform = None; locked = false; visibility = Preview;

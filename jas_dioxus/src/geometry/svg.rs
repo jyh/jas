@@ -102,6 +102,20 @@ fn opacity_attr(opacity: f64) -> String {
     }
 }
 
+/// Inkscape-compatible label attribute for the user-visible element
+/// name. We use inkscape:label rather than a <title> child because
+/// our writers emit self-closing tags for shapes; switching every
+/// writer to open/close just to host a child would be intrusive.
+/// Reader accepts both inkscape:label and a <title> child for
+/// interop with tools that round-trip through one or the other.
+fn name_attr(name: &Option<String>) -> String {
+    match name {
+        None => String::new(),
+        Some(n) if n.is_empty() => String::new(),
+        Some(n) => format!(" inkscape:label=\"{}\"", escape_xml(n)),
+    }
+}
+
 fn path_data(commands: &[PathCommand]) -> String {
     let mut parts = Vec::new();
     for cmd in commands {
@@ -166,12 +180,13 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
     match elem {
         Element::Line(e) => {
             format!(
-                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}/>\n",
+                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.x1)), fmt(px(e.y1)), fmt(px(e.x2)), fmt(px(e.y2)),
                 stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity),
                 transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Rect(e) => {
@@ -183,30 +198,33 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 rxy.push_str(&format!(" ry=\"{}\"", fmt(px(e.ry))));
             }
             format!(
-                "{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{}{}{}{}{}/>\n",
+                "{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{}{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.x)), fmt(px(e.y)), fmt(px(e.width)), fmt(px(e.height)),
                 rxy,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Circle(e) => {
             format!(
-                "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}{}{}{}/>\n",
+                "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.r)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Ellipse(e) => {
             format!(
-                "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{}{}{}/>\n",
+                "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), fmt(px(e.ry)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Polyline(e) => {
@@ -215,10 +233,11 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
-                "{}<polyline points=\"{}\"{}{}{}{}/>\n",
+                "{}<polyline points=\"{}\"{}{}{}{}{}/>\n",
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Polygon(e) => {
@@ -227,19 +246,21 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
-                "{}<polygon points=\"{}\"{}{}{}{}/>\n",
+                "{}<polygon points=\"{}\"{}{}{}{}{}/>\n",
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Path(e) => {
             format!(
-                "{}<path d=\"{}\"{}{}{}{}/>\n",
+                "{}<path d=\"{}\"{}{}{}{}{}/>\n",
                 indent,
                 path_data(&e.d),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Text(e) => {
@@ -398,12 +419,11 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             )
         }
         Element::Layer(e) => {
-            let label = if !e.name.is_empty() {
-                format!(" inkscape:label=\"{}\"", escape_xml(&e.name))
-            } else { String::new() };
+            // inkscape:groupmode="layer" lets the parser distinguish
+            // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
-                "{}<g{}{}{}>",
-                indent, label,
+                "{}<g inkscape:groupmode=\"layer\"{}{}{}>",
+                indent, name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -415,8 +435,8 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         }
         Element::Group(e) => {
             let mut lines = vec![format!(
-                "{}<g{}{}>",
-                indent,
+                "{}<g{}{}{}>",
+                indent, name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -1071,6 +1091,15 @@ fn parse_common(node: &XmlNode) -> CommonProps {
         visibility: crate::geometry::element::Visibility::default(),
         mask: None,
         tool_origin: node.attrs.get("jas:tool-origin").cloned(),
+        // User-visible name. Read inkscape:label attribute first
+        // (matches what we write); fall back to a <title> child for
+        // interop with tools that round-trip via the standard
+        // accessibility element. LYR-091 enabler.
+        name: node.attrs.get("inkscape:label").cloned()
+            .or_else(|| node.children.iter()
+                .find(|c| c.tag == "title")
+                .map(|c| c.text.clone()))
+            .filter(|s| !s.is_empty()),
     }
 }
 
@@ -1597,11 +1626,16 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                     children.push(Rc::new(elem));
                 }
             }
-            // Check for inkscape:label
-            let label = node.attrs.get("inkscape:label")
-                .cloned();
-            if let Some(name) = label {
-                Some(Element::Layer(LayerElem { children, name, common, isolated_blending: false, knockout_group: false }))
+            // Layer detection: only inkscape:groupmode="layer"
+            // promotes a <g> to a Layer. inkscape:label alone is a
+            // Group name (the new common.name path); the parser
+            // already populated common.name from inkscape:label
+            // earlier in parse_common.
+            let group_mode = node.attrs.get("inkscape:groupmode").cloned();
+            // common.name is already populated from inkscape:label
+            // by parse_common; both Layer and Group inherit it from there.
+            if group_mode.as_deref() == Some("layer") {
+                Some(Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false }))
             } else {
                 Some(Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false }))
             }
@@ -1638,7 +1672,6 @@ pub fn svg_to_document(svg: &str) -> Document {
                 // Promote top-level groups to layers
                 layers.push(Element::Layer(LayerElem {
                     children: g.children.clone(),
-                    name: String::new(),
                     common: g.common.clone(),
                     isolated_blending: g.isolated_blending,
                     knockout_group: g.knockout_group,
@@ -1647,11 +1680,10 @@ pub fn svg_to_document(svg: &str) -> Document {
             _ => {
                 // Wrap standalone elements in a default layer
                 if layers.is_empty() || !layers.last().is_some_and(|l| {
-                    if let Element::Layer(le) = l { le.name.is_empty() } else { false }
+                    if let Element::Layer(le) = l { le.name().is_empty() } else { false }
                 }) {
                     layers.push(Element::Layer(LayerElem {
                         children: vec![Rc::new(elem)],
-                        name: String::new(),
                         common: CommonProps::default(),
                         isolated_blending: false,
                         knockout_group: false,
@@ -1831,11 +1863,13 @@ mod tests {
     fn make_doc(children: Vec<Element>) -> Document {
         Document {
             layers: vec![Element::Layer(LayerElem {
-                name: "Layer".to_string(),
                 children: children.into_iter().map(Rc::new).collect(),
                 isolated_blending: false,
                 knockout_group: false,
-                common: CommonProps::default(),
+                common: CommonProps {
+                    name: Some("Layer".to_string()),
+                    ..Default::default()
+                },
             })],
             selected_layer: 0,
             selection: vec![],
@@ -2748,5 +2782,55 @@ mod tests {
         assert_eq!(w.jas_hyphenate_zone, Some(36.0));
         assert_eq!(w.jas_hyphenate_bias, Some(0.5));
         assert_eq!(w.jas_hyphenate_capitalized, Some(true));
+    }
+
+    #[test]
+    fn common_name_round_trips_through_svg() {
+        // Element name persists through document_to_svg →
+        // svg_to_document. Tests Group + Rect to cover both the
+        // open/close container writer and the self-closing shape
+        // writer paths.
+        use crate::geometry::element::{
+            CommonProps, GroupElem, RectElem, Color, Fill,
+        };
+        let mut rect = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        rect.common.name = Some("My Rect".into());
+        let mut group = GroupElem {
+            children: vec![std::rc::Rc::new(Element::Rect(rect))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        };
+        group.common.name = Some("My Group".into());
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Group(group)));
+        let svg = document_to_svg(&doc);
+        assert!(
+            svg.contains(r#"inkscape:label="My Rect""#),
+            "rect inkscape:label not in SVG: {svg}",
+        );
+        assert!(
+            svg.contains(r#"inkscape:label="My Group""#),
+            "group inkscape:label not in SVG: {svg}",
+        );
+        let parsed = svg_to_document(&svg);
+        // Layer 0 → Group → Rect.
+        let group_elem = parsed.layers[0].children().unwrap()[0].as_ref();
+        assert_eq!(
+            group_elem.common().name.as_deref(),
+            Some("My Group"),
+            "round-trip lost group name",
+        );
+        let rect_elem = group_elem.children().unwrap()[0].as_ref();
+        assert_eq!(
+            rect_elem.common().name.as_deref(),
+            Some("My Rect"),
+            "round-trip lost rect name",
+        );
     }
 }
