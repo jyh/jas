@@ -351,7 +351,7 @@ fn pack_element(elem: &Element) -> Value {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
             let children: Vec<Value> = e.children.iter().map(|c| pack_element(c)).collect();
             Value::Array(vec![vint(TAG_LAYER), locked, opacity, vis, xform,
-                              vstr(&e.name), Value::Array(children)])
+                              vstr(e.name()), Value::Array(children)])
         }
         Element::Group(e) => {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
@@ -677,7 +677,11 @@ fn unpack_element(v: &Value) -> Element {
             let name = as_str(&arr[5]).to_string();
             let children: Vec<Rc<Element>> = as_array(&arr[6]).iter()
                 .map(|c| Rc::new(unpack_element(c))).collect();
-            Element::Layer(LayerElem { name, children, common, isolated_blending: false, knockout_group: false })
+            let mut common = common;
+            if !name.is_empty() {
+                common.name = Some(name);
+            }
+            Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
         }
         TAG_GROUP => {
             let children: Vec<Rc<Element>> = as_array(&arr[5]).iter()

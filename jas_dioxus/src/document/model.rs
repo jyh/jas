@@ -288,9 +288,12 @@ mod tests {
 
     fn make_layer(name: &str) -> Element {
         Element::Layer(LayerElem {
-            name: name.to_string(), children: Vec::new(),
+            children: Vec::new(),
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps {
+                name: Some(name.to_string()),
+                ..Default::default()
+            },
         })
     }
 

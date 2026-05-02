@@ -419,16 +419,11 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             )
         }
         Element::Layer(e) => {
-            // Prefer common.name; fall back to LayerElem.name for any
-            // legacy in-memory state where the old field was set
-            // directly. (Rename commits write both in sync.)
-            let effective_name = e.common.name.clone()
-                .or_else(|| if e.name.is_empty() { None } else { Some(e.name.clone()) });
             // inkscape:groupmode="layer" lets the parser distinguish
             // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
                 "{}<g inkscape:groupmode=\"layer\"{}{}{}>",
-                indent, name_attr(&effective_name),
+                indent, name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -1637,10 +1632,10 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             // already populated common.name from inkscape:label
             // earlier in parse_common.
             let group_mode = node.attrs.get("inkscape:groupmode").cloned();
-            let label = node.attrs.get("inkscape:label").cloned();
+            // common.name is already populated from inkscape:label
+            // by parse_common; both Layer and Group inherit it from there.
             if group_mode.as_deref() == Some("layer") {
-                let name = label.unwrap_or_default();
-                Some(Element::Layer(LayerElem { children, name, common, isolated_blending: false, knockout_group: false }))
+                Some(Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false }))
             } else {
                 Some(Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false }))
             }
@@ -1677,7 +1672,6 @@ pub fn svg_to_document(svg: &str) -> Document {
                 // Promote top-level groups to layers
                 layers.push(Element::Layer(LayerElem {
                     children: g.children.clone(),
-                    name: String::new(),
                     common: g.common.clone(),
                     isolated_blending: g.isolated_blending,
                     knockout_group: g.knockout_group,
@@ -1686,11 +1680,10 @@ pub fn svg_to_document(svg: &str) -> Document {
             _ => {
                 // Wrap standalone elements in a default layer
                 if layers.is_empty() || !layers.last().is_some_and(|l| {
-                    if let Element::Layer(le) = l { le.name.is_empty() } else { false }
+                    if let Element::Layer(le) = l { le.name().is_empty() } else { false }
                 }) {
                     layers.push(Element::Layer(LayerElem {
                         children: vec![Rc::new(elem)],
-                        name: String::new(),
                         common: CommonProps::default(),
                         isolated_blending: false,
                         knockout_group: false,
@@ -1870,11 +1863,13 @@ mod tests {
     fn make_doc(children: Vec<Element>) -> Document {
         Document {
             layers: vec![Element::Layer(LayerElem {
-                name: "Layer".to_string(),
                 children: children.into_iter().map(Rc::new).collect(),
                 isolated_blending: false,
                 knockout_group: false,
-                common: CommonProps::default(),
+                common: CommonProps {
+                    name: Some("Layer".to_string()),
+                    ..Default::default()
+                },
             })],
             selected_layer: 0,
             selection: vec![],
