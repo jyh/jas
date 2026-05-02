@@ -965,8 +965,9 @@ private func attrF(_ node: XMLElement, _ name: String, _ def: Double = 0) -> Dou
 /// User-visible name from inkscape:label (preferred) or <title> child.
 /// nil → element is unnamed (UI shows <Type> fallback).
 private func parseName(_ elem: XMLElement) -> String? {
-    if let label = elem.attribute(forName: "inkscape:label")?.stringValue,
-       !label.isEmpty {
+    let label = elem.attribute(forName: "label")?.stringValue
+              ?? elem.attribute(forName: "inkscape:label")?.stringValue
+    if let label = label, !label.isEmpty {
         return label
     }
     if let title = elem.children?.first(where: { ($0 as? XMLElement)?.localName == "title" }) as? XMLElement,
@@ -1156,16 +1157,13 @@ private func parseElement(_ node: XMLNode) -> Element? {
                 }
             }
         }
-        // Layer detection: explicit inkscape:groupmode="layer" wins
-        // (Inkscape convention). Otherwise the heuristic is "label
-        // present → Layer" which preserves prior behavior for files
-        // this app saved before non-Layer naming existed.
-        let groupMode = elem.attribute(forName: "inkscape:groupmode")?.stringValue
-        let label = elem.attribute(forName: "label")?.stringValue
-                  ?? elem.attribute(forName: "inkscape:label")?.stringValue
-        let isLayer = groupMode == "layer" || label != nil
-        if isLayer {
-            return .layer(Layer(name: label ?? "", children: children,
+        // Layer detection: only explicit inkscape:groupmode="layer"
+        // marks a Layer. Plain naming (inkscape:label) on a <g> means
+        // a named Group, not a Layer.
+        let groupMode = elem.attribute(forName: "groupmode")?.stringValue
+                      ?? elem.attribute(forName: "inkscape:groupmode")?.stringValue
+        if groupMode == "layer" {
+            return .layer(Layer(name: name ?? "", children: children,
                                     opacity: opacity, transform: transform))
         }
         return .group(Group(children: children,

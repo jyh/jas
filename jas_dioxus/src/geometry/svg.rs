@@ -1631,14 +1631,14 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                     children.push(Rc::new(elem));
                 }
             }
-            // Layer detection: inkscape:groupmode="layer" wins
-            // (Inkscape convention + what we now emit). Otherwise a
-            // mere inkscape:label still implies Layer for back-compat
-            // with files saved before non-Layer naming existed.
+            // Layer detection: only inkscape:groupmode="layer"
+            // promotes a <g> to a Layer. inkscape:label alone is a
+            // Group name (the new common.name path); the parser
+            // already populated common.name from inkscape:label
+            // earlier in parse_common.
             let group_mode = node.attrs.get("inkscape:groupmode").cloned();
             let label = node.attrs.get("inkscape:label").cloned();
-            let is_layer = group_mode.as_deref() == Some("layer") || label.is_some();
-            if is_layer {
+            if group_mode.as_deref() == Some("layer") {
                 let name = label.unwrap_or_default();
                 Some(Element::Layer(LayerElem { children, name, common, isolated_blending: false, knockout_group: false }))
             } else {

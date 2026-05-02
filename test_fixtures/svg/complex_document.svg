@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 266.6667 200" width="266.6667" height="200">
-  <g inkscape:label="Shapes">
+  <g inkscape:groupmode="layer" inkscape:label="Shapes">
     <rect x="0" y="0" width="96" height="96" rx="13.3333" ry="13.3333" fill="rgb(100,149,237)" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
     <circle cx="200" cy="48" r="48" fill="none" stroke="rgb(255,0,0)" stroke-width="2.6667"/>
     <g opacity="0.5">
       <line x1="0" y1="200" x2="266.6667" y2="0" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
     </g>
   </g>
-  <g inkscape:label="Text">
+  <g inkscape:groupmode="layer" inkscape:label="Text">
     <text fill="rgb(0,0,0)" stroke="none" font-family="serif" font-size="32" font-weight="bold" x="13.3333" y="165.3333">JAS</text>
   </g>
 </svg>
