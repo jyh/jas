@@ -247,8 +247,11 @@ class ElementTest(absltest.TestCase):
         self.assertEqual(h, 23)
 
     def test_layer_default_name(self):
+        # After Layer.name → common-name merge, Layer with no name
+        # defaults to None (unnamed); display-time fallback is the
+        # layers panel's "Layer N" auto-naming.
         layer = Layer(children=(Rect(x=0, y=0, width=10, height=10),))
-        self.assertEqual(layer.name, "Layer")
+        self.assertIsNone(layer.name)
 
     def test_layer_custom_name(self):
         layer = Layer(children=(Rect(x=0, y=0, width=10, height=10),), name="Background")
