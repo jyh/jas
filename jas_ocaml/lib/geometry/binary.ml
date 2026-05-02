@@ -289,8 +289,9 @@ let pack_path_command = function
 let rec pack_element = function
   | Layer { name; children; opacity; transform; locked; visibility; _ } ->
     let ch = Array.to_list (Array.map pack_element children) in
+    let name_str = match name with Some s -> s | None -> "" in
     vlist [vint tag_layer; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform; vstr name; vlist ch]
+           pack_transform transform; vstr name_str; vlist ch]
   | Group { children; opacity; transform; locked; visibility; _ } ->
     let ch = Array.to_list (Array.map pack_element children) in
     vlist [vint tag_group; vbool locked; vf64 opacity; pack_vis visibility;
@@ -500,7 +501,8 @@ let rec unpack_element v =
   let tag = as_int (List.nth arr 0) in
   let (locked, opacity, visibility, transform) = unpack_common arr in
   if tag = tag_layer then
-    let name = as_str (List.nth arr 5) in
+    let name_str = as_str (List.nth arr 5) in
+    let name = if name_str = "" then None else Some name_str in
     let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 6))) in
     Layer { name; children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
             mask = None;

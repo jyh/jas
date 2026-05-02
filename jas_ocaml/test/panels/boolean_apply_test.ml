@@ -16,7 +16,7 @@ let rect_at x y =
 
 let make_model rects selected_paths =
   let layer = Layer {
-    name = "L0";
+    name = Some "L0";
     children = Array.of_list rects;
     opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal;
     mask = None;

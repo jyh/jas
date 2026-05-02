@@ -17,7 +17,7 @@ let make_rect x y w h =
 (** Layer with two 10x10 rects at (0,0) and (50,50). *)
 let two_rect_model () =
   let layer = Element.Layer {
-    name = "L";
+    name = Some "L";
     children = [| make_rect 0.0 0.0 10.0 10.0;
                   make_rect 50.0 50.0 10.0 10.0 |];
     transform = None; locked = false; opacity = 1.0;
@@ -221,7 +221,7 @@ let blob_brush_state_defaults (store : State_store.t) =
 
 let empty_layer_model () =
   let layer = Element.Layer {
-    name = "L";
+    name = Some "L";
     children = [||];
     transform = None; locked = false; opacity = 1.0;
     visibility = Preview; blend_mode = Normal; mask = None;
@@ -276,7 +276,7 @@ let blob_brush_commit_tests = [
       tool_origin = Some "blob_brush";
     } in
     let layer = Element.Layer {
-      name = "L"; children = [| target |];
+      name = Some "L"; children = [| target |];
       transform = None; locked = false; opacity = 1.0;
       visibility = Preview; blend_mode = Normal; mask = None;
       isolated_blending = false; knockout_group = false;
@@ -315,7 +315,7 @@ let blob_brush_commit_tests = [
       tool_origin = None;
     } in
     let layer = Element.Layer {
-      name = "L"; children = [| target |];
+      name = Some "L"; children = [| target |];
       transform = None; locked = false; opacity = 1.0;
       visibility = Preview; blend_mode = Normal; mask = None;
       isolated_blending = false; knockout_group = false;
@@ -374,7 +374,7 @@ let magic_wand_state_defaults (store : State_store.t) =
 
 let three_rect_model () =
   let layer = Element.Layer {
-    name = "L";
+    name = Some "L";
     children = [| red_filled_rect 0.0 0.0;
                   red_filled_rect 50.0 0.0;
                   blue_filled_rect 100.0 0.0 |];
@@ -450,7 +450,7 @@ let magic_wand_apply_tests = [
       | Element.Rect r -> Element.Rect { r with visibility = Element.Invisible }
       | e -> e in
     let layer = Element.Layer {
-      name = "L"; children = [| r0; r1_locked; r2_hidden |];
+      name = Some "L"; children = [| r0; r1_locked; r2_hidden |];
       transform = None; locked = false; opacity = 1.0;
       visibility = Preview; blend_mode = Normal; mask = None;
       isolated_blending = false; knockout_group = false;
@@ -475,7 +475,7 @@ let magic_wand_apply_tests = [
 
 let artboard_model abs_list =
   let layer = Element.Layer {
-    name = "L"; children = [||];
+    name = Some "L"; children = [||];
     transform = None; locked = false; opacity = 1.0;
     visibility = Preview; blend_mode = Normal; mask = None;
     isolated_blending = false; knockout_group = false;

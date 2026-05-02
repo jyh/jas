@@ -487,7 +487,9 @@ type element =
       knockout_group : bool;
     }
   | Layer of {
-      name : string;
+      name : string option;
+      (** Optional after the Layer.name → common-name merge: None means
+          an unnamed layer; the layers panel substitutes "Layer N". *)
       children : element array;
       opacity : float;
       transform : transform option;

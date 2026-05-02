@@ -92,7 +92,7 @@ let () =
         ctrl5#remove_layer 0;
         assert (Array.length ctrl5#document.Jas.Document.layers = 1);
         (match ctrl5#document.Jas.Document.layers.(0) with
-         | Layer { name; _ } -> assert (name = "B")
+         | Layer { name = Some n; _ } -> assert (n = "B")
          | _ -> assert false));
 
       Alcotest.test_case "set_document" `Quick (fun () ->

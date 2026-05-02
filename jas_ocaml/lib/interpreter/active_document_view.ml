@@ -43,9 +43,10 @@ let build
             | Element.Preview -> "preview"
           in
           let path_json = `Assoc [("__path__", `List [`Int i])] in
+          let name_str = match le.name with Some s -> s | None -> "" in
           Some (`Assoc [
             ("kind", `String "Layer");
-            ("name", `String le.name);
+            ("name", `String name_str);
             ("common", `Assoc [
               ("visibility", `String vis);
               ("locked", `Bool (Element.is_locked e));
@@ -62,7 +63,7 @@ let build
     let layer_names =
       Array.to_list layers
       |> List.filter_map (function
-        | Element.Layer le -> Some le.name
+        | Element.Layer le -> le.name
         | _ -> None)
     in
     let rec find_n n =

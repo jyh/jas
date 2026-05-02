@@ -426,11 +426,12 @@ let rec element_json = function
   | Layer e ->
     let o = json_obj () in
     json_str o "type" "layer";
-    common_fields_no_name o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+    (* After Layer.name → common-name merge, Layer uses the same
+       nullable name path as every other element. *)
+    common_fields o ~opacity:e.opacity ~transform:e.transform
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     let children = Array.to_list e.children |> List.map element_json in
     json_raw o "children" (json_array children);
-    json_str o "name" e.name;
     json_build o
   | Live (Compound_shape cs) ->
     let o = json_obj () in
@@ -822,7 +823,9 @@ let rec parse_element j =
   | "layer" ->
     let children = j |> member "children" |> to_list
       |> List.map parse_element |> Array.of_list in
-    let name = j |> member "name" |> to_string in
+    (* After Layer.name → common-name merge, Layer reads name from
+       the outer parse_element binding (same nullable path everything
+       else uses). *)
     Layer { name; children; opacity; transform; locked; visibility; blend_mode = Normal;
             mask = None;
             isolated_blending = false; knockout_group = false }
