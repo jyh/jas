@@ -511,10 +511,11 @@ fn element_json(elem: &Element) -> String {
         }
         Element::Layer(e) => {
             o.str_val("type", "layer");
-            common_fields_no_name(&mut o, &e.common);
+            // After Layer.name → common.name merge, Layer uses the
+            // same nullable name path as every other element.
+            common_fields(&mut o, &e.common);
             let children: Vec<String> = e.children.iter().map(|c| element_json(c)).collect();
             o.raw("children", json_array(&children));
-            o.str_val("name", &e.name);
         }
         Element::Live(v) => match v {
             crate::geometry::live::LiveVariant::CompoundShape(cs) => {
@@ -970,8 +971,9 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
         "layer" => {
             let children = v["children"].as_array().unwrap_or(&vec![])
                 .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
-            let name = v["name"].as_str().unwrap_or("Layer").to_string();
-            Element::Layer(LayerElem { name, children, common, isolated_blending: false, knockout_group: false })
+            // common.name was already populated by parse_common from the
+            // top-level "name" field — Layer no longer reads name itself.
+            Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
         },
         _ => panic!("Unknown element type: {}", typ),
     }

@@ -2130,11 +2130,10 @@ mod tests {
             stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(rect)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -2859,11 +2858,10 @@ mod tests {
         use crate::document::document::Document;
         use crate::geometry::element::LayerElem;
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -3263,11 +3261,10 @@ mod tests {
             stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(Element::Path(pe))],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -3354,11 +3351,10 @@ mod tests {
             stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(Element::Path(pe))],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -3474,11 +3470,10 @@ mod tests {
             stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(Element::Path(pe))],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -3552,11 +3547,10 @@ mod tests {
             stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(Element::Path(pe))],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let mut model = Model::new(
             Document {
@@ -3637,11 +3631,10 @@ mod tests {
             stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(Element::Path(pe))],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -3719,11 +3712,10 @@ mod tests {
             stroke_brush: None, stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(Element::Path(pe))],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let mut model = Model::new(
             Document {
@@ -3809,11 +3801,10 @@ mod tests {
             stroke_brush_overrides: None,
         };
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(Element::Path(pe))],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -4271,11 +4262,10 @@ mod tests {
             common: CommonProps::default(),
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         Model::new(
             Document {
@@ -4634,10 +4624,9 @@ mod tests {
                 common: CommonProps::default(),
             });
             let layer = Element::Layer(LayerElem {
-                name: "L".to_string(),
                 children: vec![std::rc::Rc::new(group)],
                 isolated_blending: false, knockout_group: false,
-                common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
             });
             Model::new(
                 Document {
@@ -4697,10 +4686,9 @@ mod tests {
                 fill_gradient: None, stroke_gradient: None,
             });
             let layer = Element::Layer(LayerElem {
-                name: "L".to_string(),
                 children: vec![std::rc::Rc::new(a), std::rc::Rc::new(b)],
                 isolated_blending: false, knockout_group: false,
-                common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
             });
             Model::new(
                 Document {

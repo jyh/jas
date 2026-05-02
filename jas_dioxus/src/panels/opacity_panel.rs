@@ -303,9 +303,11 @@ mod tests {
             stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L0".into(),
             children: vec![Rc::new(rect)],
-            common: CommonProps::default(),
+            common: CommonProps {
+                name: Some("L0".into()),
+                ..Default::default()
+            },
             isolated_blending: false,
             knockout_group: false,
         });

@@ -1243,7 +1243,6 @@ pub struct GroupElem {
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct LayerElem {
-    pub name: String,
     pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
     /// See [`GroupElem::isolated_blending`]. Present on layers so the
@@ -1254,6 +1253,23 @@ pub struct LayerElem {
     /// See [`GroupElem::knockout_group`].
     #[serde(default)]
     pub knockout_group: bool,
+}
+
+impl LayerElem {
+    /// Layer's user-visible name. Backed by `common.name`; returns "" when
+    /// the layer is unnamed (callers like the layers panel substitute
+    /// "Layer N" themselves).
+    pub fn name(&self) -> &str {
+        self.common.name.as_deref().unwrap_or("")
+    }
+
+    /// Convenience setter: routes through `common.name`. Empty string
+    /// is normalized to `None` so an unnamed layer round-trips as null
+    /// rather than as the empty string.
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        let s = name.into();
+        self.common.name = if s.is_empty() { None } else { Some(s) };
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3728,14 +3744,14 @@ mod tests {
     #[test]
     fn element_serde_roundtrip_layer() {
         let elem = Element::Layer(LayerElem {
-            name: "Layer 1".into(),
             children: Vec::new(),
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { opacity: 0.75, mode: BlendMode::Normal,
                                   transform: None, locked: true,
                                   visibility: Visibility::Outline, mask: None,
-                                  tool_origin: None , name: None },
+                                  tool_origin: None,
+                                  name: Some("Layer 1".into()) },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();

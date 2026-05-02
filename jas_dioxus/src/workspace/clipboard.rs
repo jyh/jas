@@ -249,7 +249,6 @@ pub(crate) fn selection_to_svg(st: &AppState) -> Option<String> {
     let temp_doc = Document {
         layers: vec![GeoElement::Layer(LayerElem {
             children: elements.into_iter().map(Rc::new).collect(),
-            name: String::new(),
             common: CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,

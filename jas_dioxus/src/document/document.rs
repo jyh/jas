@@ -228,9 +228,11 @@ impl Default for Document {
         ensure_artboards_invariant(&mut artboards, None);
         Self {
             layers: vec![Element::Layer(LayerElem {
-                name: "Layer".to_string(),
                 children: Vec::new(),
-                common: CommonProps::default(),
+                common: CommonProps {
+                    name: Some("Layer".to_string()),
+                    ..Default::default()
+                },
                 isolated_blending: false,
                 knockout_group: false,
             })],
@@ -460,11 +462,13 @@ mod tests {
 
     fn make_layer(name: &str, children: Vec<Element>) -> Element {
         Element::Layer(LayerElem {
-            name: name.to_string(),
             children: children.into_iter().map(Rc::new).collect(),
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps {
+                name: Some(name.to_string()),
+                ..Default::default()
+            },
         })
     }
 

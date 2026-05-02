@@ -1897,11 +1897,10 @@ mod tests {
         let line = make_line(0.0, 0.0, 5.0, 5.0);
         let group = make_group(vec![make_line(1.0, 1.0, 2.0, 2.0), make_line(3.0, 3.0, 4.0, 4.0)]);
         let layer = Element::Layer(LayerElem {
-            name: "L0".to_string(),
             children: vec![Rc::new(rect), Rc::new(group), Rc::new(line)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         Model::new(doc, None)
@@ -2183,11 +2182,10 @@ mod tests {
         let r1 = make_rect(0.0, 0.0, 10.0, 10.0);
         let r2 = make_rect(5.0, 0.0, 10.0, 10.0);
         let layer = Element::Layer(LayerElem {
-            name: "L0".to_string(),
             children: vec![Rc::new(r1), Rc::new(r2)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
@@ -2303,11 +2301,10 @@ mod tests {
             stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L0".to_string(),
             children: vec![Rc::new(r1), Rc::new(r2)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
@@ -2333,11 +2330,10 @@ mod tests {
             stroke_gradient: None,
         }));
         let layer = Element::Layer(LayerElem {
-            name: "L0".to_string(),
             children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
@@ -2354,11 +2350,10 @@ mod tests {
         // Redo the selection (prior divide consumed them).
         let mut model = {
             let layer = Element::Layer(LayerElem {
-                name: "L0".to_string(),
                 children: vec![unpainted_rect(0.0), unpainted_rect(5.0)],
                 isolated_blending: false,
                 knockout_group: false,
-                common: CommonProps::default(),
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
             });
             let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
             doc.selection = vec![
@@ -2415,11 +2410,10 @@ mod tests {
         let rect_a = make_rect(0.0, 0.0, 10.0, 10.0);
         let rect_b = make_rect(5.0, 0.0, 10.0, 10.0);
         let layer = Element::Layer(LayerElem {
-            name: "L0".to_string(),
             children: vec![Rc::new(rect_a), Rc::new(rect_b)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let mut model = Model::new(doc, None);
