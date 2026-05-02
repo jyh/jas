@@ -1980,6 +1980,8 @@ public func convertSmoothToCorner(_ d: [PathCommand], anchorIdx: Int) -> [PathCo
 /// SVG \<line\> element.
 public struct Line: Equatable {
     public let x1: Double, y1: Double, x2: Double, y2: Double
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let stroke: Stroke?
     public let widthPoints: [StrokeWidthPoint]
     public let opacity: Double
@@ -2000,7 +2002,9 @@ public struct Line: Equatable {
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
-                strokeGradient: Gradient? = nil) {
+                strokeGradient: Gradient? = nil,
+                name: String? = nil) {
+        self.name = name
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
         self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -2020,6 +2024,8 @@ public struct Line: Equatable {
 /// SVG \<rect\> element.
 public struct Rect: Equatable {
     public let x: Double, y: Double, width: Double, height: Double
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let rx: Double, ry: Double
     public let fill: Fill?
     public let stroke: Stroke?
@@ -2041,7 +2047,9 @@ public struct Rect: Equatable {
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
-                strokeGradient: Gradient? = nil) {
+                strokeGradient: Gradient? = nil,
+                name: String? = nil) {
+        self.name = name
         self.x = x; self.y = y; self.width = width; self.height = height
         self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
@@ -2059,6 +2067,8 @@ public struct Rect: Equatable {
 /// SVG \<circle\> element.
 public struct Circle: Equatable {
     public let cx: Double, cy: Double, r: Double
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2078,7 +2088,9 @@ public struct Circle: Equatable {
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
-                strokeGradient: Gradient? = nil) {
+                strokeGradient: Gradient? = nil,
+                name: String? = nil) {
+        self.name = name
         self.cx = cx; self.cy = cy; self.r = r
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2095,6 +2107,8 @@ public struct Circle: Equatable {
 /// SVG \<ellipse\> element.
 public struct Ellipse: Equatable {
     public let cx: Double, cy: Double, rx: Double, ry: Double
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2114,7 +2128,9 @@ public struct Ellipse: Equatable {
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
-                strokeGradient: Gradient? = nil) {
+                strokeGradient: Gradient? = nil,
+                name: String? = nil) {
+        self.name = name
         self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2131,6 +2147,8 @@ public struct Ellipse: Equatable {
 /// SVG \<polyline\> element.
 public struct Polyline: Equatable {
     public let points: [(Double, Double)]
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2150,7 +2168,9 @@ public struct Polyline: Equatable {
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
-                strokeGradient: Gradient? = nil) {
+                strokeGradient: Gradient? = nil,
+                name: String? = nil) {
+        self.name = name
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2180,6 +2200,8 @@ public struct Polyline: Equatable {
 /// SVG \<polygon\> element.
 public struct Polygon: Equatable {
     public let points: [(Double, Double)]
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2199,7 +2221,9 @@ public struct Polygon: Equatable {
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
-                strokeGradient: Gradient? = nil) {
+                strokeGradient: Gradient? = nil,
+                name: String? = nil) {
+        self.name = name
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2313,6 +2337,8 @@ func pathBounds(_ d: [PathCommand]) -> BBox {
 
 public struct Path: Equatable {
     public let d: [PathCommand]
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let widthPoints: [StrokeWidthPoint]
@@ -2352,7 +2378,9 @@ public struct Path: Equatable {
                 strokeGradient: Gradient? = nil,
                 strokeBrush: String? = nil,
                 strokeBrushOverrides: String? = nil,
-                toolOrigin: String? = nil) {
+                toolOrigin: String? = nil,
+                name: String? = nil) {
+        self.name = name
         self.d = d
         self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -2388,6 +2416,8 @@ public struct Path: Equatable {
 /// per CHARACTER.md's identity-omission rule.
 public struct Text: Equatable {
     public let x: Double, y: Double
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let tspans: [Tspan]
     public let fontFamily: String
     public let fontSize: Double
@@ -2434,7 +2464,9 @@ public struct Text: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                name: String? = nil) {
+        self.name = name
         self.x = x; self.y = y; self.tspans = tspans
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
@@ -2470,7 +2502,8 @@ public struct Text: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                name: String? = nil) {
         let t = Tspan(id: 0, content: content)
         self.init(x: x, y: y, tspans: [t],
                   fontFamily: fontFamily, fontSize: fontSize,
@@ -2485,7 +2518,8 @@ public struct Text: Equatable {
                   width: width, height: height,
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
-                  locked: locked, visibility: visibility)
+                  locked: locked, visibility: visibility,
+                  name: name)
     }
 
     /// Derived content: concatenation of every tspan's content.
@@ -2558,6 +2592,8 @@ public struct Text: Equatable {
 /// The 11 new character-panel fields mirror `Text`'s.
 public struct TextPath: Equatable {
     public let d: [PathCommand]
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let tspans: [Tspan]
     public let startOffset: Double
     public let fontFamily: String
@@ -2602,7 +2638,9 @@ public struct TextPath: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                name: String? = nil) {
+        self.name = name
         self.d = d; self.tspans = tspans; self.startOffset = startOffset
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
@@ -2696,6 +2734,8 @@ public struct TextPath: Equatable {
 /// SVG \<g\> element.
 public struct Group: Equatable {
     public let children: [Element]
+    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
+    public let name: String?
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
@@ -2715,7 +2755,9 @@ public struct Group: Equatable {
                 blendMode: BlendMode = .normal,
                 isolatedBlending: Bool = false,
                 knockoutGroup: Bool = false,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                name: String? = nil) {
+        self.name = name
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
