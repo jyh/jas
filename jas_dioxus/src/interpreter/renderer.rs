@@ -7412,6 +7412,7 @@ mod tests {
                     visibility: vis,
                     mask: None,
                     tool_origin: None,
+                name: None,
                 },
             })
         }).collect();

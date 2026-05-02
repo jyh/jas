@@ -858,6 +858,13 @@ pub struct CommonProps {
     /// See BLOB_BRUSH_TOOL.md §Fill and stroke.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_origin: Option<String>,
+    /// User-visible name. None means the element is unnamed and the
+    /// UI shows a `<Type>` fallback (per LYR-022). Round-trips through
+    /// SVG as a `<title>` child element. Layers retain their own
+    /// LayerElem.name for back-compat during the rollout; the
+    /// Element::display_name() helper prefers this field when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Default for CommonProps {
@@ -870,6 +877,7 @@ impl Default for CommonProps {
             visibility: Visibility::Preview,
             mask: None,
             tool_origin: None,
+            name: None,
         }
     }
 }
@@ -3727,7 +3735,7 @@ mod tests {
             common: CommonProps { opacity: 0.75, mode: BlendMode::Normal,
                                   transform: None, locked: true,
                                   visibility: Visibility::Outline, mask: None,
-                                  tool_origin: None },
+                                  tool_origin: None , name: None },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3881,6 +3889,7 @@ mod tests {
                 visibility: Visibility::Preview,
                 mask: Some(Box::new(make_square_mask())),
                 tool_origin: None,
+            name: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,
@@ -3925,6 +3934,7 @@ mod tests {
                 visibility: Visibility::Preview,
                 mask: None,
                 tool_origin: None,
+            name: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,
