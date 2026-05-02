@@ -2781,4 +2781,54 @@ mod tests {
         assert_eq!(w.jas_hyphenate_bias, Some(0.5));
         assert_eq!(w.jas_hyphenate_capitalized, Some(true));
     }
+
+    #[test]
+    fn common_name_round_trips_through_svg() {
+        // Element name persists through document_to_svg →
+        // svg_to_document. Tests Group + Rect to cover both the
+        // open/close container writer and the self-closing shape
+        // writer paths.
+        use crate::geometry::element::{
+            CommonProps, GroupElem, RectElem, Color, Fill,
+        };
+        let mut rect = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        rect.common.name = Some("My Rect".into());
+        let mut group = GroupElem {
+            children: vec![std::rc::Rc::new(Element::Rect(rect))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        };
+        group.common.name = Some("My Group".into());
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Group(group)));
+        let svg = document_to_svg(&doc);
+        assert!(
+            svg.contains(r#"inkscape:label="My Rect""#),
+            "rect inkscape:label not in SVG: {svg}",
+        );
+        assert!(
+            svg.contains(r#"inkscape:label="My Group""#),
+            "group inkscape:label not in SVG: {svg}",
+        );
+        let parsed = svg_to_document(&svg);
+        // Layer 0 → Group → Rect.
+        let group_elem = parsed.layers[0].children().unwrap()[0].as_ref();
+        assert_eq!(
+            group_elem.common().name.as_deref(),
+            Some("My Group"),
+            "round-trip lost group name",
+        );
+        let rect_elem = group_elem.children().unwrap()[0].as_ref();
+        assert_eq!(
+            rect_elem.common().name.as_deref(),
+            Some("My Rect"),
+            "round-trip lost rect name",
+        );
+    }
 }
