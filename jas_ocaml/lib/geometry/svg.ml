@@ -76,6 +76,12 @@ let transform_attr = function
 let opacity_attr o =
   if o >= 1.0 then "" else Printf.sprintf " opacity=\"%s\"" (fmt o)
 
+(* User-visible element name → inkscape:label attribute. Reader
+   accepts both this and a <title> child for cross-tool interop. *)
+let name_attr = function
+  | None | Some "" -> ""
+  | Some n -> Printf.sprintf " inkscape:label=\"%s\"" (escape_xml n)
+
 let path_data cmds =
   let parts = List.map (fun cmd ->
     let open Element in
@@ -219,46 +225,48 @@ let tspan_svg (t : Element.tspan) : string =
 let rec element_svg indent (elem : Element.element) =
   let open Element in
   match elem with
-  | Line { x1; y1; x2; y2; stroke; opacity; transform; _ } ->
-    Printf.sprintf "%s<line x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\"%s%s%s/>"
+  | Line { x1; y1; x2; y2; stroke; opacity; transform; name; _ } ->
+    Printf.sprintf "%s<line x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\"%s%s%s%s/>"
       indent (fmt (px x1)) (fmt (px y1)) (fmt (px x2)) (fmt (px y2))
       (stroke_attrs stroke) (opacity_attr opacity) (transform_attr transform)
-  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; _ } ->
+      (name_attr name)
+  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; name; _ } ->
     let rxy = (if rx > 0.0 then Printf.sprintf " rx=\"%s\"" (fmt (px rx)) else "")
             ^ (if ry > 0.0 then Printf.sprintf " ry=\"%s\"" (fmt (px ry)) else "") in
-    Printf.sprintf "%s<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"%s%s%s%s%s/>"
+    Printf.sprintf "%s<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"%s%s%s%s%s%s/>"
       indent (fmt (px x)) (fmt (px y)) (fmt (px width)) (fmt (px height))
       rxy (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform)
-  | Circle { cx; cy; r; fill; stroke; opacity; transform; _ } ->
-    Printf.sprintf "%s<circle cx=\"%s\" cy=\"%s\" r=\"%s\"%s%s%s%s/>"
+      (transform_attr transform) (name_attr name)
+  | Circle { cx; cy; r; fill; stroke; opacity; transform; name; _ } ->
+    Printf.sprintf "%s<circle cx=\"%s\" cy=\"%s\" r=\"%s\"%s%s%s%s%s/>"
       indent (fmt (px cx)) (fmt (px cy)) (fmt (px r))
       (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform)
-  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; _ } ->
-    Printf.sprintf "%s<ellipse cx=\"%s\" cy=\"%s\" rx=\"%s\" ry=\"%s\"%s%s%s%s/>"
+      (transform_attr transform) (name_attr name)
+  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; name; _ } ->
+    Printf.sprintf "%s<ellipse cx=\"%s\" cy=\"%s\" rx=\"%s\" ry=\"%s\"%s%s%s%s%s/>"
       indent (fmt (px cx)) (fmt (px cy)) (fmt (px rx)) (fmt (px ry))
       (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform)
-  | Polyline { points; fill; stroke; opacity; transform; _ } ->
+      (transform_attr transform) (name_attr name)
+  | Polyline { points; fill; stroke; opacity; transform; name; _ } ->
     let ps = String.concat " "
       (List.map (fun (x, y) -> Printf.sprintf "%s,%s" (fmt (px x)) (fmt (px y))) points) in
-    Printf.sprintf "%s<polyline points=\"%s\"%s%s%s%s/>"
+    Printf.sprintf "%s<polyline points=\"%s\"%s%s%s%s%s/>"
       indent ps (fill_attrs fill) (stroke_attrs stroke)
-      (opacity_attr opacity) (transform_attr transform)
-  | Polygon { points; fill; stroke; opacity; transform; _ } ->
+      (opacity_attr opacity) (transform_attr transform) (name_attr name)
+  | Polygon { points; fill; stroke; opacity; transform; name; _ } ->
     let ps = String.concat " "
       (List.map (fun (x, y) -> Printf.sprintf "%s,%s" (fmt (px x)) (fmt (px y))) points) in
-    Printf.sprintf "%s<polygon points=\"%s\"%s%s%s%s/>"
+    Printf.sprintf "%s<polygon points=\"%s\"%s%s%s%s%s/>"
       indent ps (fill_attrs fill) (stroke_attrs stroke)
-      (opacity_attr opacity) (transform_attr transform)
-  | Path { d; fill; stroke; opacity; transform; tool_origin; _ } ->
+      (opacity_attr opacity) (transform_attr transform) (name_attr name)
+  | Path { d; fill; stroke; opacity; transform; tool_origin; name; _ } ->
     let tool_origin_attr = match tool_origin with
       | Some s -> Printf.sprintf " jas:tool-origin=\"%s\"" (escape_xml s)
       | None -> "" in
-    Printf.sprintf "%s<path d=\"%s\"%s%s%s%s%s/>"
+    Printf.sprintf "%s<path d=\"%s\"%s%s%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform) tool_origin_attr
+      (name_attr name)
   | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
            text_transform; font_variant; baseline_shift; line_height; letter_spacing;
            xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
@@ -309,13 +317,14 @@ let rec element_svg indent (elem : Element.element) =
       fw_attr fs_attr td_attr extra
       (opacity_attr opacity) (transform_attr transform)
       (path_data d) offset_attr space_attr body
-  | Group { children; opacity; transform; _ } ->
-    let header = Printf.sprintf "%s<g%s%s>"
-      indent (opacity_attr opacity) (transform_attr transform) in
+  | Group { children; opacity; transform; name; _ } ->
+    let header = Printf.sprintf "%s<g%s%s%s>"
+      indent (name_attr name) (opacity_attr opacity) (transform_attr transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
   | Layer { name; children; opacity; transform; _ } ->
+    (* Layer.name is required (non-optional). Always emit when non-empty. *)
     let label = if name <> "" then Printf.sprintf " inkscape:label=\"%s\"" (escape_xml name) else "" in
     let header = Printf.sprintf "%s<g%s%s%s>"
       indent label (opacity_attr opacity) (transform_attr transform) in
@@ -642,6 +651,10 @@ let rec parse_element i =
     let stroke = parse_stroke attrs in
     let opacity = parse_opacity attrs in
     let transform = parse_transform attrs in
+    (* User-visible name from inkscape:label (preferred). The <title>
+       child fallback is captured later inside the element body parse
+       if needed. *)
+    let parsed_name = get_attr attrs "inkscape:label" in
     let elem = match tag with
       | "line" ->
         Some (Element.make_line
@@ -763,7 +776,13 @@ let rec parse_element i =
     (match tag with
      | "text" | "g" -> ()  (* already consumed *)
      | _ -> if elem <> None then (match Xmlm.peek i with `El_end -> let _ = Xmlm.input i in () | _ -> ()));
-    elem
+    (* Apply parsed inkscape:label name (if any) to the constructed
+       element. Layer's name is set via make_layer above; this only
+       takes effect for non-Layer elements where parsed_name is the
+       canonical source. *)
+    (match elem, parsed_name with
+     | Some e, Some n when tag <> "g" -> Some (Element.with_name e (Some n))
+     | _, _ -> elem)
   | _ -> None
 
 and parse_tspan_body i attrs : Element.tspan list =

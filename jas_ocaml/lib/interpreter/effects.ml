@@ -1258,8 +1258,7 @@ let apply_character_attrs_to_elem (elem : Element.element) (a : character_attrs)
   let (<|>) v def = match v with Some x -> x | None -> def in
   match elem with
   | Element.Text t ->
-    Element.Text {
-      t with
+    Element.Text { t with
       font_family = a.font_family <|> t.font_family;
       font_size = a.font_size <|> t.font_size;
       font_weight = a.font_weight <|> t.font_weight;
@@ -1278,8 +1277,7 @@ let apply_character_attrs_to_elem (elem : Element.element) (a : character_attrs)
       kerning = a.kerning;
     }
   | Element.Text_path tp ->
-    Element.Text_path {
-      tp with
+    Element.Text_path { tp with
       font_family = a.font_family <|> tp.font_family;
       font_size = a.font_size <|> tp.font_size;
       font_weight = a.font_weight <|> tp.font_weight;

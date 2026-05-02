@@ -152,7 +152,7 @@ let expand (cs : compound_shape) precision : element list =
     if Array.length ring < 3 then None
     else
       let points = Array.to_list ring in
-      Some (Polygon {
+      Some (Polygon { name = None;
         points;
         fill = cs.fill;
         stroke = cs.stroke;

@@ -440,7 +440,7 @@ let menu_tests = [
     let doc = m#document in
     let child1 = layer "c1" in
     let child2 = layer "c2" in
-    let group = Jas.Element.Group {
+    let group = Jas.Element.Group { name = None;
       children = [|child1; child2|];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;

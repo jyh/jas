@@ -5,7 +5,7 @@ open Jas.Element
 module Live = Jas.Live
 
 let rect_at x y =
-  Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
+  Rect { name = None; x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = None; stroke = None; opacity = 1.0; transform = None;
          locked = false; visibility = Preview; blend_mode = Normal; mask = None;
            fill_gradient = None;
@@ -117,7 +117,7 @@ let test_empty_compound_has_empty_bounds () =
   Alcotest.(check bool) "bh = 0" true (approx_equal bh 0.0)
 
 let test_path_flattens_into_polygon_set () =
-  let path = Path {
+  let path = Path { name = None;
     d = [
       MoveTo (0.0, 0.0);
       LineTo (10.0, 0.0);

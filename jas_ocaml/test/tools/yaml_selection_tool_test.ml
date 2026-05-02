@@ -20,7 +20,7 @@ let selection_tool () : Yaml_tool.yaml_tool option =
     | _ -> None
 
 let make_rect x y w h =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = w; height = h; rx = 0.0; ry = 0.0;
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview;

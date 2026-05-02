@@ -474,7 +474,7 @@ let () =
 
       Alcotest.test_case "recognize_element_skips_rect" `Quick (fun () ->
         let open Jas.Element in
-        let elem = Rect { x = 0.0; y = 0.0; width = 100.0; height = 60.0; rx = 0.0; ry = 0.0;
+        let elem = Rect { name = None; x = 0.0; y = 0.0; width = 100.0; height = 60.0; rx = 0.0; ry = 0.0;
           fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal; mask = None;
             fill_gradient = None;
             stroke_gradient = None;
@@ -483,7 +483,7 @@ let () =
 
       Alcotest.test_case "recognize_element_skips_circle" `Quick (fun () ->
         let open Jas.Element in
-        let elem = Circle { cx = 50.0; cy = 50.0; r = 30.0;
+        let elem = Circle { name = None; cx = 50.0; cy = 50.0; r = 30.0;
           fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal; mask = None;
             fill_gradient = None;
             stroke_gradient = None;
@@ -492,7 +492,7 @@ let () =
 
       Alcotest.test_case "recognize_element_skips_polygon" `Quick (fun () ->
         let open Jas.Element in
-        let elem = Polygon { points = [(0.0, 0.0); (100.0, 0.0); (50.0, 86.6)];
+        let elem = Polygon { name = None; points = [(0.0, 0.0); (100.0, 0.0); (50.0, 86.6)];
           fill = None; stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal; mask = None;
             fill_gradient = None;
             stroke_gradient = None;

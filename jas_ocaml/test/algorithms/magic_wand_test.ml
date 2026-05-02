@@ -6,7 +6,7 @@ open Jas
 
 let make_rect ?fill ?stroke ?(opacity = 1.0)
     ?(blend_mode = Element.Normal) () : Element.element =
-  Element.Rect {
+  Element.Rect { name = None;
     x = 0.0; y = 0.0; width = 10.0; height = 10.0;
     rx = 0.0; ry = 0.0;
     fill; stroke; opacity;
