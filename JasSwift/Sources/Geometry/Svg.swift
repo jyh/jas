@@ -384,9 +384,9 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return lines.joined(separator: "\n")
 
     case .layer(let v):
-        // Layer.name is required (non-optional); always emit when non-empty.
-        let label = v.name.isEmpty ? "" : " inkscape:label=\"\(escapeXml(v.name))\""
-        var lines = ["\(indent)<g\(label)\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        // inkscape:groupmode="layer" lets the parser distinguish a
+        // Layer from a named Group (both carry inkscape:label).
+        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -1205,14 +1205,17 @@ public func svgToDocument(_ svg: String) -> Document {
             case .layer(let l):
                 layers.append(l)
             case .group(let g):
-                layers.append(Layer(name: "", children: g.children,
+                layers.append(Layer(name: g.name, children: g.children,
                                         opacity: g.opacity, transform: g.transform))
             default:
-                if layers.isEmpty || !layers.last!.name.isEmpty {
-                    layers.append(Layer(name: "", children: [elem]))
+                // If the last layer is a nameless wrapper (created by
+                // this same loop on a previous bare element), append
+                // to it; otherwise start a fresh wrapper layer.
+                if layers.isEmpty || layers.last!.name != nil {
+                    layers.append(Layer(children: [elem]))
                 } else {
                     let last = layers.removeLast()
-                    layers.append(Layer(name: "", children: last.children + [elem],
+                    layers.append(Layer(name: last.name, children: last.children + [elem],
                                             opacity: last.opacity, transform: last.transform))
                 }
             }

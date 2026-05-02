@@ -438,10 +438,11 @@ private func elementJson(_ elem: Element) -> String {
         o.raw("children", jsonArray(children))
     case .layer(let e):
         o.str("type", "layer")
-        commonFieldsNoName(o, e.opacity, e.transform, e.locked, e.visibility)
+        // After Layer.name → common-name merge, Layer uses the same
+        // nullable name path as every other element.
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
         let children = e.children.map { elementJson($0) }
         o.raw("children", jsonArray(children))
-        o.str("name", e.name)
     case .live(let v):
         o.str("type", "live")
         o.str("kind", v.kind)
@@ -816,8 +817,10 @@ package func parseElement(_ v: Any?) -> Element {
                             locked: locked, visibility: visibility, name: name))
     case "layer":
         let children = (d["children"] as? [Any] ?? []).map { parseElement($0) }
-        let layerName = d["name"] as? String ?? "Layer"
-        return .layer(Layer(name: layerName, children: children, opacity: opacity, transform: transform,
+        // After Layer.name → common-name merge, Layer reads its name from
+        // the same `name` JSON field as every other element (parsed into
+        // the local `name` binding by parseCommon).
+        return .layer(Layer(name: name, children: children, opacity: opacity, transform: transform,
                             locked: locked, visibility: visibility))
     default:
         fatalError("Unknown element type: \(typ)")

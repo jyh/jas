@@ -2778,9 +2778,11 @@ public struct Group: Equatable {
     }
 }
 
-/// A named group (layer) of elements.
+/// A named group (layer) of elements. Mirrors the same field shape as
+/// ``Group``: the user-visible name is `String?` and unnamed layers
+/// fall back to a "Layer N" display label in the layers panel.
 public struct Layer: Equatable {
-    public let name: String
+    public let name: String?
     public let children: [Element]
     public let opacity: Double
     public let transform: Transform?
@@ -2794,14 +2796,20 @@ public struct Layer: Equatable {
     /// See ``Group/knockoutGroup``.
     public let knockoutGroup: Bool
 
-    public init(name: String = "Layer", children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
+    /// Convenience accessor that returns the empty string when the
+    /// layer is unnamed. Most callers should use `name ?? ""` directly,
+    /// but this keeps `assert(layer.displayName == "X")` style call
+    /// sites readable when nil-vs-"" doesn't matter.
+    public var displayName: String { name ?? "" }
+
+    public init(name: String? = nil, children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
                 isolatedBlending: Bool = false,
                 knockoutGroup: Bool = false,
                 mask: Mask? = nil) {
-        self.name = name
+        self.name = (name?.isEmpty == true) ? nil : name
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked

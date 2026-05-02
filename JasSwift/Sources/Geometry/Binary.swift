@@ -549,7 +549,7 @@ private func packElement(_ elem: Element) -> MsgValue {
     case .layer(let e):
         let children: [MsgValue] = e.children.map { packElement($0) }
         return .array([vint(tagLayer), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform), vstr(e.name), .array(children)])
+                       packTransform(e.transform), vstr(e.name ?? ""), .array(children)])
     case .group(let e):
         let children: [MsgValue] = e.children.map { packElement($0) }
         return .array([vint(tagGroup), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
