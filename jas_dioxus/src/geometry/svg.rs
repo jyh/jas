@@ -102,6 +102,20 @@ fn opacity_attr(opacity: f64) -> String {
     }
 }
 
+/// Inkscape-compatible label attribute for the user-visible element
+/// name. We use inkscape:label rather than a <title> child because
+/// our writers emit self-closing tags for shapes; switching every
+/// writer to open/close just to host a child would be intrusive.
+/// Reader accepts both inkscape:label and a <title> child for
+/// interop with tools that round-trip through one or the other.
+fn name_attr(name: &Option<String>) -> String {
+    match name {
+        None => String::new(),
+        Some(n) if n.is_empty() => String::new(),
+        Some(n) => format!(" inkscape:label=\"{}\"", escape_xml(n)),
+    }
+}
+
 fn path_data(commands: &[PathCommand]) -> String {
     let mut parts = Vec::new();
     for cmd in commands {
@@ -166,12 +180,13 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
     match elem {
         Element::Line(e) => {
             format!(
-                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}/>\n",
+                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.x1)), fmt(px(e.y1)), fmt(px(e.x2)), fmt(px(e.y2)),
                 stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity),
                 transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Rect(e) => {
@@ -183,30 +198,33 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 rxy.push_str(&format!(" ry=\"{}\"", fmt(px(e.ry))));
             }
             format!(
-                "{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{}{}{}{}{}/>\n",
+                "{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{}{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.x)), fmt(px(e.y)), fmt(px(e.width)), fmt(px(e.height)),
                 rxy,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Circle(e) => {
             format!(
-                "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}{}{}{}/>\n",
+                "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.r)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Ellipse(e) => {
             format!(
-                "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{}{}{}/>\n",
+                "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), fmt(px(e.ry)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Polyline(e) => {
@@ -215,10 +233,11 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
-                "{}<polyline points=\"{}\"{}{}{}{}/>\n",
+                "{}<polyline points=\"{}\"{}{}{}{}{}/>\n",
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Polygon(e) => {
@@ -227,19 +246,21 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
-                "{}<polygon points=\"{}\"{}{}{}{}/>\n",
+                "{}<polygon points=\"{}\"{}{}{}{}{}/>\n",
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Path(e) => {
             format!(
-                "{}<path d=\"{}\"{}{}{}{}/>\n",
+                "{}<path d=\"{}\"{}{}{}{}{}/>\n",
                 indent,
                 path_data(&e.d),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                name_attr(&e.common.name),
             )
         }
         Element::Text(e) => {
@@ -398,12 +419,14 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             )
         }
         Element::Layer(e) => {
-            let label = if !e.name.is_empty() {
-                format!(" inkscape:label=\"{}\"", escape_xml(&e.name))
-            } else { String::new() };
+            // Prefer common.name; fall back to LayerElem.name for any
+            // legacy in-memory state where the old field was set
+            // directly. (Rename commits write both in sync.)
+            let effective_name = e.common.name.clone()
+                .or_else(|| if e.name.is_empty() { None } else { Some(e.name.clone()) });
             let mut lines = vec![format!(
                 "{}<g{}{}{}>",
-                indent, label,
+                indent, name_attr(&effective_name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -415,8 +438,8 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         }
         Element::Group(e) => {
             let mut lines = vec![format!(
-                "{}<g{}{}>",
-                indent,
+                "{}<g{}{}{}>",
+                indent, name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -1071,11 +1094,14 @@ fn parse_common(node: &XmlNode) -> CommonProps {
         visibility: crate::geometry::element::Visibility::default(),
         mask: None,
         tool_origin: node.attrs.get("jas:tool-origin").cloned(),
-        // <title> child as the first content of the element holds
-        // the user-visible name (LYR-091 enabler).
-        name: node.children.iter()
-            .find(|c| c.tag == "title")
-            .map(|c| c.text.clone())
+        // User-visible name. Read inkscape:label attribute first
+        // (matches what we write); fall back to a <title> child for
+        // interop with tools that round-trip via the standard
+        // accessibility element. LYR-091 enabler.
+        name: node.attrs.get("inkscape:label").cloned()
+            .or_else(|| node.children.iter()
+                .find(|c| c.tag == "title")
+                .map(|c| c.text.clone()))
             .filter(|s| !s.is_empty()),
     }
 }

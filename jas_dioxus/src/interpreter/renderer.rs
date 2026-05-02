@@ -5472,6 +5472,14 @@ fn tree_preview_svg(elem: &GeoElement) -> String {
 }
 
 fn tree_elem_display_name(elem: &GeoElement) -> (String, bool) {
+    // Prefer common.name (any element can carry one); fall back to
+    // LayerElem.name for back-compat during the rollout. Show the
+    // bracket-type fallback when both are empty.
+    if let Some(n) = elem.common().name.as_deref() {
+        if !n.is_empty() {
+            return (n.to_string(), true);
+        }
+    }
     if let GeoElement::Layer(le) = elem {
         if !le.name.is_empty() {
             return (le.name.clone(), true);
@@ -5968,21 +5976,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             dioxus::prelude::Key::F2 => {
                 // F2 starts inline rename on the active row. Without a
                 // separate focus concept, "active" is the last panel-
-                // selected row. Only layers are renameable today
-                // (matches the can_rename check on the row span).
+                // selected row. Any element type is renameable now
+                // that common.name backs the data.
                 spawn(async move {
                     let mut st = a.borrow_mut();
                     let target = st.layers_panel_selection.last().cloned();
                     if let Some(path) = target {
-                        let is_layer = st.tab()
-                            .and_then(|t| t.model.document().get_element(&path))
-                            .map(|e| e.is_layer())
-                            .unwrap_or(false);
-                        if is_layer {
-                            st.layers_renaming = Some(path.clone());
-                            kb_rev += 1;
-                            schedule_focus_rename_input(&path);
-                        }
+                        st.layers_renaming = Some(path.clone());
+                        kb_rev += 1;
+                        schedule_focus_rename_input(&path);
                     }
                 });
             }
@@ -6847,8 +6849,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                 if let Some(tab) = st.tab_mut() {
                                                                     tab.model.snapshot();
                                                                     let doc = tab.model.document_mut();
-                                                                    if let Some(crate::geometry::element::Element::Layer(le)) = doc.get_element_mut(&p) {
-                                                                        le.name = val_inner;
+                                                                    if let Some(elem) = doc.get_element_mut(&p) {
+                                                                        // Write to common.name for any
+                                                                        // element type (LYR-091); Layers
+                                                                        // also keep LayerElem.name in
+                                                                        // sync for back-compat.
+                                                                        elem.common_mut().name = if val_inner.is_empty() {
+                                                                            None
+                                                                        } else {
+                                                                            Some(val_inner.clone())
+                                                                        };
+                                                                        if let crate::geometry::element::Element::Layer(le) = elem {
+                                                                            le.name = val_inner;
+                                                                        }
                                                                     }
                                                                 }
                                                                 st.layers_renaming = None;
@@ -6897,8 +6910,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                             if let Some(tab) = st.tab_mut() {
                                                                 tab.model.snapshot();
                                                                 let doc = tab.model.document_mut();
-                                                                if let Some(crate::geometry::element::Element::Layer(le)) = doc.get_element_mut(&p) {
-                                                                    le.name = val_inner;
+                                                                if let Some(elem) = doc.get_element_mut(&p) {
+                                                                    elem.common_mut().name = if val_inner.is_empty() {
+                                                                        None
+                                                                    } else {
+                                                                        Some(val_inner.clone())
+                                                                    };
+                                                                    if let crate::geometry::element::Element::Layer(le) = elem {
+                                                                        le.name = val_inner;
+                                                                    }
                                                                 }
                                                             }
                                                             st.layers_renaming = None;
@@ -6917,7 +6937,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     let name_path = row.path.clone();
                                     let name_app = app.clone();
                                     let mut name_rev = revision;
-                                    let can_rename = row.is_layer;
+                                    // Any element row can be renamed — common.name backs
+                                    // the persistence (LYR-091). Was layer-only before
+                                    // common.name landed.
+                                    let can_rename = true;
                                     rsx! {
                                         span {
                                             style: "{name_style}",
