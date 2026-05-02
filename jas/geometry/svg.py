@@ -388,7 +388,7 @@ def _element_svg(elem: Element, indent: str) -> str:
 
         case Layer(children=children, name=name, opacity=opacity, transform=transform):
             label = f' inkscape:label="{escape(name)}"' if name else ""
-            lines = [f'{indent}<g{label}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
+            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
@@ -1041,14 +1041,15 @@ def _parse_element(node: ET.Element) -> Element | None:
             elem = _parse_element(child)
             if elem is not None:
                 children.append(elem)
-        # Check for inkscape:groupmode="layer" first (Inkscape
-        # convention) then label-presence as a fallback for files
-        # this app saved before non-Layer naming existed.
+        # Layer detection: only inkscape:groupmode="layer" promotes a
+        # <g> to a Layer. inkscape:label alone is a Group name now
+        # (was historically Layer-only, but with non-Layer naming
+        # support that heuristic is wrong). Existing fixtures opt in
+        # via the explicit groupmode attribute.
         group_mode = (node.get(f"{{{_INKSCAPE_NS}}}groupmode")
                       or node.get("inkscape:groupmode"))
         label = node.get(f"{{{_INKSCAPE_NS}}}label") or node.get("inkscape:label")
-        is_layer = group_mode == "layer" or label is not None
-        if is_layer:
+        if group_mode == "layer":
             return Layer(children=tuple(children), name=label or "",
                          opacity=opacity, transform=transform)
         return Group(children=tuple(children),

@@ -277,6 +277,23 @@ fn visibility_str(v: Visibility) -> &'static str {
 
 fn common_fields(o: &mut JsonObj, c: &CommonProps) {
     o.bool_val("locked", c.locked);
+    // User-visible name from common.name. Layer emits its own name
+    // field separately (Layer.name predates common.name); the Layer
+    // arm uses common_fields_no_name() so we don't double-emit.
+    match c.name.as_deref() {
+        None => o.null("name"),
+        Some(n) => o.str_val("name", n),
+    }
+    o.num("opacity", c.opacity);
+    o.raw("transform", transform_json(&c.transform));
+    o.str_val("visibility", visibility_str(c.visibility));
+}
+
+/// Variant of `common_fields` that omits the optional name. Used by
+/// Layer which carries its own required name field; emitting both
+/// would produce a duplicate JSON key.
+fn common_fields_no_name(o: &mut JsonObj, c: &CommonProps) {
+    o.bool_val("locked", c.locked);
     o.num("opacity", c.opacity);
     o.raw("transform", transform_json(&c.transform));
     o.str_val("visibility", visibility_str(c.visibility));
@@ -494,7 +511,7 @@ fn element_json(elem: &Element) -> String {
         }
         Element::Layer(e) => {
             o.str_val("type", "layer");
-            common_fields(&mut o, &e.common);
+            common_fields_no_name(&mut o, &e.common);
             let children: Vec<String> = e.children.iter().map(|c| element_json(c)).collect();
             o.raw("children", json_array(&children));
             o.str_val("name", &e.name);

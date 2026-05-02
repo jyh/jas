@@ -324,9 +324,11 @@ let rec element_svg indent (elem : Element.element) =
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
   | Layer { name; children; opacity; transform; _ } ->
-    (* Layer.name is required (non-optional). Always emit when non-empty. *)
+    (* Layer.name is required (non-optional). Always emit when non-empty.
+       inkscape:groupmode="layer" is the discriminator that re-parses
+       this <g> as a Layer rather than a named Group. *)
     let label = if name <> "" then Printf.sprintf " inkscape:label=\"%s\"" (escape_xml name) else "" in
-    let header = Printf.sprintf "%s<g%s%s%s>"
+    let header = Printf.sprintf "%s<g inkscape:groupmode=\"layer\"%s%s%s>"
       indent label (opacity_attr opacity) (transform_attr transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
@@ -651,10 +653,11 @@ let rec parse_element i =
     let stroke = parse_stroke attrs in
     let opacity = parse_opacity attrs in
     let transform = parse_transform attrs in
-    (* User-visible name from inkscape:label (preferred). The <title>
-       child fallback is captured later inside the element body parse
-       if needed. *)
-    let parsed_name = get_attr attrs "inkscape:label" in
+    (* User-visible name from inkscape:label (preferred). xmlm strips
+       the namespace prefix so we look up the local name "label".
+       The <title> child fallback is captured later inside the element
+       body parse if needed. *)
+    let parsed_name = get_attr attrs "label" in
     let elem = match tag with
       | "line" ->
         Some (Element.make_line
@@ -762,11 +765,15 @@ let rec parse_element i =
             | _ -> Some base))
       | "g" ->
         let children = parse_children i in
-        let label = get_attr attrs "label" in
-        (match label with
-         | Some name ->
+        (* Layer detection: only explicit inkscape:groupmode="layer"
+           (Inkscape convention) marks a Layer. Plain inkscape:label
+           on a <g> means a named Group, not a Layer. *)
+        let group_mode = get_attr attrs "groupmode" in
+        (match group_mode with
+         | Some "layer" ->
+           let name = match parsed_name with Some n -> n | None -> "" in
            Some (Element.make_layer ~name ~opacity ~transform children)
-         | None ->
+         | _ ->
            Some (Element.make_group ~opacity ~transform children))
       | _ ->
         skip_element i;
@@ -777,11 +784,12 @@ let rec parse_element i =
      | "text" | "g" -> ()  (* already consumed *)
      | _ -> if elem <> None then (match Xmlm.peek i with `El_end -> let _ = Xmlm.input i in () | _ -> ()));
     (* Apply parsed inkscape:label name (if any) to the constructed
-       element. Layer's name is set via make_layer above; this only
-       takes effect for non-Layer elements where parsed_name is the
-       canonical source. *)
+       element. Layer's name is set via make_layer above and is
+       skipped here (Layer.name is its own required field, distinct
+       from the optional common name carried by other elements). *)
+    let is_layer = match elem with Some (Element.Layer _) -> true | _ -> false in
     (match elem, parsed_name with
-     | Some e, Some n when tag <> "g" -> Some (Element.with_name e (Some n))
+     | Some e, Some n when not is_layer -> Some (Element.with_name e (Some n))
      | _, _ -> elem)
   | _ -> None
 
