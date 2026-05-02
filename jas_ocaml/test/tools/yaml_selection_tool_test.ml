@@ -20,7 +20,7 @@ let selection_tool () : Yaml_tool.yaml_tool option =
     | _ -> None
 
 let make_rect x y w h =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = w; height = h; rx = 0.0; ry = 0.0;
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview;
@@ -31,7 +31,7 @@ let make_rect x y w h =
 (** Layer with two 10x10 rects at (0,0) and (50,50). *)
 let two_rect_model () : Model.model =
   let layer = Element.Layer {
-    name = "L";
+    name = Some "L";
     children = [| make_rect 0.0 0.0 10.0 10.0;
                   make_rect 50.0 50.0 10.0 10.0 |];
     transform = None; locked = false; opacity = 1.0;

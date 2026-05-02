@@ -5,7 +5,7 @@
 open Jas
 
 let make_rect x y w h =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = w; height = h;
     rx = 0.0; ry = 0.0;
     fill = None; stroke = None;
@@ -17,7 +17,7 @@ let make_rect x y w h =
 (** Layer with two 10x10 rects at (0,0) and (50,50). *)
 let two_rect_model () =
   let layer = Element.Layer {
-    name = "L";
+    name = Some "L";
     children = [| make_rect 0.0 0.0 10.0 10.0;
                   make_rect 50.0 50.0 10.0 10.0 |];
     transform = None; locked = false; opacity = 1.0;
@@ -221,7 +221,7 @@ let blob_brush_state_defaults (store : State_store.t) =
 
 let empty_layer_model () =
   let layer = Element.Layer {
-    name = "L";
+    name = Some "L";
     children = [||];
     transform = None; locked = false; opacity = 1.0;
     visibility = Preview; blend_mode = Normal; mask = None;
@@ -260,7 +260,7 @@ let blob_brush_commit_tests = [
   Alcotest.test_case "commit_erasing_deletes_fully_covered_element" `Quick (fun () ->
     (* Small 4x2 blob-brush square fully inside the sweep's coverage
        area (sweep = 50pt horizontal, tip 10pt -> covers y in [-5, 5]). *)
-    let target = Element.Path {
+    let target = Element.Path { name = None;
       d = [ Element.MoveTo (23.0, -1.0);
             Element.LineTo (27.0, -1.0);
             Element.LineTo (27.0, 1.0);
@@ -276,7 +276,7 @@ let blob_brush_commit_tests = [
       tool_origin = Some "blob_brush";
     } in
     let layer = Element.Layer {
-      name = "L"; children = [| target |];
+      name = Some "L"; children = [| target |];
       transform = None; locked = false; opacity = 1.0;
       visibility = Preview; blend_mode = Normal; mask = None;
       isolated_blending = false; knockout_group = false;
@@ -299,7 +299,7 @@ let blob_brush_commit_tests = [
 
   Alcotest.test_case "commit_erasing_ignores_non_blob_brush" `Quick (fun () ->
     (* Same square but tool_origin = None. Erase must skip it. *)
-    let target = Element.Path {
+    let target = Element.Path { name = None;
       d = [ Element.MoveTo (20.0, -2.0);
             Element.LineTo (30.0, -2.0);
             Element.LineTo (30.0, 2.0);
@@ -315,7 +315,7 @@ let blob_brush_commit_tests = [
       tool_origin = None;
     } in
     let layer = Element.Layer {
-      name = "L"; children = [| target |];
+      name = Some "L"; children = [| target |];
       transform = None; locked = false; opacity = 1.0;
       visibility = Preview; blend_mode = Normal; mask = None;
       isolated_blending = false; knockout_group = false;
@@ -340,7 +340,7 @@ let blob_brush_commit_tests = [
 (* Magic Wand effect *)
 
 let red_filled_rect x y =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = 10.0; height = 10.0;
     rx = 0.0; ry = 0.0;
     fill = Some (Element.make_fill (Element.color_rgb 1.0 0.0 0.0));
@@ -351,7 +351,7 @@ let red_filled_rect x y =
   }
 
 let blue_filled_rect x y =
-  Element.Rect {
+  Element.Rect { name = None;
     x; y; width = 10.0; height = 10.0;
     rx = 0.0; ry = 0.0;
     fill = Some (Element.make_fill (Element.color_rgb 0.0 0.0 1.0));
@@ -374,7 +374,7 @@ let magic_wand_state_defaults (store : State_store.t) =
 
 let three_rect_model () =
   let layer = Element.Layer {
-    name = "L";
+    name = Some "L";
     children = [| red_filled_rect 0.0 0.0;
                   red_filled_rect 50.0 0.0;
                   blue_filled_rect 100.0 0.0 |];
@@ -450,7 +450,7 @@ let magic_wand_apply_tests = [
       | Element.Rect r -> Element.Rect { r with visibility = Element.Invisible }
       | e -> e in
     let layer = Element.Layer {
-      name = "L"; children = [| r0; r1_locked; r2_hidden |];
+      name = Some "L"; children = [| r0; r1_locked; r2_hidden |];
       transform = None; locked = false; opacity = 1.0;
       visibility = Preview; blend_mode = Normal; mask = None;
       isolated_blending = false; knockout_group = false;
@@ -475,7 +475,7 @@ let magic_wand_apply_tests = [
 
 let artboard_model abs_list =
   let layer = Element.Layer {
-    name = "L"; children = [||];
+    name = Some "L"; children = [||];
     transform = None; locked = false; opacity = 1.0;
     visibility = Preview; blend_mode = Normal; mask = None;
     isolated_blending = false; knockout_group = false;

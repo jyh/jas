@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 400 133.3333" width="400" height="133.3333">
-  <g inkscape:label="Layer 1">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
     <path d="M0,0 L66.6667,66.6667 C88.8889,0 122.2222,26.6667 133.3333,66.6667 S177.7778,0 200,0 Q233.3333,0 266.6667,66.6667 T333.3333,0 A33.3333,33.3333 0 0,1 400,0 Z" fill="none" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
   </g>
 </svg>

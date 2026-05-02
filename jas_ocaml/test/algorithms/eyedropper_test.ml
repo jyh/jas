@@ -34,7 +34,7 @@ let make_rect ?fill ?stroke ?(opacity = 1.0)
     ?(blend_mode = Element.Normal)
     ?(locked = false)
     ?(visibility = Element.Preview) () : Element.element =
-  Element.Rect {
+  Element.Rect { name = None;
     x = 0.0; y = 0.0; width = 100.0; height = 100.0;
     rx = 0.0; ry = 0.0;
     fill; stroke; opacity;
@@ -43,7 +43,7 @@ let make_rect ?fill ?stroke ?(opacity = 1.0)
   }
 
 let make_line ?stroke ?(width_points = []) () : Element.element =
-  Element.Line {
+  Element.Line { name = None;
     x1 = 0.0; y1 = 0.0; x2 = 10.0; y2 = 10.0;
     stroke; width_points;
     opacity = 1.0; transform = None; locked = false;
@@ -52,7 +52,7 @@ let make_line ?stroke ?(width_points = []) () : Element.element =
   }
 
 let make_group () : Element.element =
-  Element.Group {
+  Element.Group { name = None;
     children = [||]; opacity = 1.0; transform = None; locked = false;
     visibility = Element.Preview; blend_mode = Element.Normal;
     mask = None; isolated_blending = false; knockout_group = false;

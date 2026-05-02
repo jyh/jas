@@ -42,39 +42,39 @@ private func normalizeElement(_ elem: Element) -> Element {
         return .line(Line(x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2,
                           stroke: e.stroke.map(normalizeStroke), widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
-                          locked: e.locked, visibility: e.visibility))
+                          locked: e.locked, visibility: e.visibility, name: e.name))
     case .rect(let e):
         return .rect(Rect(x: e.x, y: e.y, width: e.width, height: e.height,
                            rx: e.rx, ry: e.ry,
                            fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                            opacity: e.opacity, transform: e.transform,
-                           locked: e.locked, visibility: e.visibility))
+                           locked: e.locked, visibility: e.visibility, name: e.name))
     case .circle(let e):
         return .circle(Circle(cx: e.cx, cy: e.cy, r: e.r,
                               fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                               opacity: e.opacity, transform: e.transform,
-                              locked: e.locked, visibility: e.visibility))
+                              locked: e.locked, visibility: e.visibility, name: e.name))
     case .ellipse(let e):
         return .ellipse(Ellipse(cx: e.cx, cy: e.cy, rx: e.rx, ry: e.ry,
                                 fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                                 opacity: e.opacity, transform: e.transform,
-                                locked: e.locked, visibility: e.visibility))
+                                locked: e.locked, visibility: e.visibility, name: e.name))
     case .polyline(let e):
         return .polyline(Polyline(points: e.points,
                                   fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                                   opacity: e.opacity, transform: e.transform,
-                                  locked: e.locked, visibility: e.visibility))
+                                  locked: e.locked, visibility: e.visibility, name: e.name))
     case .polygon(let e):
         return .polygon(Polygon(points: e.points,
                                 fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                                 opacity: e.opacity, transform: e.transform,
-                                locked: e.locked, visibility: e.visibility))
+                                locked: e.locked, visibility: e.visibility, name: e.name))
     case .path(let e):
         return .path(Path(d: e.d,
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                           widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
-                          locked: e.locked, visibility: e.visibility))
+                          locked: e.locked, visibility: e.visibility, name: e.name))
     case .text(let e):
         // Pass the tspans tuple through so multi-tspan text
         // survives normalisation. The content-init would collapse
@@ -92,7 +92,7 @@ private func normalizeElement(_ elem: Element) -> Element {
                           width: e.width, height: e.height,
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                           opacity: e.opacity, transform: e.transform,
-                          locked: e.locked, visibility: e.visibility))
+                          locked: e.locked, visibility: e.visibility, name: e.name))
     case .textPath(let e):
         return .textPath(TextPath(d: e.d, tspans: e.tspans, startOffset: e.startOffset,
                                   fontFamily: e.fontFamily, fontSize: e.fontSize,
@@ -106,11 +106,11 @@ private func normalizeElement(_ elem: Element) -> Element {
                                   kerning: e.kerning,
                                   fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                                   opacity: e.opacity, transform: e.transform,
-                                  locked: e.locked, visibility: e.visibility))
+                                  locked: e.locked, visibility: e.visibility, name: e.name))
     case .group(let g):
         return .group(Group(children: g.children.map(normalizeElement),
                             opacity: g.opacity, transform: g.transform,
-                            locked: g.locked, visibility: g.visibility))
+                            locked: g.locked, visibility: g.visibility, name: g.name))
     case .layer(let l):
         return .layer(Layer(name: l.name, children: l.children.map(normalizeElement),
                             opacity: l.opacity, transform: l.transform,

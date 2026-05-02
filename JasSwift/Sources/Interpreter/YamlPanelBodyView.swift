@@ -1218,8 +1218,8 @@ private func elementTypeLabel(_ elem: Element) -> String {
 }
 
 private func elementDisplayName(_ elem: Element) -> (String, Bool) {
-    if case .layer(let le) = elem, !le.name.isEmpty {
-        return (le.name, true)
+    if case .layer(let le) = elem, let n = le.name, !n.isEmpty {
+        return (n, true)
     }
     return ("<\(elementTypeLabel(elem))>", false)
 }
@@ -1336,7 +1336,7 @@ struct LayerOptionsSheet: View {
         .frame(width: 320)
         .onAppear {
             if case .layer(let le) = e {
-                name = le.name
+                name = le.name ?? ""
                 lock = le.locked
                 show = le.visibility != .invisible
                 preview = le.visibility == .preview
@@ -1847,7 +1847,7 @@ struct TreeViewContent: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .onTapGesture(count: 2) {
                         if case .layer(let le) = elem {
-                            editingName = le.name
+                            editingName = le.name ?? ""
                             renamingPath = path
                         }
                     }
@@ -2073,7 +2073,7 @@ struct TreeViewContent: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .onTapGesture(count: 2) {
                         if case .layer(let le) = elem {
-                            editingName = le.name
+                            editingName = le.name ?? ""
                             renamingPath = path
                         }
                     }

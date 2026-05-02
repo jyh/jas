@@ -92,7 +92,7 @@ let () =
         ctrl5#remove_layer 0;
         assert (Array.length ctrl5#document.Jas.Document.layers = 1);
         (match ctrl5#document.Jas.Document.layers.(0) with
-         | Layer { name; _ } -> assert (name = "B")
+         | Layer { name = Some n; _ } -> assert (n = "B")
          | _ -> assert false));
 
       Alcotest.test_case "set_document" `Quick (fun () ->
@@ -205,7 +205,7 @@ let () =
 
       Alcotest.test_case "filled rect: marquee inside interior hits" `Quick (fun () ->
         let fill = Some { fill_color = Rgb { r = 1.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 } in
-        let filled_rect = Rect { x = 0.0; y = 0.0; width = 100.0; height = 100.0;
+        let filled_rect = Rect { name = None; x = 0.0; y = 0.0; width = 100.0; height = 100.0;
                                   rx = 0.0; ry = 0.0; fill;
                                   stroke = None; opacity = 1.0; transform = None; locked = false;
                                   visibility = Jas.Element.Preview;

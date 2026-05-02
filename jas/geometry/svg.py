@@ -86,6 +86,15 @@ def _opacity_attr(opacity: float) -> str:
     return f' opacity="{_fmt(opacity)}"'
 
 
+def _name_attr(name: str | None) -> str:
+    """User-visible element name → ``inkscape:label`` attribute. Reader
+    accepts both this and a ``<title>`` child for cross-tool interop.
+    """
+    if not name:
+        return ""
+    return f' inkscape:label="{escape(name)}"'
+
+
 def _tspan_svg(t) -> str:
     """Emit a single Tspan as an SVG ``<tspan ...>content</tspan>``.
     Only overridden attributes are emitted (inherited values are absent).
@@ -239,14 +248,17 @@ def _element_svg(elem: Element, indent: str) -> str:
     """Render an element as SVG XML."""
     match elem:
         case Line(x1=x1, y1=y1, x2=x2, y2=y2,
-                  stroke=stroke, opacity=opacity, transform=transform):
+                  stroke=stroke, opacity=opacity, transform=transform,
+                  name=name):
             return (f'{indent}<line x1="{_fmt(_px(x1))}" y1="{_fmt(_px(y1))}"'
                     f' x2="{_fmt(_px(x2))}" y2="{_fmt(_px(y2))}"'
                     f'{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                    f'{_name_attr(name)}/>')
 
         case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry,
-                  fill=fill, stroke=stroke, opacity=opacity, transform=transform):
+                  fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+                  name=name):
             rxy = ""
             if rx > 0:
                 rxy += f' rx="{_fmt(_px(rx))}"'
@@ -256,39 +268,49 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f' width="{_fmt(_px(w))}" height="{_fmt(_px(h))}"'
                     f'{rxy}'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                    f'{_name_attr(name)}/>')
 
         case Circle(cx=cx, cy=cy, r=r,
-                    fill=fill, stroke=stroke, opacity=opacity, transform=transform):
+                    fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+                    name=name):
             return (f'{indent}<circle cx="{_fmt(_px(cx))}" cy="{_fmt(_px(cy))}"'
                     f' r="{_fmt(_px(r))}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                    f'{_name_attr(name)}/>')
 
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry,
-                     fill=fill, stroke=stroke, opacity=opacity, transform=transform):
+                     fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+                     name=name):
             return (f'{indent}<ellipse cx="{_fmt(_px(cx))}" cy="{_fmt(_px(cy))}"'
                     f' rx="{_fmt(_px(rx))}" ry="{_fmt(_px(ry))}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                    f'{_name_attr(name)}/>')
 
         case Polyline(points=pts, fill=fill, stroke=stroke,
-                      opacity=opacity, transform=transform):
+                      opacity=opacity, transform=transform,
+                      name=name):
             ps = " ".join(f"{_fmt(_px(x))},{_fmt(_px(y))}" for x, y in pts)
             return (f'{indent}<polyline points="{ps}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                    f'{_name_attr(name)}/>')
 
         case Polygon(points=pts, fill=fill, stroke=stroke,
-                     opacity=opacity, transform=transform):
+                     opacity=opacity, transform=transform,
+                     name=name):
             ps = " ".join(f"{_fmt(_px(x))},{_fmt(_px(y))}" for x, y in pts)
             return (f'{indent}<polygon points="{ps}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                    f'{_name_attr(name)}/>')
 
         case Path(d=cmds, fill=fill, stroke=stroke,
                   opacity=opacity, transform=transform,
-                  tool_origin=tool_origin):
+                  tool_origin=tool_origin,
+                  name=name):
             tool_origin_attr = (
                 f' jas:tool-origin="{escape(tool_origin)}"'
                 if tool_origin else ""
@@ -296,7 +318,8 @@ def _element_svg(elem: Element, indent: str) -> str:
             return (f'{indent}<path d="{_path_data(cmds)}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{tool_origin_attr}/>')
+                    f'{tool_origin_attr}'
+                    f'{_name_attr(name)}/>')
 
         case TextPath():
             # Destructure via attribute access to avoid an even wider
@@ -365,14 +388,15 @@ def _element_svg(elem: Element, indent: str) -> str:
 
         case Layer(children=children, name=name, opacity=opacity, transform=transform):
             label = f' inkscape:label="{escape(name)}"' if name else ""
-            lines = [f'{indent}<g{label}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
+            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
             return "\n".join(lines)
 
-        case Group(children=children, opacity=opacity, transform=transform):
-            lines = [f'{indent}<g{_opacity_attr(opacity)}{_transform_attr(transform)}>']
+        case Group(children=children, opacity=opacity, transform=transform,
+                   name=name):
+            lines = [f'{indent}<g{_name_attr(name)}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
@@ -855,6 +879,14 @@ def _parse_element(node: ET.Element) -> Element | None:
     stroke = _parse_stroke(node)
     opacity = _parse_opacity(node)
     transform = _parse_transform(node)
+    # User-visible name from inkscape:label (preferred) or <title> child.
+    name = (node.get(f"{{{_INKSCAPE_NS}}}label")
+            or node.get("inkscape:label"))
+    if not name:
+        for child in node:
+            if _strip_ns(child.tag) == "title" and child.text:
+                name = child.text
+                break
 
     if tag == "line":
         return Line(
@@ -862,7 +894,8 @@ def _parse_element(node: ET.Element) -> Element | None:
             y1=_pt(_safe_float(node.get("y1"))),
             x2=_pt(_safe_float(node.get("x2"))),
             y2=_pt(_safe_float(node.get("y2"))),
-            stroke=stroke, opacity=opacity, transform=transform)
+            stroke=stroke, opacity=opacity, transform=transform,
+            name=name)
 
     if tag == "rect":
         return Rect(
@@ -872,14 +905,16 @@ def _parse_element(node: ET.Element) -> Element | None:
             height=_pt(_safe_float(node.get("height"))),
             rx=_pt(_safe_float(node.get("rx"))),
             ry=_pt(_safe_float(node.get("ry"))),
-            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+            name=name)
 
     if tag == "circle":
         return Circle(
             cx=_pt(_safe_float(node.get("cx"))),
             cy=_pt(_safe_float(node.get("cy"))),
             r=_pt(_safe_float(node.get("r"))),
-            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+            name=name)
 
     if tag == "ellipse":
         return Ellipse(
@@ -887,24 +922,28 @@ def _parse_element(node: ET.Element) -> Element | None:
             cy=_pt(_safe_float(node.get("cy"))),
             rx=_pt(_safe_float(node.get("rx"))),
             ry=_pt(_safe_float(node.get("ry"))),
-            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+            name=name)
 
     if tag == "polyline":
         pts = _parse_points(node.get("points", ""))
         return Polyline(points=pts, fill=fill, stroke=stroke,
-                        opacity=opacity, transform=transform)
+                        opacity=opacity, transform=transform,
+                        name=name)
 
     if tag == "polygon":
         pts = _parse_points(node.get("points", ""))
         return Polygon(points=pts, fill=fill, stroke=stroke,
-                       opacity=opacity, transform=transform)
+                       opacity=opacity, transform=transform,
+                       name=name)
 
     if tag == "path":
         d = _parse_path_d(node.get("d", ""))
         tool_origin = node.get("jas:tool-origin")
         return Path(d=d, fill=fill, stroke=stroke,
                     opacity=opacity, transform=transform,
-                    tool_origin=tool_origin)
+                    tool_origin=tool_origin,
+                    name=name)
 
     if tag == "text":
         ff = node.get("font-family", "sans-serif")
@@ -997,16 +1036,28 @@ def _parse_element(node: ET.Element) -> Element | None:
     if tag == "g":
         children = []
         for child in node:
+            if _strip_ns(child.tag) == "title":
+                continue  # title used for name; skip as element
             elem = _parse_element(child)
             if elem is not None:
                 children.append(elem)
-        # Check for inkscape:label to determine Layer vs Group
+        # Layer detection: only inkscape:groupmode="layer" promotes a
+        # <g> to a Layer. inkscape:label alone is a Group name now
+        # (was historically Layer-only, but with non-Layer naming
+        # support that heuristic is wrong). Existing fixtures opt in
+        # via the explicit groupmode attribute.
+        group_mode = (node.get(f"{{{_INKSCAPE_NS}}}groupmode")
+                      or node.get("inkscape:groupmode"))
         label = node.get(f"{{{_INKSCAPE_NS}}}label") or node.get("inkscape:label")
-        if label:
-            return Layer(children=tuple(children), name=label,
+        if group_mode == "layer":
+            return Layer(children=tuple(children), name=label or "",
                          opacity=opacity, transform=transform)
         return Group(children=tuple(children),
-                     opacity=opacity, transform=transform)
+                     opacity=opacity, transform=transform,
+                     name=name)
+
+    if tag == "title":
+        return None  # parent reads as the name
 
     return None
 

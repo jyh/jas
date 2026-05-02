@@ -1484,7 +1484,7 @@ fn build_active_document_view(
             let path_json = serde_json::json!({"__path__": [i as u64]});
             top_level_layers.push(serde_json::json!({
                 "kind": "Layer",
-                "name": le.name,
+                "name": le.name(),
                 "common": {
                     "visibility": vis,
                     "locked": le.common.locked,
@@ -1493,7 +1493,7 @@ fn build_active_document_view(
                 "path": path_json.clone(),
             }));
             top_level_layer_paths.push(path_json);
-            layer_names.insert(le.name.clone());
+            layer_names.insert(le.name().to_string());
         }
     }
     // next_layer_name: smallest "Layer N" not already taken
@@ -2024,9 +2024,11 @@ fn run_yaml_effect(
         };
         let layer = crate::geometry::element::Element::Layer(
             crate::geometry::element::LayerElem {
-                name,
                 children: Vec::new(),
-                common: crate::geometry::element::CommonProps::default(),
+                common: crate::geometry::element::CommonProps {
+                    name: Some(name),
+                    ..Default::default()
+                },
                 isolated_blending: false,
                 knockout_group: false,
             }
@@ -2188,9 +2190,11 @@ fn run_yaml_effect(
                 new_doc = new_doc.delete_element(p);
             }
             let new_layer = Element::Layer(LayerElem {
-                name,
                 children,
-                common: CommonProps::default(),
+                common: CommonProps {
+                    name: Some(name),
+                    ..Default::default()
+                },
                 isolated_blending: false,
                 knockout_group: false,
             });
@@ -2785,7 +2789,7 @@ fn apply_doc_set_field(
         }
         "name" => {
             if let (Element::Layer(le), Value::Str(s)) = (elem, value) {
-                le.name = s.clone();
+                le.set_name(s.clone());
                 true
             } else { false }
         }
@@ -5472,9 +5476,11 @@ fn tree_preview_svg(elem: &GeoElement) -> String {
 }
 
 fn tree_elem_display_name(elem: &GeoElement) -> (String, bool) {
-    if let GeoElement::Layer(le) = elem {
-        if !le.name.is_empty() {
-            return (le.name.clone(), true);
+    // Every element's name lives in common.name. The bracket-type
+    // fallback shows when the name is unset.
+    if let Some(n) = elem.common().name.as_deref() {
+        if !n.is_empty() {
+            return (n.to_string(), true);
         }
     }
     (format!("<{}>", tree_type_label(elem)), false)
@@ -5705,7 +5711,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             for p in &stack {
                 if let Some(elem) = doc.get_element(p) {
                     let label = match elem {
-                        crate::geometry::element::Element::Layer(le) if !le.name.is_empty() => le.name.clone(),
+                        crate::geometry::element::Element::Layer(le) if !le.name().is_empty() => le.name().to_string(),
                         _ => format!("<{}>", match elem {
                             crate::geometry::element::Element::Group(_) => "Group",
                             crate::geometry::element::Element::Layer(_) => "Layer",
@@ -5968,21 +5974,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             dioxus::prelude::Key::F2 => {
                 // F2 starts inline rename on the active row. Without a
                 // separate focus concept, "active" is the last panel-
-                // selected row. Only layers are renameable today
-                // (matches the can_rename check on the row span).
+                // selected row. Any element type is renameable now
+                // that common.name backs the data.
                 spawn(async move {
                     let mut st = a.borrow_mut();
                     let target = st.layers_panel_selection.last().cloned();
                     if let Some(path) = target {
-                        let is_layer = st.tab()
-                            .and_then(|t| t.model.document().get_element(&path))
-                            .map(|e| e.is_layer())
-                            .unwrap_or(false);
-                        if is_layer {
-                            st.layers_renaming = Some(path.clone());
-                            kb_rev += 1;
-                            schedule_focus_rename_input(&path);
-                        }
+                        st.layers_renaming = Some(path.clone());
+                        kb_rev += 1;
+                        schedule_focus_rename_input(&path);
                     }
                 });
             }
@@ -6847,8 +6847,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                 if let Some(tab) = st.tab_mut() {
                                                                     tab.model.snapshot();
                                                                     let doc = tab.model.document_mut();
-                                                                    if let Some(crate::geometry::element::Element::Layer(le)) = doc.get_element_mut(&p) {
-                                                                        le.name = val_inner;
+                                                                    if let Some(elem) = doc.get_element_mut(&p) {
+                                                                        // Write to common.name for any
+                                                                        // element type (LYR-091); Layers
+                                                                        // also keep LayerElem.name in
+                                                                        // sync for back-compat.
+                                                                        elem.common_mut().name = if val_inner.is_empty() {
+                                                                            None
+                                                                        } else {
+                                                                            Some(val_inner.clone())
+                                                                        };
+                                                                        if let crate::geometry::element::Element::Layer(le) = elem {
+                                                                            le.name() = val_inner;
+                                                                        }
                                                                     }
                                                                 }
                                                                 st.layers_renaming = None;
@@ -6897,8 +6908,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                             if let Some(tab) = st.tab_mut() {
                                                                 tab.model.snapshot();
                                                                 let doc = tab.model.document_mut();
-                                                                if let Some(crate::geometry::element::Element::Layer(le)) = doc.get_element_mut(&p) {
-                                                                    le.name = val_inner;
+                                                                if let Some(elem) = doc.get_element_mut(&p) {
+                                                                    elem.common_mut().name = if val_inner.is_empty() {
+                                                                        None
+                                                                    } else {
+                                                                        Some(val_inner.clone())
+                                                                    };
+                                                                    if let crate::geometry::element::Element::Layer(le) = elem {
+                                                                        le.name() = val_inner;
+                                                                    }
                                                                 }
                                                             }
                                                             st.layers_renaming = None;
@@ -6917,7 +6935,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     let name_path = row.path.clone();
                                     let name_app = app.clone();
                                     let mut name_rev = revision;
-                                    let can_rename = row.is_layer;
+                                    // Any element row can be renamed — common.name backs
+                                    // the persistence (LYR-091). Was layer-only before
+                                    // common.name landed.
+                                    let can_rename = true;
                                     rsx! {
                                         span {
                                             style: "{name_style}",
@@ -7400,7 +7421,6 @@ mod tests {
         }
         let doc_layers: Vec<Element> = layers.into_iter().map(|(name, vis, locked)| {
             Element::Layer(LayerElem {
-                name,
                 children: Vec::new(),
                 isolated_blending: false,
                 knockout_group: false,
@@ -7412,6 +7432,7 @@ mod tests {
                     visibility: vis,
                     mask: None,
                     tool_origin: None,
+                    name: Some(name),
                 },
             })
         }).collect();
@@ -7604,8 +7625,8 @@ mod tests {
         run_yaml_effects(&effects, &eval_ctx, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 2);
-        assert_eq!(tab_layer(&st, 0).name, "A");
-        assert_eq!(tab_layer(&st, 1).name, "C");
+        assert_eq!(tab_layer(&st, 0).name(), "A");
+        assert_eq!(tab_layer(&st, 1).name(), "C");
     }
 
     #[test]
@@ -7622,9 +7643,9 @@ mod tests {
         run_yaml_effects(&effects, &eval_ctx, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 3);
-        assert_eq!(tab_layer(&st, 0).name, "A");
-        assert_eq!(tab_layer(&st, 1).name, "A");   // clone
-        assert_eq!(tab_layer(&st, 2).name, "B");
+        assert_eq!(tab_layer(&st, 0).name(), "A");
+        assert_eq!(tab_layer(&st, 1).name(), "A");   // clone
+        assert_eq!(tab_layer(&st, 2).name(), "B");
     }
 
     #[test]
@@ -7639,7 +7660,7 @@ mod tests {
         dispatch_action("delete_layer_selection", &params, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 1);
-        assert_eq!(tab_layer(&st, 0).name, "B");
+        assert_eq!(tab_layer(&st, 0).name(), "B");
         assert_eq!(st.layers_panel_selection.len(), 0);
     }
 
@@ -7654,30 +7675,26 @@ mod tests {
             st.active_tab = 0;
         }
         // Construct a doc: [Layer A, Group G(child1, child2), Layer B]
-        let layer_a = Element::Layer(LayerElem {
-            name: "A".into(), children: Vec::new(),
+        let layer_a = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("A".into()), ..Default::default() },
         });
-        let child1 = Element::Layer(LayerElem {
-            name: "c1".into(), children: Vec::new(),
+        let child1 = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("c1".into()), ..Default::default() },
         });
-        let child2 = Element::Layer(LayerElem {
-            name: "c2".into(), children: Vec::new(),
+        let child2 = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("c2".into()), ..Default::default() },
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(child1), Rc::new(child2)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
         });
-        let layer_b = Element::Layer(LayerElem {
-            name: "B".into(), children: Vec::new(),
+        let layer_b = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("B".into()), ..Default::default() },
         });
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
         new_doc.layers = vec![layer_a, group, layer_b];
@@ -7690,7 +7707,7 @@ mod tests {
         // Children c1 and c2 are NOT Layers but are held as Rc<Element>;
         // the unpacker dereferences. After unpack: A, c1, c2, B.
         let names: Vec<String> = layers.iter().map(|e| match e {
-            Element::Layer(le) => le.name.clone(),
+            Element::Layer(le) => le.name().to_string(),
             _ => format!("{:?}", e),
         }).collect();
         assert_eq!(names, vec!["A", "c1", "c2", "B"]);
@@ -7711,10 +7728,10 @@ mod tests {
         assert_eq!(layers.len(), 2);
         // Layer 2 (not in selection) survives at idx 0;
         // new auto-named Layer 4 at idx 1 with Layer 1 + Layer 3 as children.
-        assert_eq!(tab_layer(&st, 0).name, "Layer 2");
+        assert_eq!(tab_layer(&st, 0).name(), "Layer 2");
         match &layers[1] {
             Element::Layer(le) => {
-                assert_eq!(le.name, "Layer 4");
+                assert_eq!(le.name(), "Layer 4");
                 assert_eq!(le.children.len(), 2);
             }
             other => panic!("expected Layer at idx 1, got {:?}", other),
@@ -7743,7 +7760,7 @@ mod tests {
             }
             other => panic!("expected Group at idx 0, got {:?}", other),
         }
-        assert_eq!(tab_layer(&st, 1).name, "B");
+        assert_eq!(tab_layer(&st, 1).name(), "B");
     }
 
     #[test]
@@ -7783,7 +7800,7 @@ mod tests {
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 2);
         // Auto-generated name skips Layer 1
-        assert_eq!(tab_layer(&st, 1).name, "Layer 2");
+        assert_eq!(tab_layer(&st, 1).name(), "Layer 2");
     }
 
     #[test]
@@ -7799,9 +7816,9 @@ mod tests {
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 4);
         // Inserted at index 2 (selection 1 + 1); next unused name is Layer 4
-        assert_eq!(tab_layer(&st, 2).name, "Layer 4");
+        assert_eq!(tab_layer(&st, 2).name(), "Layer 4");
         // Layer 3 shifted to index 3
-        assert_eq!(tab_layer(&st, 3).name, "Layer 3");
+        assert_eq!(tab_layer(&st, 3).name(), "Layer 3");
     }
 
     #[test]
@@ -7815,9 +7832,9 @@ mod tests {
         dispatch_action("duplicate_layer_selection", &params, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 3);
-        assert_eq!(tab_layer(&st, 0).name, "A");
-        assert_eq!(tab_layer(&st, 1).name, "B");
-        assert_eq!(tab_layer(&st, 2).name, "B");
+        assert_eq!(tab_layer(&st, 0).name(), "A");
+        assert_eq!(tab_layer(&st, 1).name(), "B");
+        assert_eq!(tab_layer(&st, 2).name(), "B");
     }
 
     #[test]
@@ -7882,7 +7899,7 @@ mod tests {
         // Edit-mode YAML ends with close_dialog which is deferred.
         assert!(deferred.iter().any(|e| e.get("close_dialog").is_some()));
         let layer = tab_layer(&st, 0);
-        assert_eq!(layer.name, "Renamed");
+        assert_eq!(layer.name(), "Renamed");
         assert!(layer.common.locked);
         assert_eq!(layer.common.visibility, Visibility::Outline);
     }
@@ -7923,7 +7940,7 @@ mod tests {
         dispatch_action("layer_options_confirm", &params, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 2);
-        assert_eq!(tab_layer(&st, 1).name, "Brand New");
+        assert_eq!(tab_layer(&st, 1).name(), "Brand New");
         assert_eq!(tab_layer(&st, 1).common.visibility, Visibility::Preview);
     }
 
@@ -7943,8 +7960,8 @@ mod tests {
         run_yaml_effects(&effects, &eval_ctx, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 2);
-        assert_eq!(tab_layer(&st, 0).name, "B");
-        assert_eq!(tab_layer(&st, 1).name, "D");
+        assert_eq!(tab_layer(&st, 0).name(), "B");
+        assert_eq!(tab_layer(&st, 1).name(), "D");
     }
 
     // ── Phase 4: Paragraph panel writes ─────────────────────────

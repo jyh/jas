@@ -377,7 +377,7 @@ let () =
         |]|] in
         let doc2 = roundtrip doc in
         match doc2.Jas.Document.layers.(0) with
-        | Layer { name; _ } -> assert (name = "Background")
+        | Layer { name = Some n; _ } -> assert (n = "Background")
         | _ -> assert false);
 
       Alcotest.test_case "round-trip multiple layers" `Quick (fun () ->
@@ -392,10 +392,10 @@ let () =
         let doc2 = roundtrip doc in
         assert (Array.length doc2.Jas.Document.layers = 2);
         (match doc2.Jas.Document.layers.(0) with
-         | Layer { name; _ } -> assert (name = "L1")
+         | Layer { name = Some n; _ } -> assert (n = "L1")
          | _ -> assert false);
         (match doc2.Jas.Document.layers.(1) with
-         | Layer { name; _ } -> assert (name = "L2")
+         | Layer { name = Some n; _ } -> assert (n = "L2")
          | _ -> assert false));
 
       Alcotest.test_case "round-trip ellipse" `Quick (fun () ->

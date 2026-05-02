@@ -156,7 +156,17 @@ let visibility_str = function
   | Outline -> "outline"
   | Preview -> "preview"
 
-let common_fields o ~opacity ~transform ~locked ~visibility =
+let common_fields o ~opacity ~transform ~locked ~visibility ~name =
+  json_bool o "locked" locked;
+  (match name with
+   | None -> json_null o "name"
+   | Some n when n = "" -> json_null o "name"
+   | Some n -> json_str o "name" n);
+  json_num o "opacity" opacity;
+  json_raw o "transform" (transform_json transform);
+  json_str o "visibility" (visibility_str visibility)
+
+let common_fields_no_name o ~opacity ~transform ~locked ~visibility =
   json_bool o "locked" locked;
   json_num o "opacity" opacity;
   json_raw o "transform" (transform_json transform);
@@ -263,7 +273,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "line";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     json_raw o "stroke" (stroke_json e.stroke);
     json_num o "x1" e.x1;
     json_num o "x2" e.x2;
@@ -274,7 +284,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "rect";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     json_raw o "fill" (fill_json e.fill);
     json_num o "height" e.height;
     json_num o "rx" e.rx;
@@ -288,7 +298,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "circle";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     json_num o "cx" e.cx;
     json_num o "cy" e.cy;
     json_raw o "fill" (fill_json e.fill);
@@ -299,7 +309,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "ellipse";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     json_num o "cx" e.cx;
     json_num o "cy" e.cy;
     json_raw o "fill" (fill_json e.fill);
@@ -311,7 +321,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "polyline";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     json_raw o "fill" (fill_json e.fill);
     json_raw o "points" (points_json e.points);
     json_raw o "stroke" (stroke_json e.stroke);
@@ -320,7 +330,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "polygon";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     json_raw o "fill" (fill_json e.fill);
     json_raw o "points" (points_json e.points);
     json_raw o "stroke" (stroke_json e.stroke);
@@ -329,7 +339,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "path";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     let cmds = List.map path_command_json e.d in
     json_raw o "d" (json_array cmds);
     json_raw o "fill" (fill_json e.fill);
@@ -339,7 +349,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "text";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     (* Extended element-wide attribute slots. Still-null slots are
        placeholders until Text grows per-element override fields
        (see TSPAN.md Attribute Home). *)
@@ -376,7 +386,7 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "text_path";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     json_empty_as_null o "baseline_shift" e.baseline_shift;
     let cmds = List.map path_command_json e.d in
     json_raw o "d" (json_array cmds);
@@ -409,25 +419,26 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "group";
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     let children = Array.to_list e.children |> List.map element_json in
     json_raw o "children" (json_array children);
     json_build o
   | Layer e ->
     let o = json_obj () in
     json_str o "type" "layer";
+    (* After Layer.name → common-name merge, Layer uses the same
+       nullable name path as every other element. *)
     common_fields o ~opacity:e.opacity ~transform:e.transform
-      ~locked:e.locked ~visibility:e.visibility;
+      ~locked:e.locked ~visibility:e.visibility ~name:e.name;
     let children = Array.to_list e.children |> List.map element_json in
     json_raw o "children" (json_array children);
-    json_str o "name" e.name;
     json_build o
   | Live (Compound_shape cs) ->
     let o = json_obj () in
     json_str o "type" "live";
     json_str o "kind" "compound_shape";
     common_fields o ~opacity:cs.opacity ~transform:cs.transform
-      ~locked:cs.locked ~visibility:cs.visibility;
+      ~locked:cs.locked ~visibility:cs.visibility ~name:None;
     let children = Array.to_list cs.operands |> List.map element_json in
     json_raw o "children" (json_array children);
     json_build o
@@ -670,9 +681,12 @@ let rec parse_element j =
   let transform = parse_transform (j |> member "transform") in
   let locked = j |> member "locked" |> to_bool in
   let visibility = parse_visibility (j |> member "visibility") in
+  let name = match j |> member "name" with
+    | `String s -> Some s
+    | _ -> None in
   match typ with
   | "line" ->
-    Line { x1 = j |> member "x1" |> to_num;
+    Line { name; x1 = j |> member "x1" |> to_num;
            y1 = j |> member "y1" |> to_num;
            x2 = j |> member "x2" |> to_num;
            y2 = j |> member "y2" |> to_num;
@@ -682,7 +696,7 @@ let rec parse_element j =
              stroke_gradient = None;
            }
   | "rect" ->
-    Rect { x = j |> member "x" |> to_num;
+    Rect { name; x = j |> member "x" |> to_num;
            y = j |> member "y" |> to_num;
            width = j |> member "width" |> to_num;
            height = j |> member "height" |> to_num;
@@ -695,7 +709,7 @@ let rec parse_element j =
              stroke_gradient = None;
            }
   | "circle" ->
-    Circle { cx = j |> member "cx" |> to_num;
+    Circle { name; cx = j |> member "cx" |> to_num;
              cy = j |> member "cy" |> to_num;
              r = j |> member "r" |> to_num;
              fill = parse_fill (j |> member "fill");
@@ -705,7 +719,7 @@ let rec parse_element j =
                stroke_gradient = None;
              }
   | "ellipse" ->
-    Ellipse { cx = j |> member "cx" |> to_num;
+    Ellipse { name; cx = j |> member "cx" |> to_num;
               cy = j |> member "cy" |> to_num;
               rx = j |> member "rx" |> to_num;
               ry = j |> member "ry" |> to_num;
@@ -716,7 +730,7 @@ let rec parse_element j =
                 stroke_gradient = None;
               }
   | "polyline" ->
-    Polyline { points = parse_points (j |> member "points");
+    Polyline { name; points = parse_points (j |> member "points");
                fill = parse_fill (j |> member "fill");
                stroke = parse_stroke (j |> member "stroke");
                opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
@@ -724,7 +738,7 @@ let rec parse_element j =
                  stroke_gradient = None;
                }
   | "polygon" ->
-    Polygon { points = parse_points (j |> member "points");
+    Polygon { name; points = parse_points (j |> member "points");
               fill = parse_fill (j |> member "fill");
               stroke = parse_stroke (j |> member "stroke");
               opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
@@ -732,7 +746,7 @@ let rec parse_element j =
                 stroke_gradient = None;
               }
   | "path" ->
-    Path { d = j |> member "d" |> to_list |> List.map parse_path_command;
+    Path { name; d = j |> member "d" |> to_list |> List.map parse_path_command;
            fill = parse_fill (j |> member "fill");
            stroke = parse_stroke (j |> member "stroke");
            width_points = [];
@@ -748,7 +762,7 @@ let rec parse_element j =
            }
   | "text" ->
     let content = parse_content_or_tspans j in
-    Text { x = j |> member "x" |> to_num;
+    Text { name; x = j |> member "x" |> to_num;
            y = j |> member "y" |> to_num;
            content;
            font_family = j |> member "font_family" |> to_string;
@@ -776,7 +790,7 @@ let rec parse_element j =
            tspans = tspans_from_content content }
   | "text_path" ->
     let content = parse_content_or_tspans j in
-    Text_path { d = j |> member "d" |> to_list |> List.map parse_path_command;
+    Text_path { name; d = j |> member "d" |> to_list |> List.map parse_path_command;
                 content;
                 start_offset = j |> member "start_offset" |> to_num;
                 font_family = j |> member "font_family" |> to_string;
@@ -803,13 +817,15 @@ let rec parse_element j =
   | "group" ->
     let children = j |> member "children" |> to_list
       |> List.map parse_element |> Array.of_list in
-    Group { children; opacity; transform; locked; visibility; blend_mode = Normal;
+    Group { name; children; opacity; transform; locked; visibility; blend_mode = Normal;
             mask = None;
             isolated_blending = false; knockout_group = false }
   | "layer" ->
     let children = j |> member "children" |> to_list
       |> List.map parse_element |> Array.of_list in
-    let name = j |> member "name" |> to_string in
+    (* After Layer.name → common-name merge, Layer reads name from
+       the outer parse_element binding (same nullable path everything
+       else uses). *)
     Layer { name; children; opacity; transform; locked; visibility; blend_mode = Normal;
             mask = None;
             isolated_blending = false; knockout_group = false }

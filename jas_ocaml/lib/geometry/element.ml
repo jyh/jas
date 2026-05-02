@@ -566,6 +566,8 @@ type path_command =
 (** SVG element types. All elements are immutable. *)
 type element =
   | Line of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       x1 : float; y1 : float;
       x2 : float; y2 : float;
       stroke : stroke option;
@@ -579,6 +581,8 @@ type element =
       stroke_gradient : gradient option;
     }
   | Rect of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       x : float; y : float;
       width : float; height : float;
       rx : float; ry : float;
@@ -594,6 +598,8 @@ type element =
       stroke_gradient : gradient option;
     }
   | Circle of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       cx : float; cy : float; r : float;
       fill : fill option;
       stroke : stroke option;
@@ -607,6 +613,8 @@ type element =
       stroke_gradient : gradient option;
     }
   | Ellipse of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       cx : float; cy : float;
       rx : float; ry : float;
       fill : fill option;
@@ -621,6 +629,8 @@ type element =
       stroke_gradient : gradient option;
     }
   | Polyline of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -634,6 +644,8 @@ type element =
       stroke_gradient : gradient option;
     }
   | Polygon of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -647,6 +659,8 @@ type element =
       stroke_gradient : gradient option;
     }
   | Path of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       d : path_command list;
       fill : fill option;
       stroke : stroke option;
@@ -673,6 +687,8 @@ type element =
       tool_origin : string option;
     }
   | Text of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       x : float; y : float;
       content : string;
       font_family : string;
@@ -708,6 +724,8 @@ type element =
       tspans : tspan array;
     }
   | Text_path of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       d : path_command list;
       content : string;
       start_offset : float;
@@ -738,6 +756,8 @@ type element =
       tspans : tspan array;
     }
   | Group of {
+      (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
+      name : string option;
       children : element array;
       opacity : float;
       transform : transform option;
@@ -749,7 +769,10 @@ type element =
       knockout_group : bool;
     }
   | Layer of {
-      name : string;
+      (* After the Layer.name → common-name merge, Layer.name is
+         optional like every other element's name. None means unnamed
+         (display-time fallback to "Layer N" in the layers panel). *)
+      name : string option;
       children : element array;
       opacity : float;
       transform : transform option;
@@ -1109,25 +1132,25 @@ let transform_of elem =
   | Live (Compound_shape cs) -> cs.transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
-  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
+  Line { name = None; x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
 
 let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
-  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Rect { name = None; x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy r =
-  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Circle { name = None; cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy rx ry =
-  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Ellipse { name = None; cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Polyline { name = None; points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Polygon { name = None; points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) ?(stroke_brush = None) ?(stroke_brush_overrides = None) ?(tool_origin = None) d =
-  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush; stroke_brush_overrides; tool_origin }
+  Path { name = None; d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush; stroke_brush_overrides; tool_origin }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /
@@ -1177,7 +1200,7 @@ let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = 
     ?(aa_mode = "") ?(rotate = "") ?(horizontal_scale = "")
     ?(vertical_scale = "") ?(kerning = "")
     ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y content =
-  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
+  Text { name = None; x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
          text_transform; font_variant; baseline_shift; line_height; letter_spacing;
          xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
          text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
@@ -1190,7 +1213,7 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
     ?(aa_mode = "") ?(rotate = "") ?(horizontal_scale = "")
     ?(vertical_scale = "") ?(kerning = "")
     ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d content =
-  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
+  Text_path { name = None; d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
               text_transform; font_variant; baseline_shift; line_height; letter_spacing;
               xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
               fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
@@ -1198,11 +1221,16 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
               tspans = tspans_from_content content }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Group { children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+  Group { name = None; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
           mask = None;
           isolated_blending = false; knockout_group = false }
 
-let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
+let make_layer ?name ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
+  let name = match name with
+    | None -> None
+    | Some s when s = "" -> None
+    | Some s -> Some s
+  in
   Layer { name; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
           mask = None;
           isolated_blending = false; knockout_group = false }
@@ -1404,6 +1432,25 @@ let with_width_points elem wp =
   | Line r -> Line { r with width_points = wp }
   | Path r -> Path { r with width_points = wp }
   | _ -> elem
+
+(* Set the user-visible name on any element. Layer.name is required
+   non-optional and lives in a different field than the new common
+   name; this helper writes to the optional common name everywhere
+   else, and writes to Layer.name (treating None as ""). *)
+let with_name elem (n : string option) =
+  match elem with
+  | Line r       -> Line { r with name = n }
+  | Rect r       -> Rect { r with name = n }
+  | Circle r     -> Circle { r with name = n }
+  | Ellipse r    -> Ellipse { r with name = n }
+  | Polyline r   -> Polyline { r with name = n }
+  | Polygon r    -> Polygon { r with name = n }
+  | Path r       -> Path { r with name = n }
+  | Text r       -> Text { r with name = n }
+  | Text_path r  -> Text_path { r with name = n }
+  | Group r      -> Group { r with name = n }
+  | Layer r      -> Layer { r with name = n }
+  | Live _       -> elem
 
 let color_to_hex c =
   let (r, g, b, _) = color_to_rgba c in
@@ -1729,7 +1776,7 @@ let move_control_points ?(is_all = false) elem indices dx dy =
           let (px, py) = pts.(i) in
           pts.(i) <- (px +. dx, py +. dy)
       done;
-      Polygon { points = Array.to_list pts;
+      Polygon { name = None; points = Array.to_list pts;
                 fill = r.fill; stroke = r.stroke;
                 opacity = r.opacity; transform = r.transform;
                 locked = r.locked; visibility = r.visibility;

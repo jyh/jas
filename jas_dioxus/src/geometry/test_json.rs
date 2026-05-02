@@ -277,6 +277,23 @@ fn visibility_str(v: Visibility) -> &'static str {
 
 fn common_fields(o: &mut JsonObj, c: &CommonProps) {
     o.bool_val("locked", c.locked);
+    // User-visible name from common.name. Layer emits its own name
+    // field separately (Layer.name predates common.name); the Layer
+    // arm uses common_fields_no_name() so we don't double-emit.
+    match c.name.as_deref() {
+        None => o.null("name"),
+        Some(n) => o.str_val("name", n),
+    }
+    o.num("opacity", c.opacity);
+    o.raw("transform", transform_json(&c.transform));
+    o.str_val("visibility", visibility_str(c.visibility));
+}
+
+/// Variant of `common_fields` that omits the optional name. Used by
+/// Layer which carries its own required name field; emitting both
+/// would produce a duplicate JSON key.
+fn common_fields_no_name(o: &mut JsonObj, c: &CommonProps) {
+    o.bool_val("locked", c.locked);
     o.num("opacity", c.opacity);
     o.raw("transform", transform_json(&c.transform));
     o.str_val("visibility", visibility_str(c.visibility));
@@ -494,10 +511,11 @@ fn element_json(elem: &Element) -> String {
         }
         Element::Layer(e) => {
             o.str_val("type", "layer");
+            // After Layer.name → common.name merge, Layer uses the
+            // same nullable name path as every other element.
             common_fields(&mut o, &e.common);
             let children: Vec<String> = e.children.iter().map(|c| element_json(c)).collect();
             o.raw("children", json_array(&children));
-            o.str_val("name", &e.name);
         }
         Element::Live(v) => match v {
             crate::geometry::live::LiveVariant::CompoundShape(cs) => {
@@ -787,6 +805,7 @@ fn parse_common(v: &serde_json::Value) -> CommonProps {
         visibility: parse_visibility(&v["visibility"]),
         mask: None,
         tool_origin: v.get("tool_origin").and_then(|t| t.as_str()).map(String::from),
+        name: v.get("name").and_then(|t| t.as_str()).map(String::from),
     }
 }
 
@@ -952,8 +971,9 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
         "layer" => {
             let children = v["children"].as_array().unwrap_or(&vec![])
                 .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
-            let name = v["name"].as_str().unwrap_or("Layer").to_string();
-            Element::Layer(LayerElem { name, children, common, isolated_blending: false, knockout_group: false })
+            // common.name was already populated by parse_common from the
+            // top-level "name" field — Layer no longer reads name itself.
+            Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
         },
         _ => panic!("Unknown element type: {}", typ),
     }

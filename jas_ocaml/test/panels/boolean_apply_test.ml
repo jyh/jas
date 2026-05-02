@@ -7,7 +7,7 @@ module Document = Jas.Document
 module Boolean_apply = Jas.Boolean_apply
 
 let rect_at x y =
-  Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
+  Rect { name = None; x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = None; stroke = None; opacity = 1.0; transform = None;
          locked = false; visibility = Preview; blend_mode = Normal; mask = None;
            fill_gradient = None;
@@ -16,7 +16,7 @@ let rect_at x y =
 
 let make_model rects selected_paths =
   let layer = Layer {
-    name = "L0";
+    name = Some "L0";
     children = Array.of_list rects;
     opacity = 1.0; transform = None; locked = false; visibility = Preview; blend_mode = Normal;
     mask = None;
@@ -127,7 +127,7 @@ let test_unknown_op_is_noop () =
 (* ── DIVIDE / TRIM / MERGE tests ────────────────────────────── *)
 
 let rect_with_fill x y color =
-  Rect { x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
+  Rect { name = None; x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = Some { fill_color = color; fill_opacity = 1.0 };
          stroke = None; opacity = 1.0; transform = None;
          locked = false; visibility = Preview; blend_mode = Normal; mask = None;
@@ -155,7 +155,7 @@ let test_trim_two_overlapping_keeps_two () =
 
 let test_trim_fully_covered_operand_vanishes () =
   let back = rect_at 0.0 0.0 in
-  let front = Rect { x = 0.0; y = 0.0; width = 20.0; height = 20.0;
+  let front = Rect { name = None; x = 0.0; y = 0.0; width = 20.0; height = 20.0;
                      rx = 0.0; ry = 0.0; fill = None; stroke = None;
                      opacity = 1.0; transform = None; locked = false;
                      visibility = Preview; blend_mode = Normal; mask = None;

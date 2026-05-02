@@ -6009,14 +6009,13 @@ mod tests {
             stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![
                 std::rc::Rc::new(rect0),
                 std::rc::Rc::new(rect1),
             ],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer],
@@ -6645,11 +6644,10 @@ mod tests {
 
     fn make_model_with_empty_layer() -> Model {
         let layer = Element::Layer(crate::geometry::element::LayerElem {
-            name: "L".to_string(),
             children: vec![],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = crate::document::document::Document {
             layers: vec![layer],
@@ -6945,11 +6943,10 @@ mod tests {
             stroke_brush_overrides: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(path_elem)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer],
@@ -7223,11 +7220,10 @@ mod tests {
             stroke_brush: None, stroke_brush_overrides: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(target_path)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer],
@@ -7279,11 +7275,10 @@ mod tests {
             stroke_brush: None, stroke_brush_overrides: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![std::rc::Rc::new(target_path)],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer],
@@ -7332,7 +7327,6 @@ mod tests {
             stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![
                 std::rc::Rc::new(make(red_fill.clone(), 0.0)),
                 std::rc::Rc::new(make(red_fill, 20.0)),
@@ -7340,7 +7334,7 @@ mod tests {
             ],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer],
@@ -7460,7 +7454,6 @@ mod tests {
             stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![
                 std::rc::Rc::new(make(0.0, false, Visibility::Preview)),
                 std::rc::Rc::new(make(20.0, true, Visibility::Preview)),
@@ -7468,7 +7461,7 @@ mod tests {
             ],
             isolated_blending: false,
             knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer],
@@ -7542,13 +7535,12 @@ mod tests {
             fill_gradient: None, stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![
                 std::rc::Rc::new(make(Some(red), 0.0)),
                 std::rc::Rc::new(make(None, 20.0)),
             ],
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -7651,13 +7643,12 @@ mod tests {
             fill_gradient: None, stroke_gradient: None,
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![
                 std::rc::Rc::new(make(Some(red), 0.0, false)),
                 std::rc::Rc::new(make(None, 20.0, true)),
             ],
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -7722,13 +7713,12 @@ mod tests {
             ..GroupElem::default()
         });
         let layer = Element::Layer(LayerElem {
-            name: "L".to_string(),
             children: vec![
                 std::rc::Rc::new(make_rect(Some(red), 0.0)),
                 std::rc::Rc::new(group),
             ],
             isolated_blending: false, knockout_group: false,
-            common: CommonProps::default(),
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,

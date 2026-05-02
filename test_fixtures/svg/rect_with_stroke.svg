@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 96 48" width="96" height="48">
-  <g inkscape:label="Layer 1">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
     <rect x="0" y="0" width="96" height="48" fill="rgb(0,0,255)" stroke="rgb(0,0,0)" stroke-width="2.6667" stroke-linecap="round" stroke-linejoin="bevel"/>
   </g>
 </svg>

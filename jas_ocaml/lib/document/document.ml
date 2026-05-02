@@ -196,7 +196,7 @@ let array_replace_nth arr n x =
 let with_children node new_children =
   match node with
   | Group { opacity; transform; locked; visibility; blend_mode; isolated_blending; knockout_group; _ } ->
-    Group { children = new_children; opacity; transform; locked; visibility; blend_mode;
+    Group { name = None; children = new_children; opacity; transform; locked; visibility; blend_mode;
             mask = None;
             isolated_blending; knockout_group }
   | Layer { name; opacity; transform; locked; visibility; blend_mode; isolated_blending; knockout_group; _ } ->
