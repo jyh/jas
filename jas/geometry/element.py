@@ -1222,8 +1222,15 @@ class Group(Element):
 
 @dataclass(frozen=True)
 class Layer(Group):
-    """A named group (layer) of elements."""
-    name: str = "Layer"
+    """A top-level container.
+
+    After the Layer.name → common-name merge, Layer carries no extra
+    fields beyond Group. The Layer/Group distinction survives at the
+    type level so the layers panel can still tell "top-level
+    container" from "nested container", and so the SVG codec can
+    emit ``inkscape:groupmode="layer"`` for Layers only.
+    """
+    pass
 
 
 # ─── LiveElement framework ─────────────────────────────────────

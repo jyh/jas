@@ -164,7 +164,7 @@ class Document:
     """A document consisting of an ordered list of layers, a selection,
     a list of artboards (ARTBOARDS.md), and document-global artboard
     options."""
-    layers: tuple[Layer, ...] = (Layer(),)
+    layers: tuple[Layer, ...] = (Layer(name="Layer"),)
     selected_layer: int = 0
     selection: Selection = frozenset()
     artboards: tuple = ()
