@@ -303,8 +303,10 @@ import Testing
 }
 
 @Test func layerDefaultName() {
+    // After the Layer.name → common-name merge, Layer.name defaults
+    // to nil (unnamed); display-time callers fall back to "Layer N".
     let layer = Layer(children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))])
-    #expect(layer.name == "Layer")
+    #expect(layer.name == nil)
 }
 
 @Test func layerCustomName() {

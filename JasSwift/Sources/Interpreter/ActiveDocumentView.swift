@@ -54,7 +54,7 @@ public func buildActiveDocumentView(
         let pathJson: [String: Any] = ["__path__": [i]]
         topLevelLayers.append([
             "kind": "Layer",
-            "name": layer.name,
+            "name": layer.name ?? "",
             "common": [
                 "visibility": vis,
                 "locked": layer.locked,
@@ -62,7 +62,7 @@ public func buildActiveDocumentView(
             "path": pathJson,
         ])
         topLevelLayerPaths.append(pathJson)
-        layerNames.insert(layer.name)
+        if let n = layer.name { layerNames.insert(n) }
     }
     var n = 1
     while layerNames.contains("Layer \(n)") { n += 1 }

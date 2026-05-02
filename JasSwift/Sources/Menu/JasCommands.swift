@@ -509,9 +509,9 @@ public struct JasCommands: Commands {
                 guard !children.isEmpty else { continue }
                 // Find matching layer by name
                 var targetIdx: Int?
-                if !pastedLayer.name.isEmpty {
+                if let pastedName = pastedLayer.name, !pastedName.isEmpty {
                     for i in 0..<newLayers.count {
-                        if newLayers[i].name == pastedLayer.name {
+                        if newLayers[i].name == pastedName {
                             targetIdx = i
                             break
                         }
