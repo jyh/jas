@@ -1071,6 +1071,12 @@ fn parse_common(node: &XmlNode) -> CommonProps {
         visibility: crate::geometry::element::Visibility::default(),
         mask: None,
         tool_origin: node.attrs.get("jas:tool-origin").cloned(),
+        // <title> child as the first content of the element holds
+        // the user-visible name (LYR-091 enabler).
+        name: node.children.iter()
+            .find(|c| c.tag == "title")
+            .map(|c| c.text.clone())
+            .filter(|s| !s.is_empty()),
     }
 }
 

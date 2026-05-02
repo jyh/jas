@@ -787,6 +787,7 @@ fn parse_common(v: &serde_json::Value) -> CommonProps {
         visibility: parse_visibility(&v["visibility"]),
         mask: None,
         tool_origin: v.get("tool_origin").and_then(|t| t.as_str()).map(String::from),
+        name: v.get("name").and_then(|t| t.as_str()).map(String::from),
     }
 }
 
