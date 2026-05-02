@@ -216,12 +216,15 @@ let () =
         assert (x = 0.0 && y = 0.0 && w = 23.0 && h = 23.0));
 
       Alcotest.test_case "layer default name" `Quick (fun () ->
+        (* After Layer.name → common-name merge, make_layer with no
+           ~name produces an unnamed layer (None); display falls back
+           to "Layer N" at the panel layer. *)
         let layer = make_layer [|make_rect 0.0 0.0 10.0 10.0|] in
-        match layer with Layer { name; _ } -> assert (name = "Layer") | _ -> assert false);
+        match layer with Layer { name; _ } -> assert (name = None) | _ -> assert false);
 
       Alcotest.test_case "layer custom name" `Quick (fun () ->
         let layer2 = make_layer ~name:"Background" [|make_rect 0.0 0.0 10.0 10.0|] in
-        match layer2 with Layer { name; _ } -> assert (name = "Background") | _ -> assert false);
+        match layer2 with Layer { name = Some n; _ } -> assert (n = "Background") | _ -> assert false);
 
       Alcotest.test_case "layer bounds" `Quick (fun () ->
         let layer3 = make_layer ~name:"Shapes" [|make_rect 0.0 0.0 10.0 10.0; make_circle 50.0 50.0 5.0|] in

@@ -324,12 +324,10 @@ let rec element_svg indent (elem : Element.element) =
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
   | Layer { name; children; opacity; transform; _ } ->
-    (* Layer.name is required (non-optional). Always emit when non-empty.
-       inkscape:groupmode="layer" is the discriminator that re-parses
+    (* inkscape:groupmode="layer" is the discriminator that re-parses
        this <g> as a Layer rather than a named Group. *)
-    let label = if name <> "" then Printf.sprintf " inkscape:label=\"%s\"" (escape_xml name) else "" in
     let header = Printf.sprintf "%s<g inkscape:groupmode=\"layer\"%s%s%s>"
-      indent label (opacity_attr opacity) (transform_attr transform) in
+      indent (name_attr name) (opacity_attr opacity) (transform_attr transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])

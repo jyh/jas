@@ -39,8 +39,8 @@ let () =
         let l5 = make_layer ~name:"B" [||] in
         let doc4 = make_document [|l4; l5|] in
         assert (Array.length doc4.layers = 2);
-        (match doc4.layers.(0) with Layer { name; _ } -> assert (name = "A") | _ -> assert false);
-        (match doc4.layers.(1) with Layer { name; _ } -> assert (name = "B") | _ -> assert false));
+        (match doc4.layers.(0) with Layer { name = Some n; _ } -> assert (n = "A") | _ -> assert false);
+        (match doc4.layers.(1) with Layer { name = Some n; _ } -> assert (n = "B") | _ -> assert false));
 
       Alcotest.test_case "default selection is empty" `Quick (fun () ->
         assert (PathMap.is_empty doc.selection));

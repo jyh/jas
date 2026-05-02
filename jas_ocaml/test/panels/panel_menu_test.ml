@@ -231,7 +231,7 @@ let menu_tests = [
     let layers = m#document.Jas.Document.layers in
     assert (Array.length layers = 3);
     (* No selection: new layer appended at end *)
-    assert (match layers.(2) with Jas.Element.Layer le -> le.name <> "Layer 0" && le.name <> "Layer 1" | _ -> false));
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name <> Some "Layer 0" && le.name <> Some "Layer 1" | _ -> false));
 
   Alcotest.test_case "new_layer_with_selection_inserts_above" `Quick (fun () ->
     let l = default_layout () in
@@ -250,9 +250,9 @@ let menu_tests = [
     assert (Array.length layers = 4);
     (* insert_pos = 1 + 1 = 2, new layer at index 2 *)
     assert (match layers.(2) with Jas.Element.Layer le ->
-      le.name <> "Layer 0" && le.name <> "Layer 1" && le.name <> "Layer 2" | _ -> false);
+      le.name <> Some "Layer 0" && le.name <> Some "Layer 1" && le.name <> Some "Layer 2" | _ -> false);
     (* Layer 2 shifted to index 3 *)
-    assert (match layers.(3) with Jas.Element.Layer le -> le.name = "Layer 2" | _ -> false));
+    assert (match layers.(3) with Jas.Element.Layer le -> le.name = Some "Layer 2" | _ -> false));
 
   Alcotest.test_case "toggle_all_layers_visibility_via_yaml" `Quick (fun () ->
     let l = default_layout () in
@@ -260,7 +260,7 @@ let menu_tests = [
     let addr = pa did 2 0 in
     let m = Jas.Model.create () in
     let layer0 = Jas.Element.Layer {
-      name = "A"; children = [||];
+      name = Some "A"; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -282,7 +282,7 @@ let menu_tests = [
     let addr = pa did 2 0 in
     let m = Jas.Model.create () in
     let layer0 = Jas.Element.Layer {
-      name = "A"; children = [||];
+      name = Some "A"; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -299,7 +299,7 @@ let menu_tests = [
   Alcotest.test_case "new_layer_via_yaml_no_selection" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -312,12 +312,12 @@ let menu_tests = [
     let layers = m#document.Jas.Document.layers in
     assert (Array.length layers = 2);
     (* Auto name skips "Layer 1" -> next is "Layer 2" *)
-    assert (match layers.(1) with Jas.Element.Layer le -> le.name = "Layer 2" | _ -> false));
+    assert (match layers.(1) with Jas.Element.Layer le -> le.name = Some "Layer 2" | _ -> false));
 
   Alcotest.test_case "new_layer_via_yaml_inserts_above_selection" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -333,13 +333,13 @@ let menu_tests = [
     let layers = m#document.Jas.Document.layers in
     assert (Array.length layers = 4);
     (* Inserted at idx 2, next unused name after {Layer 1,2,3} is Layer 4 *)
-    assert (match layers.(2) with Jas.Element.Layer le -> le.name = "Layer 4" | _ -> false);
-    assert (match layers.(3) with Jas.Element.Layer le -> le.name = "Layer 3" | _ -> false));
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name = Some "Layer 4" | _ -> false);
+    assert (match layers.(3) with Jas.Element.Layer le -> le.name = Some "Layer 3" | _ -> false));
 
   Alcotest.test_case "delete_layer_selection_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -353,12 +353,12 @@ let menu_tests = [
       "delete_layer_selection" m;
     let layers = m#document.Jas.Document.layers in
     assert (Array.length layers = 1);
-    assert (match layers.(0) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
+    assert (match layers.(0) with Jas.Element.Layer le -> le.name = Some "B" | _ -> false));
 
   Alcotest.test_case "duplicate_layer_selection_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -372,14 +372,14 @@ let menu_tests = [
       "duplicate_layer_selection" m;
     let layers = m#document.Jas.Document.layers in
     assert (Array.length layers = 3);
-    assert (match layers.(0) with Jas.Element.Layer le -> le.name = "A" | _ -> false);
-    assert (match layers.(1) with Jas.Element.Layer le -> le.name = "B" | _ -> false);
-    assert (match layers.(2) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
+    assert (match layers.(0) with Jas.Element.Layer le -> le.name = Some "A" | _ -> false);
+    assert (match layers.(1) with Jas.Element.Layer le -> le.name = Some "B" | _ -> false);
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name = Some "B" | _ -> false));
 
   Alcotest.test_case "new_group_via_yaml_top_level" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -399,12 +399,12 @@ let menu_tests = [
        assert (Array.length children = 2)
      | _ -> assert false);
     assert (match layers.(1) with
-            | Jas.Element.Layer le -> le.name = "B" | _ -> false));
+            | Jas.Element.Layer le -> le.name = Some "B" | _ -> false));
 
   Alcotest.test_case "collect_in_new_layer_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -421,16 +421,16 @@ let menu_tests = [
     assert (Array.length layers = 2);
     (* Layer 2 survives at idx 0; new "Layer 4" appended at idx 1 *)
     assert (match layers.(0) with
-            | Jas.Element.Layer le -> le.name = "Layer 2" | _ -> false);
+            | Jas.Element.Layer le -> le.name = Some "Layer 2" | _ -> false);
     assert (match layers.(1) with
             | Jas.Element.Layer le ->
-              le.name = "Layer 4" && Array.length le.children = 2
+              le.name = Some "Layer 4" && Array.length le.children = 2
             | _ -> false));
 
   Alcotest.test_case "flatten_artwork_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -454,17 +454,17 @@ let menu_tests = [
       "flatten_artwork" m;
     let layers = m#document.Jas.Document.layers in
     assert (Array.length layers = 4);
-    assert (match layers.(0) with Jas.Element.Layer le -> le.name = "A" | _ -> false);
-    assert (match layers.(1) with Jas.Element.Layer le -> le.name = "c1" | _ -> false);
-    assert (match layers.(2) with Jas.Element.Layer le -> le.name = "c2" | _ -> false);
-    assert (match layers.(3) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
+    assert (match layers.(0) with Jas.Element.Layer le -> le.name = Some "A" | _ -> false);
+    assert (match layers.(1) with Jas.Element.Layer le -> le.name = Some "c1" | _ -> false);
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name = Some "c2" | _ -> false);
+    assert (match layers.(3) with Jas.Element.Layer le -> le.name = Some "B" | _ -> false));
 
   Alcotest.test_case "layer_options_confirm_edit_mode" `Quick (fun () ->
     let m = Jas.Model.create () in
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
-        name = "Old"; children = [||];
+        name = Some "Old"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
@@ -484,7 +484,7 @@ let menu_tests = [
     let layer = m#document.Jas.Document.layers.(0) in
     assert (match layer with
             | Jas.Element.Layer le ->
-              le.name = "Renamed" && le.locked = true
+              le.name = Some "Renamed" && le.locked = true
               && le.visibility = Jas.Element.Outline
             | _ -> false));
 
@@ -493,7 +493,7 @@ let menu_tests = [
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
-        name = "Existing"; children = [||];
+        name = Some "Existing"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
@@ -514,7 +514,7 @@ let menu_tests = [
     assert (Array.length layers = 2);
     assert (match layers.(1) with
             | Jas.Element.Layer le ->
-              le.name = "Brand New"
+              le.name = Some "Brand New"
               && le.visibility = Jas.Element.Preview
             | _ -> false));
 
@@ -523,7 +523,7 @@ let menu_tests = [
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
-        name = "A"; children = [||];
+        name = Some "A"; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
@@ -548,7 +548,7 @@ let menu_tests = [
     Jas.Layers_panel_state.clear_isolation_stack ();
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = a; children = [||];
+      name = Some a; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;

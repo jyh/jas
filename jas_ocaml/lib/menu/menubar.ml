@@ -209,19 +209,21 @@ let paste_clipboard (model : Model.model) offset () =
           if Array.length children = 0 then ()
           else begin
             let name = match pasted_layer with
-              | Element.Layer { name; _ } -> name
-              | _ -> ""
+              | Element.Layer { name = Some s; _ } when s <> "" -> Some s
+              | _ -> None
             in
             (* Find matching layer by name *)
             let target_idx = ref (-1) in
-            if name <> "" then
-              Array.iteri (fun i existing ->
-                if !target_idx < 0 then
-                  match existing with
-                  | Element.Layer { name = n; _ } when n = name ->
-                    target_idx := i
-                  | _ -> ()
-              ) new_layers;
+            (match name with
+             | Some pname ->
+               Array.iteri (fun i existing ->
+                 if !target_idx < 0 then
+                   match existing with
+                   | Element.Layer { name = Some n; _ } when n = pname ->
+                     target_idx := i
+                   | _ -> ()
+               ) new_layers
+             | None -> ());
             if !target_idx < 0 then
               target_idx := doc.Document.selected_layer;
             let idx = !target_idx in

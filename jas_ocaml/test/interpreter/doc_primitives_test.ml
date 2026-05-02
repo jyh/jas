@@ -16,7 +16,7 @@ let make_rect x y w h =
 
 let doc_with_rect () =
   let layer = Element.Layer {
-    name = "L"; children = [| make_rect 10.0 10.0 20.0 20.0 |];
+    name = Some "L"; children = [| make_rect 10.0 10.0 20.0 20.0 |];
     transform = None; locked = false; opacity = 1.0;
     visibility = Preview; blend_mode = Normal; mask = None;
     isolated_blending = false; knockout_group = false;

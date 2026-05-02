@@ -769,7 +769,10 @@ type element =
       knockout_group : bool;
     }
   | Layer of {
-      name : string;
+      (* After the Layer.name → common-name merge, Layer.name is
+         optional like every other element's name. None means unnamed
+         (display-time fallback to "Layer N" in the layers panel). *)
+      name : string option;
       children : element array;
       opacity : float;
       transform : transform option;
@@ -1222,7 +1225,12 @@ let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
           mask = None;
           isolated_blending = false; knockout_group = false }
 
-let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
+let make_layer ?name ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
+  let name = match name with
+    | None -> None
+    | Some s when s = "" -> None
+    | Some s -> Some s
+  in
   Layer { name; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
           mask = None;
           isolated_blending = false; knockout_group = false }
@@ -1441,7 +1449,7 @@ let with_name elem (n : string option) =
   | Text r       -> Text { r with name = n }
   | Text_path r  -> Text_path { r with name = n }
   | Group r      -> Group { r with name = n }
-  | Layer r      -> Layer { r with name = (match n with Some s -> s | None -> "") }
+  | Layer r      -> Layer { r with name = n }
   | Live _       -> elem
 
 let color_to_hex c =

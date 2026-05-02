@@ -872,7 +872,7 @@ and open_layer_options_dialog path =
       let vbox = dlg#vbox in
       let name_row = GPack.hbox ~spacing:8 ~packing:(vbox#pack ~expand:false) () in
       ignore (GMisc.label ~text:"Name:" ~packing:(name_row#pack ~expand:false) ());
-      let name_entry = GEdit.entry ~text:le.name ~packing:(name_row#pack ~expand:true) () in
+      let name_entry = GEdit.entry ~text:(match le.name with Some s -> s | None -> "") ~packing:(name_row#pack ~expand:true) () in
       let lock_cb = GButton.check_button ~label:"Lock" ~packing:(vbox#pack ~expand:false) () in
       lock_cb#set_active le.locked;
       let show_cb = GButton.check_button ~label:"Show" ~packing:(vbox#pack ~expand:false) () in
@@ -1052,7 +1052,8 @@ and render_tree_view ~packing ~ctx:_ _el =
       | Some m2 ->
         let e = Document.get_element m2#document p in
         let label = match e with
-          | Element.Layer le when le.name <> "" -> le.name
+          | Element.Layer le ->
+            (match le.name with Some s when s <> "" -> s | _ -> "<?>")
           | _ -> "<?>"
         in
         let seg_eb = GBin.event_box ~packing:(bar#pack ~expand:false) () in
@@ -1095,7 +1096,10 @@ and render_tree_view ~packing ~ctx:_ _el =
   in
   let display_name e =
     match e with
-    | Element.Layer le when le.name <> "" -> (le.name, true)
+    | Element.Layer le ->
+      (match le.name with
+       | Some s when s <> "" -> (s, true)
+       | _ -> (Printf.sprintf "<%s>" (type_label e), false))
     | _ -> (Printf.sprintf "<%s>" (type_label e), false)
   in
   let is_container e = match e with Element.Group _ | Element.Layer _ -> true | _ -> false in
@@ -1426,7 +1430,7 @@ and render_tree_view ~packing ~ctx:_ _el =
         (match !Layers_panel_state.renaming with
          | Some rp when rp = path ->
            let initial = match elem with
-             | Element.Layer le -> le.name
+             | Element.Layer le -> (match le.name with Some s -> s | None -> "")
              | _ -> ""
            in
            let entry = GEdit.entry ~text:initial ~packing:(hbox#pack ~expand:true) () in
@@ -1439,7 +1443,9 @@ and render_tree_view ~packing ~ctx:_ _el =
                 let e = Document.get_element d ep in
                 (match e with
                  | Element.Layer le ->
-                   let new_layer = Element.Layer { le with name = entry#text } in
+                   let typed = entry#text in
+                   let new_name = if typed = "" then None else Some typed in
+                   let new_layer = Element.Layer { le with name = new_name } in
                    m2#snapshot;
                    m2#set_document (Document.replace_element d ep new_layer)
                  | _ -> ()));
@@ -1654,7 +1660,7 @@ and render_tree_view ~packing ~ctx:_ _el =
       (match !Layers_panel_state.renaming with
        | Some rp when rp = path ->
          let initial = match elem with
-           | Element.Layer le -> le.name
+           | Element.Layer le -> (match le.name with Some s -> s | None -> "")
            | _ -> ""
          in
          let entry = GEdit.entry ~text:initial ~packing:(hbox#pack ~expand:true) () in
@@ -1667,7 +1673,9 @@ and render_tree_view ~packing ~ctx:_ _el =
               let e = Document.get_element d ep in
               (match e with
                | Element.Layer le ->
-                 let new_layer = Element.Layer { le with name = entry#text } in
+                 let typed = entry#text in
+                 let new_name = if typed = "" then None else Some typed in
+                 let new_layer = Element.Layer { le with name = new_name } in
                  m2#snapshot;
                  m2#set_document (Document.replace_element d ep new_layer)
                | _ -> ()));
