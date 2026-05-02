@@ -424,8 +424,10 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             // directly. (Rename commits write both in sync.)
             let effective_name = e.common.name.clone()
                 .or_else(|| if e.name.is_empty() { None } else { Some(e.name.clone()) });
+            // inkscape:groupmode="layer" lets the parser distinguish
+            // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
-                "{}<g{}{}{}>",
+                "{}<g inkscape:groupmode=\"layer\"{}{}{}>",
                 indent, name_attr(&effective_name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
@@ -1629,10 +1631,15 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                     children.push(Rc::new(elem));
                 }
             }
-            // Check for inkscape:label
-            let label = node.attrs.get("inkscape:label")
-                .cloned();
-            if let Some(name) = label {
+            // Layer detection: inkscape:groupmode="layer" wins
+            // (Inkscape convention + what we now emit). Otherwise a
+            // mere inkscape:label still implies Layer for back-compat
+            // with files saved before non-Layer naming existed.
+            let group_mode = node.attrs.get("inkscape:groupmode").cloned();
+            let label = node.attrs.get("inkscape:label").cloned();
+            let is_layer = group_mode.as_deref() == Some("layer") || label.is_some();
+            if is_layer {
+                let name = label.unwrap_or_default();
                 Some(Element::Layer(LayerElem { children, name, common, isolated_blending: false, knockout_group: false }))
             } else {
                 Some(Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false }))
