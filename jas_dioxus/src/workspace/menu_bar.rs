@@ -336,28 +336,37 @@ pub(crate) fn MenuBarView(
                 "document_setup" => {
                     let st = app_for_menu.borrow();
                     let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                    let outer_scope = crate::interpreter::renderer::build_dialog_outer_scope(&st);
                     drop(st);
                     // Signal is Copy; shadow into a local mutable
                     // binding so the &mut required by open_dialog
                     // doesn't make this dispatch closure FnMut.
                     let mut sig = yaml_dialog_sig;
-                    crate::interpreter::dialog_view::open_dialog(
+                    // open_dialog_with_outer threads `active_document`
+                    // into the init context, so init expressions like
+                    // `active_document.document_setup.bleed_top`
+                    // resolve to the persisted value rather than the
+                    // YAML default.
+                    crate::interpreter::dialog_view::open_dialog_with_outer(
                         &mut sig,
                         "document_setup",
                         &serde_json::Map::new(),
                         &live_state,
+                        &outer_scope,
                     );
                 }
                 "print" => {
                     let st = app_for_menu.borrow();
                     let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                    let outer_scope = crate::interpreter::renderer::build_dialog_outer_scope(&st);
                     drop(st);
                     let mut sig = yaml_dialog_sig;
-                    crate::interpreter::dialog_view::open_dialog(
+                    crate::interpreter::dialog_view::open_dialog_with_outer(
                         &mut sig,
                         "print",
                         &serde_json::Map::new(),
                         &live_state,
+                        &outer_scope,
                     );
                 }
                 "export_to_pdf" => {
