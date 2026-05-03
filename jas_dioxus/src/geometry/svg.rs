@@ -1712,6 +1712,7 @@ pub fn svg_to_document(svg: &str) -> Document {
         artboards,
         artboard_options: crate::document::artboard::ArtboardOptions::default(),
         document_setup: crate::document::document_setup::DocumentSetup::default(),
+        print_preferences: crate::document::print_preferences::PrintPreferences::default(),
     };
     normalize_document(&doc)
 }
