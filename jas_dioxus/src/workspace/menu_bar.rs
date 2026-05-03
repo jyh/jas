@@ -349,18 +349,16 @@ pub(crate) fn MenuBarView(
                     );
                 }
                 "print" => {
-                    // Print dialog YAML lands in the next sub-commit;
-                    // for Phase 1B MVP we surface PDF export from
-                    // here as a placeholder so the menu item isn't
-                    // dead.
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            let bytes = crate::geometry::pdf::document_to_pdf(tab.model.document());
-                            let stem = filename_stem(&tab.model.filename);
-                            let filename = format!("{}.pdf", stem);
-                            download_bytes(&filename, &bytes, "application/pdf");
-                        }
-                    }));
+                    let st = app_for_menu.borrow();
+                    let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                    drop(st);
+                    let mut sig = yaml_dialog_sig;
+                    crate::interpreter::dialog_view::open_dialog(
+                        &mut sig,
+                        "print",
+                        &serde_json::Map::new(),
+                        &live_state,
+                    );
                 }
                 "export_to_pdf" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {

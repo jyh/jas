@@ -3583,6 +3583,394 @@
         }
       ]
     },
+    "open_print_dialog": {
+      "description": "Open the Print dialog. Init expressions copy active_document.print_preferences.* into dialog state so edits are local until Print or Done.\n",
+      "category": "document",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "print"
+          }
+        }
+      ]
+    },
+    "print_dialog_done": {
+      "description": "Commit PrintPreferences from dialog state and close. \"Done\" saves the preferences without triggering a print job (the user may want to print later via Cmd+P with the saved settings).\n",
+      "category": "document",
+      "params": {
+        "preset_name": {
+          "type": "string"
+        },
+        "copies": {
+          "type": "number"
+        },
+        "collate": {
+          "type": "bool"
+        },
+        "reverse_order": {
+          "type": "bool"
+        },
+        "artboard_range_mode": {
+          "type": "string"
+        },
+        "artboard_range": {
+          "type": "string"
+        },
+        "ignore_artboards": {
+          "type": "bool"
+        },
+        "skip_blank_artboards": {
+          "type": "bool"
+        },
+        "media_size": {
+          "type": "string"
+        },
+        "media_width": {
+          "type": "number"
+        },
+        "media_height": {
+          "type": "number"
+        },
+        "orientation": {
+          "type": "string"
+        },
+        "auto_rotate": {
+          "type": "bool"
+        },
+        "transverse": {
+          "type": "bool"
+        },
+        "print_layers": {
+          "type": "string"
+        },
+        "placement_x": {
+          "type": "number"
+        },
+        "placement_y": {
+          "type": "number"
+        },
+        "scaling_mode": {
+          "type": "string"
+        },
+        "custom_scale": {
+          "type": "number"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_print_preferences_field": {
+            "field": "preset_name",
+            "value": "param.preset_name"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "copies",
+            "value": "param.copies"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "collate",
+            "value": "param.collate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "reverse_order",
+            "value": "param.reverse_order"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range_mode",
+            "value": "param.artboard_range_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range",
+            "value": "param.artboard_range"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "ignore_artboards",
+            "value": "param.ignore_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "skip_blank_artboards",
+            "value": "param.skip_blank_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_size",
+            "value": "param.media_size"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_width",
+            "value": "param.media_width"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_height",
+            "value": "param.media_height"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "orientation",
+            "value": "param.orientation"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "auto_rotate",
+            "value": "param.auto_rotate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "transverse",
+            "value": "param.transverse"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "print_layers",
+            "value": "param.print_layers"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_x",
+            "value": "param.placement_x"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_y",
+            "value": "param.placement_y"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "scaling_mode",
+            "value": "param.scaling_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "custom_scale",
+            "value": "param.custom_scale"
+          }
+        },
+        "clear_dialog_snapshot",
+        "close_dialog"
+      ]
+    },
+    "print_dialog_print": {
+      "description": "Commit PrintPreferences and trigger PDF generation. Same field writes as print_dialog_done, then close_dialog. The actual PDF build + browser download is intercepted on the native side (Rust menu_bar reroutes \"print\" to call geometry::pdf with the now-saved preferences). Flask logs the print intent.\n",
+      "category": "document",
+      "params": {
+        "preset_name": {
+          "type": "string"
+        },
+        "copies": {
+          "type": "number"
+        },
+        "collate": {
+          "type": "bool"
+        },
+        "reverse_order": {
+          "type": "bool"
+        },
+        "artboard_range_mode": {
+          "type": "string"
+        },
+        "artboard_range": {
+          "type": "string"
+        },
+        "ignore_artboards": {
+          "type": "bool"
+        },
+        "skip_blank_artboards": {
+          "type": "bool"
+        },
+        "media_size": {
+          "type": "string"
+        },
+        "media_width": {
+          "type": "number"
+        },
+        "media_height": {
+          "type": "number"
+        },
+        "orientation": {
+          "type": "string"
+        },
+        "auto_rotate": {
+          "type": "bool"
+        },
+        "transverse": {
+          "type": "bool"
+        },
+        "print_layers": {
+          "type": "string"
+        },
+        "placement_x": {
+          "type": "number"
+        },
+        "placement_y": {
+          "type": "number"
+        },
+        "scaling_mode": {
+          "type": "string"
+        },
+        "custom_scale": {
+          "type": "number"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_print_preferences_field": {
+            "field": "preset_name",
+            "value": "param.preset_name"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "copies",
+            "value": "param.copies"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "collate",
+            "value": "param.collate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "reverse_order",
+            "value": "param.reverse_order"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range_mode",
+            "value": "param.artboard_range_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range",
+            "value": "param.artboard_range"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "ignore_artboards",
+            "value": "param.ignore_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "skip_blank_artboards",
+            "value": "param.skip_blank_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_size",
+            "value": "param.media_size"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_width",
+            "value": "param.media_width"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_height",
+            "value": "param.media_height"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "orientation",
+            "value": "param.orientation"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "auto_rotate",
+            "value": "param.auto_rotate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "transverse",
+            "value": "param.transverse"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "print_layers",
+            "value": "param.print_layers"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_x",
+            "value": "param.placement_x"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_y",
+            "value": "param.placement_y"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "scaling_mode",
+            "value": "param.scaling_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "custom_scale",
+            "value": "param.custom_scale"
+          }
+        },
+        "clear_dialog_snapshot",
+        {
+          "geometry.export_pdf": {}
+        },
+        "close_dialog"
+      ]
+    },
+    "noop": {
+      "description": "Disabled-button stub. Used by Phase-1B Print dialog footer buttons (Page Setup..., Setup...) that are placeholders until OS-driver hookup lands.\n",
+      "category": "document",
+      "enabled_when": "false",
+      "effects": [
+        {
+          "log": "noop"
+        }
+      ]
+    },
     "open_brush_options": {
       "description": "Open the Brush Options dialog. Mode is one of create, library_edit, instance_edit (see BRUSH_OPTIONS_DIALOG.md \u00a7Modes). Library + brush_slug parameters select the master brush; instance_edit reads the brush from the canvas selection's jas:stroke-brush attribute.\n",
       "category": "brushes",
@@ -28033,6 +28421,992 @@
                 "label": "OK",
                 "action": "paragraph_justification_confirm",
                 "variant": "primary"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "print": {
+      "summary": "Print",
+      "description": "Modal Print dialog (PRINT.md \u00a7Phase 1B). Six-tab structure: only the General tab is populated in Phase 1B; tabs 2\u20136 hold short placeholder copy noting the phase that will fill them in.\nThe General tab maps 1:1 onto the 23 PrintPreferences fields per PRINT.md. Edits are batched: changes don't apply until Print or Done; Cancel discards. The Print button triggers PDF generation and a browser download of the resulting bytes (Phase 1B's PDF-first architecture; OS print panel hookup waits for a later phase).\nPhase 1B deferrals: - The Tiling sub-section (tile_overlap_*, tile_range) \u2014 fields\n  reserved in PrintPreferences but hidden until Phase 7+.\n- \"Page Setup...\" and \"Setup...\" footer buttons \u2014 disabled\n  placeholders until OS-driver hookup lands.\n- Live preview pane on the left of the General tab \u2014 not yet\n  drawn; Phase 1B ships text-only.\n",
+      "modal": true,
+      "width": 720,
+      "state": {
+        "active_tab": {
+          "type": "string",
+          "default": "general"
+        },
+        "preset_name": {
+          "type": "string",
+          "default": "[Default]"
+        },
+        "copies": {
+          "type": "number",
+          "default": 1
+        },
+        "collate": {
+          "type": "bool",
+          "default": false
+        },
+        "reverse_order": {
+          "type": "bool",
+          "default": false
+        },
+        "artboard_range_mode": {
+          "type": "enum",
+          "values": [
+            "all",
+            "range"
+          ],
+          "default": "all"
+        },
+        "artboard_range": {
+          "type": "string",
+          "default": ""
+        },
+        "ignore_artboards": {
+          "type": "bool",
+          "default": false
+        },
+        "skip_blank_artboards": {
+          "type": "bool",
+          "default": false
+        },
+        "media_size": {
+          "type": "enum",
+          "values": [
+            "defined_by_driver",
+            "letter",
+            "legal",
+            "tabloid",
+            "a3",
+            "a4",
+            "a5",
+            "custom"
+          ],
+          "default": "defined_by_driver"
+        },
+        "media_width": {
+          "type": "number",
+          "default": 612
+        },
+        "media_height": {
+          "type": "number",
+          "default": 792
+        },
+        "orientation": {
+          "type": "enum",
+          "values": [
+            "portrait",
+            "landscape"
+          ],
+          "default": "portrait"
+        },
+        "auto_rotate": {
+          "type": "bool",
+          "default": true
+        },
+        "transverse": {
+          "type": "bool",
+          "default": false
+        },
+        "print_layers": {
+          "type": "enum",
+          "values": [
+            "visible_printable",
+            "visible",
+            "all"
+          ],
+          "default": "visible_printable"
+        },
+        "placement_x": {
+          "type": "number",
+          "default": 0
+        },
+        "placement_y": {
+          "type": "number",
+          "default": 0
+        },
+        "scaling_mode": {
+          "type": "enum",
+          "values": [
+            "do_not_scale",
+            "fit_to_page",
+            "custom"
+          ],
+          "default": "do_not_scale"
+        },
+        "custom_scale": {
+          "type": "number",
+          "default": 100.0
+        }
+      },
+      "init": {
+        "preset_name": "active_document.print_preferences.preset_name",
+        "copies": "active_document.print_preferences.copies",
+        "collate": "active_document.print_preferences.collate",
+        "reverse_order": "active_document.print_preferences.reverse_order",
+        "artboard_range_mode": "active_document.print_preferences.artboard_range_mode",
+        "artboard_range": "active_document.print_preferences.artboard_range",
+        "ignore_artboards": "active_document.print_preferences.ignore_artboards",
+        "skip_blank_artboards": "active_document.print_preferences.skip_blank_artboards",
+        "media_size": "active_document.print_preferences.media_size",
+        "media_width": "active_document.print_preferences.media_width",
+        "media_height": "active_document.print_preferences.media_height",
+        "orientation": "active_document.print_preferences.orientation",
+        "auto_rotate": "active_document.print_preferences.auto_rotate",
+        "transverse": "active_document.print_preferences.transverse",
+        "print_layers": "active_document.print_preferences.print_layers",
+        "placement_x": "active_document.print_preferences.placement_x",
+        "placement_y": "active_document.print_preferences.placement_y",
+        "scaling_mode": "active_document.print_preferences.scaling_mode",
+        "custom_scale": "active_document.print_preferences.custom_scale"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 0,
+          "padding": 0
+        },
+        "children": [
+          {
+            "id": "print_tabs",
+            "type": "tabs",
+            "bind": {
+              "value": "dialog.active_tab"
+            },
+            "tabs": [
+              {
+                "id": "general",
+                "label": "General",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Print Preset:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_preset",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "[Default]",
+                                  "value": "[Default]"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.preset_name"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Copies",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Copies:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_copies",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.copies"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 6,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "pr_collate",
+                      "type": "toggle",
+                      "label": "Collate",
+                      "bind": {
+                        "checked": "dialog.collate"
+                      }
+                    },
+                    {
+                      "id": "pr_reverse",
+                      "type": "toggle",
+                      "label": "Reverse Order",
+                      "bind": {
+                        "checked": "dialog.reverse_order"
+                      }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Artboards",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Range:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_range_mode",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "All",
+                                  "value": "all"
+                                },
+                                {
+                                  "label": "Range",
+                                  "value": "range"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.artboard_range_mode"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 6,
+                          "children": [
+                            {
+                              "id": "pr_range_input",
+                              "type": "text_input",
+                              "placeholder": "1-3, 5",
+                              "bind": {
+                                "value": "dialog.artboard_range",
+                                "disabled": "dialog.artboard_range_mode != 'range'"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "pr_ignore_artboards",
+                      "type": "toggle",
+                      "label": "Ignore Artboards",
+                      "bind": {
+                        "checked": "dialog.ignore_artboards"
+                      }
+                    },
+                    {
+                      "id": "pr_skip_blank",
+                      "type": "toggle",
+                      "label": "Skip Blank Artboards",
+                      "bind": {
+                        "checked": "dialog.skip_blank_artboards"
+                      }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Media",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Size:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_media_size",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Defined by Driver",
+                                  "value": "defined_by_driver"
+                                },
+                                {
+                                  "label": "Letter (612 \u00d7 792)",
+                                  "value": "letter"
+                                },
+                                {
+                                  "label": "Legal (612 \u00d7 1008)",
+                                  "value": "legal"
+                                },
+                                {
+                                  "label": "Tabloid (792 \u00d7 1224)",
+                                  "value": "tabloid"
+                                },
+                                {
+                                  "label": "A3 (842 \u00d7 1191)",
+                                  "value": "a3"
+                                },
+                                {
+                                  "label": "A4 (595 \u00d7 842)",
+                                  "value": "a4"
+                                },
+                                {
+                                  "label": "A5 (420 \u00d7 595)",
+                                  "value": "a5"
+                                },
+                                {
+                                  "label": "Custom",
+                                  "value": "custom"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.media_size"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Width:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_media_width",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.media_width",
+                                "disabled": "dialog.media_size != 'custom'"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Height:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_media_height",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.media_height",
+                                "disabled": "dialog.media_size != 'custom'"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Orientation:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_orientation",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Portrait",
+                                  "value": "portrait"
+                                },
+                                {
+                                  "label": "Landscape",
+                                  "value": "landscape"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.orientation"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "pr_auto_rotate",
+                      "type": "toggle",
+                      "label": "Auto-Rotate",
+                      "bind": {
+                        "checked": "dialog.auto_rotate"
+                      }
+                    },
+                    {
+                      "id": "pr_transverse",
+                      "type": "toggle",
+                      "label": "Transverse",
+                      "bind": {
+                        "checked": "dialog.transverse"
+                      }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Options",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Print Layers:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_print_layers",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Visible & Printable Layers",
+                                  "value": "visible_printable"
+                                },
+                                {
+                                  "label": "Visible Layers",
+                                  "value": "visible"
+                                },
+                                {
+                                  "label": "All Layers",
+                                  "value": "all"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.print_layers"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Placement X:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_placement_x",
+                              "type": "number_input",
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.placement_x"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Placement Y:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_placement_y",
+                              "type": "number_input",
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.placement_y"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Scaling:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 6,
+                          "children": [
+                            {
+                              "id": "pr_scaling_mode",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Do Not Scale",
+                                  "value": "do_not_scale"
+                                },
+                                {
+                                  "label": "Fit to Page",
+                                  "value": "fit_to_page"
+                                },
+                                {
+                                  "label": "Custom Scale",
+                                  "value": "custom"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.scaling_mode"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_custom_scale",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.custom_scale",
+                                "disabled": "dialog.scaling_mode != 'custom'"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "marks_and_bleed",
+                "label": "Marks and Bleed",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Marks and Bleed",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 2 (PRINT.md \u00a7Phase 2). Trim marks, registration marks, color bars, page information, mark type, weight and offset, plus per-print bleed override.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "output",
+                "label": "Output",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Output",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 3 (PRINT.md \u00a7Phase 3). Composite vs Separations, emulsion, image polarity, printer resolution, spot/process conversion, overprint black, per-ink overrides.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "graphics",
+                "label": "Graphics",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Graphics",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 4 (PRINT.md \u00a7Phase 4). Path flatness, font download, PostScript level, data format, gradient compatibility, raster effects resolution.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color_management",
+                "label": "Color Management",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Color Management",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 5 (PRINT.md \u00a7Phase 5). Document and printer profiles, color handling, rendering intent, preserve RGB numbers.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "advanced",
+                "label": "Advanced",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Advanced",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 6 (PRINT.md \u00a7Phase 6). Print as bitmap, overprint flattener preset; also re-houses Document Setup transparency / overprint settings.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "padding": 12,
+              "alignment": "center",
+              "justify": "end",
+              "border_top": "1px solid var(--jas-border,#555)"
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Page Setup...",
+                "bind": {
+                  "disabled": "true"
+                },
+                "action": "noop"
+              },
+              {
+                "type": "button",
+                "label": "Setup...",
+                "bind": {
+                  "disabled": "true"
+                },
+                "action": "noop"
+              },
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "Done",
+                "action": "print_dialog_done",
+                "params": {
+                  "preset_name": "dialog.preset_name",
+                  "copies": "dialog.copies",
+                  "collate": "dialog.collate",
+                  "reverse_order": "dialog.reverse_order",
+                  "artboard_range_mode": "dialog.artboard_range_mode",
+                  "artboard_range": "dialog.artboard_range",
+                  "ignore_artboards": "dialog.ignore_artboards",
+                  "skip_blank_artboards": "dialog.skip_blank_artboards",
+                  "media_size": "dialog.media_size",
+                  "media_width": "dialog.media_width",
+                  "media_height": "dialog.media_height",
+                  "orientation": "dialog.orientation",
+                  "auto_rotate": "dialog.auto_rotate",
+                  "transverse": "dialog.transverse",
+                  "print_layers": "dialog.print_layers",
+                  "placement_x": "dialog.placement_x",
+                  "placement_y": "dialog.placement_y",
+                  "scaling_mode": "dialog.scaling_mode",
+                  "custom_scale": "dialog.custom_scale"
+                }
+              },
+              {
+                "type": "button",
+                "label": "Print",
+                "variant": "primary",
+                "action": "print_dialog_print",
+                "params": {
+                  "preset_name": "dialog.preset_name",
+                  "copies": "dialog.copies",
+                  "collate": "dialog.collate",
+                  "reverse_order": "dialog.reverse_order",
+                  "artboard_range_mode": "dialog.artboard_range_mode",
+                  "artboard_range": "dialog.artboard_range",
+                  "ignore_artboards": "dialog.ignore_artboards",
+                  "skip_blank_artboards": "dialog.skip_blank_artboards",
+                  "media_size": "dialog.media_size",
+                  "media_width": "dialog.media_width",
+                  "media_height": "dialog.media_height",
+                  "orientation": "dialog.orientation",
+                  "auto_rotate": "dialog.auto_rotate",
+                  "transverse": "dialog.transverse",
+                  "print_layers": "dialog.print_layers",
+                  "placement_x": "dialog.placement_x",
+                  "placement_y": "dialog.placement_y",
+                  "scaling_mode": "dialog.scaling_mode",
+                  "custom_scale": "dialog.custom_scale"
+                }
               }
             ]
           }
