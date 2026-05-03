@@ -11,6 +11,9 @@ menubar:
       - { id: menu_revert,   label: "&Revert",      action: revert,
           enabled_when: "active_document.is_modified and active_document.has_filename" }
       - separator
+      - { id: menu_document_setup, label: "Document Set&up...", action: open_document_setup,
+          enabled_when: "state.tab_count > 0" }
+      - separator
       - { id: menu_quit,     label: "&Quit",        action: quit,          shortcut: "Ctrl+Q" }
 
   - id: edit_menu

@@ -2536,6 +2536,55 @@ actions:
     effects:
       - log: "rearrange_artboards (deferred)"
 
+  # ─── Document Setup dialog (PRINT.md §1A) ────────────────
+
+  open_document_setup:
+    description: >
+      Open the Document Setup dialog. Init expressions copy the
+      current document_setup fields into dialog state so edits are
+      local until OK.
+    category: document
+    effects:
+      - open_dialog:
+          id: document_setup
+
+  document_setup_confirm:
+    description: >
+      Commit the Document Setup dialog. Writes all DocumentSetup
+      fields via doc.set_document_setup_field. Single undo op covers
+      the batch; close_dialog dismisses.
+    category: document
+    params:
+      bleed_top: { type: number }
+      bleed_right: { type: number }
+      bleed_bottom: { type: number }
+      bleed_left: { type: number }
+      bleed_uniform: { type: bool }
+      show_images_outline: { type: bool }
+      highlight_substituted_glyphs: { type: bool }
+    effects:
+      - snapshot
+      - doc.set_document_setup_field: { field: "bleed_top",    value: "param.bleed_top" }
+      - doc.set_document_setup_field: { field: "bleed_right",  value: "param.bleed_right" }
+      - doc.set_document_setup_field: { field: "bleed_bottom", value: "param.bleed_bottom" }
+      - doc.set_document_setup_field: { field: "bleed_left",   value: "param.bleed_left" }
+      - doc.set_document_setup_field: { field: "bleed_uniform", value: "param.bleed_uniform" }
+      - doc.set_document_setup_field: { field: "show_images_outline", value: "param.show_images_outline" }
+      - doc.set_document_setup_field: { field: "highlight_substituted_glyphs", value: "param.highlight_substituted_glyphs" }
+      - clear_dialog_snapshot
+      - close_dialog
+
+  document_setup_toggle_bleed_uniform:
+    description: >
+      Toggle dialog.bleed_uniform. Phase-1A deferral: dialog state
+      mutation from action effects is not yet wired (matches
+      toggle_artboard_chain_link precedent). The chain-link icon
+      ships visually but the click is a no-op until the dialog-state
+      effect framework lands.
+    category: document
+    effects:
+      - log: "document_setup_toggle_bleed_uniform (native, deferred)"
+
   # ─── Brushes panel ───────────────────────────────────────
   # Action stubs for the Brushes panel and its menu. Phase 1
   # ships the panel YAML and minimal click semantics; most
