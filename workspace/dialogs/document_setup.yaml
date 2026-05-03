@@ -25,7 +25,7 @@ document_setup:
     Phase 1A.
 
   modal: true
-  width: 360
+  width: 460
 
   state:
     bleed_top:
@@ -70,83 +70,61 @@ document_setup:
         content: "Bleed"
         style: { font_size: 11, font_weight: bold }
 
-      # Top / Bottom row + chain link
-      - type: row
+      # Bleed grid: 2-row × 4-col grid of label/input pairs, with the
+      # chain-link icon spanning both rows on the right edge so it
+      # visually anchors the four-sides-locked relationship.
+      - type: container
+        layout: row
+        style: { gap: 12, alignment: center }
         children:
-          - type: col
-            col: 2
+          - type: container
+            layout: column
+            style: { gap: 8, flex: 1 }
             children:
-              - { type: text, content: "Top:", style: { font_size: 11 } }
-          - type: col
-            col: 3
-            children:
-              - id: ds_bleed_top
-                type: number_input
-                min: 0
-                style: { width: 80 }
-                bind:
-                  value: "dialog.bleed_top"
-          - type: col
-            col: 2
-            children:
-              - { type: text, content: "Bottom:", style: { font_size: 11 } }
-          - type: col
-            col: 3
-            children:
-              - id: ds_bleed_bottom
-                type: number_input
-                min: 0
-                style: { width: 80 }
-                bind:
-                  value: "dialog.bleed_bottom"
-          - type: col
-            col: 2
-            children:
-              - id: ds_bleed_chain
-                type: icon_button
-                icon: "{{if dialog.bleed_uniform then 'chain_linked' else 'chain_broken'}}"
-                summary: "Lock all four bleed sides to the same value"
-                description: >
-                  Toggle — when engaged, editing any one bleed field
-                  propagates the new value to all four. Document-
-                  persistent.
-                style: { size: 16 }
-                behavior:
-                  - event: click
-                    action: document_setup_toggle_bleed_uniform
-
-      # Left / Right row
-      - type: row
-        children:
-          - type: col
-            col: 2
-            children:
-              - { type: text, content: "Left:", style: { font_size: 11 } }
-          - type: col
-            col: 3
-            children:
-              - id: ds_bleed_left
-                type: number_input
-                min: 0
-                style: { width: 80 }
-                bind:
-                  value: "dialog.bleed_left"
-          - type: col
-            col: 2
-            children:
-              - { type: text, content: "Right:", style: { font_size: 11 } }
-          - type: col
-            col: 3
-            children:
-              - id: ds_bleed_right
-                type: number_input
-                min: 0
-                style: { width: 80 }
-                bind:
-                  value: "dialog.bleed_right"
-          - type: col
-            col: 2
-            children: []
+              - type: container
+                layout: row
+                style: { gap: 12, alignment: center }
+                children:
+                  - { type: text, content: "Top:",    style: { font_size: 11, width: 50 } }
+                  - id: ds_bleed_top
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_top" }
+                  - { type: text, content: "Bottom:", style: { font_size: 11, width: 60, padding_left: 12 } }
+                  - id: ds_bleed_bottom
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_bottom" }
+              - type: container
+                layout: row
+                style: { gap: 12, alignment: center }
+                children:
+                  - { type: text, content: "Left:",   style: { font_size: 11, width: 50 } }
+                  - id: ds_bleed_left
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_left" }
+                  - { type: text, content: "Right:",  style: { font_size: 11, width: 60, padding_left: 12 } }
+                  - id: ds_bleed_right
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_right" }
+          - id: ds_bleed_chain
+            type: icon_button
+            icon: "{{if dialog.bleed_uniform then 'chain_linked' else 'chain_broken'}}"
+            summary: "Lock all four bleed sides to the same value"
+            description: >
+              Toggle — when engaged, editing any one bleed field
+              propagates the new value to all four. Document-
+              persistent.
+            style: { size: 20, width: 28, height: 28 }
+            behavior:
+              - event: click
+                action: document_setup_toggle_bleed_uniform
 
       # Display section
       - type: separator
