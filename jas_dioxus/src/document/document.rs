@@ -36,6 +36,7 @@ use crate::document::artboard::{
     ensure_artboards_invariant, generate_artboard_id, Artboard, ArtboardOptions,
 };
 use crate::document::document_setup::DocumentSetup;
+use crate::document::print_preferences::PrintPreferences;
 use crate::geometry::element::{Element, LayerElem, CommonProps};
 
 /// A path identifies an element by its position in the document tree.
@@ -222,6 +223,11 @@ pub struct Document {
     /// Per-document Document Setup state: bleed, image outline display,
     /// substituted-glyph highlight (PRINT.md §Phase 1A).
     pub document_setup: DocumentSetup,
+    /// Per-document Print dialog last-used state (PRINT.md §Phase 1B).
+    /// Phase 1B populates the General tab; later phases extend with
+    /// sub-records for marks, output, graphics, color management,
+    /// advanced.
+    pub print_preferences: PrintPreferences,
 }
 
 impl Default for Document {
@@ -245,6 +251,7 @@ impl Default for Document {
             artboards,
             artboard_options: ArtboardOptions::default(),
             document_setup: DocumentSetup::default(),
+            print_preferences: PrintPreferences::default(),
         }
     }
 }
