@@ -35,6 +35,7 @@ use std::rc::Rc;
 use crate::document::artboard::{
     ensure_artboards_invariant, generate_artboard_id, Artboard, ArtboardOptions,
 };
+use crate::document::document_setup::DocumentSetup;
 use crate::geometry::element::{Element, LayerElem, CommonProps};
 
 /// A path identifies an element by its position in the document tree.
@@ -218,6 +219,9 @@ pub struct Document {
     /// Document-wide artboard display toggles (fade outside,
     /// update while dragging).
     pub artboard_options: ArtboardOptions,
+    /// Per-document Document Setup state: bleed, image outline display,
+    /// substituted-glyph highlight (PRINT.md §Phase 1A).
+    pub document_setup: DocumentSetup,
 }
 
 impl Default for Document {
@@ -240,6 +244,7 @@ impl Default for Document {
             selection: Vec::new(),
             artboards,
             artboard_options: ArtboardOptions::default(),
+            document_setup: DocumentSetup::default(),
         }
     }
 }

@@ -7,6 +7,7 @@
 
 use crate::document::artboard::{Artboard, ArtboardFill, ArtboardOptions};
 use crate::document::document::{Document, ElementPath, ElementSelection, Selection, SelectionKind, SortedCps};
+use crate::document::document_setup::DocumentSetup;
 use crate::geometry::element::*;
 
 // ---------------------------------------------------------------------------
@@ -593,6 +594,18 @@ fn artboard_options_json(opts: &ArtboardOptions) -> String {
     o.build()
 }
 
+fn document_setup_json(s: &DocumentSetup) -> String {
+    let mut o = JsonObj::new();
+    o.num("bleed_bottom", s.bleed_bottom);
+    o.num("bleed_left", s.bleed_left);
+    o.num("bleed_right", s.bleed_right);
+    o.num("bleed_top", s.bleed_top);
+    o.bool_val("bleed_uniform", s.bleed_uniform);
+    o.bool_val("highlight_substituted_glyphs", s.highlight_substituted_glyphs);
+    o.bool_val("show_images_outline", s.show_images_outline);
+    o.build()
+}
+
 /// Serialize a Document to canonical test JSON.
 ///
 /// The output is a compact JSON string with sorted keys and normalized
@@ -611,6 +624,9 @@ pub fn document_to_test_json(doc: &Document) -> String {
     }
     if !doc.artboards.is_empty() {
         o.raw("artboards", artboards_json(&doc.artboards));
+    }
+    if doc.document_setup != DocumentSetup::default() {
+        o.raw("document_setup", document_setup_json(&doc.document_setup));
     }
     o.raw("layers", json_array(&layers));
     o.int("selected_layer", doc.selected_layer);
@@ -1039,6 +1055,22 @@ fn parse_artboard_options(v: &serde_json::Value) -> ArtboardOptions {
     }
 }
 
+fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
+    if v.is_null() || !v.is_object() {
+        return DocumentSetup::default();
+    }
+    let d = DocumentSetup::default();
+    DocumentSetup {
+        bleed_top: v["bleed_top"].as_f64().unwrap_or(d.bleed_top),
+        bleed_right: v["bleed_right"].as_f64().unwrap_or(d.bleed_right),
+        bleed_bottom: v["bleed_bottom"].as_f64().unwrap_or(d.bleed_bottom),
+        bleed_left: v["bleed_left"].as_f64().unwrap_or(d.bleed_left),
+        bleed_uniform: v["bleed_uniform"].as_bool().unwrap_or(d.bleed_uniform),
+        show_images_outline: v["show_images_outline"].as_bool().unwrap_or(d.show_images_outline),
+        highlight_substituted_glyphs: v["highlight_substituted_glyphs"].as_bool().unwrap_or(d.highlight_substituted_glyphs),
+    }
+}
+
 pub fn test_json_to_document(json: &str) -> Document {
     let v: serde_json::Value = serde_json::from_str(json)
         .expect("Failed to parse test JSON");
@@ -1048,12 +1080,14 @@ pub fn test_json_to_document(json: &str) -> Document {
     let selection = parse_selection(&v["selection"]);
     let artboards = parse_artboards(&v["artboards"]);
     let artboard_options = parse_artboard_options(&v["artboard_options"]);
+    let document_setup = parse_document_setup(&v["document_setup"]);
     Document {
         layers,
         selected_layer,
         selection,
         artboards,
         artboard_options,
+        document_setup,
     }
 }
 
@@ -1282,8 +1316,39 @@ mod tests {
         let d = test_json_to_document(legacy);
         assert!(d.artboards.is_empty());
         assert_eq!(d.artboard_options, ArtboardOptions::default());
+        assert_eq!(d.document_setup, DocumentSetup::default());
         // Re-serializing yields the same bytes.
         let json2 = document_to_test_json(&d);
         assert_eq!(legacy, json2);
+    }
+
+    #[test]
+    fn document_setup_only_emitted_when_non_default() {
+        let d = Document::default();
+        let json = document_to_test_json(&d);
+        assert!(!json.contains("\"document_setup\""));
+
+        let mut d2 = Document::default();
+        d2.document_setup.bleed_top = 9.0;
+        let json2 = document_to_test_json(&d2);
+        assert!(json2.contains("\"document_setup\""));
+        assert!(json2.contains("\"bleed_top\":9.0"));
+    }
+
+    #[test]
+    fn document_setup_roundtrip() {
+        let mut d = Document::default();
+        d.document_setup = DocumentSetup {
+            bleed_top: 9.0,
+            bleed_right: 9.0,
+            bleed_bottom: 9.0,
+            bleed_left: 9.0,
+            bleed_uniform: false,
+            show_images_outline: true,
+            highlight_substituted_glyphs: true,
+        };
+        let json = document_to_test_json(&d);
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.document_setup, d.document_setup);
     }
 }
