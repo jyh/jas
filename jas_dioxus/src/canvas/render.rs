@@ -1782,6 +1782,7 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
 //   3. (element tree — unchanged)
 //   4. draw_fade_overlay         — dims off-artboard regions (phase-E)
 //   5. draw_artboard_borders     — thin default borders
+//   5b. draw_bleed_guides        — red dashed rect, when bleed != 0
 //   6. draw_artboard_accent      — 2px outline for panel-selected
 //   7. draw_artboard_labels      — "N  Name" above top-left
 //   8. draw_artboard_display_marks — center mark / cross hairs / safe areas
@@ -1870,6 +1871,57 @@ fn draw_artboard_borders(ctx: &CanvasRenderingContext2d, doc: &Document) {
     for ab in &doc.artboards {
         ctx.stroke_rect(ab.x, ab.y, ab.width, ab.height);
     }
+}
+
+const BLEED_GUIDE_COLOR: &str = "rgb(229,0,0)";
+const BLEED_GUIDE_DASH: [f64; 2] = [4.0, 4.0];
+
+/// Compute the on-canvas bleed guide rectangle for one artboard, in
+/// document points: `(x, y, w, h)` extended outward from the artboard
+/// by the per-side bleed values. Returns `None` when all four bleeds
+/// are zero (the no-bleed case is the default and elides the guide
+/// entirely).
+pub fn bleed_rect_for_artboard(
+    ab: &crate::document::artboard::Artboard,
+    setup: &crate::document::document_setup::DocumentSetup,
+) -> Option<(f64, f64, f64, f64)> {
+    if setup.bleed_top == 0.0
+        && setup.bleed_right == 0.0
+        && setup.bleed_bottom == 0.0
+        && setup.bleed_left == 0.0
+    {
+        return None;
+    }
+    Some((
+        ab.x - setup.bleed_left,
+        ab.y - setup.bleed_top,
+        ab.width + setup.bleed_left + setup.bleed_right,
+        ab.height + setup.bleed_top + setup.bleed_bottom,
+    ))
+}
+
+fn draw_bleed_guides(ctx: &CanvasRenderingContext2d, doc: &Document) {
+    if doc.document_setup.bleed_top == 0.0
+        && doc.document_setup.bleed_right == 0.0
+        && doc.document_setup.bleed_bottom == 0.0
+        && doc.document_setup.bleed_left == 0.0
+    {
+        return;
+    }
+    ctx.save();
+    ctx.set_stroke_style_str(BLEED_GUIDE_COLOR);
+    ctx.set_line_width(1.0);
+    let dash = js_sys::Array::new();
+    dash.push(&wasm_bindgen::JsValue::from_f64(BLEED_GUIDE_DASH[0]));
+    dash.push(&wasm_bindgen::JsValue::from_f64(BLEED_GUIDE_DASH[1]));
+    let _ = ctx.set_line_dash(&dash);
+    for ab in &doc.artboards {
+        if let Some((x, y, w, h)) = bleed_rect_for_artboard(ab, &doc.document_setup) {
+            ctx.stroke_rect(x, y, w, h);
+        }
+    }
+    ctx.set_line_dash(&js_sys::Array::new()).ok();
+    ctx.restore();
 }
 
 fn draw_artboard_accent(
@@ -2044,6 +2096,10 @@ pub fn render(
     // never occluded).
     draw_artboard_borders(ctx, doc);
 
+    // Layer 5b: bleed guide rectangles (PRINT.md §1A) — drawn just
+    // outside artboards when document_setup.bleed_* is non-zero.
+    draw_bleed_guides(ctx, doc);
+
     // Layer 6: accent borders for panel-selected artboards.
     draw_artboard_accent(ctx, doc, panel_selected_artboards);
 
@@ -2065,6 +2121,41 @@ mod tests {
     fn css_color_opaque_black() {
         let c = Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(0,0,0)");
+    }
+
+    // ── bleed rect (PRINT.md §1A) ──────────────────────────
+
+    fn ab_at(x: f64, y: f64, w: f64, h: f64) -> crate::document::artboard::Artboard {
+        crate::document::artboard::Artboard {
+            x, y, width: w, height: h,
+            ..crate::document::artboard::Artboard::default_with_id("ab".to_string())
+        }
+    }
+
+    #[test]
+    fn bleed_rect_none_when_all_zero() {
+        let ab = ab_at(10.0, 20.0, 100.0, 200.0);
+        let s = crate::document::document_setup::DocumentSetup::default();
+        assert_eq!(bleed_rect_for_artboard(&ab, &s), None);
+    }
+
+    #[test]
+    fn bleed_rect_uniform_extends_all_sides() {
+        let ab = ab_at(10.0, 20.0, 100.0, 200.0);
+        let mut s = crate::document::document_setup::DocumentSetup::default();
+        s.bleed_top = 5.0;
+        s.bleed_right = 5.0;
+        s.bleed_bottom = 5.0;
+        s.bleed_left = 5.0;
+        assert_eq!(bleed_rect_for_artboard(&ab, &s), Some((5.0, 15.0, 110.0, 210.0)));
+    }
+
+    #[test]
+    fn bleed_rect_partial_only_offsets_sides_with_bleed() {
+        let ab = ab_at(10.0, 20.0, 100.0, 200.0);
+        let mut s = crate::document::document_setup::DocumentSetup::default();
+        s.bleed_left = 7.0; // top/right/bottom remain 0
+        assert_eq!(bleed_rect_for_artboard(&ab, &s), Some((3.0, 20.0, 107.0, 200.0)));
     }
 
     #[test]

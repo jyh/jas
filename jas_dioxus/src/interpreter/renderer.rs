@@ -1458,6 +1458,15 @@ fn build_active_document_view(
                 "fade_region_outside_artboard": true,
                 "update_while_dragging": true,
             },
+            "document_setup": {
+                "bleed_top": 0.0,
+                "bleed_right": 0.0,
+                "bleed_bottom": 0.0,
+                "bleed_left": 0.0,
+                "bleed_uniform": true,
+                "show_images_outline": false,
+                "highlight_substituted_glyphs": false,
+            },
             "artboards_count": 0,
             "next_artboard_name": "Artboard 1",
             "current_artboard_id": serde_json::Value::Null,
@@ -1595,6 +1604,15 @@ fn build_active_document_view(
         "artboard_options": {
             "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
             "update_while_dragging": doc.artboard_options.update_while_dragging,
+        },
+        "document_setup": {
+            "bleed_top": doc.document_setup.bleed_top,
+            "bleed_right": doc.document_setup.bleed_right,
+            "bleed_bottom": doc.document_setup.bleed_bottom,
+            "bleed_left": doc.document_setup.bleed_left,
+            "bleed_uniform": doc.document_setup.bleed_uniform,
+            "show_images_outline": doc.document_setup.show_images_outline,
+            "highlight_substituted_glyphs": doc.document_setup.highlight_substituted_glyphs,
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -1979,6 +1997,52 @@ fn run_yaml_effect(
             }
             "update_while_dragging" => {
                 new_doc.artboard_options.update_while_dragging = flag;
+            }
+            _ => return deferred,
+        }
+        tab.model.set_document(new_doc);
+        return deferred;
+    }
+
+    // doc.set_document_setup_field: { field, value }  — PRINT.md §1A
+    if let Some(spec) = eff.get("doc.set_document_setup_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        match field.as_str() {
+            "bleed_top" | "bleed_right" | "bleed_bottom" | "bleed_left" => {
+                let n = match value_val {
+                    super::expr_types::Value::Number(n) => n,
+                    super::expr_types::Value::Bool(_) => return deferred,
+                    _ => return deferred,
+                };
+                match field.as_str() {
+                    "bleed_top" => new_doc.document_setup.bleed_top = n,
+                    "bleed_right" => new_doc.document_setup.bleed_right = n,
+                    "bleed_bottom" => new_doc.document_setup.bleed_bottom = n,
+                    "bleed_left" => new_doc.document_setup.bleed_left = n,
+                    _ => unreachable!(),
+                }
+            }
+            "bleed_uniform" | "show_images_outline" | "highlight_substituted_glyphs" => {
+                let b = match value_val {
+                    super::expr_types::Value::Bool(b) => b,
+                    _ => return deferred,
+                };
+                match field.as_str() {
+                    "bleed_uniform" => new_doc.document_setup.bleed_uniform = b,
+                    "show_images_outline" => new_doc.document_setup.show_images_outline = b,
+                    "highlight_substituted_glyphs" => new_doc.document_setup.highlight_substituted_glyphs = b,
+                    _ => unreachable!(),
+                }
             }
             _ => return deferred,
         }

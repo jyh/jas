@@ -3489,6 +3489,100 @@
         }
       ]
     },
+    "open_document_setup": {
+      "description": "Open the Document Setup dialog. Init expressions copy the current document_setup fields into dialog state so edits are local until OK.\n",
+      "category": "document",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "document_setup"
+          }
+        }
+      ]
+    },
+    "document_setup_confirm": {
+      "description": "Commit the Document Setup dialog. Writes all DocumentSetup fields via doc.set_document_setup_field. Single undo op covers the batch; close_dialog dismisses.\n",
+      "category": "document",
+      "params": {
+        "bleed_top": {
+          "type": "number"
+        },
+        "bleed_right": {
+          "type": "number"
+        },
+        "bleed_bottom": {
+          "type": "number"
+        },
+        "bleed_left": {
+          "type": "number"
+        },
+        "bleed_uniform": {
+          "type": "bool"
+        },
+        "show_images_outline": {
+          "type": "bool"
+        },
+        "highlight_substituted_glyphs": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_top",
+            "value": "param.bleed_top"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_right",
+            "value": "param.bleed_right"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_bottom",
+            "value": "param.bleed_bottom"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_left",
+            "value": "param.bleed_left"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_uniform",
+            "value": "param.bleed_uniform"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "show_images_outline",
+            "value": "param.show_images_outline"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "highlight_substituted_glyphs",
+            "value": "param.highlight_substituted_glyphs"
+          }
+        },
+        "clear_dialog_snapshot",
+        "close_dialog"
+      ]
+    },
+    "document_setup_toggle_bleed_uniform": {
+      "description": "Toggle dialog.bleed_uniform. Phase-1A deferral: dialog state mutation from action effects is not yet wired (matches toggle_artboard_chain_link precedent). The chain-link icon ships visually but the click is a no-op until the dialog-state effect framework lands.\n",
+      "category": "document",
+      "effects": [
+        {
+          "log": "document_setup_toggle_bleed_uniform (native, deferred)"
+        }
+      ]
+    },
     "open_brush_options": {
       "description": "Open the Brush Options dialog. Mode is one of create, library_edit, instance_edit (see BRUSH_OPTIONS_DIALOG.md \u00a7Modes). Library + brush_slug parameters select the master brush; instance_edit reads the brush from the canvas selection's jas:stroke-brush attribute.\n",
       "category": "brushes",
@@ -6334,6 +6428,13 @@
           "label": "&Revert",
           "action": "revert",
           "enabled_when": "active_document.is_modified and active_document.has_filename"
+        },
+        "separator",
+        {
+          "id": "menu_document_setup",
+          "label": "Document Set&up...",
+          "action": "open_document_setup",
+          "enabled_when": "state.tab_count > 0"
         },
         "separator",
         {
@@ -25436,6 +25537,291 @@
                     ]
                   }
                 ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "document_setup": {
+      "summary": "Document Setup",
+      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase-1 deferrals (parked for Phase 6 / global units): units selector, transparency grid, transparency-flattener preset, \"Discard White Overprint in Output\", \"Simulate Colored Paper\".\nPhase-1A deferral: the chain-link toggle's bleed_uniform state persists with the document, but mirroring a single-side edit to all four fields is not yet wired (matches the artboard_options chain-link precedent). User types each side individually in Phase 1A.\n",
+      "modal": true,
+      "width": 360,
+      "state": {
+        "bleed_top": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_right": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_bottom": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_left": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_uniform": {
+          "type": "bool",
+          "default": true
+        },
+        "show_images_outline": {
+          "type": "bool",
+          "default": false
+        },
+        "highlight_substituted_glyphs": {
+          "type": "bool",
+          "default": false
+        }
+      },
+      "init": {
+        "bleed_top": "active_document.document_setup.bleed_top",
+        "bleed_right": "active_document.document_setup.bleed_right",
+        "bleed_bottom": "active_document.document_setup.bleed_bottom",
+        "bleed_left": "active_document.document_setup.bleed_left",
+        "bleed_uniform": "active_document.document_setup.bleed_uniform",
+        "show_images_outline": "active_document.document_setup.show_images_outline",
+        "highlight_substituted_glyphs": "active_document.document_setup.highlight_substituted_glyphs"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 10,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "Bleed",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 2,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Top:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ds_bleed_top",
+                    "type": "number_input",
+                    "min": 0,
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.bleed_top"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 2,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Bottom:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ds_bleed_bottom",
+                    "type": "number_input",
+                    "min": 0,
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.bleed_bottom"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 2,
+                "children": [
+                  {
+                    "id": "ds_bleed_chain",
+                    "type": "icon_button",
+                    "icon": "{{if dialog.bleed_uniform then 'chain_linked' else 'chain_broken'}}",
+                    "summary": "Lock all four bleed sides to the same value",
+                    "description": "Toggle \u2014 when engaged, editing any one bleed field propagates the new value to all four. Document- persistent.\n",
+                    "style": {
+                      "size": 16
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "action": "document_setup_toggle_bleed_uniform"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 2,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Left:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ds_bleed_left",
+                    "type": "number_input",
+                    "min": 0,
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.bleed_left"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 2,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Right:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ds_bleed_right",
+                    "type": "number_input",
+                    "min": 0,
+                    "style": {
+                      "width": 80
+                    },
+                    "bind": {
+                      "value": "dialog.bleed_right"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 2,
+                "children": []
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Display",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "id": "ds_show_images_outline",
+            "type": "toggle",
+            "label": "Show Images In Outline Mode",
+            "bind": {
+              "checked": "dialog.show_images_outline"
+            }
+          },
+          {
+            "id": "ds_highlight_substituted",
+            "type": "toggle",
+            "label": "Highlight Substituted Glyphs",
+            "bind": {
+              "checked": "dialog.highlight_substituted_glyphs"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "end"
+            },
+            "children": [
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "OK",
+                "action": "document_setup_confirm",
+                "variant": "primary",
+                "params": {
+                  "bleed_top": "dialog.bleed_top",
+                  "bleed_right": "dialog.bleed_right",
+                  "bleed_bottom": "dialog.bleed_bottom",
+                  "bleed_left": "dialog.bleed_left",
+                  "bleed_uniform": "dialog.bleed_uniform",
+                  "show_images_outline": "dialog.show_images_outline",
+                  "highlight_substituted_glyphs": "dialog.highlight_substituted_glyphs"
+                }
               }
             ]
           }
