@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 use super::app_state::{Act, AppHandle, AppState, TabState};
 use super::clipboard::{
-    clipboard_read_and_paste, clipboard_write, download_file, find_panel,
+    clipboard_read_and_paste, clipboard_write, download_bytes, download_file, find_panel,
     open_file_dialog, selection_to_svg,
 };
 // SaveAsDialog import removed — workspace save-as now uses YAML dialog system
@@ -332,6 +332,45 @@ pub(crate) fn MenuBarView(
                 }
                 "workspace_submenu" | "appearance_submenu" => {
                     // Handled by dynamic submenu rendering, not dispatch
+                }
+                "document_setup" => {
+                    let st = app_for_menu.borrow();
+                    let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                    drop(st);
+                    // Signal is Copy; shadow into a local mutable
+                    // binding so the &mut required by open_dialog
+                    // doesn't make this dispatch closure FnMut.
+                    let mut sig = yaml_dialog_sig;
+                    crate::interpreter::dialog_view::open_dialog(
+                        &mut sig,
+                        "document_setup",
+                        &serde_json::Map::new(),
+                        &live_state,
+                    );
+                }
+                "print" => {
+                    // Print dialog YAML lands in the next sub-commit;
+                    // for Phase 1B MVP we surface PDF export from
+                    // here as a placeholder so the menu item isn't
+                    // dead.
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(tab) = st.tab_mut() {
+                            let bytes = crate::geometry::pdf::document_to_pdf(tab.model.document());
+                            let stem = filename_stem(&tab.model.filename);
+                            let filename = format!("{}.pdf", stem);
+                            download_bytes(&filename, &bytes, "application/pdf");
+                        }
+                    }));
+                }
+                "export_to_pdf" => {
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(tab) = st.tab_mut() {
+                            let bytes = crate::geometry::pdf::document_to_pdf(tab.model.document());
+                            let stem = filename_stem(&tab.model.filename);
+                            let filename = format!("{}.pdf", stem);
+                            download_bytes(&filename, &bytes, "application/pdf");
+                        }
+                    }));
                 }
                 _ => {}
             }
@@ -677,5 +716,45 @@ pub(crate) fn MenuBarView(
                 {node}
             }
         }
+    }
+}
+
+/// Strip a known extension from a filename so we can append a new one
+/// (`Untitled.svg` → `Untitled` → `Untitled.pdf`). Falls back to the
+/// raw filename when no extension matches; an empty filename returns
+/// `"Untitled"`.
+fn filename_stem(filename: &str) -> String {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return "Untitled".to_string();
+    }
+    for ext in [".svg", ".pdf", ".jas"] {
+        if let Some(stripped) = trimmed.strip_suffix(ext) {
+            return stripped.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filename_stem_strips_known_extensions() {
+        assert_eq!(filename_stem("Untitled.svg"), "Untitled");
+        assert_eq!(filename_stem("art.pdf"), "art");
+        assert_eq!(filename_stem("doc.jas"), "doc");
+    }
+
+    #[test]
+    fn filename_stem_keeps_unknown_extension() {
+        assert_eq!(filename_stem("photo.png"), "photo.png");
+    }
+
+    #[test]
+    fn filename_stem_empty_yields_untitled() {
+        assert_eq!(filename_stem(""), "Untitled");
+        assert_eq!(filename_stem("   "), "Untitled");
     }
 }
