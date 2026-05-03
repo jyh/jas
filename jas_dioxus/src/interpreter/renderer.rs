@@ -1467,6 +1467,31 @@ fn build_active_document_view(
                 "show_images_outline": false,
                 "highlight_substituted_glyphs": false,
             },
+            "print_preferences": {
+                "preset_name": "[Default]",
+                "printer_name": serde_json::Value::Null,
+                "copies": 1,
+                "collate": false,
+                "reverse_order": false,
+                "artboard_range_mode": "all",
+                "artboard_range": "",
+                "ignore_artboards": false,
+                "skip_blank_artboards": false,
+                "media_size": "defined_by_driver",
+                "media_width": 612.0,
+                "media_height": 792.0,
+                "orientation": "portrait",
+                "auto_rotate": true,
+                "transverse": false,
+                "print_layers": "visible_printable",
+                "placement_x": 0.0,
+                "placement_y": 0.0,
+                "scaling_mode": "do_not_scale",
+                "custom_scale": 100.0,
+                "tile_overlap_h": 0.0,
+                "tile_overlap_v": 0.0,
+                "tile_range": "",
+            },
             "artboards_count": 0,
             "next_artboard_name": "Artboard 1",
             "current_artboard_id": serde_json::Value::Null,
@@ -1613,6 +1638,32 @@ fn build_active_document_view(
             "bleed_uniform": doc.document_setup.bleed_uniform,
             "show_images_outline": doc.document_setup.show_images_outline,
             "highlight_substituted_glyphs": doc.document_setup.highlight_substituted_glyphs,
+        },
+        "print_preferences": {
+            "preset_name": doc.print_preferences.preset_name.clone(),
+            "printer_name": doc.print_preferences.printer_name.clone()
+                .map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+            "copies": doc.print_preferences.copies,
+            "collate": doc.print_preferences.collate,
+            "reverse_order": doc.print_preferences.reverse_order,
+            "artboard_range_mode": crate::document::print_preferences::artboard_range_mode_str(&doc.print_preferences.artboard_range_mode),
+            "artboard_range": doc.print_preferences.artboard_range.clone(),
+            "ignore_artboards": doc.print_preferences.ignore_artboards,
+            "skip_blank_artboards": doc.print_preferences.skip_blank_artboards,
+            "media_size": crate::document::print_preferences::media_size_str(&doc.print_preferences.media_size),
+            "media_width": doc.print_preferences.media_width,
+            "media_height": doc.print_preferences.media_height,
+            "orientation": crate::document::print_preferences::orientation_str(&doc.print_preferences.orientation),
+            "auto_rotate": doc.print_preferences.auto_rotate,
+            "transverse": doc.print_preferences.transverse,
+            "print_layers": crate::document::print_preferences::print_layers_str(&doc.print_preferences.print_layers),
+            "placement_x": doc.print_preferences.placement_x,
+            "placement_y": doc.print_preferences.placement_y,
+            "scaling_mode": crate::document::print_preferences::scaling_mode_str(&doc.print_preferences.scaling_mode),
+            "custom_scale": doc.print_preferences.custom_scale,
+            "tile_overlap_h": doc.print_preferences.tile_overlap_h,
+            "tile_overlap_v": doc.print_preferences.tile_overlap_v,
+            "tile_range": doc.print_preferences.tile_range.clone(),
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -2001,6 +2052,75 @@ fn run_yaml_effect(
             _ => return deferred,
         }
         tab.model.set_document(new_doc);
+        return deferred;
+    }
+
+    // doc.set_print_preferences_field: { field, value }  — PRINT.md §1B
+    if let Some(spec) = eff.get("doc.set_print_preferences_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::{
+            artboard_range_mode_from, media_size_from, orientation_from, print_layers_from,
+            scaling_mode_from,
+        };
+        // Borrow once and dispatch by field name. Type mismatches
+        // (string-to-bool etc) silently skip the update — matches
+        // doc.set_document_setup_field's defensiveness.
+        let p = &mut new_doc.print_preferences;
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("preset_name", super::expr_types::Value::Str(s)) => p.preset_name = s.clone(),
+            ("printer_name", super::expr_types::Value::Str(s)) => {
+                p.printer_name = if s.is_empty() { None } else { Some(s.clone()) };
+            }
+            ("printer_name", _) if matches!(value_val, super::expr_types::Value::Number(_) | super::expr_types::Value::Bool(_)) => applied = false,
+            ("copies", super::expr_types::Value::Number(n)) => p.copies = (*n as i64).max(0) as u32,
+            ("collate", super::expr_types::Value::Bool(b)) => p.collate = *b,
+            ("reverse_order", super::expr_types::Value::Bool(b)) => p.reverse_order = *b,
+            ("artboard_range_mode", super::expr_types::Value::Str(s)) => {
+                p.artboard_range_mode = artboard_range_mode_from(s);
+            }
+            ("artboard_range", super::expr_types::Value::Str(s)) => p.artboard_range = s.clone(),
+            ("ignore_artboards", super::expr_types::Value::Bool(b)) => p.ignore_artboards = *b,
+            ("skip_blank_artboards", super::expr_types::Value::Bool(b)) => {
+                p.skip_blank_artboards = *b
+            }
+            ("media_size", super::expr_types::Value::Str(s)) => {
+                p.media_size = media_size_from(s);
+            }
+            ("media_width", super::expr_types::Value::Number(n)) => p.media_width = *n,
+            ("media_height", super::expr_types::Value::Number(n)) => p.media_height = *n,
+            ("orientation", super::expr_types::Value::Str(s)) => {
+                p.orientation = orientation_from(s);
+            }
+            ("auto_rotate", super::expr_types::Value::Bool(b)) => p.auto_rotate = *b,
+            ("transverse", super::expr_types::Value::Bool(b)) => p.transverse = *b,
+            ("print_layers", super::expr_types::Value::Str(s)) => {
+                p.print_layers = print_layers_from(s);
+            }
+            ("placement_x", super::expr_types::Value::Number(n)) => p.placement_x = *n,
+            ("placement_y", super::expr_types::Value::Number(n)) => p.placement_y = *n,
+            ("scaling_mode", super::expr_types::Value::Str(s)) => {
+                p.scaling_mode = scaling_mode_from(s);
+            }
+            ("custom_scale", super::expr_types::Value::Number(n)) => p.custom_scale = *n,
+            ("tile_overlap_h", super::expr_types::Value::Number(n)) => p.tile_overlap_h = *n,
+            ("tile_overlap_v", super::expr_types::Value::Number(n)) => p.tile_overlap_v = *n,
+            ("tile_range", super::expr_types::Value::Str(s)) => p.tile_range = s.clone(),
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
         return deferred;
     }
 
