@@ -106,6 +106,7 @@ fn render_el(
         "tree_view" => render_tree_view(el, ctx, rctx),
         "element_preview" => render_element_preview(el, ctx, rctx),
         "dropdown" => render_layers_filter_dropdown(el, ctx, rctx),
+        "tabs" => render_tabs(el, ctx, rctx),
         _ => render_placeholder(el, ctx, rctx),
     }
 }
@@ -2052,6 +2053,24 @@ fn run_yaml_effect(
             _ => return deferred,
         }
         tab.model.set_document(new_doc);
+        return deferred;
+    }
+
+    // geometry.export_pdf: { filename_hint }  — PRINT.md §1B.
+    // Generates a PDF from the active document and triggers a browser
+    // blob download. filename_hint is the suggested download name; if
+    // unset or empty, derives one from the tab's filename via
+    // pdf_filename_for_tab.
+    if let Some(spec) = eff.get("geometry.export_pdf").and_then(|v| v.as_object()) {
+        let Some(tab) = st.tabs.get(st.active_tab) else { return deferred; };
+        let bytes = crate::geometry::pdf::document_to_pdf(tab.model.document());
+        let hint = spec
+            .get("filename_hint")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| pdf_filename_for_tab(&tab.model.filename));
+        crate::workspace::clipboard::download_bytes(&hint, &bytes, "application/pdf");
         return deferred;
     }
 
@@ -7407,6 +7426,152 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Strip a known filename extension and append `.pdf`. Mirrors the
+/// menu_bar helper but lives here so the YAML effect handler doesn't
+/// need to reach into workspace::menu_bar.
+fn pdf_filename_for_tab(filename: &str) -> String {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return "Untitled.pdf".to_string();
+    }
+    for ext in [".svg", ".pdf", ".jas"] {
+        if let Some(stem) = trimmed.strip_suffix(ext) {
+            return format!("{}.pdf", stem);
+        }
+    }
+    format!("{}.pdf", trimmed)
+}
+
+/// Tabs widget — left-rail tab list plus a content area showing the
+/// active tab. Active tab is read from `bind.value` (typically
+/// `dialog.<field>`); clicking a tab writes its `id` back through the
+/// dialog signal. When no bind or the bound value is empty, the first
+/// tab is active and the widget is read-only.
+///
+/// YAML:
+/// ```
+/// - id: print_tabs
+///   type: tabs
+///   layout: left_rail            # default; only left_rail in Phase 1B
+///   bind: { value: "dialog.active_tab" }
+///   tabs:
+///     - { id: general, label: "General",
+///         content: { type: container, children: [...] } }
+///     - { id: marks_and_bleed, label: "Marks and Bleed",
+///         content: { type: text, content: "Available in Phase 2" } }
+///     ...
+/// ```
+fn render_tabs(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+    let tabs = el.get("tabs").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+    if tabs.is_empty() {
+        return rsx! { div { id: "{id}", style: "{style}" } };
+    }
+
+    let first_id = tabs[0]
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let bind_expr = el
+        .get("bind")
+        .and_then(|b| b.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let active_id: String = if bind_expr.is_empty() {
+        first_id.clone()
+    } else {
+        match expr::eval(bind_expr, ctx) {
+            Value::Str(s) if !s.is_empty() => s,
+            _ => first_id.clone(),
+        }
+    };
+
+    let bind_field: Option<String> = match classify_bind(bind_expr) {
+        BindTarget::Dialog(f) => Some(f),
+        _ => None,
+    };
+
+    // Render the active tab's content. Inactive tabs aren't rendered
+    // at all (matches the spec's expectation that only General is
+    // populated in Phase 1B; placeholder tabs simply swap in their
+    // text content node when activated).
+    let active_content = tabs
+        .iter()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(active_id.as_str()))
+        .and_then(|t| t.get("content"))
+        .map(|c| render_el(c, ctx, rctx))
+        .unwrap_or_else(|| rsx! { div {} });
+
+    // Snapshot the per-tab nav data once so the rsx loop doesn't
+    // borrow `tabs` again.
+    let nav: Vec<(String, String, bool)> = tabs
+        .iter()
+        .map(|t| {
+            let tid = t
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let label = t
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let active = tid == active_id;
+            (tid, label, active)
+        })
+        .collect();
+
+    let dialog_signal = rctx.dialog_ctx.0;
+    let revision = rctx.revision;
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "display:flex;flex-direction:row;align-items:stretch;gap:0;{style}",
+            // Left rail.
+            div {
+                style: "display:flex;flex-direction:column;min-width:140px;border-right:1px solid var(--jas-border,#555);padding:4px 0;background:var(--jas-pane-bg-dark,#2a2a2a);",
+                for (tid, label, active) in nav {
+                    {
+                        let target = tid.clone();
+                        let bind_field2 = bind_field.clone();
+                        let mut sig = dialog_signal;
+                        let mut rev = revision;
+                        let bg = if active { "background:var(--jas-pane-bg,#3a3a3a);" } else { "" };
+                        let weight = if active { "font-weight:600;" } else { "" };
+                        rsx! {
+                            div {
+                                key: "{target}",
+                                style: "padding:6px 12px;cursor:pointer;font-size:12px;color:var(--jas-text,#ccc);user-select:none;{bg}{weight}",
+                                onmousedown: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation();
+                                    if let Some(field) = &bind_field2 {
+                                        if let Some(mut ds) = sig() {
+                                            ds.set_value(field, serde_json::json!(target.clone()));
+                                            sig.set(Some(ds));
+                                        }
+                                        rev += 1;
+                                    }
+                                },
+                                "{label}"
+                            }
+                        }
+                    }
+                }
+            }
+            // Content area.
+            div {
+                style: "flex:1;padding:12px;",
+                {active_content}
             }
         }
     }
