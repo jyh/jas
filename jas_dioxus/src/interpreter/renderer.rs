@@ -7060,9 +7060,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                         } else {
                                                                             Some(val_inner.clone())
                                                                         };
-                                                                        if let crate::geometry::element::Element::Layer(le) = elem {
-                                                                            le.name() = val_inner;
-                                                                        }
+                                                                        // Layer.name is now backed by
+                                                                        // common.name (LYR-091 merge);
+                                                                        // the assignment above already
+                                                                        // covers Layer along with every
+                                                                        // other element type.
+                                                                        let _ = val_inner;
                                                                     }
                                                                 }
                                                                 st.layers_renaming = None;
@@ -7117,9 +7120,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                     } else {
                                                                         Some(val_inner.clone())
                                                                     };
-                                                                    if let crate::geometry::element::Element::Layer(le) = elem {
-                                                                        le.name() = val_inner;
-                                                                    }
+                                                                    // Layer.name backed by common.name
+                                                                    // (LYR-091); covered above.
+                                                                    let _ = val_inner;
                                                                 }
                                                             }
                                                             st.layers_renaming = None;
