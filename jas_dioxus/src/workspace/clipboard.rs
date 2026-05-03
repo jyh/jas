@@ -291,6 +291,40 @@ pub(crate) fn download_file(filename: &str, content: &str) {
     let _ = web_sys::Url::revoke_object_url(&url);
 }
 
+/// Download a binary blob (e.g. PDF) as a file in the browser.
+pub(crate) fn download_bytes(filename: &str, content: &[u8], mime_type: &str) {
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return,
+    };
+    let document = match window.document() {
+        Some(d) => d,
+        None => return,
+    };
+    let u8_arr = js_sys::Uint8Array::new_with_length(content.len() as u32);
+    u8_arr.copy_from(content);
+    let parts = js_sys::Array::new();
+    parts.push(&u8_arr.into());
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(mime_type);
+    let blob = match web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let url = match web_sys::Url::create_object_url_with_blob(&blob) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    let a: web_sys::HtmlAnchorElement = match document.create_element("a") {
+        Ok(el) => el.unchecked_into(),
+        Err(_) => return,
+    };
+    a.set_href(&url);
+    a.set_download(filename);
+    a.click();
+    let _ = web_sys::Url::revoke_object_url(&url);
+}
+
 /// Trigger a file open dialog and load the file into a new tab.
 pub(crate) fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
     let window = match web_sys::window() {
