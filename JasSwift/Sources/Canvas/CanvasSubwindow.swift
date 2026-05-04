@@ -1624,6 +1624,24 @@ private func drawArtboardBorders(_ ctx: CGContext, _ doc: Document) {
     }
 }
 
+/// Z-layer 5b (PRINT.md §1A): red dashed bleed guide drawn just
+/// outside each artboard when any documentSetup.bleed* is non-zero.
+private func drawBleedGuides(_ ctx: CGContext, _ doc: Document) {
+    let s = doc.documentSetup
+    if s.bleedTop == 0 && s.bleedRight == 0 && s.bleedBottom == 0 && s.bleedLeft == 0 {
+        return
+    }
+    ctx.saveGState()
+    ctx.setStrokeColor(CGColor(red: 0.9, green: 0, blue: 0, alpha: 1))
+    ctx.setLineWidth(1.0)
+    ctx.setLineDash(phase: 0, lengths: [4, 4])
+    for ab in doc.artboards {
+        guard let r = s.bleedRect(forArtboard: ab) else { continue }
+        ctx.stroke(CGRect(x: r.0, y: r.1, width: r.2, height: r.3))
+    }
+    ctx.restoreGState()
+}
+
 private func drawArtboardAccent(
     _ ctx: CGContext, _ doc: Document, selectedIds: [String]
 ) {
@@ -2159,6 +2177,8 @@ class CanvasNSView: NSView {
         drawFadeOverlay(ctx, document, bounds: bounds)
         // Layer 5: artboard borders.
         drawArtboardBorders(ctx, document)
+        // Layer 5b: bleed guide rectangles (PRINT.md §1A).
+        drawBleedGuides(ctx, document)
         // Layer 6: accent border for panel-selected artboards.
         drawArtboardAccent(ctx, document, selectedIds: artboardsPanelSelection)
         // Layer 7: artboard labels above top-left corner.
