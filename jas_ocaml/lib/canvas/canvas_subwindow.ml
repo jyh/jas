@@ -1514,6 +1514,28 @@ let draw_artboard_borders cr (doc : Document.document) =
     Cairo.stroke cr
   ) doc.Document.artboards
 
+(* Z-layer 5b (PRINT.md §1A): red dashed bleed guide drawn just
+   outside each artboard when any document_setup.bleed_* is non-zero. *)
+let draw_bleed_guides cr (doc : Document.document) =
+  let s = doc.Document.document_setup in
+  if s.Document_setup.bleed_top = 0.0 && s.bleed_right = 0.0
+     && s.bleed_bottom = 0.0 && s.bleed_left = 0.0
+  then ()
+  else begin
+    Cairo.save cr;
+    Cairo.set_source_rgb cr 0.9 0.0 0.0;
+    Cairo.set_line_width cr 1.0;
+    Cairo.set_dash cr ~ofs:0.0 [|4.0; 4.0|];
+    List.iter (fun (ab : Artboard.artboard) ->
+      match Document_setup.bleed_rect_for_artboard s ab with
+      | Some (x, y, w, h) ->
+        Cairo.rectangle cr x y ~w ~h;
+        Cairo.stroke cr
+      | None -> ()
+    ) doc.Document.artboards;
+    Cairo.restore cr
+  end
+
 let draw_artboard_accent cr (doc : Document.document) ~selected_ids =
   if selected_ids <> [] then begin
     Cairo.set_source_rgba cr 0.0 (120.0 /. 255.0) (215.0 /. 255.0) 0.95;
@@ -2101,6 +2123,8 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         draw_fade_overlay cr current_doc ~canvas_w:w ~canvas_h:h;
         (* Layer 5: artboard borders *)
         draw_artboard_borders cr current_doc;
+        (* Layer 5b: bleed guide rectangles (PRINT.md §1A). *)
+        draw_bleed_guides cr current_doc;
         (* Layer 6: accent border for panel-selected artboards
            (empty list until panel_selection is threaded in). *)
         draw_artboard_accent cr current_doc ~selected_ids:[];
