@@ -511,6 +511,50 @@ private func artboardOptionsJson(_ opts: ArtboardOptions) -> String {
     return o.build()
 }
 
+private func documentSetupJson(_ s: DocumentSetup) -> String {
+    let o = JsonObj()
+    o.num("bleed_bottom", s.bleedBottom)
+    o.num("bleed_left", s.bleedLeft)
+    o.num("bleed_right", s.bleedRight)
+    o.num("bleed_top", s.bleedTop)
+    o.bool("bleed_uniform", s.bleedUniform)
+    o.bool("highlight_substituted_glyphs", s.highlightSubstitutedGlyphs)
+    o.bool("show_images_outline", s.showImagesOutline)
+    return o.build()
+}
+
+private func printPreferencesJson(_ p: PrintPreferences) -> String {
+    let o = JsonObj()
+    o.str("artboard_range", p.artboardRange)
+    o.str("artboard_range_mode", p.artboardRangeMode.rawValue)
+    o.bool("auto_rotate", p.autoRotate)
+    o.bool("collate", p.collate)
+    o.int("copies", p.copies)
+    o.num("custom_scale", p.customScale)
+    o.bool("ignore_artboards", p.ignoreArtboards)
+    o.num("media_height", p.mediaHeight)
+    o.str("media_size", p.mediaSize.rawValue)
+    o.num("media_width", p.mediaWidth)
+    o.str("orientation", p.orientation.rawValue)
+    o.num("placement_x", p.placementX)
+    o.num("placement_y", p.placementY)
+    o.str("preset_name", p.presetName)
+    o.str("print_layers", p.printLayers.rawValue)
+    if let pn = p.printerName {
+        o.str("printer_name", pn)
+    } else {
+        o.raw("printer_name", "null")
+    }
+    o.bool("reverse_order", p.reverseOrder)
+    o.str("scaling_mode", p.scalingMode.rawValue)
+    o.bool("skip_blank_artboards", p.skipBlankArtboards)
+    o.num("tile_overlap_h", p.tileOverlapH)
+    o.num("tile_overlap_v", p.tileOverlapV)
+    o.str("tile_range", p.tileRange)
+    o.bool("transverse", p.transverse)
+    return o.build()
+}
+
 /// Serialize a Document to canonical test JSON.
 ///
 /// The output is a compact JSON string with sorted keys and normalized
@@ -530,7 +574,13 @@ package func documentToTestJson(_ doc: Document) -> String {
     if !doc.artboards.isEmpty {
         o.raw("artboards", artboardsJson(doc.artboards))
     }
+    if doc.documentSetup != .default {
+        o.raw("document_setup", documentSetupJson(doc.documentSetup))
+    }
     o.raw("layers", jsonArray(layers))
+    if doc.printPreferences != .default {
+        o.raw("print_preferences", printPreferencesJson(doc.printPreferences))
+    }
     o.int("selected_layer", doc.selectedLayer)
     o.raw("selection", selectionJson(Array(doc.selection)))
     return o.build()
@@ -879,6 +929,54 @@ private func parseArtboardOptions(_ v: Any?) -> ArtboardOptions {
     )
 }
 
+private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = DocumentSetup.default
+    return DocumentSetup(
+        bleedTop: (d["bleed_top"] as? NSNumber)?.doubleValue ?? def.bleedTop,
+        bleedRight: (d["bleed_right"] as? NSNumber)?.doubleValue ?? def.bleedRight,
+        bleedBottom: (d["bleed_bottom"] as? NSNumber)?.doubleValue ?? def.bleedBottom,
+        bleedLeft: (d["bleed_left"] as? NSNumber)?.doubleValue ?? def.bleedLeft,
+        bleedUniform: (d["bleed_uniform"] as? Bool) ?? def.bleedUniform,
+        showImagesOutline: (d["show_images_outline"] as? Bool) ?? def.showImagesOutline,
+        highlightSubstitutedGlyphs: (d["highlight_substituted_glyphs"] as? Bool) ?? def.highlightSubstitutedGlyphs
+    )
+}
+
+private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = PrintPreferences.default
+    let printer: String? = {
+        if let s = d["printer_name"] as? String { return s }
+        return nil
+    }()
+    return PrintPreferences(
+        presetName: (d["preset_name"] as? String) ?? def.presetName,
+        printerName: printer,
+        copies: (d["copies"] as? NSNumber)?.intValue ?? def.copies,
+        collate: (d["collate"] as? Bool) ?? def.collate,
+        reverseOrder: (d["reverse_order"] as? Bool) ?? def.reverseOrder,
+        artboardRangeMode: ArtboardRangeMode(rawValue: (d["artboard_range_mode"] as? String) ?? "") ?? def.artboardRangeMode,
+        artboardRange: (d["artboard_range"] as? String) ?? def.artboardRange,
+        ignoreArtboards: (d["ignore_artboards"] as? Bool) ?? def.ignoreArtboards,
+        skipBlankArtboards: (d["skip_blank_artboards"] as? Bool) ?? def.skipBlankArtboards,
+        mediaSize: MediaSize(rawValue: (d["media_size"] as? String) ?? "") ?? def.mediaSize,
+        mediaWidth: (d["media_width"] as? NSNumber)?.doubleValue ?? def.mediaWidth,
+        mediaHeight: (d["media_height"] as? NSNumber)?.doubleValue ?? def.mediaHeight,
+        orientation: Orientation(rawValue: (d["orientation"] as? String) ?? "") ?? def.orientation,
+        autoRotate: (d["auto_rotate"] as? Bool) ?? def.autoRotate,
+        transverse: (d["transverse"] as? Bool) ?? def.transverse,
+        printLayers: PrintLayers(rawValue: (d["print_layers"] as? String) ?? "") ?? def.printLayers,
+        placementX: (d["placement_x"] as? NSNumber)?.doubleValue ?? def.placementX,
+        placementY: (d["placement_y"] as? NSNumber)?.doubleValue ?? def.placementY,
+        scalingMode: ScalingMode(rawValue: (d["scaling_mode"] as? String) ?? "") ?? def.scalingMode,
+        customScale: (d["custom_scale"] as? NSNumber)?.doubleValue ?? def.customScale,
+        tileOverlapH: (d["tile_overlap_h"] as? NSNumber)?.doubleValue ?? def.tileOverlapH,
+        tileOverlapV: (d["tile_overlap_v"] as? NSNumber)?.doubleValue ?? def.tileOverlapV,
+        tileRange: (d["tile_range"] as? String) ?? def.tileRange
+    )
+}
+
 /// Parse canonical test JSON into a Document.
 ///
 /// This is the inverse of ``documentToTestJson(_:)``.
@@ -895,11 +993,15 @@ package func testJsonToDocument(_ json: String) -> Document {
     let selection = parseSelection(v["selection"])
     let artboards = parseArtboards(v["artboards"])
     let artboardOptions = parseArtboardOptions(v["artboard_options"])
+    let documentSetup = parseDocumentSetup(v["document_setup"])
+    let printPreferences = parsePrintPreferences(v["print_preferences"])
     return Document(
         rawLayers: layers,
         rawSelectedLayer: selectedLayer,
         rawSelection: selection,
         rawArtboards: artboards,
-        rawArtboardOptions: artboardOptions
+        rawArtboardOptions: artboardOptions,
+        rawDocumentSetup: documentSetup,
+        rawPrintPreferences: printPreferences
     )
 }

@@ -188,19 +188,28 @@ public struct Document: Equatable {
     /// Document-global artboard display toggles (fade outside,
     /// update while dragging).
     public let artboardOptions: ArtboardOptions
+    /// Per-document Document Setup state: bleed, image outline display,
+    /// substituted-glyph highlight (PRINT.md §Phase 1A).
+    public let documentSetup: DocumentSetup
+    /// Per-document Print dialog last-used state (PRINT.md §Phase 1B).
+    public let printPreferences: PrintPreferences
 
     public init(
         layers: [Layer] = [Layer(name: "Layer", children: [])],
         selectedLayer: Int = 0,
         selection: Selection = [],
         artboards: [Artboard] = [],
-        artboardOptions: ArtboardOptions = .default
+        artboardOptions: ArtboardOptions = .default,
+        documentSetup: DocumentSetup = .default,
+        printPreferences: PrintPreferences = .default
     ) {
         self.layers = layers
         self.selectedLayer = selectedLayer
         self.selection = selection
         self.artboards = artboards
         self.artboardOptions = artboardOptions
+        self.documentSetup = documentSetup
+        self.printPreferences = printPreferences
     }
 
     /// Fresh-document initializer: seeds one default artboard via the
@@ -226,13 +235,17 @@ public struct Document: Equatable {
         rawSelectedLayer: Int,
         rawSelection: Selection,
         rawArtboards: [Artboard],
-        rawArtboardOptions: ArtboardOptions
+        rawArtboardOptions: ArtboardOptions,
+        rawDocumentSetup: DocumentSetup = .default,
+        rawPrintPreferences: PrintPreferences = .default
     ) {
         self.layers = rawLayers
         self.selectedLayer = rawSelectedLayer
         self.selection = rawSelection
         self.artboards = rawArtboards
         self.artboardOptions = rawArtboardOptions
+        self.documentSetup = rawDocumentSetup
+        self.printPreferences = rawPrintPreferences
     }
 
     /// Return the ElementSelection for the given path, or nil.
@@ -299,7 +312,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
     }
     /// Return a new document with newElem inserted immediately after path.
     public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> Document {
@@ -316,7 +329,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
     }
 
     /// Return a new document with the element at path removed.
@@ -331,7 +344,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
     }
 
     /// Return a new document with all selected elements removed and selection cleared.
@@ -345,7 +358,9 @@ public struct Document: Equatable {
                            selectedLayer: doc.selectedLayer,
                            selection: [],
                            artboards: artboards,
-                           artboardOptions: artboardOptions)
+                           artboardOptions: artboardOptions,
+                           documentSetup: documentSetup,
+                           printPreferences: printPreferences)
     }
 }
 
