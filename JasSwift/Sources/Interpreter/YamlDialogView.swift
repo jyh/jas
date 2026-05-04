@@ -74,7 +74,14 @@ func openYamlDialogWithOuter(
 
     var dialogState = defaults
 
-    // Evaluate init expressions (two-pass for dict order independence)
+    // Evaluate init expressions (two-pass for dict order independence).
+    // Both passes get outerScope so non-dialog-referencing init exprs
+    // can still read `active_document.*` and `panel.*` (matches Rust's
+    // build_dialog_outer_scope behavior; without this fix any init
+    // that reads e.g. `active_document.print_preferences.copies`
+    // would silently resolve to null and the dialog would open with
+    // the YAML state defaults instead of the persisted document
+    // values).
     if let initMap = dlgDef["init"] as? [String: Any] {
         var deferred: [(String, Any)] = []
         for (key, expr) in initMap {
@@ -82,11 +89,10 @@ func openYamlDialogWithOuter(
             if exprStr.contains("dialog.") {
                 deferred.append((key, expr))
             } else {
-                let initCtx: [String: Any] = [
-                    "state": liveState,
-                    "dialog": dialogState,
-                    "param": resolvedParams,
-                ]
+                var initCtx: [String: Any] = outerScope
+                initCtx["state"] = liveState
+                initCtx["dialog"] = dialogState
+                initCtx["param"] = resolvedParams
                 let result = evaluate(exprStr, context: initCtx)
                 dialogState[key] = valueToAnyDlg(result)
             }

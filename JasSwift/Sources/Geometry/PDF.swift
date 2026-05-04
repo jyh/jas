@@ -15,6 +15,168 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+/// Strip a known filename extension and append `.pdf`. Falls back to
+/// "Untitled.pdf" for empty / Untitled-N filenames.
+public func pdfFilenameForModel(_ model: Model) -> String {
+    let trimmed = model.filename.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty || trimmed.hasPrefix("Untitled-") {
+        return "Untitled.pdf"
+    }
+    let url = URL(fileURLWithPath: trimmed)
+    let stem = url.deletingPathExtension().lastPathComponent
+    return "\(stem).pdf"
+}
+
+/// Apply a single field update to PrintPreferences, returning a new
+/// instance. Returns nil for unknown fields or value-type mismatches
+/// — the caller then leaves the document unchanged (matches the
+/// defensive contract of doc.set_artboard_options_field). Internal
+/// because `Value` is internal to the JasLib module.
+func applyPrintPrefField(_ p: PrintPreferences, field: String, val: Value) -> PrintPreferences? {
+    func num() -> Double? {
+        if case .number(let n) = val { return n }
+        return nil
+    }
+    func bool() -> Bool? {
+        if case .bool(let b) = val { return b }
+        return nil
+    }
+    func str() -> String? {
+        if case .string(let s) = val { return s }
+        return nil
+    }
+    switch field {
+    case "preset_name":
+        guard let s = str() else { return nil }
+        return _withPref(p, presetName: s)
+    case "printer_name":
+        guard let s = str() else { return nil }
+        return _withPref(p, printerName: s.isEmpty ? .some(nil) : .some(.some(s)))
+    case "copies":
+        guard let n = num() else { return nil }
+        return _withPref(p, copies: max(0, Int(n)))
+    case "collate":
+        guard let b = bool() else { return nil }
+        return _withPref(p, collate: b)
+    case "reverse_order":
+        guard let b = bool() else { return nil }
+        return _withPref(p, reverseOrder: b)
+    case "artboard_range_mode":
+        guard let s = str(), let m = ArtboardRangeMode(rawValue: s) else { return nil }
+        return _withPref(p, artboardRangeMode: m)
+    case "artboard_range":
+        guard let s = str() else { return nil }
+        return _withPref(p, artboardRange: s)
+    case "ignore_artboards":
+        guard let b = bool() else { return nil }
+        return _withPref(p, ignoreArtboards: b)
+    case "skip_blank_artboards":
+        guard let b = bool() else { return nil }
+        return _withPref(p, skipBlankArtboards: b)
+    case "media_size":
+        guard let s = str(), let m = MediaSize(rawValue: s) else { return nil }
+        return _withPref(p, mediaSize: m)
+    case "media_width":
+        guard let n = num() else { return nil }
+        return _withPref(p, mediaWidth: n)
+    case "media_height":
+        guard let n = num() else { return nil }
+        return _withPref(p, mediaHeight: n)
+    case "orientation":
+        guard let s = str(), let o = Orientation(rawValue: s) else { return nil }
+        return _withPref(p, orientation: o)
+    case "auto_rotate":
+        guard let b = bool() else { return nil }
+        return _withPref(p, autoRotate: b)
+    case "transverse":
+        guard let b = bool() else { return nil }
+        return _withPref(p, transverse: b)
+    case "print_layers":
+        guard let s = str(), let pl = PrintLayers(rawValue: s) else { return nil }
+        return _withPref(p, printLayers: pl)
+    case "placement_x":
+        guard let n = num() else { return nil }
+        return _withPref(p, placementX: n)
+    case "placement_y":
+        guard let n = num() else { return nil }
+        return _withPref(p, placementY: n)
+    case "scaling_mode":
+        guard let s = str(), let m = ScalingMode(rawValue: s) else { return nil }
+        return _withPref(p, scalingMode: m)
+    case "custom_scale":
+        guard let n = num() else { return nil }
+        return _withPref(p, customScale: n)
+    case "tile_overlap_h":
+        guard let n = num() else { return nil }
+        return _withPref(p, tileOverlapH: n)
+    case "tile_overlap_v":
+        guard let n = num() else { return nil }
+        return _withPref(p, tileOverlapV: n)
+    case "tile_range":
+        guard let s = str() else { return nil }
+        return _withPref(p, tileRange: s)
+    default:
+        return nil
+    }
+}
+
+/// PrintPreferences is immutable (`let` fields), so per-field updates
+/// build a fresh instance. Each labelled-arg override is optional;
+/// nil means "keep current". `printerName` uses Optional<Optional<>>
+/// to distinguish "no override" from "set to nil".
+private func _withPref(
+    _ p: PrintPreferences,
+    presetName: String? = nil,
+    printerName: String?? = nil,
+    copies: Int? = nil,
+    collate: Bool? = nil,
+    reverseOrder: Bool? = nil,
+    artboardRangeMode: ArtboardRangeMode? = nil,
+    artboardRange: String? = nil,
+    ignoreArtboards: Bool? = nil,
+    skipBlankArtboards: Bool? = nil,
+    mediaSize: MediaSize? = nil,
+    mediaWidth: Double? = nil,
+    mediaHeight: Double? = nil,
+    orientation: Orientation? = nil,
+    autoRotate: Bool? = nil,
+    transverse: Bool? = nil,
+    printLayers: PrintLayers? = nil,
+    placementX: Double? = nil,
+    placementY: Double? = nil,
+    scalingMode: ScalingMode? = nil,
+    customScale: Double? = nil,
+    tileOverlapH: Double? = nil,
+    tileOverlapV: Double? = nil,
+    tileRange: String? = nil
+) -> PrintPreferences {
+    return PrintPreferences(
+        presetName: presetName ?? p.presetName,
+        printerName: printerName ?? p.printerName,
+        copies: copies ?? p.copies,
+        collate: collate ?? p.collate,
+        reverseOrder: reverseOrder ?? p.reverseOrder,
+        artboardRangeMode: artboardRangeMode ?? p.artboardRangeMode,
+        artboardRange: artboardRange ?? p.artboardRange,
+        ignoreArtboards: ignoreArtboards ?? p.ignoreArtboards,
+        skipBlankArtboards: skipBlankArtboards ?? p.skipBlankArtboards,
+        mediaSize: mediaSize ?? p.mediaSize,
+        mediaWidth: mediaWidth ?? p.mediaWidth,
+        mediaHeight: mediaHeight ?? p.mediaHeight,
+        orientation: orientation ?? p.orientation,
+        autoRotate: autoRotate ?? p.autoRotate,
+        transverse: transverse ?? p.transverse,
+        printLayers: printLayers ?? p.printLayers,
+        placementX: placementX ?? p.placementX,
+        placementY: placementY ?? p.placementY,
+        scalingMode: scalingMode ?? p.scalingMode,
+        customScale: customScale ?? p.customScale,
+        tileOverlapH: tileOverlapH ?? p.tileOverlapH,
+        tileOverlapV: tileOverlapV ?? p.tileOverlapV,
+        tileRange: tileRange ?? p.tileRange
+    )
+}
+
 /// Convert a document to PDF bytes.
 public func documentToPdf(_ doc: Document) -> Data {
     let pages = collectPages(doc)

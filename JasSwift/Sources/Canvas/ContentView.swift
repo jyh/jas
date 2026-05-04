@@ -250,6 +250,9 @@ public struct ContentView: View {
                     .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
                     .focusedSceneValue(\.workspace, workspace)
                     .focusedSceneValue(\.activeAppearance, workspace.appConfig.activeAppearance)
+                    .focusedSceneValue(\.openYamlDialog, { dialogId in
+                        openYamlDialogFromMenu(dialogId)
+                    })
                     .allowsHitTesting(false)
             }
             .overlay {
@@ -471,6 +474,30 @@ public struct ContentView: View {
         let entry = CanvasEntry(model: model)
         workspace.canvases.append(entry)
         workspace.selectedTab = entry.id
+    }
+
+    /// Open a YAML dialog by id from a menu command. Builds liveState
+    /// from workspace defaults and threads `active_document` into the
+    /// outer scope so init: expressions can read persisted document
+    /// fields (PRINT.md §Phase 1B; matches the Rust dispatch path).
+    private func openYamlDialogFromMenu(_ dialogId: String) {
+        guard let model = workspace.activeModel else { return }
+        var liveState: [String: Any] = WorkspaceData.load()?.stateDefaults() ?? [:]
+        if let fill = model.defaultFill {
+            liveState["fill_color"] = "#" + fill.color.toHex()
+        }
+        if let stroke = model.defaultStroke {
+            liveState["stroke_color"] = "#" + stroke.color.toHex()
+        }
+        let outer: [String: Any] = [
+            "active_document": buildActiveDocumentView(model: model)
+        ]
+        yamlDialogState = openYamlDialogWithOuter(
+            dialogId: dialogId,
+            rawParams: [:],
+            liveState: liveState,
+            outerScope: outer
+        )
     }
 
     /// Close a canvas tab, prompting to save unsaved changes.

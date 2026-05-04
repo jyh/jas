@@ -1,5 +1,8 @@
 /// Layers panel menu definition.
 
+import AppKit
+import Foundation
+
 public enum LayersPanel {
     public static func menuItems() -> [PanelMenuItem] {
         [
@@ -647,8 +650,137 @@ public enum LayersPanel {
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
                 artboards: doc.artboards,
-                artboardOptions: newOpts
+                artboardOptions: newOpts,
+                documentSetup: doc.documentSetup,
+                printPreferences: doc.printPreferences
             )
+            return nil
+        }
+
+        // doc.set_document_setup_field — PRINT.md §1A
+        let docSetDocumentSetupFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let s = doc.documentSetup
+            let newSetup: DocumentSetup
+            switch field {
+            case "bleed_top":
+                guard case .number(let n) = val else { return nil }
+                newSetup = DocumentSetup(bleedTop: n, bleedRight: s.bleedRight,
+                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
+                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
+                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+            case "bleed_right":
+                guard case .number(let n) = val else { return nil }
+                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: n,
+                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
+                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
+                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+            case "bleed_bottom":
+                guard case .number(let n) = val else { return nil }
+                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
+                    bleedBottom: n, bleedLeft: s.bleedLeft,
+                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
+                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+            case "bleed_left":
+                guard case .number(let n) = val else { return nil }
+                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
+                    bleedBottom: s.bleedBottom, bleedLeft: n,
+                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
+                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+            case "bleed_uniform":
+                guard case .bool(let b) = val else { return nil }
+                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
+                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
+                    bleedUniform: b, showImagesOutline: s.showImagesOutline,
+                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+            case "show_images_outline":
+                guard case .bool(let b) = val else { return nil }
+                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
+                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
+                    bleedUniform: s.bleedUniform, showImagesOutline: b,
+                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+            case "highlight_substituted_glyphs":
+                guard case .bool(let b) = val else { return nil }
+                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
+                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
+                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
+                    highlightSubstitutedGlyphs: b)
+            default: return nil
+            }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: newSetup,
+                printPreferences: doc.printPreferences
+            )
+            return nil
+        }
+
+        // doc.set_print_preferences_field — PRINT.md §1B
+        let docSetPrintPreferencesFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            let np = applyPrintPrefField(p, field: field, val: val)
+            guard let updated = np else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // geometry.export_pdf — PRINT.md §1B. Generates a PDF from the
+        // current document and presents an NSSavePanel for the user to
+        // pick the destination. filename_hint optional.
+        let geometryExportPdfHandler: PlatformEffect = { value, _, _ in
+            let spec = value as? [String: Any] ?? [:]
+            let bytes = documentToPdf(model.document)
+            let hint: String = (spec["filename_hint"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? pdfFilenameForModel(model)
+            let panel = NSSavePanel()
+            panel.title = "Export to PDF"
+            panel.nameFieldStringValue = hint
+            panel.allowedContentTypes = [.pdf]
+            panel.allowsOtherFileTypes = false
+            guard panel.runModal() == .OK, let url = panel.url else { return nil }
+            do {
+                try bytes.write(to: url)
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.runModal()
+            }
             return nil
         }
 
@@ -715,8 +847,11 @@ public enum LayersPanel {
             "doc.duplicate_artboard": docDuplicateArtboardHandler,
             "doc.set_artboard_field": docSetArtboardFieldHandler,
             "doc.set_artboard_options_field": docSetArtboardOptionsFieldHandler,
+            "doc.set_document_setup_field": docSetDocumentSetupFieldHandler,
+            "doc.set_print_preferences_field": docSetPrintPreferencesFieldHandler,
             "doc.move_artboards_up": docMoveArtboardsUpHandler,
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
+            "geometry.export_pdf": geometryExportPdfHandler,
             "list_push": listPushHandler,
             "pop": popHandler,
         ]

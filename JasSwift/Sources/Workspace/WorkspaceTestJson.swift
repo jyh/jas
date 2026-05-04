@@ -281,6 +281,10 @@ private let menuBar: [(String, [MenuItem])] = [
         ("Open...", "open", "\u{2318}O"),
         ("Save", "save", "\u{2318}S"),
         ("---", "", ""),
+        ("Document Setup...", "document_setup", ""),
+        ("Print...", "print", "\u{2318}P"),
+        ("Export to PDF...", "export_to_pdf", ""),
+        ("---", "", ""),
         ("Close Tab", "close", "\u{2318}W"),
     ]),
     ("Edit", [
