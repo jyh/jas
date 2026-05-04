@@ -257,6 +257,10 @@ let menu_bar = [
     ("Open...", "open", "\xE2\x8C\x98O");
     ("Save", "save", "\xE2\x8C\x98S");
     ("---", "", "");
+    ("Document Setup...", "document_setup", "");
+    ("Print...", "print", "\xE2\x8C\x98P");
+    ("Export to PDF...", "export_to_pdf", "");
+    ("---", "", "");
     ("Close Tab", "close", "\xE2\x8C\x98W");
   ]);
   ("Edit", [

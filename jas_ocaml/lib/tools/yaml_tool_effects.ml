@@ -3796,7 +3796,152 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* doc.set_document_setup_field — PRINT.md §1A *)
+  let doc_set_document_setup_field spec ctx store =
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let s = doc.document_setup in
+          let new_setup =
+            let num_val () = eval_number (Some v) store ctx in
+            let bool_val () = eval_bool (Some v) store ctx in
+            match field with
+            | "bleed_top" -> Some { s with bleed_top = num_val () }
+            | "bleed_right" -> Some { s with bleed_right = num_val () }
+            | "bleed_bottom" -> Some { s with bleed_bottom = num_val () }
+            | "bleed_left" -> Some { s with bleed_left = num_val () }
+            | "bleed_uniform" -> Some { s with bleed_uniform = bool_val () }
+            | "show_images_outline" -> Some { s with show_images_outline = bool_val () }
+            | "highlight_substituted_glyphs" ->
+              Some { s with highlight_substituted_glyphs = bool_val () }
+            | _ -> None
+          in
+          (match new_setup with
+           | Some ns -> ctrl#set_document { doc with document_setup = ns }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.set_print_preferences_field — PRINT.md §1B *)
+  let doc_set_print_preferences_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let np : Print_preferences.t option =
+            let num () = eval_number (Some v) store ctx in
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "preset_name" ->
+              (match str_v () with Some s -> Some { p with preset_name = s } | None -> None)
+            | "printer_name" ->
+              (match str_v () with
+               | Some "" -> Some { p with printer_name = None }
+               | Some s -> Some { p with printer_name = Some s }
+               | None -> None)
+            | "copies" -> Some { p with copies = max 0 (int_of_float (num ())) }
+            | "collate" -> Some { p with collate = bool_v () }
+            | "reverse_order" -> Some { p with reverse_order = bool_v () }
+            | "artboard_range_mode" ->
+              (match str_v () with
+               | Some s -> Some { p with artboard_range_mode =
+                                Print_preferences.artboard_range_mode_of_string s }
+               | None -> None)
+            | "artboard_range" ->
+              (match str_v () with Some s -> Some { p with artboard_range = s } | None -> None)
+            | "ignore_artboards" -> Some { p with ignore_artboards = bool_v () }
+            | "skip_blank_artboards" -> Some { p with skip_blank_artboards = bool_v () }
+            | "media_size" ->
+              (match str_v () with
+               | Some s -> Some { p with media_size = Print_preferences.media_size_of_string s }
+               | None -> None)
+            | "media_width" -> Some { p with media_width = num () }
+            | "media_height" -> Some { p with media_height = num () }
+            | "orientation" ->
+              (match str_v () with
+               | Some s -> Some { p with orientation = Print_preferences.orientation_of_string s }
+               | None -> None)
+            | "auto_rotate" -> Some { p with auto_rotate = bool_v () }
+            | "transverse" -> Some { p with transverse = bool_v () }
+            | "print_layers" ->
+              (match str_v () with
+               | Some s -> Some { p with print_layers = Print_preferences.print_layers_of_string s }
+               | None -> None)
+            | "placement_x" -> Some { p with placement_x = num () }
+            | "placement_y" -> Some { p with placement_y = num () }
+            | "scaling_mode" ->
+              (match str_v () with
+               | Some s -> Some { p with scaling_mode = Print_preferences.scaling_mode_of_string s }
+               | None -> None)
+            | "custom_scale" -> Some { p with custom_scale = num () }
+            | "tile_overlap_h" -> Some { p with tile_overlap_h = num () }
+            | "tile_overlap_v" -> Some { p with tile_overlap_v = num () }
+            | "tile_range" ->
+              (match str_v () with Some s -> Some { p with tile_range = s } | None -> None)
+            | _ -> None
+          in
+          (match np with
+           | Some new_p -> ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* geometry.export_pdf — PRINT.md §1B. Generates a PDF and prompts
+     for a save location via GtkFileChooserDialog. *)
+  let geometry_export_pdf _ _ _ =
+    let doc = ctrl#document in
+    let bytes = Pdf.document_to_pdf doc in
+    let dialog = GWindow.file_chooser_dialog
+      ~action:`SAVE
+      ~title:"Export to PDF"
+      () in
+    dialog#add_button_stock `CANCEL `CANCEL;
+    dialog#add_button_stock `SAVE `ACCEPT;
+    dialog#set_current_name "Untitled.pdf";
+    let filter = GFile.filter ~name:"PDF Files" ~patterns:["*.pdf"] () in
+    dialog#add_filter filter;
+    dialog#set_filter filter;
+    dialog#set_do_overwrite_confirmation true;
+    (match dialog#run () with
+     | `ACCEPT ->
+       (match dialog#filename with
+        | Some path ->
+          let oc = open_out_bin path in
+          output_string oc bytes;
+          close_out oc
+        | None -> ())
+     | _ -> ());
+    dialog#destroy ();
+    `Null
+  in
+
   [ ("doc.snapshot", doc_snapshot);
+    ("doc.set_document_setup_field", doc_set_document_setup_field);
+    ("doc.set_print_preferences_field", doc_set_print_preferences_field);
+    ("geometry.export_pdf", geometry_export_pdf);
     ("doc.artboard.probe_hit", doc_artboard_probe_hit);
     ("doc.artboard.probe_hover", doc_artboard_probe_hover);
     ("doc.artboard.create_commit", doc_artboard_create_commit);

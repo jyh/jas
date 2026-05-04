@@ -170,6 +170,7 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "tree_view" -> render_tree_view ~packing ~ctx el
   | "element_preview" -> render_element_preview ~packing el
   | "dropdown" -> render_layers_filter_dropdown ~packing el
+  | "tabs" -> render_tabs ~packing ~ctx el
   | _ -> render_placeholder ~packing el
 
 and render_container ~packing ~ctx el etype =
@@ -1722,6 +1723,55 @@ and render_tree_view ~packing ~ctx:_ _el =
 and render_element_preview ~packing _el =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN ~packing () in
   frame#misc#set_size_request ~width:32 ~height:32 ()
+
+(* PRINT.md §1B: tabs widget. Left-rail tab list + content area
+   showing the active tab. Active tab read from [bind.value]
+   (typically dialog.<field>); falls back to first tab when no bind
+   or empty value. Click writes back the tab id (currently a no-op
+   for non-panel binds — same dialog-write limitation as Swift's
+   render_tabs and OCaml's other widgets). *)
+and render_tabs ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let tabs_arr = el |> member "tabs" |> to_list in
+  let first_id = match tabs_arr with
+    | t :: _ -> t |> member "id" |> to_string_option |> Option.value ~default:""
+    | [] -> "" in
+  let bind_expr = el |> member "bind" |> safe_member "value"
+                   |> to_string_option in
+  let active_id = match bind_expr with
+    | None -> first_id
+    | Some e ->
+      (match Expr_eval.evaluate e ctx with
+       | Expr_eval.Str s when s <> "" -> s
+       | _ -> first_id) in
+  let hbox = GPack.hbox ~spacing:0 ~packing () in
+  (* Left rail. *)
+  let rail = GPack.vbox ~spacing:0 ~packing:(hbox#pack ~expand:false) () in
+  rail#misc#set_size_request ~width:140 ();
+  List.iter (fun tab ->
+    let tab_id = tab |> member "id" |> to_string_option |> Option.value ~default:"" in
+    let label = tab |> member "label" |> to_string_option |> Option.value ~default:"" in
+    let is_active = tab_id = active_id in
+    let prefix = if is_active then "▸ " else "  " in
+    let btn = GButton.button
+      ~label:(prefix ^ label)
+      ~relief:`NONE
+      ~packing:(rail#pack ~expand:false) () in
+    (* Click handler: dialog-state write goes here once the framework
+       supports it. For now, a no-op for dialog binds. *)
+    ignore (btn#connect#clicked ~callback:(fun () -> ()))
+  ) tabs_arr;
+  (* Content area. *)
+  let content = GPack.vbox ~spacing:0 ~packing:(hbox#pack ~expand:true ~fill:true) () in
+  let active_content =
+    List.find_opt (fun t ->
+      (t |> member "id" |> to_string_option) = Some active_id
+    ) tabs_arr
+    |> Option.map (fun t -> t |> member "content")
+  in
+  (match active_content with
+   | Some c when c <> `Null -> render_element ~packing:(content#pack ~expand:true ~fill:true) ~ctx c
+   | _ -> ())
 
 and render_placeholder ~packing el =
   let open Yojson.Safe.Util in
