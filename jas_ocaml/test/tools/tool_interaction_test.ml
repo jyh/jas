@@ -757,7 +757,9 @@ let () =
           { Jas.Document.layers = [| layer |]; selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
             artboards = [];
-            artboard_options = Jas.Artboard.default_options };
+            artboard_options = Jas.Artboard.default_options;
+            document_setup = Jas.Document_setup.default;
+            print_preferences = Jas.Print_preferences.default };
         let ctrl = Jas.Controller.create ~model () in
         let ctx : Jas.Canvas_tool.tool_context = {
           model;
@@ -855,7 +857,9 @@ let () =
           { Jas.Document.layers = [| layer |]; selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
             artboards = [];
-            artboard_options = Jas.Artboard.default_options };
+            artboard_options = Jas.Artboard.default_options;
+            document_setup = Jas.Document_setup.default;
+            print_preferences = Jas.Print_preferences.default };
         let ctrl = Jas.Controller.create ~model () in
         let ctx : Jas.Canvas_tool.tool_context = {
           model;
@@ -906,7 +910,9 @@ let () =
           { Jas.Document.layers = [| layer |]; selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
             artboards = [];
-            artboard_options = Jas.Artboard.default_options };
+            artboard_options = Jas.Artboard.default_options;
+            document_setup = Jas.Document_setup.default;
+            print_preferences = Jas.Print_preferences.default };
         let ctrl = Jas.Controller.create ~model () in
         let ctx : Jas.Canvas_tool.tool_context = {
           model;

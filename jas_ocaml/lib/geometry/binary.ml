@@ -664,7 +664,9 @@ let unpack_document v =
      artboards; app load-time repair seeds a default. *)
   { layers; selected_layer; selection;
     artboards = [];
-    artboard_options = Artboard.default_options }
+    artboard_options = Artboard.default_options;
+    document_setup = Document_setup.default;
+    print_preferences = Print_preferences.default }
 
 (* -- Raw deflate compression --------------------------------------------- *)
 
