@@ -849,6 +849,8 @@ fn unpack_document(v: &Value) -> Document {
         selection,
         artboards: Vec::new(),
         artboard_options: crate::document::artboard::ArtboardOptions::default(),
+        document_setup: crate::document::document_setup::DocumentSetup::default(),
+        print_preferences: crate::document::print_preferences::PrintPreferences::default(),
     }
 }
 

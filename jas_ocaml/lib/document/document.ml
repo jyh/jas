@@ -101,6 +101,8 @@ type document = {
   selection : selection;
   artboards : Artboard.artboard list;
   artboard_options : Artboard.options;
+  document_setup : Document_setup.t;
+  print_preferences : Print_preferences.t;
 }
 
 let make_document
@@ -108,8 +110,11 @@ let make_document
     ?(selection = PathMap.empty)
     ?(artboards = [])
     ?(artboard_options = Artboard.default_options)
+    ?(document_setup = Document_setup.default)
+    ?(print_preferences = Print_preferences.default)
     layers =
-  { layers; selected_layer; selection; artboards; artboard_options }
+  { layers; selected_layer; selection; artboards; artboard_options;
+    document_setup; print_preferences }
 
 (** Build a fully-selected entry for [path]. *)
 let element_selection_all path =

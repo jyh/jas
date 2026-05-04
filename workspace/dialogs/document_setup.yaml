@@ -1,0 +1,168 @@
+document_setup:
+  summary: "Document Setup"
+  description: >
+    Modal dialog for editing per-document settings: bleed values
+    (PRINT.md §Phase 1A), an image-outline display toggle, and a
+    substituted-glyph highlight toggle. Edits are batched: changes
+    don't apply until OK; Cancel discards; OK records a single undo
+    entry.
+
+    Bleed is the slop area around an artboard that artwork extends
+    into for trim tolerance during commercial printing. Each side has
+    its own value in points. The chain-link toggle, when active,
+    propagates a single-side edit to all four sides — the chain state
+    persists with the document so the user's preferred mode survives
+    across sessions.
+
+    Phase-1 deferrals (parked for Phase 6 / global units): units
+    selector, transparency grid, transparency-flattener preset,
+    "Discard White Overprint in Output", "Simulate Colored Paper".
+
+    Phase-1A deferral: the chain-link toggle's bleed_uniform state
+    persists with the document, but mirroring a single-side edit to
+    all four fields is not yet wired (matches the artboard_options
+    chain-link precedent). User types each side individually in
+    Phase 1A.
+
+  modal: true
+  width: 460
+
+  state:
+    bleed_top:
+      type: number
+      default: 0
+    bleed_right:
+      type: number
+      default: 0
+    bleed_bottom:
+      type: number
+      default: 0
+    bleed_left:
+      type: number
+      default: 0
+    bleed_uniform:
+      type: bool
+      default: true
+    show_images_outline:
+      type: bool
+      default: false
+    highlight_substituted_glyphs:
+      type: bool
+      default: false
+
+  init:
+    bleed_top:    "active_document.document_setup.bleed_top"
+    bleed_right:  "active_document.document_setup.bleed_right"
+    bleed_bottom: "active_document.document_setup.bleed_bottom"
+    bleed_left:   "active_document.document_setup.bleed_left"
+    bleed_uniform: "active_document.document_setup.bleed_uniform"
+    show_images_outline: "active_document.document_setup.show_images_outline"
+    highlight_substituted_glyphs: "active_document.document_setup.highlight_substituted_glyphs"
+
+  content:
+    type: container
+    layout: column
+    style: { gap: 10, padding: 16 }
+    children:
+
+      # Bleed section header
+      - type: text
+        content: "Bleed"
+        style: { font_size: 11, font_weight: bold }
+
+      # Bleed grid: 2-row × 4-col grid of label/input pairs, with the
+      # chain-link icon spanning both rows on the right edge so it
+      # visually anchors the four-sides-locked relationship.
+      - type: container
+        layout: row
+        style: { gap: 12, alignment: center }
+        children:
+          - type: container
+            layout: column
+            style: { gap: 8, flex: 1 }
+            children:
+              - type: container
+                layout: row
+                style: { gap: 12, alignment: center }
+                children:
+                  - { type: text, content: "Top:",    style: { font_size: 11, width: 50 } }
+                  - id: ds_bleed_top
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_top" }
+                  - { type: text, content: "Bottom:", style: { font_size: 11, width: 60, padding_left: 12 } }
+                  - id: ds_bleed_bottom
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_bottom" }
+              - type: container
+                layout: row
+                style: { gap: 12, alignment: center }
+                children:
+                  - { type: text, content: "Left:",   style: { font_size: 11, width: 50 } }
+                  - id: ds_bleed_left
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_left" }
+                  - { type: text, content: "Right:",  style: { font_size: 11, width: 60, padding_left: 12 } }
+                  - id: ds_bleed_right
+                    type: number_input
+                    min: 0
+                    style: { width: 80 }
+                    bind: { value: "dialog.bleed_right" }
+          - id: ds_bleed_chain
+            type: icon_button
+            bind:
+              icon: 'if dialog.bleed_uniform then "chain_linked" else "chain_broken"'
+            summary: "Lock all four bleed sides to the same value"
+            description: >
+              Toggle — when engaged, editing any one bleed field
+              propagates the new value to all four. Document-
+              persistent.
+            style: { size: 20, width: 28, height: 28 }
+            behavior:
+              - event: click
+                action: document_setup_toggle_bleed_uniform
+
+      # Display section
+      - type: separator
+        orientation: horizontal
+      - type: text
+        content: "Display"
+        style: { font_size: 11, font_weight: bold }
+
+      - id: ds_show_images_outline
+        type: toggle
+        label: "Show Images In Outline Mode"
+        bind:
+          checked: "dialog.show_images_outline"
+
+      - id: ds_highlight_substituted
+        type: toggle
+        label: "Highlight Substituted Glyphs"
+        bind:
+          checked: "dialog.highlight_substituted_glyphs"
+
+      # Footer: Cancel / OK
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: end }
+        children:
+          - type: spacer
+            style: { flex: 1 }
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - type: button
+            label: "OK"
+            action: document_setup_confirm
+            variant: primary
+            params:
+              bleed_top: "dialog.bleed_top"
+              bleed_right: "dialog.bleed_right"
+              bleed_bottom: "dialog.bleed_bottom"
+              bleed_left: "dialog.bleed_left"
+              bleed_uniform: "dialog.bleed_uniform"
+              show_images_outline: "dialog.show_images_outline"
+              highlight_substituted_glyphs: "dialog.highlight_substituted_glyphs"

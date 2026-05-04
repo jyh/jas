@@ -54,12 +54,19 @@ type document = {
   selection : selection;
   artboards : Artboard.artboard list;
   artboard_options : Artboard.options;
+  (** Per-document Document Setup state: bleed + display toggles
+      (PRINT.md §Phase 1A). *)
+  document_setup : Document_setup.t;
+  (** Per-document Print dialog last-used state (PRINT.md §Phase 1B). *)
+  print_preferences : Print_preferences.t;
 }
 
 val make_document :
   ?selected_layer:int -> ?selection:selection ->
   ?artboards:Artboard.artboard list ->
   ?artboard_options:Artboard.options ->
+  ?document_setup:Document_setup.t ->
+  ?print_preferences:Print_preferences.t ->
   Element.element array -> document
 
 (** Convenience: build a fully-selected entry. *)

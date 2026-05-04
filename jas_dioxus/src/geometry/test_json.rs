@@ -7,6 +7,12 @@
 
 use crate::document::artboard::{Artboard, ArtboardFill, ArtboardOptions};
 use crate::document::document::{Document, ElementPath, ElementSelection, Selection, SelectionKind, SortedCps};
+use crate::document::document_setup::DocumentSetup;
+use crate::document::print_preferences::{
+    artboard_range_mode_from, artboard_range_mode_str, media_size_from, media_size_str,
+    orientation_from, orientation_str, print_layers_from, print_layers_str, scaling_mode_from,
+    scaling_mode_str, PrintPreferences,
+};
 use crate::geometry::element::*;
 
 // ---------------------------------------------------------------------------
@@ -593,6 +599,49 @@ fn artboard_options_json(opts: &ArtboardOptions) -> String {
     o.build()
 }
 
+fn document_setup_json(s: &DocumentSetup) -> String {
+    let mut o = JsonObj::new();
+    o.num("bleed_bottom", s.bleed_bottom);
+    o.num("bleed_left", s.bleed_left);
+    o.num("bleed_right", s.bleed_right);
+    o.num("bleed_top", s.bleed_top);
+    o.bool_val("bleed_uniform", s.bleed_uniform);
+    o.bool_val("highlight_substituted_glyphs", s.highlight_substituted_glyphs);
+    o.bool_val("show_images_outline", s.show_images_outline);
+    o.build()
+}
+
+fn print_preferences_json(p: &PrintPreferences) -> String {
+    let mut o = JsonObj::new();
+    o.str_val("artboard_range", &p.artboard_range);
+    o.str_val("artboard_range_mode", artboard_range_mode_str(&p.artboard_range_mode));
+    o.bool_val("auto_rotate", p.auto_rotate);
+    o.bool_val("collate", p.collate);
+    o.int("copies", p.copies as usize);
+    o.num("custom_scale", p.custom_scale);
+    o.bool_val("ignore_artboards", p.ignore_artboards);
+    o.num("media_height", p.media_height);
+    o.str_val("media_size", media_size_str(&p.media_size));
+    o.num("media_width", p.media_width);
+    o.str_val("orientation", orientation_str(&p.orientation));
+    o.num("placement_x", p.placement_x);
+    o.num("placement_y", p.placement_y);
+    o.str_val("preset_name", &p.preset_name);
+    o.str_val("print_layers", print_layers_str(&p.print_layers));
+    match &p.printer_name {
+        Some(s) => o.str_val("printer_name", s),
+        None => o.raw("printer_name", "null".to_string()),
+    }
+    o.bool_val("reverse_order", p.reverse_order);
+    o.str_val("scaling_mode", scaling_mode_str(&p.scaling_mode));
+    o.bool_val("skip_blank_artboards", p.skip_blank_artboards);
+    o.num("tile_overlap_h", p.tile_overlap_h);
+    o.num("tile_overlap_v", p.tile_overlap_v);
+    o.str_val("tile_range", &p.tile_range);
+    o.bool_val("transverse", p.transverse);
+    o.build()
+}
+
 /// Serialize a Document to canonical test JSON.
 ///
 /// The output is a compact JSON string with sorted keys and normalized
@@ -612,7 +661,13 @@ pub fn document_to_test_json(doc: &Document) -> String {
     if !doc.artboards.is_empty() {
         o.raw("artboards", artboards_json(&doc.artboards));
     }
+    if doc.document_setup != DocumentSetup::default() {
+        o.raw("document_setup", document_setup_json(&doc.document_setup));
+    }
     o.raw("layers", json_array(&layers));
+    if doc.print_preferences != PrintPreferences::default() {
+        o.raw("print_preferences", print_preferences_json(&doc.print_preferences));
+    }
     o.int("selected_layer", doc.selected_layer);
     o.raw("selection", selection_json(&doc.selection));
     o.build()
@@ -1039,6 +1094,55 @@ fn parse_artboard_options(v: &serde_json::Value) -> ArtboardOptions {
     }
 }
 
+fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
+    if v.is_null() || !v.is_object() {
+        return DocumentSetup::default();
+    }
+    let d = DocumentSetup::default();
+    DocumentSetup {
+        bleed_top: v["bleed_top"].as_f64().unwrap_or(d.bleed_top),
+        bleed_right: v["bleed_right"].as_f64().unwrap_or(d.bleed_right),
+        bleed_bottom: v["bleed_bottom"].as_f64().unwrap_or(d.bleed_bottom),
+        bleed_left: v["bleed_left"].as_f64().unwrap_or(d.bleed_left),
+        bleed_uniform: v["bleed_uniform"].as_bool().unwrap_or(d.bleed_uniform),
+        show_images_outline: v["show_images_outline"].as_bool().unwrap_or(d.show_images_outline),
+        highlight_substituted_glyphs: v["highlight_substituted_glyphs"].as_bool().unwrap_or(d.highlight_substituted_glyphs),
+    }
+}
+
+fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
+    if v.is_null() || !v.is_object() {
+        return PrintPreferences::default();
+    }
+    let d = PrintPreferences::default();
+    PrintPreferences {
+        preset_name: v["preset_name"].as_str().map(String::from).unwrap_or(d.preset_name),
+        printer_name: v["printer_name"].as_str().map(String::from),
+        copies: v["copies"].as_u64().map(|n| n as u32).unwrap_or(d.copies),
+        collate: v["collate"].as_bool().unwrap_or(d.collate),
+        reverse_order: v["reverse_order"].as_bool().unwrap_or(d.reverse_order),
+        artboard_range_mode: v["artboard_range_mode"].as_str()
+            .map(artboard_range_mode_from).unwrap_or(d.artboard_range_mode),
+        artboard_range: v["artboard_range"].as_str().map(String::from).unwrap_or(d.artboard_range),
+        ignore_artboards: v["ignore_artboards"].as_bool().unwrap_or(d.ignore_artboards),
+        skip_blank_artboards: v["skip_blank_artboards"].as_bool().unwrap_or(d.skip_blank_artboards),
+        media_size: v["media_size"].as_str().map(media_size_from).unwrap_or(d.media_size),
+        media_width: v["media_width"].as_f64().unwrap_or(d.media_width),
+        media_height: v["media_height"].as_f64().unwrap_or(d.media_height),
+        orientation: v["orientation"].as_str().map(orientation_from).unwrap_or(d.orientation),
+        auto_rotate: v["auto_rotate"].as_bool().unwrap_or(d.auto_rotate),
+        transverse: v["transverse"].as_bool().unwrap_or(d.transverse),
+        print_layers: v["print_layers"].as_str().map(print_layers_from).unwrap_or(d.print_layers),
+        placement_x: v["placement_x"].as_f64().unwrap_or(d.placement_x),
+        placement_y: v["placement_y"].as_f64().unwrap_or(d.placement_y),
+        scaling_mode: v["scaling_mode"].as_str().map(scaling_mode_from).unwrap_or(d.scaling_mode),
+        custom_scale: v["custom_scale"].as_f64().unwrap_or(d.custom_scale),
+        tile_overlap_h: v["tile_overlap_h"].as_f64().unwrap_or(d.tile_overlap_h),
+        tile_overlap_v: v["tile_overlap_v"].as_f64().unwrap_or(d.tile_overlap_v),
+        tile_range: v["tile_range"].as_str().map(String::from).unwrap_or(d.tile_range),
+    }
+}
+
 pub fn test_json_to_document(json: &str) -> Document {
     let v: serde_json::Value = serde_json::from_str(json)
         .expect("Failed to parse test JSON");
@@ -1048,12 +1152,16 @@ pub fn test_json_to_document(json: &str) -> Document {
     let selection = parse_selection(&v["selection"]);
     let artboards = parse_artboards(&v["artboards"]);
     let artboard_options = parse_artboard_options(&v["artboard_options"]);
+    let document_setup = parse_document_setup(&v["document_setup"]);
+    let print_preferences = parse_print_preferences(&v["print_preferences"]);
     Document {
         layers,
         selected_layer,
         selection,
         artboards,
         artboard_options,
+        document_setup,
+        print_preferences,
     }
 }
 
@@ -1282,8 +1390,88 @@ mod tests {
         let d = test_json_to_document(legacy);
         assert!(d.artboards.is_empty());
         assert_eq!(d.artboard_options, ArtboardOptions::default());
+        assert_eq!(d.document_setup, DocumentSetup::default());
         // Re-serializing yields the same bytes.
         let json2 = document_to_test_json(&d);
         assert_eq!(legacy, json2);
+    }
+
+    #[test]
+    fn document_setup_only_emitted_when_non_default() {
+        let d = Document::default();
+        let json = document_to_test_json(&d);
+        assert!(!json.contains("\"document_setup\""));
+
+        let mut d2 = Document::default();
+        d2.document_setup.bleed_top = 9.0;
+        let json2 = document_to_test_json(&d2);
+        assert!(json2.contains("\"document_setup\""));
+        assert!(json2.contains("\"bleed_top\":9.0"));
+    }
+
+    #[test]
+    fn document_setup_roundtrip() {
+        let mut d = Document::default();
+        d.document_setup = DocumentSetup {
+            bleed_top: 9.0,
+            bleed_right: 9.0,
+            bleed_bottom: 9.0,
+            bleed_left: 9.0,
+            bleed_uniform: false,
+            show_images_outline: true,
+            highlight_substituted_glyphs: true,
+        };
+        let json = document_to_test_json(&d);
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.document_setup, d.document_setup);
+    }
+
+    #[test]
+    fn print_preferences_only_emitted_when_non_default() {
+        let d = Document::default();
+        let json = document_to_test_json(&d);
+        assert!(!json.contains("\"print_preferences\""));
+
+        let mut d2 = Document::default();
+        d2.print_preferences.copies = 5;
+        let json2 = document_to_test_json(&d2);
+        assert!(json2.contains("\"print_preferences\""));
+        assert!(json2.contains("\"copies\":5"));
+    }
+
+    #[test]
+    fn print_preferences_roundtrip() {
+        use crate::document::print_preferences::{
+            ArtboardRangeMode, MediaSize, Orientation, PrintLayers, PrintPreferences, ScalingMode,
+        };
+        let mut d = Document::default();
+        d.print_preferences = PrintPreferences {
+            preset_name: "[Default]".to_string(),
+            printer_name: Some("My Laser".to_string()),
+            copies: 7,
+            collate: true,
+            reverse_order: true,
+            artboard_range_mode: ArtboardRangeMode::Range,
+            artboard_range: "1-3, 5".to_string(),
+            ignore_artboards: true,
+            skip_blank_artboards: true,
+            media_size: MediaSize::A4,
+            media_width: 595.28,
+            media_height: 841.89,
+            orientation: Orientation::Landscape,
+            auto_rotate: false,
+            transverse: true,
+            print_layers: PrintLayers::All,
+            placement_x: 12.0,
+            placement_y: 24.0,
+            scaling_mode: ScalingMode::Custom,
+            custom_scale: 75.5,
+            tile_overlap_h: 6.0,
+            tile_overlap_v: 6.0,
+            tile_range: "1-2".to_string(),
+        };
+        let json = document_to_test_json(&d);
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences, d.print_preferences);
     }
 }

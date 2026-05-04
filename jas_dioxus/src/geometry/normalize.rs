@@ -19,6 +19,8 @@ pub fn normalize_document(doc: &Document) -> Document {
         selection: doc.selection.clone(),
         artboards: doc.artboards.clone(),
         artboard_options: doc.artboard_options.clone(),
+        document_setup: doc.document_setup.clone(),
+        print_preferences: doc.print_preferences.clone(),
     }
 }
 

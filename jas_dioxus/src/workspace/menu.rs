@@ -21,6 +21,10 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         ("Open...", "open", "\u{2318}O"),
         ("Save", "save", "\u{2318}S"),
         SEP,
+        ("Document Setup...", "document_setup", ""),
+        ("Print...", "print", "\u{2318}P"),
+        ("Export to PDF...", "export_to_pdf", ""),
+        SEP,
         ("Close Tab", "close", "\u{2318}W"),
     ]),
     ("Edit", &[
@@ -70,6 +74,7 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
 /// All known dispatch command strings.
 pub const DISPATCH_COMMANDS: &[&str] = &[
     "new", "open", "save", "close",
+    "document_setup", "print", "export_to_pdf",
     "undo", "redo",
     "cut", "copy", "paste", "paste_in_place",
     "select_all", "delete",
@@ -236,7 +241,18 @@ mod tests {
     #[test]
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
-        assert_eq!(total, 41); // 5 + 10 + 9 + 17 (Window grows with Magic Wand)
+        // 9 (File: +Document Setup +Print +Export to PDF +separator)
+        // + 10 (Edit) + 9 (Object) + 17 (Window) = 45
+        assert_eq!(total, 45);
+    }
+
+    #[test]
+    fn file_menu_has_print_pipeline_entries() {
+        let (_, items) = &MENU_BAR[0];
+        let labels: Vec<&str> = items.iter().map(|(l, _, _)| *l).collect();
+        assert!(labels.contains(&"Document Setup..."));
+        assert!(labels.contains(&"Print..."));
+        assert!(labels.contains(&"Export to PDF..."));
     }
 
     #[test]

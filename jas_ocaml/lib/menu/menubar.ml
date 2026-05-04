@@ -344,6 +344,47 @@ let save_as (model : Model.model) (parent : GWindow.window) () =
 let is_untitled filename =
   String.length filename >= 9 && String.sub filename 0 9 = "Untitled-"
 
+(** Strip a known extension from [filename] and append .pdf. Falls
+    back to "Untitled.pdf" for empty / Untitled-N names. *)
+let pdf_filename_for filename =
+  let trimmed = String.trim filename in
+  if trimmed = "" || is_untitled trimmed then "Untitled.pdf"
+  else
+    let stem =
+      try Filename.chop_extension trimmed
+      with Invalid_argument _ -> trimmed
+    in
+    Filename.basename stem ^ ".pdf"
+
+(** PRINT.md §1B File menu Export to PDF... entry. Generates a PDF
+    via Pdf.document_to_pdf and writes it to a user-chosen path. *)
+let export_to_pdf (model : Model.model) (parent : GWindow.window) () =
+  let dialog = GWindow.file_chooser_dialog
+    ~action:`SAVE
+    ~title:"Export to PDF"
+    ~parent
+    () in
+  dialog#add_button_stock `CANCEL `CANCEL;
+  dialog#add_button_stock `SAVE `ACCEPT;
+  dialog#set_current_name (pdf_filename_for model#filename);
+  let filter = GFile.filter ~name:"PDF Files" ~patterns:["*.pdf"] () in
+  dialog#add_filter filter;
+  dialog#set_filter filter;
+  dialog#set_do_overwrite_confirmation true;
+  begin match dialog#run () with
+  | `ACCEPT ->
+    begin match dialog#filename with
+    | Some path ->
+      let bytes = Pdf.document_to_pdf model#document in
+      let oc = open_out_bin path in
+      output_string oc bytes;
+      close_out oc
+    | None -> ()
+    end
+  | _ -> ()
+  end;
+  dialog#destroy ()
+
 let save (model : Model.model) (parent : GWindow.window) () =
   if is_untitled model#filename then
     save_as model parent ()
@@ -409,6 +450,14 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   ignore (file_factory#add_item "Save" ~key:GdkKeysyms._s ~callback:(fun () -> save (m ()) parent ()));
   ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(fun () -> save_as (m ()) parent ()));
   ignore (file_factory#add_item "Revert" ~callback:(revert m parent));
+  ignore (file_factory#add_separator ());
+  (* PRINT.md §1: Document Setup, Print, Export to PDF. *)
+  ignore (file_factory#add_item "Document Setup..." ~callback:(fun () ->
+    print_endline "Document Setup (deferred: GTK dialog wiring)"));
+  ignore (file_factory#add_item "Print..." ~key:GdkKeysyms._p ~callback:(fun () ->
+    print_endline "Print (deferred: GTK dialog wiring)"));
+  ignore (file_factory#add_item "Export to PDF..." ~callback:(fun () ->
+    export_to_pdf (m ()) parent ()));
   ignore (file_factory#add_separator ());
   ignore (file_factory#add_item "Quit" ~key:GdkKeysyms._q ~callback:(fun () -> GMain.quit ()));
 

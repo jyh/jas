@@ -273,12 +273,143 @@ def build_artboard_handlers(model) -> dict:
             )
         return None
 
+    # PRINT.md §1A
+    def doc_set_document_setup_field(spec, call_ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        s = model.document.document_setup
+        bleed_fields = {
+            "bleed_top", "bleed_right", "bleed_bottom", "bleed_left",
+        }
+        bool_fields = {
+            "bleed_uniform", "show_images_outline", "highlight_substituted_glyphs",
+        }
+        if field in bleed_fields:
+            if not isinstance(value, (int, float)):
+                return None
+            new_s = dataclasses.replace(s, **{field: float(value)})
+        elif field in bool_fields:
+            if not isinstance(value, bool):
+                return None
+            new_s = dataclasses.replace(s, **{field: value})
+        else:
+            return None
+        model.document = dataclasses.replace(model.document, document_setup=new_s)
+        return None
+
+    # PRINT.md §1B
+    def doc_set_print_preferences_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            ArtboardRangeMode, MediaSize, Orientation, PrintLayers, ScalingMode,
+            _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        # Field → (expected python type or enum class, optional cast).
+        if field in {"copies"}:
+            if not isinstance(value, (int, float)):
+                return None
+            new_p = dataclasses.replace(p, **{field: max(0, int(value))})
+        elif field in {"media_width", "media_height", "placement_x", "placement_y",
+                       "custom_scale", "tile_overlap_h", "tile_overlap_v"}:
+            if not isinstance(value, (int, float)):
+                return None
+            new_p = dataclasses.replace(p, **{field: float(value)})
+        elif field in {"collate", "reverse_order", "ignore_artboards",
+                       "skip_blank_artboards", "auto_rotate", "transverse"}:
+            if not isinstance(value, bool):
+                return None
+            new_p = dataclasses.replace(p, **{field: value})
+        elif field in {"preset_name", "artboard_range", "tile_range"}:
+            if not isinstance(value, str):
+                return None
+            new_p = dataclasses.replace(p, **{field: value})
+        elif field == "printer_name":
+            if value is None:
+                new_p = dataclasses.replace(p, printer_name=None)
+            elif isinstance(value, str):
+                new_p = dataclasses.replace(
+                    p, printer_name=value if value else None)
+            else:
+                return None
+        elif field == "artboard_range_mode":
+            if not isinstance(value, str):
+                return None
+            new_p = dataclasses.replace(p, artboard_range_mode=_enum_from_string(
+                ArtboardRangeMode, value, p.artboard_range_mode))
+        elif field == "media_size":
+            if not isinstance(value, str):
+                return None
+            new_p = dataclasses.replace(p, media_size=_enum_from_string(
+                MediaSize, value, p.media_size))
+        elif field == "orientation":
+            if not isinstance(value, str):
+                return None
+            new_p = dataclasses.replace(p, orientation=_enum_from_string(
+                Orientation, value, p.orientation))
+        elif field == "print_layers":
+            if not isinstance(value, str):
+                return None
+            new_p = dataclasses.replace(p, print_layers=_enum_from_string(
+                PrintLayers, value, p.print_layers))
+        elif field == "scaling_mode":
+            if not isinstance(value, str):
+                return None
+            new_p = dataclasses.replace(p, scaling_mode=_enum_from_string(
+                ScalingMode, value, p.scaling_mode))
+        else:
+            return None
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
+    # PRINT.md §1B
+    def geometry_export_pdf(_spec, _call_ctx, _store):
+        from geometry.pdf import document_to_pdf
+        from PySide6.QtWidgets import QFileDialog
+        bytes_ = document_to_pdf(model.document)
+        # Suggested name: strip known extension on model.filename, append .pdf.
+        # When no model attr exists, default to "Untitled.pdf".
+        suggested = "Untitled.pdf"
+        fname = getattr(model, "filename", "") or ""
+        if fname and not fname.startswith("Untitled-"):
+            stem = fname.rsplit(".", 1)[0] if "." in fname else fname
+            suggested = f"{stem}.pdf"
+        path, _ = QFileDialog.getSaveFileName(
+            None, "Export to PDF", suggested, "PDF Files (*.pdf)")
+        if path:
+            with open(path, "wb") as f:
+                f.write(bytes_)
+        return None
+
     return {
         "doc.create_artboard": doc_create_artboard,
         "doc.delete_artboard_by_id": doc_delete_artboard_by_id,
         "doc.duplicate_artboard": doc_duplicate_artboard,
         "doc.set_artboard_field": doc_set_artboard_field,
         "doc.set_artboard_options_field": doc_set_artboard_options_field,
+        "doc.set_document_setup_field": doc_set_document_setup_field,
+        "doc.set_print_preferences_field": doc_set_print_preferences_field,
         "doc.move_artboards_up": doc_move_artboards_up,
         "doc.move_artboards_down": doc_move_artboards_down,
+        "geometry.export_pdf": geometry_export_pdf,
     }

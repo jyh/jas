@@ -34,6 +34,8 @@ def build_active_document_view(
     ab_sel = list(artboards_panel_selection or [])
 
     if model is None:
+        from document.document_setup import DocumentSetup
+        from document.print_preferences import PrintPreferences
         return {
             "top_level_layers": [],
             "top_level_layer_paths": [],
@@ -48,6 +50,8 @@ def build_active_document_view(
                 "fade_region_outside_artboard": True,
                 "update_while_dragging": True,
             },
+            "document_setup": _document_setup_view(DocumentSetup()),
+            "print_preferences": _print_preferences_view(PrintPreferences()),
             "artboards_count": 0,
             "next_artboard_name": "Artboard 1",
             "current_artboard_id": None,
@@ -145,11 +149,53 @@ def build_active_document_view(
             "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
             "update_while_dragging": doc.artboard_options.update_while_dragging,
         },
+        "document_setup": _document_setup_view(doc.document_setup),
+        "print_preferences": _print_preferences_view(doc.print_preferences),
         "artboards_count": len(doc.artboards),
         "next_artboard_name": next_artboard_name(doc.artboards),
         "current_artboard_id": current_artboard_id,
         "current_artboard": current_artboard_view,
         "artboards_panel_selection_ids": ab_sel,
+    }
+
+
+def _document_setup_view(s) -> dict:
+    return {
+        "bleed_top": s.bleed_top,
+        "bleed_right": s.bleed_right,
+        "bleed_bottom": s.bleed_bottom,
+        "bleed_left": s.bleed_left,
+        "bleed_uniform": s.bleed_uniform,
+        "show_images_outline": s.show_images_outline,
+        "highlight_substituted_glyphs": s.highlight_substituted_glyphs,
+    }
+
+
+def _print_preferences_view(p) -> dict:
+    return {
+        "preset_name": p.preset_name,
+        "printer_name": p.printer_name,
+        "copies": p.copies,
+        "collate": p.collate,
+        "reverse_order": p.reverse_order,
+        "artboard_range_mode": p.artboard_range_mode.value,
+        "artboard_range": p.artboard_range,
+        "ignore_artboards": p.ignore_artboards,
+        "skip_blank_artboards": p.skip_blank_artboards,
+        "media_size": p.media_size.value,
+        "media_width": p.media_width,
+        "media_height": p.media_height,
+        "orientation": p.orientation.value,
+        "auto_rotate": p.auto_rotate,
+        "transverse": p.transverse,
+        "print_layers": p.print_layers.value,
+        "placement_x": p.placement_x,
+        "placement_y": p.placement_y,
+        "scaling_mode": p.scaling_mode.value,
+        "custom_scale": p.custom_scale,
+        "tile_overlap_h": p.tile_overlap_h,
+        "tile_overlap_v": p.tile_overlap_v,
+        "tile_range": p.tile_range,
     }
 
 

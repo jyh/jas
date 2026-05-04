@@ -504,6 +504,49 @@ def _artboard_options_json(opts):
     return o.build()
 
 
+def _document_setup_json(s):
+    o = _JsonObj()
+    o.num("bleed_bottom", s.bleed_bottom)
+    o.num("bleed_left", s.bleed_left)
+    o.num("bleed_right", s.bleed_right)
+    o.num("bleed_top", s.bleed_top)
+    o.bool_("bleed_uniform", s.bleed_uniform)
+    o.bool_("highlight_substituted_glyphs", s.highlight_substituted_glyphs)
+    o.bool_("show_images_outline", s.show_images_outline)
+    return o.build()
+
+
+def _print_preferences_json(p):
+    o = _JsonObj()
+    o.str("artboard_range", p.artboard_range)
+    o.str("artboard_range_mode", p.artboard_range_mode.value)
+    o.bool_("auto_rotate", p.auto_rotate)
+    o.bool_("collate", p.collate)
+    o.int_("copies", p.copies)
+    o.num("custom_scale", p.custom_scale)
+    o.bool_("ignore_artboards", p.ignore_artboards)
+    o.num("media_height", p.media_height)
+    o.str("media_size", p.media_size.value)
+    o.num("media_width", p.media_width)
+    o.str("orientation", p.orientation.value)
+    o.num("placement_x", p.placement_x)
+    o.num("placement_y", p.placement_y)
+    o.str("preset_name", p.preset_name)
+    o.str("print_layers", p.print_layers.value)
+    if p.printer_name is None:
+        o.raw("printer_name", "null")
+    else:
+        o.str("printer_name", p.printer_name)
+    o.bool_("reverse_order", p.reverse_order)
+    o.str("scaling_mode", p.scaling_mode.value)
+    o.bool_("skip_blank_artboards", p.skip_blank_artboards)
+    o.num("tile_overlap_h", p.tile_overlap_h)
+    o.num("tile_overlap_v", p.tile_overlap_v)
+    o.str("tile_range", p.tile_range)
+    o.bool_("transverse", p.transverse)
+    return o.build()
+
+
 def document_to_test_json(doc: Document) -> str:
     """Serialize a Document to canonical test JSON.
 
@@ -516,13 +559,19 @@ def document_to_test_json(doc: Document) -> str:
     holds.
     """
     from document.artboard import ArtboardOptions
+    from document.document_setup import DocumentSetup
+    from document.print_preferences import PrintPreferences
     layers = [_element_json(l) for l in doc.layers]
     o = _JsonObj()
     if doc.artboard_options != ArtboardOptions():
         o.raw("artboard_options", _artboard_options_json(doc.artboard_options))
     if len(doc.artboards) > 0:
         o.raw("artboards", _artboards_json(doc.artboards))
+    if doc.document_setup != DocumentSetup():
+        o.raw("document_setup", _document_setup_json(doc.document_setup))
     o.raw("layers", _json_array(layers))
+    if doc.print_preferences != PrintPreferences():
+        o.raw("print_preferences", _print_preferences_json(doc.print_preferences))
     o.int_("selected_layer", doc.selected_layer)
     o.raw("selection", _selection_json(doc.selection))
     return o.build()
@@ -849,6 +898,62 @@ def _parse_artboard_options(v):
     )
 
 
+def _parse_document_setup(v):
+    from document.document_setup import DocumentSetup
+    if not isinstance(v, dict):
+        return DocumentSetup()
+    d = DocumentSetup()
+    return DocumentSetup(
+        bleed_top=v.get("bleed_top", d.bleed_top),
+        bleed_right=v.get("bleed_right", d.bleed_right),
+        bleed_bottom=v.get("bleed_bottom", d.bleed_bottom),
+        bleed_left=v.get("bleed_left", d.bleed_left),
+        bleed_uniform=v.get("bleed_uniform", d.bleed_uniform),
+        show_images_outline=v.get("show_images_outline", d.show_images_outline),
+        highlight_substituted_glyphs=v.get(
+            "highlight_substituted_glyphs", d.highlight_substituted_glyphs),
+    )
+
+
+def _parse_print_preferences(v):
+    from document.print_preferences import (
+        PrintPreferences, ArtboardRangeMode, MediaSize, Orientation,
+        PrintLayers, ScalingMode, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return PrintPreferences()
+    d = PrintPreferences()
+    return PrintPreferences(
+        preset_name=v.get("preset_name", d.preset_name),
+        printer_name=v.get("printer_name", d.printer_name),
+        copies=v.get("copies", d.copies),
+        collate=v.get("collate", d.collate),
+        reverse_order=v.get("reverse_order", d.reverse_order),
+        artboard_range_mode=_enum_from_string(
+            ArtboardRangeMode, v.get("artboard_range_mode", ""), d.artboard_range_mode),
+        artboard_range=v.get("artboard_range", d.artboard_range),
+        ignore_artboards=v.get("ignore_artboards", d.ignore_artboards),
+        skip_blank_artboards=v.get("skip_blank_artboards", d.skip_blank_artboards),
+        media_size=_enum_from_string(MediaSize, v.get("media_size", ""), d.media_size),
+        media_width=v.get("media_width", d.media_width),
+        media_height=v.get("media_height", d.media_height),
+        orientation=_enum_from_string(
+            Orientation, v.get("orientation", ""), d.orientation),
+        auto_rotate=v.get("auto_rotate", d.auto_rotate),
+        transverse=v.get("transverse", d.transverse),
+        print_layers=_enum_from_string(
+            PrintLayers, v.get("print_layers", ""), d.print_layers),
+        placement_x=v.get("placement_x", d.placement_x),
+        placement_y=v.get("placement_y", d.placement_y),
+        scaling_mode=_enum_from_string(
+            ScalingMode, v.get("scaling_mode", ""), d.scaling_mode),
+        custom_scale=v.get("custom_scale", d.custom_scale),
+        tile_overlap_h=v.get("tile_overlap_h", d.tile_overlap_h),
+        tile_overlap_v=v.get("tile_overlap_v", d.tile_overlap_v),
+        tile_range=v.get("tile_range", d.tile_range),
+    )
+
+
 def test_json_to_document(json_str: str) -> Document:
     """Parse canonical test JSON into a Document.
 
@@ -862,10 +967,14 @@ def test_json_to_document(json_str: str) -> Document:
     selection = _parse_selection(d["selection"])
     artboards = _parse_artboards(d.get("artboards", []))
     artboard_options = _parse_artboard_options(d.get("artboard_options", None))
+    document_setup = _parse_document_setup(d.get("document_setup", None))
+    print_preferences = _parse_print_preferences(d.get("print_preferences", None))
     return Document(layers=layers, selected_layer=selected_layer,
                     selection=selection,
                     artboards=artboards,
-                    artboard_options=artboard_options)
+                    artboard_options=artboard_options,
+                    document_setup=document_setup,
+                    print_preferences=print_preferences)
 
 # Prevent pytest from collecting this function as a test (the file name
 # test_json.py matches pytest's test_*.py pattern).

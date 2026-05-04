@@ -3489,6 +3489,488 @@
         }
       ]
     },
+    "open_document_setup": {
+      "description": "Open the Document Setup dialog. Init expressions copy the current document_setup fields into dialog state so edits are local until OK.\n",
+      "category": "document",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "document_setup"
+          }
+        }
+      ]
+    },
+    "document_setup_confirm": {
+      "description": "Commit the Document Setup dialog. Writes all DocumentSetup fields via doc.set_document_setup_field. Single undo op covers the batch; close_dialog dismisses.\n",
+      "category": "document",
+      "params": {
+        "bleed_top": {
+          "type": "number"
+        },
+        "bleed_right": {
+          "type": "number"
+        },
+        "bleed_bottom": {
+          "type": "number"
+        },
+        "bleed_left": {
+          "type": "number"
+        },
+        "bleed_uniform": {
+          "type": "bool"
+        },
+        "show_images_outline": {
+          "type": "bool"
+        },
+        "highlight_substituted_glyphs": {
+          "type": "bool"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_top",
+            "value": "param.bleed_top"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_right",
+            "value": "param.bleed_right"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_bottom",
+            "value": "param.bleed_bottom"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_left",
+            "value": "param.bleed_left"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "bleed_uniform",
+            "value": "param.bleed_uniform"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "show_images_outline",
+            "value": "param.show_images_outline"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "highlight_substituted_glyphs",
+            "value": "param.highlight_substituted_glyphs"
+          }
+        },
+        "clear_dialog_snapshot",
+        "close_dialog"
+      ]
+    },
+    "document_setup_toggle_bleed_uniform": {
+      "description": "Toggle dialog.bleed_uniform. Phase-1A deferral: dialog state mutation from action effects is not yet wired (matches toggle_artboard_chain_link precedent). The chain-link icon ships visually but the click is a no-op until the dialog-state effect framework lands.\n",
+      "category": "document",
+      "effects": [
+        {
+          "log": "document_setup_toggle_bleed_uniform (native, deferred)"
+        }
+      ]
+    },
+    "open_print_dialog": {
+      "description": "Open the Print dialog. Init expressions copy active_document.print_preferences.* into dialog state so edits are local until Print or Done.\n",
+      "category": "document",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "print"
+          }
+        }
+      ]
+    },
+    "print_dialog_done": {
+      "description": "Commit PrintPreferences from dialog state and close. \"Done\" saves the preferences without triggering a print job (the user may want to print later via Cmd+P with the saved settings).\n",
+      "category": "document",
+      "params": {
+        "preset_name": {
+          "type": "string"
+        },
+        "copies": {
+          "type": "number"
+        },
+        "collate": {
+          "type": "bool"
+        },
+        "reverse_order": {
+          "type": "bool"
+        },
+        "artboard_range_mode": {
+          "type": "string"
+        },
+        "artboard_range": {
+          "type": "string"
+        },
+        "ignore_artboards": {
+          "type": "bool"
+        },
+        "skip_blank_artboards": {
+          "type": "bool"
+        },
+        "media_size": {
+          "type": "string"
+        },
+        "media_width": {
+          "type": "number"
+        },
+        "media_height": {
+          "type": "number"
+        },
+        "orientation": {
+          "type": "string"
+        },
+        "auto_rotate": {
+          "type": "bool"
+        },
+        "transverse": {
+          "type": "bool"
+        },
+        "print_layers": {
+          "type": "string"
+        },
+        "placement_x": {
+          "type": "number"
+        },
+        "placement_y": {
+          "type": "number"
+        },
+        "scaling_mode": {
+          "type": "string"
+        },
+        "custom_scale": {
+          "type": "number"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_print_preferences_field": {
+            "field": "preset_name",
+            "value": "param.preset_name"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "copies",
+            "value": "param.copies"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "collate",
+            "value": "param.collate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "reverse_order",
+            "value": "param.reverse_order"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range_mode",
+            "value": "param.artboard_range_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range",
+            "value": "param.artboard_range"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "ignore_artboards",
+            "value": "param.ignore_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "skip_blank_artboards",
+            "value": "param.skip_blank_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_size",
+            "value": "param.media_size"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_width",
+            "value": "param.media_width"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_height",
+            "value": "param.media_height"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "orientation",
+            "value": "param.orientation"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "auto_rotate",
+            "value": "param.auto_rotate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "transverse",
+            "value": "param.transverse"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "print_layers",
+            "value": "param.print_layers"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_x",
+            "value": "param.placement_x"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_y",
+            "value": "param.placement_y"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "scaling_mode",
+            "value": "param.scaling_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "custom_scale",
+            "value": "param.custom_scale"
+          }
+        },
+        "clear_dialog_snapshot",
+        "close_dialog"
+      ]
+    },
+    "print_dialog_print": {
+      "description": "Commit PrintPreferences and trigger PDF generation. Same field writes as print_dialog_done, then close_dialog. The actual PDF build + browser download is intercepted on the native side (Rust menu_bar reroutes \"print\" to call geometry::pdf with the now-saved preferences). Flask logs the print intent.\n",
+      "category": "document",
+      "params": {
+        "preset_name": {
+          "type": "string"
+        },
+        "copies": {
+          "type": "number"
+        },
+        "collate": {
+          "type": "bool"
+        },
+        "reverse_order": {
+          "type": "bool"
+        },
+        "artboard_range_mode": {
+          "type": "string"
+        },
+        "artboard_range": {
+          "type": "string"
+        },
+        "ignore_artboards": {
+          "type": "bool"
+        },
+        "skip_blank_artboards": {
+          "type": "bool"
+        },
+        "media_size": {
+          "type": "string"
+        },
+        "media_width": {
+          "type": "number"
+        },
+        "media_height": {
+          "type": "number"
+        },
+        "orientation": {
+          "type": "string"
+        },
+        "auto_rotate": {
+          "type": "bool"
+        },
+        "transverse": {
+          "type": "bool"
+        },
+        "print_layers": {
+          "type": "string"
+        },
+        "placement_x": {
+          "type": "number"
+        },
+        "placement_y": {
+          "type": "number"
+        },
+        "scaling_mode": {
+          "type": "string"
+        },
+        "custom_scale": {
+          "type": "number"
+        }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "doc.set_print_preferences_field": {
+            "field": "preset_name",
+            "value": "param.preset_name"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "copies",
+            "value": "param.copies"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "collate",
+            "value": "param.collate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "reverse_order",
+            "value": "param.reverse_order"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range_mode",
+            "value": "param.artboard_range_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "artboard_range",
+            "value": "param.artboard_range"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "ignore_artboards",
+            "value": "param.ignore_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "skip_blank_artboards",
+            "value": "param.skip_blank_artboards"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_size",
+            "value": "param.media_size"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_width",
+            "value": "param.media_width"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "media_height",
+            "value": "param.media_height"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "orientation",
+            "value": "param.orientation"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "auto_rotate",
+            "value": "param.auto_rotate"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "transverse",
+            "value": "param.transverse"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "print_layers",
+            "value": "param.print_layers"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_x",
+            "value": "param.placement_x"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "placement_y",
+            "value": "param.placement_y"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "scaling_mode",
+            "value": "param.scaling_mode"
+          }
+        },
+        {
+          "doc.set_print_preferences_field": {
+            "field": "custom_scale",
+            "value": "param.custom_scale"
+          }
+        },
+        "clear_dialog_snapshot",
+        {
+          "geometry.export_pdf": {}
+        },
+        "close_dialog"
+      ]
+    },
+    "noop": {
+      "description": "Disabled-button stub. Used by Phase-1B Print dialog footer buttons (Page Setup..., Setup...) that are placeholders until OS-driver hookup lands.\n",
+      "category": "document",
+      "enabled_when": "false",
+      "effects": [
+        {
+          "log": "noop"
+        }
+      ]
+    },
     "open_brush_options": {
       "description": "Open the Brush Options dialog. Mode is one of create, library_edit, instance_edit (see BRUSH_OPTIONS_DIALOG.md \u00a7Modes). Library + brush_slug parameters select the master brush; instance_edit reads the brush from the canvas selection's jas:stroke-brush attribute.\n",
       "category": "brushes",
@@ -4722,6 +5204,14 @@
     "chain": {
       "viewbox": "0 0 16 16",
       "svg": "<path d=\"M6,4 C6,2 10,2 10,4 L10,6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <path d=\"M6,12 C6,14 10,14 10,12 L10,10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"6\" x2=\"6\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <line x1=\"10\" y1=\"6\" x2=\"10\" y2=\"10\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>\n"
+    },
+    "chain_linked": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"6\" width=\"6\" height=\"4\" rx=\"2\" ry=\"2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/>\n<rect x=\"8\" y=\"6\" width=\"6\" height=\"4\" rx=\"2\" ry=\"2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/>\n"
+    },
+    "chain_broken": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"6\" width=\"5\" height=\"4\" rx=\"2\" ry=\"2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/>\n<rect x=\"9\" y=\"6\" width=\"5\" height=\"4\" rx=\"2\" ry=\"2\"\n      fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/>\n<line x1=\"6\" y1=\"11\" x2=\"10\" y2=\"5\"\n      stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>\n"
     },
     "swap": {
       "viewbox": "0 0 16 16",
@@ -6334,6 +6824,13 @@
           "label": "&Revert",
           "action": "revert",
           "enabled_when": "active_document.is_modified and active_document.has_filename"
+        },
+        "separator",
+        {
+          "id": "menu_document_setup",
+          "label": "Document Set&up...",
+          "action": "open_document_setup",
+          "enabled_when": "state.tab_count > 0"
         },
         "separator",
         {
@@ -25442,6 +25939,272 @@
         ]
       }
     },
+    "document_setup": {
+      "summary": "Document Setup",
+      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase-1 deferrals (parked for Phase 6 / global units): units selector, transparency grid, transparency-flattener preset, \"Discard White Overprint in Output\", \"Simulate Colored Paper\".\nPhase-1A deferral: the chain-link toggle's bleed_uniform state persists with the document, but mirroring a single-side edit to all four fields is not yet wired (matches the artboard_options chain-link precedent). User types each side individually in Phase 1A.\n",
+      "modal": true,
+      "width": 460,
+      "state": {
+        "bleed_top": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_right": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_bottom": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_left": {
+          "type": "number",
+          "default": 0
+        },
+        "bleed_uniform": {
+          "type": "bool",
+          "default": true
+        },
+        "show_images_outline": {
+          "type": "bool",
+          "default": false
+        },
+        "highlight_substituted_glyphs": {
+          "type": "bool",
+          "default": false
+        }
+      },
+      "init": {
+        "bleed_top": "active_document.document_setup.bleed_top",
+        "bleed_right": "active_document.document_setup.bleed_right",
+        "bleed_bottom": "active_document.document_setup.bleed_bottom",
+        "bleed_left": "active_document.document_setup.bleed_left",
+        "bleed_uniform": "active_document.document_setup.bleed_uniform",
+        "show_images_outline": "active_document.document_setup.show_images_outline",
+        "highlight_substituted_glyphs": "active_document.document_setup.highlight_substituted_glyphs"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 10,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "Bleed",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 12,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "container",
+                "layout": "column",
+                "style": {
+                  "gap": 8,
+                  "flex": 1
+                },
+                "children": [
+                  {
+                    "type": "container",
+                    "layout": "row",
+                    "style": {
+                      "gap": 12,
+                      "alignment": "center"
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Top:",
+                        "style": {
+                          "font_size": 11,
+                          "width": 50
+                        }
+                      },
+                      {
+                        "id": "ds_bleed_top",
+                        "type": "number_input",
+                        "min": 0,
+                        "style": {
+                          "width": 80
+                        },
+                        "bind": {
+                          "value": "dialog.bleed_top"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "content": "Bottom:",
+                        "style": {
+                          "font_size": 11,
+                          "width": 60,
+                          "padding_left": 12
+                        }
+                      },
+                      {
+                        "id": "ds_bleed_bottom",
+                        "type": "number_input",
+                        "min": 0,
+                        "style": {
+                          "width": 80
+                        },
+                        "bind": {
+                          "value": "dialog.bleed_bottom"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "container",
+                    "layout": "row",
+                    "style": {
+                      "gap": 12,
+                      "alignment": "center"
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Left:",
+                        "style": {
+                          "font_size": 11,
+                          "width": 50
+                        }
+                      },
+                      {
+                        "id": "ds_bleed_left",
+                        "type": "number_input",
+                        "min": 0,
+                        "style": {
+                          "width": 80
+                        },
+                        "bind": {
+                          "value": "dialog.bleed_left"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "content": "Right:",
+                        "style": {
+                          "font_size": 11,
+                          "width": 60,
+                          "padding_left": 12
+                        }
+                      },
+                      {
+                        "id": "ds_bleed_right",
+                        "type": "number_input",
+                        "min": 0,
+                        "style": {
+                          "width": 80
+                        },
+                        "bind": {
+                          "value": "dialog.bleed_right"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "ds_bleed_chain",
+                "type": "icon_button",
+                "bind": {
+                  "icon": "if dialog.bleed_uniform then \"chain_linked\" else \"chain_broken\""
+                },
+                "summary": "Lock all four bleed sides to the same value",
+                "description": "Toggle \u2014 when engaged, editing any one bleed field propagates the new value to all four. Document- persistent.\n",
+                "style": {
+                  "size": 20,
+                  "width": 28,
+                  "height": 28
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "document_setup_toggle_bleed_uniform"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Display",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "id": "ds_show_images_outline",
+            "type": "toggle",
+            "label": "Show Images In Outline Mode",
+            "bind": {
+              "checked": "dialog.show_images_outline"
+            }
+          },
+          {
+            "id": "ds_highlight_substituted",
+            "type": "toggle",
+            "label": "Highlight Substituted Glyphs",
+            "bind": {
+              "checked": "dialog.highlight_substituted_glyphs"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "end"
+            },
+            "children": [
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "OK",
+                "action": "document_setup_confirm",
+                "variant": "primary",
+                "params": {
+                  "bleed_top": "dialog.bleed_top",
+                  "bleed_right": "dialog.bleed_right",
+                  "bleed_bottom": "dialog.bleed_bottom",
+                  "bleed_left": "dialog.bleed_left",
+                  "bleed_uniform": "dialog.bleed_uniform",
+                  "show_images_outline": "dialog.show_images_outline",
+                  "highlight_substituted_glyphs": "dialog.highlight_substituted_glyphs"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
     "eyedropper_tool_options": {
       "summary": "Eyedropper Tool Options",
       "description": "Modal dialog opened by double-clicking the Eyedropper icon in the toolbar. Edits 25 per-document toggles that gate which attribute groups and sub-attributes the Eyedropper samples and applies.\nFive master groups (Fill, Stroke, Opacity, Character, Paragraph) each have a master toggle; Stroke / Opacity / Character / Paragraph also have sub-toggles for finer control. Master OFF skips the entire group regardless of sub-toggles. Master ON + sub OFF skips that sub-attribute. Both must be ON for an attribute to be copied.\nWhen the source element lacks an attribute (e.g. a Path being sampled has no character data) or the target can't receive it (e.g. applying character attrs to a Path), the corresponding sub-toggles are no-ops at apply time. No warning, no error.\nReset restores all toggles to their declared defaults (all true) without committing. Cancel discards edits. OK writes every working-copy value to the corresponding state.eyedropper_* key.\nSee transcripts/EYEDROPPER_TOOL.md.\n",
@@ -27647,6 +28410,992 @@
                 "label": "OK",
                 "action": "paragraph_justification_confirm",
                 "variant": "primary"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "print": {
+      "summary": "Print",
+      "description": "Modal Print dialog (PRINT.md \u00a7Phase 1B). Six-tab structure: only the General tab is populated in Phase 1B; tabs 2\u20136 hold short placeholder copy noting the phase that will fill them in.\nThe General tab maps 1:1 onto the 23 PrintPreferences fields per PRINT.md. Edits are batched: changes don't apply until Print or Done; Cancel discards. The Print button triggers PDF generation and a browser download of the resulting bytes (Phase 1B's PDF-first architecture; OS print panel hookup waits for a later phase).\nPhase 1B deferrals: - The Tiling sub-section (tile_overlap_*, tile_range) \u2014 fields\n  reserved in PrintPreferences but hidden until Phase 7+.\n- \"Page Setup...\" and \"Setup...\" footer buttons \u2014 disabled\n  placeholders until OS-driver hookup lands.\n- Live preview pane on the left of the General tab \u2014 not yet\n  drawn; Phase 1B ships text-only.\n",
+      "modal": true,
+      "width": 720,
+      "state": {
+        "active_tab": {
+          "type": "string",
+          "default": "general"
+        },
+        "preset_name": {
+          "type": "string",
+          "default": "[Default]"
+        },
+        "copies": {
+          "type": "number",
+          "default": 1
+        },
+        "collate": {
+          "type": "bool",
+          "default": false
+        },
+        "reverse_order": {
+          "type": "bool",
+          "default": false
+        },
+        "artboard_range_mode": {
+          "type": "enum",
+          "values": [
+            "all",
+            "range"
+          ],
+          "default": "all"
+        },
+        "artboard_range": {
+          "type": "string",
+          "default": ""
+        },
+        "ignore_artboards": {
+          "type": "bool",
+          "default": false
+        },
+        "skip_blank_artboards": {
+          "type": "bool",
+          "default": false
+        },
+        "media_size": {
+          "type": "enum",
+          "values": [
+            "defined_by_driver",
+            "letter",
+            "legal",
+            "tabloid",
+            "a3",
+            "a4",
+            "a5",
+            "custom"
+          ],
+          "default": "defined_by_driver"
+        },
+        "media_width": {
+          "type": "number",
+          "default": 612
+        },
+        "media_height": {
+          "type": "number",
+          "default": 792
+        },
+        "orientation": {
+          "type": "enum",
+          "values": [
+            "portrait",
+            "landscape"
+          ],
+          "default": "portrait"
+        },
+        "auto_rotate": {
+          "type": "bool",
+          "default": true
+        },
+        "transverse": {
+          "type": "bool",
+          "default": false
+        },
+        "print_layers": {
+          "type": "enum",
+          "values": [
+            "visible_printable",
+            "visible",
+            "all"
+          ],
+          "default": "visible_printable"
+        },
+        "placement_x": {
+          "type": "number",
+          "default": 0
+        },
+        "placement_y": {
+          "type": "number",
+          "default": 0
+        },
+        "scaling_mode": {
+          "type": "enum",
+          "values": [
+            "do_not_scale",
+            "fit_to_page",
+            "custom"
+          ],
+          "default": "do_not_scale"
+        },
+        "custom_scale": {
+          "type": "number",
+          "default": 100.0
+        }
+      },
+      "init": {
+        "preset_name": "active_document.print_preferences.preset_name",
+        "copies": "active_document.print_preferences.copies",
+        "collate": "active_document.print_preferences.collate",
+        "reverse_order": "active_document.print_preferences.reverse_order",
+        "artboard_range_mode": "active_document.print_preferences.artboard_range_mode",
+        "artboard_range": "active_document.print_preferences.artboard_range",
+        "ignore_artboards": "active_document.print_preferences.ignore_artboards",
+        "skip_blank_artboards": "active_document.print_preferences.skip_blank_artboards",
+        "media_size": "active_document.print_preferences.media_size",
+        "media_width": "active_document.print_preferences.media_width",
+        "media_height": "active_document.print_preferences.media_height",
+        "orientation": "active_document.print_preferences.orientation",
+        "auto_rotate": "active_document.print_preferences.auto_rotate",
+        "transverse": "active_document.print_preferences.transverse",
+        "print_layers": "active_document.print_preferences.print_layers",
+        "placement_x": "active_document.print_preferences.placement_x",
+        "placement_y": "active_document.print_preferences.placement_y",
+        "scaling_mode": "active_document.print_preferences.scaling_mode",
+        "custom_scale": "active_document.print_preferences.custom_scale"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 0,
+          "padding": 0
+        },
+        "children": [
+          {
+            "id": "print_tabs",
+            "type": "tabs",
+            "bind": {
+              "value": "dialog.active_tab"
+            },
+            "tabs": [
+              {
+                "id": "general",
+                "label": "General",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Print Preset:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_preset",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "[Default]",
+                                  "value": "[Default]"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.preset_name"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Copies",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Copies:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_copies",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.copies"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 6,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "pr_collate",
+                      "type": "toggle",
+                      "label": "Collate",
+                      "bind": {
+                        "checked": "dialog.collate"
+                      }
+                    },
+                    {
+                      "id": "pr_reverse",
+                      "type": "toggle",
+                      "label": "Reverse Order",
+                      "bind": {
+                        "checked": "dialog.reverse_order"
+                      }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Artboards",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Range:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_range_mode",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "All",
+                                  "value": "all"
+                                },
+                                {
+                                  "label": "Range",
+                                  "value": "range"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.artboard_range_mode"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 6,
+                          "children": [
+                            {
+                              "id": "pr_range_input",
+                              "type": "text_input",
+                              "placeholder": "1-3, 5",
+                              "bind": {
+                                "value": "dialog.artboard_range",
+                                "disabled": "dialog.artboard_range_mode != 'range'"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "pr_ignore_artboards",
+                      "type": "toggle",
+                      "label": "Ignore Artboards",
+                      "bind": {
+                        "checked": "dialog.ignore_artboards"
+                      }
+                    },
+                    {
+                      "id": "pr_skip_blank",
+                      "type": "toggle",
+                      "label": "Skip Blank Artboards",
+                      "bind": {
+                        "checked": "dialog.skip_blank_artboards"
+                      }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Media",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Size:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_media_size",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Defined by Driver",
+                                  "value": "defined_by_driver"
+                                },
+                                {
+                                  "label": "Letter (612 \u00d7 792)",
+                                  "value": "letter"
+                                },
+                                {
+                                  "label": "Legal (612 \u00d7 1008)",
+                                  "value": "legal"
+                                },
+                                {
+                                  "label": "Tabloid (792 \u00d7 1224)",
+                                  "value": "tabloid"
+                                },
+                                {
+                                  "label": "A3 (842 \u00d7 1191)",
+                                  "value": "a3"
+                                },
+                                {
+                                  "label": "A4 (595 \u00d7 842)",
+                                  "value": "a4"
+                                },
+                                {
+                                  "label": "A5 (420 \u00d7 595)",
+                                  "value": "a5"
+                                },
+                                {
+                                  "label": "Custom",
+                                  "value": "custom"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.media_size"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Width:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_media_width",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.media_width",
+                                "disabled": "dialog.media_size != 'custom'"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Height:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_media_height",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.media_height",
+                                "disabled": "dialog.media_size != 'custom'"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Orientation:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_orientation",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Portrait",
+                                  "value": "portrait"
+                                },
+                                {
+                                  "label": "Landscape",
+                                  "value": "landscape"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.orientation"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "pr_auto_rotate",
+                      "type": "toggle",
+                      "label": "Auto-Rotate",
+                      "bind": {
+                        "checked": "dialog.auto_rotate"
+                      }
+                    },
+                    {
+                      "id": "pr_transverse",
+                      "type": "toggle",
+                      "label": "Transverse",
+                      "bind": {
+                        "checked": "dialog.transverse"
+                      }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Options",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Print Layers:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_print_layers",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Visible & Printable Layers",
+                                  "value": "visible_printable"
+                                },
+                                {
+                                  "label": "Visible Layers",
+                                  "value": "visible"
+                                },
+                                {
+                                  "label": "All Layers",
+                                  "value": "all"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.print_layers"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Placement X:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_placement_x",
+                              "type": "number_input",
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.placement_x"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Placement Y:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_placement_y",
+                              "type": "number_input",
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.placement_y"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Scaling:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 6,
+                          "children": [
+                            {
+                              "id": "pr_scaling_mode",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Do Not Scale",
+                                  "value": "do_not_scale"
+                                },
+                                {
+                                  "label": "Fit to Page",
+                                  "value": "fit_to_page"
+                                },
+                                {
+                                  "label": "Custom Scale",
+                                  "value": "custom"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.scaling_mode"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_custom_scale",
+                              "type": "number_input",
+                              "min": 1,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.custom_scale",
+                                "disabled": "dialog.scaling_mode != 'custom'"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "marks_and_bleed",
+                "label": "Marks and Bleed",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Marks and Bleed",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 2 (PRINT.md \u00a7Phase 2). Trim marks, registration marks, color bars, page information, mark type, weight and offset, plus per-print bleed override.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "output",
+                "label": "Output",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Output",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 3 (PRINT.md \u00a7Phase 3). Composite vs Separations, emulsion, image polarity, printer resolution, spot/process conversion, overprint black, per-ink overrides.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "graphics",
+                "label": "Graphics",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Graphics",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 4 (PRINT.md \u00a7Phase 4). Path flatness, font download, PostScript level, data format, gradient compatibility, raster effects resolution.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color_management",
+                "label": "Color Management",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Color Management",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 5 (PRINT.md \u00a7Phase 5). Document and printer profiles, color handling, rendering intent, preserve RGB numbers.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "advanced",
+                "label": "Advanced",
+                "content": {
+                  "type": "container",
+                  "layout": "column",
+                  "style": {
+                    "gap": 12,
+                    "padding": 4
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Advanced",
+                      "style": {
+                        "font_size": 13,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "content": "Available in Phase 6 (PRINT.md \u00a7Phase 6). Print as bitmap, overprint flattener preset; also re-houses Document Setup transparency / overprint settings.",
+                      "style": {
+                        "font_size": 11,
+                        "color": "var(--jas-text-dim,#888)"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "padding": 12,
+              "alignment": "center",
+              "justify": "end",
+              "border_top": "1px solid var(--jas-border,#555)"
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Page Setup...",
+                "bind": {
+                  "disabled": "true"
+                },
+                "action": "noop"
+              },
+              {
+                "type": "button",
+                "label": "Setup...",
+                "bind": {
+                  "disabled": "true"
+                },
+                "action": "noop"
+              },
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "Done",
+                "action": "print_dialog_done",
+                "params": {
+                  "preset_name": "dialog.preset_name",
+                  "copies": "dialog.copies",
+                  "collate": "dialog.collate",
+                  "reverse_order": "dialog.reverse_order",
+                  "artboard_range_mode": "dialog.artboard_range_mode",
+                  "artboard_range": "dialog.artboard_range",
+                  "ignore_artboards": "dialog.ignore_artboards",
+                  "skip_blank_artboards": "dialog.skip_blank_artboards",
+                  "media_size": "dialog.media_size",
+                  "media_width": "dialog.media_width",
+                  "media_height": "dialog.media_height",
+                  "orientation": "dialog.orientation",
+                  "auto_rotate": "dialog.auto_rotate",
+                  "transverse": "dialog.transverse",
+                  "print_layers": "dialog.print_layers",
+                  "placement_x": "dialog.placement_x",
+                  "placement_y": "dialog.placement_y",
+                  "scaling_mode": "dialog.scaling_mode",
+                  "custom_scale": "dialog.custom_scale"
+                }
+              },
+              {
+                "type": "button",
+                "label": "Print",
+                "variant": "primary",
+                "action": "print_dialog_print",
+                "params": {
+                  "preset_name": "dialog.preset_name",
+                  "copies": "dialog.copies",
+                  "collate": "dialog.collate",
+                  "reverse_order": "dialog.reverse_order",
+                  "artboard_range_mode": "dialog.artboard_range_mode",
+                  "artboard_range": "dialog.artboard_range",
+                  "ignore_artboards": "dialog.ignore_artboards",
+                  "skip_blank_artboards": "dialog.skip_blank_artboards",
+                  "media_size": "dialog.media_size",
+                  "media_width": "dialog.media_width",
+                  "media_height": "dialog.media_height",
+                  "orientation": "dialog.orientation",
+                  "auto_rotate": "dialog.auto_rotate",
+                  "transverse": "dialog.transverse",
+                  "print_layers": "dialog.print_layers",
+                  "placement_x": "dialog.placement_x",
+                  "placement_y": "dialog.placement_y",
+                  "scaling_mode": "dialog.scaling_mode",
+                  "custom_scale": "dialog.custom_scale"
+                }
               }
             ]
           }

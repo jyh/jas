@@ -87,6 +87,8 @@ struct YamlElementView: View {
                 renderTreeView()
             case "element_preview":
                 renderElementPreview()
+            case "tabs":
+                renderTabs()
             default:
                 renderPlaceholder()
             }
@@ -1179,6 +1181,69 @@ struct YamlElementView: View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
             YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+        }
+    }
+
+    // MARK: - Tabs (PRINT.md §1B; matches Rust render_tabs)
+
+    /// Tabs widget — left-rail tab list plus a content area showing
+    /// the active tab. Active tab is read from `bind.value` (typically
+    /// `dialog.<field>`); falls back to the first tab id when no bind
+    /// or empty value. Click writes the tab id back through the
+    /// dialog-state path (subject to the broader dialog-write
+    /// limitation noted in writeBackKey — for non-panel binds the
+    /// click is currently a no-op until that framework piece lands).
+    @ViewBuilder
+    private func renderTabs() -> some View {
+        let tabs = element["tabs"] as? [[String: Any]] ?? []
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
+        let firstId = (tabs.first?["id"] as? String) ?? ""
+        let activeId: String = {
+            if let e = valueExpr {
+                let r = evaluate(e, context: context)
+                if case .string(let s) = r, !s.isEmpty { return s }
+            }
+            return firstId
+        }()
+        let activeContent = tabs.first(where: { ($0["id"] as? String) == activeId })?["content"] as? [String: Any]
+
+        HStack(alignment: .top, spacing: 0) {
+            // Left rail
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(0..<tabs.count, id: \.self) { i in
+                    let tab = tabs[i]
+                    let tabId = tab["id"] as? String ?? ""
+                    let label = tab["label"] as? String ?? ""
+                    let isActive = tabId == activeId
+                    Button(action: {
+                        // Dialog-state write goes here when the framework
+                        // supports it. For now this is a no-op for dialog
+                        // binds; the active tab stays on whatever the
+                        // init expression produced.
+                    }) {
+                        SwiftUI.Text(label)
+                            .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(isActive ? SwiftUI.Color.gray.opacity(0.2) : SwiftUI.Color.clear)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .frame(minWidth: 140)
+            .background(SwiftUI.Color.gray.opacity(0.08))
+            // Content
+            VStack {
+                if let content = activeContent {
+                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 }

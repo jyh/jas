@@ -290,6 +290,10 @@ MENU_BAR = [
         ("Open...", "open", "\u2318O"),
         ("Save", "save", "\u2318S"),
         ("---", "", ""),
+        ("Document Setup...", "document_setup", ""),
+        ("Print...", "print", "\u2318P"),
+        ("Export to PDF...", "export_to_pdf", ""),
+        ("---", "", ""),
         ("Close Tab", "close", "\u2318W"),
     ]),
     ("Edit", [

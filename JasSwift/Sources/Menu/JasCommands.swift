@@ -32,6 +32,13 @@ public struct FocusedActiveAppearanceKey: FocusedValueKey {
     public typealias Value = String
 }
 
+/// Closure that opens a YAML dialog by id. Published from ContentView
+/// so JasCommands menu items can route to dialogs without owning the
+/// dialog-state binding directly.
+public struct FocusedOpenYamlDialogKey: FocusedValueKey {
+    public typealias Value = (String) -> Void
+}
+
 public extension FocusedValues {
     var workspace: WorkspaceState? {
         get { self[FocusedWorkspaceKey.self] }
@@ -61,6 +68,10 @@ public extension FocusedValues {
         get { self[FocusedActiveAppearanceKey.self] }
         set { self[FocusedActiveAppearanceKey.self] = newValue }
     }
+    var openYamlDialog: ((String) -> Void)? {
+        get { self[FocusedOpenYamlDialogKey.self] }
+        set { self[FocusedOpenYamlDialogKey.self] = newValue }
+    }
 }
 
 /// Custom menu commands for Jas app (File, Edit, View menus).
@@ -72,6 +83,7 @@ public struct JasCommands: Commands {
     @FocusedValue(\.addCanvas) private var addCanvas
     @FocusedValue(\.workspace) private var workspace
     @FocusedValue(\.activeAppearance) private var activeAppearanceName
+    @FocusedValue(\.openYamlDialog) private var openYamlDialog
 
     public init() {}
 
@@ -105,6 +117,24 @@ public struct JasCommands: Commands {
             .disabled(model == nil
                       || !(model?.isModified ?? false)
                       || (model?.filename.hasPrefix("Untitled-") ?? true))
+
+            Divider()
+
+            Button("Document Setup...") {
+                openYamlDialog?("document_setup")
+            }
+            .disabled(model == nil)
+
+            Button("Print...") {
+                openYamlDialog?("print")
+            }
+            .keyboardShortcut("p", modifiers: .command)
+            .disabled(model == nil)
+
+            Button("Export to PDF...") {
+                exportToPdf()
+            }
+            .disabled(model == nil)
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -436,6 +466,23 @@ public struct JasCommands: Commands {
             try svg.write(to: url, atomically: true, encoding: .utf8)
             model.markSaved()
             model.filename = url.path
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
+    }
+
+    private func exportToPdf() {
+        guard let model = model else { return }
+        let bytes = documentToPdf(model.document)
+        let panel = NSSavePanel()
+        panel.title = "Export to PDF"
+        panel.nameFieldStringValue = pdfFilenameForModel(model)
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsOtherFileTypes = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try bytes.write(to: url)
         } catch {
             let alert = NSAlert(error: error)
             alert.runModal()
