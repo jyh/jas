@@ -1955,6 +1955,69 @@ def _wire_change(widget, action, params, condition, effects, store, ctx, dispatc
 
 # ── Type dispatch table ──────────────────────────────────────
 
+def _render_tabs(el, store, ctx, dispatch_fn):
+    """PRINT.md §1B: tabs widget. Left rail of clickable labels +
+    content area showing the active tab. Active tab read from
+    bind.value (typically dialog.<field>); falls back to the first
+    tab when no bind or empty value. Click writes back the tab id
+    via dispatch_fn (no-op for non-panel binds today, same as the
+    Swift / OCaml renderers — full dialog-write hookup is a separate
+    framework piece)."""
+    from PySide6.QtWidgets import QPushButton
+    tabs = el.get("tabs") or []
+    bind = el.get("bind") or {}
+    value_expr = bind.get("value")
+    first_id = tabs[0].get("id", "") if tabs else ""
+    active_id = first_id
+    if isinstance(value_expr, str) and value_expr:
+        from workspace_interpreter.expr import evaluate
+        result = evaluate(value_expr, ctx)
+        v = getattr(result, "value", None)
+        if isinstance(v, str) and v:
+            active_id = v
+
+    widget = QWidget()
+    outer = QHBoxLayout(widget)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
+
+    # Left rail.
+    rail = QWidget()
+    rail.setFixedWidth(140)
+    rail_layout = QVBoxLayout(rail)
+    rail_layout.setContentsMargins(0, 4, 0, 4)
+    rail_layout.setSpacing(0)
+    for tab in tabs:
+        tab_id = tab.get("id", "")
+        label = tab.get("label", "")
+        is_active = tab_id == active_id
+        prefix = "▸ " if is_active else "  "
+        btn = QPushButton(prefix + label)
+        btn.setFlat(True)
+        btn.setStyleSheet(
+            "text-align: left; padding: 4px 12px; "
+            + ("font-weight: 600;" if is_active else ""))
+        rail_layout.addWidget(btn)
+    rail_layout.addStretch(1)
+    outer.addWidget(rail)
+
+    # Content area.
+    content_widget = QWidget()
+    content_layout = QVBoxLayout(content_widget)
+    content_layout.setContentsMargins(12, 12, 12, 12)
+    active_tab = next((t for t in tabs if t.get("id") == active_id), None)
+    if active_tab is not None:
+        content = active_tab.get("content")
+        if isinstance(content, dict):
+            child = render_element(content, store, ctx, dispatch_fn)
+            if child:
+                content_layout.addWidget(child)
+    content_layout.addStretch(1)
+    outer.addWidget(content_widget, 1)
+
+    return widget
+
+
 _RENDERERS = {
     "container": _render_container,
     "row": lambda el, s, c, d: _render_container({**el, "layout": "row"}, s, c, d),
@@ -1982,5 +2045,6 @@ _RENDERERS = {
     "tree_view": _render_tree_view,
     "element_preview": _render_element_preview,
     "dropdown": _render_dropdown,
+    "tabs": _render_tabs,
     "placeholder": _render_placeholder,
 }
