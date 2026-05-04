@@ -13,6 +13,46 @@
     layers_panel_selection_count see live panel state. Pass [] from
     callers that don't have layers-panel context. *)
 
+let document_setup_view (s : Document_setup.t) : Yojson.Safe.t =
+  `Assoc [
+    ("bleed_top", `Float s.bleed_top);
+    ("bleed_right", `Float s.bleed_right);
+    ("bleed_bottom", `Float s.bleed_bottom);
+    ("bleed_left", `Float s.bleed_left);
+    ("bleed_uniform", `Bool s.bleed_uniform);
+    ("show_images_outline", `Bool s.show_images_outline);
+    ("highlight_substituted_glyphs", `Bool s.highlight_substituted_glyphs);
+  ]
+
+let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
+  `Assoc [
+    ("preset_name", `String p.preset_name);
+    ("printer_name",
+     match p.printer_name with Some s -> `String s | None -> `Null);
+    ("copies", `Int p.copies);
+    ("collate", `Bool p.collate);
+    ("reverse_order", `Bool p.reverse_order);
+    ("artboard_range_mode",
+     `String (Print_preferences.artboard_range_mode_to_string p.artboard_range_mode));
+    ("artboard_range", `String p.artboard_range);
+    ("ignore_artboards", `Bool p.ignore_artboards);
+    ("skip_blank_artboards", `Bool p.skip_blank_artboards);
+    ("media_size", `String (Print_preferences.media_size_to_string p.media_size));
+    ("media_width", `Float p.media_width);
+    ("media_height", `Float p.media_height);
+    ("orientation", `String (Print_preferences.orientation_to_string p.orientation));
+    ("auto_rotate", `Bool p.auto_rotate);
+    ("transverse", `Bool p.transverse);
+    ("print_layers", `String (Print_preferences.print_layers_to_string p.print_layers));
+    ("placement_x", `Float p.placement_x);
+    ("placement_y", `Float p.placement_y);
+    ("scaling_mode", `String (Print_preferences.scaling_mode_to_string p.scaling_mode));
+    ("custom_scale", `Float p.custom_scale);
+    ("tile_overlap_h", `Float p.tile_overlap_h);
+    ("tile_overlap_v", `Float p.tile_overlap_v);
+    ("tile_range", `String p.tile_range);
+  ]
+
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
   `Assoc [
     ("top_level_layers", `List []);
@@ -23,6 +63,8 @@ let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
     ("has_selection", `Bool false);
     ("selection_count", `Int 0);
     ("element_selection", `List []);
+    ("document_setup", document_setup_view Document_setup.default);
+    ("print_preferences", print_preferences_view Print_preferences.default);
   ]
 
 let build
@@ -101,6 +143,8 @@ let build
       ("has_selection", `Bool (selection_count > 0));
       ("selection_count", `Int selection_count);
       ("element_selection", element_selection_json);
+      ("document_setup", document_setup_view m#document.Document.document_setup);
+      ("print_preferences", print_preferences_view m#document.Document.print_preferences);
     ]
 
 (** Build the selection-level predicates referenced by yaml
