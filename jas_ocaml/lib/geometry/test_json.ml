@@ -499,6 +499,47 @@ let artboard_options_json (opts : Artboard.options) =
   json_bool o "update_while_dragging" opts.update_while_dragging;
   json_build o
 
+let document_setup_json (s : Document_setup.t) =
+  let o = json_obj () in
+  json_num o "bleed_bottom" s.bleed_bottom;
+  json_num o "bleed_left" s.bleed_left;
+  json_num o "bleed_right" s.bleed_right;
+  json_num o "bleed_top" s.bleed_top;
+  json_bool o "bleed_uniform" s.bleed_uniform;
+  json_bool o "highlight_substituted_glyphs" s.highlight_substituted_glyphs;
+  json_bool o "show_images_outline" s.show_images_outline;
+  json_build o
+
+let print_preferences_json (p : Print_preferences.t) =
+  let o = json_obj () in
+  json_str o "artboard_range" p.artboard_range;
+  json_str o "artboard_range_mode"
+    (Print_preferences.artboard_range_mode_to_string p.artboard_range_mode);
+  json_bool o "auto_rotate" p.auto_rotate;
+  json_bool o "collate" p.collate;
+  json_int o "copies" p.copies;
+  json_num o "custom_scale" p.custom_scale;
+  json_bool o "ignore_artboards" p.ignore_artboards;
+  json_num o "media_height" p.media_height;
+  json_str o "media_size" (Print_preferences.media_size_to_string p.media_size);
+  json_num o "media_width" p.media_width;
+  json_str o "orientation" (Print_preferences.orientation_to_string p.orientation);
+  json_num o "placement_x" p.placement_x;
+  json_num o "placement_y" p.placement_y;
+  json_str o "preset_name" p.preset_name;
+  json_str o "print_layers" (Print_preferences.print_layers_to_string p.print_layers);
+  (match p.printer_name with
+   | Some s -> json_str o "printer_name" s
+   | None -> json_raw o "printer_name" "null");
+  json_bool o "reverse_order" p.reverse_order;
+  json_str o "scaling_mode" (Print_preferences.scaling_mode_to_string p.scaling_mode);
+  json_bool o "skip_blank_artboards" p.skip_blank_artboards;
+  json_num o "tile_overlap_h" p.tile_overlap_h;
+  json_num o "tile_overlap_v" p.tile_overlap_v;
+  json_str o "tile_range" p.tile_range;
+  json_bool o "transverse" p.transverse;
+  json_build o
+
 (** Serialize a Document to canonical test JSON.
 
     Artboards and artboard_options are omitted when they carry
@@ -514,7 +555,11 @@ let document_to_test_json doc =
     json_raw o "artboard_options" (artboard_options_json doc.artboard_options);
   if doc.artboards <> [] then
     json_raw o "artboards" (artboards_json doc.artboards);
+  if doc.document_setup <> Document_setup.default then
+    json_raw o "document_setup" (document_setup_json doc.document_setup);
   json_raw o "layers" (json_array layers);
+  if doc.print_preferences <> Print_preferences.default then
+    json_raw o "print_preferences" (print_preferences_json doc.print_preferences);
   json_int o "selected_layer" doc.selected_layer;
   json_raw o "selection" (selection_json doc.selection);
   json_build o
@@ -886,6 +931,84 @@ let parse_artboard_options j : Artboard.options =
     }
   with _ -> Artboard.default_options
 
+let parse_document_setup j : Document_setup.t =
+  let open Yojson.Safe.Util in
+  let d = Document_setup.default in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      bleed_top = pick_num "bleed_top" d.bleed_top;
+      bleed_right = pick_num "bleed_right" d.bleed_right;
+      bleed_bottom = pick_num "bleed_bottom" d.bleed_bottom;
+      bleed_left = pick_num "bleed_left" d.bleed_left;
+      bleed_uniform = pick_bool "bleed_uniform" d.bleed_uniform;
+      show_images_outline = pick_bool "show_images_outline" d.show_images_outline;
+      highlight_substituted_glyphs =
+        pick_bool "highlight_substituted_glyphs" d.highlight_substituted_glyphs;
+    }
+  with _ -> d
+
+let parse_print_preferences j : Print_preferences.t =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_str_opt name =
+    match try j |> member name with _ -> `Null with
+    | `String s -> Some s
+    | _ -> None in
+  let pick_int name d_val =
+    try j |> member name |> to_int with _ -> d_val in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      preset_name = pick_str "preset_name" d.preset_name;
+      printer_name = pick_str_opt "printer_name";
+      copies = pick_int "copies" d.copies;
+      collate = pick_bool "collate" d.collate;
+      reverse_order = pick_bool "reverse_order" d.reverse_order;
+      artboard_range_mode =
+        Print_preferences.artboard_range_mode_of_string
+          (pick_str "artboard_range_mode"
+             (Print_preferences.artboard_range_mode_to_string d.artboard_range_mode));
+      artboard_range = pick_str "artboard_range" d.artboard_range;
+      ignore_artboards = pick_bool "ignore_artboards" d.ignore_artboards;
+      skip_blank_artboards = pick_bool "skip_blank_artboards" d.skip_blank_artboards;
+      media_size =
+        Print_preferences.media_size_of_string
+          (pick_str "media_size"
+             (Print_preferences.media_size_to_string d.media_size));
+      media_width = pick_num "media_width" d.media_width;
+      media_height = pick_num "media_height" d.media_height;
+      orientation =
+        Print_preferences.orientation_of_string
+          (pick_str "orientation"
+             (Print_preferences.orientation_to_string d.orientation));
+      auto_rotate = pick_bool "auto_rotate" d.auto_rotate;
+      transverse = pick_bool "transverse" d.transverse;
+      print_layers =
+        Print_preferences.print_layers_of_string
+          (pick_str "print_layers"
+             (Print_preferences.print_layers_to_string d.print_layers));
+      placement_x = pick_num "placement_x" d.placement_x;
+      placement_y = pick_num "placement_y" d.placement_y;
+      scaling_mode =
+        Print_preferences.scaling_mode_of_string
+          (pick_str "scaling_mode"
+             (Print_preferences.scaling_mode_to_string d.scaling_mode));
+      custom_scale = pick_num "custom_scale" d.custom_scale;
+      tile_overlap_h = pick_num "tile_overlap_h" d.tile_overlap_h;
+      tile_overlap_v = pick_num "tile_overlap_v" d.tile_overlap_v;
+      tile_range = pick_str "tile_range" d.tile_range;
+    }
+  with _ -> d
+
 (** Parse canonical test JSON into a Document.
     This is the inverse of [document_to_test_json]. *)
 let test_json_to_document json_str =
@@ -905,4 +1028,15 @@ let test_json_to_document json_str =
     | `Null -> Artboard.default_options
     | v -> parse_artboard_options v
   in
-  make_document ~selected_layer ~selection ~artboards ~artboard_options layers
+  let document_setup =
+    match j |> member "document_setup" with
+    | `Null -> Document_setup.default
+    | v -> parse_document_setup v
+  in
+  let print_preferences =
+    match j |> member "print_preferences" with
+    | `Null -> Print_preferences.default
+    | v -> parse_print_preferences v
+  in
+  make_document ~selected_layer ~selection ~artboards ~artboard_options
+    ~document_setup ~print_preferences layers
