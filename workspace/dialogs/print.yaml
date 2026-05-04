@@ -1,0 +1,538 @@
+print:
+  summary: "Print"
+  description: >
+    Modal Print dialog (PRINT.md §Phase 1B). Six-tab structure: only
+    the General tab is populated in Phase 1B; tabs 2–6 hold short
+    placeholder copy noting the phase that will fill them in.
+
+    The General tab maps 1:1 onto the 23 PrintPreferences fields per
+    PRINT.md. Edits are batched: changes don't apply until Print or
+    Done; Cancel discards. The Print button triggers PDF generation
+    and a browser download of the resulting bytes (Phase 1B's
+    PDF-first architecture; OS print panel hookup waits for a later
+    phase).
+
+    Phase 1B deferrals:
+    - The Tiling sub-section (tile_overlap_*, tile_range) — fields
+      reserved in PrintPreferences but hidden until Phase 7+.
+    - "Page Setup..." and "Setup..." footer buttons — disabled
+      placeholders until OS-driver hookup lands.
+    - Live preview pane on the left of the General tab — not yet
+      drawn; Phase 1B ships text-only.
+
+  modal: true
+  width: 720
+
+  state:
+    active_tab:
+      type: string
+      default: "general"
+    preset_name:
+      type: string
+      default: "[Default]"
+    copies:
+      type: number
+      default: 1
+    collate:
+      type: bool
+      default: false
+    reverse_order:
+      type: bool
+      default: false
+    artboard_range_mode:
+      type: enum
+      values: [all, range]
+      default: all
+    artboard_range:
+      type: string
+      default: ""
+    ignore_artboards:
+      type: bool
+      default: false
+    skip_blank_artboards:
+      type: bool
+      default: false
+    media_size:
+      type: enum
+      values: [defined_by_driver, letter, legal, tabloid, a3, a4, a5, custom]
+      default: defined_by_driver
+    media_width:
+      type: number
+      default: 612
+    media_height:
+      type: number
+      default: 792
+    orientation:
+      type: enum
+      values: [portrait, landscape]
+      default: portrait
+    auto_rotate:
+      type: bool
+      default: true
+    transverse:
+      type: bool
+      default: false
+    print_layers:
+      type: enum
+      values: [visible_printable, visible, all]
+      default: visible_printable
+    placement_x:
+      type: number
+      default: 0
+    placement_y:
+      type: number
+      default: 0
+    scaling_mode:
+      type: enum
+      values: [do_not_scale, fit_to_page, custom]
+      default: do_not_scale
+    custom_scale:
+      type: number
+      default: 100.0
+
+  init:
+    preset_name:          "active_document.print_preferences.preset_name"
+    copies:               "active_document.print_preferences.copies"
+    collate:              "active_document.print_preferences.collate"
+    reverse_order:        "active_document.print_preferences.reverse_order"
+    artboard_range_mode:  "active_document.print_preferences.artboard_range_mode"
+    artboard_range:       "active_document.print_preferences.artboard_range"
+    ignore_artboards:     "active_document.print_preferences.ignore_artboards"
+    skip_blank_artboards: "active_document.print_preferences.skip_blank_artboards"
+    media_size:           "active_document.print_preferences.media_size"
+    media_width:          "active_document.print_preferences.media_width"
+    media_height:         "active_document.print_preferences.media_height"
+    orientation:          "active_document.print_preferences.orientation"
+    auto_rotate:          "active_document.print_preferences.auto_rotate"
+    transverse:           "active_document.print_preferences.transverse"
+    print_layers:         "active_document.print_preferences.print_layers"
+    placement_x:          "active_document.print_preferences.placement_x"
+    placement_y:          "active_document.print_preferences.placement_y"
+    scaling_mode:         "active_document.print_preferences.scaling_mode"
+    custom_scale:         "active_document.print_preferences.custom_scale"
+
+  content:
+    type: container
+    layout: column
+    style: { gap: 0, padding: 0 }
+    children:
+      - id: print_tabs
+        type: tabs
+        bind:
+          value: "dialog.active_tab"
+        tabs:
+
+          # ── General ─────────────────────────────────
+          - id: general
+            label: "General"
+            content:
+              type: container
+              layout: column
+              style: { gap: 12, padding: 4 }
+              children:
+
+                # Preset row
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Print Preset:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_preset
+                          type: select
+                          options:
+                            - { label: "[Default]", value: "[Default]" }
+                          bind:
+                            value: "dialog.preset_name"
+
+                # Copies / Collate / Reverse
+                - type: separator
+                  orientation: horizontal
+                - type: text
+                  content: "Copies"
+                  style: { font_size: 11, font_weight: bold }
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Copies:", style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_copies
+                          type: number_input
+                          min: 1
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.copies"
+                    - type: col
+                      col: 6
+                      children: []
+
+                - id: pr_collate
+                  type: toggle
+                  label: "Collate"
+                  bind:
+                    checked: "dialog.collate"
+
+                - id: pr_reverse
+                  type: toggle
+                  label: "Reverse Order"
+                  bind:
+                    checked: "dialog.reverse_order"
+
+                # Artboards section
+                - type: separator
+                  orientation: horizontal
+                - type: text
+                  content: "Artboards"
+                  style: { font_size: 11, font_weight: bold }
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Range:", style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_range_mode
+                          type: select
+                          options:
+                            - { label: "All",   value: all }
+                            - { label: "Range", value: range }
+                          bind:
+                            value: "dialog.artboard_range_mode"
+                    - type: col
+                      col: 6
+                      children:
+                        - id: pr_range_input
+                          type: text_input
+                          placeholder: "1-3, 5"
+                          bind:
+                            value: "dialog.artboard_range"
+                            disabled: "dialog.artboard_range_mode != 'range'"
+
+                - id: pr_ignore_artboards
+                  type: toggle
+                  label: "Ignore Artboards"
+                  bind:
+                    checked: "dialog.ignore_artboards"
+
+                - id: pr_skip_blank
+                  type: toggle
+                  label: "Skip Blank Artboards"
+                  bind:
+                    checked: "dialog.skip_blank_artboards"
+
+                # Media section
+                - type: separator
+                  orientation: horizontal
+                - type: text
+                  content: "Media"
+                  style: { font_size: 11, font_weight: bold }
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Size:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_media_size
+                          type: select
+                          options:
+                            - { label: "Defined by Driver", value: defined_by_driver }
+                            - { label: "Letter (612 × 792)", value: letter }
+                            - { label: "Legal (612 × 1008)", value: legal }
+                            - { label: "Tabloid (792 × 1224)", value: tabloid }
+                            - { label: "A3 (842 × 1191)", value: a3 }
+                            - { label: "A4 (595 × 842)", value: a4 }
+                            - { label: "A5 (420 × 595)", value: a5 }
+                            - { label: "Custom", value: custom }
+                          bind:
+                            value: "dialog.media_size"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Width:", style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_media_width
+                          type: number_input
+                          min: 1
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.media_width"
+                            disabled: "dialog.media_size != 'custom'"
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Height:", style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_media_height
+                          type: number_input
+                          min: 1
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.media_height"
+                            disabled: "dialog.media_size != 'custom'"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Orientation:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_orientation
+                          type: select
+                          options:
+                            - { label: "Portrait", value: portrait }
+                            - { label: "Landscape", value: landscape }
+                          bind:
+                            value: "dialog.orientation"
+
+                - id: pr_auto_rotate
+                  type: toggle
+                  label: "Auto-Rotate"
+                  bind:
+                    checked: "dialog.auto_rotate"
+
+                - id: pr_transverse
+                  type: toggle
+                  label: "Transverse"
+                  bind:
+                    checked: "dialog.transverse"
+
+                # Options section
+                - type: separator
+                  orientation: horizontal
+                - type: text
+                  content: "Options"
+                  style: { font_size: 11, font_weight: bold }
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Print Layers:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_print_layers
+                          type: select
+                          options:
+                            - { label: "Visible & Printable Layers", value: visible_printable }
+                            - { label: "Visible Layers",             value: visible }
+                            - { label: "All Layers",                 value: all }
+                          bind:
+                            value: "dialog.print_layers"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Placement X:", style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_placement_x
+                          type: number_input
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.placement_x"
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Placement Y:", style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_placement_y
+                          type: number_input
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.placement_y"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Scaling:", style: { font_size: 11 } }
+                    - type: col
+                      col: 6
+                      children:
+                        - id: pr_scaling_mode
+                          type: select
+                          options:
+                            - { label: "Do Not Scale",       value: do_not_scale }
+                            - { label: "Fit to Page",        value: fit_to_page }
+                            - { label: "Custom Scale",       value: custom }
+                          bind:
+                            value: "dialog.scaling_mode"
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_custom_scale
+                          type: number_input
+                          min: 1
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.custom_scale"
+                            disabled: "dialog.scaling_mode != 'custom'"
+
+          # ── Marks and Bleed (Phase 2 placeholder) ────
+          - id: marks_and_bleed
+            label: "Marks and Bleed"
+            content:
+              type: container
+              layout: column
+              style: { gap: 12, padding: 4 }
+              children:
+                - { type: text, content: "Marks and Bleed",
+                    style: { font_size: 13, font_weight: bold } }
+                - { type: text,
+                    content: "Available in Phase 2 (PRINT.md §Phase 2). Trim marks, registration marks, color bars, page information, mark type, weight and offset, plus per-print bleed override.",
+                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+
+          # ── Output (Phase 3 placeholder) ─────────────
+          - id: output
+            label: "Output"
+            content:
+              type: container
+              layout: column
+              style: { gap: 12, padding: 4 }
+              children:
+                - { type: text, content: "Output",
+                    style: { font_size: 13, font_weight: bold } }
+                - { type: text,
+                    content: "Available in Phase 3 (PRINT.md §Phase 3). Composite vs Separations, emulsion, image polarity, printer resolution, spot/process conversion, overprint black, per-ink overrides.",
+                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+
+          # ── Graphics (Phase 4 placeholder) ───────────
+          - id: graphics
+            label: "Graphics"
+            content:
+              type: container
+              layout: column
+              style: { gap: 12, padding: 4 }
+              children:
+                - { type: text, content: "Graphics",
+                    style: { font_size: 13, font_weight: bold } }
+                - { type: text,
+                    content: "Available in Phase 4 (PRINT.md §Phase 4). Path flatness, font download, PostScript level, data format, gradient compatibility, raster effects resolution.",
+                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+
+          # ── Color Management (Phase 5 placeholder) ───
+          - id: color_management
+            label: "Color Management"
+            content:
+              type: container
+              layout: column
+              style: { gap: 12, padding: 4 }
+              children:
+                - { type: text, content: "Color Management",
+                    style: { font_size: 13, font_weight: bold } }
+                - { type: text,
+                    content: "Available in Phase 5 (PRINT.md §Phase 5). Document and printer profiles, color handling, rendering intent, preserve RGB numbers.",
+                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+
+          # ── Advanced (Phase 6 placeholder) ───────────
+          - id: advanced
+            label: "Advanced"
+            content:
+              type: container
+              layout: column
+              style: { gap: 12, padding: 4 }
+              children:
+                - { type: text, content: "Advanced",
+                    style: { font_size: 13, font_weight: bold } }
+                - { type: text,
+                    content: "Available in Phase 6 (PRINT.md §Phase 6). Print as bitmap, overprint flattener preset; also re-houses Document Setup transparency / overprint settings.",
+                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+
+      # ── Footer strip ─────────────────────────────────
+      - type: container
+        layout: row
+        style: { gap: 8, padding: 12, alignment: center, justify: end, border_top: "1px solid var(--jas-border,#555)" }
+        children:
+          - type: button
+            label: "Page Setup..."
+            bind:
+              disabled: "true"
+            action: noop
+          - type: button
+            label: "Setup..."
+            bind:
+              disabled: "true"
+            action: noop
+          - type: spacer
+            style: { flex: 1 }
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - type: button
+            label: "Done"
+            action: print_dialog_done
+            params:
+              preset_name: "dialog.preset_name"
+              copies: "dialog.copies"
+              collate: "dialog.collate"
+              reverse_order: "dialog.reverse_order"
+              artboard_range_mode: "dialog.artboard_range_mode"
+              artboard_range: "dialog.artboard_range"
+              ignore_artboards: "dialog.ignore_artboards"
+              skip_blank_artboards: "dialog.skip_blank_artboards"
+              media_size: "dialog.media_size"
+              media_width: "dialog.media_width"
+              media_height: "dialog.media_height"
+              orientation: "dialog.orientation"
+              auto_rotate: "dialog.auto_rotate"
+              transverse: "dialog.transverse"
+              print_layers: "dialog.print_layers"
+              placement_x: "dialog.placement_x"
+              placement_y: "dialog.placement_y"
+              scaling_mode: "dialog.scaling_mode"
+              custom_scale: "dialog.custom_scale"
+          - type: button
+            label: "Print"
+            variant: primary
+            action: print_dialog_print
+            params:
+              preset_name: "dialog.preset_name"
+              copies: "dialog.copies"
+              collate: "dialog.collate"
+              reverse_order: "dialog.reverse_order"
+              artboard_range_mode: "dialog.artboard_range_mode"
+              artboard_range: "dialog.artboard_range"
+              ignore_artboards: "dialog.ignore_artboards"
+              skip_blank_artboards: "dialog.skip_blank_artboards"
+              media_size: "dialog.media_size"
+              media_width: "dialog.media_width"
+              media_height: "dialog.media_height"
+              orientation: "dialog.orientation"
+              auto_rotate: "dialog.auto_rotate"
+              transverse: "dialog.transverse"
+              print_layers: "dialog.print_layers"
+              placement_x: "dialog.placement_x"
+              placement_y: "dialog.placement_y"
+              scaling_mode: "dialog.scaling_mode"
+              custom_scale: "dialog.custom_scale"

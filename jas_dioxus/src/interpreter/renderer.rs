@@ -106,6 +106,7 @@ fn render_el(
         "tree_view" => render_tree_view(el, ctx, rctx),
         "element_preview" => render_element_preview(el, ctx, rctx),
         "dropdown" => render_layers_filter_dropdown(el, ctx, rctx),
+        "tabs" => render_tabs(el, ctx, rctx),
         _ => render_placeholder(el, ctx, rctx),
     }
 }
@@ -1458,6 +1459,40 @@ fn build_active_document_view(
                 "fade_region_outside_artboard": true,
                 "update_while_dragging": true,
             },
+            "document_setup": {
+                "bleed_top": 0.0,
+                "bleed_right": 0.0,
+                "bleed_bottom": 0.0,
+                "bleed_left": 0.0,
+                "bleed_uniform": true,
+                "show_images_outline": false,
+                "highlight_substituted_glyphs": false,
+            },
+            "print_preferences": {
+                "preset_name": "[Default]",
+                "printer_name": serde_json::Value::Null,
+                "copies": 1,
+                "collate": false,
+                "reverse_order": false,
+                "artboard_range_mode": "all",
+                "artboard_range": "",
+                "ignore_artboards": false,
+                "skip_blank_artboards": false,
+                "media_size": "defined_by_driver",
+                "media_width": 612.0,
+                "media_height": 792.0,
+                "orientation": "portrait",
+                "auto_rotate": true,
+                "transverse": false,
+                "print_layers": "visible_printable",
+                "placement_x": 0.0,
+                "placement_y": 0.0,
+                "scaling_mode": "do_not_scale",
+                "custom_scale": 100.0,
+                "tile_overlap_h": 0.0,
+                "tile_overlap_v": 0.0,
+                "tile_range": "",
+            },
             "artboards_count": 0,
             "next_artboard_name": "Artboard 1",
             "current_artboard_id": serde_json::Value::Null,
@@ -1595,6 +1630,41 @@ fn build_active_document_view(
         "artboard_options": {
             "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
             "update_while_dragging": doc.artboard_options.update_while_dragging,
+        },
+        "document_setup": {
+            "bleed_top": doc.document_setup.bleed_top,
+            "bleed_right": doc.document_setup.bleed_right,
+            "bleed_bottom": doc.document_setup.bleed_bottom,
+            "bleed_left": doc.document_setup.bleed_left,
+            "bleed_uniform": doc.document_setup.bleed_uniform,
+            "show_images_outline": doc.document_setup.show_images_outline,
+            "highlight_substituted_glyphs": doc.document_setup.highlight_substituted_glyphs,
+        },
+        "print_preferences": {
+            "preset_name": doc.print_preferences.preset_name.clone(),
+            "printer_name": doc.print_preferences.printer_name.clone()
+                .map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+            "copies": doc.print_preferences.copies,
+            "collate": doc.print_preferences.collate,
+            "reverse_order": doc.print_preferences.reverse_order,
+            "artboard_range_mode": crate::document::print_preferences::artboard_range_mode_str(&doc.print_preferences.artboard_range_mode),
+            "artboard_range": doc.print_preferences.artboard_range.clone(),
+            "ignore_artboards": doc.print_preferences.ignore_artboards,
+            "skip_blank_artboards": doc.print_preferences.skip_blank_artboards,
+            "media_size": crate::document::print_preferences::media_size_str(&doc.print_preferences.media_size),
+            "media_width": doc.print_preferences.media_width,
+            "media_height": doc.print_preferences.media_height,
+            "orientation": crate::document::print_preferences::orientation_str(&doc.print_preferences.orientation),
+            "auto_rotate": doc.print_preferences.auto_rotate,
+            "transverse": doc.print_preferences.transverse,
+            "print_layers": crate::document::print_preferences::print_layers_str(&doc.print_preferences.print_layers),
+            "placement_x": doc.print_preferences.placement_x,
+            "placement_y": doc.print_preferences.placement_y,
+            "scaling_mode": crate::document::print_preferences::scaling_mode_str(&doc.print_preferences.scaling_mode),
+            "custom_scale": doc.print_preferences.custom_scale,
+            "tile_overlap_h": doc.print_preferences.tile_overlap_h,
+            "tile_overlap_v": doc.print_preferences.tile_overlap_v,
+            "tile_range": doc.print_preferences.tile_range.clone(),
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -1979,6 +2049,139 @@ fn run_yaml_effect(
             }
             "update_while_dragging" => {
                 new_doc.artboard_options.update_while_dragging = flag;
+            }
+            _ => return deferred,
+        }
+        tab.model.set_document(new_doc);
+        return deferred;
+    }
+
+    // geometry.export_pdf: { filename_hint }  — PRINT.md §1B.
+    // Generates a PDF from the active document and triggers a browser
+    // blob download. filename_hint is the suggested download name; if
+    // unset or empty, derives one from the tab's filename via
+    // pdf_filename_for_tab.
+    if let Some(spec) = eff.get("geometry.export_pdf").and_then(|v| v.as_object()) {
+        let Some(tab) = st.tabs.get(st.active_tab) else { return deferred; };
+        let bytes = crate::geometry::pdf::document_to_pdf(tab.model.document());
+        let hint = spec
+            .get("filename_hint")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| pdf_filename_for_tab(&tab.model.filename));
+        crate::workspace::clipboard::download_bytes(&hint, &bytes, "application/pdf");
+        return deferred;
+    }
+
+    // doc.set_print_preferences_field: { field, value }  — PRINT.md §1B
+    if let Some(spec) = eff.get("doc.set_print_preferences_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::{
+            artboard_range_mode_from, media_size_from, orientation_from, print_layers_from,
+            scaling_mode_from,
+        };
+        // Borrow once and dispatch by field name. Type mismatches
+        // (string-to-bool etc) silently skip the update — matches
+        // doc.set_document_setup_field's defensiveness.
+        let p = &mut new_doc.print_preferences;
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("preset_name", super::expr_types::Value::Str(s)) => p.preset_name = s.clone(),
+            ("printer_name", super::expr_types::Value::Str(s)) => {
+                p.printer_name = if s.is_empty() { None } else { Some(s.clone()) };
+            }
+            ("printer_name", _) if matches!(value_val, super::expr_types::Value::Number(_) | super::expr_types::Value::Bool(_)) => applied = false,
+            ("copies", super::expr_types::Value::Number(n)) => p.copies = (*n as i64).max(0) as u32,
+            ("collate", super::expr_types::Value::Bool(b)) => p.collate = *b,
+            ("reverse_order", super::expr_types::Value::Bool(b)) => p.reverse_order = *b,
+            ("artboard_range_mode", super::expr_types::Value::Str(s)) => {
+                p.artboard_range_mode = artboard_range_mode_from(s);
+            }
+            ("artboard_range", super::expr_types::Value::Str(s)) => p.artboard_range = s.clone(),
+            ("ignore_artboards", super::expr_types::Value::Bool(b)) => p.ignore_artboards = *b,
+            ("skip_blank_artboards", super::expr_types::Value::Bool(b)) => {
+                p.skip_blank_artboards = *b
+            }
+            ("media_size", super::expr_types::Value::Str(s)) => {
+                p.media_size = media_size_from(s);
+            }
+            ("media_width", super::expr_types::Value::Number(n)) => p.media_width = *n,
+            ("media_height", super::expr_types::Value::Number(n)) => p.media_height = *n,
+            ("orientation", super::expr_types::Value::Str(s)) => {
+                p.orientation = orientation_from(s);
+            }
+            ("auto_rotate", super::expr_types::Value::Bool(b)) => p.auto_rotate = *b,
+            ("transverse", super::expr_types::Value::Bool(b)) => p.transverse = *b,
+            ("print_layers", super::expr_types::Value::Str(s)) => {
+                p.print_layers = print_layers_from(s);
+            }
+            ("placement_x", super::expr_types::Value::Number(n)) => p.placement_x = *n,
+            ("placement_y", super::expr_types::Value::Number(n)) => p.placement_y = *n,
+            ("scaling_mode", super::expr_types::Value::Str(s)) => {
+                p.scaling_mode = scaling_mode_from(s);
+            }
+            ("custom_scale", super::expr_types::Value::Number(n)) => p.custom_scale = *n,
+            ("tile_overlap_h", super::expr_types::Value::Number(n)) => p.tile_overlap_h = *n,
+            ("tile_overlap_v", super::expr_types::Value::Number(n)) => p.tile_overlap_v = *n,
+            ("tile_range", super::expr_types::Value::Str(s)) => p.tile_range = s.clone(),
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.set_document_setup_field: { field, value }  — PRINT.md §1A
+    if let Some(spec) = eff.get("doc.set_document_setup_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        match field.as_str() {
+            "bleed_top" | "bleed_right" | "bleed_bottom" | "bleed_left" => {
+                let n = match value_val {
+                    super::expr_types::Value::Number(n) => n,
+                    super::expr_types::Value::Bool(_) => return deferred,
+                    _ => return deferred,
+                };
+                match field.as_str() {
+                    "bleed_top" => new_doc.document_setup.bleed_top = n,
+                    "bleed_right" => new_doc.document_setup.bleed_right = n,
+                    "bleed_bottom" => new_doc.document_setup.bleed_bottom = n,
+                    "bleed_left" => new_doc.document_setup.bleed_left = n,
+                    _ => unreachable!(),
+                }
+            }
+            "bleed_uniform" | "show_images_outline" | "highlight_substituted_glyphs" => {
+                let b = match value_val {
+                    super::expr_types::Value::Bool(b) => b,
+                    _ => return deferred,
+                };
+                match field.as_str() {
+                    "bleed_uniform" => new_doc.document_setup.bleed_uniform = b,
+                    "show_images_outline" => new_doc.document_setup.show_images_outline = b,
+                    "highlight_substituted_glyphs" => new_doc.document_setup.highlight_substituted_glyphs = b,
+                    _ => unreachable!(),
+                }
             }
             _ => return deferred,
         }
@@ -6857,9 +7060,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                         } else {
                                                                             Some(val_inner.clone())
                                                                         };
-                                                                        if let crate::geometry::element::Element::Layer(le) = elem {
-                                                                            le.name() = val_inner;
-                                                                        }
+                                                                        // Layer.name is now backed by
+                                                                        // common.name (LYR-091 merge);
+                                                                        // the assignment above already
+                                                                        // covers Layer along with every
+                                                                        // other element type.
+                                                                        let _ = val_inner;
                                                                     }
                                                                 }
                                                                 st.layers_renaming = None;
@@ -6914,9 +7120,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                     } else {
                                                                         Some(val_inner.clone())
                                                                     };
-                                                                    if let crate::geometry::element::Element::Layer(le) = elem {
-                                                                        le.name() = val_inner;
-                                                                    }
+                                                                    // Layer.name backed by common.name
+                                                                    // (LYR-091); covered above.
+                                                                    let _ = val_inner;
                                                                 }
                                                             }
                                                             st.layers_renaming = None;
@@ -7223,6 +7429,152 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Strip a known filename extension and append `.pdf`. Mirrors the
+/// menu_bar helper but lives here so the YAML effect handler doesn't
+/// need to reach into workspace::menu_bar.
+fn pdf_filename_for_tab(filename: &str) -> String {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return "Untitled.pdf".to_string();
+    }
+    for ext in [".svg", ".pdf", ".jas"] {
+        if let Some(stem) = trimmed.strip_suffix(ext) {
+            return format!("{}.pdf", stem);
+        }
+    }
+    format!("{}.pdf", trimmed)
+}
+
+/// Tabs widget — left-rail tab list plus a content area showing the
+/// active tab. Active tab is read from `bind.value` (typically
+/// `dialog.<field>`); clicking a tab writes its `id` back through the
+/// dialog signal. When no bind or the bound value is empty, the first
+/// tab is active and the widget is read-only.
+///
+/// YAML:
+/// ```
+/// - id: print_tabs
+///   type: tabs
+///   layout: left_rail            # default; only left_rail in Phase 1B
+///   bind: { value: "dialog.active_tab" }
+///   tabs:
+///     - { id: general, label: "General",
+///         content: { type: container, children: [...] } }
+///     - { id: marks_and_bleed, label: "Marks and Bleed",
+///         content: { type: text, content: "Available in Phase 2" } }
+///     ...
+/// ```
+fn render_tabs(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+    let tabs = el.get("tabs").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+    if tabs.is_empty() {
+        return rsx! { div { id: "{id}", style: "{style}" } };
+    }
+
+    let first_id = tabs[0]
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let bind_expr = el
+        .get("bind")
+        .and_then(|b| b.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let active_id: String = if bind_expr.is_empty() {
+        first_id.clone()
+    } else {
+        match expr::eval(bind_expr, ctx) {
+            Value::Str(s) if !s.is_empty() => s,
+            _ => first_id.clone(),
+        }
+    };
+
+    let bind_field: Option<String> = match classify_bind(bind_expr) {
+        BindTarget::Dialog(f) => Some(f),
+        _ => None,
+    };
+
+    // Render the active tab's content. Inactive tabs aren't rendered
+    // at all (matches the spec's expectation that only General is
+    // populated in Phase 1B; placeholder tabs simply swap in their
+    // text content node when activated).
+    let active_content = tabs
+        .iter()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(active_id.as_str()))
+        .and_then(|t| t.get("content"))
+        .map(|c| render_el(c, ctx, rctx))
+        .unwrap_or_else(|| rsx! { div {} });
+
+    // Snapshot the per-tab nav data once so the rsx loop doesn't
+    // borrow `tabs` again.
+    let nav: Vec<(String, String, bool)> = tabs
+        .iter()
+        .map(|t| {
+            let tid = t
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let label = t
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let active = tid == active_id;
+            (tid, label, active)
+        })
+        .collect();
+
+    let dialog_signal = rctx.dialog_ctx.0;
+    let revision = rctx.revision;
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "display:flex;flex-direction:row;align-items:stretch;gap:0;{style}",
+            // Left rail.
+            div {
+                style: "display:flex;flex-direction:column;min-width:140px;border-right:1px solid var(--jas-border,#555);padding:4px 0;background:var(--jas-pane-bg-dark,#2a2a2a);",
+                for (tid, label, active) in nav {
+                    {
+                        let target = tid.clone();
+                        let bind_field2 = bind_field.clone();
+                        let mut sig = dialog_signal;
+                        let mut rev = revision;
+                        let bg = if active { "background:var(--jas-pane-bg,#3a3a3a);" } else { "" };
+                        let weight = if active { "font-weight:600;" } else { "" };
+                        rsx! {
+                            div {
+                                key: "{target}",
+                                style: "padding:6px 12px;cursor:pointer;font-size:12px;color:var(--jas-text,#ccc);user-select:none;{bg}{weight}",
+                                onmousedown: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation();
+                                    if let Some(field) = &bind_field2 {
+                                        if let Some(mut ds) = sig() {
+                                            ds.set_value(field, serde_json::json!(target.clone()));
+                                            sig.set(Some(ds));
+                                        }
+                                        rev += 1;
+                                    }
+                                },
+                                "{label}"
+                            }
+                        }
+                    }
+                }
+            }
+            // Content area.
+            div {
+                style: "flex:1;padding:12px;",
+                {active_content}
             }
         }
     }

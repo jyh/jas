@@ -1,11 +1,19 @@
 (test
  (name document_test)
+ (modules document_test)
  (libraries jas alcotest))
 
 (test
  (name model_test)
+ (modules model_test)
  (libraries jas alcotest))
 
 (test
  (name controller_test)
+ (modules controller_test)
+ (libraries jas alcotest))
+
+(test
+ (name print_pipeline_test)
+ (modules print_pipeline_test)
  (libraries jas alcotest))

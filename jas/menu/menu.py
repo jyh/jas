@@ -48,6 +48,19 @@ def create_menus(window: QMainWindow) -> None:
 
     file_menu.addSeparator()
 
+    # PRINT.md §1: Document Setup, Print, Export to PDF.
+    document_setup_action = file_menu.addAction("Document Set&up...")
+    document_setup_action.triggered.connect(lambda: _open_yaml_dialog(window, "document_setup"))
+
+    print_action = file_menu.addAction("&Print...")
+    print_action.setShortcut(QKeySequence("Ctrl+P"))
+    print_action.triggered.connect(lambda: _open_yaml_dialog(window, "print"))
+
+    export_pdf_action = file_menu.addAction("Export to PDF...")
+    export_pdf_action.triggered.connect(lambda: _export_to_pdf(window, _model()))
+
+    file_menu.addSeparator()
+
     quit_action = file_menu.addAction("&Quit")
     quit_action.setShortcut(QKeySequence.Quit)
     quit_action.triggered.connect(window.close)
@@ -433,6 +446,55 @@ def _save_as(window: QMainWindow, model: Model) -> None:
         f.write(svg)
     model.mark_saved()
     model.filename = path
+
+
+def _pdf_filename_for(model: Model | None) -> str:
+    """Strip the model's filename extension and append .pdf. Falls back
+    to "Untitled.pdf" for empty / Untitled-N filenames."""
+    if model is None:
+        return "Untitled.pdf"
+    name = (model.filename or "").strip()
+    if not name or name.startswith("Untitled-"):
+        return "Untitled.pdf"
+    if "." in name:
+        name = name.rsplit(".", 1)[0]
+    return f"{name}.pdf"
+
+
+def _export_to_pdf(window: QMainWindow, model: Model | None) -> None:
+    """PRINT.md §1B File menu Export to PDF... entry. Generates a PDF
+    via geometry.pdf.document_to_pdf and writes it to a user-chosen
+    path."""
+    if model is None:
+        return
+    from geometry.pdf import document_to_pdf
+    bytes_ = document_to_pdf(model.document)
+    path, _ = QFileDialog.getSaveFileName(
+        window, "Export to PDF", _pdf_filename_for(model),
+        "PDF Files (*.pdf)")
+    if not path:
+        return
+    with open(path, "wb") as f:
+        f.write(bytes_)
+
+
+def _open_yaml_dialog(window: QMainWindow, dialog_id: str) -> None:
+    """PRINT.md §1: open a YAML dialog (Document Setup, Print) from the
+    File menu. The dialog runtime in Python lives in
+    panels.yaml_dialog_view; the menu hook simply wires the dialog id
+    through, with active_document exposed in the init context."""
+    model = window.active_model() if hasattr(window, "active_model") else None
+    if model is None:
+        return
+    # The Python yaml dialog framework's menu-hooked open path is not
+    # yet wired (the existing dialog open paths are panel-internal).
+    # Phase 1B ships the data model + PDF export + menu entry; the
+    # Document Setup / Print modal dialogs in Python reach the user
+    # via PDF export today, with the dialogs themselves landing in a
+    # follow-up alongside the Python yaml dialog framework upgrade.
+    print(f"[print pipeline] Open dialog '{dialog_id}' (deferred — "
+          f"see PRINT.md memory; Python yaml dialog menu-open path "
+          f"not yet wired)")
 
 
 def _lock_selection(model: Model) -> None:

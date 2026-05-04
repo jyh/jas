@@ -2536,6 +2536,180 @@ actions:
     effects:
       - log: "rearrange_artboards (deferred)"
 
+  # ─── Document Setup dialog (PRINT.md §1A) ────────────────
+
+  open_document_setup:
+    description: >
+      Open the Document Setup dialog. Init expressions copy the
+      current document_setup fields into dialog state so edits are
+      local until OK.
+    category: document
+    effects:
+      - open_dialog:
+          id: document_setup
+
+  document_setup_confirm:
+    description: >
+      Commit the Document Setup dialog. Writes all DocumentSetup
+      fields via doc.set_document_setup_field. Single undo op covers
+      the batch; close_dialog dismisses.
+    category: document
+    params:
+      bleed_top: { type: number }
+      bleed_right: { type: number }
+      bleed_bottom: { type: number }
+      bleed_left: { type: number }
+      bleed_uniform: { type: bool }
+      show_images_outline: { type: bool }
+      highlight_substituted_glyphs: { type: bool }
+    effects:
+      - snapshot
+      - doc.set_document_setup_field: { field: "bleed_top",    value: "param.bleed_top" }
+      - doc.set_document_setup_field: { field: "bleed_right",  value: "param.bleed_right" }
+      - doc.set_document_setup_field: { field: "bleed_bottom", value: "param.bleed_bottom" }
+      - doc.set_document_setup_field: { field: "bleed_left",   value: "param.bleed_left" }
+      - doc.set_document_setup_field: { field: "bleed_uniform", value: "param.bleed_uniform" }
+      - doc.set_document_setup_field: { field: "show_images_outline", value: "param.show_images_outline" }
+      - doc.set_document_setup_field: { field: "highlight_substituted_glyphs", value: "param.highlight_substituted_glyphs" }
+      - clear_dialog_snapshot
+      - close_dialog
+
+  document_setup_toggle_bleed_uniform:
+    description: >
+      Toggle dialog.bleed_uniform. Phase-1A deferral: dialog state
+      mutation from action effects is not yet wired (matches
+      toggle_artboard_chain_link precedent). The chain-link icon
+      ships visually but the click is a no-op until the dialog-state
+      effect framework lands.
+    category: document
+    effects:
+      - log: "document_setup_toggle_bleed_uniform (native, deferred)"
+
+  # ─── Print dialog (PRINT.md §1B) ─────────────────────────
+
+  open_print_dialog:
+    description: >
+      Open the Print dialog. Init expressions copy
+      active_document.print_preferences.* into dialog state so edits
+      are local until Print or Done.
+    category: document
+    effects:
+      - open_dialog:
+          id: print
+
+  print_dialog_done:
+    description: >
+      Commit PrintPreferences from dialog state and close. "Done"
+      saves the preferences without triggering a print job (the user
+      may want to print later via Cmd+P with the saved settings).
+    category: document
+    params:
+      preset_name: { type: string }
+      copies: { type: number }
+      collate: { type: bool }
+      reverse_order: { type: bool }
+      artboard_range_mode: { type: string }
+      artboard_range: { type: string }
+      ignore_artboards: { type: bool }
+      skip_blank_artboards: { type: bool }
+      media_size: { type: string }
+      media_width: { type: number }
+      media_height: { type: number }
+      orientation: { type: string }
+      auto_rotate: { type: bool }
+      transverse: { type: bool }
+      print_layers: { type: string }
+      placement_x: { type: number }
+      placement_y: { type: number }
+      scaling_mode: { type: string }
+      custom_scale: { type: number }
+    effects:
+      - snapshot
+      - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
+      - doc.set_print_preferences_field: { field: "copies",               value: "param.copies" }
+      - doc.set_print_preferences_field: { field: "collate",              value: "param.collate" }
+      - doc.set_print_preferences_field: { field: "reverse_order",        value: "param.reverse_order" }
+      - doc.set_print_preferences_field: { field: "artboard_range_mode",  value: "param.artboard_range_mode" }
+      - doc.set_print_preferences_field: { field: "artboard_range",       value: "param.artboard_range" }
+      - doc.set_print_preferences_field: { field: "ignore_artboards",     value: "param.ignore_artboards" }
+      - doc.set_print_preferences_field: { field: "skip_blank_artboards", value: "param.skip_blank_artboards" }
+      - doc.set_print_preferences_field: { field: "media_size",           value: "param.media_size" }
+      - doc.set_print_preferences_field: { field: "media_width",          value: "param.media_width" }
+      - doc.set_print_preferences_field: { field: "media_height",         value: "param.media_height" }
+      - doc.set_print_preferences_field: { field: "orientation",          value: "param.orientation" }
+      - doc.set_print_preferences_field: { field: "auto_rotate",          value: "param.auto_rotate" }
+      - doc.set_print_preferences_field: { field: "transverse",           value: "param.transverse" }
+      - doc.set_print_preferences_field: { field: "print_layers",         value: "param.print_layers" }
+      - doc.set_print_preferences_field: { field: "placement_x",          value: "param.placement_x" }
+      - doc.set_print_preferences_field: { field: "placement_y",          value: "param.placement_y" }
+      - doc.set_print_preferences_field: { field: "scaling_mode",         value: "param.scaling_mode" }
+      - doc.set_print_preferences_field: { field: "custom_scale",         value: "param.custom_scale" }
+      - clear_dialog_snapshot
+      - close_dialog
+
+  print_dialog_print:
+    description: >
+      Commit PrintPreferences and trigger PDF generation. Same field
+      writes as print_dialog_done, then close_dialog. The actual PDF
+      build + browser download is intercepted on the native side
+      (Rust menu_bar reroutes "print" to call geometry::pdf with the
+      now-saved preferences). Flask logs the print intent.
+    category: document
+    params:
+      preset_name: { type: string }
+      copies: { type: number }
+      collate: { type: bool }
+      reverse_order: { type: bool }
+      artboard_range_mode: { type: string }
+      artboard_range: { type: string }
+      ignore_artboards: { type: bool }
+      skip_blank_artboards: { type: bool }
+      media_size: { type: string }
+      media_width: { type: number }
+      media_height: { type: number }
+      orientation: { type: string }
+      auto_rotate: { type: bool }
+      transverse: { type: bool }
+      print_layers: { type: string }
+      placement_x: { type: number }
+      placement_y: { type: number }
+      scaling_mode: { type: string }
+      custom_scale: { type: number }
+    effects:
+      - snapshot
+      - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
+      - doc.set_print_preferences_field: { field: "copies",               value: "param.copies" }
+      - doc.set_print_preferences_field: { field: "collate",              value: "param.collate" }
+      - doc.set_print_preferences_field: { field: "reverse_order",        value: "param.reverse_order" }
+      - doc.set_print_preferences_field: { field: "artboard_range_mode",  value: "param.artboard_range_mode" }
+      - doc.set_print_preferences_field: { field: "artboard_range",       value: "param.artboard_range" }
+      - doc.set_print_preferences_field: { field: "ignore_artboards",     value: "param.ignore_artboards" }
+      - doc.set_print_preferences_field: { field: "skip_blank_artboards", value: "param.skip_blank_artboards" }
+      - doc.set_print_preferences_field: { field: "media_size",           value: "param.media_size" }
+      - doc.set_print_preferences_field: { field: "media_width",          value: "param.media_width" }
+      - doc.set_print_preferences_field: { field: "media_height",         value: "param.media_height" }
+      - doc.set_print_preferences_field: { field: "orientation",          value: "param.orientation" }
+      - doc.set_print_preferences_field: { field: "auto_rotate",          value: "param.auto_rotate" }
+      - doc.set_print_preferences_field: { field: "transverse",           value: "param.transverse" }
+      - doc.set_print_preferences_field: { field: "print_layers",         value: "param.print_layers" }
+      - doc.set_print_preferences_field: { field: "placement_x",          value: "param.placement_x" }
+      - doc.set_print_preferences_field: { field: "placement_y",          value: "param.placement_y" }
+      - doc.set_print_preferences_field: { field: "scaling_mode",         value: "param.scaling_mode" }
+      - doc.set_print_preferences_field: { field: "custom_scale",         value: "param.custom_scale" }
+      - clear_dialog_snapshot
+      - geometry.export_pdf: {}
+      - close_dialog
+
+  noop:
+    description: >
+      Disabled-button stub. Used by Phase-1B Print dialog footer
+      buttons (Page Setup..., Setup...) that are placeholders until
+      OS-driver hookup lands.
+    category: document
+    enabled_when: "false"
+    effects:
+      - log: "noop"
+
   # ─── Brushes panel ───────────────────────────────────────
   # Action stubs for the Brushes panel and its menu. Phase 1
   # ships the panel YAML and minimal click semantics; most

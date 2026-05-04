@@ -17,12 +17,22 @@ from typing import TypeVar
 
 from geometry.element import Element, Group, Layer
 from document.artboard import Artboard, ArtboardOptions
+from document.document_setup import DocumentSetup
+from document.print_preferences import PrintPreferences
 
 _G = TypeVar("_G", bound=Group)
 
 
 def _default_artboard_options() -> ArtboardOptions:
     return ArtboardOptions()
+
+
+def _default_document_setup() -> DocumentSetup:
+    return DocumentSetup()
+
+
+def _default_print_preferences() -> PrintPreferences:
+    return PrintPreferences()
 
 # A path identifies an element by its position in the document tree.
 # Each integer is a child index at that level of the tree.
@@ -170,6 +180,12 @@ class Document:
     artboards: tuple = ()
     artboard_options: "ArtboardOptions" = field(
         default_factory=lambda: _default_artboard_options()
+    )
+    document_setup: "DocumentSetup" = field(
+        default_factory=lambda: _default_document_setup()
+    )
+    print_preferences: "PrintPreferences" = field(
+        default_factory=lambda: _default_print_preferences()
     )
 
     def get_element_selection(self, path: ElementPath) -> ElementSelection | None:

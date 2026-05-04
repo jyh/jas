@@ -34,6 +34,8 @@ public func buildActiveDocumentView(
                 "fade_region_outside_artboard": true,
                 "update_while_dragging": true,
             ] as [String: Any],
+            "document_setup": documentSetupView(.default),
+            "print_preferences": printPreferencesView(.default),
             "artboards_count": 0,
             "next_artboard_name": "Artboard 1",
             "current_artboard_id": NSNull(),
@@ -132,11 +134,53 @@ public func buildActiveDocumentView(
             "fade_region_outside_artboard": m.document.artboardOptions.fadeRegionOutsideArtboard,
             "update_while_dragging": m.document.artboardOptions.updateWhileDragging,
         ] as [String: Any],
+        "document_setup": documentSetupView(m.document.documentSetup),
+        "print_preferences": printPreferencesView(m.document.printPreferences),
         "artboards_count": m.document.artboards.count,
         "next_artboard_name": nextArtboardName_,
         "current_artboard_id": currentArtboardId,
         "current_artboard": currentArtboardJson,
         "artboards_panel_selection_ids": artboardsPanelSelection,
+    ]
+}
+
+private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
+    return [
+        "bleed_top": s.bleedTop,
+        "bleed_right": s.bleedRight,
+        "bleed_bottom": s.bleedBottom,
+        "bleed_left": s.bleedLeft,
+        "bleed_uniform": s.bleedUniform,
+        "show_images_outline": s.showImagesOutline,
+        "highlight_substituted_glyphs": s.highlightSubstitutedGlyphs,
+    ]
+}
+
+private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
+    return [
+        "preset_name": p.presetName,
+        "printer_name": p.printerName ?? NSNull(),
+        "copies": p.copies,
+        "collate": p.collate,
+        "reverse_order": p.reverseOrder,
+        "artboard_range_mode": p.artboardRangeMode.rawValue,
+        "artboard_range": p.artboardRange,
+        "ignore_artboards": p.ignoreArtboards,
+        "skip_blank_artboards": p.skipBlankArtboards,
+        "media_size": p.mediaSize.rawValue,
+        "media_width": p.mediaWidth,
+        "media_height": p.mediaHeight,
+        "orientation": p.orientation.rawValue,
+        "auto_rotate": p.autoRotate,
+        "transverse": p.transverse,
+        "print_layers": p.printLayers.rawValue,
+        "placement_x": p.placementX,
+        "placement_y": p.placementY,
+        "scaling_mode": p.scalingMode.rawValue,
+        "custom_scale": p.customScale,
+        "tile_overlap_h": p.tileOverlapH,
+        "tile_overlap_v": p.tileOverlapV,
+        "tile_range": p.tileRange,
     ]
 }
 

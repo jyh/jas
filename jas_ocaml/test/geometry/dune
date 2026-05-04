@@ -27,3 +27,8 @@
  (name path_ops_test)
  (modules path_ops_test)
  (libraries jas alcotest))
+
+(test
+ (name pdf_test)
+ (modules pdf_test)
+ (libraries jas alcotest))
