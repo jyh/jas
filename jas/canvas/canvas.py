@@ -1657,6 +1657,29 @@ def _draw_artboard_borders(painter: QPainter, doc: Document) -> None:
     painter.restore()
 
 
+def _draw_bleed_guides(painter: QPainter, doc: Document) -> None:
+    """Layer 5b (PRINT.md §1A): red dashed bleed guide drawn just
+    outside each artboard when any document_setup.bleed_* is non-zero."""
+    s = doc.document_setup
+    if (s.bleed_top == 0.0 and s.bleed_right == 0.0
+            and s.bleed_bottom == 0.0 and s.bleed_left == 0.0):
+        return
+    painter.save()
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    pen = QPen(QColor(229, 0, 0))
+    pen.setWidthF(1.0)
+    pen.setStyle(Qt.PenStyle.DashLine)
+    pen.setDashPattern([4.0, 4.0])
+    painter.setPen(pen)
+    for ab in doc.artboards:
+        rect = s.bleed_rect_for_artboard(ab)
+        if rect is None:
+            continue
+        x, y, w, h = rect
+        painter.drawRect(QRectF(x, y, w, h))
+    painter.restore()
+
+
 def _draw_artboard_accent(painter: QPainter, doc: Document,
                            panel_selected_ids) -> None:
     """Layer 6: 2px accent outline on panel-selected artboards. The
@@ -2147,6 +2170,7 @@ class CanvasWidget(QWidget):
         _draw_fade_overlay(painter, doc, self.width(), self.height())
         # Z-layer 5-8: artboard chrome.
         _draw_artboard_borders(painter, doc)
+        _draw_bleed_guides(painter, doc)
         _draw_artboard_accent(painter, doc, self._artboards_panel_selection)
         _draw_artboard_labels(painter, doc)
         _draw_artboard_display_marks(painter, doc)
