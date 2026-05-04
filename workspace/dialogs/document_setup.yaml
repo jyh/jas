@@ -115,7 +115,8 @@ document_setup:
                     bind: { value: "dialog.bleed_right" }
           - id: ds_bleed_chain
             type: icon_button
-            icon: "{{if dialog.bleed_uniform then 'chain_linked' else 'chain_broken'}}"
+            bind:
+              icon: 'if dialog.bleed_uniform then "chain_linked" else "chain_broken"'
             summary: "Lock all four bleed sides to the same value"
             description: >
               Toggle — when engaged, editing any one bleed field

@@ -26118,7 +26118,9 @@
               {
                 "id": "ds_bleed_chain",
                 "type": "icon_button",
-                "icon": "{{if dialog.bleed_uniform then 'chain_linked' else 'chain_broken'}}",
+                "bind": {
+                  "icon": "if dialog.bleed_uniform then \"chain_linked\" else \"chain_broken\""
+                },
                 "summary": "Lock all four bleed sides to the same value",
                 "description": "Toggle \u2014 when engaged, editing any one bleed field propagates the new value to all four. Document- persistent.\n",
                 "style": {
