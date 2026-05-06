@@ -171,6 +171,28 @@ def _document_setup_view(s) -> dict:
     }
 
 
+def _ink_override_view(ink) -> dict:
+    return {
+        "name": ink.name,
+        "print": ink.print,
+        "frequency": ink.frequency,
+        "angle": ink.angle,
+        "dot_shape": ink.dot_shape.value,
+    }
+
+
+def _output_view(o) -> dict:
+    return {
+        "mode": o.mode.value,
+        "emulsion": o.emulsion.value,
+        "image_polarity": o.image_polarity.value,
+        "printer_resolution": o.printer_resolution,
+        "convert_spot_to_process": o.convert_spot_to_process,
+        "overprint_black": o.overprint_black,
+        "inks": [_ink_override_view(i) for i in o.inks],
+    }
+
+
 def _marks_and_bleed_view(m) -> dict:
     return {
         "all_printer_marks": m.all_printer_marks,
@@ -215,6 +237,7 @@ def _print_preferences_view(p) -> dict:
         "tile_overlap_v": p.tile_overlap_v,
         "tile_range": p.tile_range,
         "marks_and_bleed": _marks_and_bleed_view(p.marks_and_bleed),
+        "output": _output_view(p.output),
     }
 
 
