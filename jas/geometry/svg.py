@@ -405,18 +405,125 @@ def _element_svg(elem: Element, indent: str) -> str:
     return ""
 
 
+# Marks-and-Bleed + DocumentSetup SVG persistence (PRINT.md §Phase 2).
+# Stored as <jas:document-setup> and <jas:print-preferences> children
+# of <sodipodi:namedview>. Bleed values are written as raw point
+# values (no px conversion) to keep the on-disk numbers intelligible
+# and stable across viewports — they're print-domain quantities, not
+# canvas geometry.
+
+_SODIPODI_NS = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd"
+_JAS_NS = "urn:jas:1"
+
+
+def _bool_str(b: bool) -> str:
+    return "true" if b else "false"
+
+
+def _document_setup_to_xml(s, indent: str) -> str:
+    return (
+        f'{indent}<jas:document-setup'
+        f' bleed-top="{_fmt(s.bleed_top)}"'
+        f' bleed-right="{_fmt(s.bleed_right)}"'
+        f' bleed-bottom="{_fmt(s.bleed_bottom)}"'
+        f' bleed-left="{_fmt(s.bleed_left)}"'
+        f' bleed-uniform="{_bool_str(s.bleed_uniform)}"'
+        f' show-images-outline="{_bool_str(s.show_images_outline)}"'
+        f' highlight-substituted-glyphs="{_bool_str(s.highlight_substituted_glyphs)}"'
+        f'/>'
+    )
+
+
+def _marks_and_bleed_to_xml(m, indent: str) -> str:
+    return (
+        f'{indent}<jas:marks-and-bleed'
+        f' all-printer-marks="{_bool_str(m.all_printer_marks)}"'
+        f' trim-marks="{_bool_str(m.trim_marks)}"'
+        f' registration-marks="{_bool_str(m.registration_marks)}"'
+        f' color-bars="{_bool_str(m.color_bars)}"'
+        f' page-information="{_bool_str(m.page_information)}"'
+        f' printer-mark-type="{m.printer_mark_type.value}"'
+        f' trim-mark-weight="{_fmt(m.trim_mark_weight)}"'
+        f' mark-offset="{_fmt(m.mark_offset)}"'
+        f' use-document-bleed="{_bool_str(m.use_document_bleed)}"'
+        f' bleed-top="{_fmt(m.bleed_top)}"'
+        f' bleed-right="{_fmt(m.bleed_right)}"'
+        f' bleed-bottom="{_fmt(m.bleed_bottom)}"'
+        f' bleed-left="{_fmt(m.bleed_left)}"'
+        f'/>'
+    )
+
+
+def _print_preferences_to_xml(p, indent: str) -> str:
+    inner = indent + "  "
+    parts = [
+        f'{indent}<jas:print-preferences',
+        f' preset-name="{escape(p.preset_name)}"',
+        f' copies="{p.copies}"',
+        f' collate="{_bool_str(p.collate)}"',
+        f' reverse-order="{_bool_str(p.reverse_order)}"',
+        f' artboard-range-mode="{p.artboard_range_mode.value}"',
+        f' artboard-range="{escape(p.artboard_range)}"',
+        f' ignore-artboards="{_bool_str(p.ignore_artboards)}"',
+        f' skip-blank-artboards="{_bool_str(p.skip_blank_artboards)}"',
+        f' media-size="{p.media_size.value}"',
+        f' media-width="{_fmt(p.media_width)}"',
+        f' media-height="{_fmt(p.media_height)}"',
+        f' orientation="{p.orientation.value}"',
+        f' auto-rotate="{_bool_str(p.auto_rotate)}"',
+        f' transverse="{_bool_str(p.transverse)}"',
+        f' print-layers="{p.print_layers.value}"',
+        f' placement-x="{_fmt(p.placement_x)}"',
+        f' placement-y="{_fmt(p.placement_y)}"',
+        f' scaling-mode="{p.scaling_mode.value}"',
+        f' custom-scale="{_fmt(p.custom_scale)}"',
+        f' tile-overlap-h="{_fmt(p.tile_overlap_h)}"',
+        f' tile-overlap-v="{_fmt(p.tile_overlap_v)}"',
+        f' tile-range="{escape(p.tile_range)}"',
+    ]
+    header = "".join(parts)
+    if p.printer_name is not None:
+        header += f' printer-name="{escape(p.printer_name)}"'
+    return (
+        f'{header}>\n'
+        f'{_marks_and_bleed_to_xml(p.marks_and_bleed, inner)}\n'
+        f'{indent}</jas:print-preferences>'
+    )
+
+
 def document_to_svg(doc: Document) -> str:
     """Convert a Document to an SVG string."""
+    from document.document_setup import DocumentSetup
+    from document.print_preferences import PrintPreferences
+
     bx, by, bw, bh = doc.bounds()
     vb = (f"{_fmt(_px(bx))} {_fmt(_px(by))} "
           f"{_fmt(_px(bw))} {_fmt(_px(bh))}")
+    setup_default = doc.document_setup == DocumentSetup()
+    prefs_default = doc.print_preferences == PrintPreferences()
+    needs_jas = (not setup_default) or (not prefs_default)
+    ns_attrs = (
+        f'xmlns="http://www.w3.org/2000/svg"'
+        f' xmlns:inkscape="{_INKSCAPE_NS}"'
+    )
+    if needs_jas:
+        ns_attrs += (
+            f' xmlns:sodipodi="{_SODIPODI_NS}"'
+            f' xmlns:jas="{_JAS_NS}"'
+        )
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<svg xmlns="http://www.w3.org/2000/svg"'
-        f' xmlns:inkscape="{_INKSCAPE_NS}"'
+        f'<svg {ns_attrs}'
         f' viewBox="{vb}"'
         f' width="{_fmt(_px(bw))}" height="{_fmt(_px(bh))}">',
     ]
+    if needs_jas:
+        lines.append('  <sodipodi:namedview id="namedview1">')
+        if not setup_default:
+            lines.append(_document_setup_to_xml(doc.document_setup, "    "))
+        if not prefs_default:
+            lines.append(_print_preferences_to_xml(doc.print_preferences, "    "))
+        lines.append('  </sodipodi:namedview>')
     for layer in doc.layers:
         lines.append(_element_svg(layer, "  "))
     lines.append("</svg>")
@@ -1062,6 +1169,165 @@ def _parse_element(node: ET.Element) -> Element | None:
     return None
 
 
+def _attr_get(node: ET.Element, name: str) -> str | None:
+    """Try the bare attribute name first; fall back to a `jas:`-prefixed
+    or {jas-namespace}-qualified variant for files written by
+    namespace-aware writers."""
+    v = node.get(name)
+    if v is not None:
+        return v
+    v = node.get("jas:" + name)
+    if v is not None:
+        return v
+    return node.get(f"{{{_JAS_NS}}}{name}")
+
+
+def _parse_bool_attr(node: ET.Element, name: str, default: bool) -> bool:
+    v = _attr_get(node, name)
+    if v is None:
+        return default
+    if v in ("true", "1", "yes"):
+        return True
+    if v in ("false", "0", "no"):
+        return False
+    return default
+
+
+def _parse_float_attr(node: ET.Element, name: str, default: float) -> float:
+    v = _attr_get(node, name)
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return default
+
+
+def _parse_int_attr(node: ET.Element, name: str, default: int) -> int:
+    v = _attr_get(node, name)
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return default
+
+
+def _parse_document_setup_node(node: ET.Element):
+    from document.document_setup import DocumentSetup
+    d = DocumentSetup()
+    return DocumentSetup(
+        bleed_top=_parse_float_attr(node, "bleed-top", d.bleed_top),
+        bleed_right=_parse_float_attr(node, "bleed-right", d.bleed_right),
+        bleed_bottom=_parse_float_attr(node, "bleed-bottom", d.bleed_bottom),
+        bleed_left=_parse_float_attr(node, "bleed-left", d.bleed_left),
+        bleed_uniform=_parse_bool_attr(node, "bleed-uniform", d.bleed_uniform),
+        show_images_outline=_parse_bool_attr(
+            node, "show-images-outline", d.show_images_outline),
+        highlight_substituted_glyphs=_parse_bool_attr(
+            node, "highlight-substituted-glyphs", d.highlight_substituted_glyphs),
+    )
+
+
+def _parse_marks_and_bleed_node(node: ET.Element):
+    from document.print_preferences import (
+        MarksAndBleed, PrinterMarkType, _enum_from_string,
+    )
+    d = MarksAndBleed()
+    return MarksAndBleed(
+        all_printer_marks=_parse_bool_attr(
+            node, "all-printer-marks", d.all_printer_marks),
+        trim_marks=_parse_bool_attr(node, "trim-marks", d.trim_marks),
+        registration_marks=_parse_bool_attr(
+            node, "registration-marks", d.registration_marks),
+        color_bars=_parse_bool_attr(node, "color-bars", d.color_bars),
+        page_information=_parse_bool_attr(
+            node, "page-information", d.page_information),
+        printer_mark_type=_enum_from_string(
+            PrinterMarkType,
+            _attr_get(node, "printer-mark-type") or "",
+            d.printer_mark_type),
+        trim_mark_weight=_parse_float_attr(
+            node, "trim-mark-weight", d.trim_mark_weight),
+        mark_offset=_parse_float_attr(node, "mark-offset", d.mark_offset),
+        use_document_bleed=_parse_bool_attr(
+            node, "use-document-bleed", d.use_document_bleed),
+        bleed_top=_parse_float_attr(node, "bleed-top", d.bleed_top),
+        bleed_right=_parse_float_attr(node, "bleed-right", d.bleed_right),
+        bleed_bottom=_parse_float_attr(node, "bleed-bottom", d.bleed_bottom),
+        bleed_left=_parse_float_attr(node, "bleed-left", d.bleed_left),
+    )
+
+
+def _parse_print_preferences_node(node: ET.Element):
+    from document.print_preferences import (
+        PrintPreferences, MarksAndBleed,
+        ArtboardRangeMode, MediaSize, Orientation, PrintLayers, ScalingMode,
+        _enum_from_string,
+    )
+    d = PrintPreferences()
+    mab = MarksAndBleed()
+    for child in node:
+        if _strip_ns(child.tag) == "marks-and-bleed":
+            mab = _parse_marks_and_bleed_node(child)
+            break
+    return PrintPreferences(
+        preset_name=_attr_get(node, "preset-name") or d.preset_name,
+        printer_name=_attr_get(node, "printer-name"),
+        copies=_parse_int_attr(node, "copies", d.copies),
+        collate=_parse_bool_attr(node, "collate", d.collate),
+        reverse_order=_parse_bool_attr(node, "reverse-order", d.reverse_order),
+        artboard_range_mode=_enum_from_string(
+            ArtboardRangeMode,
+            _attr_get(node, "artboard-range-mode") or "", d.artboard_range_mode),
+        artboard_range=_attr_get(node, "artboard-range") or d.artboard_range,
+        ignore_artboards=_parse_bool_attr(
+            node, "ignore-artboards", d.ignore_artboards),
+        skip_blank_artboards=_parse_bool_attr(
+            node, "skip-blank-artboards", d.skip_blank_artboards),
+        media_size=_enum_from_string(
+            MediaSize, _attr_get(node, "media-size") or "", d.media_size),
+        media_width=_parse_float_attr(node, "media-width", d.media_width),
+        media_height=_parse_float_attr(node, "media-height", d.media_height),
+        orientation=_enum_from_string(
+            Orientation, _attr_get(node, "orientation") or "", d.orientation),
+        auto_rotate=_parse_bool_attr(node, "auto-rotate", d.auto_rotate),
+        transverse=_parse_bool_attr(node, "transverse", d.transverse),
+        print_layers=_enum_from_string(
+            PrintLayers, _attr_get(node, "print-layers") or "", d.print_layers),
+        placement_x=_parse_float_attr(node, "placement-x", d.placement_x),
+        placement_y=_parse_float_attr(node, "placement-y", d.placement_y),
+        scaling_mode=_enum_from_string(
+            ScalingMode, _attr_get(node, "scaling-mode") or "", d.scaling_mode),
+        custom_scale=_parse_float_attr(node, "custom-scale", d.custom_scale),
+        tile_overlap_h=_parse_float_attr(node, "tile-overlap-h", d.tile_overlap_h),
+        tile_overlap_v=_parse_float_attr(node, "tile-overlap-v", d.tile_overlap_v),
+        tile_range=_attr_get(node, "tile-range") or d.tile_range,
+        marks_and_bleed=mab,
+    )
+
+
+def _parse_jas_print_blocks(root: ET.Element):
+    """Walk the root for <sodipodi:namedview> children and pull
+    <jas:document-setup> / <jas:print-preferences> attributes out.
+    Returns (DocumentSetup, PrintPreferences) — defaults when neither
+    block is present."""
+    from document.document_setup import DocumentSetup
+    from document.print_preferences import PrintPreferences
+    setup = DocumentSetup()
+    prefs = PrintPreferences()
+    for child in root:
+        if _strip_ns(child.tag) != "namedview":
+            continue
+        for sub in child:
+            t = _strip_ns(sub.tag)
+            if t == "document-setup":
+                setup = _parse_document_setup_node(sub)
+            elif t == "print-preferences":
+                prefs = _parse_print_preferences_node(sub)
+    return setup, prefs
+
+
 def svg_to_document(svg: str) -> Document:
     """Parse an SVG string and return a Document.
 
@@ -1073,8 +1339,12 @@ def svg_to_document(svg: str) -> Document:
     except ET.ParseError as e:
         logging.warning("Failed to parse SVG: %s", e)
         return Document(layers=(Layer(children=()),))
+    parsed_setup, parsed_prefs = _parse_jas_print_blocks(root)
     layers: list[Layer] = []
     for child in root:
+        # Skip namedview — its children are pulled out above.
+        if _strip_ns(child.tag) == "namedview":
+            continue
         elem = _parse_element(child)
         if elem is None:
             continue
@@ -1095,4 +1365,7 @@ def svg_to_document(svg: str) -> Document:
                     transform=layers[-1].transform)
     if not layers:
         layers = [Layer(children=())]
-    return normalize_document(Document(layers=tuple(layers)))
+    return normalize_document(Document(
+        layers=tuple(layers),
+        document_setup=parsed_setup,
+        print_preferences=parsed_prefs))
