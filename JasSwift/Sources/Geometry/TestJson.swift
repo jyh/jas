@@ -523,6 +523,33 @@ private func documentSetupJson(_ s: DocumentSetup) -> String {
     return o.build()
 }
 
+private func inkOverrideJson(_ ink: InkOverride) -> String {
+    let o = JsonObj()
+    o.num("angle", ink.angle)
+    o.str("dot_shape", ink.dotShape.rawValue)
+    o.num("frequency", ink.frequency)
+    o.str("name", ink.name)
+    o.bool("print", ink.print)
+    return o.build()
+}
+
+private func inksJson(_ inks: [InkOverride]) -> String {
+    let items = inks.map(inkOverrideJson)
+    return jsonArray(items)
+}
+
+private func outputJson(_ out: Output) -> String {
+    let o = JsonObj()
+    o.bool("convert_spot_to_process", out.convertSpotToProcess)
+    o.str("emulsion", out.emulsion.rawValue)
+    o.str("image_polarity", out.imagePolarity.rawValue)
+    o.raw("inks", inksJson(out.inks))
+    o.str("mode", out.mode.rawValue)
+    o.bool("overprint_black", out.overprintBlack)
+    o.str("printer_resolution", out.printerResolution)
+    return o.build()
+}
+
 private func marksAndBleedJson(_ m: MarksAndBleed) -> String {
     let o = JsonObj()
     o.bool("all_printer_marks", m.allPrinterMarks)
@@ -555,6 +582,7 @@ private func printPreferencesJson(_ p: PrintPreferences) -> String {
     o.str("media_size", p.mediaSize.rawValue)
     o.num("media_width", p.mediaWidth)
     o.str("orientation", p.orientation.rawValue)
+    o.raw("output", outputJson(p.output))
     o.num("placement_x", p.placementX)
     o.num("placement_y", p.placementY)
     o.str("preset_name", p.presetName)
@@ -962,6 +990,39 @@ private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
     )
 }
 
+private func parseInkOverride(_ v: Any?) -> InkOverride {
+    guard let d = v as? [String: Any] else {
+        return InkOverride(name: "")
+    }
+    return InkOverride(
+        name: (d["name"] as? String) ?? "",
+        print: (d["print"] as? Bool) ?? true,
+        frequency: (d["frequency"] as? NSNumber)?.doubleValue ?? 75.0,
+        angle: (d["angle"] as? NSNumber)?.doubleValue ?? 45.0,
+        dotShape: DotShape(rawValue: (d["dot_shape"] as? String) ?? "") ?? .round
+    )
+}
+
+private func parseOutput(_ v: Any?) -> Output {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = Output.default
+    let inks: [InkOverride] = {
+        if let arr = d["inks"] as? [Any] {
+            return arr.map { parseInkOverride($0) }
+        }
+        return def.inks
+    }()
+    return Output(
+        mode: OutputMode(rawValue: (d["mode"] as? String) ?? "") ?? def.mode,
+        emulsion: Emulsion(rawValue: (d["emulsion"] as? String) ?? "") ?? def.emulsion,
+        imagePolarity: ImagePolarity(rawValue: (d["image_polarity"] as? String) ?? "") ?? def.imagePolarity,
+        printerResolution: (d["printer_resolution"] as? String) ?? def.printerResolution,
+        convertSpotToProcess: (d["convert_spot_to_process"] as? Bool) ?? def.convertSpotToProcess,
+        overprintBlack: (d["overprint_black"] as? Bool) ?? def.overprintBlack,
+        inks: inks
+    )
+}
+
 private func parseMarksAndBleed(_ v: Any?) -> MarksAndBleed {
     guard let d = v as? [String: Any] else { return .default }
     let def = MarksAndBleed.default
@@ -1013,7 +1074,8 @@ private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
         tileOverlapH: (d["tile_overlap_h"] as? NSNumber)?.doubleValue ?? def.tileOverlapH,
         tileOverlapV: (d["tile_overlap_v"] as? NSNumber)?.doubleValue ?? def.tileOverlapV,
         tileRange: (d["tile_range"] as? String) ?? def.tileRange,
-        marksAndBleed: parseMarksAndBleed(d["marks_and_bleed"])
+        marksAndBleed: parseMarksAndBleed(d["marks_and_bleed"]),
+        output: parseOutput(d["output"])
     )
 }
 

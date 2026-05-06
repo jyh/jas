@@ -55,6 +55,102 @@ public enum PrinterMarkType: String, Equatable, Hashable, CaseIterable {
     case japanese
 }
 
+/// Output mode (PRINT.md §Phase 3): Composite renders the document
+/// as one PDF page per artboard (Phase 1B behavior); Separations
+/// renders one page per enabled ink in ``Output.inks``.
+public enum OutputMode: String, Equatable, Hashable, CaseIterable {
+    case composite
+    case separations
+}
+
+/// Film emulsion side (PRINT.md §Phase 3). For PDF output this
+/// has no rendering effect, but the on-disk shape is stable.
+public enum Emulsion: String, Equatable, Hashable, CaseIterable {
+    case upRight = "up_right"
+    case downRight = "down_right"
+}
+
+/// PDF page polarity (PRINT.md §Phase 3). Negative inverts the final
+/// rasterized output; for PDF this is recorded but not applied.
+public enum ImagePolarity: String, Equatable, Hashable, CaseIterable {
+    case positive
+    case negative
+}
+
+/// Halftone dot shape for an ``InkOverride`` row (PRINT.md §Phase 3).
+/// Phase 3 stores the choice; halftone screen rendering itself is a
+/// Phase 7+ deferral.
+public enum DotShape: String, Equatable, Hashable, CaseIterable {
+    case round
+    case square
+    case ellipse
+    case diamond
+    case line
+    case cross
+    case euclidean
+}
+
+/// One row in the per-ink overrides table (PRINT.md §Phase 3 Output).
+public struct InkOverride: Equatable, Hashable {
+    public let name: String
+    public let print: Bool
+    public let frequency: Double
+    public let angle: Double
+    public let dotShape: DotShape
+
+    public init(name: String, print: Bool = true, frequency: Double = 75.0,
+                angle: Double = 45.0, dotShape: DotShape = .round) {
+        self.name = name
+        self.print = print
+        self.frequency = frequency
+        self.angle = angle
+        self.dotShape = dotShape
+    }
+
+    /// The default ink list shipped with a fresh PrintPreferences:
+    /// the four CMYK process inks at standard Western screen angles.
+    public static let processCmykDefaults: [InkOverride] = [
+        InkOverride(name: "Process Cyan",    frequency: 75, angle: 105),
+        InkOverride(name: "Process Magenta", frequency: 75, angle:  75),
+        InkOverride(name: "Process Yellow",  frequency: 75, angle:  90),
+        InkOverride(name: "Process Black",   frequency: 75, angle:  45),
+    ]
+}
+
+/// Output sub-record on PrintPreferences (PRINT.md §Phase 3). The
+/// Output tab edits these 1:1; in Separations mode the PDF emitter
+/// produces one page per enabled InkOverride instead of one page
+/// per artboard.
+public struct Output: Equatable, Hashable {
+    public let mode: OutputMode
+    public let emulsion: Emulsion
+    public let imagePolarity: ImagePolarity
+    public let printerResolution: String
+    public let convertSpotToProcess: Bool
+    public let overprintBlack: Bool
+    public let inks: [InkOverride]
+
+    public init(
+        mode: OutputMode = .composite,
+        emulsion: Emulsion = .upRight,
+        imagePolarity: ImagePolarity = .positive,
+        printerResolution: String = "75 lpi / 600 dpi",
+        convertSpotToProcess: Bool = false,
+        overprintBlack: Bool = false,
+        inks: [InkOverride] = InkOverride.processCmykDefaults
+    ) {
+        self.mode = mode
+        self.emulsion = emulsion
+        self.imagePolarity = imagePolarity
+        self.printerResolution = printerResolution
+        self.convertSpotToProcess = convertSpotToProcess
+        self.overprintBlack = overprintBlack
+        self.inks = inks
+    }
+
+    public static let `default` = Output()
+}
+
 /// Marks-and-bleed sub-record on PrintPreferences (PRINT.md §Phase 2).
 /// The Marks tab exposes these 1:1 as widgets; the PDF renderer
 /// extends each page by the active bleed and overlays mark geometry
@@ -140,6 +236,8 @@ public struct PrintPreferences: Equatable, Hashable {
     public let tileRange: String
     /// Marks-and-bleed sub-record (PRINT.md §Phase 2).
     public let marksAndBleed: MarksAndBleed
+    /// Output sub-record (PRINT.md §Phase 3).
+    public let output: Output
 
     public init(
         presetName: String = "[Default]",
@@ -165,7 +263,8 @@ public struct PrintPreferences: Equatable, Hashable {
         tileOverlapH: Double = 0,
         tileOverlapV: Double = 0,
         tileRange: String = "",
-        marksAndBleed: MarksAndBleed = .default
+        marksAndBleed: MarksAndBleed = .default,
+        output: Output = .default
     ) {
         self.presetName = presetName
         self.printerName = printerName
@@ -191,6 +290,7 @@ public struct PrintPreferences: Equatable, Hashable {
         self.tileOverlapV = tileOverlapV
         self.tileRange = tileRange
         self.marksAndBleed = marksAndBleed
+        self.output = output
     }
 
     public static let `default` = PrintPreferences()
