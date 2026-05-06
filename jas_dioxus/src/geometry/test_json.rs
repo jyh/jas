@@ -15,7 +15,10 @@ use crate::document::print_preferences::{
     scaling_mode_str,
     output_mode_from, output_mode_str, emulsion_from, emulsion_str,
     image_polarity_from, image_polarity_str, dot_shape_from, dot_shape_str,
-    InkOverride, MarksAndBleed, Output, PrintPreferences,
+    font_download_from, font_download_str,
+    postscript_level_from, postscript_level_str,
+    data_format_from, data_format_str,
+    Graphics, InkOverride, MarksAndBleed, Output, PrintPreferences,
 };
 use crate::geometry::element::*;
 
@@ -615,6 +618,17 @@ fn document_setup_json(s: &DocumentSetup) -> String {
     o.build()
 }
 
+fn graphics_json(g: &Graphics) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("compatible_gradient_printing", g.compatible_gradient_printing);
+    o.str_val("data_format", data_format_str(&g.data_format));
+    o.num("flatness", g.flatness);
+    o.str_val("font_download", font_download_str(&g.font_download));
+    o.str_val("postscript_level", postscript_level_str(&g.postscript_level));
+    o.num("raster_effects_resolution", g.raster_effects_resolution);
+    o.build()
+}
+
 fn ink_override_json(ink: &InkOverride) -> String {
     let mut o = JsonObj::new();
     o.num("angle", ink.angle);
@@ -668,6 +682,7 @@ fn print_preferences_json(p: &PrintPreferences) -> String {
     o.bool_val("collate", p.collate);
     o.int("copies", p.copies as usize);
     o.num("custom_scale", p.custom_scale);
+    o.raw("graphics", graphics_json(&p.graphics));
     o.bool_val("ignore_artboards", p.ignore_artboards);
     o.raw("marks_and_bleed", marks_and_bleed_json(&p.marks_and_bleed));
     o.num("media_height", p.media_height);
@@ -1161,6 +1176,26 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
     }
 }
 
+fn parse_graphics(v: &serde_json::Value) -> Graphics {
+    if v.is_null() || !v.is_object() {
+        return Graphics::default();
+    }
+    let d = Graphics::default();
+    Graphics {
+        flatness: v["flatness"].as_f64().unwrap_or(d.flatness),
+        font_download: v["font_download"].as_str()
+            .map(font_download_from).unwrap_or(d.font_download),
+        postscript_level: v["postscript_level"].as_str()
+            .map(postscript_level_from).unwrap_or(d.postscript_level),
+        data_format: v["data_format"].as_str()
+            .map(data_format_from).unwrap_or(d.data_format),
+        compatible_gradient_printing: v["compatible_gradient_printing"]
+            .as_bool().unwrap_or(d.compatible_gradient_printing),
+        raster_effects_resolution: v["raster_effects_resolution"]
+            .as_f64().unwrap_or(d.raster_effects_resolution),
+    }
+}
+
 fn parse_ink_override(v: &serde_json::Value) -> InkOverride {
     InkOverride {
         name: v["name"].as_str().map(String::from).unwrap_or_default(),
@@ -1251,6 +1286,7 @@ fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
         tile_range: v["tile_range"].as_str().map(String::from).unwrap_or(d.tile_range),
         marks_and_bleed: parse_marks_and_bleed(&v["marks_and_bleed"]),
         output: parse_output(&v["output"]),
+        graphics: parse_graphics(&v["graphics"]),
     }
 }
 
@@ -1538,6 +1574,28 @@ mod tests {
     }
 
     #[test]
+    fn graphics_round_trip_carries_all_choices() {
+        use crate::document::print_preferences::{
+            DataFormat, FontDownload, Graphics, PostScriptLevel,
+        };
+        let mut d = Document::default();
+        d.print_preferences.graphics = Graphics {
+            flatness: 0.4,
+            font_download: FontDownload::Complete,
+            postscript_level: PostScriptLevel::Level2,
+            data_format: DataFormat::Ascii,
+            compatible_gradient_printing: true,
+            raster_effects_resolution: 600.0,
+        };
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"graphics\""), "json:\n{json}");
+        assert!(json.contains("\"flatness\":0.4"), "json:\n{json}");
+        assert!(json.contains("\"font_download\":\"complete\""), "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.graphics, d.print_preferences.graphics);
+    }
+
+    #[test]
     fn output_round_trip_carries_all_inks_and_choices() {
         use crate::document::print_preferences::{
             DotShape, Emulsion, ImagePolarity, InkOverride, Output, OutputMode,
@@ -1580,8 +1638,10 @@ mod tests {
     #[test]
     fn print_preferences_roundtrip() {
         use crate::document::print_preferences::{
-            ArtboardRangeMode, DotShape, Emulsion, ImagePolarity, InkOverride,
-            MarksAndBleed, MediaSize, Orientation, Output, OutputMode, PrintLayers,
+            ArtboardRangeMode, DataFormat, DotShape, Emulsion, FontDownload, Graphics,
+            ImagePolarity, InkOverride,
+            MarksAndBleed, MediaSize, Orientation, Output, OutputMode, PostScriptLevel,
+            PrintLayers,
             PrinterMarkType, PrintPreferences, ScalingMode,
         };
         let mut d = Document::default();
@@ -1636,6 +1696,14 @@ mod tests {
                     InkOverride { name: "Process Magenta".into(), print: true,  frequency: 100.0, angle:  75.0, dot_shape: DotShape::Round },
                     InkOverride { name: "PANTONE 185 C".into(),   print: true,  frequency:  85.0, angle:  45.0, dot_shape: DotShape::Square },
                 ],
+            },
+            graphics: Graphics {
+                flatness: 0.4,
+                font_download: FontDownload::Complete,
+                postscript_level: PostScriptLevel::Level2,
+                data_format: DataFormat::Ascii,
+                compatible_gradient_printing: true,
+                raster_effects_resolution: 600.0,
             },
         };
         let json = document_to_test_json(&d);

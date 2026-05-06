@@ -153,6 +153,62 @@ impl Default for Output {
     }
 }
 
+/// Font-download mode for the Graphics tab (PRINT.md §Phase 4).
+/// PostScript-era concept; stored for on-disk shape stability but
+/// not applied by the PDF emitter (we always embed-by-subset).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FontDownload {
+    None,
+    Subset,
+    Complete,
+}
+
+/// PostScript output level (PRINT.md §Phase 4). Stored but not
+/// applied — we emit PDF, not PostScript.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PostScriptLevel {
+    Level2,
+    Level3,
+}
+
+/// Stream encoding for PostScript output (PRINT.md §Phase 4).
+/// Stored but not applied — we emit PDF.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DataFormat {
+    Ascii,
+    Binary,
+}
+
+/// Graphics sub-record on PrintPreferences (PRINT.md §Phase 4). The
+/// Graphics tab edits these 1:1; ``flatness`` is consulted by the
+/// PDF emitter as a path-flattening tolerance, the others are stored
+/// for stable on-disk shape but not applied (PostScript-specific).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Graphics {
+    /// Path-flattening tolerance in device units; range Quality (0.2)
+    /// ↔ Speed (10.0). Smaller values = smoother curves at higher
+    /// emit cost; larger values = coarser approximation, faster.
+    pub flatness: f64,
+    pub font_download: FontDownload,
+    pub postscript_level: PostScriptLevel,
+    pub data_format: DataFormat,
+    pub compatible_gradient_printing: bool,
+    pub raster_effects_resolution: f64,
+}
+
+impl Default for Graphics {
+    fn default() -> Self {
+        Self {
+            flatness: 1.0,
+            font_download: FontDownload::Subset,
+            postscript_level: PostScriptLevel::Level3,
+            data_format: DataFormat::Binary,
+            compatible_gradient_printing: false,
+            raster_effects_resolution: 300.0,
+        }
+    }
+}
+
 /// Marks-and-bleed sub-record on PrintPreferences (PRINT.md §Phase 2).
 /// The Marks tab exposes these 1:1 as widgets; the PDF renderer
 /// extends each page by the active bleed and overlays mark geometry
@@ -230,6 +286,8 @@ pub struct PrintPreferences {
     pub marks_and_bleed: MarksAndBleed,
     /// Output sub-record (PRINT.md §Phase 3).
     pub output: Output,
+    /// Graphics sub-record (PRINT.md §Phase 4).
+    pub graphics: Graphics,
 }
 
 impl Default for PrintPreferences {
@@ -260,6 +318,7 @@ impl Default for PrintPreferences {
             tile_range: String::new(),
             marks_and_bleed: MarksAndBleed::default(),
             output: Output::default(),
+            graphics: Graphics::default(),
         }
     }
 }
@@ -423,6 +482,47 @@ pub fn image_polarity_from(s: &str) -> ImagePolarity {
     }
 }
 
+pub fn font_download_str(f: &FontDownload) -> &'static str {
+    match f {
+        FontDownload::None => "none",
+        FontDownload::Subset => "subset",
+        FontDownload::Complete => "complete",
+    }
+}
+pub fn font_download_from(s: &str) -> FontDownload {
+    match s {
+        "none" => FontDownload::None,
+        "complete" => FontDownload::Complete,
+        _ => FontDownload::Subset,
+    }
+}
+
+pub fn postscript_level_str(p: &PostScriptLevel) -> &'static str {
+    match p {
+        PostScriptLevel::Level2 => "level_2",
+        PostScriptLevel::Level3 => "level_3",
+    }
+}
+pub fn postscript_level_from(s: &str) -> PostScriptLevel {
+    match s {
+        "level_2" => PostScriptLevel::Level2,
+        _ => PostScriptLevel::Level3,
+    }
+}
+
+pub fn data_format_str(d: &DataFormat) -> &'static str {
+    match d {
+        DataFormat::Ascii => "ascii",
+        DataFormat::Binary => "binary",
+    }
+}
+pub fn data_format_from(s: &str) -> DataFormat {
+    match s {
+        "ascii" => DataFormat::Ascii,
+        _ => DataFormat::Binary,
+    }
+}
+
 pub fn dot_shape_str(d: &DotShape) -> &'static str {
     match d {
         DotShape::Round => "round",
@@ -478,6 +578,18 @@ mod tests {
         assert_eq!(p.tile_range, "");
         assert_eq!(p.marks_and_bleed, MarksAndBleed::default());
         assert_eq!(p.output, Output::default());
+        assert_eq!(p.graphics, Graphics::default());
+    }
+
+    #[test]
+    fn graphics_defaults_match_spec() {
+        let g = Graphics::default();
+        assert_eq!(g.flatness, 1.0);
+        assert_eq!(g.font_download, FontDownload::Subset);
+        assert_eq!(g.postscript_level, PostScriptLevel::Level3);
+        assert_eq!(g.data_format, DataFormat::Binary);
+        assert!(!g.compatible_gradient_printing);
+        assert_eq!(g.raster_effects_resolution, 300.0);
     }
 
     #[test]
@@ -569,6 +681,15 @@ mod tests {
         ] {
             assert_eq!(dot_shape_from(dot_shape_str(&d)), d);
         }
+        for f in [FontDownload::None, FontDownload::Subset, FontDownload::Complete] {
+            assert_eq!(font_download_from(font_download_str(&f)), f);
+        }
+        for p in [PostScriptLevel::Level2, PostScriptLevel::Level3] {
+            assert_eq!(postscript_level_from(postscript_level_str(&p)), p);
+        }
+        for d in [DataFormat::Ascii, DataFormat::Binary] {
+            assert_eq!(data_format_from(data_format_str(&d)), d);
+        }
     }
 
     #[test]
@@ -583,5 +704,8 @@ mod tests {
         assert_eq!(emulsion_from("garbage"), Emulsion::UpRight);
         assert_eq!(image_polarity_from("garbage"), ImagePolarity::Positive);
         assert_eq!(dot_shape_from("garbage"), DotShape::Round);
+        assert_eq!(font_download_from("garbage"), FontDownload::Subset);
+        assert_eq!(postscript_level_from("garbage"), PostScriptLevel::Level3);
+        assert_eq!(data_format_from("garbage"), DataFormat::Binary);
     }
 }
