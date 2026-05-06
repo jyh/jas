@@ -2474,8 +2474,11 @@ fn run_yaml_effect(
                 new_doc.document_setup.grid_size = n;
             }
             "grid_color" | "paper_color" => {
+                // Hex strings are coerced to Value::Color by Value::from_json,
+                // so accept both Str and Color here.
                 let s = match value_val {
                     super::expr_types::Value::Str(s) => s.clone(),
+                    super::expr_types::Value::Color(c) => c.clone(),
                     _ => return deferred,
                 };
                 match field.as_str() {
