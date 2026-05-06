@@ -3654,6 +3654,45 @@
         },
         "custom_scale": {
           "type": "number"
+        },
+        "mab_all_printer_marks": {
+          "type": "bool"
+        },
+        "mab_trim_marks": {
+          "type": "bool"
+        },
+        "mab_registration_marks": {
+          "type": "bool"
+        },
+        "mab_color_bars": {
+          "type": "bool"
+        },
+        "mab_page_information": {
+          "type": "bool"
+        },
+        "mab_printer_mark_type": {
+          "type": "string"
+        },
+        "mab_trim_mark_weight": {
+          "type": "number"
+        },
+        "mab_mark_offset": {
+          "type": "number"
+        },
+        "mab_use_document_bleed": {
+          "type": "bool"
+        },
+        "mab_bleed_top": {
+          "type": "number"
+        },
+        "mab_bleed_right": {
+          "type": "number"
+        },
+        "mab_bleed_bottom": {
+          "type": "number"
+        },
+        "mab_bleed_left": {
+          "type": "number"
         }
       },
       "effects": [
@@ -3770,6 +3809,84 @@
           "doc.set_print_preferences_field": {
             "field": "custom_scale",
             "value": "param.custom_scale"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "all_printer_marks",
+            "value": "param.mab_all_printer_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_marks",
+            "value": "param.mab_trim_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "registration_marks",
+            "value": "param.mab_registration_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "color_bars",
+            "value": "param.mab_color_bars"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "page_information",
+            "value": "param.mab_page_information"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "printer_mark_type",
+            "value": "param.mab_printer_mark_type"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_mark_weight",
+            "value": "param.mab_trim_mark_weight"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "mark_offset",
+            "value": "param.mab_mark_offset"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "use_document_bleed",
+            "value": "param.mab_use_document_bleed"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_top",
+            "value": "param.mab_bleed_top"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_right",
+            "value": "param.mab_bleed_right"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_bottom",
+            "value": "param.mab_bleed_bottom"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_left",
+            "value": "param.mab_bleed_left"
           }
         },
         "clear_dialog_snapshot",
@@ -3836,6 +3953,45 @@
         },
         "custom_scale": {
           "type": "number"
+        },
+        "mab_all_printer_marks": {
+          "type": "bool"
+        },
+        "mab_trim_marks": {
+          "type": "bool"
+        },
+        "mab_registration_marks": {
+          "type": "bool"
+        },
+        "mab_color_bars": {
+          "type": "bool"
+        },
+        "mab_page_information": {
+          "type": "bool"
+        },
+        "mab_printer_mark_type": {
+          "type": "string"
+        },
+        "mab_trim_mark_weight": {
+          "type": "number"
+        },
+        "mab_mark_offset": {
+          "type": "number"
+        },
+        "mab_use_document_bleed": {
+          "type": "bool"
+        },
+        "mab_bleed_top": {
+          "type": "number"
+        },
+        "mab_bleed_right": {
+          "type": "number"
+        },
+        "mab_bleed_bottom": {
+          "type": "number"
+        },
+        "mab_bleed_left": {
+          "type": "number"
         }
       },
       "effects": [
@@ -3952,6 +4108,84 @@
           "doc.set_print_preferences_field": {
             "field": "custom_scale",
             "value": "param.custom_scale"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "all_printer_marks",
+            "value": "param.mab_all_printer_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_marks",
+            "value": "param.mab_trim_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "registration_marks",
+            "value": "param.mab_registration_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "color_bars",
+            "value": "param.mab_color_bars"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "page_information",
+            "value": "param.mab_page_information"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "printer_mark_type",
+            "value": "param.mab_printer_mark_type"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_mark_weight",
+            "value": "param.mab_trim_mark_weight"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "mark_offset",
+            "value": "param.mab_mark_offset"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "use_document_bleed",
+            "value": "param.mab_use_document_bleed"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_top",
+            "value": "param.mab_bleed_top"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_right",
+            "value": "param.mab_bleed_right"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_bottom",
+            "value": "param.mab_bleed_bottom"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_left",
+            "value": "param.mab_bleed_left"
           }
         },
         "clear_dialog_snapshot",
@@ -28529,6 +28763,62 @@
         "custom_scale": {
           "type": "number",
           "default": 100.0
+        },
+        "mab_all_printer_marks": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_trim_marks": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_registration_marks": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_color_bars": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_page_information": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_printer_mark_type": {
+          "type": "enum",
+          "values": [
+            "roman",
+            "japanese"
+          ],
+          "default": "roman"
+        },
+        "mab_trim_mark_weight": {
+          "type": "number",
+          "default": 0.25
+        },
+        "mab_mark_offset": {
+          "type": "number",
+          "default": 6.0
+        },
+        "mab_use_document_bleed": {
+          "type": "bool",
+          "default": true
+        },
+        "mab_bleed_top": {
+          "type": "number",
+          "default": 0.0
+        },
+        "mab_bleed_right": {
+          "type": "number",
+          "default": 0.0
+        },
+        "mab_bleed_bottom": {
+          "type": "number",
+          "default": 0.0
+        },
+        "mab_bleed_left": {
+          "type": "number",
+          "default": 0.0
         }
       },
       "init": {
@@ -28550,7 +28840,20 @@
         "placement_x": "active_document.print_preferences.placement_x",
         "placement_y": "active_document.print_preferences.placement_y",
         "scaling_mode": "active_document.print_preferences.scaling_mode",
-        "custom_scale": "active_document.print_preferences.custom_scale"
+        "custom_scale": "active_document.print_preferences.custom_scale",
+        "mab_all_printer_marks": "active_document.print_preferences.marks_and_bleed.all_printer_marks",
+        "mab_trim_marks": "active_document.print_preferences.marks_and_bleed.trim_marks",
+        "mab_registration_marks": "active_document.print_preferences.marks_and_bleed.registration_marks",
+        "mab_color_bars": "active_document.print_preferences.marks_and_bleed.color_bars",
+        "mab_page_information": "active_document.print_preferences.marks_and_bleed.page_information",
+        "mab_printer_mark_type": "active_document.print_preferences.marks_and_bleed.printer_mark_type",
+        "mab_trim_mark_weight": "active_document.print_preferences.marks_and_bleed.trim_mark_weight",
+        "mab_mark_offset": "active_document.print_preferences.marks_and_bleed.mark_offset",
+        "mab_use_document_bleed": "active_document.print_preferences.marks_and_bleed.use_document_bleed",
+        "mab_bleed_top": "active_document.print_preferences.marks_and_bleed.bleed_top",
+        "mab_bleed_right": "active_document.print_preferences.marks_and_bleed.bleed_right",
+        "mab_bleed_bottom": "active_document.print_preferences.marks_and_bleed.bleed_bottom",
+        "mab_bleed_left": "active_document.print_preferences.marks_and_bleed.bleed_left"
       },
       "content": {
         "type": "container",
@@ -29167,19 +29470,316 @@
                   "children": [
                     {
                       "type": "text",
-                      "content": "Marks and Bleed",
+                      "content": "Marks",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "id": "pr_all_printer_marks",
+                      "type": "toggle",
+                      "label": "All Printer's Marks",
+                      "bind": {
+                        "checked": "dialog.mab_all_printer_marks"
+                      }
+                    },
+                    {
+                      "id": "pr_trim_marks",
+                      "type": "toggle",
+                      "label": "Trim Marks",
+                      "bind": {
+                        "checked": "dialog.mab_trim_marks"
+                      }
+                    },
+                    {
+                      "id": "pr_registration_marks",
+                      "type": "toggle",
+                      "label": "Registration Marks",
+                      "bind": {
+                        "checked": "dialog.mab_registration_marks"
+                      }
+                    },
+                    {
+                      "id": "pr_color_bars",
+                      "type": "toggle",
+                      "label": "Color Bars",
+                      "bind": {
+                        "checked": "dialog.mab_color_bars"
+                      }
+                    },
+                    {
+                      "id": "pr_page_information",
+                      "type": "toggle",
+                      "label": "Page Information",
+                      "bind": {
+                        "checked": "dialog.mab_page_information"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Printer Mark Type:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_printer_mark_type",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Roman",
+                                  "value": "roman"
+                                },
+                                {
+                                  "label": "Japanese",
+                                  "value": "japanese"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.mab_printer_mark_type"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Trim Mark Weight (pt):",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_trim_mark_weight",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_trim_mark_weight"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Offset (pt):",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_mark_offset",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_mark_offset"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 2 (PRINT.md \u00a7Phase 2). Trim marks, registration marks, color bars, page information, mark type, weight and offset, plus per-print bleed override.",
+                      "content": "Bleed",
                       "style": {
                         "font_size": 11,
-                        "color": "var(--jas-text-dim,#888)"
+                        "font_weight": "bold"
                       }
+                    },
+                    {
+                      "id": "pr_use_document_bleed",
+                      "type": "toggle",
+                      "label": "Use Document Bleed",
+                      "bind": {
+                        "checked": "dialog.mab_use_document_bleed"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Top:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_top",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_top",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Bottom:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_bottom",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_bottom",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Left:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_left",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_left",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Right:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_right",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_right",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -29367,7 +29967,20 @@
                   "placement_x": "dialog.placement_x",
                   "placement_y": "dialog.placement_y",
                   "scaling_mode": "dialog.scaling_mode",
-                  "custom_scale": "dialog.custom_scale"
+                  "custom_scale": "dialog.custom_scale",
+                  "mab_all_printer_marks": "dialog.mab_all_printer_marks",
+                  "mab_trim_marks": "dialog.mab_trim_marks",
+                  "mab_registration_marks": "dialog.mab_registration_marks",
+                  "mab_color_bars": "dialog.mab_color_bars",
+                  "mab_page_information": "dialog.mab_page_information",
+                  "mab_printer_mark_type": "dialog.mab_printer_mark_type",
+                  "mab_trim_mark_weight": "dialog.mab_trim_mark_weight",
+                  "mab_mark_offset": "dialog.mab_mark_offset",
+                  "mab_use_document_bleed": "dialog.mab_use_document_bleed",
+                  "mab_bleed_top": "dialog.mab_bleed_top",
+                  "mab_bleed_right": "dialog.mab_bleed_right",
+                  "mab_bleed_bottom": "dialog.mab_bleed_bottom",
+                  "mab_bleed_left": "dialog.mab_bleed_left"
                 }
               },
               {
@@ -29394,7 +30007,20 @@
                   "placement_x": "dialog.placement_x",
                   "placement_y": "dialog.placement_y",
                   "scaling_mode": "dialog.scaling_mode",
-                  "custom_scale": "dialog.custom_scale"
+                  "custom_scale": "dialog.custom_scale",
+                  "mab_all_printer_marks": "dialog.mab_all_printer_marks",
+                  "mab_trim_marks": "dialog.mab_trim_marks",
+                  "mab_registration_marks": "dialog.mab_registration_marks",
+                  "mab_color_bars": "dialog.mab_color_bars",
+                  "mab_page_information": "dialog.mab_page_information",
+                  "mab_printer_mark_type": "dialog.mab_printer_mark_type",
+                  "mab_trim_mark_weight": "dialog.mab_trim_mark_weight",
+                  "mab_mark_offset": "dialog.mab_mark_offset",
+                  "mab_use_document_bleed": "dialog.mab_use_document_bleed",
+                  "mab_bleed_top": "dialog.mab_bleed_top",
+                  "mab_bleed_right": "dialog.mab_bleed_right",
+                  "mab_bleed_bottom": "dialog.mab_bleed_bottom",
+                  "mab_bleed_left": "dialog.mab_bleed_left"
                 }
               }
             ]

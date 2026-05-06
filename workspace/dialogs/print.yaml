@@ -89,6 +89,26 @@ print:
     custom_scale:
       type: number
       default: 100.0
+    # Marks-and-bleed sub-record (PRINT.md §Phase 2). Each field is
+    # prefixed ``mab_`` in dialog state to avoid name collisions with
+    # the document-level bleed_* on DocumentSetup; the OK/Done/Print
+    # actions strip the prefix when writing back.
+    mab_all_printer_marks:    { type: bool,   default: false }
+    mab_trim_marks:           { type: bool,   default: false }
+    mab_registration_marks:   { type: bool,   default: false }
+    mab_color_bars:           { type: bool,   default: false }
+    mab_page_information:     { type: bool,   default: false }
+    mab_printer_mark_type:
+      type: enum
+      values: [roman, japanese]
+      default: roman
+    mab_trim_mark_weight:     { type: number, default: 0.25 }
+    mab_mark_offset:          { type: number, default: 6.0 }
+    mab_use_document_bleed:   { type: bool,   default: true }
+    mab_bleed_top:            { type: number, default: 0.0 }
+    mab_bleed_right:          { type: number, default: 0.0 }
+    mab_bleed_bottom:         { type: number, default: 0.0 }
+    mab_bleed_left:           { type: number, default: 0.0 }
 
   init:
     preset_name:          "active_document.print_preferences.preset_name"
@@ -110,6 +130,19 @@ print:
     placement_y:          "active_document.print_preferences.placement_y"
     scaling_mode:         "active_document.print_preferences.scaling_mode"
     custom_scale:         "active_document.print_preferences.custom_scale"
+    mab_all_printer_marks:  "active_document.print_preferences.marks_and_bleed.all_printer_marks"
+    mab_trim_marks:         "active_document.print_preferences.marks_and_bleed.trim_marks"
+    mab_registration_marks: "active_document.print_preferences.marks_and_bleed.registration_marks"
+    mab_color_bars:         "active_document.print_preferences.marks_and_bleed.color_bars"
+    mab_page_information:   "active_document.print_preferences.marks_and_bleed.page_information"
+    mab_printer_mark_type:  "active_document.print_preferences.marks_and_bleed.printer_mark_type"
+    mab_trim_mark_weight:   "active_document.print_preferences.marks_and_bleed.trim_mark_weight"
+    mab_mark_offset:        "active_document.print_preferences.marks_and_bleed.mark_offset"
+    mab_use_document_bleed: "active_document.print_preferences.marks_and_bleed.use_document_bleed"
+    mab_bleed_top:          "active_document.print_preferences.marks_and_bleed.bleed_top"
+    mab_bleed_right:        "active_document.print_preferences.marks_and_bleed.bleed_right"
+    mab_bleed_bottom:       "active_document.print_preferences.marks_and_bleed.bleed_bottom"
+    mab_bleed_left:         "active_document.print_preferences.marks_and_bleed.bleed_left"
 
   content:
     type: container
@@ -401,7 +434,7 @@ print:
                             value: "dialog.custom_scale"
                             disabled: "dialog.scaling_mode != 'custom'"
 
-          # ── Marks and Bleed (Phase 2 placeholder) ────
+          # ── Marks and Bleed (PRINT.md §Phase 2) ──────
           - id: marks_and_bleed
             label: "Marks and Bleed"
             content:
@@ -409,11 +442,173 @@ print:
               layout: column
               style: { gap: 12, padding: 4 }
               children:
-                - { type: text, content: "Marks and Bleed",
-                    style: { font_size: 13, font_weight: bold } }
-                - { type: text,
-                    content: "Available in Phase 2 (PRINT.md §Phase 2). Trim marks, registration marks, color bars, page information, mark type, weight and offset, plus per-print bleed override.",
-                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+
+                # Marks section header
+                - type: text
+                  content: "Marks"
+                  style: { font_size: 11, font_weight: bold }
+
+                - id: pr_all_printer_marks
+                  type: toggle
+                  label: "All Printer's Marks"
+                  bind:
+                    checked: "dialog.mab_all_printer_marks"
+
+                - id: pr_trim_marks
+                  type: toggle
+                  label: "Trim Marks"
+                  bind:
+                    checked: "dialog.mab_trim_marks"
+
+                - id: pr_registration_marks
+                  type: toggle
+                  label: "Registration Marks"
+                  bind:
+                    checked: "dialog.mab_registration_marks"
+
+                - id: pr_color_bars
+                  type: toggle
+                  label: "Color Bars"
+                  bind:
+                    checked: "dialog.mab_color_bars"
+
+                - id: pr_page_information
+                  type: toggle
+                  label: "Page Information"
+                  bind:
+                    checked: "dialog.mab_page_information"
+
+                # Mark style: type + weight + offset
+                - type: row
+                  children:
+                    - type: col
+                      col: 4
+                      children:
+                        - { type: text, content: "Printer Mark Type:",
+                            style: { font_size: 11 } }
+                    - type: col
+                      col: 8
+                      children:
+                        - id: pr_printer_mark_type
+                          type: select
+                          options:
+                            - { label: "Roman",    value: roman }
+                            - { label: "Japanese", value: japanese }
+                          bind:
+                            value: "dialog.mab_printer_mark_type"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 4
+                      children:
+                        - { type: text, content: "Trim Mark Weight (pt):",
+                            style: { font_size: 11 } }
+                    - type: col
+                      col: 8
+                      children:
+                        - id: pr_trim_mark_weight
+                          type: number_input
+                          min: 0
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.mab_trim_mark_weight"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 4
+                      children:
+                        - { type: text, content: "Offset (pt):",
+                            style: { font_size: 11 } }
+                    - type: col
+                      col: 8
+                      children:
+                        - id: pr_mark_offset
+                          type: number_input
+                          min: 0
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.mab_mark_offset"
+
+                # Bleed section header + per-print bleed override
+                - type: separator
+                  orientation: horizontal
+                - type: text
+                  content: "Bleed"
+                  style: { font_size: 11, font_weight: bold }
+
+                - id: pr_use_document_bleed
+                  type: toggle
+                  label: "Use Document Bleed"
+                  bind:
+                    checked: "dialog.mab_use_document_bleed"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Top:",
+                            style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_mab_bleed_top
+                          type: number_input
+                          min: 0
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.mab_bleed_top"
+                            disabled: "dialog.mab_use_document_bleed"
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Bottom:",
+                            style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_mab_bleed_bottom
+                          type: number_input
+                          min: 0
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.mab_bleed_bottom"
+                            disabled: "dialog.mab_use_document_bleed"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Left:",
+                            style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_mab_bleed_left
+                          type: number_input
+                          min: 0
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.mab_bleed_left"
+                            disabled: "dialog.mab_use_document_bleed"
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Right:",
+                            style: { font_size: 11 } }
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_mab_bleed_right
+                          type: number_input
+                          min: 0
+                          style: { width: 80 }
+                          bind:
+                            value: "dialog.mab_bleed_right"
+                            disabled: "dialog.mab_use_document_bleed"
 
           # ── Output (Phase 3 placeholder) ─────────────
           - id: output
@@ -512,6 +707,19 @@ print:
               placement_y: "dialog.placement_y"
               scaling_mode: "dialog.scaling_mode"
               custom_scale: "dialog.custom_scale"
+              mab_all_printer_marks:  "dialog.mab_all_printer_marks"
+              mab_trim_marks:         "dialog.mab_trim_marks"
+              mab_registration_marks: "dialog.mab_registration_marks"
+              mab_color_bars:         "dialog.mab_color_bars"
+              mab_page_information:   "dialog.mab_page_information"
+              mab_printer_mark_type:  "dialog.mab_printer_mark_type"
+              mab_trim_mark_weight:   "dialog.mab_trim_mark_weight"
+              mab_mark_offset:        "dialog.mab_mark_offset"
+              mab_use_document_bleed: "dialog.mab_use_document_bleed"
+              mab_bleed_top:          "dialog.mab_bleed_top"
+              mab_bleed_right:        "dialog.mab_bleed_right"
+              mab_bleed_bottom:       "dialog.mab_bleed_bottom"
+              mab_bleed_left:         "dialog.mab_bleed_left"
           - type: button
             label: "Print"
             variant: primary
@@ -536,3 +744,16 @@ print:
               placement_y: "dialog.placement_y"
               scaling_mode: "dialog.scaling_mode"
               custom_scale: "dialog.custom_scale"
+              mab_all_printer_marks:  "dialog.mab_all_printer_marks"
+              mab_trim_marks:         "dialog.mab_trim_marks"
+              mab_registration_marks: "dialog.mab_registration_marks"
+              mab_color_bars:         "dialog.mab_color_bars"
+              mab_page_information:   "dialog.mab_page_information"
+              mab_printer_mark_type:  "dialog.mab_printer_mark_type"
+              mab_trim_mark_weight:   "dialog.mab_trim_mark_weight"
+              mab_mark_offset:        "dialog.mab_mark_offset"
+              mab_use_document_bleed: "dialog.mab_use_document_bleed"
+              mab_bleed_top:          "dialog.mab_bleed_top"
+              mab_bleed_right:        "dialog.mab_bleed_right"
+              mab_bleed_bottom:       "dialog.mab_bleed_bottom"
+              mab_bleed_left:         "dialog.mab_bleed_left"
