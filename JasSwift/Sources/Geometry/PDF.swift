@@ -308,9 +308,51 @@ private struct Page {
     let srcY: Double
     let srcW: Double
     let srcH: Double
+    /// Where the trim rect sits inside the (possibly bleed-extended)
+    /// MediaBox. (0, 0) when no bleed/marks are active.
+    let trimXOff: Double
+    let trimYOff: Double
+}
+
+// MARK: - Marks-and-Bleed PDF geometry (PRINT.md §Phase 2)
+
+/// Length of each trim mark line in points. Per PRINT.md §Phase 2
+/// the mark itself is short and sits outside the trim by mark_offset.
+private let trimMarkLength: Double = 12.0
+/// Outer radius of the registration mark cross-in-circle.
+private let regMarkRadius: Double = 4.0
+/// Side length of one CMYK / RGB / grey color-bar swatch.
+private let colorBarSwatch: Double = 10.0
+
+/// Effective bleed for a print pass: per-print overrides on
+/// MarksAndBleed when use_document_bleed is false, otherwise the
+/// document-level DocumentSetup bleed.
+private func activeBleed(_ doc: Document) -> (Double, Double, Double, Double) {
+    let m = doc.printPreferences.marksAndBleed
+    if m.useDocumentBleed {
+        let d = doc.documentSetup
+        return (d.bleedTop, d.bleedRight, d.bleedBottom, d.bleedLeft)
+    }
+    return (m.bleedTop, m.bleedRight, m.bleedBottom, m.bleedLeft)
+}
+
+/// Extra space between the trim rect and the MediaBox edge needed to
+/// hold the marks. Zero when no mark category is enabled, so the
+/// MediaBox stays trim-snug for users who turn marks off.
+private func markGutter(_ m: MarksAndBleed) -> Double {
+    let any = m.allPrinterMarks || m.trimMarks || m.registrationMarks
+        || m.colorBars || m.pageInformation
+    return any ? m.markOffset + trimMarkLength + 2.0 : 0.0
 }
 
 private func collectPages(_ doc: Document) -> [Page] {
+    let (bt, br, bb, bl) = activeBleed(doc)
+    let g = markGutter(doc.printPreferences.marksAndBleed)
+    let trimXOff = bl + g
+    let trimYOff = bb + g
+    let extraW = bl + br + 2.0 * g
+    let extraH = bt + bb + 2.0 * g
+
     if doc.printPreferences.ignoreArtboards || doc.artboards.isEmpty {
         let (x, y, w, h): (Double, Double, Double, Double)
         if doc.artboards.isEmpty {
@@ -318,12 +360,16 @@ private func collectPages(_ doc: Document) -> [Page] {
         } else {
             (x, y, w, h) = artboardBoundsUnion(doc.artboards)
         }
-        return [Page(mediaBox: CGRect(x: 0, y: 0, width: w, height: h),
-                     srcX: x, srcY: y, srcW: w, srcH: h)]
+        return [Page(
+            mediaBox: CGRect(x: 0, y: 0, width: w + extraW, height: h + extraH),
+            srcX: x, srcY: y, srcW: w, srcH: h,
+            trimXOff: trimXOff, trimYOff: trimYOff)]
     }
     return doc.artboards.map { ab in
-        Page(mediaBox: CGRect(x: 0, y: 0, width: ab.width, height: ab.height),
-             srcX: ab.x, srcY: ab.y, srcW: ab.width, srcH: ab.height)
+        Page(
+            mediaBox: CGRect(x: 0, y: 0, width: ab.width + extraW, height: ab.height + extraH),
+            srcX: ab.x, srcY: ab.y, srcW: ab.width, srcH: ab.height,
+            trimXOff: trimXOff, trimYOff: trimYOff)
     }
 }
 
@@ -343,10 +389,14 @@ private func artboardBoundsUnion(_ abs: [Artboard]) -> (Double, Double, Double, 
 
 private func drawPage(_ ctx: CGContext, _ doc: Document, _ page: Page) {
     ctx.saveGState()
-    // PDF is y-up, internal model is y-down. Flip the page CTM and
-    // translate so document-space (page.srcX, page.srcY) lands at the
-    // page origin. User placement and scaling apply in page space
-    // (post-flip).
+    // Position the trim rect inside the (possibly bleed-extended)
+    // MediaBox. PDF is y-up, internal model is y-down. Flip the page
+    // CTM and translate so document-space (page.srcX, page.srcY)
+    // lands at the trim origin. User placement and scaling apply in
+    // page space (post-flip).
+    if page.trimXOff != 0 || page.trimYOff != 0 {
+        ctx.translateBy(x: CGFloat(page.trimXOff), y: CGFloat(page.trimYOff))
+    }
     ctx.translateBy(x: 0, y: page.srcH)
     ctx.scaleBy(x: 1, y: -1)
     let (sx, sy) = scalingPair(doc)
@@ -363,6 +413,130 @@ private func drawPage(_ ctx: CGContext, _ doc: Document, _ page: Page) {
     for layer in doc.layers {
         emitElement(ctx, .layer(layer), filter: doc.printPreferences.printLayers)
     }
+    ctx.restoreGState()
+
+    // Marks render in PDF native coordinates (y-up, bottom-left
+    // origin), aligned to the trim rect inside the MediaBox.
+    emitMarks(ctx, doc, page)
+}
+
+private func emitMarks(_ ctx: CGContext, _ doc: Document, _ page: Page) {
+    let m = doc.printPreferences.marksAndBleed
+    if !m.allPrinterMarks && !m.trimMarks && !m.registrationMarks
+        && !m.colorBars && !m.pageInformation {
+        return
+    }
+    let (tx, ty) = (page.trimXOff, page.trimYOff)
+    let (tw, th) = (page.srcW, page.srcH)
+    if m.allPrinterMarks || m.trimMarks {
+        emitTrimMarks(ctx, tx: tx, ty: ty, tw: tw, th: th, weight: m.trimMarkWeight, off: m.markOffset)
+    }
+    if m.allPrinterMarks || m.registrationMarks {
+        emitRegistrationMarks(ctx, tx: tx, ty: ty, tw: tw, th: th, off: m.markOffset)
+    }
+    if m.allPrinterMarks || m.colorBars {
+        emitColorBars(ctx, tx: tx, ty: ty, tw: tw, th: th, off: m.markOffset)
+    }
+    if m.allPrinterMarks || m.pageInformation {
+        emitPageInfo(ctx, tx: tx, ty: ty)
+    }
+}
+
+private func emitTrimMarks(
+    _ ctx: CGContext, tx: Double, ty: Double, tw: Double, th: Double,
+    weight: Double, off: Double
+) {
+    ctx.saveGState()
+    ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+    ctx.setLineWidth(CGFloat(weight))
+    let len = trimMarkLength
+    // Eight short strokes, two per corner.
+    let segs: [(Double, Double, Double, Double)] = [
+        (tx - off - len, ty,            tx - off,       ty),            // BL horizontal
+        (tx,             ty - off - len, tx,            ty - off),      // BL vertical
+        (tx + tw + off,  ty,            tx + tw + off + len, ty),       // BR horizontal
+        (tx + tw,        ty - off - len, tx + tw,       ty - off),      // BR vertical
+        (tx - off - len, ty + th,       tx - off,       ty + th),       // TL horizontal
+        (tx,             ty + th + off, tx,            ty + th + off + len), // TL vertical
+        (tx + tw + off,  ty + th,       tx + tw + off + len, ty + th),  // TR horizontal
+        (tx + tw,        ty + th + off, tx + tw,       ty + th + off + len), // TR vertical
+    ]
+    for (x1, y1, x2, y2) in segs {
+        ctx.move(to: CGPoint(x: x1, y: y1))
+        ctx.addLine(to: CGPoint(x: x2, y: y2))
+    }
+    ctx.strokePath()
+    ctx.restoreGState()
+}
+
+private func emitRegistrationMarks(
+    _ ctx: CGContext, tx: Double, ty: Double, tw: Double, th: Double,
+    off: Double
+) {
+    let r = regMarkRadius
+    let centers: [(Double, Double)] = [
+        (tx + tw / 2, ty - off - r),       // bottom mid
+        (tx + tw + off + r, ty + th / 2),  // right mid
+        (tx + tw / 2, ty + th + off + r),  // top mid
+        (tx - off - r, ty + th / 2),       // left mid
+    ]
+    for (cx, cy) in centers {
+        emitRegMark(ctx, cx: cx, cy: cy, r: r)
+    }
+}
+
+private func emitRegMark(_ ctx: CGContext, cx: Double, cy: Double, r: Double) {
+    ctx.saveGState()
+    ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+    ctx.setLineWidth(0.25)
+    ctx.strokeEllipse(in: CGRect(x: cx - r, y: cy - r, width: 2 * r, height: 2 * r))
+    ctx.move(to: CGPoint(x: cx - r, y: cy))
+    ctx.addLine(to: CGPoint(x: cx + r, y: cy))
+    ctx.move(to: CGPoint(x: cx, y: cy - r))
+    ctx.addLine(to: CGPoint(x: cx, y: cy + r))
+    ctx.strokePath()
+    ctx.restoreGState()
+}
+
+private func emitColorBars(
+    _ ctx: CGContext, tx: Double, ty: Double, tw: Double, th: Double,
+    off: Double
+) {
+    let s = colorBarSwatch
+    let swatches: [(Double, Double, Double)] = [
+        (0, 1, 1),    // C
+        (1, 0, 1),    // M
+        (1, 1, 0),    // Y
+        (0, 0, 0),    // K
+        (1, 0, 0),    // R
+        (0, 1, 0),    // G
+        (0, 0, 1),    // B
+        (0.5, 0.5, 0.5), // grey
+    ]
+    let baseX = tx
+    let baseY = ty + th + off + trimMarkLength + 2.0
+    for (i, (r, g, b)) in swatches.enumerated() {
+        let x = baseX + Double(i) * s
+        if x + s > tx + tw { break }
+        ctx.saveGState()
+        ctx.setFillColor(CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1))
+        ctx.fill(CGRect(x: x, y: baseY, width: s, height: s))
+        ctx.restoreGState()
+    }
+}
+
+private func emitPageInfo(_ ctx: CGContext, tx: Double, ty: Double) {
+    // Phase-2 placeholder: a small label at the bottom-left margin.
+    // Renderer-specific font metric work is deferred.
+    let str = "Jas — page" as NSString
+    let attrs: [NSAttributedString.Key: Any] = [
+        .font: NSFont(name: "Helvetica", size: 6) ?? NSFont.systemFont(ofSize: 6),
+        .foregroundColor: NSColor.black,
+    ]
+    let line = CTLineCreateWithAttributedString(NSAttributedString(string: str as String, attributes: attrs))
+    ctx.saveGState()
+    ctx.textPosition = CGPoint(x: tx, y: ty - trimMarkLength - 8)
+    CTLineDraw(line, ctx)
     ctx.restoreGState()
 }
 
