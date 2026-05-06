@@ -74,6 +74,33 @@ type output = {
 
 val default_output : output
 
+type color_handling =
+  | Let_app_determine
+  | Let_printer_determine
+  | Postscript_color_management
+
+val color_handling_to_string : color_handling -> string
+val color_handling_of_string : string -> color_handling
+
+type rendering_intent =
+  | Perceptual
+  | Relative_colorimetric
+  | Saturation
+  | Absolute_colorimetric
+
+val rendering_intent_to_string : rendering_intent -> string
+val rendering_intent_of_string : string -> rendering_intent
+
+type color_management = {
+  document_profile : string;
+  color_handling : color_handling;
+  printer_profile : string;
+  rendering_intent : rendering_intent;
+  preserve_rgb_numbers : bool;
+}
+
+val default_color_management : color_management
+
 type font_download = Font_none | Font_subset | Font_complete
 
 val font_download_to_string : font_download -> string
@@ -145,6 +172,7 @@ type t = {
   marks_and_bleed : marks_and_bleed;
   output : output;
   graphics : graphics;
+  color_management : color_management;
 }
 
 val default : t

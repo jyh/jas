@@ -1315,6 +1315,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     marks_and_bleed;
     output;
     graphics;
+    color_management = Print_preferences.default_color_management;
   }
 
 (* Walk the SVG once via Xmlm, pulling jas:document-setup +
