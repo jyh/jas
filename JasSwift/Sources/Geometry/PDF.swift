@@ -601,6 +601,16 @@ private func artboardBoundsUnion(_ abs: [Artboard]) -> (Double, Double, Double, 
 
 private func drawPage(_ ctx: CGContext, _ doc: Document, _ page: Page) {
     ctx.saveGState()
+    // Phase 4: path-flattening tolerance. CGContext.setFlatness
+    // matches the PDF ``i`` operator semantically, but stays inside
+    // the saveGState scope so it doesn't leak between pages. Default
+    // 1.0 = PDF default; setting it explicitly here is a no-op for
+    // unchanged docs but propagates user choices on Composite + on
+    // every separations page.
+    let flatness = doc.printPreferences.graphics.flatness
+    if abs(flatness - 1.0) > .ulpOfOne {
+        ctx.setFlatness(CGFloat(min(max(flatness, 0.0), 100.0)))
+    }
     // Position the trim rect inside the (possibly bleed-extended)
     // MediaBox. PDF is y-up, internal model is y-down. Flip the page
     // CTM and translate so document-space (page.srcX, page.srcY)
