@@ -142,6 +142,24 @@ let test_pdf_non_default_flatness_produces_valid_pdf () =
   assert (String.length bytes > 0);
   assert (starts_with bytes "%PDF-")
 
+let test_pdf_non_default_phase6_values_dont_break_output () =
+  (* Phase 6 v1 stores Advanced + the new DocumentSetup fields but
+     defers the rendering effects. Same scope as the Rust + Swift
+     ports. Smoke-test that having non-default values doesn't
+     crash the Cairo emitter or perturb the output envelope. *)
+  let s = { Print_preferences.print_as_bitmap = true;
+            overprint_flattener_preset = Print_preferences.High_resolution } in
+  let p = { Print_preferences.default with advanced = s } in
+  let setup = { Document_setup.default with
+                paper_color = "#fff8e7";
+                simulate_colored_paper = true;
+                transparency_flattener_preset = Print_preferences.High_resolution;
+                discard_white_overprint = true } in
+  let doc = Document.make_document ~print_preferences:p ~document_setup:setup [||] in
+  let bytes = Pdf.document_to_pdf doc in
+  assert (String.length bytes > 0);
+  assert (starts_with bytes "%PDF-")
+
 let () =
   Alcotest.run "PDF" [
     "envelope", [
@@ -157,5 +175,8 @@ let () =
     ];
     "graphics", [
       Alcotest.test_case "non-default flatness produces valid PDF" `Quick test_pdf_non_default_flatness_produces_valid_pdf;
+    ];
+    "phase6_smoke", [
+      Alcotest.test_case "non-default values don't break output" `Quick test_pdf_non_default_phase6_values_dont_break_output;
     ];
   ]
