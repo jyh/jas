@@ -49,6 +49,63 @@ pub enum ScalingMode {
     Custom,
 }
 
+/// Two cultural variants of printer's marks. ``Roman`` ships the
+/// standard Western trim/registration marks; ``Japanese`` swaps in
+/// the kasen-style marks used by Japanese commercial print shops.
+/// Phase 2 stores the choice but the renderer only differentiates in
+/// a follow-up — the on-disk shape is stable now.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PrinterMarkType {
+    Roman,
+    Japanese,
+}
+
+/// Marks-and-bleed sub-record on PrintPreferences (PRINT.md §Phase 2).
+/// The Marks tab exposes these 1:1 as widgets; the PDF renderer
+/// extends each page by the active bleed and overlays mark geometry
+/// around the trim rect.
+///
+/// ``use_document_bleed`` controls whether bleeds come from the
+/// document-level ``DocumentSetup`` or from the per-print
+/// ``bleed_*`` overrides on this struct. Defaulting to true keeps
+/// document and print in lockstep until the user opts out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarksAndBleed {
+    pub all_printer_marks: bool,
+    pub trim_marks: bool,
+    pub registration_marks: bool,
+    pub color_bars: bool,
+    pub page_information: bool,
+    pub printer_mark_type: PrinterMarkType,
+    pub trim_mark_weight: f64,
+    pub mark_offset: f64,
+    pub use_document_bleed: bool,
+    pub bleed_top: f64,
+    pub bleed_right: f64,
+    pub bleed_bottom: f64,
+    pub bleed_left: f64,
+}
+
+impl Default for MarksAndBleed {
+    fn default() -> Self {
+        Self {
+            all_printer_marks: false,
+            trim_marks: false,
+            registration_marks: false,
+            color_bars: false,
+            page_information: false,
+            printer_mark_type: PrinterMarkType::Roman,
+            trim_mark_weight: 0.25,
+            mark_offset: 6.0,
+            use_document_bleed: true,
+            bleed_top: 0.0,
+            bleed_right: 0.0,
+            bleed_bottom: 0.0,
+            bleed_left: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrintPreferences {
     pub preset_name: String,
@@ -76,6 +133,8 @@ pub struct PrintPreferences {
     pub tile_overlap_h: f64,
     pub tile_overlap_v: f64,
     pub tile_range: String,
+    /// Marks-and-bleed sub-record (PRINT.md §Phase 2).
+    pub marks_and_bleed: MarksAndBleed,
 }
 
 impl Default for PrintPreferences {
@@ -104,6 +163,7 @@ impl Default for PrintPreferences {
             tile_overlap_h: 0.0,
             tile_overlap_v: 0.0,
             tile_range: String::new(),
+            marks_and_bleed: MarksAndBleed::default(),
         }
     }
 }
@@ -215,6 +275,19 @@ pub fn scaling_mode_from(s: &str) -> ScalingMode {
     }
 }
 
+pub fn printer_mark_type_str(t: &PrinterMarkType) -> &'static str {
+    match t {
+        PrinterMarkType::Roman => "roman",
+        PrinterMarkType::Japanese => "japanese",
+    }
+}
+pub fn printer_mark_type_from(s: &str) -> PrinterMarkType {
+    match s {
+        "japanese" => PrinterMarkType::Japanese,
+        _ => PrinterMarkType::Roman,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +318,25 @@ mod tests {
         assert_eq!(p.tile_overlap_h, 0.0);
         assert_eq!(p.tile_overlap_v, 0.0);
         assert_eq!(p.tile_range, "");
+        assert_eq!(p.marks_and_bleed, MarksAndBleed::default());
+    }
+
+    #[test]
+    fn marks_and_bleed_defaults_match_spec() {
+        let m = MarksAndBleed::default();
+        assert!(!m.all_printer_marks);
+        assert!(!m.trim_marks);
+        assert!(!m.registration_marks);
+        assert!(!m.color_bars);
+        assert!(!m.page_information);
+        assert_eq!(m.printer_mark_type, PrinterMarkType::Roman);
+        assert_eq!(m.trim_mark_weight, 0.25);
+        assert_eq!(m.mark_offset, 6.0);
+        assert!(m.use_document_bleed);
+        assert_eq!(m.bleed_top, 0.0);
+        assert_eq!(m.bleed_right, 0.0);
+        assert_eq!(m.bleed_bottom, 0.0);
+        assert_eq!(m.bleed_left, 0.0);
     }
 
     #[test]
@@ -275,6 +367,9 @@ mod tests {
         for m in [ScalingMode::DoNotScale, ScalingMode::FitToPage, ScalingMode::Custom] {
             assert_eq!(scaling_mode_from(scaling_mode_str(&m)), m);
         }
+        for t in [PrinterMarkType::Roman, PrinterMarkType::Japanese] {
+            assert_eq!(printer_mark_type_from(printer_mark_type_str(&t)), t);
+        }
     }
 
     #[test]
@@ -284,5 +379,6 @@ mod tests {
         assert_eq!(orientation_from("garbage"), Orientation::Portrait);
         assert_eq!(print_layers_from("garbage"), PrintLayers::VisiblePrintable);
         assert_eq!(scaling_mode_from("garbage"), ScalingMode::DoNotScale);
+        assert_eq!(printer_mark_type_from("garbage"), PrinterMarkType::Roman);
     }
 }
