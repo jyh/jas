@@ -382,6 +382,46 @@ def build_artboard_handlers(model) -> dict:
             model.document, print_preferences=new_p)
         return None
 
+    # PRINT.md §Phase 2
+    def doc_set_marks_and_bleed_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            PrinterMarkType, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        m = p.marks_and_bleed
+        if field in {"all_printer_marks", "trim_marks", "registration_marks",
+                     "color_bars", "page_information", "use_document_bleed"}:
+            if not isinstance(value, bool):
+                return None
+            new_m = dataclasses.replace(m, **{field: value})
+        elif field in {"trim_mark_weight", "mark_offset",
+                       "bleed_top", "bleed_right", "bleed_bottom", "bleed_left"}:
+            if not isinstance(value, (int, float)):
+                return None
+            new_m = dataclasses.replace(m, **{field: float(value)})
+        elif field == "printer_mark_type":
+            if not isinstance(value, str):
+                return None
+            new_m = dataclasses.replace(m, printer_mark_type=_enum_from_string(
+                PrinterMarkType, value, m.printer_mark_type))
+        else:
+            return None
+        new_p = dataclasses.replace(p, marks_and_bleed=new_m)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
     # PRINT.md §1B
     def geometry_export_pdf(_spec, _call_ctx, _store):
         from geometry.pdf import document_to_pdf
@@ -409,6 +449,7 @@ def build_artboard_handlers(model) -> dict:
         "doc.set_artboard_options_field": doc_set_artboard_options_field,
         "doc.set_document_setup_field": doc_set_document_setup_field,
         "doc.set_print_preferences_field": doc_set_print_preferences_field,
+        "doc.set_marks_and_bleed_field": doc_set_marks_and_bleed_field,
         "doc.move_artboards_up": doc_move_artboards_up,
         "doc.move_artboards_down": doc_move_artboards_down,
         "geometry.export_pdf": geometry_export_pdf,
