@@ -571,6 +571,49 @@ def build_artboard_handlers(model) -> dict:
             model.document, print_preferences=new_p)
         return None
 
+    # PRINT.md §Phase 5
+    def doc_set_color_management_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            ColorHandling, RenderingIntent, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        c = p.color_management
+        if field in {"document_profile", "printer_profile"}:
+            if not isinstance(value, str):
+                return None
+            new_c = dataclasses.replace(c, **{field: value})
+        elif field == "color_handling":
+            if not isinstance(value, str):
+                return None
+            new_c = dataclasses.replace(c, color_handling=_enum_from_string(
+                ColorHandling, value, c.color_handling))
+        elif field == "rendering_intent":
+            if not isinstance(value, str):
+                return None
+            new_c = dataclasses.replace(c, rendering_intent=_enum_from_string(
+                RenderingIntent, value, c.rendering_intent))
+        elif field == "preserve_rgb_numbers":
+            if not isinstance(value, bool):
+                return None
+            new_c = dataclasses.replace(c, preserve_rgb_numbers=value)
+        else:
+            return None
+        new_p = dataclasses.replace(p, color_management=new_c)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
     # PRINT.md §1B
     def geometry_export_pdf(_spec, _call_ctx, _store):
         from geometry.pdf import document_to_pdf
@@ -602,6 +645,7 @@ def build_artboard_handlers(model) -> dict:
         "doc.set_output_field": doc_set_output_field,
         "doc.set_output_ink_field": doc_set_output_ink_field,
         "doc.set_graphics_field": doc_set_graphics_field,
+        "doc.set_color_management_field": doc_set_color_management_field,
         "doc.move_artboards_up": doc_move_artboards_up,
         "doc.move_artboards_down": doc_move_artboards_down,
         "geometry.export_pdf": geometry_export_pdf,
