@@ -156,6 +156,24 @@ private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
     ]
 }
 
+private func marksAndBleedView(_ m: MarksAndBleed) -> [String: Any] {
+    return [
+        "all_printer_marks": m.allPrinterMarks,
+        "trim_marks": m.trimMarks,
+        "registration_marks": m.registrationMarks,
+        "color_bars": m.colorBars,
+        "page_information": m.pageInformation,
+        "printer_mark_type": m.printerMarkType.rawValue,
+        "trim_mark_weight": m.trimMarkWeight,
+        "mark_offset": m.markOffset,
+        "use_document_bleed": m.useDocumentBleed,
+        "bleed_top": m.bleedTop,
+        "bleed_right": m.bleedRight,
+        "bleed_bottom": m.bleedBottom,
+        "bleed_left": m.bleedLeft,
+    ]
+}
+
 private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
     return [
         "preset_name": p.presetName,
@@ -181,6 +199,7 @@ private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
         "tile_overlap_h": p.tileOverlapH,
         "tile_overlap_v": p.tileOverlapV,
         "tile_range": p.tileRange,
+        "marks_and_bleed": marksAndBleedView(p.marksAndBleed),
     ]
 }
 

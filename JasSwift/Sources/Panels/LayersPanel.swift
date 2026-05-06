@@ -761,6 +761,39 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.set_marks_and_bleed_field — PRINT.md §Phase 2. Same
+        // wiring shape as doc.set_print_preferences_field above; the
+        // applyMarksAndBleedField helper handles the typed dispatch
+        // and rebuilds PrintPreferences with a new marksAndBleed.
+        let docSetMarksAndBleedFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            let np = applyMarksAndBleedField(p, field: field, val: val)
+            guard let updated = np else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
         // geometry.export_pdf — PRINT.md §1B. Generates a PDF from the
         // current document and presents an NSSavePanel for the user to
         // pick the destination. filename_hint optional.
@@ -849,6 +882,7 @@ public enum LayersPanel {
             "doc.set_artboard_options_field": docSetArtboardOptionsFieldHandler,
             "doc.set_document_setup_field": docSetDocumentSetupFieldHandler,
             "doc.set_print_preferences_field": docSetPrintPreferencesFieldHandler,
+            "doc.set_marks_and_bleed_field": docSetMarksAndBleedFieldHandler,
             "doc.move_artboards_up": docMoveArtboardsUpHandler,
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "geometry.export_pdf": geometryExportPdfHandler,
