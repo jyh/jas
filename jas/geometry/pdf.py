@@ -33,6 +33,37 @@ class _Page:
     src_y: float
     src_w: float
     src_h: float
+    # Where the trim rect sits inside the (possibly bleed-extended)
+    # MediaBox. (0, 0) when no bleed/marks are active.
+    trim_x_off: float = 0.0
+    trim_y_off: float = 0.0
+
+
+# Marks-and-Bleed PDF geometry constants (PRINT.md §Phase 2). Same
+# values as Rust + Swift + OCaml so the cross-port output stays
+# equivalent.
+_TRIM_MARK_LENGTH = 12.0
+_REG_MARK_RADIUS = 4.0
+_COLOR_BAR_SWATCH = 10.0
+
+
+def _active_bleed(doc: Document):
+    """Effective bleed for a print pass: per-print overrides on
+    marks_and_bleed when use_document_bleed is False, otherwise the
+    document-level DocumentSetup bleed."""
+    m = doc.print_preferences.marks_and_bleed
+    if m.use_document_bleed:
+        d = doc.document_setup
+        return (d.bleed_top, d.bleed_right, d.bleed_bottom, d.bleed_left)
+    return (m.bleed_top, m.bleed_right, m.bleed_bottom, m.bleed_left)
+
+
+def _mark_gutter(m) -> float:
+    """Extra space between the trim rect and the MediaBox edge needed
+    to hold the marks. Zero when no mark category is enabled."""
+    any_ = (m.all_printer_marks or m.trim_marks or m.registration_marks
+            or m.color_bars or m.page_information)
+    return m.mark_offset + _TRIM_MARK_LENGTH + 2.0 if any_ else 0.0
 
 
 def _artboard_bounds_union(abs_):
@@ -47,15 +78,26 @@ def _artboard_bounds_union(abs_):
 
 
 def _collect_pages(doc: Document) -> list[_Page]:
+    bt, br, bb, bl = _active_bleed(doc)
+    g = _mark_gutter(doc.print_preferences.marks_and_bleed)
+    trim_x_off = bl + g
+    trim_y_off = bb + g
+    extra_w = bl + br + 2.0 * g
+    extra_h = bt + bb + 2.0 * g
     if doc.print_preferences.ignore_artboards or not doc.artboards:
         if not doc.artboards:
             x, y, w, h = 0.0, 0.0, 612.0, 792.0
         else:
             x, y, w, h = _artboard_bounds_union(doc.artboards)
-        return [_Page(media_w=w, media_h=h, src_x=x, src_y=y, src_w=w, src_h=h)]
+        return [_Page(
+            media_w=w + extra_w, media_h=h + extra_h,
+            src_x=x, src_y=y, src_w=w, src_h=h,
+            trim_x_off=trim_x_off, trim_y_off=trim_y_off)]
     return [
-        _Page(media_w=ab.width, media_h=ab.height,
-              src_x=ab.x, src_y=ab.y, src_w=ab.width, src_h=ab.height)
+        _Page(
+            media_w=ab.width + extra_w, media_h=ab.height + extra_h,
+            src_x=ab.x, src_y=ab.y, src_w=ab.width, src_h=ab.height,
+            trim_x_off=trim_x_off, trim_y_off=trim_y_off)
         for ab in doc.artboards
     ]
 
@@ -274,13 +316,113 @@ def _emit_element(canvas: RLCanvas, el, filt: PrintLayers):
         return
 
 
+def _emit_trim_marks(canvas: RLCanvas, tx, ty, tw, th, weight, off):
+    canvas.saveState()
+    canvas.setStrokeColorRGB(0.0, 0.0, 0.0, alpha=1.0)
+    canvas.setLineWidth(weight)
+    length = _TRIM_MARK_LENGTH
+    # Eight short strokes, two per corner. PDF is y-up.
+    segs = [
+        (tx - off - length, ty,             tx - off,            ty),
+        (tx,                ty - off - length, tx,               ty - off),
+        (tx + tw + off,     ty,             tx + tw + off + length, ty),
+        (tx + tw,           ty - off - length, tx + tw,          ty - off),
+        (tx - off - length, ty + th,        tx - off,            ty + th),
+        (tx,                ty + th + off,  tx,                  ty + th + off + length),
+        (tx + tw + off,     ty + th,        tx + tw + off + length, ty + th),
+        (tx + tw,           ty + th + off,  tx + tw,             ty + th + off + length),
+    ]
+    for x1, y1, x2, y2 in segs:
+        canvas.line(x1, y1, x2, y2)
+    canvas.restoreState()
+
+
+def _emit_reg_mark(canvas: RLCanvas, cx, cy, r):
+    canvas.saveState()
+    canvas.setStrokeColorRGB(0.0, 0.0, 0.0, alpha=1.0)
+    canvas.setLineWidth(0.25)
+    canvas.circle(cx, cy, r, stroke=1, fill=0)
+    canvas.line(cx - r, cy, cx + r, cy)
+    canvas.line(cx, cy - r, cx, cy + r)
+    canvas.restoreState()
+
+
+def _emit_registration_marks(canvas: RLCanvas, tx, ty, tw, th, off):
+    r = _REG_MARK_RADIUS
+    centers = [
+        (tx + tw / 2, ty - off - r),       # bottom mid (PDF y-up)
+        (tx + tw + off + r, ty + th / 2),  # right mid
+        (tx + tw / 2, ty + th + off + r),  # top mid
+        (tx - off - r, ty + th / 2),       # left mid
+    ]
+    for cx, cy in centers:
+        _emit_reg_mark(canvas, cx, cy, r)
+
+
+def _emit_color_bars(canvas: RLCanvas, tx, ty, tw, th, _off):
+    s = _COLOR_BAR_SWATCH
+    swatches = [
+        (0.0, 1.0, 1.0),    # C
+        (1.0, 0.0, 1.0),    # M
+        (1.0, 1.0, 0.0),    # Y
+        (0.0, 0.0, 0.0),    # K
+        (1.0, 0.0, 0.0),    # R
+        (0.0, 1.0, 0.0),    # G
+        (0.0, 0.0, 1.0),    # B
+        (0.5, 0.5, 0.5),    # grey
+    ]
+    base_x = tx
+    # Above the top trim edge (PDF is y-up).
+    base_y = ty + th + _TRIM_MARK_LENGTH + 2.0
+    for i, (r, g, b) in enumerate(swatches):
+        x = base_x + i * s
+        if x + s > tx + tw:
+            break
+        canvas.saveState()
+        canvas.setFillColorRGB(r, g, b, alpha=1.0)
+        canvas.rect(x, base_y, s, s, stroke=0, fill=1)
+        canvas.restoreState()
+
+
+def _emit_page_info(canvas: RLCanvas, tx, ty):
+    # Phase-2 placeholder: a small label below the bottom trim edge
+    # (PDF is y-up). Renderer-specific font metric work is deferred.
+    canvas.saveState()
+    canvas.setFillColorRGB(0.0, 0.0, 0.0, alpha=1.0)
+    canvas.setFont("Helvetica", 6)
+    canvas.drawString(tx, ty - _TRIM_MARK_LENGTH - 8, "Jas — page")
+    canvas.restoreState()
+
+
+def _emit_marks(canvas: RLCanvas, doc: Document, page: _Page):
+    m = doc.print_preferences.marks_and_bleed
+    if not (m.all_printer_marks or m.trim_marks or m.registration_marks
+            or m.color_bars or m.page_information):
+        return
+    tx, ty = page.trim_x_off, page.trim_y_off
+    tw, th = page.src_w, page.src_h
+    if m.all_printer_marks or m.trim_marks:
+        _emit_trim_marks(canvas, tx, ty, tw, th,
+                         m.trim_mark_weight, m.mark_offset)
+    if m.all_printer_marks or m.registration_marks:
+        _emit_registration_marks(canvas, tx, ty, tw, th, m.mark_offset)
+    if m.all_printer_marks or m.color_bars:
+        _emit_color_bars(canvas, tx, ty, tw, th, m.mark_offset)
+    if m.all_printer_marks or m.page_information:
+        _emit_page_info(canvas, tx, ty)
+
+
 def _draw_page(canvas: RLCanvas, doc: Document, page: _Page):
     canvas.saveState()
     sx, sy = _scaling_pair(doc)
     px = doc.print_preferences.placement_x
     py = doc.print_preferences.placement_y
-    # PDF is y-up, internal model is y-down. Flip Y here, then translate
-    # so document-space (page.src_x, page.src_y) lands at the page origin.
+    # Position the trim rect inside the (possibly bleed-extended)
+    # MediaBox. PDF is y-up, internal model is y-down. Flip Y here,
+    # then translate so document-space (page.src_x, page.src_y) lands
+    # at the trim origin.
+    if page.trim_x_off != 0 or page.trim_y_off != 0:
+        canvas.translate(page.trim_x_off, page.trim_y_off)
     canvas.translate(0, page.src_h)
     canvas.scale(1, -1)
     if px != 0 or py != 0:
@@ -292,6 +434,9 @@ def _draw_page(canvas: RLCanvas, doc: Document, page: _Page):
     for layer in doc.layers:
         _emit_element(canvas, layer, doc.print_preferences.print_layers)
     canvas.restoreState()
+    # Marks render in MediaBox space (no user transforms), aligned to
+    # the trim rect inside it.
+    _emit_marks(canvas, doc, page)
 
 
 def document_to_pdf(doc: Document) -> bytes:
