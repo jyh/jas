@@ -111,6 +111,27 @@ import PDFKit
     #expect(pdf.pageCount == 1)
 }
 
+@Test func pdfNonDefaultPhase6ValuesDontBreakOutput() {
+    // Phase 6 v1 stores Advanced + Phase 6 DocumentSetup fields
+    // but defers the rendering effects (rasterize-as-bitmap, the
+    // flattener pipelines, simulated paper, white-overprint
+    // discard). Smoke-test that having non-default values
+    // doesn't crash the emitter.
+    let advanced = Advanced(printAsBitmap: true,
+                            overprintFlattenerPreset: .highResolution)
+    let setup = DocumentSetup(
+        paperColor: "#fff8e7",
+        simulateColoredPaper: true,
+        transparencyFlattenerPreset: .highResolution,
+        discardWhiteOverprint: true)
+    let prefs = PrintPreferences(advanced: advanced)
+    let doc = Document(documentSetup: setup, printPreferences: prefs)
+    let data = documentToPdf(doc)
+    let pdf = PDFDocument(data: data)
+    #expect(pdf != nil)
+    #expect(pdf?.pageCount == 1)
+}
+
 @Test func pdfNonDefaultRenderingIntentProducesValidPdf() {
     // Smoke: ColorManagement.renderingIntent ≠ .relativeColorimetric
     // propagates through the emitter (CGContext.setRenderingIntent)
