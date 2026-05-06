@@ -1813,14 +1813,21 @@ fn document_setup_to_xml(
     s: &crate::document::document_setup::DocumentSetup,
     indent: &str,
 ) -> String {
+    use crate::document::print_preferences::flattener_preset_str;
     format!(
-        "{indent}<jas:document-setup bleed-top=\"{bt}\" bleed-right=\"{br}\" bleed-bottom=\"{bb}\" bleed-left=\"{bl}\" bleed-uniform=\"{bu}\" show-images-outline=\"{sio}\" highlight-substituted-glyphs=\"{hsg}\"/>",
+        "{indent}<jas:document-setup bleed-top=\"{bt}\" bleed-right=\"{br}\" bleed-bottom=\"{bb}\" bleed-left=\"{bl}\" bleed-uniform=\"{bu}\" show-images-outline=\"{sio}\" highlight-substituted-glyphs=\"{hsg}\" grid-size=\"{gs}\" grid-color=\"{gc}\" paper-color=\"{pc}\" simulate-colored-paper=\"{scp}\" transparency-flattener-preset=\"{tfp}\" discard-white-overprint=\"{dwo}\"/>",
         indent = indent,
         bt = fmt(s.bleed_top), br = fmt(s.bleed_right),
         bb = fmt(s.bleed_bottom), bl = fmt(s.bleed_left),
         bu = bool_str(s.bleed_uniform),
         sio = bool_str(s.show_images_outline),
         hsg = bool_str(s.highlight_substituted_glyphs),
+        gs = fmt(s.grid_size),
+        gc = escape_xml(&s.grid_color),
+        pc = escape_xml(&s.paper_color),
+        scp = bool_str(s.simulate_colored_paper),
+        tfp = flattener_preset_str(&s.transparency_flattener_preset),
+        dwo = bool_str(s.discard_white_overprint),
     )
 }
 
@@ -1933,6 +1940,32 @@ fn ink_override_to_xml(
         a = fmt(ink.angle),
         ds = dot_shape_str(&ink.dot_shape),
     )
+}
+
+fn advanced_to_xml(
+    a: &crate::document::print_preferences::Advanced,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::flattener_preset_str;
+    format!(
+        "{indent}<jas:advanced print-as-bitmap=\"{pab}\" overprint-flattener-preset=\"{ofp}\"/>",
+        indent = indent,
+        pab = bool_str(a.print_as_bitmap),
+        ofp = flattener_preset_str(&a.overprint_flattener_preset),
+    )
+}
+
+fn parse_advanced(
+    node: &XmlNode,
+) -> crate::document::print_preferences::Advanced {
+    use crate::document::print_preferences::*;
+    let d = Advanced::default();
+    Advanced {
+        print_as_bitmap: get_attr(node, "print-as-bitmap")
+            .map(|s| parse_bool(s, d.print_as_bitmap)).unwrap_or(d.print_as_bitmap),
+        overprint_flattener_preset: get_attr(node, "overprint-flattener-preset")
+            .map(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
+    }
 }
 
 fn color_management_to_xml(
@@ -2135,6 +2168,8 @@ fn print_preferences_to_xml(
     s.push('\n');
     s.push_str(&color_management_to_xml(&p.color_management, &inner_indent));
     s.push('\n');
+    s.push_str(&advanced_to_xml(&p.advanced, &inner_indent));
+    s.push('\n');
     s.push_str(indent);
     s.push_str("</jas:print-preferences>");
     s
@@ -2203,6 +2238,7 @@ fn parse_print_preferences(
             "output" => p.output = parse_output(child),
             "graphics" => p.graphics = parse_graphics(child),
             "color-management" => p.color_management = parse_color_management(child),
+            "advanced" => p.advanced = parse_advanced(child),
             _ => {}
         }
     }
@@ -3431,6 +3467,47 @@ mod tests {
         assert!(svg.contains("PANTONE 185 C"), "spot ink missing:\n{svg}");
         let parsed = svg_to_document(&svg);
         assert_eq!(parsed.print_preferences.output, doc.print_preferences.output);
+    }
+
+    #[test]
+    fn advanced_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.advanced = Advanced {
+            print_as_bitmap: true,
+            overprint_flattener_preset: FlattenerPreset::HighResolution,
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:advanced"), "svg:\n{svg}");
+        assert!(svg.contains("print-as-bitmap=\"true\""), "svg:\n{svg}");
+        assert!(svg.contains("overprint-flattener-preset=\"high_resolution\""),
+                "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.advanced, doc.print_preferences.advanced);
+    }
+
+    #[test]
+    fn document_setup_phase6_fields_round_trip_through_svg() {
+        use crate::document::document_setup::DocumentSetup;
+        use crate::document::print_preferences::FlattenerPreset;
+        let mut doc = Document::default();
+        doc.document_setup = DocumentSetup {
+            grid_size: 36.0,
+            grid_color: "#0099ff".to_string(),
+            paper_color: "#fff8e7".to_string(),
+            simulate_colored_paper: true,
+            transparency_flattener_preset: FlattenerPreset::HighResolution,
+            discard_white_overprint: true,
+            ..DocumentSetup::default()
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("grid-size=\"36\""), "svg:\n{svg}");
+        assert!(svg.contains("paper-color=\"#fff8e7\""), "svg:\n{svg}");
+        assert!(svg.contains("simulate-colored-paper=\"true\""), "svg:\n{svg}");
+        assert!(svg.contains("transparency-flattener-preset=\"high_resolution\""),
+                "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.document_setup, doc.document_setup);
     }
 
     #[test]
