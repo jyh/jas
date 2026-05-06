@@ -457,6 +457,19 @@ private func documentSetupToSvg(_ s: DocumentSetup, indent: String) -> String {
         + " bleed-uniform=\"\(boolStr(s.bleedUniform))\""
         + " show-images-outline=\"\(boolStr(s.showImagesOutline))\""
         + " highlight-substituted-glyphs=\"\(boolStr(s.highlightSubstitutedGlyphs))\""
+        + " grid-size=\"\(fmt(s.gridSize))\""
+        + " grid-color=\"\(escapeXml(s.gridColor))\""
+        + " paper-color=\"\(escapeXml(s.paperColor))\""
+        + " simulate-colored-paper=\"\(boolStr(s.simulateColoredPaper))\""
+        + " transparency-flattener-preset=\"\(s.transparencyFlattenerPreset.rawValue)\""
+        + " discard-white-overprint=\"\(boolStr(s.discardWhiteOverprint))\""
+        + "/>"
+}
+
+private func advancedToSvg(_ a: Advanced, indent: String) -> String {
+    return "\(indent)<jas:advanced"
+        + " print-as-bitmap=\"\(boolStr(a.printAsBitmap))\""
+        + " overprint-flattener-preset=\"\(a.overprintFlattenerPreset.rawValue)\""
         + "/>"
 }
 
@@ -561,6 +574,8 @@ private func printPreferencesToSvg(_ p: PrintPreferences, indent: String) -> Str
     s += graphicsToSvg(p.graphics, indent: indent + "  ")
     s += "\n"
     s += colorManagementToSvg(p.colorManagement, indent: indent + "  ")
+    s += "\n"
+    s += advancedToSvg(p.advanced, indent: indent + "  ")
     s += "\n\(indent)</jas:print-preferences>"
     return s
 }
@@ -1419,7 +1434,21 @@ private func parseDocumentSetupNode(_ node: XMLElement) -> DocumentSetup {
         bleedLeft: parseDoubleAttr(node, "bleed-left", d.bleedLeft),
         bleedUniform: parseBoolAttr(node, "bleed-uniform", d.bleedUniform),
         showImagesOutline: parseBoolAttr(node, "show-images-outline", d.showImagesOutline),
-        highlightSubstitutedGlyphs: parseBoolAttr(node, "highlight-substituted-glyphs", d.highlightSubstitutedGlyphs)
+        highlightSubstitutedGlyphs: parseBoolAttr(node, "highlight-substituted-glyphs", d.highlightSubstitutedGlyphs),
+        gridSize: parseDoubleAttr(node, "grid-size", d.gridSize),
+        gridColor: attrAny(node, "grid-color") ?? d.gridColor,
+        paperColor: attrAny(node, "paper-color") ?? d.paperColor,
+        simulateColoredPaper: parseBoolAttr(node, "simulate-colored-paper", d.simulateColoredPaper),
+        transparencyFlattenerPreset: FlattenerPreset(rawValue: attrAny(node, "transparency-flattener-preset") ?? "") ?? d.transparencyFlattenerPreset,
+        discardWhiteOverprint: parseBoolAttr(node, "discard-white-overprint", d.discardWhiteOverprint)
+    )
+}
+
+private func parseAdvancedNode(_ node: XMLElement) -> Advanced {
+    let d = Advanced.default
+    return Advanced(
+        printAsBitmap: parseBoolAttr(node, "print-as-bitmap", d.printAsBitmap),
+        overprintFlattenerPreset: FlattenerPreset(rawValue: attrAny(node, "overprint-flattener-preset") ?? "") ?? d.overprintFlattenerPreset
     )
 }
 
@@ -1503,6 +1532,7 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
     var output = Output.default
     var graphics = Graphics.default
     var colorManagement = ColorManagement.default
+    var advanced = Advanced.default
     if let kids = node.children {
         for k in kids {
             guard let e = k as? XMLElement else { continue }
@@ -1511,6 +1541,7 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
             case "output": output = parseOutputNode(e)
             case "graphics": graphics = parseGraphicsNode(e)
             case "color-management": colorManagement = parseColorManagementNode(e)
+            case "advanced": advanced = parseAdvancedNode(e)
             default: break
             }
         }
@@ -1542,7 +1573,8 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
         marksAndBleed: mab,
         output: output,
         graphics: graphics,
-        colorManagement: colorManagement
+        colorManagement: colorManagement,
+        advanced: advanced
     )
 }
 

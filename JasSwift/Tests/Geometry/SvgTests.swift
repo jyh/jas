@@ -995,6 +995,37 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(parsed.documentSetup == s)
 }
 
+@Test func advancedSubRecordRoundTripsThroughSvg() {
+    let a = Advanced(printAsBitmap: true, overprintFlattenerPreset: .highResolution)
+    let p = PrintPreferences(advanced: a)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:advanced"))
+    #expect(svg.contains("print-as-bitmap=\"true\""))
+    #expect(svg.contains("overprint-flattener-preset=\"high_resolution\""))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.advanced == a)
+}
+
+@Test func documentSetupPhase6FieldsRoundTripThroughSvg() {
+    let s = DocumentSetup(
+        gridSize: 36,
+        gridColor: "#0099ff",
+        paperColor: "#fff8e7",
+        simulateColoredPaper: true,
+        transparencyFlattenerPreset: .highResolution,
+        discardWhiteOverprint: true
+    )
+    let doc = Document(layers: [Layer(children: [])], documentSetup: s)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("grid-size=\"36\""))
+    #expect(svg.contains("paper-color=\"#fff8e7\""))
+    #expect(svg.contains("simulate-colored-paper=\"true\""))
+    #expect(svg.contains("transparency-flattener-preset=\"high_resolution\""))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.documentSetup == s)
+}
+
 @Test func colorManagementSubRecordRoundTripsThroughSvg() {
     let c = ColorManagement(
         documentProfile: "Adobe RGB (1998)",
