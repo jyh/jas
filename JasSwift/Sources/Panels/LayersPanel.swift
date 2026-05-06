@@ -794,6 +794,69 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.set_output_field — PRINT.md §Phase 3. Same wiring shape
+        // as the marks-and-bleed handler above; applyOutputField
+        // handles the typed dispatch onto Output.
+        let docSetOutputFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyOutputField(p, field: field, val: val) else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // doc.set_output_ink_field — PRINT.md §Phase 3. Adds an
+        // ``index`` parameter for which row of Output.inks to update.
+        let docSetOutputInkFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String,
+                  let indexNum = spec["index"] as? NSNumber else { return nil }
+            let index = indexNum.intValue
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyOutputInkField(p, index: index, field: field, val: val) else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
         // geometry.export_pdf — PRINT.md §1B. Generates a PDF from the
         // current document and presents an NSSavePanel for the user to
         // pick the destination. filename_hint optional.
@@ -883,6 +946,8 @@ public enum LayersPanel {
             "doc.set_document_setup_field": docSetDocumentSetupFieldHandler,
             "doc.set_print_preferences_field": docSetPrintPreferencesFieldHandler,
             "doc.set_marks_and_bleed_field": docSetMarksAndBleedFieldHandler,
+            "doc.set_output_field": docSetOutputFieldHandler,
+            "doc.set_output_ink_field": docSetOutputInkFieldHandler,
             "doc.move_artboards_up": docMoveArtboardsUpHandler,
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

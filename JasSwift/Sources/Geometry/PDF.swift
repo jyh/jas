@@ -149,7 +149,8 @@ private func _withPref(
     tileOverlapH: Double? = nil,
     tileOverlapV: Double? = nil,
     tileRange: String? = nil,
-    marksAndBleed: MarksAndBleed? = nil
+    marksAndBleed: MarksAndBleed? = nil,
+    output: Output? = nil
 ) -> PrintPreferences {
     return PrintPreferences(
         presetName: presetName ?? p.presetName,
@@ -175,7 +176,8 @@ private func _withPref(
         tileOverlapH: tileOverlapH ?? p.tileOverlapH,
         tileOverlapV: tileOverlapV ?? p.tileOverlapV,
         tileRange: tileRange ?? p.tileRange,
-        marksAndBleed: marksAndBleed ?? p.marksAndBleed
+        marksAndBleed: marksAndBleed ?? p.marksAndBleed,
+        output: output ?? p.output
     )
 }
 
@@ -273,6 +275,116 @@ private func _withMab(
         bleedRight: bleedRight ?? m.bleedRight,
         bleedBottom: bleedBottom ?? m.bleedBottom,
         bleedLeft: bleedLeft ?? m.bleedLeft
+    )
+}
+
+/// Apply a single field update to PrintPreferences's Output sub-record
+/// (PRINT.md §Phase 3). Returns nil for unknown fields or value-type
+/// mismatches — caller leaves PrintPreferences unchanged.
+func applyOutputField(_ p: PrintPreferences, field: String, val: Value) -> PrintPreferences? {
+    func num() -> Double? {
+        if case .number(let n) = val { return n }
+        return nil
+    }
+    func bool() -> Bool? {
+        if case .bool(let b) = val { return b }
+        return nil
+    }
+    func str() -> String? {
+        if case .string(let s) = val { return s }
+        return nil
+    }
+    let _ = num
+    let o = p.output
+    let updated: Output
+    switch field {
+    case "mode":
+        guard let s = str(), let m = OutputMode(rawValue: s) else { return nil }
+        updated = _withOut(o, mode: m)
+    case "emulsion":
+        guard let s = str(), let e = Emulsion(rawValue: s) else { return nil }
+        updated = _withOut(o, emulsion: e)
+    case "image_polarity":
+        guard let s = str(), let ip = ImagePolarity(rawValue: s) else { return nil }
+        updated = _withOut(o, imagePolarity: ip)
+    case "printer_resolution":
+        guard let s = str() else { return nil }
+        updated = _withOut(o, printerResolution: s)
+    case "convert_spot_to_process":
+        guard let b = bool() else { return nil }
+        updated = _withOut(o, convertSpotToProcess: b)
+    case "overprint_black":
+        guard let b = bool() else { return nil }
+        updated = _withOut(o, overprintBlack: b)
+    default:
+        return nil
+    }
+    return _withPref(p, output: updated)
+}
+
+/// Apply a single field update to one InkOverride row of the Output
+/// sub-record. Out-of-range indices and unknown / mistyped fields
+/// return nil so the document stays unchanged.
+func applyOutputInkField(_ p: PrintPreferences, index: Int, field: String, val: Value) -> PrintPreferences? {
+    func num() -> Double? {
+        if case .number(let n) = val { return n }
+        return nil
+    }
+    func bool() -> Bool? {
+        if case .bool(let b) = val { return b }
+        return nil
+    }
+    func str() -> String? {
+        if case .string(let s) = val { return s }
+        return nil
+    }
+    let inks = p.output.inks
+    guard index >= 0, index < inks.count else { return nil }
+    let ink = inks[index]
+    let newInk: InkOverride
+    switch field {
+    case "name":
+        guard let s = str() else { return nil }
+        newInk = InkOverride(name: s, print: ink.print, frequency: ink.frequency, angle: ink.angle, dotShape: ink.dotShape)
+    case "print":
+        guard let b = bool() else { return nil }
+        newInk = InkOverride(name: ink.name, print: b, frequency: ink.frequency, angle: ink.angle, dotShape: ink.dotShape)
+    case "frequency":
+        guard let n = num() else { return nil }
+        newInk = InkOverride(name: ink.name, print: ink.print, frequency: n, angle: ink.angle, dotShape: ink.dotShape)
+    case "angle":
+        guard let n = num() else { return nil }
+        newInk = InkOverride(name: ink.name, print: ink.print, frequency: ink.frequency, angle: n, dotShape: ink.dotShape)
+    case "dot_shape":
+        guard let s = str(), let ds = DotShape(rawValue: s) else { return nil }
+        newInk = InkOverride(name: ink.name, print: ink.print, frequency: ink.frequency, angle: ink.angle, dotShape: ds)
+    default:
+        return nil
+    }
+    var newInks = inks
+    newInks[index] = newInk
+    let newOutput = _withOut(p.output, inks: newInks)
+    return _withPref(p, output: newOutput)
+}
+
+private func _withOut(
+    _ o: Output,
+    mode: OutputMode? = nil,
+    emulsion: Emulsion? = nil,
+    imagePolarity: ImagePolarity? = nil,
+    printerResolution: String? = nil,
+    convertSpotToProcess: Bool? = nil,
+    overprintBlack: Bool? = nil,
+    inks: [InkOverride]? = nil
+) -> Output {
+    return Output(
+        mode: mode ?? o.mode,
+        emulsion: emulsion ?? o.emulsion,
+        imagePolarity: imagePolarity ?? o.imagePolarity,
+        printerResolution: printerResolution ?? o.printerResolution,
+        convertSpotToProcess: convertSpotToProcess ?? o.convertSpotToProcess,
+        overprintBlack: overprintBlack ?? o.overprintBlack,
+        inks: inks ?? o.inks
     )
 }
 
