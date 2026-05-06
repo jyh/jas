@@ -10,9 +10,26 @@ type dialog_state = {
   params : (string * Yojson.Safe.t) list;
 }
 
-(** Open a dialog by ID, initializing its state from the workspace definition.
-    Returns [Some dialog_state] on success, [None] if dialog not found. *)
-let open_dialog (dialog_id : string)
+(** Read the live dialog state list (forwards to [Dialog_global]). *)
+let current_dialog_state () : (string * Yojson.Safe.t) list =
+  Dialog_global.read_state ()
+
+(** Set [key] in the live dialog state. *)
+let set_dialog_field (key : string) (value : Yojson.Safe.t) : unit =
+  Dialog_global.set_field key value
+
+(** Close the active dialog widget. *)
+let close_current_dialog () : unit = Dialog_global.close ()
+
+(** Build a fresh evaluation context against the live dialog state. *)
+let current_dialog_ctx () : Yojson.Safe.t =
+  !Dialog_global.current_build_ctx ()
+
+(** Open a dialog by ID, initializing its state from the workspace
+    definition. ``outer_scope`` exposes top-level keys (like
+    ``active_document``) to init expressions. *)
+let open_dialog ?(outer_scope : (string * Yojson.Safe.t) list = [])
+    (dialog_id : string)
     (raw_params : (string * Yojson.Safe.t) list)
     (live_state : (string * Yojson.Safe.t) list) : dialog_state option =
   match Workspace_loader.load () with
@@ -21,48 +38,44 @@ let open_dialog (dialog_id : string)
     match Workspace_loader.dialog ws dialog_id with
     | None -> None
     | Some (`Assoc dlg_def) ->
-      (* Extract state defaults *)
       let defaults = match List.assoc_opt "state" dlg_def with
         | Some defs -> Effects.state_defaults defs
         | None -> []
       in
-      (* Resolve param expressions *)
-      let state_ctx = `Assoc [("state", `Assoc live_state)] in
+      let state_ctx = `Assoc (
+        ("state", `Assoc live_state) :: outer_scope
+      ) in
       let resolved_params = List.map (fun (k, v) ->
         let expr_str = match v with `String s -> s | _ -> "" in
         let result = Expr_eval.evaluate expr_str state_ctx in
         (k, Effects.value_to_json result)
       ) raw_params in
-      (* Init dialog state *)
       let dialog_state = ref defaults in
-      (* Evaluate init expressions (two-pass) *)
+      let init_ctx_for () : Yojson.Safe.t =
+        `Assoc (
+          ("state", `Assoc live_state) ::
+          ("dialog", `Assoc !dialog_state) ::
+          ("param", `Assoc resolved_params) ::
+          outer_scope)
+      in
       (match List.assoc_opt "init" dlg_def with
        | Some (`Assoc init_map) ->
          let deferred = ref [] in
          List.iter (fun (key, expr) ->
            let expr_str = match expr with `String s -> s | _ -> "" in
-           if (try ignore (Str.search_forward (Str.regexp_string "dialog.") expr_str 0); true
+           if (try ignore (Str.search_forward
+                             (Str.regexp_string "dialog.") expr_str 0); true
                with Not_found -> false) then
              deferred := (key, expr) :: !deferred
            else begin
-             let init_ctx = `Assoc [
-               ("state", `Assoc live_state);
-               ("dialog", `Assoc !dialog_state);
-               ("param", `Assoc resolved_params);
-             ] in
-             let result = Expr_eval.evaluate expr_str init_ctx in
+             let result = Expr_eval.evaluate expr_str (init_ctx_for ()) in
              dialog_state := (key, Effects.value_to_json result) ::
                List.filter (fun (k, _) -> k <> key) !dialog_state
            end
          ) init_map;
          List.iter (fun (key, expr) ->
            let expr_str = match expr with `String s -> s | _ -> "" in
-           let init_ctx = `Assoc [
-             ("state", `Assoc live_state);
-             ("dialog", `Assoc !dialog_state);
-             ("param", `Assoc resolved_params);
-           ] in
-           let result = Expr_eval.evaluate expr_str init_ctx in
+           let result = Expr_eval.evaluate expr_str (init_ctx_for ()) in
            dialog_state := (key, Effects.value_to_json result) ::
              List.filter (fun (k, _) -> k <> key) !dialog_state
          ) (List.rev !deferred)
@@ -74,9 +87,13 @@ let open_dialog (dialog_id : string)
       }
     | _ -> None
 
-(** Show a YAML dialog as a GTK modal dialog.
-    Renders the dialog content using [Yaml_panel_view.render_element]. *)
-let show_dialog ?(parent : GWindow.window option) (ds : dialog_state) : unit =
+(** Dispatch a YAML action by name (forwards to [Dialog_global]). *)
+let dispatch_action = Dialog_global.dispatch_action
+
+(** Show a YAML dialog as a GTK modal dialog. *)
+let show_dialog ?(parent : GWindow.window option)
+    ?(outer_scope : (string * Yojson.Safe.t) list = [])
+    (ds : dialog_state) : unit =
   match Workspace_loader.load () with
   | None -> ()
   | Some ws ->
@@ -98,24 +115,34 @@ let show_dialog ?(parent : GWindow.window option) (ds : dialog_state) : unit =
         ~destroy_with_parent:true
         () in
       let vbox = dialog#vbox in
-      (* Build eval context *)
       let state_defaults = Workspace_loader.state_defaults ws in
       let icons = Workspace_loader.icons ws in
-      let ctx = `Assoc [
-        ("state", `Assoc state_defaults);
-        ("dialog", `Assoc ds.state);
-        ("param", `Assoc ds.params);
-        ("icons", icons);
-      ] in
-      (* Render dialog content *)
+      let live_state = ref ds.state in
+      Dialog_global.current_state := Some live_state;
+      Dialog_global.current_id := Some ds.id;
+      Dialog_global.current_outer_scope := outer_scope;
+      Dialog_global.current_close := (fun () -> dialog#destroy ());
+      Dialog_global.current_build_ctx := (fun () ->
+        `Assoc (
+          ("state", `Assoc state_defaults) ::
+          ("dialog", `Assoc !live_state) ::
+          ("param", `Assoc ds.params) ::
+          ("icons", icons) ::
+          outer_scope
+        ));
+      let ctx = !Dialog_global.current_build_ctx () in
       (match List.assoc_opt "content" dlg_def with
        | Some content ->
          Yaml_panel_view.render_element
            ~packing:(vbox#pack ~expand:false)
            ~ctx content
        | None -> ());
-      (* Show and run *)
       dialog#show ();
       ignore (dialog#run ());
-      dialog#destroy ()
+      (try dialog#destroy () with _ -> ());
+      Dialog_global.current_state := None;
+      Dialog_global.current_id := None;
+      Dialog_global.current_outer_scope := [];
+      Dialog_global.current_close := (fun () -> ());
+      Dialog_global.current_build_ctx := (fun () -> `Assoc [])
     | _ -> ()

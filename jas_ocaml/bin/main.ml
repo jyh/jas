@@ -94,6 +94,14 @@ let () =
       | None -> false
     in
     if tool_handled then true
+    (* Bare-letter tool shortcuts (V/A/P/M/N/etc.) must not fire when
+       Ctrl or Cmd is held — those modifier combos are reserved for
+       menu accelerators (Ctrl-N New, Ctrl-P Print, Ctrl-A Select All,
+       Ctrl-V Paste, Ctrl-S Save). Without this guard the tool
+       shortcut intercepts the keypress and the menu accelerator
+       never sees it. *)
+    else if List.mem `CONTROL (GdkEvent.Key.state ev)
+         || List.mem `META (GdkEvent.Key.state ev) then false
     else if key = GdkKeysyms._v || key = GdkKeysyms._V then begin
       toolbar#select_tool Jas.Toolbar.Selection; true
     end else if key = GdkKeysyms._a || key = GdkKeysyms._A then begin
