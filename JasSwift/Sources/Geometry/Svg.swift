@@ -470,6 +470,16 @@ private func inkOverrideToSvg(_ ink: InkOverride, indent: String) -> String {
         + "/>"
 }
 
+private func colorManagementToSvg(_ c: ColorManagement, indent: String) -> String {
+    return "\(indent)<jas:color-management"
+        + " document-profile=\"\(escapeXml(c.documentProfile))\""
+        + " color-handling=\"\(c.colorHandling.rawValue)\""
+        + " printer-profile=\"\(escapeXml(c.printerProfile))\""
+        + " rendering-intent=\"\(c.renderingIntent.rawValue)\""
+        + " preserve-rgb-numbers=\"\(boolStr(c.preserveRgbNumbers))\""
+        + "/>"
+}
+
 private func graphicsToSvg(_ g: Graphics, indent: String) -> String {
     return "\(indent)<jas:graphics"
         + " flatness=\"\(fmt(g.flatness))\""
@@ -549,6 +559,8 @@ private func printPreferencesToSvg(_ p: PrintPreferences, indent: String) -> Str
     s += outputToSvg(p.output, indent: indent + "  ")
     s += "\n"
     s += graphicsToSvg(p.graphics, indent: indent + "  ")
+    s += "\n"
+    s += colorManagementToSvg(p.colorManagement, indent: indent + "  ")
     s += "\n\(indent)</jas:print-preferences>"
     return s
 }
@@ -1421,6 +1433,17 @@ private func parseInkOverrideNode(_ node: XMLElement) -> InkOverride {
     )
 }
 
+private func parseColorManagementNode(_ node: XMLElement) -> ColorManagement {
+    let d = ColorManagement.default
+    return ColorManagement(
+        documentProfile: attrAny(node, "document-profile") ?? d.documentProfile,
+        colorHandling: ColorHandling(rawValue: attrAny(node, "color-handling") ?? "") ?? d.colorHandling,
+        printerProfile: attrAny(node, "printer-profile") ?? d.printerProfile,
+        renderingIntent: RenderingIntent(rawValue: attrAny(node, "rendering-intent") ?? "") ?? d.renderingIntent,
+        preserveRgbNumbers: parseBoolAttr(node, "preserve-rgb-numbers", d.preserveRgbNumbers)
+    )
+}
+
 private func parseGraphicsNode(_ node: XMLElement) -> Graphics {
     let d = Graphics.default
     return Graphics(
@@ -1479,6 +1502,7 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
     var mab = MarksAndBleed.default
     var output = Output.default
     var graphics = Graphics.default
+    var colorManagement = ColorManagement.default
     if let kids = node.children {
         for k in kids {
             guard let e = k as? XMLElement else { continue }
@@ -1486,6 +1510,7 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
             case "marks-and-bleed": mab = parseMarksAndBleedNode(e)
             case "output": output = parseOutputNode(e)
             case "graphics": graphics = parseGraphicsNode(e)
+            case "color-management": colorManagement = parseColorManagementNode(e)
             default: break
             }
         }
@@ -1516,7 +1541,8 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
         tileRange: attrAny(node, "tile-range") ?? d.tileRange,
         marksAndBleed: mab,
         output: output,
-        graphics: graphics
+        graphics: graphics,
+        colorManagement: colorManagement
     )
 }
 
