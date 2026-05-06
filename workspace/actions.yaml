@@ -2636,6 +2636,28 @@ actions:
       mab_bleed_right: { type: number }
       mab_bleed_bottom: { type: number }
       mab_bleed_left: { type: number }
+      out_mode: { type: string }
+      out_emulsion: { type: string }
+      out_image_polarity: { type: string }
+      out_printer_resolution: { type: string }
+      out_convert_spot_to_process: { type: bool }
+      out_overprint_black: { type: bool }
+      out_ink0_print: { type: bool }
+      out_ink0_frequency: { type: number }
+      out_ink0_angle: { type: number }
+      out_ink0_dot_shape: { type: string }
+      out_ink1_print: { type: bool }
+      out_ink1_frequency: { type: number }
+      out_ink1_angle: { type: number }
+      out_ink1_dot_shape: { type: string }
+      out_ink2_print: { type: bool }
+      out_ink2_frequency: { type: number }
+      out_ink2_angle: { type: number }
+      out_ink2_dot_shape: { type: string }
+      out_ink3_print: { type: bool }
+      out_ink3_frequency: { type: number }
+      out_ink3_angle: { type: number }
+      out_ink3_dot_shape: { type: string }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2670,6 +2692,28 @@ actions:
       - doc.set_marks_and_bleed_field: { field: "bleed_right",        value: "param.mab_bleed_right" }
       - doc.set_marks_and_bleed_field: { field: "bleed_bottom",       value: "param.mab_bleed_bottom" }
       - doc.set_marks_and_bleed_field: { field: "bleed_left",         value: "param.mab_bleed_left" }
+      - doc.set_output_field: { field: "mode",                    value: "param.out_mode" }
+      - doc.set_output_field: { field: "emulsion",                value: "param.out_emulsion" }
+      - doc.set_output_field: { field: "image_polarity",          value: "param.out_image_polarity" }
+      - doc.set_output_field: { field: "printer_resolution",      value: "param.out_printer_resolution" }
+      - doc.set_output_field: { field: "convert_spot_to_process", value: "param.out_convert_spot_to_process" }
+      - doc.set_output_field: { field: "overprint_black",         value: "param.out_overprint_black" }
+      - doc.set_output_ink_field: { index: 0, field: "print",     value: "param.out_ink0_print" }
+      - doc.set_output_ink_field: { index: 0, field: "frequency", value: "param.out_ink0_frequency" }
+      - doc.set_output_ink_field: { index: 0, field: "angle",     value: "param.out_ink0_angle" }
+      - doc.set_output_ink_field: { index: 0, field: "dot_shape", value: "param.out_ink0_dot_shape" }
+      - doc.set_output_ink_field: { index: 1, field: "print",     value: "param.out_ink1_print" }
+      - doc.set_output_ink_field: { index: 1, field: "frequency", value: "param.out_ink1_frequency" }
+      - doc.set_output_ink_field: { index: 1, field: "angle",     value: "param.out_ink1_angle" }
+      - doc.set_output_ink_field: { index: 1, field: "dot_shape", value: "param.out_ink1_dot_shape" }
+      - doc.set_output_ink_field: { index: 2, field: "print",     value: "param.out_ink2_print" }
+      - doc.set_output_ink_field: { index: 2, field: "frequency", value: "param.out_ink2_frequency" }
+      - doc.set_output_ink_field: { index: 2, field: "angle",     value: "param.out_ink2_angle" }
+      - doc.set_output_ink_field: { index: 2, field: "dot_shape", value: "param.out_ink2_dot_shape" }
+      - doc.set_output_ink_field: { index: 3, field: "print",     value: "param.out_ink3_print" }
+      - doc.set_output_ink_field: { index: 3, field: "frequency", value: "param.out_ink3_frequency" }
+      - doc.set_output_ink_field: { index: 3, field: "angle",     value: "param.out_ink3_angle" }
+      - doc.set_output_ink_field: { index: 3, field: "dot_shape", value: "param.out_ink3_dot_shape" }
       - clear_dialog_snapshot
       - close_dialog
 
@@ -2714,6 +2758,28 @@ actions:
       mab_bleed_right: { type: number }
       mab_bleed_bottom: { type: number }
       mab_bleed_left: { type: number }
+      out_mode: { type: string }
+      out_emulsion: { type: string }
+      out_image_polarity: { type: string }
+      out_printer_resolution: { type: string }
+      out_convert_spot_to_process: { type: bool }
+      out_overprint_black: { type: bool }
+      out_ink0_print: { type: bool }
+      out_ink0_frequency: { type: number }
+      out_ink0_angle: { type: number }
+      out_ink0_dot_shape: { type: string }
+      out_ink1_print: { type: bool }
+      out_ink1_frequency: { type: number }
+      out_ink1_angle: { type: number }
+      out_ink1_dot_shape: { type: string }
+      out_ink2_print: { type: bool }
+      out_ink2_frequency: { type: number }
+      out_ink2_angle: { type: number }
+      out_ink2_dot_shape: { type: string }
+      out_ink3_print: { type: bool }
+      out_ink3_frequency: { type: number }
+      out_ink3_angle: { type: number }
+      out_ink3_dot_shape: { type: string }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2748,6 +2814,28 @@ actions:
       - doc.set_marks_and_bleed_field: { field: "bleed_right",        value: "param.mab_bleed_right" }
       - doc.set_marks_and_bleed_field: { field: "bleed_bottom",       value: "param.mab_bleed_bottom" }
       - doc.set_marks_and_bleed_field: { field: "bleed_left",         value: "param.mab_bleed_left" }
+      - doc.set_output_field: { field: "mode",                    value: "param.out_mode" }
+      - doc.set_output_field: { field: "emulsion",                value: "param.out_emulsion" }
+      - doc.set_output_field: { field: "image_polarity",          value: "param.out_image_polarity" }
+      - doc.set_output_field: { field: "printer_resolution",      value: "param.out_printer_resolution" }
+      - doc.set_output_field: { field: "convert_spot_to_process", value: "param.out_convert_spot_to_process" }
+      - doc.set_output_field: { field: "overprint_black",         value: "param.out_overprint_black" }
+      - doc.set_output_ink_field: { index: 0, field: "print",     value: "param.out_ink0_print" }
+      - doc.set_output_ink_field: { index: 0, field: "frequency", value: "param.out_ink0_frequency" }
+      - doc.set_output_ink_field: { index: 0, field: "angle",     value: "param.out_ink0_angle" }
+      - doc.set_output_ink_field: { index: 0, field: "dot_shape", value: "param.out_ink0_dot_shape" }
+      - doc.set_output_ink_field: { index: 1, field: "print",     value: "param.out_ink1_print" }
+      - doc.set_output_ink_field: { index: 1, field: "frequency", value: "param.out_ink1_frequency" }
+      - doc.set_output_ink_field: { index: 1, field: "angle",     value: "param.out_ink1_angle" }
+      - doc.set_output_ink_field: { index: 1, field: "dot_shape", value: "param.out_ink1_dot_shape" }
+      - doc.set_output_ink_field: { index: 2, field: "print",     value: "param.out_ink2_print" }
+      - doc.set_output_ink_field: { index: 2, field: "frequency", value: "param.out_ink2_frequency" }
+      - doc.set_output_ink_field: { index: 2, field: "angle",     value: "param.out_ink2_angle" }
+      - doc.set_output_ink_field: { index: 2, field: "dot_shape", value: "param.out_ink2_dot_shape" }
+      - doc.set_output_ink_field: { index: 3, field: "print",     value: "param.out_ink3_print" }
+      - doc.set_output_ink_field: { index: 3, field: "frequency", value: "param.out_ink3_frequency" }
+      - doc.set_output_ink_field: { index: 3, field: "angle",     value: "param.out_ink3_angle" }
+      - doc.set_output_ink_field: { index: 3, field: "dot_shape", value: "param.out_ink3_dot_shape" }
       - clear_dialog_snapshot
       - geometry.export_pdf: {}
       - close_dialog

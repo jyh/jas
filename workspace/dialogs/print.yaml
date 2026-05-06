@@ -109,6 +109,60 @@ print:
     mab_bleed_right:          { type: number, default: 0.0 }
     mab_bleed_bottom:         { type: number, default: 0.0 }
     mab_bleed_left:           { type: number, default: 0.0 }
+    # Output sub-record (PRINT.md §Phase 3). Scalar fields prefixed
+    # ``out_`` to avoid collisions; the per-ink table editing the
+    # four CMYK process inks uses ``out_inkN_`` for row N (0..3).
+    # Spot inks are round-tripped through the data model but not yet
+    # editable in this dialog (Phase 3.5 follow-up).
+    out_mode:
+      type: enum
+      values: [composite, separations]
+      default: composite
+    out_emulsion:
+      type: enum
+      values: [up_right, down_right]
+      default: up_right
+    out_image_polarity:
+      type: enum
+      values: [positive, negative]
+      default: positive
+    out_printer_resolution:
+      type: string
+      default: "75 lpi / 600 dpi"
+    out_convert_spot_to_process: { type: bool, default: false }
+    out_overprint_black:         { type: bool, default: false }
+    # Ink row 0 — Process Cyan
+    out_ink0_print:     { type: bool,   default: true }
+    out_ink0_frequency: { type: number, default: 75.0 }
+    out_ink0_angle:     { type: number, default: 105.0 }
+    out_ink0_dot_shape:
+      type: enum
+      values: [round, square, ellipse, diamond, line, cross, euclidean]
+      default: round
+    # Ink row 1 — Process Magenta
+    out_ink1_print:     { type: bool,   default: true }
+    out_ink1_frequency: { type: number, default: 75.0 }
+    out_ink1_angle:     { type: number, default: 75.0 }
+    out_ink1_dot_shape:
+      type: enum
+      values: [round, square, ellipse, diamond, line, cross, euclidean]
+      default: round
+    # Ink row 2 — Process Yellow
+    out_ink2_print:     { type: bool,   default: true }
+    out_ink2_frequency: { type: number, default: 75.0 }
+    out_ink2_angle:     { type: number, default: 90.0 }
+    out_ink2_dot_shape:
+      type: enum
+      values: [round, square, ellipse, diamond, line, cross, euclidean]
+      default: round
+    # Ink row 3 — Process Black
+    out_ink3_print:     { type: bool,   default: true }
+    out_ink3_frequency: { type: number, default: 75.0 }
+    out_ink3_angle:     { type: number, default: 45.0 }
+    out_ink3_dot_shape:
+      type: enum
+      values: [round, square, ellipse, diamond, line, cross, euclidean]
+      default: round
 
   init:
     preset_name:          "active_document.print_preferences.preset_name"
@@ -143,6 +197,28 @@ print:
     mab_bleed_right:        "active_document.print_preferences.marks_and_bleed.bleed_right"
     mab_bleed_bottom:       "active_document.print_preferences.marks_and_bleed.bleed_bottom"
     mab_bleed_left:         "active_document.print_preferences.marks_and_bleed.bleed_left"
+    out_mode:                    "active_document.print_preferences.output.mode"
+    out_emulsion:                "active_document.print_preferences.output.emulsion"
+    out_image_polarity:          "active_document.print_preferences.output.image_polarity"
+    out_printer_resolution:      "active_document.print_preferences.output.printer_resolution"
+    out_convert_spot_to_process: "active_document.print_preferences.output.convert_spot_to_process"
+    out_overprint_black:         "active_document.print_preferences.output.overprint_black"
+    out_ink0_print:     "active_document.print_preferences.output.inks[0].print"
+    out_ink0_frequency: "active_document.print_preferences.output.inks[0].frequency"
+    out_ink0_angle:     "active_document.print_preferences.output.inks[0].angle"
+    out_ink0_dot_shape: "active_document.print_preferences.output.inks[0].dot_shape"
+    out_ink1_print:     "active_document.print_preferences.output.inks[1].print"
+    out_ink1_frequency: "active_document.print_preferences.output.inks[1].frequency"
+    out_ink1_angle:     "active_document.print_preferences.output.inks[1].angle"
+    out_ink1_dot_shape: "active_document.print_preferences.output.inks[1].dot_shape"
+    out_ink2_print:     "active_document.print_preferences.output.inks[2].print"
+    out_ink2_frequency: "active_document.print_preferences.output.inks[2].frequency"
+    out_ink2_angle:     "active_document.print_preferences.output.inks[2].angle"
+    out_ink2_dot_shape: "active_document.print_preferences.output.inks[2].dot_shape"
+    out_ink3_print:     "active_document.print_preferences.output.inks[3].print"
+    out_ink3_frequency: "active_document.print_preferences.output.inks[3].frequency"
+    out_ink3_angle:     "active_document.print_preferences.output.inks[3].angle"
+    out_ink3_dot_shape: "active_document.print_preferences.output.inks[3].dot_shape"
 
   content:
     type: container
@@ -610,7 +686,7 @@ print:
                             value: "dialog.mab_bleed_right"
                             disabled: "dialog.mab_use_document_bleed"
 
-          # ── Output (Phase 3 placeholder) ─────────────
+          # ── Output (PRINT.md §Phase 3) ───────────────
           - id: output
             label: "Output"
             content:
@@ -618,11 +694,310 @@ print:
               layout: column
               style: { gap: 12, padding: 4 }
               children:
-                - { type: text, content: "Output",
-                    style: { font_size: 13, font_weight: bold } }
-                - { type: text,
-                    content: "Available in Phase 3 (PRINT.md §Phase 3). Composite vs Separations, emulsion, image polarity, printer resolution, spot/process conversion, overprint black, per-ink overrides.",
-                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+                # Mode + emulsion + polarity row
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Mode:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_out_mode
+                          type: select
+                          options:
+                            - { label: "Composite",   value: "composite" }
+                            - { label: "Separations", value: "separations" }
+                          bind:
+                            value: "dialog.out_mode"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Emulsion:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_out_emulsion
+                          type: select
+                          options:
+                            - { label: "Up Right",   value: "up_right" }
+                            - { label: "Down Right", value: "down_right" }
+                          bind:
+                            value: "dialog.out_emulsion"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Image:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_out_image_polarity
+                          type: select
+                          options:
+                            - { label: "Positive", value: "positive" }
+                            - { label: "Negative", value: "negative" }
+                          bind:
+                            value: "dialog.out_image_polarity"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 3
+                      children:
+                        - { type: text, content: "Printer Resolution:", style: { font_size: 11 } }
+                    - type: col
+                      col: 9
+                      children:
+                        - id: pr_out_printer_resolution
+                          type: text_input
+                          bind:
+                            value: "dialog.out_printer_resolution"
+
+                - type: separator
+                  orientation: horizontal
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 12
+                      children:
+                        - id: pr_out_convert_spot_to_process
+                          type: checkbox
+                          label: "Convert All Spot Colors to Process"
+                          bind:
+                            checked: "dialog.out_convert_spot_to_process"
+
+                - type: row
+                  children:
+                    - type: col
+                      col: 12
+                      children:
+                        - id: pr_out_overprint_black
+                          type: checkbox
+                          label: "Overprint Black"
+                          bind:
+                            checked: "dialog.out_overprint_black"
+
+                - type: separator
+                  orientation: horizontal
+
+                # Per-ink table header
+                - { type: text, content: "Document Ink Options",
+                    style: { font_size: 11, font_weight: bold } }
+
+                - type: row
+                  style: { gap: 8 }
+                  children:
+                    - type: col
+                      col: 1
+                      children: [{ type: text, content: "Print", style: { font_size: 10, font_weight: bold } }]
+                    - type: col
+                      col: 4
+                      children: [{ type: text, content: "Ink", style: { font_size: 10, font_weight: bold } }]
+                    - type: col
+                      col: 2
+                      children: [{ type: text, content: "Frequency", style: { font_size: 10, font_weight: bold } }]
+                    - type: col
+                      col: 2
+                      children: [{ type: text, content: "Angle", style: { font_size: 10, font_weight: bold } }]
+                    - type: col
+                      col: 3
+                      children: [{ type: text, content: "Dot Shape", style: { font_size: 10, font_weight: bold } }]
+
+                # Process Cyan
+                - type: row
+                  style: { gap: 8 }
+                  children:
+                    - type: col
+                      col: 1
+                      children:
+                        - id: pr_out_ink0_print
+                          type: checkbox
+                          bind:
+                            checked: "dialog.out_ink0_print"
+                    - type: col
+                      col: 4
+                      children: [{ type: text, content: "Process Cyan", style: { font_size: 11 } }]
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink0_frequency
+                          type: number_input
+                          min: 0
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink0_frequency"
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink0_angle
+                          type: number_input
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink0_angle"
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_out_ink0_dot_shape
+                          type: select
+                          options:
+                            - { label: "Round",     value: "round" }
+                            - { label: "Square",    value: "square" }
+                            - { label: "Ellipse",   value: "ellipse" }
+                            - { label: "Diamond",   value: "diamond" }
+                            - { label: "Line",      value: "line" }
+                            - { label: "Cross",     value: "cross" }
+                            - { label: "Euclidean", value: "euclidean" }
+                          bind:
+                            value: "dialog.out_ink0_dot_shape"
+
+                # Process Magenta
+                - type: row
+                  style: { gap: 8 }
+                  children:
+                    - type: col
+                      col: 1
+                      children:
+                        - id: pr_out_ink1_print
+                          type: checkbox
+                          bind:
+                            checked: "dialog.out_ink1_print"
+                    - type: col
+                      col: 4
+                      children: [{ type: text, content: "Process Magenta", style: { font_size: 11 } }]
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink1_frequency
+                          type: number_input
+                          min: 0
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink1_frequency"
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink1_angle
+                          type: number_input
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink1_angle"
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_out_ink1_dot_shape
+                          type: select
+                          options:
+                            - { label: "Round",     value: "round" }
+                            - { label: "Square",    value: "square" }
+                            - { label: "Ellipse",   value: "ellipse" }
+                            - { label: "Diamond",   value: "diamond" }
+                            - { label: "Line",      value: "line" }
+                            - { label: "Cross",     value: "cross" }
+                            - { label: "Euclidean", value: "euclidean" }
+                          bind:
+                            value: "dialog.out_ink1_dot_shape"
+
+                # Process Yellow
+                - type: row
+                  style: { gap: 8 }
+                  children:
+                    - type: col
+                      col: 1
+                      children:
+                        - id: pr_out_ink2_print
+                          type: checkbox
+                          bind:
+                            checked: "dialog.out_ink2_print"
+                    - type: col
+                      col: 4
+                      children: [{ type: text, content: "Process Yellow", style: { font_size: 11 } }]
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink2_frequency
+                          type: number_input
+                          min: 0
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink2_frequency"
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink2_angle
+                          type: number_input
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink2_angle"
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_out_ink2_dot_shape
+                          type: select
+                          options:
+                            - { label: "Round",     value: "round" }
+                            - { label: "Square",    value: "square" }
+                            - { label: "Ellipse",   value: "ellipse" }
+                            - { label: "Diamond",   value: "diamond" }
+                            - { label: "Line",      value: "line" }
+                            - { label: "Cross",     value: "cross" }
+                            - { label: "Euclidean", value: "euclidean" }
+                          bind:
+                            value: "dialog.out_ink2_dot_shape"
+
+                # Process Black
+                - type: row
+                  style: { gap: 8 }
+                  children:
+                    - type: col
+                      col: 1
+                      children:
+                        - id: pr_out_ink3_print
+                          type: checkbox
+                          bind:
+                            checked: "dialog.out_ink3_print"
+                    - type: col
+                      col: 4
+                      children: [{ type: text, content: "Process Black", style: { font_size: 11 } }]
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink3_frequency
+                          type: number_input
+                          min: 0
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink3_frequency"
+                    - type: col
+                      col: 2
+                      children:
+                        - id: pr_out_ink3_angle
+                          type: number_input
+                          style: { width: 70 }
+                          bind:
+                            value: "dialog.out_ink3_angle"
+                    - type: col
+                      col: 3
+                      children:
+                        - id: pr_out_ink3_dot_shape
+                          type: select
+                          options:
+                            - { label: "Round",     value: "round" }
+                            - { label: "Square",    value: "square" }
+                            - { label: "Ellipse",   value: "ellipse" }
+                            - { label: "Diamond",   value: "diamond" }
+                            - { label: "Line",      value: "line" }
+                            - { label: "Cross",     value: "cross" }
+                            - { label: "Euclidean", value: "euclidean" }
+                          bind:
+                            value: "dialog.out_ink3_dot_shape"
 
           # ── Graphics (Phase 4 placeholder) ───────────
           - id: graphics
@@ -720,6 +1095,28 @@ print:
               mab_bleed_right:        "dialog.mab_bleed_right"
               mab_bleed_bottom:       "dialog.mab_bleed_bottom"
               mab_bleed_left:         "dialog.mab_bleed_left"
+              out_mode:                    "dialog.out_mode"
+              out_emulsion:                "dialog.out_emulsion"
+              out_image_polarity:          "dialog.out_image_polarity"
+              out_printer_resolution:      "dialog.out_printer_resolution"
+              out_convert_spot_to_process: "dialog.out_convert_spot_to_process"
+              out_overprint_black:         "dialog.out_overprint_black"
+              out_ink0_print:     "dialog.out_ink0_print"
+              out_ink0_frequency: "dialog.out_ink0_frequency"
+              out_ink0_angle:     "dialog.out_ink0_angle"
+              out_ink0_dot_shape: "dialog.out_ink0_dot_shape"
+              out_ink1_print:     "dialog.out_ink1_print"
+              out_ink1_frequency: "dialog.out_ink1_frequency"
+              out_ink1_angle:     "dialog.out_ink1_angle"
+              out_ink1_dot_shape: "dialog.out_ink1_dot_shape"
+              out_ink2_print:     "dialog.out_ink2_print"
+              out_ink2_frequency: "dialog.out_ink2_frequency"
+              out_ink2_angle:     "dialog.out_ink2_angle"
+              out_ink2_dot_shape: "dialog.out_ink2_dot_shape"
+              out_ink3_print:     "dialog.out_ink3_print"
+              out_ink3_frequency: "dialog.out_ink3_frequency"
+              out_ink3_angle:     "dialog.out_ink3_angle"
+              out_ink3_dot_shape: "dialog.out_ink3_dot_shape"
           - type: button
             label: "Print"
             variant: primary
@@ -757,3 +1154,25 @@ print:
               mab_bleed_right:        "dialog.mab_bleed_right"
               mab_bleed_bottom:       "dialog.mab_bleed_bottom"
               mab_bleed_left:         "dialog.mab_bleed_left"
+              out_mode:                    "dialog.out_mode"
+              out_emulsion:                "dialog.out_emulsion"
+              out_image_polarity:          "dialog.out_image_polarity"
+              out_printer_resolution:      "dialog.out_printer_resolution"
+              out_convert_spot_to_process: "dialog.out_convert_spot_to_process"
+              out_overprint_black:         "dialog.out_overprint_black"
+              out_ink0_print:     "dialog.out_ink0_print"
+              out_ink0_frequency: "dialog.out_ink0_frequency"
+              out_ink0_angle:     "dialog.out_ink0_angle"
+              out_ink0_dot_shape: "dialog.out_ink0_dot_shape"
+              out_ink1_print:     "dialog.out_ink1_print"
+              out_ink1_frequency: "dialog.out_ink1_frequency"
+              out_ink1_angle:     "dialog.out_ink1_angle"
+              out_ink1_dot_shape: "dialog.out_ink1_dot_shape"
+              out_ink2_print:     "dialog.out_ink2_print"
+              out_ink2_frequency: "dialog.out_ink2_frequency"
+              out_ink2_angle:     "dialog.out_ink2_angle"
+              out_ink2_dot_shape: "dialog.out_ink2_dot_shape"
+              out_ink3_print:     "dialog.out_ink3_print"
+              out_ink3_frequency: "dialog.out_ink3_frequency"
+              out_ink3_angle:     "dialog.out_ink3_angle"
+              out_ink3_dot_shape: "dialog.out_ink3_dot_shape"
