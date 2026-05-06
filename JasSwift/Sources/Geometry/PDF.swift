@@ -666,6 +666,23 @@ private func drawPage(_ ctx: CGContext, _ doc: Document, _ page: Page) {
     if abs(flatness - 1.0) > .ulpOfOne {
         ctx.setFlatness(CGFloat(min(max(flatness, 0.0), 100.0)))
     }
+    // Phase 5: rendering intent. CGContext.setRenderingIntent
+    // matches the PDF ``ri`` operator. Stays inside the saveGState
+    // scope so it doesn't leak between pages. Default
+    // RelativeColorimetric matches PDF 1.7 §11.6.5.8 default; emit
+    // only when non-default to keep output byte-equivalent.
+    let intent = doc.printPreferences.colorManagement.renderingIntent
+    if intent != .relativeColorimetric {
+        let cgIntent: CGColorRenderingIntent = {
+            switch intent {
+            case .perceptual: return .perceptual
+            case .relativeColorimetric: return .relativeColorimetric
+            case .saturation: return .saturation
+            case .absoluteColorimetric: return .absoluteColorimetric
+            }
+        }()
+        ctx.setRenderingIntent(cgIntent)
+    }
     // Position the trim rect inside the (possibly bleed-extended)
     // MediaBox. PDF is y-up, internal model is y-down. Flip the page
     // CTM and translate so document-space (page.srcX, page.srcY)
