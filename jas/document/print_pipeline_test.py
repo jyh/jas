@@ -9,6 +9,7 @@ from document.print_preferences import (
     MarksAndBleed, PrinterMarkType,
     Output, OutputMode, Emulsion, ImagePolarity, DotShape, InkOverride,
     Graphics, FontDownload, PostScriptLevel, DataFormat,
+    ColorManagement, ColorHandling, RenderingIntent,
 )
 from geometry.test_json import document_to_test_json, test_json_to_document
 
@@ -277,6 +278,43 @@ class GraphicsTest(absltest.TestCase):
         self.assertIn('"flatness":0.4', j)
         d2 = test_json_to_document(j)
         self.assertEqual(d2.print_preferences.graphics, g)
+
+
+class ColorManagementTest(absltest.TestCase):
+    """PRINT.md §Phase 5 ColorManagement sub-record."""
+
+    def test_defaults(self):
+        c = ColorManagement()
+        self.assertEqual(c.document_profile, "sRGB IEC61966-2.1")
+        self.assertEqual(c.color_handling, ColorHandling.LET_APP_DETERMINE)
+        self.assertEqual(c.printer_profile, "")
+        self.assertEqual(c.rendering_intent, RenderingIntent.RELATIVE_COLORIMETRIC)
+        self.assertFalse(c.preserve_rgb_numbers)
+
+    def test_enum_strings(self):
+        self.assertEqual(ColorHandling.LET_APP_DETERMINE.value, "let_app_determine")
+        self.assertEqual(ColorHandling.LET_PRINTER_DETERMINE.value, "let_printer_determine")
+        self.assertEqual(ColorHandling.POSTSCRIPT_COLOR_MANAGEMENT.value, "postscript_color_management")
+        self.assertEqual(RenderingIntent.PERCEPTUAL.value, "perceptual")
+        self.assertEqual(RenderingIntent.RELATIVE_COLORIMETRIC.value, "relative_colorimetric")
+        self.assertEqual(RenderingIntent.SATURATION.value, "saturation")
+        self.assertEqual(RenderingIntent.ABSOLUTE_COLORIMETRIC.value, "absolute_colorimetric")
+
+    def test_color_management_roundtrip(self):
+        c = ColorManagement(
+            document_profile="Adobe RGB (1998)",
+            color_handling=ColorHandling.POSTSCRIPT_COLOR_MANAGEMENT,
+            printer_profile="U.S. Web Coated (SWOP) v2",
+            rendering_intent=RenderingIntent.SATURATION,
+            preserve_rgb_numbers=True,
+        )
+        p = PrintPreferences(color_management=c)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"color_management"', j)
+        self.assertIn('"color_handling":"postscript_color_management"', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.color_management, c)
 
 
 if __name__ == "__main__":

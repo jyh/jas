@@ -81,6 +81,23 @@ class ImagePolarity(Enum):
     NEGATIVE = "negative"
 
 
+class ColorHandling(Enum):
+    """Color-handling mode for the Color Management tab (PRINT.md
+    §Phase 5). Three Adobe-standard choices."""
+    LET_APP_DETERMINE = "let_app_determine"
+    LET_PRINTER_DETERMINE = "let_printer_determine"
+    POSTSCRIPT_COLOR_MANAGEMENT = "postscript_color_management"
+
+
+class RenderingIntent(Enum):
+    """PDF rendering intent (PRINT.md §Phase 5). Names match PDF
+    1.7 §11.6.5.8 one-for-one."""
+    PERCEPTUAL = "perceptual"
+    RELATIVE_COLORIMETRIC = "relative_colorimetric"
+    SATURATION = "saturation"
+    ABSOLUTE_COLORIMETRIC = "absolute_colorimetric"
+
+
 class FontDownload(Enum):
     """Font-download mode for the Graphics tab (PRINT.md §Phase 4).
     PostScript-era concept; stored for on-disk shape stability but
@@ -123,6 +140,22 @@ def _enum_from_string(enum_class, s: str, default):
         if v.value == s:
             return v
     return default
+
+
+@dataclass(frozen=True)
+class ColorManagement:
+    """Color Management sub-record on PrintPreferences (PRINT.md
+    §Phase 5). ``rendering_intent`` is applied by the PDF emitter
+    via the ``ri`` operator; ICC profile embedding
+    (``document_profile`` / ``printer_profile``) is deferred."""
+    document_profile: str = "sRGB IEC61966-2.1"
+    color_handling: ColorHandling = ColorHandling.LET_APP_DETERMINE
+    printer_profile: str = ""
+    rendering_intent: RenderingIntent = RenderingIntent.RELATIVE_COLORIMETRIC
+    preserve_rgb_numbers: bool = False
+
+
+DEFAULT_COLOR_MANAGEMENT = ColorManagement()
 
 
 @dataclass(frozen=True)
@@ -251,6 +284,8 @@ class PrintPreferences:
     output: Output = DEFAULT_OUTPUT
     # Graphics sub-record (PRINT.md §Phase 4).
     graphics: Graphics = DEFAULT_GRAPHICS
+    # Color Management sub-record (PRINT.md §Phase 5).
+    color_management: ColorManagement = DEFAULT_COLOR_MANAGEMENT
 
 
 DEFAULT_PRINT_PREFERENCES = PrintPreferences()
