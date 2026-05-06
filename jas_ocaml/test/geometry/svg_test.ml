@@ -876,6 +876,29 @@ let () =
         let parsed = Jas.Svg.svg_to_document svg in
         assert (parsed.document_setup = s));
 
+      Alcotest.test_case "Graphics sub-record round-trips" `Quick (fun () ->
+        let g = { Jas.Print_preferences.flatness = 0.4;
+                  font_download = Jas.Print_preferences.Font_complete;
+                  postscript_level = Jas.Print_preferences.Level_2;
+                  data_format = Jas.Print_preferences.Ascii;
+                  compatible_gradient_printing = true;
+                  raster_effects_resolution = 600.0 } in
+        let p = { Jas.Print_preferences.default with graphics = g } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:graphics");
+        assert (contains svg "flatness=\"0.4\"");
+        assert (contains svg "font-download=\"complete\"");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.graphics = g));
+
       Alcotest.test_case "Output sub-record round-trips" `Quick (fun () ->
         let m = { Jas.Print_preferences.mode = Jas.Print_preferences.Separations;
                   emulsion = Jas.Print_preferences.Down_right;
@@ -933,7 +956,8 @@ let () =
                   tile_overlap_h = 1.0; tile_overlap_v = 2.0;
                   tile_range = "1-2";
                   marks_and_bleed = m;
-                  output = Jas.Print_preferences.default_output } in
+                  output = Jas.Print_preferences.default_output;
+                  graphics = Jas.Print_preferences.default_graphics } in
         let doc = make_document ~print_preferences:p [|make_layer [||]|] in
         let svg = Jas.Svg.document_to_svg doc in
         let contains s sub =
