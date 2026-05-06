@@ -168,6 +168,80 @@ def _document_setup_view(s) -> dict:
         "bleed_uniform": s.bleed_uniform,
         "show_images_outline": s.show_images_outline,
         "highlight_substituted_glyphs": s.highlight_substituted_glyphs,
+        "grid_size": s.grid_size,
+        "grid_color": s.grid_color,
+        "paper_color": s.paper_color,
+        "simulate_colored_paper": s.simulate_colored_paper,
+        "transparency_flattener_preset": s.transparency_flattener_preset.value,
+        "discard_white_overprint": s.discard_white_overprint,
+    }
+
+
+def _advanced_view(a) -> dict:
+    return {
+        "print_as_bitmap": a.print_as_bitmap,
+        "overprint_flattener_preset": a.overprint_flattener_preset.value,
+    }
+
+
+def _color_management_view(c) -> dict:
+    return {
+        "document_profile": c.document_profile,
+        "color_handling": c.color_handling.value,
+        "printer_profile": c.printer_profile,
+        "rendering_intent": c.rendering_intent.value,
+        "preserve_rgb_numbers": c.preserve_rgb_numbers,
+    }
+
+
+def _graphics_view(g) -> dict:
+    return {
+        "flatness": g.flatness,
+        "font_download": g.font_download.value,
+        "postscript_level": g.postscript_level.value,
+        "data_format": g.data_format.value,
+        "compatible_gradient_printing": g.compatible_gradient_printing,
+        "raster_effects_resolution": g.raster_effects_resolution,
+    }
+
+
+def _ink_override_view(ink) -> dict:
+    return {
+        "name": ink.name,
+        "print": ink.print,
+        "frequency": ink.frequency,
+        "angle": ink.angle,
+        "dot_shape": ink.dot_shape.value,
+    }
+
+
+def _output_view(o) -> dict:
+    return {
+        "mode": o.mode.value,
+        "emulsion": o.emulsion.value,
+        "image_polarity": o.image_polarity.value,
+        "printer_resolution": o.printer_resolution,
+        "convert_spot_to_process": o.convert_spot_to_process,
+        "overprint_black": o.overprint_black,
+        "inks": [_ink_override_view(i) for i in o.inks],
+    }
+
+
+def _marks_and_bleed_view(m) -> dict:
+    return {
+        "all_printer_marks": m.all_printer_marks,
+        "trim_marks": m.trim_marks,
+        "registration_marks": m.registration_marks,
+        "color_bars": m.color_bars,
+        "page_information": m.page_information,
+        "printer_mark_type": m.printer_mark_type.value,
+        "trim_mark_weight": m.trim_mark_weight,
+        "mark_offset": m.mark_offset,
+        "use_document_bleed": m.use_document_bleed,
+        "bleed_top": m.bleed_top,
+        "bleed_right": m.bleed_right,
+        "bleed_bottom": m.bleed_bottom,
+        "bleed_left": m.bleed_left,
     }
 
 
@@ -196,6 +270,11 @@ def _print_preferences_view(p) -> dict:
         "tile_overlap_h": p.tile_overlap_h,
         "tile_overlap_v": p.tile_overlap_v,
         "tile_range": p.tile_range,
+        "marks_and_bleed": _marks_and_bleed_view(p.marks_and_bleed),
+        "output": _output_view(p.output),
+        "graphics": _graphics_view(p.graphics),
+        "color_management": _color_management_view(p.color_management),
+        "advanced": _advanced_view(p.advanced),
     }
 
 

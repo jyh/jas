@@ -153,6 +153,80 @@ private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
         "bleed_uniform": s.bleedUniform,
         "show_images_outline": s.showImagesOutline,
         "highlight_substituted_glyphs": s.highlightSubstitutedGlyphs,
+        "grid_size": s.gridSize,
+        "grid_color": s.gridColor,
+        "paper_color": s.paperColor,
+        "simulate_colored_paper": s.simulateColoredPaper,
+        "transparency_flattener_preset": s.transparencyFlattenerPreset.rawValue,
+        "discard_white_overprint": s.discardWhiteOverprint,
+    ]
+}
+
+private func advancedView(_ a: Advanced) -> [String: Any] {
+    return [
+        "print_as_bitmap": a.printAsBitmap,
+        "overprint_flattener_preset": a.overprintFlattenerPreset.rawValue,
+    ]
+}
+
+private func colorManagementView(_ c: ColorManagement) -> [String: Any] {
+    return [
+        "document_profile": c.documentProfile,
+        "color_handling": c.colorHandling.rawValue,
+        "printer_profile": c.printerProfile,
+        "rendering_intent": c.renderingIntent.rawValue,
+        "preserve_rgb_numbers": c.preserveRgbNumbers,
+    ]
+}
+
+private func graphicsView(_ g: Graphics) -> [String: Any] {
+    return [
+        "flatness": g.flatness,
+        "font_download": g.fontDownload.rawValue,
+        "postscript_level": g.postscriptLevel.rawValue,
+        "data_format": g.dataFormat.rawValue,
+        "compatible_gradient_printing": g.compatibleGradientPrinting,
+        "raster_effects_resolution": g.rasterEffectsResolution,
+    ]
+}
+
+private func inkOverrideView(_ ink: InkOverride) -> [String: Any] {
+    return [
+        "name": ink.name,
+        "print": ink.print,
+        "frequency": ink.frequency,
+        "angle": ink.angle,
+        "dot_shape": ink.dotShape.rawValue,
+    ]
+}
+
+private func outputView(_ o: Output) -> [String: Any] {
+    return [
+        "mode": o.mode.rawValue,
+        "emulsion": o.emulsion.rawValue,
+        "image_polarity": o.imagePolarity.rawValue,
+        "printer_resolution": o.printerResolution,
+        "convert_spot_to_process": o.convertSpotToProcess,
+        "overprint_black": o.overprintBlack,
+        "inks": o.inks.map(inkOverrideView),
+    ]
+}
+
+private func marksAndBleedView(_ m: MarksAndBleed) -> [String: Any] {
+    return [
+        "all_printer_marks": m.allPrinterMarks,
+        "trim_marks": m.trimMarks,
+        "registration_marks": m.registrationMarks,
+        "color_bars": m.colorBars,
+        "page_information": m.pageInformation,
+        "printer_mark_type": m.printerMarkType.rawValue,
+        "trim_mark_weight": m.trimMarkWeight,
+        "mark_offset": m.markOffset,
+        "use_document_bleed": m.useDocumentBleed,
+        "bleed_top": m.bleedTop,
+        "bleed_right": m.bleedRight,
+        "bleed_bottom": m.bleedBottom,
+        "bleed_left": m.bleedLeft,
     ]
 }
 
@@ -181,6 +255,11 @@ private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
         "tile_overlap_h": p.tileOverlapH,
         "tile_overlap_v": p.tileOverlapV,
         "tile_range": p.tileRange,
+        "marks_and_bleed": marksAndBleedView(p.marksAndBleed),
+        "output": outputView(p.output),
+        "graphics": graphicsView(p.graphics),
+        "color_management": colorManagementView(p.colorManagement),
+        "advanced": advancedView(p.advanced),
     ]
 }
 

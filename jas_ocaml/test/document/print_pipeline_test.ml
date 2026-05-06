@@ -113,7 +113,8 @@ let test_document_setup_only_emitted_when_non_default () =
   assert (contains json2 "\"bleed_top\":9.0")
 
 let test_document_setup_roundtrip () =
-  let s = { Document_setup.bleed_top = 9.0; bleed_right = 9.0;
+  let s = { Document_setup.default with
+            bleed_top = 9.0; bleed_right = 9.0;
             bleed_bottom = 9.0; bleed_left = 9.0;
             bleed_uniform = false;
             show_images_outline = true;
@@ -164,11 +165,266 @@ let test_print_preferences_roundtrip () =
             custom_scale = 75.5;
             tile_overlap_h = 6.0;
             tile_overlap_v = 6.0;
-            tile_range = "1-2" } in
+            tile_range = "1-2";
+            marks_and_bleed = Print_preferences.default_marks_and_bleed;
+            output = Print_preferences.default_output;
+            graphics = Print_preferences.default_graphics;
+            color_management = Print_preferences.default_color_management;
+            advanced = Print_preferences.default_advanced } in
   let doc = make_document ~print_preferences:p [||] in
   let json = document_to_test_json doc in
   let doc2 = test_json_to_document json in
   assert (doc2.print_preferences = p)
+
+(* MarksAndBleed (PRINT.md §Phase 2) *)
+
+let test_marks_and_bleed_defaults () =
+  let m = Print_preferences.default_marks_and_bleed in
+  assert (m.all_printer_marks = false);
+  assert (m.trim_marks = false);
+  assert (m.registration_marks = false);
+  assert (m.color_bars = false);
+  assert (m.page_information = false);
+  assert (m.printer_mark_type = Print_preferences.Roman);
+  assert (m.trim_mark_weight = 0.25);
+  assert (m.mark_offset = 6.0);
+  assert (m.use_document_bleed = true);
+  assert (m.bleed_top = 0.0);
+  assert (m.bleed_right = 0.0);
+  assert (m.bleed_bottom = 0.0);
+  assert (m.bleed_left = 0.0)
+
+let test_printer_mark_type_strings () =
+  let open Print_preferences in
+  assert (printer_mark_type_to_string Roman = "roman");
+  assert (printer_mark_type_to_string Japanese = "japanese");
+  assert (printer_mark_type_of_string "roman" = Roman);
+  assert (printer_mark_type_of_string "japanese" = Japanese);
+  assert (printer_mark_type_of_string "garbage" = Roman)
+
+(* Advanced + DocumentSetup additions (PRINT.md §Phase 6) *)
+
+let test_advanced_defaults () =
+  let a = Print_preferences.default_advanced in
+  assert (a.print_as_bitmap = false);
+  assert (a.overprint_flattener_preset = Print_preferences.Medium_resolution)
+
+let test_flattener_preset_strings () =
+  let open Print_preferences in
+  assert (flattener_preset_to_string Low_resolution = "low_resolution");
+  assert (flattener_preset_to_string Medium_resolution = "medium_resolution");
+  assert (flattener_preset_to_string High_resolution = "high_resolution");
+  assert (flattener_preset_to_string Custom_flattener = "custom")
+
+let test_advanced_roundtrip () =
+  let a = { Print_preferences.print_as_bitmap = true;
+            overprint_flattener_preset = Print_preferences.High_resolution } in
+  let p = { Print_preferences.default with advanced = a } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"advanced\"");
+  assert (contains json "\"print_as_bitmap\":true");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.advanced = a)
+
+let test_document_setup_phase6_roundtrip () =
+  let s = { Document_setup.bleed_top = 0.0; bleed_right = 0.0;
+            bleed_bottom = 0.0; bleed_left = 0.0;
+            bleed_uniform = true;
+            show_images_outline = false;
+            highlight_substituted_glyphs = false;
+            grid_size = 36.0;
+            grid_color = "#0099ff";
+            paper_color = "#fff8e7";
+            simulate_colored_paper = true;
+            transparency_flattener_preset = Print_preferences.High_resolution;
+            discard_white_overprint = true } in
+  let doc = make_document ~document_setup:s [||] in
+  let json = document_to_test_json doc in
+  let doc2 = test_json_to_document json in
+  assert (doc2.document_setup = s)
+
+(* Color Management sub-record (PRINT.md §Phase 5) *)
+
+let test_color_management_defaults () =
+  let c = Print_preferences.default_color_management in
+  assert (c.document_profile = "sRGB IEC61966-2.1");
+  assert (c.color_handling = Print_preferences.Let_app_determine);
+  assert (c.printer_profile = "");
+  assert (c.rendering_intent = Print_preferences.Relative_colorimetric);
+  assert (c.preserve_rgb_numbers = false)
+
+let test_color_management_enum_strings () =
+  let open Print_preferences in
+  assert (color_handling_to_string Let_app_determine = "let_app_determine");
+  assert (color_handling_to_string Let_printer_determine = "let_printer_determine");
+  assert (color_handling_to_string Postscript_color_management = "postscript_color_management");
+  assert (rendering_intent_to_string Perceptual = "perceptual");
+  assert (rendering_intent_to_string Relative_colorimetric = "relative_colorimetric");
+  assert (rendering_intent_to_string Saturation = "saturation");
+  assert (rendering_intent_to_string Absolute_colorimetric = "absolute_colorimetric")
+
+let test_color_management_roundtrip () =
+  let c = { Print_preferences.document_profile = "Adobe RGB (1998)";
+            color_handling = Print_preferences.Postscript_color_management;
+            printer_profile = "U.S. Web Coated (SWOP) v2";
+            rendering_intent = Print_preferences.Saturation;
+            preserve_rgb_numbers = true } in
+  let p = { Print_preferences.default with color_management = c } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"color_management\"");
+  assert (contains json "\"color_handling\":\"postscript_color_management\"");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.color_management = c)
+
+(* Graphics sub-record (PRINT.md §Phase 4) *)
+
+let test_graphics_defaults () =
+  let g = Print_preferences.default_graphics in
+  assert (g.flatness = 1.0);
+  assert (g.font_download = Print_preferences.Font_subset);
+  assert (g.postscript_level = Print_preferences.Level_3);
+  assert (g.data_format = Print_preferences.Binary);
+  assert (g.compatible_gradient_printing = false);
+  assert (g.raster_effects_resolution = 300.0)
+
+let test_graphics_enum_strings () =
+  let open Print_preferences in
+  assert (font_download_to_string Font_none = "none");
+  assert (font_download_to_string Font_subset = "subset");
+  assert (font_download_to_string Font_complete = "complete");
+  assert (postscript_level_to_string Level_2 = "level_2");
+  assert (postscript_level_to_string Level_3 = "level_3");
+  assert (data_format_to_string Ascii = "ascii");
+  assert (data_format_to_string Binary = "binary")
+
+let test_graphics_roundtrip () =
+  let g = { Print_preferences.flatness = 0.4;
+            font_download = Print_preferences.Font_complete;
+            postscript_level = Print_preferences.Level_2;
+            data_format = Print_preferences.Ascii;
+            compatible_gradient_printing = true;
+            raster_effects_resolution = 600.0 } in
+  let p = { Print_preferences.default with graphics = g } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"graphics\"");
+  assert (contains json "\"flatness\":0.4");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.graphics = g)
+
+(* Output sub-record (PRINT.md §Phase 3) *)
+
+let test_output_defaults () =
+  let o = Print_preferences.default_output in
+  assert (o.mode = Print_preferences.Composite);
+  assert (o.emulsion = Print_preferences.Up_right);
+  assert (o.image_polarity = Print_preferences.Positive);
+  assert (o.printer_resolution = "75 lpi / 600 dpi");
+  assert (o.convert_spot_to_process = false);
+  assert (o.overprint_black = false);
+  assert (List.length o.inks = 4);
+  let inks = o.inks in
+  assert ((List.nth inks 0).name = "Process Cyan");
+  assert ((List.nth inks 0).angle = 105.0);
+  assert ((List.nth inks 1).name = "Process Magenta");
+  assert ((List.nth inks 2).name = "Process Yellow");
+  assert ((List.nth inks 3).name = "Process Black");
+  assert ((List.nth inks 3).angle = 45.0);
+  List.iter (fun (i : Print_preferences.ink_override) ->
+    assert i.print;
+    assert (i.frequency = 75.0);
+    assert (i.dot_shape = Print_preferences.Dot_round)
+  ) inks
+
+let test_output_enum_strings () =
+  let open Print_preferences in
+  assert (output_mode_to_string Composite = "composite");
+  assert (output_mode_to_string Separations = "separations");
+  assert (emulsion_to_string Up_right = "up_right");
+  assert (emulsion_to_string Down_right = "down_right");
+  assert (image_polarity_to_string Positive = "positive");
+  assert (image_polarity_to_string Negative = "negative");
+  assert (dot_shape_to_string Dot_round = "round");
+  assert (dot_shape_to_string Dot_euclidean = "euclidean")
+
+let test_output_roundtrip () =
+  let m = { Print_preferences.mode = Print_preferences.Separations;
+            emulsion = Print_preferences.Down_right;
+            image_polarity = Print_preferences.Negative;
+            printer_resolution = "150 lpi / 1200 dpi";
+            convert_spot_to_process = true;
+            overprint_black = true;
+            inks = [
+              { name = "Process Cyan"; print = false;
+                frequency = 100.0; angle = 105.0;
+                dot_shape = Print_preferences.Dot_ellipse };
+              { name = "PANTONE 185 C"; print = true;
+                frequency = 85.0; angle = 45.0;
+                dot_shape = Print_preferences.Dot_square };
+            ] } in
+  let p = { Print_preferences.default with output = m } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"output\"");
+  assert (contains json "\"PANTONE 185 C\"");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.output = m)
+
+let test_marks_and_bleed_roundtrip () =
+  let m = { Print_preferences.all_printer_marks = true;
+            trim_marks = true;
+            registration_marks = true;
+            color_bars = true;
+            page_information = true;
+            printer_mark_type = Print_preferences.Japanese;
+            trim_mark_weight = 0.5;
+            mark_offset = 12.0;
+            use_document_bleed = false;
+            bleed_top = 4.0; bleed_right = 5.0;
+            bleed_bottom = 6.0; bleed_left = 7.0 } in
+  let p = { Print_preferences.default with marks_and_bleed = m } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"marks_and_bleed\"");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.marks_and_bleed = m)
 
 let () =
   Alcotest.run "PrintPipeline" [
@@ -182,6 +438,32 @@ let () =
       Alcotest.test_case "defaults match spec" `Quick test_print_preferences_defaults_match_spec;
       Alcotest.test_case "default preset holds defaults" `Quick test_default_preset_holds_defaults;
       Alcotest.test_case "enum strings snake_case" `Quick test_enum_string_forms_are_snake_case;
+    ];
+    "marks_and_bleed", [
+      Alcotest.test_case "defaults" `Quick test_marks_and_bleed_defaults;
+      Alcotest.test_case "printer_mark_type strings" `Quick test_printer_mark_type_strings;
+      Alcotest.test_case "roundtrip" `Quick test_marks_and_bleed_roundtrip;
+    ];
+    "output", [
+      Alcotest.test_case "defaults" `Quick test_output_defaults;
+      Alcotest.test_case "enum strings" `Quick test_output_enum_strings;
+      Alcotest.test_case "roundtrip" `Quick test_output_roundtrip;
+    ];
+    "graphics", [
+      Alcotest.test_case "defaults" `Quick test_graphics_defaults;
+      Alcotest.test_case "enum strings" `Quick test_graphics_enum_strings;
+      Alcotest.test_case "roundtrip" `Quick test_graphics_roundtrip;
+    ];
+    "color_management", [
+      Alcotest.test_case "defaults" `Quick test_color_management_defaults;
+      Alcotest.test_case "enum strings" `Quick test_color_management_enum_strings;
+      Alcotest.test_case "roundtrip" `Quick test_color_management_roundtrip;
+    ];
+    "advanced", [
+      Alcotest.test_case "defaults" `Quick test_advanced_defaults;
+      Alcotest.test_case "flattener preset strings" `Quick test_flattener_preset_strings;
+      Alcotest.test_case "roundtrip" `Quick test_advanced_roundtrip;
+      Alcotest.test_case "document_setup phase 6 roundtrip" `Quick test_document_setup_phase6_roundtrip;
     ];
     "test_json", [
       Alcotest.test_case "document_setup omitted when default" `Quick test_document_setup_only_emitted_when_non_default;

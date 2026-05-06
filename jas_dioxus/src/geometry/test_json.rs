@@ -10,8 +10,19 @@ use crate::document::document::{Document, ElementPath, ElementSelection, Selecti
 use crate::document::document_setup::DocumentSetup;
 use crate::document::print_preferences::{
     artboard_range_mode_from, artboard_range_mode_str, media_size_from, media_size_str,
-    orientation_from, orientation_str, print_layers_from, print_layers_str, scaling_mode_from,
-    scaling_mode_str, PrintPreferences,
+    orientation_from, orientation_str, print_layers_from, print_layers_str,
+    printer_mark_type_from, printer_mark_type_str, scaling_mode_from,
+    scaling_mode_str,
+    output_mode_from, output_mode_str, emulsion_from, emulsion_str,
+    image_polarity_from, image_polarity_str, dot_shape_from, dot_shape_str,
+    font_download_from, font_download_str,
+    postscript_level_from, postscript_level_str,
+    data_format_from, data_format_str,
+    color_handling_from, color_handling_str,
+    rendering_intent_from, rendering_intent_str,
+    flattener_preset_from, flattener_preset_str,
+    Advanced, ColorManagement, Graphics, InkOverride, MarksAndBleed, Output,
+    PrintPreferences,
 };
 use crate::geometry::element::*;
 
@@ -606,24 +617,110 @@ fn document_setup_json(s: &DocumentSetup) -> String {
     o.num("bleed_right", s.bleed_right);
     o.num("bleed_top", s.bleed_top);
     o.bool_val("bleed_uniform", s.bleed_uniform);
+    o.bool_val("discard_white_overprint", s.discard_white_overprint);
+    o.str_val("grid_color", &s.grid_color);
+    o.num("grid_size", s.grid_size);
     o.bool_val("highlight_substituted_glyphs", s.highlight_substituted_glyphs);
+    o.str_val("paper_color", &s.paper_color);
     o.bool_val("show_images_outline", s.show_images_outline);
+    o.bool_val("simulate_colored_paper", s.simulate_colored_paper);
+    o.str_val("transparency_flattener_preset",
+              flattener_preset_str(&s.transparency_flattener_preset));
+    o.build()
+}
+
+fn advanced_json(a: &Advanced) -> String {
+    let mut o = JsonObj::new();
+    o.str_val("overprint_flattener_preset",
+              flattener_preset_str(&a.overprint_flattener_preset));
+    o.bool_val("print_as_bitmap", a.print_as_bitmap);
+    o.build()
+}
+
+fn color_management_json(c: &ColorManagement) -> String {
+    let mut o = JsonObj::new();
+    o.str_val("color_handling", color_handling_str(&c.color_handling));
+    o.str_val("document_profile", &c.document_profile);
+    o.bool_val("preserve_rgb_numbers", c.preserve_rgb_numbers);
+    o.str_val("printer_profile", &c.printer_profile);
+    o.str_val("rendering_intent", rendering_intent_str(&c.rendering_intent));
+    o.build()
+}
+
+fn graphics_json(g: &Graphics) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("compatible_gradient_printing", g.compatible_gradient_printing);
+    o.str_val("data_format", data_format_str(&g.data_format));
+    o.num("flatness", g.flatness);
+    o.str_val("font_download", font_download_str(&g.font_download));
+    o.str_val("postscript_level", postscript_level_str(&g.postscript_level));
+    o.num("raster_effects_resolution", g.raster_effects_resolution);
+    o.build()
+}
+
+fn ink_override_json(ink: &InkOverride) -> String {
+    let mut o = JsonObj::new();
+    o.num("angle", ink.angle);
+    o.str_val("dot_shape", dot_shape_str(&ink.dot_shape));
+    o.num("frequency", ink.frequency);
+    o.str_val("name", &ink.name);
+    o.bool_val("print", ink.print);
+    o.build()
+}
+
+fn inks_json(inks: &[InkOverride]) -> String {
+    let items: Vec<String> = inks.iter().map(ink_override_json).collect();
+    json_array(&items)
+}
+
+fn output_json(out: &Output) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("convert_spot_to_process", out.convert_spot_to_process);
+    o.str_val("emulsion", emulsion_str(&out.emulsion));
+    o.str_val("image_polarity", image_polarity_str(&out.image_polarity));
+    o.raw("inks", inks_json(&out.inks));
+    o.str_val("mode", output_mode_str(&out.mode));
+    o.bool_val("overprint_black", out.overprint_black);
+    o.str_val("printer_resolution", &out.printer_resolution);
+    o.build()
+}
+
+fn marks_and_bleed_json(m: &MarksAndBleed) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("all_printer_marks", m.all_printer_marks);
+    o.num("bleed_bottom", m.bleed_bottom);
+    o.num("bleed_left", m.bleed_left);
+    o.num("bleed_right", m.bleed_right);
+    o.num("bleed_top", m.bleed_top);
+    o.bool_val("color_bars", m.color_bars);
+    o.num("mark_offset", m.mark_offset);
+    o.bool_val("page_information", m.page_information);
+    o.str_val("printer_mark_type", printer_mark_type_str(&m.printer_mark_type));
+    o.bool_val("registration_marks", m.registration_marks);
+    o.num("trim_mark_weight", m.trim_mark_weight);
+    o.bool_val("trim_marks", m.trim_marks);
+    o.bool_val("use_document_bleed", m.use_document_bleed);
     o.build()
 }
 
 fn print_preferences_json(p: &PrintPreferences) -> String {
     let mut o = JsonObj::new();
+    o.raw("advanced", advanced_json(&p.advanced));
     o.str_val("artboard_range", &p.artboard_range);
     o.str_val("artboard_range_mode", artboard_range_mode_str(&p.artboard_range_mode));
     o.bool_val("auto_rotate", p.auto_rotate);
     o.bool_val("collate", p.collate);
+    o.raw("color_management", color_management_json(&p.color_management));
     o.int("copies", p.copies as usize);
     o.num("custom_scale", p.custom_scale);
+    o.raw("graphics", graphics_json(&p.graphics));
     o.bool_val("ignore_artboards", p.ignore_artboards);
+    o.raw("marks_and_bleed", marks_and_bleed_json(&p.marks_and_bleed));
     o.num("media_height", p.media_height);
     o.str_val("media_size", media_size_str(&p.media_size));
     o.num("media_width", p.media_width);
     o.str_val("orientation", orientation_str(&p.orientation));
+    o.raw("output", output_json(&p.output));
     o.num("placement_x", p.placement_x);
     o.num("placement_y", p.placement_y);
     o.str_val("preset_name", &p.preset_name);
@@ -1107,6 +1204,122 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
         bleed_uniform: v["bleed_uniform"].as_bool().unwrap_or(d.bleed_uniform),
         show_images_outline: v["show_images_outline"].as_bool().unwrap_or(d.show_images_outline),
         highlight_substituted_glyphs: v["highlight_substituted_glyphs"].as_bool().unwrap_or(d.highlight_substituted_glyphs),
+        grid_size: v["grid_size"].as_f64().unwrap_or(d.grid_size),
+        grid_color: v["grid_color"].as_str().map(String::from).unwrap_or(d.grid_color),
+        paper_color: v["paper_color"].as_str().map(String::from).unwrap_or(d.paper_color),
+        simulate_colored_paper: v["simulate_colored_paper"].as_bool().unwrap_or(d.simulate_colored_paper),
+        transparency_flattener_preset: v["transparency_flattener_preset"].as_str()
+            .map(flattener_preset_from).unwrap_or(d.transparency_flattener_preset),
+        discard_white_overprint: v["discard_white_overprint"].as_bool().unwrap_or(d.discard_white_overprint),
+    }
+}
+
+fn parse_advanced(v: &serde_json::Value) -> Advanced {
+    if v.is_null() || !v.is_object() {
+        return Advanced::default();
+    }
+    let d = Advanced::default();
+    Advanced {
+        print_as_bitmap: v["print_as_bitmap"].as_bool().unwrap_or(d.print_as_bitmap),
+        overprint_flattener_preset: v["overprint_flattener_preset"].as_str()
+            .map(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
+    }
+}
+
+fn parse_color_management(v: &serde_json::Value) -> ColorManagement {
+    if v.is_null() || !v.is_object() {
+        return ColorManagement::default();
+    }
+    let d = ColorManagement::default();
+    ColorManagement {
+        document_profile: v["document_profile"].as_str()
+            .map(String::from).unwrap_or(d.document_profile),
+        color_handling: v["color_handling"].as_str()
+            .map(color_handling_from).unwrap_or(d.color_handling),
+        printer_profile: v["printer_profile"].as_str()
+            .map(String::from).unwrap_or(d.printer_profile),
+        rendering_intent: v["rendering_intent"].as_str()
+            .map(rendering_intent_from).unwrap_or(d.rendering_intent),
+        preserve_rgb_numbers: v["preserve_rgb_numbers"].as_bool()
+            .unwrap_or(d.preserve_rgb_numbers),
+    }
+}
+
+fn parse_graphics(v: &serde_json::Value) -> Graphics {
+    if v.is_null() || !v.is_object() {
+        return Graphics::default();
+    }
+    let d = Graphics::default();
+    Graphics {
+        flatness: v["flatness"].as_f64().unwrap_or(d.flatness),
+        font_download: v["font_download"].as_str()
+            .map(font_download_from).unwrap_or(d.font_download),
+        postscript_level: v["postscript_level"].as_str()
+            .map(postscript_level_from).unwrap_or(d.postscript_level),
+        data_format: v["data_format"].as_str()
+            .map(data_format_from).unwrap_or(d.data_format),
+        compatible_gradient_printing: v["compatible_gradient_printing"]
+            .as_bool().unwrap_or(d.compatible_gradient_printing),
+        raster_effects_resolution: v["raster_effects_resolution"]
+            .as_f64().unwrap_or(d.raster_effects_resolution),
+    }
+}
+
+fn parse_ink_override(v: &serde_json::Value) -> InkOverride {
+    InkOverride {
+        name: v["name"].as_str().map(String::from).unwrap_or_default(),
+        print: v["print"].as_bool().unwrap_or(true),
+        frequency: v["frequency"].as_f64().unwrap_or(75.0),
+        angle: v["angle"].as_f64().unwrap_or(45.0),
+        dot_shape: v["dot_shape"].as_str()
+            .map(dot_shape_from)
+            .unwrap_or(crate::document::print_preferences::DotShape::Round),
+    }
+}
+
+fn parse_output(v: &serde_json::Value) -> Output {
+    if v.is_null() || !v.is_object() {
+        return Output::default();
+    }
+    let d = Output::default();
+    let inks = match v["inks"].as_array() {
+        Some(arr) => arr.iter().map(parse_ink_override).collect(),
+        None => d.inks,
+    };
+    Output {
+        mode: v["mode"].as_str().map(output_mode_from).unwrap_or(d.mode),
+        emulsion: v["emulsion"].as_str().map(emulsion_from).unwrap_or(d.emulsion),
+        image_polarity: v["image_polarity"].as_str()
+            .map(image_polarity_from).unwrap_or(d.image_polarity),
+        printer_resolution: v["printer_resolution"].as_str()
+            .map(String::from).unwrap_or(d.printer_resolution),
+        convert_spot_to_process: v["convert_spot_to_process"].as_bool()
+            .unwrap_or(d.convert_spot_to_process),
+        overprint_black: v["overprint_black"].as_bool().unwrap_or(d.overprint_black),
+        inks,
+    }
+}
+
+fn parse_marks_and_bleed(v: &serde_json::Value) -> MarksAndBleed {
+    if v.is_null() || !v.is_object() {
+        return MarksAndBleed::default();
+    }
+    let d = MarksAndBleed::default();
+    MarksAndBleed {
+        all_printer_marks: v["all_printer_marks"].as_bool().unwrap_or(d.all_printer_marks),
+        trim_marks: v["trim_marks"].as_bool().unwrap_or(d.trim_marks),
+        registration_marks: v["registration_marks"].as_bool().unwrap_or(d.registration_marks),
+        color_bars: v["color_bars"].as_bool().unwrap_or(d.color_bars),
+        page_information: v["page_information"].as_bool().unwrap_or(d.page_information),
+        printer_mark_type: v["printer_mark_type"].as_str()
+            .map(printer_mark_type_from).unwrap_or(d.printer_mark_type),
+        trim_mark_weight: v["trim_mark_weight"].as_f64().unwrap_or(d.trim_mark_weight),
+        mark_offset: v["mark_offset"].as_f64().unwrap_or(d.mark_offset),
+        use_document_bleed: v["use_document_bleed"].as_bool().unwrap_or(d.use_document_bleed),
+        bleed_top: v["bleed_top"].as_f64().unwrap_or(d.bleed_top),
+        bleed_right: v["bleed_right"].as_f64().unwrap_or(d.bleed_right),
+        bleed_bottom: v["bleed_bottom"].as_f64().unwrap_or(d.bleed_bottom),
+        bleed_left: v["bleed_left"].as_f64().unwrap_or(d.bleed_left),
     }
 }
 
@@ -1140,6 +1353,11 @@ fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
         tile_overlap_h: v["tile_overlap_h"].as_f64().unwrap_or(d.tile_overlap_h),
         tile_overlap_v: v["tile_overlap_v"].as_f64().unwrap_or(d.tile_overlap_v),
         tile_range: v["tile_range"].as_str().map(String::from).unwrap_or(d.tile_range),
+        marks_and_bleed: parse_marks_and_bleed(&v["marks_and_bleed"]),
+        output: parse_output(&v["output"]),
+        graphics: parse_graphics(&v["graphics"]),
+        color_management: parse_color_management(&v["color_management"]),
+        advanced: parse_advanced(&v["advanced"]),
     }
 }
 
@@ -1411,6 +1629,7 @@ mod tests {
 
     #[test]
     fn document_setup_roundtrip() {
+        use crate::document::print_preferences::FlattenerPreset;
         let mut d = Document::default();
         d.document_setup = DocumentSetup {
             bleed_top: 9.0,
@@ -1420,10 +1639,108 @@ mod tests {
             bleed_uniform: false,
             show_images_outline: true,
             highlight_substituted_glyphs: true,
+            grid_size: 36.0,
+            grid_color: "#0099ff".to_string(),
+            paper_color: "#fff8e7".to_string(),
+            simulate_colored_paper: true,
+            transparency_flattener_preset: FlattenerPreset::HighResolution,
+            discard_white_overprint: true,
         };
         let json = document_to_test_json(&d);
         let d2 = test_json_to_document(&json);
         assert_eq!(d2.document_setup, d.document_setup);
+    }
+
+    #[test]
+    fn advanced_round_trip_carries_all_choices() {
+        use crate::document::print_preferences::{Advanced, FlattenerPreset};
+        let mut d = Document::default();
+        d.print_preferences.advanced = Advanced {
+            print_as_bitmap: true,
+            overprint_flattener_preset: FlattenerPreset::HighResolution,
+        };
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"advanced\""), "json:\n{json}");
+        assert!(json.contains("\"print_as_bitmap\":true"), "json:\n{json}");
+        assert!(json.contains("\"overprint_flattener_preset\":\"high_resolution\""),
+                "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.advanced, d.print_preferences.advanced);
+    }
+
+    #[test]
+    fn color_management_round_trip_carries_all_choices() {
+        use crate::document::print_preferences::{
+            ColorHandling, ColorManagement, RenderingIntent,
+        };
+        let mut d = Document::default();
+        d.print_preferences.color_management = ColorManagement {
+            document_profile: "Adobe RGB (1998)".to_string(),
+            color_handling: ColorHandling::PostscriptColorManagement,
+            printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
+            rendering_intent: RenderingIntent::Saturation,
+            preserve_rgb_numbers: true,
+        };
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"color_management\""), "json:\n{json}");
+        assert!(json.contains("\"color_handling\":\"postscript_color_management\""),
+                "json:\n{json}");
+        assert!(json.contains("\"rendering_intent\":\"saturation\""),
+                "json:\n{json}");
+        assert!(json.contains("\"document_profile\":\"Adobe RGB (1998)\""),
+                "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.color_management,
+                   d.print_preferences.color_management);
+    }
+
+    #[test]
+    fn graphics_round_trip_carries_all_choices() {
+        use crate::document::print_preferences::{
+            DataFormat, FontDownload, Graphics, PostScriptLevel,
+        };
+        let mut d = Document::default();
+        d.print_preferences.graphics = Graphics {
+            flatness: 0.4,
+            font_download: FontDownload::Complete,
+            postscript_level: PostScriptLevel::Level2,
+            data_format: DataFormat::Ascii,
+            compatible_gradient_printing: true,
+            raster_effects_resolution: 600.0,
+        };
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"graphics\""), "json:\n{json}");
+        assert!(json.contains("\"flatness\":0.4"), "json:\n{json}");
+        assert!(json.contains("\"font_download\":\"complete\""), "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.graphics, d.print_preferences.graphics);
+    }
+
+    #[test]
+    fn output_round_trip_carries_all_inks_and_choices() {
+        use crate::document::print_preferences::{
+            DotShape, Emulsion, ImagePolarity, InkOverride, Output, OutputMode,
+        };
+        let mut d = Document::default();
+        d.print_preferences.output = Output {
+            mode: OutputMode::Separations,
+            emulsion: Emulsion::DownRight,
+            image_polarity: ImagePolarity::Negative,
+            printer_resolution: "150 lpi / 1200 dpi".to_string(),
+            convert_spot_to_process: true,
+            overprint_black: true,
+            inks: vec![
+                InkOverride { name: "Process Cyan".into(),    print: false, frequency: 100.0, angle: 105.0, dot_shape: DotShape::Ellipse },
+                InkOverride { name: "PANTONE 185 C".into(),   print: true,  frequency:  85.0, angle:  45.0, dot_shape: DotShape::Square },
+            ],
+        };
+        let json = document_to_test_json(&d);
+        // Output appears under print_preferences with the inks array.
+        assert!(json.contains("\"output\""), "json:\n{json}");
+        assert!(json.contains("\"inks\""), "json:\n{json}");
+        assert!(json.contains("\"PANTONE 185 C\""), "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.output, d.print_preferences.output);
     }
 
     #[test]
@@ -1442,7 +1759,12 @@ mod tests {
     #[test]
     fn print_preferences_roundtrip() {
         use crate::document::print_preferences::{
-            ArtboardRangeMode, MediaSize, Orientation, PrintLayers, PrintPreferences, ScalingMode,
+            Advanced, ArtboardRangeMode, ColorHandling, ColorManagement, DataFormat,
+            DotShape, Emulsion, FlattenerPreset, FontDownload, Graphics,
+            ImagePolarity, InkOverride,
+            MarksAndBleed, MediaSize, Orientation, Output, OutputMode, PostScriptLevel,
+            PrintLayers,
+            PrinterMarkType, PrintPreferences, RenderingIntent, ScalingMode,
         };
         let mut d = Document::default();
         d.print_preferences = PrintPreferences {
@@ -1469,6 +1791,53 @@ mod tests {
             tile_overlap_h: 6.0,
             tile_overlap_v: 6.0,
             tile_range: "1-2".to_string(),
+            marks_and_bleed: MarksAndBleed {
+                all_printer_marks: true,
+                trim_marks: true,
+                registration_marks: true,
+                color_bars: true,
+                page_information: true,
+                printer_mark_type: PrinterMarkType::Japanese,
+                trim_mark_weight: 0.5,
+                mark_offset: 9.0,
+                use_document_bleed: false,
+                bleed_top: 12.0,
+                bleed_right: 18.0,
+                bleed_bottom: 12.0,
+                bleed_left: 18.0,
+            },
+            output: Output {
+                mode: OutputMode::Separations,
+                emulsion: Emulsion::DownRight,
+                image_polarity: ImagePolarity::Negative,
+                printer_resolution: "150 lpi / 1200 dpi".to_string(),
+                convert_spot_to_process: true,
+                overprint_black: true,
+                inks: vec![
+                    InkOverride { name: "Process Cyan".into(),    print: false, frequency: 100.0, angle: 105.0, dot_shape: DotShape::Ellipse },
+                    InkOverride { name: "Process Magenta".into(), print: true,  frequency: 100.0, angle:  75.0, dot_shape: DotShape::Round },
+                    InkOverride { name: "PANTONE 185 C".into(),   print: true,  frequency:  85.0, angle:  45.0, dot_shape: DotShape::Square },
+                ],
+            },
+            graphics: Graphics {
+                flatness: 0.4,
+                font_download: FontDownload::Complete,
+                postscript_level: PostScriptLevel::Level2,
+                data_format: DataFormat::Ascii,
+                compatible_gradient_printing: true,
+                raster_effects_resolution: 600.0,
+            },
+            color_management: ColorManagement {
+                document_profile: "Adobe RGB (1998)".to_string(),
+                color_handling: ColorHandling::PostscriptColorManagement,
+                printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
+                rendering_intent: RenderingIntent::Perceptual,
+                preserve_rgb_numbers: true,
+            },
+            advanced: Advanced {
+                print_as_bitmap: true,
+                overprint_flattener_preset: FlattenerPreset::LowResolution,
+            },
         };
         let json = document_to_test_json(&d);
         let d2 = test_json_to_document(&json);

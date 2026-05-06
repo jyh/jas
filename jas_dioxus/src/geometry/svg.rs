@@ -470,9 +470,13 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
 
 const INKSCAPE_NS: &str = "http://www.inkscape.org/namespaces/inkscape";
 const SODIPODI_NS: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd";
+const JAS_NS: &str = "urn:jas:1";
 
 /// Convert a Document to an SVG string.
 pub fn document_to_svg(doc: &Document) -> String {
+    use crate::document::document_setup::DocumentSetup;
+    use crate::document::print_preferences::PrintPreferences;
+
     let (bx, by, bw, bh) = doc.bounds();
     let vb = format!(
         "{} {} {} {}",
@@ -481,18 +485,23 @@ pub fn document_to_svg(doc: &Document) -> String {
     let mut lines = vec![
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>".to_string(),
         format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"{}\" xmlns:sodipodi=\"{}\" viewBox=\"{}\" width=\"{}\" height=\"{}\">",
-            INKSCAPE_NS, SODIPODI_NS, vb, fmt(px(bw)), fmt(px(bh))
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"{}\" xmlns:sodipodi=\"{}\" xmlns:jas=\"{}\" viewBox=\"{}\" width=\"{}\" height=\"{}\">",
+            INKSCAPE_NS, SODIPODI_NS, JAS_NS, vb, fmt(px(bw)), fmt(px(bh))
         ),
     ];
     // Artboard persistence: SVG itself has no artboards concept, so
     // we use Inkscape's <sodipodi:namedview> + <inkscape:page>
     // convention. Renders correctly in Inkscape (their "pages" are
     // our artboards) and lets us round-trip artboard geometry +
-    // names + ids without losing data on save/reopen. Skipped when
-    // the document has no artboards (matching Inkscape's behavior:
-    // a "no pages" file simply omits the namedview block).
-    if !doc.artboards.is_empty() {
+    // names + ids without losing data on save/reopen. The same
+    // namedview also hosts <jas:document-setup> /
+    // <jas:print-preferences> when those differ from defaults
+    // (PRINT.md §Phase 2).
+    let setup_default = doc.document_setup == DocumentSetup::default();
+    let prefs_default = doc.print_preferences == PrintPreferences::default();
+    let want_namedview =
+        !doc.artboards.is_empty() || !setup_default || !prefs_default;
+    if want_namedview {
         lines.push("  <sodipodi:namedview id=\"namedview1\">".to_string());
         for ab in &doc.artboards {
             lines.push(format!(
@@ -502,6 +511,12 @@ pub fn document_to_svg(doc: &Document) -> String {
                 escape_xml(&ab.id),
                 escape_xml(&ab.name),
             ));
+        }
+        if !setup_default {
+            lines.push(document_setup_to_xml(&doc.document_setup, "    "));
+        }
+        if !prefs_default {
+            lines.push(print_preferences_to_xml(&doc.print_preferences, "    "));
         }
         lines.push("  </sodipodi:namedview>".to_string());
     }
@@ -1651,6 +1666,7 @@ pub fn svg_to_document(svg: &str) -> Document {
         None => return Document::default(),
     };
     let artboards = parse_artboards(&root);
+    let (document_setup, print_preferences) = parse_jas_print_blocks(&root);
     let mut layers: Vec<Element> = Vec::new();
     for child in &root.children {
         // Skip Inkscape's namedview block — it carries artboard
@@ -1703,6 +1719,8 @@ pub fn svg_to_document(svg: &str) -> Document {
         let mut d = Document::default();
         d.artboards = artboards;
         d.artboard_options = crate::document::artboard::ArtboardOptions::default();
+        d.document_setup = document_setup;
+        d.print_preferences = print_preferences;
         return d;
     }
     let doc = Document {
@@ -1711,8 +1729,8 @@ pub fn svg_to_document(svg: &str) -> Document {
         selection: Vec::new(),
         artboards,
         artboard_options: crate::document::artboard::ArtboardOptions::default(),
-        document_setup: crate::document::document_setup::DocumentSetup::default(),
-        print_preferences: crate::document::print_preferences::PrintPreferences::default(),
+        document_setup,
+        print_preferences,
     };
     normalize_document(&doc)
 }
@@ -1760,6 +1778,498 @@ fn parse_artboards(root: &XmlNode) -> Vec<crate::document::artboard::Artboard> {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// DocumentSetup + PrintPreferences serialization (PRINT.md §Phase 2)
+//
+// These live as <jas:document-setup> and <jas:print-preferences>
+// children of the <sodipodi:namedview> block. Bleed values are stored
+// as raw point values (no px conversion) to keep the on-disk numbers
+// intelligible and stable across viewports — they're print-domain
+// quantities, not canvas geometry.
+// ---------------------------------------------------------------------------
+
+fn bool_str(b: bool) -> &'static str {
+    if b { "true" } else { "false" }
+}
+
+fn parse_bool(s: &str, default: bool) -> bool {
+    match s {
+        "true" | "1" | "yes" => true,
+        "false" | "0" | "no" => false,
+        _ => default,
+    }
+}
+
+fn get_attr<'a>(node: &'a XmlNode, name: &str) -> Option<&'a str> {
+    // Try the bare name first; fall back to a `jas:`-prefixed
+    // variant for files written by namespace-aware writers.
+    node.attrs.get(name).map(String::as_str)
+        .or_else(|| node.attrs.get(&format!("jas:{}", name)).map(String::as_str))
+}
+
+fn document_setup_to_xml(
+    s: &crate::document::document_setup::DocumentSetup,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::flattener_preset_str;
+    format!(
+        "{indent}<jas:document-setup bleed-top=\"{bt}\" bleed-right=\"{br}\" bleed-bottom=\"{bb}\" bleed-left=\"{bl}\" bleed-uniform=\"{bu}\" show-images-outline=\"{sio}\" highlight-substituted-glyphs=\"{hsg}\" grid-size=\"{gs}\" grid-color=\"{gc}\" paper-color=\"{pc}\" simulate-colored-paper=\"{scp}\" transparency-flattener-preset=\"{tfp}\" discard-white-overprint=\"{dwo}\"/>",
+        indent = indent,
+        bt = fmt(s.bleed_top), br = fmt(s.bleed_right),
+        bb = fmt(s.bleed_bottom), bl = fmt(s.bleed_left),
+        bu = bool_str(s.bleed_uniform),
+        sio = bool_str(s.show_images_outline),
+        hsg = bool_str(s.highlight_substituted_glyphs),
+        gs = fmt(s.grid_size),
+        gc = escape_xml(&s.grid_color),
+        pc = escape_xml(&s.paper_color),
+        scp = bool_str(s.simulate_colored_paper),
+        tfp = flattener_preset_str(&s.transparency_flattener_preset),
+        dwo = bool_str(s.discard_white_overprint),
+    )
+}
+
+fn parse_document_setup(
+    node: &XmlNode,
+) -> crate::document::document_setup::DocumentSetup {
+    use crate::document::document_setup::DocumentSetup;
+    let d = DocumentSetup::default();
+    DocumentSetup {
+        bleed_top: get_attr(node, "bleed-top")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_top),
+        bleed_right: get_attr(node, "bleed-right")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_right),
+        bleed_bottom: get_attr(node, "bleed-bottom")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_bottom),
+        bleed_left: get_attr(node, "bleed-left")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_left),
+        bleed_uniform: get_attr(node, "bleed-uniform")
+            .map(|s| parse_bool(s, d.bleed_uniform)).unwrap_or(d.bleed_uniform),
+        show_images_outline: get_attr(node, "show-images-outline")
+            .map(|s| parse_bool(s, d.show_images_outline)).unwrap_or(d.show_images_outline),
+        highlight_substituted_glyphs: get_attr(node, "highlight-substituted-glyphs")
+            .map(|s| parse_bool(s, d.highlight_substituted_glyphs)).unwrap_or(d.highlight_substituted_glyphs),
+        grid_size: get_attr(node, "grid-size")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.grid_size),
+        grid_color: get_attr(node, "grid-color")
+            .map(str::to_string).unwrap_or(d.grid_color),
+        paper_color: get_attr(node, "paper-color")
+            .map(str::to_string).unwrap_or(d.paper_color),
+        simulate_colored_paper: get_attr(node, "simulate-colored-paper")
+            .map(|s| parse_bool(s, d.simulate_colored_paper))
+            .unwrap_or(d.simulate_colored_paper),
+        transparency_flattener_preset: get_attr(node, "transparency-flattener-preset")
+            .map(crate::document::print_preferences::flattener_preset_from)
+            .unwrap_or(d.transparency_flattener_preset),
+        discard_white_overprint: get_attr(node, "discard-white-overprint")
+            .map(|s| parse_bool(s, d.discard_white_overprint))
+            .unwrap_or(d.discard_white_overprint),
+    }
+}
+
+fn marks_and_bleed_to_xml(
+    m: &crate::document::print_preferences::MarksAndBleed,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::printer_mark_type_str;
+    format!(
+        "{indent}<jas:marks-and-bleed all-printer-marks=\"{apm}\" trim-marks=\"{tm}\" registration-marks=\"{rm}\" color-bars=\"{cb}\" page-information=\"{pi}\" printer-mark-type=\"{pmt}\" trim-mark-weight=\"{tmw}\" mark-offset=\"{mo}\" use-document-bleed=\"{udb}\" bleed-top=\"{bt}\" bleed-right=\"{br}\" bleed-bottom=\"{bb}\" bleed-left=\"{bl}\"/>",
+        indent = indent,
+        apm = bool_str(m.all_printer_marks),
+        tm = bool_str(m.trim_marks),
+        rm = bool_str(m.registration_marks),
+        cb = bool_str(m.color_bars),
+        pi = bool_str(m.page_information),
+        pmt = printer_mark_type_str(&m.printer_mark_type),
+        tmw = fmt(m.trim_mark_weight),
+        mo = fmt(m.mark_offset),
+        udb = bool_str(m.use_document_bleed),
+        bt = fmt(m.bleed_top), br = fmt(m.bleed_right),
+        bb = fmt(m.bleed_bottom), bl = fmt(m.bleed_left),
+    )
+}
+
+fn parse_marks_and_bleed(
+    node: &XmlNode,
+) -> crate::document::print_preferences::MarksAndBleed {
+    use crate::document::print_preferences::{MarksAndBleed, printer_mark_type_from};
+    let d = MarksAndBleed::default();
+    MarksAndBleed {
+        all_printer_marks: get_attr(node, "all-printer-marks")
+            .map(|s| parse_bool(s, d.all_printer_marks)).unwrap_or(d.all_printer_marks),
+        trim_marks: get_attr(node, "trim-marks")
+            .map(|s| parse_bool(s, d.trim_marks)).unwrap_or(d.trim_marks),
+        registration_marks: get_attr(node, "registration-marks")
+            .map(|s| parse_bool(s, d.registration_marks)).unwrap_or(d.registration_marks),
+        color_bars: get_attr(node, "color-bars")
+            .map(|s| parse_bool(s, d.color_bars)).unwrap_or(d.color_bars),
+        page_information: get_attr(node, "page-information")
+            .map(|s| parse_bool(s, d.page_information)).unwrap_or(d.page_information),
+        printer_mark_type: get_attr(node, "printer-mark-type")
+            .map(printer_mark_type_from).unwrap_or(d.printer_mark_type),
+        trim_mark_weight: get_attr(node, "trim-mark-weight")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.trim_mark_weight),
+        mark_offset: get_attr(node, "mark-offset")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.mark_offset),
+        use_document_bleed: get_attr(node, "use-document-bleed")
+            .map(|s| parse_bool(s, d.use_document_bleed)).unwrap_or(d.use_document_bleed),
+        bleed_top: get_attr(node, "bleed-top")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_top),
+        bleed_right: get_attr(node, "bleed-right")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_right),
+        bleed_bottom: get_attr(node, "bleed-bottom")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_bottom),
+        bleed_left: get_attr(node, "bleed-left")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.bleed_left),
+    }
+}
+
+fn ink_override_to_xml(
+    ink: &crate::document::print_preferences::InkOverride,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::dot_shape_str;
+    format!(
+        "{indent}<jas:ink name=\"{name}\" print=\"{p}\" frequency=\"{f}\" angle=\"{a}\" dot-shape=\"{ds}\"/>",
+        indent = indent,
+        name = escape_xml(&ink.name),
+        p = bool_str(ink.print),
+        f = fmt(ink.frequency),
+        a = fmt(ink.angle),
+        ds = dot_shape_str(&ink.dot_shape),
+    )
+}
+
+fn advanced_to_xml(
+    a: &crate::document::print_preferences::Advanced,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::flattener_preset_str;
+    format!(
+        "{indent}<jas:advanced print-as-bitmap=\"{pab}\" overprint-flattener-preset=\"{ofp}\"/>",
+        indent = indent,
+        pab = bool_str(a.print_as_bitmap),
+        ofp = flattener_preset_str(&a.overprint_flattener_preset),
+    )
+}
+
+fn parse_advanced(
+    node: &XmlNode,
+) -> crate::document::print_preferences::Advanced {
+    use crate::document::print_preferences::*;
+    let d = Advanced::default();
+    Advanced {
+        print_as_bitmap: get_attr(node, "print-as-bitmap")
+            .map(|s| parse_bool(s, d.print_as_bitmap)).unwrap_or(d.print_as_bitmap),
+        overprint_flattener_preset: get_attr(node, "overprint-flattener-preset")
+            .map(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
+    }
+}
+
+fn color_management_to_xml(
+    c: &crate::document::print_preferences::ColorManagement,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::*;
+    format!(
+        "{indent}<jas:color-management document-profile=\"{dp}\" color-handling=\"{ch}\" printer-profile=\"{pp}\" rendering-intent=\"{ri}\" preserve-rgb-numbers=\"{prn}\"/>",
+        indent = indent,
+        dp = escape_xml(&c.document_profile),
+        ch = color_handling_str(&c.color_handling),
+        pp = escape_xml(&c.printer_profile),
+        ri = rendering_intent_str(&c.rendering_intent),
+        prn = bool_str(c.preserve_rgb_numbers),
+    )
+}
+
+fn parse_color_management(
+    node: &XmlNode,
+) -> crate::document::print_preferences::ColorManagement {
+    use crate::document::print_preferences::*;
+    let d = ColorManagement::default();
+    ColorManagement {
+        document_profile: get_attr(node, "document-profile")
+            .map(str::to_string).unwrap_or(d.document_profile),
+        color_handling: get_attr(node, "color-handling")
+            .map(color_handling_from).unwrap_or(d.color_handling),
+        printer_profile: get_attr(node, "printer-profile")
+            .map(str::to_string).unwrap_or(d.printer_profile),
+        rendering_intent: get_attr(node, "rendering-intent")
+            .map(rendering_intent_from).unwrap_or(d.rendering_intent),
+        preserve_rgb_numbers: get_attr(node, "preserve-rgb-numbers")
+            .map(|s| parse_bool(s, d.preserve_rgb_numbers))
+            .unwrap_or(d.preserve_rgb_numbers),
+    }
+}
+
+fn graphics_to_xml(
+    g: &crate::document::print_preferences::Graphics,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::*;
+    format!(
+        "{indent}<jas:graphics flatness=\"{fl}\" font-download=\"{fd}\" postscript-level=\"{pl}\" data-format=\"{df}\" compatible-gradient-printing=\"{cgp}\" raster-effects-resolution=\"{rer}\"/>",
+        indent = indent,
+        fl = fmt(g.flatness),
+        fd = font_download_str(&g.font_download),
+        pl = postscript_level_str(&g.postscript_level),
+        df = data_format_str(&g.data_format),
+        cgp = bool_str(g.compatible_gradient_printing),
+        rer = fmt(g.raster_effects_resolution),
+    )
+}
+
+fn parse_graphics(
+    node: &XmlNode,
+) -> crate::document::print_preferences::Graphics {
+    use crate::document::print_preferences::*;
+    let d = Graphics::default();
+    Graphics {
+        flatness: get_attr(node, "flatness")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.flatness),
+        font_download: get_attr(node, "font-download")
+            .map(font_download_from).unwrap_or(d.font_download),
+        postscript_level: get_attr(node, "postscript-level")
+            .map(postscript_level_from).unwrap_or(d.postscript_level),
+        data_format: get_attr(node, "data-format")
+            .map(data_format_from).unwrap_or(d.data_format),
+        compatible_gradient_printing: get_attr(node, "compatible-gradient-printing")
+            .map(|s| parse_bool(s, d.compatible_gradient_printing))
+            .unwrap_or(d.compatible_gradient_printing),
+        raster_effects_resolution: get_attr(node, "raster-effects-resolution")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.raster_effects_resolution),
+    }
+}
+
+fn output_to_xml(
+    o: &crate::document::print_preferences::Output,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::*;
+    let inner = format!("{}  ", indent);
+    let mut s = format!(
+        "{indent}<jas:output mode=\"{m}\" emulsion=\"{e}\" image-polarity=\"{ip}\" printer-resolution=\"{pr}\" convert-spot-to-process=\"{csp}\" overprint-black=\"{ob}\">",
+        indent = indent,
+        m = output_mode_str(&o.mode),
+        e = emulsion_str(&o.emulsion),
+        ip = image_polarity_str(&o.image_polarity),
+        pr = escape_xml(&o.printer_resolution),
+        csp = bool_str(o.convert_spot_to_process),
+        ob = bool_str(o.overprint_black),
+    );
+    for ink in &o.inks {
+        s.push('\n');
+        s.push_str(&ink_override_to_xml(ink, &inner));
+    }
+    s.push('\n');
+    s.push_str(indent);
+    s.push_str("</jas:output>");
+    s
+}
+
+fn parse_ink_override(
+    node: &XmlNode,
+) -> crate::document::print_preferences::InkOverride {
+    use crate::document::print_preferences::*;
+    let d = InkOverride { name: String::new(), print: true, frequency: 75.0, angle: 45.0, dot_shape: DotShape::Round };
+    InkOverride {
+        name: get_attr(node, "name").map(str::to_string).unwrap_or(d.name),
+        print: get_attr(node, "print")
+            .map(|s| parse_bool(s, d.print)).unwrap_or(d.print),
+        frequency: get_attr(node, "frequency")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.frequency),
+        angle: get_attr(node, "angle")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.angle),
+        dot_shape: get_attr(node, "dot-shape")
+            .map(dot_shape_from).unwrap_or(d.dot_shape),
+    }
+}
+
+fn parse_output(
+    node: &XmlNode,
+) -> crate::document::print_preferences::Output {
+    use crate::document::print_preferences::*;
+    let d = Output::default();
+    let mut o = Output {
+        mode: get_attr(node, "mode")
+            .map(output_mode_from).unwrap_or(d.mode),
+        emulsion: get_attr(node, "emulsion")
+            .map(emulsion_from).unwrap_or(d.emulsion),
+        image_polarity: get_attr(node, "image-polarity")
+            .map(image_polarity_from).unwrap_or(d.image_polarity),
+        printer_resolution: get_attr(node, "printer-resolution")
+            .map(str::to_string).unwrap_or(d.printer_resolution),
+        convert_spot_to_process: get_attr(node, "convert-spot-to-process")
+            .map(|s| parse_bool(s, d.convert_spot_to_process))
+            .unwrap_or(d.convert_spot_to_process),
+        overprint_black: get_attr(node, "overprint-black")
+            .map(|s| parse_bool(s, d.overprint_black))
+            .unwrap_or(d.overprint_black),
+        // Default to an empty list; populated below from <jas:ink>
+        // children. Falls back to the CMYK defaults when no children
+        // are present, so a missing <jas:output> in older files still
+        // ends up with the standard four-row table.
+        inks: Vec::new(),
+    };
+    for child in &node.children {
+        if strip_ns(&child.tag) == "ink" {
+            o.inks.push(parse_ink_override(child));
+        }
+    }
+    if o.inks.is_empty() {
+        o.inks = InkOverride::process_cmyk_defaults();
+    }
+    o
+}
+
+fn print_preferences_to_xml(
+    p: &crate::document::print_preferences::PrintPreferences,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::*;
+    let inner_indent = format!("{}  ", indent);
+    let mut s = format!(
+        "{indent}<jas:print-preferences preset-name=\"{pn}\" copies=\"{c}\" collate=\"{co}\" reverse-order=\"{ro}\" artboard-range-mode=\"{arm}\" artboard-range=\"{ar}\" ignore-artboards=\"{ia}\" skip-blank-artboards=\"{sba}\" media-size=\"{ms}\" media-width=\"{mw}\" media-height=\"{mh}\" orientation=\"{o}\" auto-rotate=\"{aro}\" transverse=\"{tv}\" print-layers=\"{pl}\" placement-x=\"{px}\" placement-y=\"{py}\" scaling-mode=\"{sm}\" custom-scale=\"{cs}\" tile-overlap-h=\"{toh}\" tile-overlap-v=\"{tov}\" tile-range=\"{tr}\"",
+        indent = indent,
+        pn = escape_xml(&p.preset_name),
+        c = p.copies,
+        co = bool_str(p.collate),
+        ro = bool_str(p.reverse_order),
+        arm = artboard_range_mode_str(&p.artboard_range_mode),
+        ar = escape_xml(&p.artboard_range),
+        ia = bool_str(p.ignore_artboards),
+        sba = bool_str(p.skip_blank_artboards),
+        ms = media_size_str(&p.media_size),
+        mw = fmt(p.media_width), mh = fmt(p.media_height),
+        o = orientation_str(&p.orientation),
+        aro = bool_str(p.auto_rotate),
+        tv = bool_str(p.transverse),
+        pl = print_layers_str(&p.print_layers),
+        px = fmt(p.placement_x), py = fmt(p.placement_y),
+        sm = scaling_mode_str(&p.scaling_mode),
+        cs = fmt(p.custom_scale),
+        toh = fmt(p.tile_overlap_h), tov = fmt(p.tile_overlap_v),
+        tr = escape_xml(&p.tile_range),
+    );
+    // printer-name is optional — emit only when set so the absent
+    // case round-trips back to None instead of Some("").
+    if let Some(name) = &p.printer_name {
+        s.push_str(&format!(" printer-name=\"{}\"", escape_xml(name)));
+    }
+    s.push('>');
+    s.push('\n');
+    s.push_str(&marks_and_bleed_to_xml(&p.marks_and_bleed, &inner_indent));
+    s.push('\n');
+    s.push_str(&output_to_xml(&p.output, &inner_indent));
+    s.push('\n');
+    s.push_str(&graphics_to_xml(&p.graphics, &inner_indent));
+    s.push('\n');
+    s.push_str(&color_management_to_xml(&p.color_management, &inner_indent));
+    s.push('\n');
+    s.push_str(&advanced_to_xml(&p.advanced, &inner_indent));
+    s.push('\n');
+    s.push_str(indent);
+    s.push_str("</jas:print-preferences>");
+    s
+}
+
+fn parse_print_preferences(
+    node: &XmlNode,
+) -> crate::document::print_preferences::PrintPreferences {
+    use crate::document::print_preferences::*;
+    let d = PrintPreferences::default();
+    let mut p = PrintPreferences {
+        preset_name: get_attr(node, "preset-name")
+            .map(str::to_string).unwrap_or(d.preset_name),
+        printer_name: get_attr(node, "printer-name").map(str::to_string),
+        copies: get_attr(node, "copies")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.copies),
+        collate: get_attr(node, "collate")
+            .map(|s| parse_bool(s, d.collate)).unwrap_or(d.collate),
+        reverse_order: get_attr(node, "reverse-order")
+            .map(|s| parse_bool(s, d.reverse_order)).unwrap_or(d.reverse_order),
+        artboard_range_mode: get_attr(node, "artboard-range-mode")
+            .map(artboard_range_mode_from).unwrap_or(d.artboard_range_mode),
+        artboard_range: get_attr(node, "artboard-range")
+            .map(str::to_string).unwrap_or(d.artboard_range),
+        ignore_artboards: get_attr(node, "ignore-artboards")
+            .map(|s| parse_bool(s, d.ignore_artboards)).unwrap_or(d.ignore_artboards),
+        skip_blank_artboards: get_attr(node, "skip-blank-artboards")
+            .map(|s| parse_bool(s, d.skip_blank_artboards)).unwrap_or(d.skip_blank_artboards),
+        media_size: get_attr(node, "media-size")
+            .map(media_size_from).unwrap_or(d.media_size),
+        media_width: get_attr(node, "media-width")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.media_width),
+        media_height: get_attr(node, "media-height")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.media_height),
+        orientation: get_attr(node, "orientation")
+            .map(orientation_from).unwrap_or(d.orientation),
+        auto_rotate: get_attr(node, "auto-rotate")
+            .map(|s| parse_bool(s, d.auto_rotate)).unwrap_or(d.auto_rotate),
+        transverse: get_attr(node, "transverse")
+            .map(|s| parse_bool(s, d.transverse)).unwrap_or(d.transverse),
+        print_layers: get_attr(node, "print-layers")
+            .map(print_layers_from).unwrap_or(d.print_layers),
+        placement_x: get_attr(node, "placement-x")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.placement_x),
+        placement_y: get_attr(node, "placement-y")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.placement_y),
+        scaling_mode: get_attr(node, "scaling-mode")
+            .map(scaling_mode_from).unwrap_or(d.scaling_mode),
+        custom_scale: get_attr(node, "custom-scale")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.custom_scale),
+        tile_overlap_h: get_attr(node, "tile-overlap-h")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.tile_overlap_h),
+        tile_overlap_v: get_attr(node, "tile-overlap-v")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.tile_overlap_v),
+        tile_range: get_attr(node, "tile-range")
+            .map(str::to_string).unwrap_or(d.tile_range),
+        marks_and_bleed: MarksAndBleed::default(),
+        output: Output::default(),
+        graphics: Graphics::default(),
+        color_management: ColorManagement::default(),
+        advanced: Advanced::default(),
+    };
+    for child in &node.children {
+        match strip_ns(&child.tag) {
+            "marks-and-bleed" => p.marks_and_bleed = parse_marks_and_bleed(child),
+            "output" => p.output = parse_output(child),
+            "graphics" => p.graphics = parse_graphics(child),
+            "color-management" => p.color_management = parse_color_management(child),
+            "advanced" => p.advanced = parse_advanced(child),
+            _ => {}
+        }
+    }
+    p
+}
+
+/// Walk the namedview block(s) for `<jas:document-setup>` and
+/// `<jas:print-preferences>` children and return the parsed pair.
+/// Missing children produce defaults — matching the writer's
+/// "omit when default" behavior.
+fn parse_jas_print_blocks(
+    root: &XmlNode,
+) -> (
+    crate::document::document_setup::DocumentSetup,
+    crate::document::print_preferences::PrintPreferences,
+) {
+    use crate::document::document_setup::DocumentSetup;
+    use crate::document::print_preferences::PrintPreferences;
+    let mut setup = DocumentSetup::default();
+    let mut prefs = PrintPreferences::default();
+    for child in &root.children {
+        if strip_ns(&child.tag) != "namedview" { continue; }
+        for sub in &child.children {
+            match strip_ns(&sub.tag) {
+                "document-setup" => setup = parse_document_setup(sub),
+                "print-preferences" => prefs = parse_print_preferences(sub),
+                _ => {}
+            }
+        }
+    }
+    (setup, prefs)
 }
 
 // ---------------------------------------------------------------------------
@@ -2834,5 +3344,242 @@ mod tests {
             Some("My Rect"),
             "round-trip lost rect name",
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // DocumentSetup + PrintPreferences persistence under sodipodi:namedview
+    // (PRINT.md §Phase 2). Stored as <jas:document-setup> /
+    // <jas:print-preferences> elements so Inkscape and other SVG tools
+    // treat them as foreign metadata and round-trip them unchanged.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn empty_document_emits_no_jas_blocks() {
+        // A pristine Document (default DocumentSetup, default
+        // PrintPreferences) must not produce any <jas:*> metadata —
+        // keeps minimal SVG files minimal. Artboards are cleared so
+        // no namedview is emitted at all.
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let svg = document_to_svg(&doc);
+        assert!(!svg.contains("<jas:document-setup"), "svg:\n{svg}");
+        assert!(!svg.contains("<jas:print-preferences"), "svg:\n{svg}");
+        assert!(!svg.contains("<sodipodi:namedview"), "svg:\n{svg}");
+    }
+
+    #[test]
+    fn non_default_document_setup_round_trips() {
+        use crate::document::document_setup::DocumentSetup;
+        let mut doc = Document::default();
+        doc.document_setup = DocumentSetup {
+            bleed_top: 9.0, bleed_right: 18.0,
+            bleed_bottom: 36.0, bleed_left: 12.0,
+            bleed_uniform: false,
+            show_images_outline: true,
+            highlight_substituted_glyphs: true,
+            ..DocumentSetup::default()
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:document-setup"),
+                "missing jas:document-setup:\n{svg}");
+        assert!(svg.contains("xmlns:jas="),
+                "missing jas namespace decl:\n{svg}");
+
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.document_setup, doc.document_setup);
+    }
+
+    #[test]
+    fn non_default_print_preferences_round_trip() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences = PrintPreferences {
+            preset_name: "My Preset".into(),
+            printer_name: Some("LaserJet 5000".into()),
+            copies: 3,
+            collate: true,
+            reverse_order: true,
+            artboard_range_mode: ArtboardRangeMode::Range,
+            artboard_range: "1-3,5".into(),
+            ignore_artboards: true,
+            skip_blank_artboards: true,
+            media_size: MediaSize::A4,
+            media_width: 595.0,
+            media_height: 842.0,
+            orientation: Orientation::Landscape,
+            auto_rotate: false,
+            transverse: true,
+            print_layers: PrintLayers::Visible,
+            placement_x: 12.5,
+            placement_y: -3.25,
+            scaling_mode: ScalingMode::Custom,
+            custom_scale: 75.0,
+            tile_overlap_h: 1.0,
+            tile_overlap_v: 2.0,
+            tile_range: "1-2".into(),
+            marks_and_bleed: MarksAndBleed {
+                all_printer_marks: true,
+                trim_marks: true,
+                registration_marks: true,
+                color_bars: true,
+                page_information: true,
+                printer_mark_type: PrinterMarkType::Japanese,
+                trim_mark_weight: 0.5,
+                mark_offset: 12.0,
+                use_document_bleed: false,
+                bleed_top: 4.0, bleed_right: 5.0,
+                bleed_bottom: 6.0, bleed_left: 7.0,
+            },
+            output: Output::default(),
+            graphics: Graphics::default(),
+            color_management: ColorManagement::default(),
+            advanced: Advanced::default(),
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:print-preferences"),
+                "missing jas:print-preferences:\n{svg}");
+        assert!(svg.contains("<jas:marks-and-bleed"),
+                "missing jas:marks-and-bleed:\n{svg}");
+
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences, doc.print_preferences);
+    }
+
+    #[test]
+    fn output_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.output = Output {
+            mode: OutputMode::Separations,
+            emulsion: Emulsion::DownRight,
+            image_polarity: ImagePolarity::Negative,
+            printer_resolution: "150 lpi / 1200 dpi".to_string(),
+            convert_spot_to_process: true,
+            overprint_black: true,
+            inks: vec![
+                InkOverride { name: "Process Cyan".into(),    print: false, frequency: 100.0, angle: 105.0, dot_shape: DotShape::Ellipse },
+                InkOverride { name: "PANTONE 185 C".into(),   print: true,  frequency:  85.0, angle:  45.0, dot_shape: DotShape::Square },
+            ],
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:output"), "svg:\n{svg}");
+        assert!(svg.contains("<jas:ink"), "svg:\n{svg}");
+        assert!(svg.contains("PANTONE 185 C"), "spot ink missing:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.output, doc.print_preferences.output);
+    }
+
+    #[test]
+    fn advanced_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.advanced = Advanced {
+            print_as_bitmap: true,
+            overprint_flattener_preset: FlattenerPreset::HighResolution,
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:advanced"), "svg:\n{svg}");
+        assert!(svg.contains("print-as-bitmap=\"true\""), "svg:\n{svg}");
+        assert!(svg.contains("overprint-flattener-preset=\"high_resolution\""),
+                "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.advanced, doc.print_preferences.advanced);
+    }
+
+    #[test]
+    fn document_setup_phase6_fields_round_trip_through_svg() {
+        use crate::document::document_setup::DocumentSetup;
+        use crate::document::print_preferences::FlattenerPreset;
+        let mut doc = Document::default();
+        doc.document_setup = DocumentSetup {
+            grid_size: 36.0,
+            grid_color: "#0099ff".to_string(),
+            paper_color: "#fff8e7".to_string(),
+            simulate_colored_paper: true,
+            transparency_flattener_preset: FlattenerPreset::HighResolution,
+            discard_white_overprint: true,
+            ..DocumentSetup::default()
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("grid-size=\"36\""), "svg:\n{svg}");
+        assert!(svg.contains("paper-color=\"#fff8e7\""), "svg:\n{svg}");
+        assert!(svg.contains("simulate-colored-paper=\"true\""), "svg:\n{svg}");
+        assert!(svg.contains("transparency-flattener-preset=\"high_resolution\""),
+                "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.document_setup, doc.document_setup);
+    }
+
+    #[test]
+    fn color_management_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.color_management = ColorManagement {
+            document_profile: "Adobe RGB (1998)".to_string(),
+            color_handling: ColorHandling::PostscriptColorManagement,
+            printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
+            rendering_intent: RenderingIntent::Saturation,
+            preserve_rgb_numbers: true,
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:color-management"), "svg:\n{svg}");
+        assert!(svg.contains("color-handling=\"postscript_color_management\""), "svg:\n{svg}");
+        assert!(svg.contains("rendering-intent=\"saturation\""), "svg:\n{svg}");
+        assert!(svg.contains("Adobe RGB (1998)"), "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.color_management,
+                   doc.print_preferences.color_management);
+    }
+
+    #[test]
+    fn graphics_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.graphics = Graphics {
+            flatness: 0.4,
+            font_download: FontDownload::Complete,
+            postscript_level: PostScriptLevel::Level2,
+            data_format: DataFormat::Ascii,
+            compatible_gradient_printing: true,
+            raster_effects_resolution: 600.0,
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:graphics"), "svg:\n{svg}");
+        assert!(svg.contains("flatness=\"0.4\""), "svg:\n{svg}");
+        assert!(svg.contains("font-download=\"complete\""), "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.graphics, doc.print_preferences.graphics);
+    }
+
+    #[test]
+    fn jas_blocks_coexist_with_artboards() {
+        use crate::document::artboard::{Artboard, ArtboardFill};
+        use crate::document::document_setup::DocumentSetup;
+        let mut doc = Document::default();
+        doc.artboards = vec![Artboard {
+            id: "ab-a".into(), name: "Cover".into(),
+            x: 0.0, y: 0.0, width: 612.0, height: 792.0,
+            fill: ArtboardFill::Transparent,
+            show_center_mark: false, show_cross_hairs: false,
+            show_video_safe_areas: false,
+            video_ruler_pixel_aspect_ratio: 1.0,
+        }];
+        doc.document_setup = DocumentSetup {
+            bleed_top: 9.0, bleed_right: 9.0,
+            bleed_bottom: 9.0, bleed_left: 9.0,
+            bleed_uniform: true,
+            show_images_outline: false,
+            highlight_substituted_glyphs: false,
+            ..DocumentSetup::default()
+        };
+        let svg = document_to_svg(&doc);
+        // Both metadata blocks live inside the same namedview.
+        assert!(svg.contains("<sodipodi:namedview"));
+        assert!(svg.contains("<inkscape:page"));
+        assert!(svg.contains("<jas:document-setup"));
+
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.artboards.len(), 1);
+        assert_eq!(parsed.document_setup, doc.document_setup);
     }
 }

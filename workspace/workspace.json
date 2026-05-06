@@ -3524,6 +3524,24 @@
         },
         "highlight_substituted_glyphs": {
           "type": "bool"
+        },
+        "grid_size": {
+          "type": "number"
+        },
+        "grid_color": {
+          "type": "string"
+        },
+        "paper_color": {
+          "type": "string"
+        },
+        "simulate_colored_paper": {
+          "type": "bool"
+        },
+        "transparency_flattener_preset": {
+          "type": "string"
+        },
+        "discard_white_overprint": {
+          "type": "bool"
         }
       },
       "effects": [
@@ -3568,6 +3586,42 @@
           "doc.set_document_setup_field": {
             "field": "highlight_substituted_glyphs",
             "value": "param.highlight_substituted_glyphs"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "grid_size",
+            "value": "param.grid_size"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "grid_color",
+            "value": "param.grid_color"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "paper_color",
+            "value": "param.paper_color"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "simulate_colored_paper",
+            "value": "param.simulate_colored_paper"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "transparency_flattener_preset",
+            "value": "param.transparency_flattener_preset"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "discard_white_overprint",
+            "value": "param.discard_white_overprint"
           }
         },
         "clear_dialog_snapshot",
@@ -3654,6 +3708,150 @@
         },
         "custom_scale": {
           "type": "number"
+        },
+        "mab_all_printer_marks": {
+          "type": "bool"
+        },
+        "mab_trim_marks": {
+          "type": "bool"
+        },
+        "mab_registration_marks": {
+          "type": "bool"
+        },
+        "mab_color_bars": {
+          "type": "bool"
+        },
+        "mab_page_information": {
+          "type": "bool"
+        },
+        "mab_printer_mark_type": {
+          "type": "string"
+        },
+        "mab_trim_mark_weight": {
+          "type": "number"
+        },
+        "mab_mark_offset": {
+          "type": "number"
+        },
+        "mab_use_document_bleed": {
+          "type": "bool"
+        },
+        "mab_bleed_top": {
+          "type": "number"
+        },
+        "mab_bleed_right": {
+          "type": "number"
+        },
+        "mab_bleed_bottom": {
+          "type": "number"
+        },
+        "mab_bleed_left": {
+          "type": "number"
+        },
+        "out_mode": {
+          "type": "string"
+        },
+        "out_emulsion": {
+          "type": "string"
+        },
+        "out_image_polarity": {
+          "type": "string"
+        },
+        "out_printer_resolution": {
+          "type": "string"
+        },
+        "out_convert_spot_to_process": {
+          "type": "bool"
+        },
+        "out_overprint_black": {
+          "type": "bool"
+        },
+        "out_ink0_print": {
+          "type": "bool"
+        },
+        "out_ink0_frequency": {
+          "type": "number"
+        },
+        "out_ink0_angle": {
+          "type": "number"
+        },
+        "out_ink0_dot_shape": {
+          "type": "string"
+        },
+        "out_ink1_print": {
+          "type": "bool"
+        },
+        "out_ink1_frequency": {
+          "type": "number"
+        },
+        "out_ink1_angle": {
+          "type": "number"
+        },
+        "out_ink1_dot_shape": {
+          "type": "string"
+        },
+        "out_ink2_print": {
+          "type": "bool"
+        },
+        "out_ink2_frequency": {
+          "type": "number"
+        },
+        "out_ink2_angle": {
+          "type": "number"
+        },
+        "out_ink2_dot_shape": {
+          "type": "string"
+        },
+        "out_ink3_print": {
+          "type": "bool"
+        },
+        "out_ink3_frequency": {
+          "type": "number"
+        },
+        "out_ink3_angle": {
+          "type": "number"
+        },
+        "out_ink3_dot_shape": {
+          "type": "string"
+        },
+        "gfx_flatness": {
+          "type": "number"
+        },
+        "gfx_font_download": {
+          "type": "string"
+        },
+        "gfx_postscript_level": {
+          "type": "string"
+        },
+        "gfx_data_format": {
+          "type": "string"
+        },
+        "gfx_compatible_gradient_printing": {
+          "type": "bool"
+        },
+        "gfx_raster_effects_resolution": {
+          "type": "number"
+        },
+        "cm_document_profile": {
+          "type": "string"
+        },
+        "cm_color_handling": {
+          "type": "string"
+        },
+        "cm_printer_profile": {
+          "type": "string"
+        },
+        "cm_rendering_intent": {
+          "type": "string"
+        },
+        "cm_preserve_rgb_numbers": {
+          "type": "bool"
+        },
+        "adv_print_as_bitmap": {
+          "type": "bool"
+        },
+        "adv_overprint_flattener_preset": {
+          "type": "string"
         }
       },
       "effects": [
@@ -3770,6 +3968,310 @@
           "doc.set_print_preferences_field": {
             "field": "custom_scale",
             "value": "param.custom_scale"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "all_printer_marks",
+            "value": "param.mab_all_printer_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_marks",
+            "value": "param.mab_trim_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "registration_marks",
+            "value": "param.mab_registration_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "color_bars",
+            "value": "param.mab_color_bars"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "page_information",
+            "value": "param.mab_page_information"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "printer_mark_type",
+            "value": "param.mab_printer_mark_type"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_mark_weight",
+            "value": "param.mab_trim_mark_weight"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "mark_offset",
+            "value": "param.mab_mark_offset"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "use_document_bleed",
+            "value": "param.mab_use_document_bleed"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_top",
+            "value": "param.mab_bleed_top"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_right",
+            "value": "param.mab_bleed_right"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_bottom",
+            "value": "param.mab_bleed_bottom"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_left",
+            "value": "param.mab_bleed_left"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "mode",
+            "value": "param.out_mode"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "emulsion",
+            "value": "param.out_emulsion"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "image_polarity",
+            "value": "param.out_image_polarity"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "printer_resolution",
+            "value": "param.out_printer_resolution"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "convert_spot_to_process",
+            "value": "param.out_convert_spot_to_process"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "overprint_black",
+            "value": "param.out_overprint_black"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "print",
+            "value": "param.out_ink0_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "frequency",
+            "value": "param.out_ink0_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "angle",
+            "value": "param.out_ink0_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "dot_shape",
+            "value": "param.out_ink0_dot_shape"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "print",
+            "value": "param.out_ink1_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "frequency",
+            "value": "param.out_ink1_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "angle",
+            "value": "param.out_ink1_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "dot_shape",
+            "value": "param.out_ink1_dot_shape"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "print",
+            "value": "param.out_ink2_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "frequency",
+            "value": "param.out_ink2_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "angle",
+            "value": "param.out_ink2_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "dot_shape",
+            "value": "param.out_ink2_dot_shape"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "print",
+            "value": "param.out_ink3_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "frequency",
+            "value": "param.out_ink3_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "angle",
+            "value": "param.out_ink3_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "dot_shape",
+            "value": "param.out_ink3_dot_shape"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "flatness",
+            "value": "param.gfx_flatness"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "font_download",
+            "value": "param.gfx_font_download"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "postscript_level",
+            "value": "param.gfx_postscript_level"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "data_format",
+            "value": "param.gfx_data_format"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "compatible_gradient_printing",
+            "value": "param.gfx_compatible_gradient_printing"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "raster_effects_resolution",
+            "value": "param.gfx_raster_effects_resolution"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "document_profile",
+            "value": "param.cm_document_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "color_handling",
+            "value": "param.cm_color_handling"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "printer_profile",
+            "value": "param.cm_printer_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "rendering_intent",
+            "value": "param.cm_rendering_intent"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "preserve_rgb_numbers",
+            "value": "param.cm_preserve_rgb_numbers"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "print_as_bitmap",
+            "value": "param.adv_print_as_bitmap"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "overprint_flattener_preset",
+            "value": "param.adv_overprint_flattener_preset"
           }
         },
         "clear_dialog_snapshot",
@@ -3836,6 +4338,150 @@
         },
         "custom_scale": {
           "type": "number"
+        },
+        "mab_all_printer_marks": {
+          "type": "bool"
+        },
+        "mab_trim_marks": {
+          "type": "bool"
+        },
+        "mab_registration_marks": {
+          "type": "bool"
+        },
+        "mab_color_bars": {
+          "type": "bool"
+        },
+        "mab_page_information": {
+          "type": "bool"
+        },
+        "mab_printer_mark_type": {
+          "type": "string"
+        },
+        "mab_trim_mark_weight": {
+          "type": "number"
+        },
+        "mab_mark_offset": {
+          "type": "number"
+        },
+        "mab_use_document_bleed": {
+          "type": "bool"
+        },
+        "mab_bleed_top": {
+          "type": "number"
+        },
+        "mab_bleed_right": {
+          "type": "number"
+        },
+        "mab_bleed_bottom": {
+          "type": "number"
+        },
+        "mab_bleed_left": {
+          "type": "number"
+        },
+        "out_mode": {
+          "type": "string"
+        },
+        "out_emulsion": {
+          "type": "string"
+        },
+        "out_image_polarity": {
+          "type": "string"
+        },
+        "out_printer_resolution": {
+          "type": "string"
+        },
+        "out_convert_spot_to_process": {
+          "type": "bool"
+        },
+        "out_overprint_black": {
+          "type": "bool"
+        },
+        "out_ink0_print": {
+          "type": "bool"
+        },
+        "out_ink0_frequency": {
+          "type": "number"
+        },
+        "out_ink0_angle": {
+          "type": "number"
+        },
+        "out_ink0_dot_shape": {
+          "type": "string"
+        },
+        "out_ink1_print": {
+          "type": "bool"
+        },
+        "out_ink1_frequency": {
+          "type": "number"
+        },
+        "out_ink1_angle": {
+          "type": "number"
+        },
+        "out_ink1_dot_shape": {
+          "type": "string"
+        },
+        "out_ink2_print": {
+          "type": "bool"
+        },
+        "out_ink2_frequency": {
+          "type": "number"
+        },
+        "out_ink2_angle": {
+          "type": "number"
+        },
+        "out_ink2_dot_shape": {
+          "type": "string"
+        },
+        "out_ink3_print": {
+          "type": "bool"
+        },
+        "out_ink3_frequency": {
+          "type": "number"
+        },
+        "out_ink3_angle": {
+          "type": "number"
+        },
+        "out_ink3_dot_shape": {
+          "type": "string"
+        },
+        "gfx_flatness": {
+          "type": "number"
+        },
+        "gfx_font_download": {
+          "type": "string"
+        },
+        "gfx_postscript_level": {
+          "type": "string"
+        },
+        "gfx_data_format": {
+          "type": "string"
+        },
+        "gfx_compatible_gradient_printing": {
+          "type": "bool"
+        },
+        "gfx_raster_effects_resolution": {
+          "type": "number"
+        },
+        "cm_document_profile": {
+          "type": "string"
+        },
+        "cm_color_handling": {
+          "type": "string"
+        },
+        "cm_printer_profile": {
+          "type": "string"
+        },
+        "cm_rendering_intent": {
+          "type": "string"
+        },
+        "cm_preserve_rgb_numbers": {
+          "type": "bool"
+        },
+        "adv_print_as_bitmap": {
+          "type": "bool"
+        },
+        "adv_overprint_flattener_preset": {
+          "type": "string"
         }
       },
       "effects": [
@@ -3952,6 +4598,310 @@
           "doc.set_print_preferences_field": {
             "field": "custom_scale",
             "value": "param.custom_scale"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "all_printer_marks",
+            "value": "param.mab_all_printer_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_marks",
+            "value": "param.mab_trim_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "registration_marks",
+            "value": "param.mab_registration_marks"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "color_bars",
+            "value": "param.mab_color_bars"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "page_information",
+            "value": "param.mab_page_information"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "printer_mark_type",
+            "value": "param.mab_printer_mark_type"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "trim_mark_weight",
+            "value": "param.mab_trim_mark_weight"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "mark_offset",
+            "value": "param.mab_mark_offset"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "use_document_bleed",
+            "value": "param.mab_use_document_bleed"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_top",
+            "value": "param.mab_bleed_top"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_right",
+            "value": "param.mab_bleed_right"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_bottom",
+            "value": "param.mab_bleed_bottom"
+          }
+        },
+        {
+          "doc.set_marks_and_bleed_field": {
+            "field": "bleed_left",
+            "value": "param.mab_bleed_left"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "mode",
+            "value": "param.out_mode"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "emulsion",
+            "value": "param.out_emulsion"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "image_polarity",
+            "value": "param.out_image_polarity"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "printer_resolution",
+            "value": "param.out_printer_resolution"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "convert_spot_to_process",
+            "value": "param.out_convert_spot_to_process"
+          }
+        },
+        {
+          "doc.set_output_field": {
+            "field": "overprint_black",
+            "value": "param.out_overprint_black"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "print",
+            "value": "param.out_ink0_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "frequency",
+            "value": "param.out_ink0_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "angle",
+            "value": "param.out_ink0_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 0,
+            "field": "dot_shape",
+            "value": "param.out_ink0_dot_shape"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "print",
+            "value": "param.out_ink1_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "frequency",
+            "value": "param.out_ink1_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "angle",
+            "value": "param.out_ink1_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 1,
+            "field": "dot_shape",
+            "value": "param.out_ink1_dot_shape"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "print",
+            "value": "param.out_ink2_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "frequency",
+            "value": "param.out_ink2_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "angle",
+            "value": "param.out_ink2_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 2,
+            "field": "dot_shape",
+            "value": "param.out_ink2_dot_shape"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "print",
+            "value": "param.out_ink3_print"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "frequency",
+            "value": "param.out_ink3_frequency"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "angle",
+            "value": "param.out_ink3_angle"
+          }
+        },
+        {
+          "doc.set_output_ink_field": {
+            "index": 3,
+            "field": "dot_shape",
+            "value": "param.out_ink3_dot_shape"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "flatness",
+            "value": "param.gfx_flatness"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "font_download",
+            "value": "param.gfx_font_download"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "postscript_level",
+            "value": "param.gfx_postscript_level"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "data_format",
+            "value": "param.gfx_data_format"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "compatible_gradient_printing",
+            "value": "param.gfx_compatible_gradient_printing"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "raster_effects_resolution",
+            "value": "param.gfx_raster_effects_resolution"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "document_profile",
+            "value": "param.cm_document_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "color_handling",
+            "value": "param.cm_color_handling"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "printer_profile",
+            "value": "param.cm_printer_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "rendering_intent",
+            "value": "param.cm_rendering_intent"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "preserve_rgb_numbers",
+            "value": "param.cm_preserve_rgb_numbers"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "print_as_bitmap",
+            "value": "param.adv_print_as_bitmap"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "overprint_flattener_preset",
+            "value": "param.adv_overprint_flattener_preset"
           }
         },
         "clear_dialog_snapshot",
@@ -25941,7 +26891,7 @@
     },
     "document_setup": {
       "summary": "Document Setup",
-      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase-1 deferrals (parked for Phase 6 / global units): units selector, transparency grid, transparency-flattener preset, \"Discard White Overprint in Output\", \"Simulate Colored Paper\".\nPhase-1A deferral: the chain-link toggle's bleed_uniform state persists with the document, but mirroring a single-side edit to all four fields is not yet wired (matches the artboard_options chain-link precedent). User types each side individually in Phase 1A.\n",
+      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase 6 added the formerly-deferred Phase-1A items: grid size / color, simulate colored paper (with paper color), transparency- flattener preset, \"Discard White Overprint in Output\". The Units selector remains deferred (no global-units feature yet).\nPhase-1A deferral: the chain-link toggle's bleed_uniform state persists with the document, but mirroring a single-side edit to all four fields is not yet wired (matches the artboard_options chain-link precedent). User types each side individually in Phase 1A.\n",
       "modal": true,
       "width": 460,
       "state": {
@@ -25972,6 +26922,36 @@
         "highlight_substituted_glyphs": {
           "type": "bool",
           "default": false
+        },
+        "grid_size": {
+          "type": "number",
+          "default": 72.0
+        },
+        "grid_color": {
+          "type": "string",
+          "default": "#cccccc"
+        },
+        "paper_color": {
+          "type": "string",
+          "default": "#ffffff"
+        },
+        "simulate_colored_paper": {
+          "type": "bool",
+          "default": false
+        },
+        "transparency_flattener_preset": {
+          "type": "enum",
+          "values": [
+            "low_resolution",
+            "medium_resolution",
+            "high_resolution",
+            "custom"
+          ],
+          "default": "medium_resolution"
+        },
+        "discard_white_overprint": {
+          "type": "bool",
+          "default": false
         }
       },
       "init": {
@@ -25981,7 +26961,13 @@
         "bleed_left": "active_document.document_setup.bleed_left",
         "bleed_uniform": "active_document.document_setup.bleed_uniform",
         "show_images_outline": "active_document.document_setup.show_images_outline",
-        "highlight_substituted_glyphs": "active_document.document_setup.highlight_substituted_glyphs"
+        "highlight_substituted_glyphs": "active_document.document_setup.highlight_substituted_glyphs",
+        "grid_size": "active_document.document_setup.grid_size",
+        "grid_color": "active_document.document_setup.grid_color",
+        "paper_color": "active_document.document_setup.paper_color",
+        "simulate_colored_paper": "active_document.document_setup.simulate_colored_paper",
+        "transparency_flattener_preset": "active_document.document_setup.transparency_flattener_preset",
+        "discard_white_overprint": "active_document.document_setup.discard_white_overprint"
       },
       "content": {
         "type": "container",
@@ -26166,6 +27152,185 @@
             }
           },
           {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Grid",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 12,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Size (pt):",
+                "style": {
+                  "font_size": 11,
+                  "width": 80
+                }
+              },
+              {
+                "id": "ds_grid_size",
+                "type": "number_input",
+                "min": 1,
+                "style": {
+                  "width": 80
+                },
+                "bind": {
+                  "value": "dialog.grid_size"
+                }
+              },
+              {
+                "type": "text",
+                "content": "Color:",
+                "style": {
+                  "font_size": 11,
+                  "width": 50,
+                  "padding_left": 12
+                }
+              },
+              {
+                "id": "ds_grid_color",
+                "type": "text_input",
+                "style": {
+                  "width": 100
+                },
+                "bind": {
+                  "value": "dialog.grid_color"
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Paper",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "id": "ds_simulate_colored_paper",
+            "type": "toggle",
+            "label": "Simulate Colored Paper",
+            "bind": {
+              "checked": "dialog.simulate_colored_paper"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 12,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Paper Color:",
+                "style": {
+                  "font_size": 11,
+                  "width": 80
+                }
+              },
+              {
+                "id": "ds_paper_color",
+                "type": "text_input",
+                "style": {
+                  "width": 100
+                },
+                "bind": {
+                  "value": "dialog.paper_color"
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Transparency & Overprint",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 12,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Flattener Preset:",
+                "style": {
+                  "font_size": 11,
+                  "width": 130
+                }
+              },
+              {
+                "id": "ds_transparency_flattener_preset",
+                "type": "select",
+                "options": [
+                  {
+                    "label": "Low Resolution",
+                    "value": "low_resolution"
+                  },
+                  {
+                    "label": "Medium Resolution",
+                    "value": "medium_resolution"
+                  },
+                  {
+                    "label": "High Resolution",
+                    "value": "high_resolution"
+                  },
+                  {
+                    "label": "Custom",
+                    "value": "custom"
+                  }
+                ],
+                "bind": {
+                  "value": "dialog.transparency_flattener_preset"
+                }
+              }
+            ]
+          },
+          {
+            "id": "ds_discard_white_overprint",
+            "type": "toggle",
+            "label": "Discard White Overprint in Output",
+            "bind": {
+              "checked": "dialog.discard_white_overprint"
+            }
+          },
+          {
+            "type": "text",
+            "content": "Phase 6 stores these on disk and round-trips them through Document Setup. The flattener pipeline + simulated paper rendering land in a follow-up.",
+            "style": {
+              "font_size": 10,
+              "color": "var(--jas-text-dim,#888)"
+            }
+          },
+          {
             "type": "container",
             "layout": "row",
             "style": {
@@ -26197,7 +27362,13 @@
                   "bleed_left": "dialog.bleed_left",
                   "bleed_uniform": "dialog.bleed_uniform",
                   "show_images_outline": "dialog.show_images_outline",
-                  "highlight_substituted_glyphs": "dialog.highlight_substituted_glyphs"
+                  "highlight_substituted_glyphs": "dialog.highlight_substituted_glyphs",
+                  "grid_size": "dialog.grid_size",
+                  "grid_color": "dialog.grid_color",
+                  "paper_color": "dialog.paper_color",
+                  "simulate_colored_paper": "dialog.simulate_colored_paper",
+                  "transparency_flattener_preset": "dialog.transparency_flattener_preset",
+                  "discard_white_overprint": "dialog.discard_white_overprint"
                 }
               }
             ]
@@ -28529,6 +29700,280 @@
         "custom_scale": {
           "type": "number",
           "default": 100.0
+        },
+        "mab_all_printer_marks": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_trim_marks": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_registration_marks": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_color_bars": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_page_information": {
+          "type": "bool",
+          "default": false
+        },
+        "mab_printer_mark_type": {
+          "type": "enum",
+          "values": [
+            "roman",
+            "japanese"
+          ],
+          "default": "roman"
+        },
+        "mab_trim_mark_weight": {
+          "type": "number",
+          "default": 0.25
+        },
+        "mab_mark_offset": {
+          "type": "number",
+          "default": 6.0
+        },
+        "mab_use_document_bleed": {
+          "type": "bool",
+          "default": true
+        },
+        "mab_bleed_top": {
+          "type": "number",
+          "default": 0.0
+        },
+        "mab_bleed_right": {
+          "type": "number",
+          "default": 0.0
+        },
+        "mab_bleed_bottom": {
+          "type": "number",
+          "default": 0.0
+        },
+        "mab_bleed_left": {
+          "type": "number",
+          "default": 0.0
+        },
+        "out_mode": {
+          "type": "enum",
+          "values": [
+            "composite",
+            "separations"
+          ],
+          "default": "composite"
+        },
+        "out_emulsion": {
+          "type": "enum",
+          "values": [
+            "up_right",
+            "down_right"
+          ],
+          "default": "up_right"
+        },
+        "out_image_polarity": {
+          "type": "enum",
+          "values": [
+            "positive",
+            "negative"
+          ],
+          "default": "positive"
+        },
+        "out_printer_resolution": {
+          "type": "string",
+          "default": "75 lpi / 600 dpi"
+        },
+        "out_convert_spot_to_process": {
+          "type": "bool",
+          "default": false
+        },
+        "out_overprint_black": {
+          "type": "bool",
+          "default": false
+        },
+        "out_ink0_print": {
+          "type": "bool",
+          "default": true
+        },
+        "out_ink0_frequency": {
+          "type": "number",
+          "default": 75.0
+        },
+        "out_ink0_angle": {
+          "type": "number",
+          "default": 105.0
+        },
+        "out_ink0_dot_shape": {
+          "type": "enum",
+          "values": [
+            "round",
+            "square",
+            "ellipse",
+            "diamond",
+            "line",
+            "cross",
+            "euclidean"
+          ],
+          "default": "round"
+        },
+        "out_ink1_print": {
+          "type": "bool",
+          "default": true
+        },
+        "out_ink1_frequency": {
+          "type": "number",
+          "default": 75.0
+        },
+        "out_ink1_angle": {
+          "type": "number",
+          "default": 75.0
+        },
+        "out_ink1_dot_shape": {
+          "type": "enum",
+          "values": [
+            "round",
+            "square",
+            "ellipse",
+            "diamond",
+            "line",
+            "cross",
+            "euclidean"
+          ],
+          "default": "round"
+        },
+        "out_ink2_print": {
+          "type": "bool",
+          "default": true
+        },
+        "out_ink2_frequency": {
+          "type": "number",
+          "default": 75.0
+        },
+        "out_ink2_angle": {
+          "type": "number",
+          "default": 90.0
+        },
+        "out_ink2_dot_shape": {
+          "type": "enum",
+          "values": [
+            "round",
+            "square",
+            "ellipse",
+            "diamond",
+            "line",
+            "cross",
+            "euclidean"
+          ],
+          "default": "round"
+        },
+        "out_ink3_print": {
+          "type": "bool",
+          "default": true
+        },
+        "out_ink3_frequency": {
+          "type": "number",
+          "default": 75.0
+        },
+        "out_ink3_angle": {
+          "type": "number",
+          "default": 45.0
+        },
+        "out_ink3_dot_shape": {
+          "type": "enum",
+          "values": [
+            "round",
+            "square",
+            "ellipse",
+            "diamond",
+            "line",
+            "cross",
+            "euclidean"
+          ],
+          "default": "round"
+        },
+        "gfx_flatness": {
+          "type": "number",
+          "default": 1.0
+        },
+        "gfx_font_download": {
+          "type": "enum",
+          "values": [
+            "none",
+            "subset",
+            "complete"
+          ],
+          "default": "subset"
+        },
+        "gfx_postscript_level": {
+          "type": "enum",
+          "values": [
+            "level_2",
+            "level_3"
+          ],
+          "default": "level_3"
+        },
+        "gfx_data_format": {
+          "type": "enum",
+          "values": [
+            "ascii",
+            "binary"
+          ],
+          "default": "binary"
+        },
+        "gfx_compatible_gradient_printing": {
+          "type": "bool",
+          "default": false
+        },
+        "gfx_raster_effects_resolution": {
+          "type": "number",
+          "default": 300.0
+        },
+        "cm_document_profile": {
+          "type": "string",
+          "default": "sRGB IEC61966-2.1"
+        },
+        "cm_color_handling": {
+          "type": "enum",
+          "values": [
+            "let_app_determine",
+            "let_printer_determine",
+            "postscript_color_management"
+          ],
+          "default": "let_app_determine"
+        },
+        "cm_printer_profile": {
+          "type": "string",
+          "default": ""
+        },
+        "cm_rendering_intent": {
+          "type": "enum",
+          "values": [
+            "perceptual",
+            "relative_colorimetric",
+            "saturation",
+            "absolute_colorimetric"
+          ],
+          "default": "relative_colorimetric"
+        },
+        "cm_preserve_rgb_numbers": {
+          "type": "bool",
+          "default": false
+        },
+        "adv_print_as_bitmap": {
+          "type": "bool",
+          "default": false
+        },
+        "adv_overprint_flattener_preset": {
+          "type": "enum",
+          "values": [
+            "low_resolution",
+            "medium_resolution",
+            "high_resolution",
+            "custom"
+          ],
+          "default": "medium_resolution"
         }
       },
       "init": {
@@ -28550,7 +29995,55 @@
         "placement_x": "active_document.print_preferences.placement_x",
         "placement_y": "active_document.print_preferences.placement_y",
         "scaling_mode": "active_document.print_preferences.scaling_mode",
-        "custom_scale": "active_document.print_preferences.custom_scale"
+        "custom_scale": "active_document.print_preferences.custom_scale",
+        "mab_all_printer_marks": "active_document.print_preferences.marks_and_bleed.all_printer_marks",
+        "mab_trim_marks": "active_document.print_preferences.marks_and_bleed.trim_marks",
+        "mab_registration_marks": "active_document.print_preferences.marks_and_bleed.registration_marks",
+        "mab_color_bars": "active_document.print_preferences.marks_and_bleed.color_bars",
+        "mab_page_information": "active_document.print_preferences.marks_and_bleed.page_information",
+        "mab_printer_mark_type": "active_document.print_preferences.marks_and_bleed.printer_mark_type",
+        "mab_trim_mark_weight": "active_document.print_preferences.marks_and_bleed.trim_mark_weight",
+        "mab_mark_offset": "active_document.print_preferences.marks_and_bleed.mark_offset",
+        "mab_use_document_bleed": "active_document.print_preferences.marks_and_bleed.use_document_bleed",
+        "mab_bleed_top": "active_document.print_preferences.marks_and_bleed.bleed_top",
+        "mab_bleed_right": "active_document.print_preferences.marks_and_bleed.bleed_right",
+        "mab_bleed_bottom": "active_document.print_preferences.marks_and_bleed.bleed_bottom",
+        "mab_bleed_left": "active_document.print_preferences.marks_and_bleed.bleed_left",
+        "out_mode": "active_document.print_preferences.output.mode",
+        "out_emulsion": "active_document.print_preferences.output.emulsion",
+        "out_image_polarity": "active_document.print_preferences.output.image_polarity",
+        "out_printer_resolution": "active_document.print_preferences.output.printer_resolution",
+        "out_convert_spot_to_process": "active_document.print_preferences.output.convert_spot_to_process",
+        "out_overprint_black": "active_document.print_preferences.output.overprint_black",
+        "out_ink0_print": "active_document.print_preferences.output.inks[0].print",
+        "out_ink0_frequency": "active_document.print_preferences.output.inks[0].frequency",
+        "out_ink0_angle": "active_document.print_preferences.output.inks[0].angle",
+        "out_ink0_dot_shape": "active_document.print_preferences.output.inks[0].dot_shape",
+        "out_ink1_print": "active_document.print_preferences.output.inks[1].print",
+        "out_ink1_frequency": "active_document.print_preferences.output.inks[1].frequency",
+        "out_ink1_angle": "active_document.print_preferences.output.inks[1].angle",
+        "out_ink1_dot_shape": "active_document.print_preferences.output.inks[1].dot_shape",
+        "out_ink2_print": "active_document.print_preferences.output.inks[2].print",
+        "out_ink2_frequency": "active_document.print_preferences.output.inks[2].frequency",
+        "out_ink2_angle": "active_document.print_preferences.output.inks[2].angle",
+        "out_ink2_dot_shape": "active_document.print_preferences.output.inks[2].dot_shape",
+        "out_ink3_print": "active_document.print_preferences.output.inks[3].print",
+        "out_ink3_frequency": "active_document.print_preferences.output.inks[3].frequency",
+        "out_ink3_angle": "active_document.print_preferences.output.inks[3].angle",
+        "out_ink3_dot_shape": "active_document.print_preferences.output.inks[3].dot_shape",
+        "gfx_flatness": "active_document.print_preferences.graphics.flatness",
+        "gfx_font_download": "active_document.print_preferences.graphics.font_download",
+        "gfx_postscript_level": "active_document.print_preferences.graphics.postscript_level",
+        "gfx_data_format": "active_document.print_preferences.graphics.data_format",
+        "gfx_compatible_gradient_printing": "active_document.print_preferences.graphics.compatible_gradient_printing",
+        "gfx_raster_effects_resolution": "active_document.print_preferences.graphics.raster_effects_resolution",
+        "cm_document_profile": "active_document.print_preferences.color_management.document_profile",
+        "cm_color_handling": "active_document.print_preferences.color_management.color_handling",
+        "cm_printer_profile": "active_document.print_preferences.color_management.printer_profile",
+        "cm_rendering_intent": "active_document.print_preferences.color_management.rendering_intent",
+        "cm_preserve_rgb_numbers": "active_document.print_preferences.color_management.preserve_rgb_numbers",
+        "adv_print_as_bitmap": "active_document.print_preferences.advanced.print_as_bitmap",
+        "adv_overprint_flattener_preset": "active_document.print_preferences.advanced.overprint_flattener_preset"
       },
       "content": {
         "type": "container",
@@ -29167,19 +30660,316 @@
                   "children": [
                     {
                       "type": "text",
-                      "content": "Marks and Bleed",
+                      "content": "Marks",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "id": "pr_all_printer_marks",
+                      "type": "toggle",
+                      "label": "All Printer's Marks",
+                      "bind": {
+                        "checked": "dialog.mab_all_printer_marks"
+                      }
+                    },
+                    {
+                      "id": "pr_trim_marks",
+                      "type": "toggle",
+                      "label": "Trim Marks",
+                      "bind": {
+                        "checked": "dialog.mab_trim_marks"
+                      }
+                    },
+                    {
+                      "id": "pr_registration_marks",
+                      "type": "toggle",
+                      "label": "Registration Marks",
+                      "bind": {
+                        "checked": "dialog.mab_registration_marks"
+                      }
+                    },
+                    {
+                      "id": "pr_color_bars",
+                      "type": "toggle",
+                      "label": "Color Bars",
+                      "bind": {
+                        "checked": "dialog.mab_color_bars"
+                      }
+                    },
+                    {
+                      "id": "pr_page_information",
+                      "type": "toggle",
+                      "label": "Page Information",
+                      "bind": {
+                        "checked": "dialog.mab_page_information"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Printer Mark Type:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_printer_mark_type",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Roman",
+                                  "value": "roman"
+                                },
+                                {
+                                  "label": "Japanese",
+                                  "value": "japanese"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.mab_printer_mark_type"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Trim Mark Weight (pt):",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_trim_mark_weight",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_trim_mark_weight"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Offset (pt):",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_mark_offset",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_mark_offset"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 2 (PRINT.md \u00a7Phase 2). Trim marks, registration marks, color bars, page information, mark type, weight and offset, plus per-print bleed override.",
+                      "content": "Bleed",
                       "style": {
                         "font_size": 11,
-                        "color": "var(--jas-text-dim,#888)"
+                        "font_weight": "bold"
                       }
+                    },
+                    {
+                      "id": "pr_use_document_bleed",
+                      "type": "toggle",
+                      "label": "Use Document Bleed",
+                      "bind": {
+                        "checked": "dialog.mab_use_document_bleed"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Top:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_top",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_top",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Bottom:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_bottom",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_bottom",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Left:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_left",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_left",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Right:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_mab_bleed_right",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.mab_bleed_right",
+                                "disabled": "dialog.mab_use_document_bleed"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -29196,20 +30986,730 @@
                   },
                   "children": [
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Mode:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_out_mode",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Composite",
+                                  "value": "composite"
+                                },
+                                {
+                                  "label": "Separations",
+                                  "value": "separations"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.out_mode"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Emulsion:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_out_emulsion",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Up Right",
+                                  "value": "up_right"
+                                },
+                                {
+                                  "label": "Down Right",
+                                  "value": "down_right"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.out_emulsion"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Image:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_out_image_polarity",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Positive",
+                                  "value": "positive"
+                                },
+                                {
+                                  "label": "Negative",
+                                  "value": "negative"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.out_image_polarity"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Printer Resolution:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_out_printer_resolution",
+                              "type": "text_input",
+                              "bind": {
+                                "value": "dialog.out_printer_resolution"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_out_convert_spot_to_process",
+                              "type": "checkbox",
+                              "label": "Convert All Spot Colors to Process",
+                              "bind": {
+                                "checked": "dialog.out_convert_spot_to_process"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_out_overprint_black",
+                              "type": "checkbox",
+                              "label": "Overprint Black",
+                              "bind": {
+                                "checked": "dialog.out_overprint_black"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
                       "type": "text",
-                      "content": "Output",
+                      "content": "Document Ink Options",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
-                      "type": "text",
-                      "content": "Available in Phase 3 (PRINT.md \u00a7Phase 3). Composite vs Separations, emulsion, image polarity, printer resolution, spot/process conversion, overprint black, per-ink overrides.",
+                      "type": "row",
                       "style": {
-                        "font_size": 11,
-                        "color": "var(--jas-text-dim,#888)"
-                      }
+                        "gap": 8
+                      },
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 1,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Print",
+                              "style": {
+                                "font_size": 10,
+                                "font_weight": "bold"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Ink",
+                              "style": {
+                                "font_size": 10,
+                                "font_weight": "bold"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Frequency",
+                              "style": {
+                                "font_size": 10,
+                                "font_weight": "bold"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Angle",
+                              "style": {
+                                "font_size": 10,
+                                "font_weight": "bold"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Dot Shape",
+                              "style": {
+                                "font_size": 10,
+                                "font_weight": "bold"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "style": {
+                        "gap": 8
+                      },
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 1,
+                          "children": [
+                            {
+                              "id": "pr_out_ink0_print",
+                              "type": "checkbox",
+                              "bind": {
+                                "checked": "dialog.out_ink0_print"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Process Cyan",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink0_frequency",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink0_frequency"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink0_angle",
+                              "type": "number_input",
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink0_angle"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_out_ink0_dot_shape",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Round",
+                                  "value": "round"
+                                },
+                                {
+                                  "label": "Square",
+                                  "value": "square"
+                                },
+                                {
+                                  "label": "Ellipse",
+                                  "value": "ellipse"
+                                },
+                                {
+                                  "label": "Diamond",
+                                  "value": "diamond"
+                                },
+                                {
+                                  "label": "Line",
+                                  "value": "line"
+                                },
+                                {
+                                  "label": "Cross",
+                                  "value": "cross"
+                                },
+                                {
+                                  "label": "Euclidean",
+                                  "value": "euclidean"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.out_ink0_dot_shape"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "style": {
+                        "gap": 8
+                      },
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 1,
+                          "children": [
+                            {
+                              "id": "pr_out_ink1_print",
+                              "type": "checkbox",
+                              "bind": {
+                                "checked": "dialog.out_ink1_print"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Process Magenta",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink1_frequency",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink1_frequency"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink1_angle",
+                              "type": "number_input",
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink1_angle"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_out_ink1_dot_shape",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Round",
+                                  "value": "round"
+                                },
+                                {
+                                  "label": "Square",
+                                  "value": "square"
+                                },
+                                {
+                                  "label": "Ellipse",
+                                  "value": "ellipse"
+                                },
+                                {
+                                  "label": "Diamond",
+                                  "value": "diamond"
+                                },
+                                {
+                                  "label": "Line",
+                                  "value": "line"
+                                },
+                                {
+                                  "label": "Cross",
+                                  "value": "cross"
+                                },
+                                {
+                                  "label": "Euclidean",
+                                  "value": "euclidean"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.out_ink1_dot_shape"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "style": {
+                        "gap": 8
+                      },
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 1,
+                          "children": [
+                            {
+                              "id": "pr_out_ink2_print",
+                              "type": "checkbox",
+                              "bind": {
+                                "checked": "dialog.out_ink2_print"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Process Yellow",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink2_frequency",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink2_frequency"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink2_angle",
+                              "type": "number_input",
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink2_angle"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_out_ink2_dot_shape",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Round",
+                                  "value": "round"
+                                },
+                                {
+                                  "label": "Square",
+                                  "value": "square"
+                                },
+                                {
+                                  "label": "Ellipse",
+                                  "value": "ellipse"
+                                },
+                                {
+                                  "label": "Diamond",
+                                  "value": "diamond"
+                                },
+                                {
+                                  "label": "Line",
+                                  "value": "line"
+                                },
+                                {
+                                  "label": "Cross",
+                                  "value": "cross"
+                                },
+                                {
+                                  "label": "Euclidean",
+                                  "value": "euclidean"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.out_ink2_dot_shape"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "style": {
+                        "gap": 8
+                      },
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 1,
+                          "children": [
+                            {
+                              "id": "pr_out_ink3_print",
+                              "type": "checkbox",
+                              "bind": {
+                                "checked": "dialog.out_ink3_print"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Process Black",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink3_frequency",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink3_frequency"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 2,
+                          "children": [
+                            {
+                              "id": "pr_out_ink3_angle",
+                              "type": "number_input",
+                              "style": {
+                                "width": 70
+                              },
+                              "bind": {
+                                "value": "dialog.out_ink3_angle"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "id": "pr_out_ink3_dot_shape",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Round",
+                                  "value": "round"
+                                },
+                                {
+                                  "label": "Square",
+                                  "value": "square"
+                                },
+                                {
+                                  "label": "Ellipse",
+                                  "value": "ellipse"
+                                },
+                                {
+                                  "label": "Diamond",
+                                  "value": "diamond"
+                                },
+                                {
+                                  "label": "Line",
+                                  "value": "line"
+                                },
+                                {
+                                  "label": "Cross",
+                                  "value": "cross"
+                                },
+                                {
+                                  "label": "Euclidean",
+                                  "value": "euclidean"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.out_ink3_dot_shape"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -29227,19 +31727,271 @@
                   "children": [
                     {
                       "type": "text",
-                      "content": "Graphics",
+                      "content": "Paths",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Flatness:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_flatness",
+                              "type": "number_input",
+                              "min": 0.2,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.gfx_flatness"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 4 (PRINT.md \u00a7Phase 4). Path flatness, font download, PostScript level, data format, gradient compatibility, raster effects resolution.",
+                      "content": "Lower = higher curve quality (slower). Higher = coarser approximation (faster). Range 0.2\u201310.",
                       "style": {
-                        "font_size": 11,
+                        "font_size": 10,
                         "color": "var(--jas-text-dim,#888)"
                       }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Fonts",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Download:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_font_download",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "None",
+                                  "value": "none"
+                                },
+                                {
+                                  "label": "Subset",
+                                  "value": "subset"
+                                },
+                                {
+                                  "label": "Complete",
+                                  "value": "complete"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.gfx_font_download"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Options",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "PostScript:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_postscript_level",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Level 2",
+                                  "value": "level_2"
+                                },
+                                {
+                                  "label": "Level 3",
+                                  "value": "level_3"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.gfx_postscript_level"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Data Format:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_data_format",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "ASCII",
+                                  "value": "ascii"
+                                },
+                                {
+                                  "label": "Binary",
+                                  "value": "binary"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.gfx_data_format"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_gfx_compatible_gradient_printing",
+                              "type": "checkbox",
+                              "label": "Compatible Gradient and Gradient Mesh Printing",
+                              "bind": {
+                                "checked": "dialog.gfx_compatible_gradient_printing"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Raster Effects",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Resolution (dpi):",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_raster_effects_resolution",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.gfx_raster_effects_resolution"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -29257,19 +32009,206 @@
                   "children": [
                     {
                       "type": "text",
-                      "content": "Color Management",
+                      "content": "Profiles",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Document Profile:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_document_profile",
+                              "type": "text_input",
+                              "bind": {
+                                "value": "dialog.cm_document_profile"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Printer Profile:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_printer_profile",
+                              "type": "text_input",
+                              "bind": {
+                                "value": "dialog.cm_printer_profile"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 5 (PRINT.md \u00a7Phase 5). Document and printer profiles, color handling, rendering intent, preserve RGB numbers.",
+                      "content": "ICC profile names are stored on save but not yet embedded in the PDF \u2014 that lands in a follow-up.",
                       "style": {
-                        "font_size": 11,
+                        "font_size": 10,
                         "color": "var(--jas-text-dim,#888)"
                       }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Handling",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Color Handling:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_color_handling",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Let App Determine Colors",
+                                  "value": "let_app_determine"
+                                },
+                                {
+                                  "label": "Let Printer Determine Colors",
+                                  "value": "let_printer_determine"
+                                },
+                                {
+                                  "label": "PostScript Color Management",
+                                  "value": "postscript_color_management"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.cm_color_handling"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Rendering Intent:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_rendering_intent",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Perceptual",
+                                  "value": "perceptual"
+                                },
+                                {
+                                  "label": "Relative Colorimetric",
+                                  "value": "relative_colorimetric"
+                                },
+                                {
+                                  "label": "Saturation",
+                                  "value": "saturation"
+                                },
+                                {
+                                  "label": "Absolute Colorimetric",
+                                  "value": "absolute_colorimetric"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.cm_rendering_intent"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_cm_preserve_rgb_numbers",
+                              "type": "checkbox",
+                              "label": "Preserve RGB Numbers",
+                              "bind": {
+                                "checked": "dialog.cm_preserve_rgb_numbers"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -29286,18 +32225,90 @@
                   },
                   "children": [
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_adv_print_as_bitmap",
+                              "type": "checkbox",
+                              "label": "Print as Bitmap",
+                              "bind": {
+                                "checked": "dialog.adv_print_as_bitmap"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
                       "type": "text",
-                      "content": "Advanced",
+                      "content": "Overprint Flattener",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Preset:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_adv_overprint_flattener_preset",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Low Resolution",
+                                  "value": "low_resolution"
+                                },
+                                {
+                                  "label": "Medium Resolution",
+                                  "value": "medium_resolution"
+                                },
+                                {
+                                  "label": "High Resolution",
+                                  "value": "high_resolution"
+                                },
+                                {
+                                  "label": "Custom",
+                                  "value": "custom"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.adv_overprint_flattener_preset"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 6 (PRINT.md \u00a7Phase 6). Print as bitmap, overprint flattener preset; also re-houses Document Setup transparency / overprint settings.",
+                      "content": "The flattener pipeline isn't wired in yet \u2014 Phase 6 stores the choice on disk and round-trips it through Print Preferences.",
                       "style": {
-                        "font_size": 11,
+                        "font_size": 10,
                         "color": "var(--jas-text-dim,#888)"
                       }
                     }
@@ -29367,7 +32378,55 @@
                   "placement_x": "dialog.placement_x",
                   "placement_y": "dialog.placement_y",
                   "scaling_mode": "dialog.scaling_mode",
-                  "custom_scale": "dialog.custom_scale"
+                  "custom_scale": "dialog.custom_scale",
+                  "mab_all_printer_marks": "dialog.mab_all_printer_marks",
+                  "mab_trim_marks": "dialog.mab_trim_marks",
+                  "mab_registration_marks": "dialog.mab_registration_marks",
+                  "mab_color_bars": "dialog.mab_color_bars",
+                  "mab_page_information": "dialog.mab_page_information",
+                  "mab_printer_mark_type": "dialog.mab_printer_mark_type",
+                  "mab_trim_mark_weight": "dialog.mab_trim_mark_weight",
+                  "mab_mark_offset": "dialog.mab_mark_offset",
+                  "mab_use_document_bleed": "dialog.mab_use_document_bleed",
+                  "mab_bleed_top": "dialog.mab_bleed_top",
+                  "mab_bleed_right": "dialog.mab_bleed_right",
+                  "mab_bleed_bottom": "dialog.mab_bleed_bottom",
+                  "mab_bleed_left": "dialog.mab_bleed_left",
+                  "out_mode": "dialog.out_mode",
+                  "out_emulsion": "dialog.out_emulsion",
+                  "out_image_polarity": "dialog.out_image_polarity",
+                  "out_printer_resolution": "dialog.out_printer_resolution",
+                  "out_convert_spot_to_process": "dialog.out_convert_spot_to_process",
+                  "out_overprint_black": "dialog.out_overprint_black",
+                  "out_ink0_print": "dialog.out_ink0_print",
+                  "out_ink0_frequency": "dialog.out_ink0_frequency",
+                  "out_ink0_angle": "dialog.out_ink0_angle",
+                  "out_ink0_dot_shape": "dialog.out_ink0_dot_shape",
+                  "out_ink1_print": "dialog.out_ink1_print",
+                  "out_ink1_frequency": "dialog.out_ink1_frequency",
+                  "out_ink1_angle": "dialog.out_ink1_angle",
+                  "out_ink1_dot_shape": "dialog.out_ink1_dot_shape",
+                  "out_ink2_print": "dialog.out_ink2_print",
+                  "out_ink2_frequency": "dialog.out_ink2_frequency",
+                  "out_ink2_angle": "dialog.out_ink2_angle",
+                  "out_ink2_dot_shape": "dialog.out_ink2_dot_shape",
+                  "out_ink3_print": "dialog.out_ink3_print",
+                  "out_ink3_frequency": "dialog.out_ink3_frequency",
+                  "out_ink3_angle": "dialog.out_ink3_angle",
+                  "out_ink3_dot_shape": "dialog.out_ink3_dot_shape",
+                  "gfx_flatness": "dialog.gfx_flatness",
+                  "gfx_font_download": "dialog.gfx_font_download",
+                  "gfx_postscript_level": "dialog.gfx_postscript_level",
+                  "gfx_data_format": "dialog.gfx_data_format",
+                  "gfx_compatible_gradient_printing": "dialog.gfx_compatible_gradient_printing",
+                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution",
+                  "cm_document_profile": "dialog.cm_document_profile",
+                  "cm_color_handling": "dialog.cm_color_handling",
+                  "cm_printer_profile": "dialog.cm_printer_profile",
+                  "cm_rendering_intent": "dialog.cm_rendering_intent",
+                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers",
+                  "adv_print_as_bitmap": "dialog.adv_print_as_bitmap",
+                  "adv_overprint_flattener_preset": "dialog.adv_overprint_flattener_preset"
                 }
               },
               {
@@ -29394,7 +32453,55 @@
                   "placement_x": "dialog.placement_x",
                   "placement_y": "dialog.placement_y",
                   "scaling_mode": "dialog.scaling_mode",
-                  "custom_scale": "dialog.custom_scale"
+                  "custom_scale": "dialog.custom_scale",
+                  "mab_all_printer_marks": "dialog.mab_all_printer_marks",
+                  "mab_trim_marks": "dialog.mab_trim_marks",
+                  "mab_registration_marks": "dialog.mab_registration_marks",
+                  "mab_color_bars": "dialog.mab_color_bars",
+                  "mab_page_information": "dialog.mab_page_information",
+                  "mab_printer_mark_type": "dialog.mab_printer_mark_type",
+                  "mab_trim_mark_weight": "dialog.mab_trim_mark_weight",
+                  "mab_mark_offset": "dialog.mab_mark_offset",
+                  "mab_use_document_bleed": "dialog.mab_use_document_bleed",
+                  "mab_bleed_top": "dialog.mab_bleed_top",
+                  "mab_bleed_right": "dialog.mab_bleed_right",
+                  "mab_bleed_bottom": "dialog.mab_bleed_bottom",
+                  "mab_bleed_left": "dialog.mab_bleed_left",
+                  "out_mode": "dialog.out_mode",
+                  "out_emulsion": "dialog.out_emulsion",
+                  "out_image_polarity": "dialog.out_image_polarity",
+                  "out_printer_resolution": "dialog.out_printer_resolution",
+                  "out_convert_spot_to_process": "dialog.out_convert_spot_to_process",
+                  "out_overprint_black": "dialog.out_overprint_black",
+                  "out_ink0_print": "dialog.out_ink0_print",
+                  "out_ink0_frequency": "dialog.out_ink0_frequency",
+                  "out_ink0_angle": "dialog.out_ink0_angle",
+                  "out_ink0_dot_shape": "dialog.out_ink0_dot_shape",
+                  "out_ink1_print": "dialog.out_ink1_print",
+                  "out_ink1_frequency": "dialog.out_ink1_frequency",
+                  "out_ink1_angle": "dialog.out_ink1_angle",
+                  "out_ink1_dot_shape": "dialog.out_ink1_dot_shape",
+                  "out_ink2_print": "dialog.out_ink2_print",
+                  "out_ink2_frequency": "dialog.out_ink2_frequency",
+                  "out_ink2_angle": "dialog.out_ink2_angle",
+                  "out_ink2_dot_shape": "dialog.out_ink2_dot_shape",
+                  "out_ink3_print": "dialog.out_ink3_print",
+                  "out_ink3_frequency": "dialog.out_ink3_frequency",
+                  "out_ink3_angle": "dialog.out_ink3_angle",
+                  "out_ink3_dot_shape": "dialog.out_ink3_dot_shape",
+                  "gfx_flatness": "dialog.gfx_flatness",
+                  "gfx_font_download": "dialog.gfx_font_download",
+                  "gfx_postscript_level": "dialog.gfx_postscript_level",
+                  "gfx_data_format": "dialog.gfx_data_format",
+                  "gfx_compatible_gradient_printing": "dialog.gfx_compatible_gradient_printing",
+                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution",
+                  "cm_document_profile": "dialog.cm_document_profile",
+                  "cm_color_handling": "dialog.cm_color_handling",
+                  "cm_printer_profile": "dialog.cm_printer_profile",
+                  "cm_rendering_intent": "dialog.cm_rendering_intent",
+                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers",
+                  "adv_print_as_bitmap": "dialog.adv_print_as_bitmap",
+                  "adv_overprint_flattener_preset": "dialog.adv_overprint_flattener_preset"
                 }
               }
             ]

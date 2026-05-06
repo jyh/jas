@@ -793,5 +793,177 @@ class SvgImportTest(absltest.TestCase):
         self.assertFalse(r.stroke.dash_align_anchors)
 
 
+class Phase2MetadataSvgTest(absltest.TestCase):
+    """DocumentSetup + PrintPreferences SVG persistence (PRINT.md §Phase 2)."""
+
+    def test_default_doc_emits_no_jas_blocks(self):
+        doc = Document(layers=(Layer(children=()),))
+        svg = document_to_svg(doc)
+        self.assertNotIn('<jas:document-setup', svg)
+        self.assertNotIn('<jas:print-preferences', svg)
+        self.assertNotIn('<sodipodi:namedview', svg)
+
+    def test_non_default_document_setup_round_trips(self):
+        from document.document_setup import DocumentSetup
+        s = DocumentSetup(
+            bleed_top=9.0, bleed_right=18.0,
+            bleed_bottom=36.0, bleed_left=12.0,
+            bleed_uniform=False,
+            show_images_outline=True,
+            highlight_substituted_glyphs=True)
+        doc = Document(layers=(Layer(children=()),), document_setup=s)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:document-setup', svg)
+        self.assertIn('xmlns:jas=', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.document_setup, s)
+
+    def test_advanced_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, Advanced, FlattenerPreset,
+        )
+        a = Advanced(
+            print_as_bitmap=True,
+            overprint_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+        )
+        p = PrintPreferences(advanced=a)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:advanced', svg)
+        self.assertIn('print-as-bitmap="true"', svg)
+        self.assertIn('overprint-flattener-preset="high_resolution"', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.advanced, a)
+
+    def test_document_setup_phase6_fields_round_trip_through_svg(self):
+        from document.document_setup import DocumentSetup
+        from document.print_preferences import FlattenerPreset
+        s = DocumentSetup(
+            grid_size=36.0,
+            grid_color="#0099ff",
+            paper_color="#fff8e7",
+            simulate_colored_paper=True,
+            transparency_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+            discard_white_overprint=True,
+        )
+        doc = Document(layers=(Layer(children=()),), document_setup=s)
+        svg = document_to_svg(doc)
+        self.assertIn('grid-size="36"', svg)
+        self.assertIn('paper-color="#fff8e7"', svg)
+        self.assertIn('simulate-colored-paper="true"', svg)
+        self.assertIn('transparency-flattener-preset="high_resolution"', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.document_setup, s)
+
+    def test_color_management_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, ColorManagement, ColorHandling, RenderingIntent,
+        )
+        c = ColorManagement(
+            document_profile="Adobe RGB (1998)",
+            color_handling=ColorHandling.POSTSCRIPT_COLOR_MANAGEMENT,
+            printer_profile="U.S. Web Coated (SWOP) v2",
+            rendering_intent=RenderingIntent.SATURATION,
+            preserve_rgb_numbers=True,
+        )
+        p = PrintPreferences(color_management=c)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:color-management', svg)
+        self.assertIn('color-handling="postscript_color_management"', svg)
+        self.assertIn('rendering-intent="saturation"', svg)
+        self.assertIn('Adobe RGB (1998)', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.color_management, c)
+
+    def test_graphics_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, Graphics, FontDownload, PostScriptLevel, DataFormat,
+        )
+        g = Graphics(
+            flatness=0.4,
+            font_download=FontDownload.COMPLETE,
+            postscript_level=PostScriptLevel.LEVEL_2,
+            data_format=DataFormat.ASCII,
+            compatible_gradient_printing=True,
+            raster_effects_resolution=600.0,
+        )
+        p = PrintPreferences(graphics=g)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:graphics', svg)
+        self.assertIn('flatness="0.4"', svg)
+        self.assertIn('font-download="complete"', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.graphics, g)
+
+    def test_output_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, Output, OutputMode, Emulsion, ImagePolarity,
+            DotShape, InkOverride,
+        )
+        o = Output(
+            mode=OutputMode.SEPARATIONS,
+            emulsion=Emulsion.DOWN_RIGHT,
+            image_polarity=ImagePolarity.NEGATIVE,
+            printer_resolution="150 lpi / 1200 dpi",
+            convert_spot_to_process=True,
+            overprint_black=True,
+            inks=(
+                InkOverride(name="Process Cyan", print=False,
+                            frequency=100.0, angle=105.0,
+                            dot_shape=DotShape.ELLIPSE),
+                InkOverride(name="PANTONE 185 C", print=True,
+                            frequency=85.0, angle=45.0,
+                            dot_shape=DotShape.SQUARE),
+            ),
+        )
+        p = PrintPreferences(output=o)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:output', svg)
+        self.assertIn('<jas:ink', svg)
+        self.assertIn('PANTONE 185 C', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.output, o)
+
+    def test_non_default_print_preferences_round_trip(self):
+        from document.print_preferences import (
+            PrintPreferences, MarksAndBleed, ArtboardRangeMode, MediaSize,
+            Orientation, PrintLayers, ScalingMode, PrinterMarkType,
+        )
+        m = MarksAndBleed(
+            all_printer_marks=True, trim_marks=True,
+            registration_marks=True, color_bars=True,
+            page_information=True,
+            printer_mark_type=PrinterMarkType.JAPANESE,
+            trim_mark_weight=0.5, mark_offset=12.0,
+            use_document_bleed=False,
+            bleed_top=4.0, bleed_right=5.0,
+            bleed_bottom=6.0, bleed_left=7.0)
+        p = PrintPreferences(
+            preset_name="My Preset",
+            printer_name="LaserJet 5000",
+            copies=3, collate=True, reverse_order=True,
+            artboard_range_mode=ArtboardRangeMode.RANGE,
+            artboard_range="1-3,5",
+            ignore_artboards=True, skip_blank_artboards=True,
+            media_size=MediaSize.A4,
+            media_width=595.0, media_height=842.0,
+            orientation=Orientation.LANDSCAPE,
+            auto_rotate=False, transverse=True,
+            print_layers=PrintLayers.VISIBLE,
+            placement_x=12.5, placement_y=-3.25,
+            scaling_mode=ScalingMode.CUSTOM, custom_scale=75.0,
+            tile_overlap_h=1.0, tile_overlap_v=2.0, tile_range="1-2",
+            marks_and_bleed=m)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:print-preferences', svg)
+        self.assertIn('<jas:marks-and-bleed', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences, p)
+
+
 if __name__ == "__main__":
     absltest.main()

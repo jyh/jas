@@ -6,6 +6,11 @@ from document.document_setup import DocumentSetup
 from document.print_preferences import (
     PrintPreferences, PrintPreset, ArtboardRangeMode, MediaSize, Orientation,
     PrintLayers, ScalingMode, DEFAULT_PRESET,
+    MarksAndBleed, PrinterMarkType,
+    Output, OutputMode, Emulsion, ImagePolarity, DotShape, InkOverride,
+    Graphics, FontDownload, PostScriptLevel, DataFormat,
+    ColorManagement, ColorHandling, RenderingIntent,
+    Advanced, FlattenerPreset,
 )
 from geometry.test_json import document_to_test_json, test_json_to_document
 
@@ -134,6 +139,229 @@ class TestJsonCodecTest(absltest.TestCase):
         d = Document(print_preferences=p)
         d2 = test_json_to_document(document_to_test_json(d))
         self.assertEqual(d2.print_preferences, p)
+
+
+class MarksAndBleedTest(absltest.TestCase):
+    """PRINT.md §Phase 2 sub-record on PrintPreferences."""
+
+    def test_defaults(self):
+        m = MarksAndBleed()
+        self.assertFalse(m.all_printer_marks)
+        self.assertFalse(m.trim_marks)
+        self.assertFalse(m.registration_marks)
+        self.assertFalse(m.color_bars)
+        self.assertFalse(m.page_information)
+        self.assertEqual(m.printer_mark_type, PrinterMarkType.ROMAN)
+        self.assertEqual(m.trim_mark_weight, 0.25)
+        self.assertEqual(m.mark_offset, 6.0)
+        self.assertTrue(m.use_document_bleed)
+        self.assertEqual(m.bleed_top, 0.0)
+        self.assertEqual(m.bleed_right, 0.0)
+        self.assertEqual(m.bleed_bottom, 0.0)
+        self.assertEqual(m.bleed_left, 0.0)
+
+    def test_printer_mark_type_strings(self):
+        self.assertEqual(PrinterMarkType.ROMAN.value, "roman")
+        self.assertEqual(PrinterMarkType.JAPANESE.value, "japanese")
+
+    def test_marks_and_bleed_roundtrip(self):
+        m = MarksAndBleed(
+            all_printer_marks=True, trim_marks=True,
+            registration_marks=True, color_bars=True,
+            page_information=True,
+            printer_mark_type=PrinterMarkType.JAPANESE,
+            trim_mark_weight=0.5, mark_offset=12.0,
+            use_document_bleed=False,
+            bleed_top=4.0, bleed_right=5.0,
+            bleed_bottom=6.0, bleed_left=7.0,
+        )
+        p = PrintPreferences(marks_and_bleed=m)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"marks_and_bleed"', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.marks_and_bleed, m)
+
+
+class OutputTest(absltest.TestCase):
+    """PRINT.md §Phase 3 Output sub-record."""
+
+    def test_defaults(self):
+        o = Output()
+        self.assertEqual(o.mode, OutputMode.COMPOSITE)
+        self.assertEqual(o.emulsion, Emulsion.UP_RIGHT)
+        self.assertEqual(o.image_polarity, ImagePolarity.POSITIVE)
+        self.assertEqual(o.printer_resolution, "75 lpi / 600 dpi")
+        self.assertFalse(o.convert_spot_to_process)
+        self.assertFalse(o.overprint_black)
+        self.assertEqual(len(o.inks), 4)
+        self.assertEqual(o.inks[0].name, "Process Cyan")
+        self.assertEqual(o.inks[0].angle, 105.0)
+        self.assertEqual(o.inks[1].name, "Process Magenta")
+        self.assertEqual(o.inks[2].name, "Process Yellow")
+        self.assertEqual(o.inks[3].name, "Process Black")
+        self.assertEqual(o.inks[3].angle, 45.0)
+        for ink in o.inks:
+            self.assertTrue(ink.print)
+            self.assertEqual(ink.frequency, 75.0)
+            self.assertEqual(ink.dot_shape, DotShape.ROUND)
+
+    def test_enum_strings(self):
+        self.assertEqual(OutputMode.COMPOSITE.value, "composite")
+        self.assertEqual(OutputMode.SEPARATIONS.value, "separations")
+        self.assertEqual(Emulsion.UP_RIGHT.value, "up_right")
+        self.assertEqual(Emulsion.DOWN_RIGHT.value, "down_right")
+        self.assertEqual(ImagePolarity.POSITIVE.value, "positive")
+        self.assertEqual(ImagePolarity.NEGATIVE.value, "negative")
+        self.assertEqual(DotShape.ROUND.value, "round")
+        self.assertEqual(DotShape.EUCLIDEAN.value, "euclidean")
+
+    def test_output_roundtrip(self):
+        o = Output(
+            mode=OutputMode.SEPARATIONS,
+            emulsion=Emulsion.DOWN_RIGHT,
+            image_polarity=ImagePolarity.NEGATIVE,
+            printer_resolution="150 lpi / 1200 dpi",
+            convert_spot_to_process=True,
+            overprint_black=True,
+            inks=(
+                InkOverride(name="Process Cyan", print=False,
+                            frequency=100.0, angle=105.0,
+                            dot_shape=DotShape.ELLIPSE),
+                InkOverride(name="PANTONE 185 C", print=True,
+                            frequency=85.0, angle=45.0,
+                            dot_shape=DotShape.SQUARE),
+            ),
+        )
+        p = PrintPreferences(output=o)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"output"', j)
+        self.assertIn('"PANTONE 185 C"', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.output, o)
+
+
+class GraphicsTest(absltest.TestCase):
+    """PRINT.md §Phase 4 Graphics sub-record."""
+
+    def test_defaults(self):
+        g = Graphics()
+        self.assertEqual(g.flatness, 1.0)
+        self.assertEqual(g.font_download, FontDownload.SUBSET)
+        self.assertEqual(g.postscript_level, PostScriptLevel.LEVEL_3)
+        self.assertEqual(g.data_format, DataFormat.BINARY)
+        self.assertFalse(g.compatible_gradient_printing)
+        self.assertEqual(g.raster_effects_resolution, 300.0)
+
+    def test_enum_strings(self):
+        self.assertEqual(FontDownload.NONE.value, "none")
+        self.assertEqual(FontDownload.SUBSET.value, "subset")
+        self.assertEqual(FontDownload.COMPLETE.value, "complete")
+        self.assertEqual(PostScriptLevel.LEVEL_2.value, "level_2")
+        self.assertEqual(PostScriptLevel.LEVEL_3.value, "level_3")
+        self.assertEqual(DataFormat.ASCII.value, "ascii")
+        self.assertEqual(DataFormat.BINARY.value, "binary")
+
+    def test_graphics_roundtrip(self):
+        g = Graphics(
+            flatness=0.4,
+            font_download=FontDownload.COMPLETE,
+            postscript_level=PostScriptLevel.LEVEL_2,
+            data_format=DataFormat.ASCII,
+            compatible_gradient_printing=True,
+            raster_effects_resolution=600.0,
+        )
+        p = PrintPreferences(graphics=g)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"graphics"', j)
+        self.assertIn('"flatness":0.4', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.graphics, g)
+
+
+class ColorManagementTest(absltest.TestCase):
+    """PRINT.md §Phase 5 ColorManagement sub-record."""
+
+    def test_defaults(self):
+        c = ColorManagement()
+        self.assertEqual(c.document_profile, "sRGB IEC61966-2.1")
+        self.assertEqual(c.color_handling, ColorHandling.LET_APP_DETERMINE)
+        self.assertEqual(c.printer_profile, "")
+        self.assertEqual(c.rendering_intent, RenderingIntent.RELATIVE_COLORIMETRIC)
+        self.assertFalse(c.preserve_rgb_numbers)
+
+    def test_enum_strings(self):
+        self.assertEqual(ColorHandling.LET_APP_DETERMINE.value, "let_app_determine")
+        self.assertEqual(ColorHandling.LET_PRINTER_DETERMINE.value, "let_printer_determine")
+        self.assertEqual(ColorHandling.POSTSCRIPT_COLOR_MANAGEMENT.value, "postscript_color_management")
+        self.assertEqual(RenderingIntent.PERCEPTUAL.value, "perceptual")
+        self.assertEqual(RenderingIntent.RELATIVE_COLORIMETRIC.value, "relative_colorimetric")
+        self.assertEqual(RenderingIntent.SATURATION.value, "saturation")
+        self.assertEqual(RenderingIntent.ABSOLUTE_COLORIMETRIC.value, "absolute_colorimetric")
+
+    def test_color_management_roundtrip(self):
+        c = ColorManagement(
+            document_profile="Adobe RGB (1998)",
+            color_handling=ColorHandling.POSTSCRIPT_COLOR_MANAGEMENT,
+            printer_profile="U.S. Web Coated (SWOP) v2",
+            rendering_intent=RenderingIntent.SATURATION,
+            preserve_rgb_numbers=True,
+        )
+        p = PrintPreferences(color_management=c)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"color_management"', j)
+        self.assertIn('"color_handling":"postscript_color_management"', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.color_management, c)
+
+
+class AdvancedTest(absltest.TestCase):
+    """PRINT.md §Phase 6 Advanced sub-record."""
+
+    def test_defaults(self):
+        a = Advanced()
+        self.assertFalse(a.print_as_bitmap)
+        self.assertEqual(a.overprint_flattener_preset,
+                         FlattenerPreset.MEDIUM_RESOLUTION)
+
+    def test_flattener_preset_strings(self):
+        self.assertEqual(FlattenerPreset.LOW_RESOLUTION.value, "low_resolution")
+        self.assertEqual(FlattenerPreset.MEDIUM_RESOLUTION.value, "medium_resolution")
+        self.assertEqual(FlattenerPreset.HIGH_RESOLUTION.value, "high_resolution")
+        self.assertEqual(FlattenerPreset.CUSTOM.value, "custom")
+
+    def test_advanced_roundtrip(self):
+        a = Advanced(
+            print_as_bitmap=True,
+            overprint_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+        )
+        p = PrintPreferences(advanced=a)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"advanced"', j)
+        self.assertIn('"print_as_bitmap":true', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.advanced, a)
+
+    def test_document_setup_phase6_roundtrip(self):
+        s = DocumentSetup(
+            grid_size=36.0,
+            grid_color="#0099ff",
+            paper_color="#fff8e7",
+            simulate_colored_paper=True,
+            transparency_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+            discard_white_overprint=True,
+        )
+        d = Document(document_setup=s)
+        j = document_to_test_json(d)
+        self.assertIn('"grid_size":36.0', j)
+        self.assertIn('"paper_color":"#fff8e7"', j)
+        self.assertIn('"simulate_colored_paper":true', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.document_setup, s)
 
 
 if __name__ == "__main__":

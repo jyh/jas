@@ -518,24 +518,108 @@ private func documentSetupJson(_ s: DocumentSetup) -> String {
     o.num("bleed_right", s.bleedRight)
     o.num("bleed_top", s.bleedTop)
     o.bool("bleed_uniform", s.bleedUniform)
+    o.bool("discard_white_overprint", s.discardWhiteOverprint)
+    o.str("grid_color", s.gridColor)
+    o.num("grid_size", s.gridSize)
     o.bool("highlight_substituted_glyphs", s.highlightSubstitutedGlyphs)
+    o.str("paper_color", s.paperColor)
     o.bool("show_images_outline", s.showImagesOutline)
+    o.bool("simulate_colored_paper", s.simulateColoredPaper)
+    o.str("transparency_flattener_preset", s.transparencyFlattenerPreset.rawValue)
+    return o.build()
+}
+
+private func advancedJson(_ a: Advanced) -> String {
+    let o = JsonObj()
+    o.str("overprint_flattener_preset", a.overprintFlattenerPreset.rawValue)
+    o.bool("print_as_bitmap", a.printAsBitmap)
+    return o.build()
+}
+
+private func colorManagementJson(_ c: ColorManagement) -> String {
+    let o = JsonObj()
+    o.str("color_handling", c.colorHandling.rawValue)
+    o.str("document_profile", c.documentProfile)
+    o.bool("preserve_rgb_numbers", c.preserveRgbNumbers)
+    o.str("printer_profile", c.printerProfile)
+    o.str("rendering_intent", c.renderingIntent.rawValue)
+    return o.build()
+}
+
+private func graphicsJson(_ g: Graphics) -> String {
+    let o = JsonObj()
+    o.bool("compatible_gradient_printing", g.compatibleGradientPrinting)
+    o.str("data_format", g.dataFormat.rawValue)
+    o.num("flatness", g.flatness)
+    o.str("font_download", g.fontDownload.rawValue)
+    o.str("postscript_level", g.postscriptLevel.rawValue)
+    o.num("raster_effects_resolution", g.rasterEffectsResolution)
+    return o.build()
+}
+
+private func inkOverrideJson(_ ink: InkOverride) -> String {
+    let o = JsonObj()
+    o.num("angle", ink.angle)
+    o.str("dot_shape", ink.dotShape.rawValue)
+    o.num("frequency", ink.frequency)
+    o.str("name", ink.name)
+    o.bool("print", ink.print)
+    return o.build()
+}
+
+private func inksJson(_ inks: [InkOverride]) -> String {
+    let items = inks.map(inkOverrideJson)
+    return jsonArray(items)
+}
+
+private func outputJson(_ out: Output) -> String {
+    let o = JsonObj()
+    o.bool("convert_spot_to_process", out.convertSpotToProcess)
+    o.str("emulsion", out.emulsion.rawValue)
+    o.str("image_polarity", out.imagePolarity.rawValue)
+    o.raw("inks", inksJson(out.inks))
+    o.str("mode", out.mode.rawValue)
+    o.bool("overprint_black", out.overprintBlack)
+    o.str("printer_resolution", out.printerResolution)
+    return o.build()
+}
+
+private func marksAndBleedJson(_ m: MarksAndBleed) -> String {
+    let o = JsonObj()
+    o.bool("all_printer_marks", m.allPrinterMarks)
+    o.num("bleed_bottom", m.bleedBottom)
+    o.num("bleed_left", m.bleedLeft)
+    o.num("bleed_right", m.bleedRight)
+    o.num("bleed_top", m.bleedTop)
+    o.bool("color_bars", m.colorBars)
+    o.num("mark_offset", m.markOffset)
+    o.bool("page_information", m.pageInformation)
+    o.str("printer_mark_type", m.printerMarkType.rawValue)
+    o.bool("registration_marks", m.registrationMarks)
+    o.num("trim_mark_weight", m.trimMarkWeight)
+    o.bool("trim_marks", m.trimMarks)
+    o.bool("use_document_bleed", m.useDocumentBleed)
     return o.build()
 }
 
 private func printPreferencesJson(_ p: PrintPreferences) -> String {
     let o = JsonObj()
+    o.raw("advanced", advancedJson(p.advanced))
     o.str("artboard_range", p.artboardRange)
     o.str("artboard_range_mode", p.artboardRangeMode.rawValue)
     o.bool("auto_rotate", p.autoRotate)
     o.bool("collate", p.collate)
+    o.raw("color_management", colorManagementJson(p.colorManagement))
     o.int("copies", p.copies)
     o.num("custom_scale", p.customScale)
+    o.raw("graphics", graphicsJson(p.graphics))
     o.bool("ignore_artboards", p.ignoreArtboards)
+    o.raw("marks_and_bleed", marksAndBleedJson(p.marksAndBleed))
     o.num("media_height", p.mediaHeight)
     o.str("media_size", p.mediaSize.rawValue)
     o.num("media_width", p.mediaWidth)
     o.str("orientation", p.orientation.rawValue)
+    o.raw("output", outputJson(p.output))
     o.num("placement_x", p.placementX)
     o.num("placement_y", p.placementY)
     o.str("preset_name", p.presetName)
@@ -939,7 +1023,100 @@ private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
         bleedLeft: (d["bleed_left"] as? NSNumber)?.doubleValue ?? def.bleedLeft,
         bleedUniform: (d["bleed_uniform"] as? Bool) ?? def.bleedUniform,
         showImagesOutline: (d["show_images_outline"] as? Bool) ?? def.showImagesOutline,
-        highlightSubstitutedGlyphs: (d["highlight_substituted_glyphs"] as? Bool) ?? def.highlightSubstitutedGlyphs
+        highlightSubstitutedGlyphs: (d["highlight_substituted_glyphs"] as? Bool) ?? def.highlightSubstitutedGlyphs,
+        gridSize: (d["grid_size"] as? NSNumber)?.doubleValue ?? def.gridSize,
+        gridColor: (d["grid_color"] as? String) ?? def.gridColor,
+        paperColor: (d["paper_color"] as? String) ?? def.paperColor,
+        simulateColoredPaper: (d["simulate_colored_paper"] as? Bool) ?? def.simulateColoredPaper,
+        transparencyFlattenerPreset: FlattenerPreset(rawValue: (d["transparency_flattener_preset"] as? String) ?? "") ?? def.transparencyFlattenerPreset,
+        discardWhiteOverprint: (d["discard_white_overprint"] as? Bool) ?? def.discardWhiteOverprint
+    )
+}
+
+private func parseAdvanced(_ v: Any?) -> Advanced {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = Advanced.default
+    return Advanced(
+        printAsBitmap: (d["print_as_bitmap"] as? Bool) ?? def.printAsBitmap,
+        overprintFlattenerPreset: FlattenerPreset(rawValue: (d["overprint_flattener_preset"] as? String) ?? "") ?? def.overprintFlattenerPreset
+    )
+}
+
+private func parseColorManagement(_ v: Any?) -> ColorManagement {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = ColorManagement.default
+    return ColorManagement(
+        documentProfile: (d["document_profile"] as? String) ?? def.documentProfile,
+        colorHandling: ColorHandling(rawValue: (d["color_handling"] as? String) ?? "") ?? def.colorHandling,
+        printerProfile: (d["printer_profile"] as? String) ?? def.printerProfile,
+        renderingIntent: RenderingIntent(rawValue: (d["rendering_intent"] as? String) ?? "") ?? def.renderingIntent,
+        preserveRgbNumbers: (d["preserve_rgb_numbers"] as? Bool) ?? def.preserveRgbNumbers
+    )
+}
+
+private func parseGraphics(_ v: Any?) -> Graphics {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = Graphics.default
+    return Graphics(
+        flatness: (d["flatness"] as? NSNumber)?.doubleValue ?? def.flatness,
+        fontDownload: FontDownload(rawValue: (d["font_download"] as? String) ?? "") ?? def.fontDownload,
+        postscriptLevel: PostScriptLevel(rawValue: (d["postscript_level"] as? String) ?? "") ?? def.postscriptLevel,
+        dataFormat: DataFormat(rawValue: (d["data_format"] as? String) ?? "") ?? def.dataFormat,
+        compatibleGradientPrinting: (d["compatible_gradient_printing"] as? Bool) ?? def.compatibleGradientPrinting,
+        rasterEffectsResolution: (d["raster_effects_resolution"] as? NSNumber)?.doubleValue ?? def.rasterEffectsResolution
+    )
+}
+
+private func parseInkOverride(_ v: Any?) -> InkOverride {
+    guard let d = v as? [String: Any] else {
+        return InkOverride(name: "")
+    }
+    return InkOverride(
+        name: (d["name"] as? String) ?? "",
+        print: (d["print"] as? Bool) ?? true,
+        frequency: (d["frequency"] as? NSNumber)?.doubleValue ?? 75.0,
+        angle: (d["angle"] as? NSNumber)?.doubleValue ?? 45.0,
+        dotShape: DotShape(rawValue: (d["dot_shape"] as? String) ?? "") ?? .round
+    )
+}
+
+private func parseOutput(_ v: Any?) -> Output {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = Output.default
+    let inks: [InkOverride] = {
+        if let arr = d["inks"] as? [Any] {
+            return arr.map { parseInkOverride($0) }
+        }
+        return def.inks
+    }()
+    return Output(
+        mode: OutputMode(rawValue: (d["mode"] as? String) ?? "") ?? def.mode,
+        emulsion: Emulsion(rawValue: (d["emulsion"] as? String) ?? "") ?? def.emulsion,
+        imagePolarity: ImagePolarity(rawValue: (d["image_polarity"] as? String) ?? "") ?? def.imagePolarity,
+        printerResolution: (d["printer_resolution"] as? String) ?? def.printerResolution,
+        convertSpotToProcess: (d["convert_spot_to_process"] as? Bool) ?? def.convertSpotToProcess,
+        overprintBlack: (d["overprint_black"] as? Bool) ?? def.overprintBlack,
+        inks: inks
+    )
+}
+
+private func parseMarksAndBleed(_ v: Any?) -> MarksAndBleed {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = MarksAndBleed.default
+    return MarksAndBleed(
+        allPrinterMarks: (d["all_printer_marks"] as? Bool) ?? def.allPrinterMarks,
+        trimMarks: (d["trim_marks"] as? Bool) ?? def.trimMarks,
+        registrationMarks: (d["registration_marks"] as? Bool) ?? def.registrationMarks,
+        colorBars: (d["color_bars"] as? Bool) ?? def.colorBars,
+        pageInformation: (d["page_information"] as? Bool) ?? def.pageInformation,
+        printerMarkType: PrinterMarkType(rawValue: (d["printer_mark_type"] as? String) ?? "") ?? def.printerMarkType,
+        trimMarkWeight: (d["trim_mark_weight"] as? NSNumber)?.doubleValue ?? def.trimMarkWeight,
+        markOffset: (d["mark_offset"] as? NSNumber)?.doubleValue ?? def.markOffset,
+        useDocumentBleed: (d["use_document_bleed"] as? Bool) ?? def.useDocumentBleed,
+        bleedTop: (d["bleed_top"] as? NSNumber)?.doubleValue ?? def.bleedTop,
+        bleedRight: (d["bleed_right"] as? NSNumber)?.doubleValue ?? def.bleedRight,
+        bleedBottom: (d["bleed_bottom"] as? NSNumber)?.doubleValue ?? def.bleedBottom,
+        bleedLeft: (d["bleed_left"] as? NSNumber)?.doubleValue ?? def.bleedLeft
     )
 }
 
@@ -973,7 +1150,12 @@ private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
         customScale: (d["custom_scale"] as? NSNumber)?.doubleValue ?? def.customScale,
         tileOverlapH: (d["tile_overlap_h"] as? NSNumber)?.doubleValue ?? def.tileOverlapH,
         tileOverlapV: (d["tile_overlap_v"] as? NSNumber)?.doubleValue ?? def.tileOverlapV,
-        tileRange: (d["tile_range"] as? String) ?? def.tileRange
+        tileRange: (d["tile_range"] as? String) ?? def.tileRange,
+        marksAndBleed: parseMarksAndBleed(d["marks_and_bleed"]),
+        output: parseOutput(d["output"]),
+        graphics: parseGraphics(d["graphics"]),
+        colorManagement: parseColorManagement(d["color_management"]),
+        advanced: parseAdvanced(d["advanced"])
     )
 }
 

@@ -27,8 +27,17 @@
 
 use crate::document::artboard::Artboard;
 use crate::document::document::Document;
-use crate::document::print_preferences::{PrintLayers, ScalingMode};
+use crate::document::print_preferences::{
+    MarksAndBleed, OutputMode, PrintLayers, ScalingMode,
+};
 use crate::geometry::element::*;
+
+/// Length of a single trim mark in points. Standard print convention.
+const TRIM_MARK_LENGTH: f64 = 12.0;
+/// Radius of the registration mark circle (with cross inscribed).
+const REG_MARK_RADIUS: f64 = 4.0;
+/// Edge of one color-bar swatch in points.
+const COLOR_BAR_SWATCH: f64 = 10.0;
 
 /// Convert a document to PDF bytes. The returned Vec<u8> is a valid
 /// PDF 1.4 file: catalog → pages → page objects → content streams,
@@ -59,40 +68,132 @@ pub fn document_to_pdf(doc: &Document) -> Vec<u8> {
 
 // ── Page collection ───────────────────────────────────────────
 
+/// Page descriptor. Phase 2: ``media_box`` is extended by the active
+/// bleed plus mark gutter; the artwork's trim rect sits inside at
+/// ``(trim_x_off, trim_y_off)`` and the mark renderer reads
+/// trim_x_off / trim_y_off / trim_w / trim_h to position trim marks,
+/// registration marks, color bars, and page information OUTSIDE the
+/// trim rect.
 #[derive(Debug, Clone)]
 struct Page {
     media_box: [f64; 4], // [llx, lly, urx, ury] in points
+    /// PDF-space (y-up) offset from page origin to the artboard's
+    /// bottom-left corner. Equal to ``bleed_left + mark_gutter`` /
+    /// ``bleed_bottom + mark_gutter``.
+    trim_x_off: f64,
+    trim_y_off: f64,
+    /// Source rect in document coordinates. Drawing transforms map
+    /// (src_x, src_y) → (trim_x_off, trim_y_off + src_h) in PDF.
     src_x: f64,
     src_y: f64,
     src_w: f64,
     src_h: f64,
+    /// PRINT.md §Phase 3: when ``Some(name)``, this page is one
+    /// channel of a separations job, labelled with the ink name.
+    /// Phase 3 v1 renders the artwork the same way Composite mode
+    /// does and stamps the label as a small page-info string;
+    /// per-ink channel extraction is a deferred follow-up.
+    separation_label: Option<String>,
+}
+
+/// Resolve the active bleed values per PRINT.md §Phase 2:
+/// document-level bleed when ``use_document_bleed`` is true, else the
+/// per-print overrides on ``MarksAndBleed``.
+fn active_bleed(doc: &Document) -> (f64, f64, f64, f64) {
+    let m = &doc.print_preferences.marks_and_bleed;
+    if m.use_document_bleed {
+        let s = &doc.document_setup;
+        (s.bleed_top, s.bleed_right, s.bleed_bottom, s.bleed_left)
+    } else {
+        (m.bleed_top, m.bleed_right, m.bleed_bottom, m.bleed_left)
+    }
+}
+
+/// Width of the gutter between the bleed edge and the page edge that
+/// holds printer's marks. Zero when no mark category is enabled so
+/// pages don't grow needlessly.
+fn mark_gutter(m: &MarksAndBleed) -> f64 {
+    let any = m.all_printer_marks
+        || m.trim_marks
+        || m.registration_marks
+        || m.color_bars
+        || m.page_information;
+    if any {
+        m.mark_offset + TRIM_MARK_LENGTH + 2.0
+    } else {
+        0.0
+    }
 }
 
 fn collect_pages(doc: &Document) -> Vec<Page> {
-    if doc.print_preferences.ignore_artboards || doc.artboards.is_empty() {
+    let (bt, br, bb, bl) = active_bleed(doc);
+    let g = mark_gutter(&doc.print_preferences.marks_and_bleed);
+    let make_page = |src_x: f64, src_y: f64, src_w: f64, src_h: f64| Page {
+        media_box: [0.0, 0.0, src_w + bl + br + 2.0 * g, src_h + bt + bb + 2.0 * g],
+        trim_x_off: bl + g,
+        trim_y_off: bb + g,
+        src_x,
+        src_y,
+        src_w,
+        src_h,
+        separation_label: None,
+    };
+    let base: Vec<Page> = if doc.print_preferences.ignore_artboards || doc.artboards.is_empty() {
         let (x, y, w, h) = if doc.artboards.is_empty() {
             (0.0, 0.0, 612.0, 792.0)
         } else {
             artboard_bounds_union(&doc.artboards)
         };
-        return vec![Page {
-            media_box: [0.0, 0.0, w, h],
-            src_x: x,
-            src_y: y,
-            src_w: w,
-            src_h: h,
-        }];
+        vec![make_page(x, y, w, h)]
+    } else {
+        doc.artboards
+            .iter()
+            .map(|ab| make_page(ab.x, ab.y, ab.width, ab.height))
+            .collect()
+    };
+    expand_for_separations(doc, base)
+}
+
+/// In Composite mode, return ``base`` unchanged. In Separations mode,
+/// emit one copy of every base page per enabled ink in
+/// ``output.inks`` (artboard-major order: artboard 1 / Cyan, artboard
+/// 1 / Magenta, …, artboard 2 / Cyan, …). When Separations mode is
+/// chosen but no inks are enabled, return ``base`` so the user still
+/// gets a PDF — silent fall-through is friendlier than an empty file.
+fn expand_for_separations(doc: &Document, base: Vec<Page>) -> Vec<Page> {
+    let out = &doc.print_preferences.output;
+    if out.mode != OutputMode::Separations {
+        return base;
     }
-    doc.artboards
-        .iter()
-        .map(|ab| Page {
-            media_box: [0.0, 0.0, ab.width, ab.height],
-            src_x: ab.x,
-            src_y: ab.y,
-            src_w: ab.width,
-            src_h: ab.height,
-        })
-        .collect()
+    let enabled: Vec<&str> = out.inks.iter()
+        .filter(|i| i.print)
+        .map(|i| i.name.as_str())
+        .collect();
+    if enabled.is_empty() {
+        return base;
+    }
+    let mut expanded = Vec::with_capacity(base.len() * enabled.len());
+    for page in base.into_iter() {
+        for name in &enabled {
+            let mut p = clone_page(&page);
+            p.separation_label = Some((*name).to_string());
+            expanded.push(p);
+        }
+    }
+    expanded
+}
+
+fn clone_page(p: &Page) -> Page {
+    Page {
+        media_box: p.media_box,
+        trim_x_off: p.trim_x_off,
+        trim_y_off: p.trim_y_off,
+        src_x: p.src_x,
+        src_y: p.src_y,
+        src_w: p.src_w,
+        src_h: p.src_h,
+        separation_label: p.separation_label.clone(),
+    }
 }
 
 fn artboard_bounds_union(abs: &[Artboard]) -> (f64, f64, f64, f64) {
@@ -116,8 +217,44 @@ fn build_page_content(doc: &Document, page: &Page) -> String {
     let (sx, sy) = scaling_pair(doc);
     let (px, py) = placement_pair(doc);
 
+    // Phase 4: path-flattening tolerance. Default 1.0 matches PDF's
+    // built-in default, so emit only when non-default to keep the
+    // content stream byte-equivalent for unchanged docs. Clamp to
+    // [0, 100] per PDF 1.7 §8.4.3.
+    let flatness = doc.print_preferences.graphics.flatness;
+    if (flatness - 1.0).abs() > f64::EPSILON {
+        let clamped = flatness.clamp(0.0, 100.0);
+        push_num(&mut s, clamped);
+        s.push_str("i\n");
+    }
+
+    // Phase 5: rendering intent. PDF's ``ri`` operator takes the
+    // intent's CamelCase name as a /Name object. Default
+    // RelativeColorimetric matches PDF 1.7 §11.6.5.8 default;
+    // emit only when non-default to keep unchanged docs
+    // byte-equivalent.
+    use crate::document::print_preferences::RenderingIntent;
+    let intent = &doc.print_preferences.color_management.rendering_intent;
+    if *intent != RenderingIntent::RelativeColorimetric {
+        let name = match intent {
+            RenderingIntent::Perceptual => "Perceptual",
+            RenderingIntent::RelativeColorimetric => "RelativeColorimetric",
+            RenderingIntent::Saturation => "Saturation",
+            RenderingIntent::AbsoluteColorimetric => "AbsoluteColorimetric",
+        };
+        s.push_str("/");
+        s.push_str(name);
+        s.push_str(" ri\n");
+    }
+
+    // Artwork pass — pushed inside one save/restore so the y-flip
+    // and source-rect translates don't leak into the marks pass.
     s.push_str("q\n");
-    // Y-flip plus a translate to put origin at (0, page_h).
+    // Position artboard inside the bleed-extended page (Phase 2).
+    if page.trim_x_off != 0.0 || page.trim_y_off != 0.0 {
+        push_cm(&mut s, 1.0, 0.0, 0.0, 1.0, page.trim_x_off, page.trim_y_off);
+    }
+    // Y-flip plus a translate to put origin at (0, src_h).
     push_cm(&mut s, 1.0, 0.0, 0.0, -1.0, 0.0, page.src_h);
     if px != 0.0 || py != 0.0 {
         push_cm(&mut s, 1.0, 0.0, 0.0, 1.0, px, py);
@@ -133,7 +270,193 @@ fn build_page_content(doc: &Document, page: &Page) -> String {
         emit_element(&mut s, layer, &doc.print_preferences.print_layers);
     }
     s.push_str("Q\n");
+
+    // Mark pass — runs in unmodified page space so positions are
+    // straightforward and the y-flip from the artwork pass doesn't
+    // confuse mark geometry. PRINT.md §Phase 2.
+    emit_marks(&mut s, doc, page);
+    // Separations label (PRINT.md §Phase 3): stamp the ink name on
+    // the page so the printer / user can tell the channels apart.
+    // Also runs in page space; placed just above the bottom-right
+    // trim corner so it doesn't collide with the page-info string
+    // at the bottom-left.
+    if let Some(name) = &page.separation_label {
+        emit_separation_label(&mut s, page, name);
+    }
     s
+}
+
+/// Stamp the ink name in 6pt Helvetica at the bottom-right of the
+/// trim rect. PDF strings are escaped so non-ASCII / special chars
+/// don't corrupt the content stream.
+fn emit_separation_label(s: &mut String, page: &Page, name: &str) {
+    let label_x = page.trim_x_off + page.src_w - 80.0;
+    let label_y = page.trim_y_off - 14.0;
+    s.push_str("q\nBT\n/F1 6 Tf\n0 0 0 rg\n");
+    push_num(s, label_x);
+    push_num(s, label_y);
+    s.push_str("Td\n(");
+    s.push_str(&pdf_escape_string(name));
+    s.push_str(") Tj\nET\nQ\n");
+}
+
+/// Escape a string for inclusion in a PDF literal-string (between
+/// parentheses): escape ``\`` ``(`` ``)`` per PDF 1.7 §7.3.4.2, and
+/// drop any non-printable byte to avoid breaking the content stream.
+fn pdf_escape_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '(' => out.push_str("\\("),
+            ')' => out.push_str("\\)"),
+            c if (c as u32) >= 0x20 && (c as u32) < 0x7f => out.push(c),
+            _ => {} // skip non-ASCII; PDF default font has no glyph anyway
+        }
+    }
+    out
+}
+
+/// Draw the printer's marks around the page's trim rect (PRINT.md
+/// §Phase 2). Operates in page (PDF y-up) space. Order: trim marks,
+/// registration marks, color bars, page information.
+fn emit_marks(s: &mut String, doc: &Document, page: &Page) {
+    let m = &doc.print_preferences.marks_and_bleed;
+    let any = m.all_printer_marks
+        || m.trim_marks
+        || m.registration_marks
+        || m.color_bars
+        || m.page_information;
+    if !any {
+        return;
+    }
+    let trim_x = page.trim_x_off;
+    let trim_y = page.trim_y_off;
+    let trim_w = page.src_w;
+    let trim_h = page.src_h;
+    if m.all_printer_marks || m.trim_marks {
+        emit_trim_marks(s, trim_x, trim_y, trim_w, trim_h, m.mark_offset, m.trim_mark_weight);
+    }
+    if m.all_printer_marks || m.registration_marks {
+        emit_registration_marks(s, trim_x, trim_y, trim_w, trim_h, m.mark_offset);
+    }
+    if m.all_printer_marks || m.color_bars {
+        emit_color_bars(s, trim_x, trim_y, trim_w, trim_h, m.mark_offset);
+    }
+    if m.all_printer_marks || m.page_information {
+        emit_page_info(s, trim_x, trim_y, trim_w, m.mark_offset);
+    }
+}
+
+/// Eight short black lines, two at each corner of the trim rect,
+/// offset by ``mark_offset`` and of ``TRIM_MARK_LENGTH``.
+fn emit_trim_marks(s: &mut String, tx: f64, ty: f64, tw: f64, th: f64,
+                   mark_offset: f64, weight: f64) {
+    s.push_str("q\n0 0 0 RG\n");
+    push_num(s, weight.max(0.05));
+    s.push_str("w\n");
+    let l = TRIM_MARK_LENGTH;
+    let g = mark_offset;
+    // For each corner, draw one horizontal and one vertical mark.
+    // Bottom-left corner.
+    push_line(s, tx - g - l, ty,         tx - g,       ty);
+    push_line(s, tx,         ty - g - l, tx,           ty - g);
+    // Bottom-right.
+    push_line(s, tx + tw + g, ty,         tx + tw + g + l, ty);
+    push_line(s, tx + tw,     ty - g - l, tx + tw,         ty - g);
+    // Top-left.
+    push_line(s, tx - g - l, ty + th,         tx - g,    ty + th);
+    push_line(s, tx,         ty + th + g,     tx,        ty + th + g + l);
+    // Top-right.
+    push_line(s, tx + tw + g, ty + th,         tx + tw + g + l, ty + th);
+    push_line(s, tx + tw,     ty + th + g,     tx + tw,         ty + th + g + l);
+    s.push_str("Q\n");
+}
+
+/// Four registration marks (cross-in-circle) at the midpoints of the
+/// trim rect's edges, offset outward by ``mark_offset``.
+fn emit_registration_marks(s: &mut String, tx: f64, ty: f64, tw: f64, th: f64,
+                            mark_offset: f64) {
+    s.push_str("q\n0 0 0 RG\n0.5 w\n");
+    let r = REG_MARK_RADIUS;
+    let off = mark_offset + r;
+    let cx_top = tx + tw / 2.0;
+    let cy_top = ty + th + off;
+    emit_reg_mark(s, cx_top, cy_top, r);
+    let cx_bot = tx + tw / 2.0;
+    let cy_bot = ty - off;
+    emit_reg_mark(s, cx_bot, cy_bot, r);
+    let cx_lft = tx - off;
+    let cy_lft = ty + th / 2.0;
+    emit_reg_mark(s, cx_lft, cy_lft, r);
+    let cx_rgt = tx + tw + off;
+    let cy_rgt = ty + th / 2.0;
+    emit_reg_mark(s, cx_rgt, cy_rgt, r);
+    s.push_str("Q\n");
+}
+
+fn emit_reg_mark(s: &mut String, cx: f64, cy: f64, r: f64) {
+    // Circle.
+    emit_circle(s, cx, cy, r, r);
+    s.push_str("S\n");
+    // Cross extending slightly past the circle for visibility.
+    let arm = r + 2.0;
+    push_line(s, cx - arm, cy, cx + arm, cy);
+    push_line(s, cx, cy - arm, cx, cy + arm);
+}
+
+/// Eight-square color bar above the trim rect's top edge: the
+/// process colors C/M/Y/K plus their RGB complements R/G/B and a
+/// 50%-grey reference.
+fn emit_color_bars(s: &mut String, tx: f64, ty: f64, tw: f64, th: f64,
+                   mark_offset: f64) {
+    let _ = tw;
+    let swatches: [(f64, f64, f64); 8] = [
+        (0.0, 1.0, 1.0), // C
+        (1.0, 0.0, 1.0), // M
+        (1.0, 1.0, 0.0), // Y
+        (0.0, 0.0, 0.0), // K
+        (1.0, 0.0, 0.0), // R
+        (0.0, 1.0, 0.0), // G
+        (0.0, 0.0, 1.0), // B
+        (0.5, 0.5, 0.5), // grey
+    ];
+    let bar_x = tx;
+    let bar_y = ty + th + mark_offset;
+    s.push_str("q\n");
+    for (i, (r, g, b)) in swatches.iter().enumerate() {
+        push_num(s, *r);
+        push_num(s, *g);
+        push_num(s, *b);
+        s.push_str("rg\n");
+        push_num(s, bar_x + (i as f64) * COLOR_BAR_SWATCH);
+        push_num(s, bar_y);
+        push_num(s, COLOR_BAR_SWATCH);
+        push_num(s, COLOR_BAR_SWATCH);
+        s.push_str("re\nf\n");
+    }
+    s.push_str("Q\n");
+}
+
+/// Single-line page info text along the bottom mark gutter. Phase 2
+/// emits "Jas — page" placeholder text using Helvetica 6pt; later
+/// phases will substitute filename / artboard name / date.
+fn emit_page_info(s: &mut String, tx: f64, ty: f64, tw: f64, mark_offset: f64) {
+    let _ = tw;
+    let info_y = ty - mark_offset - 8.0;
+    s.push_str("q\nBT\n/F1 6 Tf\n0 0 0 rg\n");
+    push_num(s, tx);
+    push_num(s, info_y);
+    s.push_str("Td\n(Jas \\261 page) Tj\nET\nQ\n");
+}
+
+fn push_line(s: &mut String, x1: f64, y1: f64, x2: f64, y2: f64) {
+    push_num(s, x1);
+    push_num(s, y1);
+    s.push_str("m\n");
+    push_num(s, x2);
+    push_num(s, y2);
+    s.push_str("l\nS\n");
 }
 
 fn scaling_pair(doc: &Document) -> (f64, f64) {
@@ -732,6 +1055,183 @@ mod tests {
         assert!(s.contains("/Count 3"), "expected /Count 3");
         let count = s.matches("/Type /Page ").count();
         assert_eq!(count, 3, "expected 3 /Type /Page entries");
+    }
+
+    #[test]
+    fn pdf_separations_emits_one_page_per_enabled_ink() {
+        use crate::document::print_preferences::OutputMode;
+        let mut doc = Document::default();
+        doc.artboards = vec![Artboard {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            ..Artboard::default_with_id("a".into())
+        }];
+        doc.print_preferences.output.mode = OutputMode::Separations;
+        // Default 4 process inks all enabled → 4 pages.
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Count 4"), "expected /Count 4, got:\n{s}");
+        // Page-info string includes each ink's name (escaped per PDF
+        // string-literal rules — names are ASCII so no surprises).
+        assert!(s.contains("(Process Cyan)"), "missing Cyan label");
+        assert!(s.contains("(Process Magenta)"), "missing Magenta label");
+        assert!(s.contains("(Process Yellow)"), "missing Yellow label");
+        assert!(s.contains("(Process Black)"), "missing Black label");
+    }
+
+    #[test]
+    fn pdf_separations_skips_unprinted_inks() {
+        use crate::document::print_preferences::OutputMode;
+        let mut doc = Document::default();
+        doc.artboards = vec![Artboard {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            ..Artboard::default_with_id("a".into())
+        }];
+        doc.print_preferences.output.mode = OutputMode::Separations;
+        // Disable Cyan + Magenta — should leave 2 pages (Yellow + Black).
+        doc.print_preferences.output.inks[0].print = false;
+        doc.print_preferences.output.inks[1].print = false;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Count 2"), "expected /Count 2, got:\n{s}");
+        assert!(!s.contains("(Process Cyan)"), "should not contain Cyan");
+        assert!(!s.contains("(Process Magenta)"), "should not contain Magenta");
+        assert!(s.contains("(Process Yellow)"));
+        assert!(s.contains("(Process Black)"));
+    }
+
+    #[test]
+    fn pdf_separations_with_zero_enabled_inks_falls_back_to_composite() {
+        use crate::document::print_preferences::OutputMode;
+        let mut doc = Document::default();
+        doc.artboards = vec![Artboard {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            ..Artboard::default_with_id("a".into())
+        }];
+        doc.print_preferences.output.mode = OutputMode::Separations;
+        for ink in &mut doc.print_preferences.output.inks {
+            ink.print = false;
+        }
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        // Empty ink list shouldn't yield an empty PDF — friendlier
+        // to fall through to the single composite page.
+        assert!(s.contains("/Count 1"), "expected /Count 1, got:\n{s}");
+    }
+
+    #[test]
+    fn pdf_composite_mode_unchanged_by_phase3_changes() {
+        let doc = Document::default();
+        // Composite is the default; ensure adding the Output sub-record
+        // didn't perturb the page count.
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Count 1"));
+        assert!(!s.contains("(Process Cyan)"),
+                "composite-mode page must not stamp ink labels");
+    }
+
+    #[test]
+    fn pdf_default_flatness_emits_no_i_operator() {
+        // Default flatness is 1.0 = PDF default; the emitter skips
+        // emitting an ``i`` operator in that case so existing
+        // content streams stay byte-equivalent.
+        let doc = Document::default();
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        // Look for "<num> i\n" — but be lenient against unrelated
+        // content. The default doc has no curves so no implicit
+        // tolerance directive should appear.
+        assert!(!s.contains(" i\n"),
+                "default flatness must not emit an i operator:\n{s}");
+    }
+
+    #[test]
+    fn pdf_non_default_flatness_emits_i_operator() {
+        let mut doc = Document::default();
+        doc.print_preferences.graphics.flatness = 5.0;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("5 i\n"),
+                "expected ``5 i`` directive in content stream:\n{s}");
+    }
+
+    #[test]
+    fn pdf_non_default_phase6_values_dont_break_output() {
+        // Phase 6 v1 stores Advanced + Phase 6 DocumentSetup fields
+        // but defers the rendering effects. This smoke-test pins
+        // down that having non-default values doesn't crash the
+        // emitter or produce malformed output — when the rendering
+        // pipeline lands later it should slot into this same
+        // envelope.
+        use crate::document::print_preferences::{Advanced, FlattenerPreset};
+        let mut doc = Document::default();
+        doc.print_preferences.advanced = Advanced {
+            print_as_bitmap: true,
+            overprint_flattener_preset: FlattenerPreset::HighResolution,
+        };
+        doc.document_setup.simulate_colored_paper = true;
+        doc.document_setup.paper_color = "#fff8e7".to_string();
+        doc.document_setup.discard_white_overprint = true;
+        doc.document_setup.transparency_flattener_preset = FlattenerPreset::HighResolution;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.starts_with("%PDF-"), "expected PDF envelope:\n{s}");
+        assert!(s.contains("%%EOF"), "expected EOF marker");
+        // Default page count (1 composite page on the empty doc)
+        // should still hold — Phase 6 doesn't change pagination.
+        assert!(s.contains("/Count 1"), "expected /Count 1");
+    }
+
+    #[test]
+    fn pdf_default_rendering_intent_emits_no_ri_operator() {
+        // RelativeColorimetric is the PDF default; the emitter
+        // skips emitting an ``ri`` operator in that case.
+        let doc = Document::default();
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(!s.contains(" ri\n"),
+                "default rendering intent must not emit an ri operator:\n{s}");
+    }
+
+    #[test]
+    fn pdf_non_default_rendering_intent_emits_ri_operator() {
+        use crate::document::print_preferences::RenderingIntent;
+        let mut doc = Document::default();
+        doc.print_preferences.color_management.rendering_intent =
+            RenderingIntent::Perceptual;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Perceptual ri\n"),
+                "expected ``/Perceptual ri`` directive:\n{s}");
+    }
+
+    #[test]
+    fn pdf_rendering_intent_uses_pdf_camelcase_names() {
+        use crate::document::print_preferences::RenderingIntent;
+        for (intent, name) in &[
+            (RenderingIntent::Perceptual, "Perceptual"),
+            (RenderingIntent::Saturation, "Saturation"),
+            (RenderingIntent::AbsoluteColorimetric, "AbsoluteColorimetric"),
+        ] {
+            let mut doc = Document::default();
+            doc.print_preferences.color_management.rendering_intent = intent.clone();
+            let bytes = document_to_pdf(&doc);
+            let s = String::from_utf8_lossy(&bytes);
+            let expected = format!("/{} ri\n", name);
+            assert!(s.contains(&expected),
+                    "expected `{}` in stream for {:?}:\n{}", expected, intent, s);
+        }
+    }
+
+    #[test]
+    fn pdf_flatness_is_clamped_to_pdf_max() {
+        let mut doc = Document::default();
+        doc.print_preferences.graphics.flatness = 1000.0;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        // Per PDF 1.7 §8.4.3 the spec ceiling is 100.
+        assert!(s.contains("100 i\n"),
+                "expected clamped ``100 i`` directive:\n{s}");
     }
 
     #[test]

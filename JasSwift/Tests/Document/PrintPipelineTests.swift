@@ -148,3 +148,220 @@ import Testing
     let doc2 = testJsonToDocument(json)
     #expect(doc2.printPreferences == p)
 }
+
+// MARK: - MarksAndBleed (PRINT.md §Phase 2)
+
+@Test func marksAndBleedDefaultsMatchSpec() {
+    let m = MarksAndBleed.default
+    #expect(m.allPrinterMarks == false)
+    #expect(m.trimMarks == false)
+    #expect(m.registrationMarks == false)
+    #expect(m.colorBars == false)
+    #expect(m.pageInformation == false)
+    #expect(m.printerMarkType == .roman)
+    #expect(m.trimMarkWeight == 0.25)
+    #expect(m.markOffset == 6.0)
+    #expect(m.useDocumentBleed == true)
+    #expect(m.bleedTop == 0)
+    #expect(m.bleedRight == 0)
+    #expect(m.bleedBottom == 0)
+    #expect(m.bleedLeft == 0)
+}
+
+@Test func printerMarkTypeRawValuesAreSnakeCase() {
+    #expect(PrinterMarkType.roman.rawValue == "roman")
+    #expect(PrinterMarkType.japanese.rawValue == "japanese")
+}
+
+@Test func advancedDefaultsMatchSpec() {
+    let a = Advanced.default
+    #expect(a.printAsBitmap == false)
+    #expect(a.overprintFlattenerPreset == .mediumResolution)
+}
+
+@Test func flattenerPresetEnumRawValuesAreSnakeCase() {
+    #expect(FlattenerPreset.lowResolution.rawValue == "low_resolution")
+    #expect(FlattenerPreset.mediumResolution.rawValue == "medium_resolution")
+    #expect(FlattenerPreset.highResolution.rawValue == "high_resolution")
+    #expect(FlattenerPreset.custom.rawValue == "custom")
+}
+
+@Test func advancedRoundTripsThroughPrintPreferences() {
+    let a = Advanced(printAsBitmap: true, overprintFlattenerPreset: .highResolution)
+    let p = PrintPreferences(advanced: a)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"advanced\""))
+    #expect(json.contains("\"print_as_bitmap\":true"))
+    #expect(json.contains("\"overprint_flattener_preset\":\"high_resolution\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.advanced == a)
+}
+
+@Test func documentSetupPhase6FieldsRoundTrip() {
+    let s = DocumentSetup(
+        gridSize: 36,
+        gridColor: "#0099ff",
+        paperColor: "#fff8e7",
+        simulateColoredPaper: true,
+        transparencyFlattenerPreset: .highResolution,
+        discardWhiteOverprint: true
+    )
+    let doc = Document(documentSetup: s)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"grid_size\":36"))
+    #expect(json.contains("\"paper_color\":\"#fff8e7\""))
+    #expect(json.contains("\"simulate_colored_paper\":true"))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.documentSetup == s)
+}
+
+@Test func colorManagementDefaultsMatchSpec() {
+    let c = ColorManagement.default
+    #expect(c.documentProfile == "sRGB IEC61966-2.1")
+    #expect(c.colorHandling == .letAppDetermine)
+    #expect(c.printerProfile == "")
+    #expect(c.renderingIntent == .relativeColorimetric)
+    #expect(c.preserveRgbNumbers == false)
+}
+
+@Test func colorManagementEnumRawValuesAreSnakeCase() {
+    #expect(ColorHandling.letAppDetermine.rawValue == "let_app_determine")
+    #expect(ColorHandling.letPrinterDetermine.rawValue == "let_printer_determine")
+    #expect(ColorHandling.postscriptColorManagement.rawValue == "postscript_color_management")
+    #expect(RenderingIntent.perceptual.rawValue == "perceptual")
+    #expect(RenderingIntent.relativeColorimetric.rawValue == "relative_colorimetric")
+    #expect(RenderingIntent.saturation.rawValue == "saturation")
+    #expect(RenderingIntent.absoluteColorimetric.rawValue == "absolute_colorimetric")
+}
+
+@Test func colorManagementRoundTripsThroughPrintPreferences() {
+    let c = ColorManagement(
+        documentProfile: "Adobe RGB (1998)",
+        colorHandling: .postscriptColorManagement,
+        printerProfile: "U.S. Web Coated (SWOP) v2",
+        renderingIntent: .saturation,
+        preserveRgbNumbers: true
+    )
+    let p = PrintPreferences(colorManagement: c)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"color_management\""))
+    #expect(json.contains("\"color_handling\":\"postscript_color_management\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.colorManagement == c)
+}
+
+@Test func graphicsDefaultsMatchSpec() {
+    let g = Graphics.default
+    #expect(g.flatness == 1.0)
+    #expect(g.fontDownload == .subset)
+    #expect(g.postscriptLevel == .level3)
+    #expect(g.dataFormat == .binary)
+    #expect(g.compatibleGradientPrinting == false)
+    #expect(g.rasterEffectsResolution == 300.0)
+}
+
+@Test func graphicsEnumRawValuesAreSnakeCase() {
+    #expect(FontDownload.none.rawValue == "none")
+    #expect(FontDownload.subset.rawValue == "subset")
+    #expect(FontDownload.complete.rawValue == "complete")
+    #expect(PostScriptLevel.level2.rawValue == "level_2")
+    #expect(PostScriptLevel.level3.rawValue == "level_3")
+    #expect(DataFormat.ascii.rawValue == "ascii")
+    #expect(DataFormat.binary.rawValue == "binary")
+}
+
+@Test func graphicsRoundTripsThroughPrintPreferences() {
+    let g = Graphics(
+        flatness: 0.4,
+        fontDownload: .complete,
+        postscriptLevel: .level2,
+        dataFormat: .ascii,
+        compatibleGradientPrinting: true,
+        rasterEffectsResolution: 600.0
+    )
+    let p = PrintPreferences(graphics: g)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"graphics\""))
+    #expect(json.contains("\"flatness\":0.4"))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.graphics == g)
+}
+
+@Test func outputDefaultsMatchSpec() {
+    let o = Output.default
+    #expect(o.mode == .composite)
+    #expect(o.emulsion == .upRight)
+    #expect(o.imagePolarity == .positive)
+    #expect(o.printerResolution == "75 lpi / 600 dpi")
+    #expect(o.convertSpotToProcess == false)
+    #expect(o.overprintBlack == false)
+    #expect(o.inks.count == 4)
+    #expect(o.inks[0].name == "Process Cyan" && o.inks[0].angle == 105.0)
+    #expect(o.inks[1].name == "Process Magenta" && o.inks[1].angle == 75.0)
+    #expect(o.inks[2].name == "Process Yellow" && o.inks[2].angle == 90.0)
+    #expect(o.inks[3].name == "Process Black" && o.inks[3].angle == 45.0)
+    for ink in o.inks {
+        #expect(ink.print)
+        #expect(ink.frequency == 75.0)
+        #expect(ink.dotShape == .round)
+    }
+}
+
+@Test func outputEnumRawValuesAreSnakeCase() {
+    #expect(OutputMode.composite.rawValue == "composite")
+    #expect(OutputMode.separations.rawValue == "separations")
+    #expect(Emulsion.upRight.rawValue == "up_right")
+    #expect(Emulsion.downRight.rawValue == "down_right")
+    #expect(ImagePolarity.positive.rawValue == "positive")
+    #expect(ImagePolarity.negative.rawValue == "negative")
+    #expect(DotShape.round.rawValue == "round")
+    #expect(DotShape.euclidean.rawValue == "euclidean")
+}
+
+@Test func outputRoundTripsThroughPrintPreferences() {
+    let o = Output(
+        mode: .separations,
+        emulsion: .downRight,
+        imagePolarity: .negative,
+        printerResolution: "150 lpi / 1200 dpi",
+        convertSpotToProcess: true,
+        overprintBlack: true,
+        inks: [
+            InkOverride(name: "Process Cyan", print: false, frequency: 100, angle: 105, dotShape: .ellipse),
+            InkOverride(name: "PANTONE 185 C", print: true, frequency: 85, angle: 45, dotShape: .square),
+        ]
+    )
+    let p = PrintPreferences(output: o)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"output\""))
+    #expect(json.contains("\"inks\""))
+    #expect(json.contains("\"PANTONE 185 C\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.output == o)
+}
+
+@Test func marksAndBleedRoundTripsThroughPrintPreferences() {
+    let m = MarksAndBleed(
+        allPrinterMarks: true,
+        trimMarks: true,
+        registrationMarks: true,
+        colorBars: true,
+        pageInformation: true,
+        printerMarkType: .japanese,
+        trimMarkWeight: 0.5,
+        markOffset: 12,
+        useDocumentBleed: false,
+        bleedTop: 4, bleedRight: 5,
+        bleedBottom: 6, bleedLeft: 7
+    )
+    let p = PrintPreferences(marksAndBleed: m)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"marks_and_bleed\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.marksAndBleed == m)
+}

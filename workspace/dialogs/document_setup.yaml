@@ -14,9 +14,10 @@ document_setup:
     persists with the document so the user's preferred mode survives
     across sessions.
 
-    Phase-1 deferrals (parked for Phase 6 / global units): units
-    selector, transparency grid, transparency-flattener preset,
-    "Discard White Overprint in Output", "Simulate Colored Paper".
+    Phase 6 added the formerly-deferred Phase-1A items: grid size /
+    color, simulate colored paper (with paper color), transparency-
+    flattener preset, "Discard White Overprint in Output". The Units
+    selector remains deferred (no global-units feature yet).
 
     Phase-1A deferral: the chain-link toggle's bleed_uniform state
     persists with the document, but mirroring a single-side edit to
@@ -49,6 +50,26 @@ document_setup:
     highlight_substituted_glyphs:
       type: bool
       default: false
+    # Phase 6 additions (deferred Phase 1A items).
+    grid_size:
+      type: number
+      default: 72.0
+    grid_color:
+      type: string
+      default: "#cccccc"
+    paper_color:
+      type: string
+      default: "#ffffff"
+    simulate_colored_paper:
+      type: bool
+      default: false
+    transparency_flattener_preset:
+      type: enum
+      values: [low_resolution, medium_resolution, high_resolution, custom]
+      default: medium_resolution
+    discard_white_overprint:
+      type: bool
+      default: false
 
   init:
     bleed_top:    "active_document.document_setup.bleed_top"
@@ -58,6 +79,12 @@ document_setup:
     bleed_uniform: "active_document.document_setup.bleed_uniform"
     show_images_outline: "active_document.document_setup.show_images_outline"
     highlight_substituted_glyphs: "active_document.document_setup.highlight_substituted_glyphs"
+    grid_size:                     "active_document.document_setup.grid_size"
+    grid_color:                    "active_document.document_setup.grid_color"
+    paper_color:                   "active_document.document_setup.paper_color"
+    simulate_colored_paper:        "active_document.document_setup.simulate_colored_paper"
+    transparency_flattener_preset: "active_document.document_setup.transparency_flattener_preset"
+    discard_white_overprint:       "active_document.document_setup.discard_white_overprint"
 
   content:
     type: container
@@ -146,6 +173,83 @@ document_setup:
         bind:
           checked: "dialog.highlight_substituted_glyphs"
 
+      # Grid section (Phase 6)
+      - type: separator
+        orientation: horizontal
+      - type: text
+        content: "Grid"
+        style: { font_size: 11, font_weight: bold }
+
+      - type: container
+        layout: row
+        style: { gap: 12, alignment: center }
+        children:
+          - { type: text, content: "Size (pt):", style: { font_size: 11, width: 80 } }
+          - id: ds_grid_size
+            type: number_input
+            min: 1
+            style: { width: 80 }
+            bind: { value: "dialog.grid_size" }
+          - { type: text, content: "Color:", style: { font_size: 11, width: 50, padding_left: 12 } }
+          - id: ds_grid_color
+            type: text_input
+            style: { width: 100 }
+            bind: { value: "dialog.grid_color" }
+
+      # Paper section (Phase 6)
+      - type: separator
+        orientation: horizontal
+      - type: text
+        content: "Paper"
+        style: { font_size: 11, font_weight: bold }
+
+      - id: ds_simulate_colored_paper
+        type: toggle
+        label: "Simulate Colored Paper"
+        bind:
+          checked: "dialog.simulate_colored_paper"
+
+      - type: container
+        layout: row
+        style: { gap: 12, alignment: center }
+        children:
+          - { type: text, content: "Paper Color:", style: { font_size: 11, width: 80 } }
+          - id: ds_paper_color
+            type: text_input
+            style: { width: 100 }
+            bind: { value: "dialog.paper_color" }
+
+      # Transparency / Overprint section (Phase 6)
+      - type: separator
+        orientation: horizontal
+      - type: text
+        content: "Transparency & Overprint"
+        style: { font_size: 11, font_weight: bold }
+
+      - type: container
+        layout: row
+        style: { gap: 12, alignment: center }
+        children:
+          - { type: text, content: "Flattener Preset:", style: { font_size: 11, width: 130 } }
+          - id: ds_transparency_flattener_preset
+            type: select
+            options:
+              - { label: "Low Resolution",    value: "low_resolution" }
+              - { label: "Medium Resolution", value: "medium_resolution" }
+              - { label: "High Resolution",   value: "high_resolution" }
+              - { label: "Custom",            value: "custom" }
+            bind:
+              value: "dialog.transparency_flattener_preset"
+
+      - id: ds_discard_white_overprint
+        type: toggle
+        label: "Discard White Overprint in Output"
+        bind:
+          checked: "dialog.discard_white_overprint"
+      - type: text
+        content: "Phase 6 stores these on disk and round-trips them through Document Setup. The flattener pipeline + simulated paper rendering land in a follow-up."
+        style: { font_size: 10, color: "var(--jas-text-dim,#888)" }
+
       # Footer: Cancel / OK
       - type: container
         layout: row
@@ -166,3 +270,9 @@ document_setup:
               bleed_uniform: "dialog.bleed_uniform"
               show_images_outline: "dialog.show_images_outline"
               highlight_substituted_glyphs: "dialog.highlight_substituted_glyphs"
+              grid_size:                     "dialog.grid_size"
+              grid_color:                    "dialog.grid_color"
+              paper_color:                   "dialog.paper_color"
+              simulate_colored_paper:        "dialog.simulate_colored_paper"
+              transparency_flattener_preset: "dialog.transparency_flattener_preset"
+              discard_white_overprint:       "dialog.discard_white_overprint"

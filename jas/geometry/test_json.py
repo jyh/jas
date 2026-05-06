@@ -511,24 +511,108 @@ def _document_setup_json(s):
     o.num("bleed_right", s.bleed_right)
     o.num("bleed_top", s.bleed_top)
     o.bool_("bleed_uniform", s.bleed_uniform)
+    o.bool_("discard_white_overprint", s.discard_white_overprint)
+    o.str("grid_color", s.grid_color)
+    o.num("grid_size", s.grid_size)
     o.bool_("highlight_substituted_glyphs", s.highlight_substituted_glyphs)
+    o.str("paper_color", s.paper_color)
     o.bool_("show_images_outline", s.show_images_outline)
+    o.bool_("simulate_colored_paper", s.simulate_colored_paper)
+    o.str("transparency_flattener_preset", s.transparency_flattener_preset.value)
+    return o.build()
+
+
+def _advanced_json(a):
+    o = _JsonObj()
+    o.str("overprint_flattener_preset", a.overprint_flattener_preset.value)
+    o.bool_("print_as_bitmap", a.print_as_bitmap)
+    return o.build()
+
+
+def _color_management_json(c):
+    o = _JsonObj()
+    o.str("color_handling", c.color_handling.value)
+    o.str("document_profile", c.document_profile)
+    o.bool_("preserve_rgb_numbers", c.preserve_rgb_numbers)
+    o.str("printer_profile", c.printer_profile)
+    o.str("rendering_intent", c.rendering_intent.value)
+    return o.build()
+
+
+def _graphics_json(g):
+    o = _JsonObj()
+    o.bool_("compatible_gradient_printing", g.compatible_gradient_printing)
+    o.str("data_format", g.data_format.value)
+    o.num("flatness", g.flatness)
+    o.str("font_download", g.font_download.value)
+    o.str("postscript_level", g.postscript_level.value)
+    o.num("raster_effects_resolution", g.raster_effects_resolution)
+    return o.build()
+
+
+def _ink_override_json(ink):
+    o = _JsonObj()
+    o.num("angle", ink.angle)
+    o.str("dot_shape", ink.dot_shape.value)
+    o.num("frequency", ink.frequency)
+    o.str("name", ink.name)
+    o.bool_("print", ink.print)
+    return o.build()
+
+
+def _inks_json(inks):
+    items = [_ink_override_json(i) for i in inks]
+    return _json_array(items)
+
+
+def _output_json(out):
+    o = _JsonObj()
+    o.bool_("convert_spot_to_process", out.convert_spot_to_process)
+    o.str("emulsion", out.emulsion.value)
+    o.str("image_polarity", out.image_polarity.value)
+    o.raw("inks", _inks_json(out.inks))
+    o.str("mode", out.mode.value)
+    o.bool_("overprint_black", out.overprint_black)
+    o.str("printer_resolution", out.printer_resolution)
+    return o.build()
+
+
+def _marks_and_bleed_json(m):
+    o = _JsonObj()
+    o.bool_("all_printer_marks", m.all_printer_marks)
+    o.num("bleed_bottom", m.bleed_bottom)
+    o.num("bleed_left", m.bleed_left)
+    o.num("bleed_right", m.bleed_right)
+    o.num("bleed_top", m.bleed_top)
+    o.bool_("color_bars", m.color_bars)
+    o.num("mark_offset", m.mark_offset)
+    o.bool_("page_information", m.page_information)
+    o.str("printer_mark_type", m.printer_mark_type.value)
+    o.bool_("registration_marks", m.registration_marks)
+    o.num("trim_mark_weight", m.trim_mark_weight)
+    o.bool_("trim_marks", m.trim_marks)
+    o.bool_("use_document_bleed", m.use_document_bleed)
     return o.build()
 
 
 def _print_preferences_json(p):
     o = _JsonObj()
+    o.raw("advanced", _advanced_json(p.advanced))
     o.str("artboard_range", p.artboard_range)
     o.str("artboard_range_mode", p.artboard_range_mode.value)
     o.bool_("auto_rotate", p.auto_rotate)
     o.bool_("collate", p.collate)
+    o.raw("color_management", _color_management_json(p.color_management))
     o.int_("copies", p.copies)
     o.num("custom_scale", p.custom_scale)
+    o.raw("graphics", _graphics_json(p.graphics))
     o.bool_("ignore_artboards", p.ignore_artboards)
+    o.raw("marks_and_bleed", _marks_and_bleed_json(p.marks_and_bleed))
     o.num("media_height", p.media_height)
     o.str("media_size", p.media_size.value)
     o.num("media_width", p.media_width)
     o.str("orientation", p.orientation.value)
+    o.raw("output", _output_json(p.output))
     o.num("placement_x", p.placement_x)
     o.num("placement_y", p.placement_y)
     o.str("preset_name", p.preset_name)
@@ -900,6 +984,7 @@ def _parse_artboard_options(v):
 
 def _parse_document_setup(v):
     from document.document_setup import DocumentSetup
+    from document.print_preferences import FlattenerPreset, _enum_from_string
     if not isinstance(v, dict):
         return DocumentSetup()
     d = DocumentSetup()
@@ -912,6 +997,137 @@ def _parse_document_setup(v):
         show_images_outline=v.get("show_images_outline", d.show_images_outline),
         highlight_substituted_glyphs=v.get(
             "highlight_substituted_glyphs", d.highlight_substituted_glyphs),
+        grid_size=v.get("grid_size", d.grid_size),
+        grid_color=v.get("grid_color", d.grid_color),
+        paper_color=v.get("paper_color", d.paper_color),
+        simulate_colored_paper=v.get(
+            "simulate_colored_paper", d.simulate_colored_paper),
+        transparency_flattener_preset=_enum_from_string(
+            FlattenerPreset, v.get("transparency_flattener_preset", ""),
+            d.transparency_flattener_preset),
+        discard_white_overprint=v.get(
+            "discard_white_overprint", d.discard_white_overprint),
+    )
+
+
+def _parse_advanced(v):
+    from document.print_preferences import (
+        Advanced, FlattenerPreset, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return Advanced()
+    d = Advanced()
+    return Advanced(
+        print_as_bitmap=v.get("print_as_bitmap", d.print_as_bitmap),
+        overprint_flattener_preset=_enum_from_string(
+            FlattenerPreset, v.get("overprint_flattener_preset", ""),
+            d.overprint_flattener_preset),
+    )
+
+
+def _parse_color_management(v):
+    from document.print_preferences import (
+        ColorManagement, ColorHandling, RenderingIntent, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return ColorManagement()
+    d = ColorManagement()
+    return ColorManagement(
+        document_profile=v.get("document_profile", d.document_profile),
+        color_handling=_enum_from_string(
+            ColorHandling, v.get("color_handling", ""), d.color_handling),
+        printer_profile=v.get("printer_profile", d.printer_profile),
+        rendering_intent=_enum_from_string(
+            RenderingIntent, v.get("rendering_intent", ""), d.rendering_intent),
+        preserve_rgb_numbers=v.get("preserve_rgb_numbers", d.preserve_rgb_numbers),
+    )
+
+
+def _parse_graphics(v):
+    from document.print_preferences import (
+        Graphics, FontDownload, PostScriptLevel, DataFormat,
+        _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return Graphics()
+    d = Graphics()
+    return Graphics(
+        flatness=v.get("flatness", d.flatness),
+        font_download=_enum_from_string(
+            FontDownload, v.get("font_download", ""), d.font_download),
+        postscript_level=_enum_from_string(
+            PostScriptLevel, v.get("postscript_level", ""), d.postscript_level),
+        data_format=_enum_from_string(
+            DataFormat, v.get("data_format", ""), d.data_format),
+        compatible_gradient_printing=v.get(
+            "compatible_gradient_printing", d.compatible_gradient_printing),
+        raster_effects_resolution=v.get(
+            "raster_effects_resolution", d.raster_effects_resolution),
+    )
+
+
+def _parse_ink_override(v):
+    from document.print_preferences import (
+        InkOverride, DotShape, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return InkOverride(name="")
+    return InkOverride(
+        name=v.get("name", ""),
+        print=v.get("print", True),
+        frequency=v.get("frequency", 75.0),
+        angle=v.get("angle", 45.0),
+        dot_shape=_enum_from_string(DotShape, v.get("dot_shape", ""), DotShape.ROUND),
+    )
+
+
+def _parse_output(v):
+    from document.print_preferences import (
+        Output, OutputMode, Emulsion, ImagePolarity, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return Output()
+    d = Output()
+    inks_raw = v.get("inks")
+    if isinstance(inks_raw, list):
+        inks = tuple(_parse_ink_override(i) for i in inks_raw)
+    else:
+        inks = d.inks
+    return Output(
+        mode=_enum_from_string(OutputMode, v.get("mode", ""), d.mode),
+        emulsion=_enum_from_string(Emulsion, v.get("emulsion", ""), d.emulsion),
+        image_polarity=_enum_from_string(
+            ImagePolarity, v.get("image_polarity", ""), d.image_polarity),
+        printer_resolution=v.get("printer_resolution", d.printer_resolution),
+        convert_spot_to_process=v.get(
+            "convert_spot_to_process", d.convert_spot_to_process),
+        overprint_black=v.get("overprint_black", d.overprint_black),
+        inks=inks,
+    )
+
+
+def _parse_marks_and_bleed(v):
+    from document.print_preferences import (
+        MarksAndBleed, PrinterMarkType, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return MarksAndBleed()
+    d = MarksAndBleed()
+    return MarksAndBleed(
+        all_printer_marks=v.get("all_printer_marks", d.all_printer_marks),
+        trim_marks=v.get("trim_marks", d.trim_marks),
+        registration_marks=v.get("registration_marks", d.registration_marks),
+        color_bars=v.get("color_bars", d.color_bars),
+        page_information=v.get("page_information", d.page_information),
+        printer_mark_type=_enum_from_string(
+            PrinterMarkType, v.get("printer_mark_type", ""), d.printer_mark_type),
+        trim_mark_weight=v.get("trim_mark_weight", d.trim_mark_weight),
+        mark_offset=v.get("mark_offset", d.mark_offset),
+        use_document_bleed=v.get("use_document_bleed", d.use_document_bleed),
+        bleed_top=v.get("bleed_top", d.bleed_top),
+        bleed_right=v.get("bleed_right", d.bleed_right),
+        bleed_bottom=v.get("bleed_bottom", d.bleed_bottom),
+        bleed_left=v.get("bleed_left", d.bleed_left),
     )
 
 
@@ -951,6 +1167,11 @@ def _parse_print_preferences(v):
         tile_overlap_h=v.get("tile_overlap_h", d.tile_overlap_h),
         tile_overlap_v=v.get("tile_overlap_v", d.tile_overlap_v),
         tile_range=v.get("tile_range", d.tile_range),
+        marks_and_bleed=_parse_marks_and_bleed(v.get("marks_and_bleed", None)),
+        output=_parse_output(v.get("output", None)),
+        graphics=_parse_graphics(v.get("graphics", None)),
+        color_management=_parse_color_management(v.get("color_management", None)),
+        advanced=_parse_advanced(v.get("advanced", None)),
     )
 
 

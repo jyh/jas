@@ -3798,6 +3798,16 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
 
   (* doc.set_document_setup_field — PRINT.md §1A *)
   let doc_set_document_setup_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
     (match spec with
      | `Assoc args ->
        let field_opt = List.assoc_opt "field" args in
@@ -3809,6 +3819,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
           let new_setup =
             let num_val () = eval_number (Some v) store ctx in
             let bool_val () = eval_bool (Some v) store ctx in
+            let str_val () = eval_str (Some v) in
             match field with
             | "bleed_top" -> Some { s with bleed_top = num_val () }
             | "bleed_right" -> Some { s with bleed_right = num_val () }
@@ -3818,10 +3829,72 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
             | "show_images_outline" -> Some { s with show_images_outline = bool_val () }
             | "highlight_substituted_glyphs" ->
               Some { s with highlight_substituted_glyphs = bool_val () }
+            (* Phase 6 additions. *)
+            | "grid_size" -> Some { s with grid_size = num_val () }
+            | "grid_color" ->
+              (match str_val () with
+               | Some str -> Some { s with grid_color = str }
+               | None -> None)
+            | "paper_color" ->
+              (match str_val () with
+               | Some str -> Some { s with paper_color = str }
+               | None -> None)
+            | "simulate_colored_paper" ->
+              Some { s with simulate_colored_paper = bool_val () }
+            | "transparency_flattener_preset" ->
+              (match str_val () with
+               | Some str -> Some { s with transparency_flattener_preset =
+                                  Print_preferences.flattener_preset_of_string str }
+               | None -> None)
+            | "discard_white_overprint" ->
+              Some { s with discard_white_overprint = bool_val () }
             | _ -> None
           in
           (match new_setup with
            | Some ns -> ctrl#set_document { doc with document_setup = ns }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.set_advanced_field — PRINT.md §Phase 6. *)
+  let doc_set_advanced_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let a = p.advanced in
+          let na : Print_preferences.advanced option =
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "print_as_bitmap" -> Some { a with print_as_bitmap = bool_v () }
+            | "overprint_flattener_preset" ->
+              (match str_v () with
+               | Some s -> Some { a with overprint_flattener_preset =
+                                  Print_preferences.flattener_preset_of_string s }
+               | None -> None)
+            | _ -> None
+          in
+          (match na with
+           | Some new_a ->
+             let new_p = { p with advanced = new_a } in
+             ctrl#set_document { doc with print_preferences = new_p }
            | None -> ())
         | _ -> ())
      | _ -> ());
@@ -3909,6 +3982,292 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* doc.set_marks_and_bleed_field — PRINT.md §Phase 2. Same wiring
+     shape as doc.set_print_preferences_field above; dispatches by
+     field name onto the marks_and_bleed sub-record and then rebuilds
+     print_preferences with the new value. *)
+  let doc_set_marks_and_bleed_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let m = p.marks_and_bleed in
+          let nm : Print_preferences.marks_and_bleed option =
+            let num () = eval_number (Some v) store ctx in
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "all_printer_marks" -> Some { m with all_printer_marks = bool_v () }
+            | "trim_marks" -> Some { m with trim_marks = bool_v () }
+            | "registration_marks" -> Some { m with registration_marks = bool_v () }
+            | "color_bars" -> Some { m with color_bars = bool_v () }
+            | "page_information" -> Some { m with page_information = bool_v () }
+            | "printer_mark_type" ->
+              (match str_v () with
+               | Some s -> Some { m with printer_mark_type =
+                                  Print_preferences.printer_mark_type_of_string s }
+               | None -> None)
+            | "trim_mark_weight" -> Some { m with trim_mark_weight = num () }
+            | "mark_offset" -> Some { m with mark_offset = num () }
+            | "use_document_bleed" -> Some { m with use_document_bleed = bool_v () }
+            | "bleed_top" -> Some { m with bleed_top = num () }
+            | "bleed_right" -> Some { m with bleed_right = num () }
+            | "bleed_bottom" -> Some { m with bleed_bottom = num () }
+            | "bleed_left" -> Some { m with bleed_left = num () }
+            | _ -> None
+          in
+          (match nm with
+           | Some new_m ->
+             let new_p = { p with marks_and_bleed = new_m } in
+             ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.set_output_field — PRINT.md §Phase 3. Same wiring shape as
+     doc.set_marks_and_bleed_field; dispatches by field name onto
+     the output sub-record and rebuilds print_preferences. *)
+  let doc_set_output_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let o = p.output in
+          let no : Print_preferences.output option =
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "mode" ->
+              (match str_v () with
+               | Some s -> Some { o with mode = Print_preferences.output_mode_of_string s }
+               | None -> None)
+            | "emulsion" ->
+              (match str_v () with
+               | Some s -> Some { o with emulsion = Print_preferences.emulsion_of_string s }
+               | None -> None)
+            | "image_polarity" ->
+              (match str_v () with
+               | Some s -> Some { o with image_polarity = Print_preferences.image_polarity_of_string s }
+               | None -> None)
+            | "printer_resolution" ->
+              (match str_v () with
+               | Some s -> Some { o with printer_resolution = s }
+               | None -> None)
+            | "convert_spot_to_process" -> Some { o with convert_spot_to_process = bool_v () }
+            | "overprint_black" -> Some { o with overprint_black = bool_v () }
+            | _ -> None
+          in
+          (match no with
+           | Some new_o ->
+             let new_p = { p with output = new_o } in
+             ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.set_output_ink_field — PRINT.md §Phase 3. Updates one cell
+     of the output.inks table at the given index. *)
+  let doc_set_output_ink_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       let index_opt = List.assoc_opt "index" args in
+       (match field_opt, value_opt, index_opt with
+        | Some (`String field), Some v, Some (`Int idx) ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let o = p.output in
+          let inks = o.inks in
+          if idx < 0 || idx >= List.length inks then ()
+          else begin
+            let ink = List.nth inks idx in
+            let new_ink_opt : Print_preferences.ink_override option =
+              let num () = eval_number (Some v) store ctx in
+              let bool_v () = eval_bool (Some v) store ctx in
+              let str_v () = eval_str (Some v) in
+              match field with
+              | "name" ->
+                (match str_v () with
+                 | Some s -> Some { ink with name = s }
+                 | None -> None)
+              | "print" -> Some { ink with print = bool_v () }
+              | "frequency" -> Some { ink with frequency = num () }
+              | "angle" -> Some { ink with angle = num () }
+              | "dot_shape" ->
+                (match str_v () with
+                 | Some s -> Some { ink with dot_shape = Print_preferences.dot_shape_of_string s }
+                 | None -> None)
+              | _ -> None
+            in
+            (match new_ink_opt with
+             | Some new_ink ->
+               let new_inks = List.mapi (fun i x ->
+                 if i = idx then new_ink else x
+               ) inks in
+               let new_o = { o with inks = new_inks } in
+               let new_p = { p with output = new_o } in
+               ctrl#set_document { doc with print_preferences = new_p }
+             | None -> ())
+          end
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.set_graphics_field — PRINT.md §Phase 4. Same wiring shape
+     as doc.set_output_field; dispatches by field name onto the
+     graphics sub-record and rebuilds print_preferences. *)
+  let doc_set_graphics_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let g = p.graphics in
+          let ng : Print_preferences.graphics option =
+            let num () = eval_number (Some v) store ctx in
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "flatness" -> Some { g with flatness = num () }
+            | "font_download" ->
+              (match str_v () with
+               | Some s -> Some { g with font_download = Print_preferences.font_download_of_string s }
+               | None -> None)
+            | "postscript_level" ->
+              (match str_v () with
+               | Some s -> Some { g with postscript_level = Print_preferences.postscript_level_of_string s }
+               | None -> None)
+            | "data_format" ->
+              (match str_v () with
+               | Some s -> Some { g with data_format = Print_preferences.data_format_of_string s }
+               | None -> None)
+            | "compatible_gradient_printing" ->
+              Some { g with compatible_gradient_printing = bool_v () }
+            | "raster_effects_resolution" ->
+              Some { g with raster_effects_resolution = num () }
+            | _ -> None
+          in
+          (match ng with
+           | Some new_g ->
+             let new_p = { p with graphics = new_g } in
+             ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.set_color_management_field — PRINT.md §Phase 5. *)
+  let doc_set_color_management_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let c = p.color_management in
+          let nc : Print_preferences.color_management option =
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "document_profile" ->
+              (match str_v () with
+               | Some s -> Some { c with document_profile = s }
+               | None -> None)
+            | "color_handling" ->
+              (match str_v () with
+               | Some s -> Some { c with color_handling = Print_preferences.color_handling_of_string s }
+               | None -> None)
+            | "printer_profile" ->
+              (match str_v () with
+               | Some s -> Some { c with printer_profile = s }
+               | None -> None)
+            | "rendering_intent" ->
+              (match str_v () with
+               | Some s -> Some { c with rendering_intent = Print_preferences.rendering_intent_of_string s }
+               | None -> None)
+            | "preserve_rgb_numbers" -> Some { c with preserve_rgb_numbers = bool_v () }
+            | _ -> None
+          in
+          (match nc with
+           | Some new_c ->
+             let new_p = { p with color_management = new_c } in
+             ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
   (* geometry.export_pdf — PRINT.md §1B. Generates a PDF and prompts
      for a save location via GtkFileChooserDialog. *)
   let geometry_export_pdf _ _ _ =
@@ -3940,7 +4299,13 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
 
   [ ("doc.snapshot", doc_snapshot);
     ("doc.set_document_setup_field", doc_set_document_setup_field);
+    ("doc.set_advanced_field", doc_set_advanced_field);
     ("doc.set_print_preferences_field", doc_set_print_preferences_field);
+    ("doc.set_marks_and_bleed_field", doc_set_marks_and_bleed_field);
+    ("doc.set_output_field", doc_set_output_field);
+    ("doc.set_output_ink_field", doc_set_output_ink_field);
+    ("doc.set_graphics_field", doc_set_graphics_field);
+    ("doc.set_color_management_field", doc_set_color_management_field);
     ("geometry.export_pdf", geometry_export_pdf);
     ("doc.artboard.probe_hit", doc_artboard_probe_hit);
     ("doc.artboard.probe_hover", doc_artboard_probe_hover);

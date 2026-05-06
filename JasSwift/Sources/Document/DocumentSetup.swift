@@ -21,6 +21,14 @@ public struct DocumentSetup: Equatable, Hashable {
     /// Tint glyphs that were rendered with a substituted font so the
     /// user can spot missing-font cases.
     public let highlightSubstitutedGlyphs: Bool
+    // ── Phase 6 additions (deferred Phase 1A items) ─────────────
+    /// Spacing between major canvas grid lines, in points.
+    public let gridSize: Double
+    public let gridColor: String
+    public let paperColor: String
+    public let simulateColoredPaper: Bool
+    public let transparencyFlattenerPreset: FlattenerPreset
+    public let discardWhiteOverprint: Bool
 
     public init(
         bleedTop: Double = 0,
@@ -29,7 +37,13 @@ public struct DocumentSetup: Equatable, Hashable {
         bleedLeft: Double = 0,
         bleedUniform: Bool = true,
         showImagesOutline: Bool = false,
-        highlightSubstitutedGlyphs: Bool = false
+        highlightSubstitutedGlyphs: Bool = false,
+        gridSize: Double = 72.0,
+        gridColor: String = "#cccccc",
+        paperColor: String = "#ffffff",
+        simulateColoredPaper: Bool = false,
+        transparencyFlattenerPreset: FlattenerPreset = .mediumResolution,
+        discardWhiteOverprint: Bool = false
     ) {
         self.bleedTop = bleedTop
         self.bleedRight = bleedRight
@@ -38,6 +52,12 @@ public struct DocumentSetup: Equatable, Hashable {
         self.bleedUniform = bleedUniform
         self.showImagesOutline = showImagesOutline
         self.highlightSubstitutedGlyphs = highlightSubstitutedGlyphs
+        self.gridSize = gridSize
+        self.gridColor = gridColor
+        self.paperColor = paperColor
+        self.simulateColoredPaper = simulateColoredPaper
+        self.transparencyFlattenerPreset = transparencyFlattenerPreset
+        self.discardWhiteOverprint = discardWhiteOverprint
     }
 
     public static let `default` = DocumentSetup()
