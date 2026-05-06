@@ -995,6 +995,29 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(parsed.documentSetup == s)
 }
 
+@Test func outputSubRecordRoundTripsThroughSvg() {
+    let o = Output(
+        mode: .separations,
+        emulsion: .downRight,
+        imagePolarity: .negative,
+        printerResolution: "150 lpi / 1200 dpi",
+        convertSpotToProcess: true,
+        overprintBlack: true,
+        inks: [
+            InkOverride(name: "Process Cyan", print: false, frequency: 100, angle: 105, dotShape: .ellipse),
+            InkOverride(name: "PANTONE 185 C", print: true, frequency: 85, angle: 45, dotShape: .square),
+        ]
+    )
+    let p = PrintPreferences(output: o)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:output"))
+    #expect(svg.contains("<jas:ink"))
+    #expect(svg.contains("PANTONE 185 C"))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.output == o)
+}
+
 @Test func printPreferencesRoundTripThroughSvg() {
     let p = PrintPreferences(
         presetName: "My Preset",
