@@ -359,6 +359,32 @@ let document_setup_to_xml indent (s : Document_setup.t) =
     (bool_str s.show_images_outline)
     (bool_str s.highlight_substituted_glyphs)
 
+let ink_override_to_xml indent (ink : Print_preferences.ink_override) =
+  Printf.sprintf
+    "%s<jas:ink name=\"%s\" print=\"%s\" frequency=\"%s\" angle=\"%s\" dot-shape=\"%s\"/>"
+    indent
+    (escape_xml ink.name)
+    (bool_str ink.print)
+    (fmt ink.frequency)
+    (fmt ink.angle)
+    (Print_preferences.dot_shape_to_string ink.dot_shape)
+
+let output_to_xml indent (o : Print_preferences.output) =
+  let inner = indent ^ "  " in
+  let header = Printf.sprintf
+    "%s<jas:output mode=\"%s\" emulsion=\"%s\" image-polarity=\"%s\" printer-resolution=\"%s\" convert-spot-to-process=\"%s\" overprint-black=\"%s\">"
+    indent
+    (Print_preferences.output_mode_to_string o.mode)
+    (Print_preferences.emulsion_to_string o.emulsion)
+    (Print_preferences.image_polarity_to_string o.image_polarity)
+    (escape_xml o.printer_resolution)
+    (bool_str o.convert_spot_to_process)
+    (bool_str o.overprint_black)
+  in
+  let inks = String.concat "\n"
+    (List.map (ink_override_to_xml inner) o.inks) in
+  Printf.sprintf "%s\n%s\n%s</jas:output>" header inks indent
+
 let marks_and_bleed_to_xml indent (m : Print_preferences.marks_and_bleed) =
   Printf.sprintf
     "%s<jas:marks-and-bleed all-printer-marks=\"%s\" trim-marks=\"%s\" registration-marks=\"%s\" color-bars=\"%s\" page-information=\"%s\" printer-mark-type=\"%s\" trim-mark-weight=\"%s\" mark-offset=\"%s\" use-document-bleed=\"%s\" bleed-top=\"%s\" bleed-right=\"%s\" bleed-bottom=\"%s\" bleed-left=\"%s\"/>"
@@ -403,9 +429,10 @@ let print_preferences_to_xml indent (p : Print_preferences.t) =
     | Some n -> Printf.sprintf " printer-name=\"%s\"" (escape_xml n)
     | None -> ""
   in
-  Printf.sprintf "%s%s>\n%s\n%s</jas:print-preferences>"
+  Printf.sprintf "%s%s>\n%s\n%s\n%s</jas:print-preferences>"
     header printer_attr
     (marks_and_bleed_to_xml inner p.marks_and_bleed)
+    (output_to_xml inner p.output)
     indent
 
 let document_to_svg doc =
@@ -1153,6 +1180,38 @@ let parse_document_setup_attrs attrs : Document_setup.t =
       attr_bool attrs "highlight-substituted-glyphs" d.highlight_substituted_glyphs;
   }
 
+let parse_output_attrs attrs : Print_preferences.output =
+  let d = Print_preferences.default_output in
+  {
+    mode =
+      Print_preferences.output_mode_of_string
+        (attr_str attrs "mode"
+           (Print_preferences.output_mode_to_string d.mode));
+    emulsion =
+      Print_preferences.emulsion_of_string
+        (attr_str attrs "emulsion"
+           (Print_preferences.emulsion_to_string d.emulsion));
+    image_polarity =
+      Print_preferences.image_polarity_of_string
+        (attr_str attrs "image-polarity"
+           (Print_preferences.image_polarity_to_string d.image_polarity));
+    printer_resolution = attr_str attrs "printer-resolution" d.printer_resolution;
+    convert_spot_to_process = attr_bool attrs "convert-spot-to-process" d.convert_spot_to_process;
+    overprint_black = attr_bool attrs "overprint-black" d.overprint_black;
+    inks = d.inks;
+  }
+
+let parse_ink_override_attrs attrs : Print_preferences.ink_override =
+  {
+    name = attr_str attrs "name" "";
+    print = attr_bool attrs "print" true;
+    frequency = attr_float attrs "frequency" 75.0;
+    angle = attr_float attrs "angle" 45.0;
+    dot_shape =
+      Print_preferences.dot_shape_of_string
+        (attr_str attrs "dot-shape" "round");
+  }
+
 let parse_marks_and_bleed_attrs attrs : Print_preferences.marks_and_bleed =
   let d = Print_preferences.default_marks_and_bleed in
   {
@@ -1175,6 +1234,7 @@ let parse_marks_and_bleed_attrs attrs : Print_preferences.marks_and_bleed =
   }
 
 let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_marks_and_bleed)
+    ?(output=Print_preferences.default_output)
     attrs : Print_preferences.t =
   let d = Print_preferences.default in
   let printer_name = match get_attr attrs "printer-name" with
@@ -1220,7 +1280,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     tile_overlap_v = attr_float attrs "tile-overlap-v" d.tile_overlap_v;
     tile_range = attr_str attrs "tile-range" d.tile_range;
     marks_and_bleed;
-    output = Print_preferences.default_output;
+    output;
   }
 
 (* Walk the SVG once via Xmlm, pulling jas:document-setup +
@@ -1260,21 +1320,51 @@ let parse_jas_print_blocks svg =
            skip_element i
          | "print-preferences" ->
            let mab = ref Print_preferences.default_marks_and_bleed in
-           (* Walk children for nested marks-and-bleed. *)
+           let out = ref Print_preferences.default_output in
+           let inks = ref [] in
+           (* Walk children: nested marks-and-bleed, output (with its
+              own ink children). When <jas:output> is present, its
+              attribute set is captured into [out_attrs] and child
+              <jas:ink> elements accumulate into [inks]. *)
            let rec walk_pp () =
              match Xmlm.peek i with
              | `El_end -> let _ = Xmlm.input i in ()
              | `Data _ -> let _ = Xmlm.input i in walk_pp ()
              | `El_start ((_, ctag), cattrs) ->
                let _ = Xmlm.input i in
-               (if ctag = "marks-and-bleed" then
-                  mab := parse_marks_and_bleed_attrs (attrs_of_xmlm_attrs cattrs));
-               skip_element i;
+               let cattrs_a = attrs_of_xmlm_attrs cattrs in
+               (match ctag with
+                | "marks-and-bleed" ->
+                  mab := parse_marks_and_bleed_attrs cattrs_a;
+                  skip_element i
+                | "output" ->
+                  let o_inks = ref [] in
+                  let rec walk_out () =
+                    match Xmlm.peek i with
+                    | `El_end -> let _ = Xmlm.input i in ()
+                    | `Data _ -> let _ = Xmlm.input i in walk_out ()
+                    | `El_start ((_, itag), iattrs) ->
+                      let _ = Xmlm.input i in
+                      let iattrs_a = attrs_of_xmlm_attrs iattrs in
+                      (if itag = "ink" then
+                         o_inks := parse_ink_override_attrs iattrs_a :: !o_inks);
+                      skip_element i;
+                      walk_out ()
+                    | `Dtd _ -> let _ = Xmlm.input i in walk_out ()
+                  in
+                  walk_out ();
+                  inks := List.rev !o_inks;
+                  let parsed_inks =
+                    if !inks = [] then Print_preferences.process_cmyk_default_inks
+                    else !inks
+                  in
+                  out := { (parse_output_attrs cattrs_a) with inks = parsed_inks }
+                | _ -> skip_element i);
                walk_pp ()
              | `Dtd _ -> let _ = Xmlm.input i in walk_pp ()
            in
            walk_pp ();
-           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab attrs
+           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab ~output:!out attrs
          | _ ->
            skip_element i);
         walk_namedview ()

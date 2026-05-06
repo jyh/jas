@@ -876,6 +876,37 @@ let () =
         let parsed = Jas.Svg.svg_to_document svg in
         assert (parsed.document_setup = s));
 
+      Alcotest.test_case "Output sub-record round-trips" `Quick (fun () ->
+        let m = { Jas.Print_preferences.mode = Jas.Print_preferences.Separations;
+                  emulsion = Jas.Print_preferences.Down_right;
+                  image_polarity = Jas.Print_preferences.Negative;
+                  printer_resolution = "150 lpi / 1200 dpi";
+                  convert_spot_to_process = true;
+                  overprint_black = true;
+                  inks = [
+                    { name = "Process Cyan"; print = false;
+                      frequency = 100.0; angle = 105.0;
+                      dot_shape = Jas.Print_preferences.Dot_ellipse };
+                    { name = "PANTONE 185 C"; print = true;
+                      frequency = 85.0; angle = 45.0;
+                      dot_shape = Jas.Print_preferences.Dot_square };
+                  ] } in
+        let p = { Jas.Print_preferences.default with output = m } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:output");
+        assert (contains svg "<jas:ink");
+        assert (contains svg "PANTONE 185 C");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.output = m));
+
       Alcotest.test_case "non-default PrintPreferences round-trips" `Quick (fun () ->
         let m = { Jas.Print_preferences.all_printer_marks = true;
                   trim_marks = true; registration_marks = true;
@@ -901,7 +932,8 @@ let () =
                   custom_scale = 75.0;
                   tile_overlap_h = 1.0; tile_overlap_v = 2.0;
                   tile_range = "1-2";
-                  marks_and_bleed = m } in
+                  marks_and_bleed = m;
+                  output = Jas.Print_preferences.default_output } in
         let doc = make_document ~print_preferences:p [|make_layer [||]|] in
         let svg = Jas.Svg.document_to_svg doc in
         let contains s sub =
