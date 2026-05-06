@@ -156,6 +156,28 @@ private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
     ]
 }
 
+private func inkOverrideView(_ ink: InkOverride) -> [String: Any] {
+    return [
+        "name": ink.name,
+        "print": ink.print,
+        "frequency": ink.frequency,
+        "angle": ink.angle,
+        "dot_shape": ink.dotShape.rawValue,
+    ]
+}
+
+private func outputView(_ o: Output) -> [String: Any] {
+    return [
+        "mode": o.mode.rawValue,
+        "emulsion": o.emulsion.rawValue,
+        "image_polarity": o.imagePolarity.rawValue,
+        "printer_resolution": o.printerResolution,
+        "convert_spot_to_process": o.convertSpotToProcess,
+        "overprint_black": o.overprintBlack,
+        "inks": o.inks.map(inkOverrideView),
+    ]
+}
+
 private func marksAndBleedView(_ m: MarksAndBleed) -> [String: Any] {
     return [
         "all_printer_marks": m.allPrinterMarks,
@@ -200,6 +222,7 @@ private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
         "tile_overlap_v": p.tileOverlapV,
         "tile_range": p.tileRange,
         "marks_and_bleed": marksAndBleedView(p.marksAndBleed),
+        "output": outputView(p.output),
     ]
 }
 
