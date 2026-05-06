@@ -19,7 +19,35 @@ type page = {
   src_y : float;
   src_w : float;
   src_h : float;
+  (* Where the trim rect sits inside the (possibly bleed-extended)
+     MediaBox. (0., 0.) when no bleed/marks are active. *)
+  trim_x_off : float;
+  trim_y_off : float;
 }
+
+(* Marks-and-Bleed PDF geometry constants (PRINT.md §Phase 2). Same
+   values as Rust + Swift so the cross-port output stays equivalent. *)
+let trim_mark_length = 12.0
+let reg_mark_radius = 4.0
+let color_bar_swatch = 10.0
+
+(** Effective bleed for a print pass: per-print overrides on
+    marks_and_bleed when use_document_bleed is false, otherwise the
+    document-level Document_setup bleed. *)
+let active_bleed (doc : Document.document) =
+  let m = doc.print_preferences.marks_and_bleed in
+  if m.use_document_bleed then
+    let d = doc.document_setup in
+    (d.bleed_top, d.bleed_right, d.bleed_bottom, d.bleed_left)
+  else
+    (m.bleed_top, m.bleed_right, m.bleed_bottom, m.bleed_left)
+
+(** Extra space between the trim rect and the MediaBox edge needed
+    to hold the marks. Zero when no mark category is enabled. *)
+let mark_gutter (m : Print_preferences.marks_and_bleed) =
+  let any = m.all_printer_marks || m.trim_marks || m.registration_marks
+            || m.color_bars || m.page_information in
+  if any then m.mark_offset +. trim_mark_length +. 2.0 else 0.0
 
 let artboard_bounds_union (abs : Artboard.artboard list) =
   let min_x = ref infinity and min_y = ref infinity in
@@ -33,18 +61,29 @@ let artboard_bounds_union (abs : Artboard.artboard list) =
   (!min_x, !min_y, !max_x -. !min_x, !max_y -. !min_y)
 
 let collect_pages (doc : Document.document) : page list =
+  let (bt, br, bb, bl) = active_bleed doc in
+  let g = mark_gutter doc.print_preferences.marks_and_bleed in
+  let trim_x_off = bl +. g in
+  (* Cairo PDF is y-down (top-left origin), so the trim's y offset
+     in MediaBox space is the top bleed plus the gutter. *)
+  let trim_y_off = bt +. g in
+  let extra_w = bl +. br +. 2.0 *. g in
+  let extra_h = bt +. bb +. 2.0 *. g in
   if doc.print_preferences.ignore_artboards || doc.artboards = [] then begin
     let (x, y, w, h) =
       if doc.artboards = [] then (0.0, 0.0, 612.0, 792.0)
       else artboard_bounds_union doc.artboards
     in
-    [{ media_w = w; media_h = h; src_x = x; src_y = y; src_w = w; src_h = h }]
+    [{ media_w = w +. extra_w; media_h = h +. extra_h;
+       src_x = x; src_y = y; src_w = w; src_h = h;
+       trim_x_off; trim_y_off }]
   end
   else
     List.map (fun (ab : Artboard.artboard) ->
-      { media_w = ab.width; media_h = ab.height;
+      { media_w = ab.width +. extra_w; media_h = ab.height +. extra_h;
         src_x = ab.x; src_y = ab.y;
-        src_w = ab.width; src_h = ab.height }
+        src_w = ab.width; src_h = ab.height;
+        trim_x_off; trim_y_off }
     ) doc.artboards
 
 let scaling_pair (doc : Document.document) =
@@ -249,8 +288,121 @@ let rec emit_element cr (el : Element.element) ~filter =
     emit_text cr ~tspans ~font_family ~font_size ~x ~y ~fill ~transform
   | Text_path _ | Live _ -> ()  (* Phase 1B deferral *)
 
+let emit_trim_marks cr ~tx ~ty ~tw ~th ~weight ~off =
+  Cairo.save cr;
+  Cairo.set_source_rgb cr 0.0 0.0 0.0;
+  Cairo.set_line_width cr weight;
+  let len = trim_mark_length in
+  (* Cairo PDF is y-down: y=0 is the top of the page, so "above the
+     trim" is y < trim_y_off and "below the trim" is y > trim_y_off + th.
+     Eight short strokes, two per corner. *)
+  let segs = [
+    (* Top-left *)
+    (tx -. off -. len, ty,             tx -. off,       ty);
+    (tx,               ty -. off -. len, tx,            ty -. off);
+    (* Top-right *)
+    (tx +. tw +. off,  ty,             tx +. tw +. off +. len, ty);
+    (tx +. tw,         ty -. off -. len, tx +. tw,      ty -. off);
+    (* Bottom-left *)
+    (tx -. off -. len, ty +. th,       tx -. off,       ty +. th);
+    (tx,               ty +. th +. off, tx,            ty +. th +. off +. len);
+    (* Bottom-right *)
+    (tx +. tw +. off,  ty +. th,       tx +. tw +. off +. len, ty +. th);
+    (tx +. tw,         ty +. th +. off, tx +. tw,      ty +. th +. off +. len);
+  ] in
+  List.iter (fun (x1, y1, x2, y2) ->
+    Cairo.move_to cr x1 y1;
+    Cairo.line_to cr x2 y2
+  ) segs;
+  Cairo.stroke cr;
+  Cairo.restore cr
+
+let emit_reg_mark cr ~cx ~cy ~r =
+  Cairo.save cr;
+  Cairo.set_source_rgb cr 0.0 0.0 0.0;
+  Cairo.set_line_width cr 0.25;
+  Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
+  Cairo.stroke cr;
+  Cairo.move_to cr (cx -. r) cy;
+  Cairo.line_to cr (cx +. r) cy;
+  Cairo.move_to cr cx (cy -. r);
+  Cairo.line_to cr cx (cy +. r);
+  Cairo.stroke cr;
+  Cairo.restore cr
+
+let emit_registration_marks cr ~tx ~ty ~tw ~th ~off =
+  let r = reg_mark_radius in
+  let centers = [
+    (tx +. tw /. 2.0, ty -. off -. r);       (* top mid *)
+    (tx +. tw +. off +. r, ty +. th /. 2.0); (* right mid *)
+    (tx +. tw /. 2.0, ty +. th +. off +. r); (* bottom mid *)
+    (tx -. off -. r, ty +. th /. 2.0);       (* left mid *)
+  ] in
+  List.iter (fun (cx, cy) -> emit_reg_mark cr ~cx ~cy ~r) centers
+
+let emit_color_bars cr ~tx ~ty ~tw ~th:_ ~off:_ =
+  let s = color_bar_swatch in
+  let swatches = [
+    (0.0, 1.0, 1.0);   (* C *)
+    (1.0, 0.0, 1.0);   (* M *)
+    (1.0, 1.0, 0.0);   (* Y *)
+    (0.0, 0.0, 0.0);   (* K *)
+    (1.0, 0.0, 0.0);   (* R *)
+    (0.0, 1.0, 0.0);   (* G *)
+    (0.0, 0.0, 1.0);   (* B *)
+    (0.5, 0.5, 0.5);   (* grey *)
+  ] in
+  let base_x = tx in
+  (* Above the top trim edge (Cairo is y-down). *)
+  let base_y = ty -. trim_mark_length -. 2.0 -. s in
+  List.iteri (fun i (r, g, b) ->
+    let x = base_x +. float_of_int i *. s in
+    if x +. s <= tx +. tw then begin
+      Cairo.save cr;
+      Cairo.set_source_rgb cr r g b;
+      Cairo.rectangle cr x base_y ~w:s ~h:s;
+      Cairo.fill cr;
+      Cairo.restore cr
+    end
+  ) swatches
+
+let emit_page_info cr ~tx ~ty ~th =
+  (* Phase-2 placeholder: a small label below the bottom trim edge
+     (Cairo is y-down). Renderer-specific font work is deferred. *)
+  Cairo.save cr;
+  Cairo.set_source_rgb cr 0.0 0.0 0.0;
+  Cairo.select_font_face cr "Helvetica" ~slant:Cairo.Upright ~weight:Cairo.Normal;
+  Cairo.set_font_size cr 6.0;
+  Cairo.move_to cr tx (ty +. th +. trim_mark_length +. 8.0);
+  Cairo.show_text cr "Jas — page";
+  Cairo.restore cr
+
+let emit_marks cr (doc : Document.document) (page : page) =
+  let m = doc.print_preferences.marks_and_bleed in
+  if m.all_printer_marks || m.trim_marks || m.registration_marks
+     || m.color_bars || m.page_information
+  then begin
+    let tx = page.trim_x_off and ty = page.trim_y_off in
+    let tw = page.src_w and th = page.src_h in
+    if m.all_printer_marks || m.trim_marks then
+      emit_trim_marks cr ~tx ~ty ~tw ~th
+        ~weight:m.trim_mark_weight ~off:m.mark_offset;
+    if m.all_printer_marks || m.registration_marks then
+      emit_registration_marks cr ~tx ~ty ~tw ~th ~off:m.mark_offset;
+    if m.all_printer_marks || m.color_bars then
+      emit_color_bars cr ~tx ~ty ~tw ~th ~off:m.mark_offset;
+    if m.all_printer_marks || m.page_information then
+      emit_page_info cr ~tx ~ty ~th
+  end
+
 let draw_page cr (doc : Document.document) (page : page) =
   Cairo.save cr;
+  (* Position the trim rect inside the (possibly bleed-extended)
+     MediaBox before any user transforms. Cairo is y-down so this
+     matches the Rust + Swift "trim corners at trim_x_off / trim_y_off"
+     contract. *)
+  if page.trim_x_off <> 0.0 || page.trim_y_off <> 0.0 then
+    Cairo.translate cr page.trim_x_off page.trim_y_off;
   let (sx, sy) = scaling_pair doc in
   let px = doc.print_preferences.placement_x in
   let py = doc.print_preferences.placement_y in
@@ -261,7 +413,10 @@ let draw_page cr (doc : Document.document) (page : page) =
   Array.iter (fun layer ->
     emit_element cr layer ~filter:doc.print_preferences.print_layers
   ) doc.layers;
-  Cairo.restore cr
+  Cairo.restore cr;
+  (* Marks render in MediaBox space (no user transforms), aligned to
+     the trim rect inside it. *)
+  emit_marks cr doc page
 
 (** Convert a document to PDF bytes. *)
 let document_to_pdf (doc : Document.document) : string =
@@ -270,7 +425,8 @@ let document_to_pdf (doc : Document.document) : string =
   let first = match pages with
     | p :: _ -> p
     | [] -> { media_w = 612.0; media_h = 792.0;
-              src_x = 0.0; src_y = 0.0; src_w = 612.0; src_h = 792.0 }
+              src_x = 0.0; src_y = 0.0; src_w = 612.0; src_h = 792.0;
+              trim_x_off = 0.0; trim_y_off = 0.0 }
   in
   let surface = Cairo.PDF.create_for_stream
       (Buffer.add_string buf)
