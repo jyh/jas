@@ -470,6 +470,17 @@ private func inkOverrideToSvg(_ ink: InkOverride, indent: String) -> String {
         + "/>"
 }
 
+private func graphicsToSvg(_ g: Graphics, indent: String) -> String {
+    return "\(indent)<jas:graphics"
+        + " flatness=\"\(fmt(g.flatness))\""
+        + " font-download=\"\(g.fontDownload.rawValue)\""
+        + " postscript-level=\"\(g.postscriptLevel.rawValue)\""
+        + " data-format=\"\(g.dataFormat.rawValue)\""
+        + " compatible-gradient-printing=\"\(boolStr(g.compatibleGradientPrinting))\""
+        + " raster-effects-resolution=\"\(fmt(g.rasterEffectsResolution))\""
+        + "/>"
+}
+
 private func outputToSvg(_ o: Output, indent: String) -> String {
     let inner = indent + "  "
     var s = "\(indent)<jas:output"
@@ -536,6 +547,8 @@ private func printPreferencesToSvg(_ p: PrintPreferences, indent: String) -> Str
     s += marksAndBleedToSvg(p.marksAndBleed, indent: indent + "  ")
     s += "\n"
     s += outputToSvg(p.output, indent: indent + "  ")
+    s += "\n"
+    s += graphicsToSvg(p.graphics, indent: indent + "  ")
     s += "\n\(indent)</jas:print-preferences>"
     return s
 }
@@ -1408,6 +1421,18 @@ private func parseInkOverrideNode(_ node: XMLElement) -> InkOverride {
     )
 }
 
+private func parseGraphicsNode(_ node: XMLElement) -> Graphics {
+    let d = Graphics.default
+    return Graphics(
+        flatness: parseDoubleAttr(node, "flatness", d.flatness),
+        fontDownload: FontDownload(rawValue: attrAny(node, "font-download") ?? "") ?? d.fontDownload,
+        postscriptLevel: PostScriptLevel(rawValue: attrAny(node, "postscript-level") ?? "") ?? d.postscriptLevel,
+        dataFormat: DataFormat(rawValue: attrAny(node, "data-format") ?? "") ?? d.dataFormat,
+        compatibleGradientPrinting: parseBoolAttr(node, "compatible-gradient-printing", d.compatibleGradientPrinting),
+        rasterEffectsResolution: parseDoubleAttr(node, "raster-effects-resolution", d.rasterEffectsResolution)
+    )
+}
+
 private func parseOutputNode(_ node: XMLElement) -> Output {
     let d = Output.default
     var inks: [InkOverride] = []
@@ -1453,12 +1478,14 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
     let d = PrintPreferences.default
     var mab = MarksAndBleed.default
     var output = Output.default
+    var graphics = Graphics.default
     if let kids = node.children {
         for k in kids {
             guard let e = k as? XMLElement else { continue }
             switch e.localName {
             case "marks-and-bleed": mab = parseMarksAndBleedNode(e)
             case "output": output = parseOutputNode(e)
+            case "graphics": graphics = parseGraphicsNode(e)
             default: break
             }
         }
@@ -1488,7 +1515,8 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
         tileOverlapV: parseDoubleAttr(node, "tile-overlap-v", d.tileOverlapV),
         tileRange: attrAny(node, "tile-range") ?? d.tileRange,
         marksAndBleed: mab,
-        output: output
+        output: output,
+        graphics: graphics
     )
 }
 
