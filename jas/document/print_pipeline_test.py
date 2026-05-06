@@ -6,6 +6,7 @@ from document.document_setup import DocumentSetup
 from document.print_preferences import (
     PrintPreferences, PrintPreset, ArtboardRangeMode, MediaSize, Orientation,
     PrintLayers, ScalingMode, DEFAULT_PRESET,
+    MarksAndBleed, PrinterMarkType,
 )
 from geometry.test_json import document_to_test_json, test_json_to_document
 
@@ -134,6 +135,48 @@ class TestJsonCodecTest(absltest.TestCase):
         d = Document(print_preferences=p)
         d2 = test_json_to_document(document_to_test_json(d))
         self.assertEqual(d2.print_preferences, p)
+
+
+class MarksAndBleedTest(absltest.TestCase):
+    """PRINT.md §Phase 2 sub-record on PrintPreferences."""
+
+    def test_defaults(self):
+        m = MarksAndBleed()
+        self.assertFalse(m.all_printer_marks)
+        self.assertFalse(m.trim_marks)
+        self.assertFalse(m.registration_marks)
+        self.assertFalse(m.color_bars)
+        self.assertFalse(m.page_information)
+        self.assertEqual(m.printer_mark_type, PrinterMarkType.ROMAN)
+        self.assertEqual(m.trim_mark_weight, 0.25)
+        self.assertEqual(m.mark_offset, 6.0)
+        self.assertTrue(m.use_document_bleed)
+        self.assertEqual(m.bleed_top, 0.0)
+        self.assertEqual(m.bleed_right, 0.0)
+        self.assertEqual(m.bleed_bottom, 0.0)
+        self.assertEqual(m.bleed_left, 0.0)
+
+    def test_printer_mark_type_strings(self):
+        self.assertEqual(PrinterMarkType.ROMAN.value, "roman")
+        self.assertEqual(PrinterMarkType.JAPANESE.value, "japanese")
+
+    def test_marks_and_bleed_roundtrip(self):
+        m = MarksAndBleed(
+            all_printer_marks=True, trim_marks=True,
+            registration_marks=True, color_bars=True,
+            page_information=True,
+            printer_mark_type=PrinterMarkType.JAPANESE,
+            trim_mark_weight=0.5, mark_offset=12.0,
+            use_document_bleed=False,
+            bleed_top=4.0, bleed_right=5.0,
+            bleed_bottom=6.0, bleed_left=7.0,
+        )
+        p = PrintPreferences(marks_and_bleed=m)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"marks_and_bleed"', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.marks_and_bleed, m)
 
 
 if __name__ == "__main__":

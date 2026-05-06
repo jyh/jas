@@ -516,6 +516,24 @@ def _document_setup_json(s):
     return o.build()
 
 
+def _marks_and_bleed_json(m):
+    o = _JsonObj()
+    o.bool_("all_printer_marks", m.all_printer_marks)
+    o.num("bleed_bottom", m.bleed_bottom)
+    o.num("bleed_left", m.bleed_left)
+    o.num("bleed_right", m.bleed_right)
+    o.num("bleed_top", m.bleed_top)
+    o.bool_("color_bars", m.color_bars)
+    o.num("mark_offset", m.mark_offset)
+    o.bool_("page_information", m.page_information)
+    o.str("printer_mark_type", m.printer_mark_type.value)
+    o.bool_("registration_marks", m.registration_marks)
+    o.num("trim_mark_weight", m.trim_mark_weight)
+    o.bool_("trim_marks", m.trim_marks)
+    o.bool_("use_document_bleed", m.use_document_bleed)
+    return o.build()
+
+
 def _print_preferences_json(p):
     o = _JsonObj()
     o.str("artboard_range", p.artboard_range)
@@ -525,6 +543,7 @@ def _print_preferences_json(p):
     o.int_("copies", p.copies)
     o.num("custom_scale", p.custom_scale)
     o.bool_("ignore_artboards", p.ignore_artboards)
+    o.raw("marks_and_bleed", _marks_and_bleed_json(p.marks_and_bleed))
     o.num("media_height", p.media_height)
     o.str("media_size", p.media_size.value)
     o.num("media_width", p.media_width)
@@ -915,6 +934,31 @@ def _parse_document_setup(v):
     )
 
 
+def _parse_marks_and_bleed(v):
+    from document.print_preferences import (
+        MarksAndBleed, PrinterMarkType, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return MarksAndBleed()
+    d = MarksAndBleed()
+    return MarksAndBleed(
+        all_printer_marks=v.get("all_printer_marks", d.all_printer_marks),
+        trim_marks=v.get("trim_marks", d.trim_marks),
+        registration_marks=v.get("registration_marks", d.registration_marks),
+        color_bars=v.get("color_bars", d.color_bars),
+        page_information=v.get("page_information", d.page_information),
+        printer_mark_type=_enum_from_string(
+            PrinterMarkType, v.get("printer_mark_type", ""), d.printer_mark_type),
+        trim_mark_weight=v.get("trim_mark_weight", d.trim_mark_weight),
+        mark_offset=v.get("mark_offset", d.mark_offset),
+        use_document_bleed=v.get("use_document_bleed", d.use_document_bleed),
+        bleed_top=v.get("bleed_top", d.bleed_top),
+        bleed_right=v.get("bleed_right", d.bleed_right),
+        bleed_bottom=v.get("bleed_bottom", d.bleed_bottom),
+        bleed_left=v.get("bleed_left", d.bleed_left),
+    )
+
+
 def _parse_print_preferences(v):
     from document.print_preferences import (
         PrintPreferences, ArtboardRangeMode, MediaSize, Orientation,
@@ -951,6 +995,7 @@ def _parse_print_preferences(v):
         tile_overlap_h=v.get("tile_overlap_h", d.tile_overlap_h),
         tile_overlap_v=v.get("tile_overlap_v", d.tile_overlap_v),
         tile_range=v.get("tile_range", d.tile_range),
+        marks_and_bleed=_parse_marks_and_bleed(v.get("marks_and_bleed", None)),
     )
 
 
