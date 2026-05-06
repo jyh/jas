@@ -3798,6 +3798,16 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
 
   (* doc.set_document_setup_field — PRINT.md §1A *)
   let doc_set_document_setup_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
     (match spec with
      | `Assoc args ->
        let field_opt = List.assoc_opt "field" args in
@@ -3809,6 +3819,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
           let new_setup =
             let num_val () = eval_number (Some v) store ctx in
             let bool_val () = eval_bool (Some v) store ctx in
+            let str_val () = eval_str (Some v) in
             match field with
             | "bleed_top" -> Some { s with bleed_top = num_val () }
             | "bleed_right" -> Some { s with bleed_right = num_val () }
@@ -3818,10 +3829,72 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
             | "show_images_outline" -> Some { s with show_images_outline = bool_val () }
             | "highlight_substituted_glyphs" ->
               Some { s with highlight_substituted_glyphs = bool_val () }
+            (* Phase 6 additions. *)
+            | "grid_size" -> Some { s with grid_size = num_val () }
+            | "grid_color" ->
+              (match str_val () with
+               | Some str -> Some { s with grid_color = str }
+               | None -> None)
+            | "paper_color" ->
+              (match str_val () with
+               | Some str -> Some { s with paper_color = str }
+               | None -> None)
+            | "simulate_colored_paper" ->
+              Some { s with simulate_colored_paper = bool_val () }
+            | "transparency_flattener_preset" ->
+              (match str_val () with
+               | Some str -> Some { s with transparency_flattener_preset =
+                                  Print_preferences.flattener_preset_of_string str }
+               | None -> None)
+            | "discard_white_overprint" ->
+              Some { s with discard_white_overprint = bool_val () }
             | _ -> None
           in
           (match new_setup with
            | Some ns -> ctrl#set_document { doc with document_setup = ns }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
+  (* doc.set_advanced_field — PRINT.md §Phase 6. *)
+  let doc_set_advanced_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let a = p.advanced in
+          let na : Print_preferences.advanced option =
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "print_as_bitmap" -> Some { a with print_as_bitmap = bool_v () }
+            | "overprint_flattener_preset" ->
+              (match str_v () with
+               | Some s -> Some { a with overprint_flattener_preset =
+                                  Print_preferences.flattener_preset_of_string s }
+               | None -> None)
+            | _ -> None
+          in
+          (match na with
+           | Some new_a ->
+             let new_p = { p with advanced = new_a } in
+             ctrl#set_document { doc with print_preferences = new_p }
            | None -> ())
         | _ -> ())
      | _ -> ());
@@ -4226,6 +4299,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
 
   [ ("doc.snapshot", doc_snapshot);
     ("doc.set_document_setup_field", doc_set_document_setup_field);
+    ("doc.set_advanced_field", doc_set_advanced_field);
     ("doc.set_print_preferences_field", doc_set_print_preferences_field);
     ("doc.set_marks_and_bleed_field", doc_set_marks_and_bleed_field);
     ("doc.set_output_field", doc_set_output_field);

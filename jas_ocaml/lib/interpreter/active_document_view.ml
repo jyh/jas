@@ -22,6 +22,20 @@ let document_setup_view (s : Document_setup.t) : Yojson.Safe.t =
     ("bleed_uniform", `Bool s.bleed_uniform);
     ("show_images_outline", `Bool s.show_images_outline);
     ("highlight_substituted_glyphs", `Bool s.highlight_substituted_glyphs);
+    ("grid_size", `Float s.grid_size);
+    ("grid_color", `String s.grid_color);
+    ("paper_color", `String s.paper_color);
+    ("simulate_colored_paper", `Bool s.simulate_colored_paper);
+    ("transparency_flattener_preset",
+     `String (Print_preferences.flattener_preset_to_string s.transparency_flattener_preset));
+    ("discard_white_overprint", `Bool s.discard_white_overprint);
+  ]
+
+let advanced_view (a : Print_preferences.advanced) : Yojson.Safe.t =
+  `Assoc [
+    ("print_as_bitmap", `Bool a.print_as_bitmap);
+    ("overprint_flattener_preset",
+     `String (Print_preferences.flattener_preset_to_string a.overprint_flattener_preset));
   ]
 
 let color_management_view (c : Print_preferences.color_management) : Yojson.Safe.t =
@@ -118,6 +132,7 @@ let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
     ("output", output_view p.output);
     ("graphics", graphics_view p.graphics);
     ("color_management", color_management_view p.color_management);
+    ("advanced", advanced_view p.advanced);
   ]
 
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
