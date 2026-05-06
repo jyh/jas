@@ -173,6 +173,60 @@ import Testing
     #expect(PrinterMarkType.japanese.rawValue == "japanese")
 }
 
+@Test func outputDefaultsMatchSpec() {
+    let o = Output.default
+    #expect(o.mode == .composite)
+    #expect(o.emulsion == .upRight)
+    #expect(o.imagePolarity == .positive)
+    #expect(o.printerResolution == "75 lpi / 600 dpi")
+    #expect(o.convertSpotToProcess == false)
+    #expect(o.overprintBlack == false)
+    #expect(o.inks.count == 4)
+    #expect(o.inks[0].name == "Process Cyan" && o.inks[0].angle == 105.0)
+    #expect(o.inks[1].name == "Process Magenta" && o.inks[1].angle == 75.0)
+    #expect(o.inks[2].name == "Process Yellow" && o.inks[2].angle == 90.0)
+    #expect(o.inks[3].name == "Process Black" && o.inks[3].angle == 45.0)
+    for ink in o.inks {
+        #expect(ink.print)
+        #expect(ink.frequency == 75.0)
+        #expect(ink.dotShape == .round)
+    }
+}
+
+@Test func outputEnumRawValuesAreSnakeCase() {
+    #expect(OutputMode.composite.rawValue == "composite")
+    #expect(OutputMode.separations.rawValue == "separations")
+    #expect(Emulsion.upRight.rawValue == "up_right")
+    #expect(Emulsion.downRight.rawValue == "down_right")
+    #expect(ImagePolarity.positive.rawValue == "positive")
+    #expect(ImagePolarity.negative.rawValue == "negative")
+    #expect(DotShape.round.rawValue == "round")
+    #expect(DotShape.euclidean.rawValue == "euclidean")
+}
+
+@Test func outputRoundTripsThroughPrintPreferences() {
+    let o = Output(
+        mode: .separations,
+        emulsion: .downRight,
+        imagePolarity: .negative,
+        printerResolution: "150 lpi / 1200 dpi",
+        convertSpotToProcess: true,
+        overprintBlack: true,
+        inks: [
+            InkOverride(name: "Process Cyan", print: false, frequency: 100, angle: 105, dotShape: .ellipse),
+            InkOverride(name: "PANTONE 185 C", print: true, frequency: 85, angle: 45, dotShape: .square),
+        ]
+    )
+    let p = PrintPreferences(output: o)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"output\""))
+    #expect(json.contains("\"inks\""))
+    #expect(json.contains("\"PANTONE 185 C\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.output == o)
+}
+
 @Test func marksAndBleedRoundTripsThroughPrintPreferences() {
     let m = MarksAndBleed(
         allPrinterMarks: true,
