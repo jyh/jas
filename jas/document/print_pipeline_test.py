@@ -7,6 +7,7 @@ from document.print_preferences import (
     PrintPreferences, PrintPreset, ArtboardRangeMode, MediaSize, Orientation,
     PrintLayers, ScalingMode, DEFAULT_PRESET,
     MarksAndBleed, PrinterMarkType,
+    Output, OutputMode, Emulsion, ImagePolarity, DotShape, InkOverride,
 )
 from geometry.test_json import document_to_test_json, test_json_to_document
 
@@ -177,6 +178,65 @@ class MarksAndBleedTest(absltest.TestCase):
         self.assertIn('"marks_and_bleed"', j)
         d2 = test_json_to_document(j)
         self.assertEqual(d2.print_preferences.marks_and_bleed, m)
+
+
+class OutputTest(absltest.TestCase):
+    """PRINT.md §Phase 3 Output sub-record."""
+
+    def test_defaults(self):
+        o = Output()
+        self.assertEqual(o.mode, OutputMode.COMPOSITE)
+        self.assertEqual(o.emulsion, Emulsion.UP_RIGHT)
+        self.assertEqual(o.image_polarity, ImagePolarity.POSITIVE)
+        self.assertEqual(o.printer_resolution, "75 lpi / 600 dpi")
+        self.assertFalse(o.convert_spot_to_process)
+        self.assertFalse(o.overprint_black)
+        self.assertEqual(len(o.inks), 4)
+        self.assertEqual(o.inks[0].name, "Process Cyan")
+        self.assertEqual(o.inks[0].angle, 105.0)
+        self.assertEqual(o.inks[1].name, "Process Magenta")
+        self.assertEqual(o.inks[2].name, "Process Yellow")
+        self.assertEqual(o.inks[3].name, "Process Black")
+        self.assertEqual(o.inks[3].angle, 45.0)
+        for ink in o.inks:
+            self.assertTrue(ink.print)
+            self.assertEqual(ink.frequency, 75.0)
+            self.assertEqual(ink.dot_shape, DotShape.ROUND)
+
+    def test_enum_strings(self):
+        self.assertEqual(OutputMode.COMPOSITE.value, "composite")
+        self.assertEqual(OutputMode.SEPARATIONS.value, "separations")
+        self.assertEqual(Emulsion.UP_RIGHT.value, "up_right")
+        self.assertEqual(Emulsion.DOWN_RIGHT.value, "down_right")
+        self.assertEqual(ImagePolarity.POSITIVE.value, "positive")
+        self.assertEqual(ImagePolarity.NEGATIVE.value, "negative")
+        self.assertEqual(DotShape.ROUND.value, "round")
+        self.assertEqual(DotShape.EUCLIDEAN.value, "euclidean")
+
+    def test_output_roundtrip(self):
+        o = Output(
+            mode=OutputMode.SEPARATIONS,
+            emulsion=Emulsion.DOWN_RIGHT,
+            image_polarity=ImagePolarity.NEGATIVE,
+            printer_resolution="150 lpi / 1200 dpi",
+            convert_spot_to_process=True,
+            overprint_black=True,
+            inks=(
+                InkOverride(name="Process Cyan", print=False,
+                            frequency=100.0, angle=105.0,
+                            dot_shape=DotShape.ELLIPSE),
+                InkOverride(name="PANTONE 185 C", print=True,
+                            frequency=85.0, angle=45.0,
+                            dot_shape=DotShape.SQUARE),
+            ),
+        )
+        p = PrintPreferences(output=o)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"output"', j)
+        self.assertIn('"PANTONE 185 C"', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.output, o)
 
 
 if __name__ == "__main__":

@@ -58,12 +58,95 @@ class PrinterMarkType(Enum):
     JAPANESE = "japanese"
 
 
+class OutputMode(Enum):
+    """Output mode (PRINT.md §Phase 3). COMPOSITE renders one PDF
+    page per artboard; SEPARATIONS renders one page per enabled ink
+    in ``Output.inks``."""
+    COMPOSITE = "composite"
+    SEPARATIONS = "separations"
+
+
+class Emulsion(Enum):
+    """Film emulsion side (PRINT.md §Phase 3). For PDF output this
+    has no rendering effect, but the on-disk shape is stable."""
+    UP_RIGHT = "up_right"
+    DOWN_RIGHT = "down_right"
+
+
+class ImagePolarity(Enum):
+    """PDF page polarity (PRINT.md §Phase 3). NEGATIVE inverts the
+    final rasterized output; for PDF this is recorded but not
+    applied."""
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+
+
+class DotShape(Enum):
+    """Halftone dot shape for an ``InkOverride`` row (PRINT.md
+    §Phase 3). Phase 3 stores the choice; halftone screen rendering
+    itself is a Phase 7+ deferral."""
+    ROUND = "round"
+    SQUARE = "square"
+    ELLIPSE = "ellipse"
+    DIAMOND = "diamond"
+    LINE = "line"
+    CROSS = "cross"
+    EUCLIDEAN = "euclidean"
+
+
 def _enum_from_string(enum_class, s: str, default):
     """Look up an enum value by its string form; return `default` on miss."""
     for v in enum_class:
         if v.value == s:
             return v
     return default
+
+
+@dataclass(frozen=True)
+class InkOverride:
+    """One row in the per-ink overrides table (PRINT.md §Phase 3)."""
+    name: str
+    print: bool = True
+    frequency: float = 75.0
+    angle: float = 45.0
+    dot_shape: DotShape = DotShape.ROUND
+
+
+def _process_cmyk_default_inks() -> tuple[InkOverride, ...]:
+    """The default ink list shipped with a fresh Output: the four CMYK
+    process inks at standard Western screen angles."""
+    return (
+        InkOverride(name="Process Cyan",    frequency=75.0, angle=105.0),
+        InkOverride(name="Process Magenta", frequency=75.0, angle=75.0),
+        InkOverride(name="Process Yellow",  frequency=75.0, angle=90.0),
+        InkOverride(name="Process Black",   frequency=75.0, angle=45.0),
+    )
+
+
+@dataclass(frozen=True)
+class Output:
+    """Output sub-record on PrintPreferences (PRINT.md §Phase 3). The
+    Output tab edits these 1:1; in Separations mode the PDF emitter
+    produces one page per enabled InkOverride instead of one page
+    per artboard."""
+    mode: OutputMode = OutputMode.COMPOSITE
+    emulsion: Emulsion = Emulsion.UP_RIGHT
+    image_polarity: ImagePolarity = ImagePolarity.POSITIVE
+    printer_resolution: str = "75 lpi / 600 dpi"
+    convert_spot_to_process: bool = False
+    overprint_black: bool = False
+    inks: tuple[InkOverride, ...] = ()
+
+    def __post_init__(self):
+        # frozen dataclass: use object.__setattr__ to seed the default
+        # ink list (mutable defaults aren't allowed on dataclass fields,
+        # and the empty-tuple sentinel keeps the field's default
+        # comparable / hashable).
+        if not self.inks:
+            object.__setattr__(self, "inks", _process_cmyk_default_inks())
+
+
+DEFAULT_OUTPUT = Output()
 
 
 @dataclass(frozen=True)
@@ -124,6 +207,8 @@ class PrintPreferences:
     tile_range: str = ""
     # Marks-and-bleed sub-record (PRINT.md §Phase 2).
     marks_and_bleed: MarksAndBleed = DEFAULT_MARKS_AND_BLEED
+    # Output sub-record (PRINT.md §Phase 3).
+    output: Output = DEFAULT_OUTPUT
 
 
 DEFAULT_PRINT_PREFERENCES = PrintPreferences()
