@@ -209,6 +209,38 @@ impl Default for Graphics {
     }
 }
 
+/// Transparency / overprint flattener preset (PRINT.md §Phase 6).
+/// Used by both the Print Advanced tab (overprint flattener) and
+/// the Document Setup transparency flattener — same enum, two
+/// independent fields. Phase 6 v1 stores the choice but doesn't
+/// run a flattener; the actual flattening pipeline is a follow-up.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FlattenerPreset {
+    LowResolution,
+    MediumResolution,
+    HighResolution,
+    Custom,
+}
+
+/// Advanced sub-record on PrintPreferences (PRINT.md §Phase 6 Advanced
+/// tab). Phase 6 v1 stores the values; rendering effects (rasterizing
+/// the entire page when ``print_as_bitmap`` is true; running the
+/// overprint flattener) are deferred.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Advanced {
+    pub print_as_bitmap: bool,
+    pub overprint_flattener_preset: FlattenerPreset,
+}
+
+impl Default for Advanced {
+    fn default() -> Self {
+        Self {
+            print_as_bitmap: false,
+            overprint_flattener_preset: FlattenerPreset::MediumResolution,
+        }
+    }
+}
+
 /// Color-handling mode for the Color Management tab (PRINT.md §Phase 5).
 /// Three Adobe-standard choices: let the app, let the printer, or
 /// hand the data straight to the PostScript driver. PDF output
@@ -340,6 +372,8 @@ pub struct PrintPreferences {
     pub graphics: Graphics,
     /// Color Management sub-record (PRINT.md §Phase 5).
     pub color_management: ColorManagement,
+    /// Advanced sub-record (PRINT.md §Phase 6).
+    pub advanced: Advanced,
 }
 
 impl Default for PrintPreferences {
@@ -372,6 +406,7 @@ impl Default for PrintPreferences {
             output: Output::default(),
             graphics: Graphics::default(),
             color_management: ColorManagement::default(),
+            advanced: Advanced::default(),
         }
     }
 }
@@ -535,6 +570,23 @@ pub fn image_polarity_from(s: &str) -> ImagePolarity {
     }
 }
 
+pub fn flattener_preset_str(p: &FlattenerPreset) -> &'static str {
+    match p {
+        FlattenerPreset::LowResolution => "low_resolution",
+        FlattenerPreset::MediumResolution => "medium_resolution",
+        FlattenerPreset::HighResolution => "high_resolution",
+        FlattenerPreset::Custom => "custom",
+    }
+}
+pub fn flattener_preset_from(s: &str) -> FlattenerPreset {
+    match s {
+        "low_resolution" => FlattenerPreset::LowResolution,
+        "high_resolution" => FlattenerPreset::HighResolution,
+        "custom" => FlattenerPreset::Custom,
+        _ => FlattenerPreset::MediumResolution,
+    }
+}
+
 pub fn color_handling_str(c: &ColorHandling) -> &'static str {
     match c {
         ColorHandling::LetAppDetermine => "let_app_determine",
@@ -665,6 +717,14 @@ mod tests {
         assert_eq!(p.output, Output::default());
         assert_eq!(p.graphics, Graphics::default());
         assert_eq!(p.color_management, ColorManagement::default());
+        assert_eq!(p.advanced, Advanced::default());
+    }
+
+    #[test]
+    fn advanced_defaults_match_spec() {
+        let a = Advanced::default();
+        assert!(!a.print_as_bitmap);
+        assert_eq!(a.overprint_flattener_preset, FlattenerPreset::MediumResolution);
     }
 
     #[test]
@@ -801,6 +861,14 @@ mod tests {
         ] {
             assert_eq!(rendering_intent_from(rendering_intent_str(&r)), r);
         }
+        for f in [
+            FlattenerPreset::LowResolution,
+            FlattenerPreset::MediumResolution,
+            FlattenerPreset::HighResolution,
+            FlattenerPreset::Custom,
+        ] {
+            assert_eq!(flattener_preset_from(flattener_preset_str(&f)), f);
+        }
     }
 
     #[test]
@@ -820,5 +888,6 @@ mod tests {
         assert_eq!(data_format_from("garbage"), DataFormat::Binary);
         assert_eq!(color_handling_from("garbage"), ColorHandling::LetAppDetermine);
         assert_eq!(rendering_intent_from("garbage"), RenderingIntent::RelativeColorimetric);
+        assert_eq!(flattener_preset_from("garbage"), FlattenerPreset::MediumResolution);
     }
 }
