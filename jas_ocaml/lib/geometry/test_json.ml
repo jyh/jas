@@ -510,6 +510,19 @@ let document_setup_json (s : Document_setup.t) =
   json_bool o "show_images_outline" s.show_images_outline;
   json_build o
 
+let graphics_json (g : Print_preferences.graphics) =
+  let o = json_obj () in
+  json_bool o "compatible_gradient_printing" g.compatible_gradient_printing;
+  json_str o "data_format"
+    (Print_preferences.data_format_to_string g.data_format);
+  json_num o "flatness" g.flatness;
+  json_str o "font_download"
+    (Print_preferences.font_download_to_string g.font_download);
+  json_str o "postscript_level"
+    (Print_preferences.postscript_level_to_string g.postscript_level);
+  json_num o "raster_effects_resolution" g.raster_effects_resolution;
+  json_build o
+
 let ink_override_json (ink : Print_preferences.ink_override) =
   let o = json_obj () in
   json_num o "angle" ink.angle;
@@ -562,6 +575,7 @@ let print_preferences_json (p : Print_preferences.t) =
   json_bool o "collate" p.collate;
   json_int o "copies" p.copies;
   json_num o "custom_scale" p.custom_scale;
+  json_raw o "graphics" (graphics_json p.graphics);
   json_bool o "ignore_artboards" p.ignore_artboards;
   json_raw o "marks_and_bleed" (marks_and_bleed_json p.marks_and_bleed);
   json_num o "media_height" p.media_height;
@@ -996,6 +1010,37 @@ let parse_document_setup j : Document_setup.t =
     }
   with _ -> d
 
+let parse_graphics j : Print_preferences.graphics =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_graphics in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      flatness = pick_num "flatness" d.flatness;
+      font_download =
+        Print_preferences.font_download_of_string
+          (pick_str "font_download"
+             (Print_preferences.font_download_to_string d.font_download));
+      postscript_level =
+        Print_preferences.postscript_level_of_string
+          (pick_str "postscript_level"
+             (Print_preferences.postscript_level_to_string d.postscript_level));
+      data_format =
+        Print_preferences.data_format_of_string
+          (pick_str "data_format"
+             (Print_preferences.data_format_to_string d.data_format));
+      compatible_gradient_printing =
+        pick_bool "compatible_gradient_printing" d.compatible_gradient_printing;
+      raster_effects_resolution =
+        pick_num "raster_effects_resolution" d.raster_effects_resolution;
+    }
+  with _ -> d
+
 let parse_ink_override j : Print_preferences.ink_override =
   let open Yojson.Safe.Util in
   let pick_str name d_val =
@@ -1104,6 +1149,11 @@ let parse_print_preferences j : Print_preferences.t =
     | `Null -> d.output
     | v -> parse_output v
   in
+  let pick_graphics () =
+    match try j |> member "graphics" with _ -> `Null with
+    | `Null -> d.graphics
+    | v -> parse_graphics v
+  in
   try
     {
       preset_name = pick_str "preset_name" d.preset_name;
@@ -1146,6 +1196,7 @@ let parse_print_preferences j : Print_preferences.t =
       tile_range = pick_str "tile_range" d.tile_range;
       marks_and_bleed = pick_marks_and_bleed ();
       output = pick_output ();
+      graphics = pick_graphics ();
     }
   with _ -> d
 

@@ -74,6 +74,32 @@ type output = {
 
 val default_output : output
 
+type font_download = Font_none | Font_subset | Font_complete
+
+val font_download_to_string : font_download -> string
+val font_download_of_string : string -> font_download
+
+type postscript_level = Level_2 | Level_3
+
+val postscript_level_to_string : postscript_level -> string
+val postscript_level_of_string : string -> postscript_level
+
+type data_format = Ascii | Binary
+
+val data_format_to_string : data_format -> string
+val data_format_of_string : string -> data_format
+
+type graphics = {
+  flatness : float;
+  font_download : font_download;
+  postscript_level : postscript_level;
+  data_format : data_format;
+  compatible_gradient_printing : bool;
+  raster_effects_resolution : float;
+}
+
+val default_graphics : graphics
+
 type marks_and_bleed = {
   all_printer_marks : bool;
   trim_marks : bool;
@@ -118,6 +144,7 @@ type t = {
   tile_range : string;
   marks_and_bleed : marks_and_bleed;
   output : output;
+  graphics : graphics;
 }
 
 val default : t
