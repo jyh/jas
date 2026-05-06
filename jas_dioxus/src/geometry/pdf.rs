@@ -27,7 +27,9 @@
 
 use crate::document::artboard::Artboard;
 use crate::document::document::Document;
-use crate::document::print_preferences::{MarksAndBleed, PrintLayers, ScalingMode};
+use crate::document::print_preferences::{
+    MarksAndBleed, OutputMode, PrintLayers, ScalingMode,
+};
 use crate::geometry::element::*;
 
 /// Length of a single trim mark in points. Standard print convention.
@@ -86,6 +88,12 @@ struct Page {
     src_y: f64,
     src_w: f64,
     src_h: f64,
+    /// PRINT.md §Phase 3: when ``Some(name)``, this page is one
+    /// channel of a separations job, labelled with the ink name.
+    /// Phase 3 v1 renders the artwork the same way Composite mode
+    /// does and stamps the label as a small page-info string;
+    /// per-ink channel extraction is a deferred follow-up.
+    separation_label: Option<String>,
 }
 
 /// Resolve the active bleed values per PRINT.md §Phase 2:
@@ -128,19 +136,64 @@ fn collect_pages(doc: &Document) -> Vec<Page> {
         src_y,
         src_w,
         src_h,
+        separation_label: None,
     };
-    if doc.print_preferences.ignore_artboards || doc.artboards.is_empty() {
+    let base: Vec<Page> = if doc.print_preferences.ignore_artboards || doc.artboards.is_empty() {
         let (x, y, w, h) = if doc.artboards.is_empty() {
             (0.0, 0.0, 612.0, 792.0)
         } else {
             artboard_bounds_union(&doc.artboards)
         };
-        return vec![make_page(x, y, w, h)];
+        vec![make_page(x, y, w, h)]
+    } else {
+        doc.artboards
+            .iter()
+            .map(|ab| make_page(ab.x, ab.y, ab.width, ab.height))
+            .collect()
+    };
+    expand_for_separations(doc, base)
+}
+
+/// In Composite mode, return ``base`` unchanged. In Separations mode,
+/// emit one copy of every base page per enabled ink in
+/// ``output.inks`` (artboard-major order: artboard 1 / Cyan, artboard
+/// 1 / Magenta, …, artboard 2 / Cyan, …). When Separations mode is
+/// chosen but no inks are enabled, return ``base`` so the user still
+/// gets a PDF — silent fall-through is friendlier than an empty file.
+fn expand_for_separations(doc: &Document, base: Vec<Page>) -> Vec<Page> {
+    let out = &doc.print_preferences.output;
+    if out.mode != OutputMode::Separations {
+        return base;
     }
-    doc.artboards
-        .iter()
-        .map(|ab| make_page(ab.x, ab.y, ab.width, ab.height))
-        .collect()
+    let enabled: Vec<&str> = out.inks.iter()
+        .filter(|i| i.print)
+        .map(|i| i.name.as_str())
+        .collect();
+    if enabled.is_empty() {
+        return base;
+    }
+    let mut expanded = Vec::with_capacity(base.len() * enabled.len());
+    for page in base.into_iter() {
+        for name in &enabled {
+            let mut p = clone_page(&page);
+            p.separation_label = Some((*name).to_string());
+            expanded.push(p);
+        }
+    }
+    expanded
+}
+
+fn clone_page(p: &Page) -> Page {
+    Page {
+        media_box: p.media_box,
+        trim_x_off: p.trim_x_off,
+        trim_y_off: p.trim_y_off,
+        src_x: p.src_x,
+        src_y: p.src_y,
+        src_w: p.src_w,
+        src_h: p.src_h,
+        separation_label: p.separation_label.clone(),
+    }
 }
 
 fn artboard_bounds_union(abs: &[Artboard]) -> (f64, f64, f64, f64) {
@@ -192,7 +245,46 @@ fn build_page_content(doc: &Document, page: &Page) -> String {
     // straightforward and the y-flip from the artwork pass doesn't
     // confuse mark geometry. PRINT.md §Phase 2.
     emit_marks(&mut s, doc, page);
+    // Separations label (PRINT.md §Phase 3): stamp the ink name on
+    // the page so the printer / user can tell the channels apart.
+    // Also runs in page space; placed just above the bottom-right
+    // trim corner so it doesn't collide with the page-info string
+    // at the bottom-left.
+    if let Some(name) = &page.separation_label {
+        emit_separation_label(&mut s, page, name);
+    }
     s
+}
+
+/// Stamp the ink name in 6pt Helvetica at the bottom-right of the
+/// trim rect. PDF strings are escaped so non-ASCII / special chars
+/// don't corrupt the content stream.
+fn emit_separation_label(s: &mut String, page: &Page, name: &str) {
+    let label_x = page.trim_x_off + page.src_w - 80.0;
+    let label_y = page.trim_y_off - 14.0;
+    s.push_str("q\nBT\n/F1 6 Tf\n0 0 0 rg\n");
+    push_num(s, label_x);
+    push_num(s, label_y);
+    s.push_str("Td\n(");
+    s.push_str(&pdf_escape_string(name));
+    s.push_str(") Tj\nET\nQ\n");
+}
+
+/// Escape a string for inclusion in a PDF literal-string (between
+/// parentheses): escape ``\`` ``(`` ``)`` per PDF 1.7 §7.3.4.2, and
+/// drop any non-printable byte to avoid breaking the content stream.
+fn pdf_escape_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '(' => out.push_str("\\("),
+            ')' => out.push_str("\\)"),
+            c if (c as u32) >= 0x20 && (c as u32) < 0x7f => out.push(c),
+            _ => {} // skip non-ASCII; PDF default font has no glyph anyway
+        }
+    }
+    out
 }
 
 /// Draw the printer's marks around the page's trim rect (PRINT.md
@@ -933,6 +1025,79 @@ mod tests {
         assert!(s.contains("/Count 3"), "expected /Count 3");
         let count = s.matches("/Type /Page ").count();
         assert_eq!(count, 3, "expected 3 /Type /Page entries");
+    }
+
+    #[test]
+    fn pdf_separations_emits_one_page_per_enabled_ink() {
+        use crate::document::print_preferences::OutputMode;
+        let mut doc = Document::default();
+        doc.artboards = vec![Artboard {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            ..Artboard::default_with_id("a".into())
+        }];
+        doc.print_preferences.output.mode = OutputMode::Separations;
+        // Default 4 process inks all enabled → 4 pages.
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Count 4"), "expected /Count 4, got:\n{s}");
+        // Page-info string includes each ink's name (escaped per PDF
+        // string-literal rules — names are ASCII so no surprises).
+        assert!(s.contains("(Process Cyan)"), "missing Cyan label");
+        assert!(s.contains("(Process Magenta)"), "missing Magenta label");
+        assert!(s.contains("(Process Yellow)"), "missing Yellow label");
+        assert!(s.contains("(Process Black)"), "missing Black label");
+    }
+
+    #[test]
+    fn pdf_separations_skips_unprinted_inks() {
+        use crate::document::print_preferences::OutputMode;
+        let mut doc = Document::default();
+        doc.artboards = vec![Artboard {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            ..Artboard::default_with_id("a".into())
+        }];
+        doc.print_preferences.output.mode = OutputMode::Separations;
+        // Disable Cyan + Magenta — should leave 2 pages (Yellow + Black).
+        doc.print_preferences.output.inks[0].print = false;
+        doc.print_preferences.output.inks[1].print = false;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Count 2"), "expected /Count 2, got:\n{s}");
+        assert!(!s.contains("(Process Cyan)"), "should not contain Cyan");
+        assert!(!s.contains("(Process Magenta)"), "should not contain Magenta");
+        assert!(s.contains("(Process Yellow)"));
+        assert!(s.contains("(Process Black)"));
+    }
+
+    #[test]
+    fn pdf_separations_with_zero_enabled_inks_falls_back_to_composite() {
+        use crate::document::print_preferences::OutputMode;
+        let mut doc = Document::default();
+        doc.artboards = vec![Artboard {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            ..Artboard::default_with_id("a".into())
+        }];
+        doc.print_preferences.output.mode = OutputMode::Separations;
+        for ink in &mut doc.print_preferences.output.inks {
+            ink.print = false;
+        }
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        // Empty ink list shouldn't yield an empty PDF — friendlier
+        // to fall through to the single composite page.
+        assert!(s.contains("/Count 1"), "expected /Count 1, got:\n{s}");
+    }
+
+    #[test]
+    fn pdf_composite_mode_unchanged_by_phase3_changes() {
+        let doc = Document::default();
+        // Composite is the default; ensure adding the Output sub-record
+        // didn't perturb the page count.
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Count 1"));
+        assert!(!s.contains("(Process Cyan)"),
+                "composite-mode page must not stamp ink labels");
     }
 
     #[test]
