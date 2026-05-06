@@ -171,6 +171,24 @@ def _document_setup_view(s) -> dict:
     }
 
 
+def _marks_and_bleed_view(m) -> dict:
+    return {
+        "all_printer_marks": m.all_printer_marks,
+        "trim_marks": m.trim_marks,
+        "registration_marks": m.registration_marks,
+        "color_bars": m.color_bars,
+        "page_information": m.page_information,
+        "printer_mark_type": m.printer_mark_type.value,
+        "trim_mark_weight": m.trim_mark_weight,
+        "mark_offset": m.mark_offset,
+        "use_document_bleed": m.use_document_bleed,
+        "bleed_top": m.bleed_top,
+        "bleed_right": m.bleed_right,
+        "bleed_bottom": m.bleed_bottom,
+        "bleed_left": m.bleed_left,
+    }
+
+
 def _print_preferences_view(p) -> dict:
     return {
         "preset_name": p.preset_name,
@@ -196,6 +214,7 @@ def _print_preferences_view(p) -> dict:
         "tile_overlap_h": p.tile_overlap_h,
         "tile_overlap_v": p.tile_overlap_v,
         "tile_range": p.tile_range,
+        "marks_and_bleed": _marks_and_bleed_view(p.marks_and_bleed),
     }
 
 
