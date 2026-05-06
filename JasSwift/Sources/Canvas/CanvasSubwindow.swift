@@ -1567,6 +1567,15 @@ private func elemChildren(_ e: Element) -> [Element] {
 // integration waits on threading the theme through CanvasNSView.
 
 private let artboardBorderColor = CGColor(gray: 0.2, alpha: 1.0)
+/// Pasteboard (canvas background outside artboards). Medium gray so
+/// white artboards stand out as "paper on a layout table." Hardcoded
+/// pending the Phase-D theme threading; matches Illustrator's
+/// pasteboard convention rather than the dock theme.
+private let canvasBackgroundColor = CGColor(gray: 0.47, alpha: 1.0)
+/// Default fill drawn for an artboard whose `fill` is `.transparent`.
+/// Without this the canvas-bg color would show through and there'd be
+/// no visual distinction between artboard and pasteboard.
+private let artboardDefaultFillColor = CGColor(gray: 1.0, alpha: 1.0)
 private let artboardAccentColor = CGColor(srgbRed: 0, green: 120.0/255.0, blue: 215.0/255.0, alpha: 0.95)
 private let artboardMarkColor = CGColor(gray: 0.6, alpha: 1.0)
 private let artboardLabelColor = CGColor(gray: 0.8, alpha: 1.0)
@@ -1592,7 +1601,12 @@ private func drawArtboardFills(_ ctx: CGContext, _ doc: Document) {
     for ab in doc.artboards {
         switch ab.fill {
         case .transparent:
-            continue  // canvas shows through
+            // Default to a white "paper" fill so the artboard reads as
+            // distinct from the gray pasteboard. (A future "show
+            // transparency grid" pref could opt out of this and draw
+            // the checkerboard instead.)
+            ctx.setFillColor(artboardDefaultFillColor)
+            ctx.fill(CGRect(x: ab.x, y: ab.y, width: ab.width, height: ab.height))
         case .color(let hex):
             guard let cg = cgColorFromHex(hex) else { continue }
             ctx.setFillColor(cg)
@@ -1604,16 +1618,15 @@ private func drawArtboardFills(_ ctx: CGContext, _ doc: Document) {
 private func drawFadeOverlay(_ ctx: CGContext, _ doc: Document, bounds: CGRect) {
     guard doc.artboardOptions.fadeRegionOutsideArtboard else { return }
     guard !doc.artboards.isEmpty else { return }
-    ctx.saveGState()
-    ctx.setFillColor(artboardFadeColor)
-    ctx.fill(bounds)
-    // Punch artboards out of the mask via destinationOut composite.
-    ctx.setBlendMode(.destinationOut)
-    ctx.setFillColor(CGColor(gray: 0, alpha: 1))
-    for ab in doc.artboards {
-        ctx.fill(CGRect(x: ab.x, y: ab.y, width: ab.width, height: ab.height))
-    }
-    ctx.restoreGState()
+    // No-op now that the gray pasteboard + white artboard fills give
+    // enough visual contrast on their own. The legacy implementation
+    // here used `destinationOut` to punch artboards out of a darken
+    // overlay, which wiped the artboard fill back to the context's
+    // (black) backing — the original "all white canvas → black
+    // artboard" smoke regression. Kept the function so the toggle
+    // wiring still resolves; reinstate a non-destructive overlay
+    // (additive darken outside artboards, computed via an inverse
+    // rect path) if a future visual pass calls for it.
 }
 
 private func drawArtboardBorders(_ ctx: CGContext, _ doc: Document) {
@@ -1632,7 +1645,7 @@ private func drawBleedGuides(_ ctx: CGContext, _ doc: Document) {
         return
     }
     ctx.saveGState()
-    ctx.setStrokeColor(CGColor(red: 0.9, green: 0, blue: 0, alpha: 1))
+    ctx.setStrokeColor(CGColor(srgbRed: 0.9, green: 0, blue: 0, alpha: 1))
     ctx.setLineWidth(1.0)
     ctx.setLineDash(phase: 0, lengths: [4, 4])
     for ab in doc.artboards {
@@ -2095,7 +2108,14 @@ class CanvasNSView: NSView {
 
     var activeTool: CanvasTool {
         let tool = onToolRead?() ?? currentTool
-        return tools[tool]!
+        // Force-unwrap would crash for any Tool case that ``createTools``
+        // doesn't yet register (Hand / Zoom / Scale / Rotate / Shear /
+        // MagicWand / Paintbrush / BlobBrush / Artboard / Eyedropper as
+        // of 2026-05). Spacebar activates Hand, so an accidental Space
+        // would brick the canvas. Fall back to the always-registered
+        // selection tool — the chosen tool simply won't act, matching
+        // the per-tool-omission contract documented on createTools.
+        return tools[tool] ?? tools[.selection]!
     }
 
     var toolContext: ToolContext? {
@@ -2124,11 +2144,12 @@ class CanvasNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        // Layer 1: canvas background (white). Filled in screen-space
-        // before the view transform so it covers the viewport
-        // regardless of zoom and pan. Per ZOOM_TOOL.md §Anchor and
-        // clamp math (rendering pipeline).
-        ctx.setFillColor(.white)
+        // Layer 1: pasteboard (canvas background). Medium gray; the
+        // artboard fills draw white over it so the artboard reads as
+        // "paper on a layout table." Filled in screen-space before the
+        // view transform so it covers the viewport regardless of zoom
+        // and pan. Per ZOOM_TOOL.md §Anchor and clamp math.
+        ctx.setFillColor(canvasBackgroundColor)
         ctx.fill(bounds)
         // Sync model viewport size with the current canvas bounds.
         // First-time viewport syncs re-center on the active artboard

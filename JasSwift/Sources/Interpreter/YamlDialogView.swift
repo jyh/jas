@@ -227,6 +227,14 @@ struct YamlDialogOverlay: View {
                 )
                 .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 8)
                 .frame(maxWidth: dialogWidth(ds))
+                // Without this the outer VStack expands vertically to
+                // fill the ZStack — Spacer()s in the tabs renderer
+                // (used for the left rail and the content column)
+                // push the dialog to full window height. Forcing
+                // intrinsic vertical sizing fits the dialog to its
+                // content; the inner Spacers still let tab content
+                // top-align within the available rail height.
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -274,10 +282,26 @@ struct YamlDialogOverlay: View {
                 element: content,
                 context: ctx,
                 model: model,
-                onWidgetAction: handleDialogWidgetAction
+                onWidgetAction: handleDialogWidgetAction,
+                theme: theme,
+                onDialogWrite: handleDialogStateWrite
             )
+                .foregroundColor(SwiftUI.Color(nsColor: theme.text))
                 .padding(4)
         }
+    }
+
+    /// Receive a write from a dialog-body widget bound to ``dialog.X``.
+    /// Updates both the SwiftUI ``dialogState`` binding (so the dialog
+    /// re-renders with the typed value) and the underlying StateStore
+    /// dialog map (so any prop ``set:`` setter or ``on_change`` hook
+    /// fires, and so a later ``yamlDialogStateFromStore`` snapshot
+    /// would observe the same value).
+    private func handleDialogStateWrite(_ key: String, _ value: Any?) {
+        model?.stateStore.setDialog(key, value)
+        guard var ds = dialogState else { return }
+        ds.state[key] = value
+        dialogState = ds
     }
 
     /// Dispatch a dialog-body widget-level ``action:`` click. Params

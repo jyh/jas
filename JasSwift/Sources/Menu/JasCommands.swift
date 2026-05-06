@@ -90,7 +90,10 @@ public struct JasCommands: Commands {
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New") {
-                addCanvas?(Model())
+                // Document() defaults artboards: []; newEmptyDocument()
+                // seeds the at-least-one-artboard invariant so the new
+                // canvas isn't a featureless white plane.
+                addCanvas?(Model(document: Document.newEmptyDocument()))
             }
             .keyboardShortcut("n", modifiers: .command)
 
@@ -232,22 +235,31 @@ public struct JasCommands: Commands {
             .keyboardShortcut("3", modifiers: [.command, .option])
         }
 
-        // Replace default toolbar section in View menu with our zoom items
+        // Replace default toolbar section in View menu with our zoom items.
+        // Uses the same @FocusedValue(\.jasModel) path that Save / Print
+        // use — workspace from @FocusedValue doesn't propagate to
+        // JasCommands for reasons that aren't obvious here, but model
+        // does, and we don't need workspace for these actions anyway.
         CommandGroup(replacing: .toolbar) {
-            Button("Zoom In") {
-                print("Zoom in")
-            }
-            .keyboardShortcut("+", modifiers: .command)
+            Button("Zoom In") { model?.zoomIn() }
+            .keyboardShortcut("=", modifiers: .command)
+            .disabled(model == nil)
 
-            Button("Zoom Out") {
-                print("Zoom out")
-            }
+            Button("Zoom Out") { model?.zoomOut() }
             .keyboardShortcut("-", modifiers: .command)
+            .disabled(model == nil)
 
-            Button("Fit in Window") {
-                print("Fit in window")
-            }
+            Button("Actual Size") { model?.zoomToActualSize() }
+            .keyboardShortcut("1", modifiers: .command)
+            .disabled(model == nil)
+
+            Button("Fit Artboard") { model?.fitActiveArtboard() }
             .keyboardShortcut("0", modifiers: .command)
+            .disabled(model == nil)
+
+            Button("Fit All Artboards") { model?.fitAllArtboards() }
+            .keyboardShortcut("0", modifiers: [.command, .option])
+            .disabled(model == nil)
         }
 
         // Replace default window list with our workspace/pane items

@@ -70,8 +70,17 @@ public class Controller {
         var layers = doc.layers
         layers[idx] = newLayer
         let es = ElementSelection.all([idx, childIdx])
+        // Preserve every non-layer document field — Document's default
+        // initializer zeros artboards / artboardOptions / documentSetup
+        // / printPreferences if they aren't passed, so the prior
+        // shorter call wiped the artboard out from under the user the
+        // moment they drew their first shape.
         model.document = Document(layers: layers, selectedLayer: idx,
-                                     selection: [es])
+                                  selection: [es],
+                                  artboards: doc.artboards,
+                                  artboardOptions: doc.artboardOptions,
+                                  documentSetup: doc.documentSetup,
+                                  printPreferences: doc.printPreferences)
     }
 
     /// Append ``element`` to the mask subtree of the element at
