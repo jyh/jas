@@ -24,6 +24,19 @@ let document_setup_view (s : Document_setup.t) : Yojson.Safe.t =
     ("highlight_substituted_glyphs", `Bool s.highlight_substituted_glyphs);
   ]
 
+let graphics_view (g : Print_preferences.graphics) : Yojson.Safe.t =
+  `Assoc [
+    ("flatness", `Float g.flatness);
+    ("font_download",
+     `String (Print_preferences.font_download_to_string g.font_download));
+    ("postscript_level",
+     `String (Print_preferences.postscript_level_to_string g.postscript_level));
+    ("data_format",
+     `String (Print_preferences.data_format_to_string g.data_format));
+    ("compatible_gradient_printing", `Bool g.compatible_gradient_printing);
+    ("raster_effects_resolution", `Float g.raster_effects_resolution);
+  ]
+
 let ink_override_view (ink : Print_preferences.ink_override) : Yojson.Safe.t =
   `Assoc [
     ("name", `String ink.name);
@@ -92,6 +105,7 @@ let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
     ("tile_range", `String p.tile_range);
     ("marks_and_bleed", marks_and_bleed_view p.marks_and_bleed);
     ("output", output_view p.output);
+    ("graphics", graphics_view p.graphics);
   ]
 
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =

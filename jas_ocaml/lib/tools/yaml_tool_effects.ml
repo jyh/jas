@@ -4084,6 +4084,63 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* doc.set_graphics_field — PRINT.md §Phase 4. Same wiring shape
+     as doc.set_output_field; dispatches by field name onto the
+     graphics sub-record and rebuilds print_preferences. *)
+  let doc_set_graphics_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let g = p.graphics in
+          let ng : Print_preferences.graphics option =
+            let num () = eval_number (Some v) store ctx in
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "flatness" -> Some { g with flatness = num () }
+            | "font_download" ->
+              (match str_v () with
+               | Some s -> Some { g with font_download = Print_preferences.font_download_of_string s }
+               | None -> None)
+            | "postscript_level" ->
+              (match str_v () with
+               | Some s -> Some { g with postscript_level = Print_preferences.postscript_level_of_string s }
+               | None -> None)
+            | "data_format" ->
+              (match str_v () with
+               | Some s -> Some { g with data_format = Print_preferences.data_format_of_string s }
+               | None -> None)
+            | "compatible_gradient_printing" ->
+              Some { g with compatible_gradient_printing = bool_v () }
+            | "raster_effects_resolution" ->
+              Some { g with raster_effects_resolution = num () }
+            | _ -> None
+          in
+          (match ng with
+           | Some new_g ->
+             let new_p = { p with graphics = new_g } in
+             ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
   (* geometry.export_pdf — PRINT.md §1B. Generates a PDF and prompts
      for a save location via GtkFileChooserDialog. *)
   let geometry_export_pdf _ _ _ =
@@ -4119,6 +4176,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.set_marks_and_bleed_field", doc_set_marks_and_bleed_field);
     ("doc.set_output_field", doc_set_output_field);
     ("doc.set_output_ink_field", doc_set_output_ink_field);
+    ("doc.set_graphics_field", doc_set_graphics_field);
     ("geometry.export_pdf", geometry_export_pdf);
     ("doc.artboard.probe_hit", doc_artboard_probe_hit);
     ("doc.artboard.probe_hover", doc_artboard_probe_hover);
