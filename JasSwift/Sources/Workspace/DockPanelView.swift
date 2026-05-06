@@ -172,7 +172,7 @@ public struct PanelGroupView: View {
                     if let ws = WorkspaceData.load(),
                        let content = ws.panelContent(contentId) {
                         let ctx = buildPanelCtx(ws: ws, contentId: contentId)
-                        YamlPanelBodyView(contentSpec: content, context: ctx, model: model, panelId: contentId)
+                        YamlPanelBodyView(contentSpec: content, context: ctx, model: model, panelId: contentId, theme: theme)
                     } else {
                         SwiftUI.Text(verbatim: panelLabel(kind))
                             .font(.system(size: 12))

@@ -32,6 +32,19 @@ struct YamlElementView: View {
     /// ``LayersPanel.dispatchYamlAction``. Nil elsewhere (panel
     /// content has no widget-level ``action:`` today).
     var onWidgetAction: ((String, [String: Any]) -> Void)? = nil
+    /// Active theme, threaded for ``icon_button`` SVG rendering
+    /// (``WorkspaceIcon`` tints ``currentColor`` with ``theme.text``).
+    /// Nil call sites (e.g. early init) fall back to the text-stub
+    /// rendering of ``icon_button``.
+    var theme: Theme? = nil
+    /// Set by YAML dialogs to receive widget write-backs whose
+    /// ``bind.value`` / ``bind.checked`` expression starts with
+    /// ``dialog.``. Without it, dialog widgets are read-only — typing
+    /// into a number_input bound to ``dialog.bleed_top`` would resolve
+    /// to a no-op and the rendered value would snap back to whatever
+    /// the dialog state held when the field rendered. Mirrors the Rust
+    /// dialog-signal write path (``dialog_signal.set(Some(ds))``).
+    var onDialogWrite: ((String, Any?) -> Void)? = nil
 
     var body: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
@@ -119,6 +132,38 @@ struct YamlElementView: View {
         return rest
     }
 
+    /// Classify a `bind.value` / `bind.checked` expression as either a
+    /// panel-scoped write or a dialog-scoped write. Used by widget
+    /// renderers to route edits into the right state container —
+    /// without this, dialog widgets bound to ``dialog.X`` would resolve
+    /// the writeBackKey panel-only fast path to nil and the field would
+    /// behave read-only. Mirrors Rust's ``classify_bind`` /
+    /// ``BindTarget``.
+    private enum WriteScope { case panel, dialog }
+    private struct WriteTarget {
+        let scope: WriteScope
+        let key: String
+    }
+    private func writeBackTarget(_ expr: String?) -> WriteTarget? {
+        guard let e = expr?.trimmingCharacters(in: .whitespaces) else { return nil }
+        if let rest = stripIdentifierPrefix(e, prefix: "panel.") {
+            return WriteTarget(scope: .panel, key: rest)
+        }
+        if let rest = stripIdentifierPrefix(e, prefix: "dialog.") {
+            return WriteTarget(scope: .dialog, key: rest)
+        }
+        return nil
+    }
+    private func stripIdentifierPrefix(_ e: String, prefix: String) -> String? {
+        guard e.hasPrefix(prefix) else { return nil }
+        let rest = String(e.dropFirst(prefix.count))
+        guard !rest.isEmpty,
+              rest.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else {
+            return nil
+        }
+        return rest
+    }
+
     /// Commit a write to the panel state: store → bump version →
     /// fire the `notify_panel_state_changed` hook. No-op when the
     /// target key / panelId / store isn't available.
@@ -152,6 +197,22 @@ struct YamlElementView: View {
         notifyPanelStateChanged(pid, store: model.stateStore, model: model)
     }
 
+    /// Dispatch a widget edit to the right state container based on the
+    /// classified bind target. Panel writes go through the existing
+    /// commitPanelWrite path; dialog writes route to the YAML dialog
+    /// overlay's onDialogWrite closure (which updates the SwiftUI
+    /// binding so the dialog re-renders with the typed value, and
+    /// pushes through to ``StateStore.setDialog`` so any setter prop
+    /// or on_change hook fires).
+    private func commitWidgetWrite(target: WriteTarget, value: Any?) {
+        switch target.scope {
+        case .panel:
+            commitPanelWrite(key: target.key, value: value)
+        case .dialog:
+            onDialogWrite?(target.key, value)
+        }
+    }
+
     // MARK: - Repeat
 
     /// Expand a repeat directive: evaluate the source expression to get a list,
@@ -178,21 +239,21 @@ struct YamlElementView: View {
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
                 }
             }
         }
@@ -259,14 +320,66 @@ struct YamlElementView: View {
         let gap = (element["style"] as? [String: Any])?["gap"] as? CGFloat ?? 0
 
         if isRow {
-            HStack(spacing: gap) {
-                renderChildElements()
+            // Bootstrap-style: when row children declare `col: N`,
+            // honor those weights as proportional widths summed to 12
+            // across the row. Lays out via GeometryReader so each col
+            // gets its slice of the parent. Without this, label and
+            // field cols pack tight against each other and rows
+            // misalign across the panel.
+            let children = (element["children"] as? [[String: Any]]) ?? []
+            let weights = children.map { ($0["col"] as? Int) ?? 0 }
+            let totalWeight = weights.reduce(0, +)
+            if totalWeight > 0 {
+                bootstrapRow(children: children, weights: weights,
+                             totalWeight: totalWeight, gap: gap)
+            } else {
+                HStack(alignment: .center, spacing: gap) {
+                    renderChildElements()
+                }
             }
         } else {
-            VStack(spacing: gap) {
+            // Column / col container: VStack defaults to .center
+            // horizontal alignment, which centers each child
+            // horizontally within the column. Bootstrap-style YAML
+            // expects left-justified content (label sits at the
+            // leading edge of its col, the input next to it sits at
+            // the leading edge of its col), so override to .leading.
+            VStack(alignment: .leading, spacing: gap) {
                 renderChildElements()
             }
         }
+    }
+
+    /// Lay out a row whose children declare `col: N` weights, dividing
+    /// the available width across the columns (out of 12 by Bootstrap
+    /// convention). Each column gets `(weight / totalWeight) *
+    /// (rowWidth - gaps)` and is left-aligned within its slot.
+    @ViewBuilder
+    private func bootstrapRow(children: [[String: Any]], weights: [Int],
+                              totalWeight: Int, gap: CGFloat) -> some View {
+        GeometryReader { geo in
+            let totalGap = gap * CGFloat(max(0, children.count - 1))
+            let usable = max(0, geo.size.width - totalGap)
+            HStack(alignment: .center, spacing: gap) {
+                ForEach(0..<children.count, id: \.self) { i in
+                    let w = weights[i]
+                    let width = w > 0
+                        ? usable * CGFloat(w) / CGFloat(totalWeight)
+                        : nil
+                    YamlElementView(
+                        element: children[i], context: context, model: model,
+                        panelId: panelId, onWidgetAction: onWidgetAction,
+                        theme: theme, onDialogWrite: onDialogWrite
+                    )
+                    .frame(width: width, alignment: .leading)
+                }
+            }
+        }
+        // GeometryReader expands to fill available height by default
+        // — but row contents are typically a single line tall, so
+        // pin the row's height to its largest natural child rather
+        // than letting it absorb the rest of the dialog.
+        .frame(height: 28)
     }
 
     // MARK: - Grid
@@ -282,7 +395,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
             }
         }
     }
@@ -329,18 +442,43 @@ struct YamlElementView: View {
     private func renderIconButton() -> some View {
         let summary = element["summary"] as? String ?? ""
         let isDisabled = evalBindDisabled()
-        // bind.icon: expression whose evaluated string names the
-        // icon glyph. Swift's icon_button renderer currently shows
-        // the summary as its label rather than the glyph; the
-        // resolved icon name is captured here so future icon-
-        // rendering support can pick it up without another YAML
-        // change. Used by op_link_indicator to flip between
-        // ``link_linked`` / ``link_unlinked`` as mask.linked
-        // changes.
-        let _ = resolvedIconName()
-        return Button(summary) { handleWidgetClick() }
+        let iconName = resolvedIconName()
+        let iconSize = resolvedIconSize()
+        // When a theme is in scope and the icon resolves through
+        // WorkspaceIcon's parser (rect/line/circle/ellipse/poly/path
+        // subset), render the SVG glyph; otherwise fall back to a
+        // text button using the summary so the click target stays
+        // accessible. Mirrors jas_dioxus's render_icon_button which
+        // embeds the SVG inline.
+        if let theme = theme, !iconName.isEmpty,
+           WorkspaceIconCache.shared.lookup(iconName) != nil {
+            Button(action: { handleWidgetClick() }) {
+                WorkspaceIcon(name: iconName, size: iconSize, tint: theme.text)
+            }
             .buttonStyle(.plain)
+            .help(summary)
             .disabled(isDisabled)
+        } else {
+            Button(summary) { handleWidgetClick() }
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
+        }
+    }
+
+    /// Read ``style.size`` from the icon_button element (default 20pt).
+    /// Mirrors Rust's ``icon_size_px`` — used so dialogs / panels with
+    /// a small style.size declaration get a small icon rather than a
+    /// stretched one.
+    private func resolvedIconSize() -> CGFloat {
+        if let style = element["style"] as? [String: Any], let raw = style["size"] {
+            if let n = raw as? Double { return CGFloat(n) }
+            if let n = raw as? Int { return CGFloat(n) }
+            if let s = raw as? String,
+               let n = Double(s.trimmingCharacters(in: CharacterSet(charactersIn: "px "))) {
+                return CGFloat(n)
+            }
+        }
+        return 20
     }
 
     /// Resolve the icon name from ``bind.icon`` (if present, as a
@@ -490,16 +628,22 @@ struct YamlElementView: View {
             }
             return minVal
         }()
-        let writeKey = writeBackKey(valueExpr)
+        let writeTarget = writeBackTarget(valueExpr)
 
         TextField("", value: Binding<Int>(
             get: { currentValue },
             set: { newVal in
-                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
             }
         ), format: .number)
             .frame(width: 45)
             .textFieldStyle(.roundedBorder)
+            // Override the inherited foregroundColor — dialogs cascade
+            // theme.text (light) over the body so labels read on the
+            // dark backdrop, but TextFields keep a white system
+            // background and inherit that light text, leaving the
+            // typed digits low-contrast and barely legible.
+            .foregroundColor(.black)
     }
 
     // MARK: - Text Input
@@ -516,15 +660,18 @@ struct YamlElementView: View {
             }
             return ""
         }()
-        let writeKey = writeBackKey(valueExpr)
+        let writeTarget = writeBackTarget(valueExpr)
 
         TextField(placeholder, text: Binding<String>(
             get: { currentValue },
             set: { newVal in
-                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
             }
         ))
             .textFieldStyle(.roundedBorder)
+            // Same rationale as renderNumberInput: keep the typed text
+            // dark against the system white text-field background.
+            .foregroundColor(.black)
     }
 
     // MARK: - Length Input
@@ -557,7 +704,7 @@ struct YamlElementView: View {
             }
         }()
         let displayValue = Length.format(ptValue, unit: unit, precision: precision)
-        let writeKey = writeBackKey(valueExpr)
+        let writeTarget = writeBackTarget(valueExpr)
 
         // Identity-coupled key forces remount when the bound pt value
         // changes (clamp-on-commit, external writes), pulling the
@@ -568,11 +715,11 @@ struct YamlElementView: View {
         TextField(placeholder, text: Binding<String>(
             get: { displayValue },
             set: { newVal in
-                guard let key = writeKey else { return }
+                guard let t = writeTarget else { return }
                 let trimmed = newVal.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty {
                     if nullable {
-                        commitPanelWrite(key: key, value: nil as Any?)
+                        commitWidgetWrite(target: t, value: nil as Any?)
                     }
                     // Non-nullable empty: drop the edit; the remount on
                     // any subsequent write will redisplay the prior value.
@@ -583,11 +730,14 @@ struct YamlElementView: View {
                 }
                 if let lo = minClamp, newPt < lo { newPt = lo }
                 if let hi = maxClamp, newPt > hi { newPt = hi }
-                commitPanelWrite(key: key, value: newPt)
+                commitWidgetWrite(target: t, value: newPt)
             }
         ))
             .id(stableId)
             .textFieldStyle(.roundedBorder)
+            // Match number/text inputs — dark text on the system
+            // white field background.
+            .foregroundColor(.black)
     }
 
     // MARK: - Color Swatch
@@ -947,7 +1097,7 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderPanel() -> some View {
         if let content = element["content"] as? [String: Any] {
-            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
         } else {
             renderPlaceholder()
         }
@@ -1061,7 +1211,7 @@ struct YamlElementView: View {
             }
             return ""
         }()
-        let writeKey = writeBackKey(valueExpr)
+        let writeTarget = writeBackTarget(valueExpr)
 
         let entries = options.enumerated().map { i, opt -> PickerEntry in
             let v = opt["value"].map { "\($0)" } ?? ""
@@ -1071,7 +1221,7 @@ struct YamlElementView: View {
         Picker("", selection: Binding<String>(
             get: { currentValue },
             set: { newVal in
-                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
             }
         )) {
             ForEach(entries) { e in
@@ -1079,6 +1229,14 @@ struct YamlElementView: View {
             }
         }
         .labelsHidden()
+        // SwiftUI Picker defaults to filling available row width on
+        // macOS; the YAML rows in print.yaml put a select inside a
+        // grid column that's wider than the dropdown's content needs,
+        // so without this the dropdown stretches to absorb the empty
+        // space and the dialog reads as button-bloat. Take intrinsic
+        // width horizontally so the dropdown sits left-aligned in its
+        // column with content-sized chrome.
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: - Toggle / Checkbox
@@ -1094,7 +1252,7 @@ struct YamlElementView: View {
             }
             return false
         }()
-        let writeKey = writeBackKey(checkedExpr)
+        let writeTarget = writeBackTarget(checkedExpr)
         let isDisabled: Bool = {
             if let disExpr = bind?["disabled"] as? String {
                 return evaluate(disExpr, context: context).toBool()
@@ -1127,7 +1285,7 @@ struct YamlElementView: View {
                     }
                     return
                 }
-                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
             }
         ))
             .toggleStyle(.checkbox)
@@ -1152,7 +1310,7 @@ struct YamlElementView: View {
             }
             return ""
         }()
-        let writeKey = writeBackKey(valueExpr)
+        let writeTarget = writeBackTarget(valueExpr)
 
         // SwiftUI doesn't have a native combo box with free entry;
         // use Picker as a dropdown with the current value displayed.
@@ -1164,7 +1322,7 @@ struct YamlElementView: View {
         Picker("", selection: Binding<String>(
             get: { currentValue },
             set: { newVal in
-                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
             }
         )) {
             ForEach(entries) { e in
@@ -1180,7 +1338,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
         }
     }
 
@@ -1189,15 +1347,15 @@ struct YamlElementView: View {
     /// Tabs widget — left-rail tab list plus a content area showing
     /// the active tab. Active tab is read from `bind.value` (typically
     /// `dialog.<field>`); falls back to the first tab id when no bind
-    /// or empty value. Click writes the tab id back through the
-    /// dialog-state path (subject to the broader dialog-write
-    /// limitation noted in writeBackKey — for non-panel binds the
-    /// click is currently a no-op until that framework piece lands).
+    /// or empty value. Click writes the tab id back through
+    /// commitWidgetWrite (panel store or dialog binding, depending on
+    /// the bind prefix).
     @ViewBuilder
     private func renderTabs() -> some View {
         let tabs = element["tabs"] as? [[String: Any]] ?? []
         let bind = element["bind"] as? [String: Any]
         let valueExpr = bind?["value"] as? String
+        let writeTarget = writeBackTarget(valueExpr)
         let firstId = (tabs.first?["id"] as? String) ?? ""
         let activeId: String = {
             if let e = valueExpr {
@@ -1217,10 +1375,9 @@ struct YamlElementView: View {
                     let label = tab["label"] as? String ?? ""
                     let isActive = tabId == activeId
                     Button(action: {
-                        // Dialog-state write goes here when the framework
-                        // supports it. For now this is a no-op for dialog
-                        // binds; the active tab stays on whatever the
-                        // init expression produced.
+                        if let t = writeTarget {
+                            commitWidgetWrite(target: t, value: tabId)
+                        }
                     }) {
                         SwiftUI.Text(label)
                             .font(.system(size: 12, weight: isActive ? .semibold : .regular))
@@ -1233,12 +1390,15 @@ struct YamlElementView: View {
                 }
                 Spacer()
             }
-            .frame(minWidth: 140)
+            // Fixed left-rail width — `minWidth` lets the rail balloon
+            // when the parent HStack hands it half the dialog. The
+            // tab labels max out around 130pt; 160pt gives padding.
+            .frame(width: 160)
             .background(SwiftUI.Color.gray.opacity(0.08))
             // Content
             VStack {
                 if let content = activeContent {
-                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction)
+                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
                 }
                 Spacer()
             }
@@ -2232,9 +2392,15 @@ struct YamlPanelBodyView: View {
     /// Widget write-backs inside this body route to
     /// `model.stateStore.setPanel(panelId, ...)`.
     var panelId: String?
+    /// Active theme — passed down to ``icon_button`` so it can tint
+    /// `currentColor` SVG fills/strokes via ``WorkspaceIcon``.
+    var theme: Theme? = nil
+    /// Dialog overlays supply this so dialog-bound widgets can write
+    /// back to the SwiftUI dialog state. Panels leave it nil.
+    var onDialogWrite: ((String, Any?) -> Void)? = nil
 
     var body: some View {
-        YamlElementView(element: contentSpec, context: context, model: model, panelId: panelId)
+        YamlElementView(element: contentSpec, context: context, model: model, panelId: panelId, theme: theme, onDialogWrite: onDialogWrite)
             .padding(4)
     }
 }

@@ -134,6 +134,60 @@ public class Model: ObservableObject {
         objectWillChange.send()
     }
 
+    /// View shortcuts shared between the canvas keyDown handler and
+    /// the View menu commands. Both paths must call into the same
+    /// place — otherwise the SwiftUI menu's keyboardShortcut steals
+    /// the chord before the canvas sees it, leaving the menu button
+    /// the only working invocation surface (and a stub menu button is
+    /// what bit us in the smoke before this landed). Hard-coded zoom
+    /// limits match workspace prefs (zoom_step 1.2, min/max 0.1 / 64).
+    public func zoomIn() { applyZoomCentered(factor: 1.2) }
+    public func zoomOut() { applyZoomCentered(factor: 1.0 / 1.2) }
+    public func zoomToActualSize() {
+        zoomLevel = min(max(1.0, 0.1), 64.0)
+    }
+    public func fitActiveArtboard() {
+        guard let ab = document.artboards.first else { return }
+        fitRect(x: Double(ab.x), y: Double(ab.y),
+                w: Double(ab.width), h: Double(ab.height))
+    }
+    public func fitAllArtboards() {
+        let abs = document.artboards
+        guard !abs.isEmpty else { return }
+        var minX = Double.infinity, minY = Double.infinity
+        var maxX = -Double.infinity, maxY = -Double.infinity
+        for ab in abs {
+            minX = min(minX, Double(ab.x))
+            minY = min(minY, Double(ab.y))
+            maxX = max(maxX, Double(ab.x + ab.width))
+            maxY = max(maxY, Double(ab.y + ab.height))
+        }
+        fitRect(x: minX, y: minY, w: maxX - minX, h: maxY - minY)
+    }
+
+    private func applyZoomCentered(factor: Double) {
+        let cx = viewportW / 2.0
+        let cy = viewportH / 2.0
+        let docCx = (cx - viewOffsetX) / zoomLevel
+        let docCy = (cy - viewOffsetY) / zoomLevel
+        let z = min(max(zoomLevel * factor, 0.1), 64.0)
+        zoomLevel = z
+        viewOffsetX = cx - docCx * z
+        viewOffsetY = cy - docCy * z
+    }
+
+    private func fitRect(x: Double, y: Double, w: Double, h: Double) {
+        guard w > 0, h > 0, viewportW > 0, viewportH > 0 else { return }
+        let pad = 20.0
+        let availW = viewportW - 2 * pad
+        let availH = viewportH - 2 * pad
+        guard availW > 0, availH > 0 else { return }
+        let z = min(max(min(availW / w, availH / h), 0.1), 64.0)
+        zoomLevel = z
+        viewOffsetX = viewportW / 2.0 - (x + w / 2.0) * z
+        viewOffsetY = viewportH / 2.0 - (y + h / 2.0) * z
+    }
+
     public func onDocumentChanged(_ callback: @escaping (Document) -> Void) {
         listeners.append(callback)
     }
