@@ -16,7 +16,7 @@ import math
 from dataclasses import dataclass
 
 from document.document import Document
-from document.print_preferences import PrintLayers, ScalingMode
+from document.print_preferences import PrintLayers, ScalingMode, OutputMode
 from geometry.element import (
     Circle, Color, Ellipse, Group, Layer, Line, Path, Polygon, Polyline, Rect,
     Text, TextPath, Visibility,
@@ -37,6 +37,11 @@ class _Page:
     # MediaBox. (0, 0) when no bleed/marks are active.
     trim_x_off: float = 0.0
     trim_y_off: float = 0.0
+    # PRINT.md §Phase 3: when set, this page is one channel of a
+    # separations job. v1 renders the artwork the same way Composite
+    # does and stamps the label as a small page-info string;
+    # per-ink channel extraction is a deferred follow-up.
+    separation_label: str | None = None
 
 
 # Marks-and-Bleed PDF geometry constants (PRINT.md §Phase 2). Same
@@ -89,17 +94,43 @@ def _collect_pages(doc: Document) -> list[_Page]:
             x, y, w, h = 0.0, 0.0, 612.0, 792.0
         else:
             x, y, w, h = _artboard_bounds_union(doc.artboards)
-        return [_Page(
+        base = [_Page(
             media_w=w + extra_w, media_h=h + extra_h,
             src_x=x, src_y=y, src_w=w, src_h=h,
             trim_x_off=trim_x_off, trim_y_off=trim_y_off)]
-    return [
-        _Page(
-            media_w=ab.width + extra_w, media_h=ab.height + extra_h,
-            src_x=ab.x, src_y=ab.y, src_w=ab.width, src_h=ab.height,
-            trim_x_off=trim_x_off, trim_y_off=trim_y_off)
-        for ab in doc.artboards
-    ]
+    else:
+        base = [
+            _Page(
+                media_w=ab.width + extra_w, media_h=ab.height + extra_h,
+                src_x=ab.x, src_y=ab.y, src_w=ab.width, src_h=ab.height,
+                trim_x_off=trim_x_off, trim_y_off=trim_y_off)
+            for ab in doc.artboards
+        ]
+    return _expand_for_separations(doc, base)
+
+
+def _expand_for_separations(doc: Document, base: list[_Page]) -> list[_Page]:
+    """In Composite mode, returns base unchanged. In Separations mode
+    (PRINT.md §Phase 3), expands each base page into one copy per
+    enabled ink in artboard-major order. When Separations is chosen
+    but no inks are enabled, falls through to the composite pages so
+    the user still gets a PDF instead of an empty file."""
+    out = doc.print_preferences.output
+    if out.mode != OutputMode.SEPARATIONS:
+        return base
+    enabled = [i for i in out.inks if i.print]
+    if not enabled:
+        return base
+    expanded: list[_Page] = []
+    for page in base:
+        for ink in enabled:
+            expanded.append(_Page(
+                media_w=page.media_w, media_h=page.media_h,
+                src_x=page.src_x, src_y=page.src_y,
+                src_w=page.src_w, src_h=page.src_h,
+                trim_x_off=page.trim_x_off, trim_y_off=page.trim_y_off,
+                separation_label=ink.name))
+    return expanded
 
 
 def _scaling_pair(doc: Document) -> tuple[float, float]:
@@ -437,6 +468,22 @@ def _draw_page(canvas: RLCanvas, doc: Document, page: _Page):
     # Marks render in MediaBox space (no user transforms), aligned to
     # the trim rect inside it.
     _emit_marks(canvas, doc, page)
+    # Separations label (PRINT.md §Phase 3): stamp the ink name on
+    # each separations page so the printer / user can tell channels
+    # apart. Placed at the bottom-right of the trim rect to avoid
+    # colliding with the page-info string at the bottom-left.
+    if page.separation_label is not None:
+        _emit_separation_label(canvas, page, page.separation_label)
+
+
+def _emit_separation_label(canvas: RLCanvas, page: _Page, name: str):
+    label_x = page.trim_x_off + page.src_w - 80
+    label_y = page.trim_y_off - 14
+    canvas.saveState()
+    canvas.setFillColorRGB(0, 0, 0, alpha=1)
+    canvas.setFont("Helvetica", 6)
+    canvas.drawString(label_x, label_y, name)
+    canvas.restoreState()
 
 
 def document_to_pdf(doc: Document) -> bytes:
