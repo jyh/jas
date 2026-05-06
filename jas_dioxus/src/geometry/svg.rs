@@ -1844,6 +1844,21 @@ fn parse_document_setup(
             .map(|s| parse_bool(s, d.show_images_outline)).unwrap_or(d.show_images_outline),
         highlight_substituted_glyphs: get_attr(node, "highlight-substituted-glyphs")
             .map(|s| parse_bool(s, d.highlight_substituted_glyphs)).unwrap_or(d.highlight_substituted_glyphs),
+        grid_size: get_attr(node, "grid-size")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.grid_size),
+        grid_color: get_attr(node, "grid-color")
+            .map(str::to_string).unwrap_or(d.grid_color),
+        paper_color: get_attr(node, "paper-color")
+            .map(str::to_string).unwrap_or(d.paper_color),
+        simulate_colored_paper: get_attr(node, "simulate-colored-paper")
+            .map(|s| parse_bool(s, d.simulate_colored_paper))
+            .unwrap_or(d.simulate_colored_paper),
+        transparency_flattener_preset: get_attr(node, "transparency-flattener-preset")
+            .map(crate::document::print_preferences::flattener_preset_from)
+            .unwrap_or(d.transparency_flattener_preset),
+        discard_white_overprint: get_attr(node, "discard-white-overprint")
+            .map(|s| parse_bool(s, d.discard_white_overprint))
+            .unwrap_or(d.discard_white_overprint),
     }
 }
 
@@ -2180,6 +2195,7 @@ fn parse_print_preferences(
         output: Output::default(),
         graphics: Graphics::default(),
         color_management: ColorManagement::default(),
+        advanced: Advanced::default(),
     };
     for child in &node.children {
         match strip_ns(&child.tag) {
@@ -3325,6 +3341,7 @@ mod tests {
             bleed_uniform: false,
             show_images_outline: true,
             highlight_substituted_glyphs: true,
+            ..DocumentSetup::default()
         };
         let svg = document_to_svg(&doc);
         assert!(svg.contains("<jas:document-setup"),
@@ -3380,6 +3397,7 @@ mod tests {
             output: Output::default(),
             graphics: Graphics::default(),
             color_management: ColorManagement::default(),
+            advanced: Advanced::default(),
         };
         let svg = document_to_svg(&doc);
         assert!(svg.contains("<jas:print-preferences"),
@@ -3475,6 +3493,7 @@ mod tests {
             bleed_uniform: true,
             show_images_outline: false,
             highlight_substituted_glyphs: false,
+            ..DocumentSetup::default()
         };
         let svg = document_to_svg(&doc);
         // Both metadata blocks live inside the same namedview.

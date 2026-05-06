@@ -20,7 +20,9 @@ use crate::document::print_preferences::{
     data_format_from, data_format_str,
     color_handling_from, color_handling_str,
     rendering_intent_from, rendering_intent_str,
-    ColorManagement, Graphics, InkOverride, MarksAndBleed, Output, PrintPreferences,
+    flattener_preset_from, flattener_preset_str,
+    Advanced, ColorManagement, Graphics, InkOverride, MarksAndBleed, Output,
+    PrintPreferences,
 };
 use crate::geometry::element::*;
 
@@ -615,8 +617,23 @@ fn document_setup_json(s: &DocumentSetup) -> String {
     o.num("bleed_right", s.bleed_right);
     o.num("bleed_top", s.bleed_top);
     o.bool_val("bleed_uniform", s.bleed_uniform);
+    o.bool_val("discard_white_overprint", s.discard_white_overprint);
+    o.str_val("grid_color", &s.grid_color);
+    o.num("grid_size", s.grid_size);
     o.bool_val("highlight_substituted_glyphs", s.highlight_substituted_glyphs);
+    o.str_val("paper_color", &s.paper_color);
     o.bool_val("show_images_outline", s.show_images_outline);
+    o.bool_val("simulate_colored_paper", s.simulate_colored_paper);
+    o.str_val("transparency_flattener_preset",
+              flattener_preset_str(&s.transparency_flattener_preset));
+    o.build()
+}
+
+fn advanced_json(a: &Advanced) -> String {
+    let mut o = JsonObj::new();
+    o.str_val("overprint_flattener_preset",
+              flattener_preset_str(&a.overprint_flattener_preset));
+    o.bool_val("print_as_bitmap", a.print_as_bitmap);
     o.build()
 }
 
@@ -688,6 +705,7 @@ fn marks_and_bleed_json(m: &MarksAndBleed) -> String {
 
 fn print_preferences_json(p: &PrintPreferences) -> String {
     let mut o = JsonObj::new();
+    o.raw("advanced", advanced_json(&p.advanced));
     o.str_val("artboard_range", &p.artboard_range);
     o.str_val("artboard_range_mode", artboard_range_mode_str(&p.artboard_range_mode));
     o.bool_val("auto_rotate", p.auto_rotate);
@@ -1186,6 +1204,25 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
         bleed_uniform: v["bleed_uniform"].as_bool().unwrap_or(d.bleed_uniform),
         show_images_outline: v["show_images_outline"].as_bool().unwrap_or(d.show_images_outline),
         highlight_substituted_glyphs: v["highlight_substituted_glyphs"].as_bool().unwrap_or(d.highlight_substituted_glyphs),
+        grid_size: v["grid_size"].as_f64().unwrap_or(d.grid_size),
+        grid_color: v["grid_color"].as_str().map(String::from).unwrap_or(d.grid_color),
+        paper_color: v["paper_color"].as_str().map(String::from).unwrap_or(d.paper_color),
+        simulate_colored_paper: v["simulate_colored_paper"].as_bool().unwrap_or(d.simulate_colored_paper),
+        transparency_flattener_preset: v["transparency_flattener_preset"].as_str()
+            .map(flattener_preset_from).unwrap_or(d.transparency_flattener_preset),
+        discard_white_overprint: v["discard_white_overprint"].as_bool().unwrap_or(d.discard_white_overprint),
+    }
+}
+
+fn parse_advanced(v: &serde_json::Value) -> Advanced {
+    if v.is_null() || !v.is_object() {
+        return Advanced::default();
+    }
+    let d = Advanced::default();
+    Advanced {
+        print_as_bitmap: v["print_as_bitmap"].as_bool().unwrap_or(d.print_as_bitmap),
+        overprint_flattener_preset: v["overprint_flattener_preset"].as_str()
+            .map(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
     }
 }
 
@@ -1320,6 +1357,7 @@ fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
         output: parse_output(&v["output"]),
         graphics: parse_graphics(&v["graphics"]),
         color_management: parse_color_management(&v["color_management"]),
+        advanced: parse_advanced(&v["advanced"]),
     }
 }
 
@@ -1591,6 +1629,7 @@ mod tests {
 
     #[test]
     fn document_setup_roundtrip() {
+        use crate::document::print_preferences::FlattenerPreset;
         let mut d = Document::default();
         d.document_setup = DocumentSetup {
             bleed_top: 9.0,
@@ -1600,10 +1639,33 @@ mod tests {
             bleed_uniform: false,
             show_images_outline: true,
             highlight_substituted_glyphs: true,
+            grid_size: 36.0,
+            grid_color: "#0099ff".to_string(),
+            paper_color: "#fff8e7".to_string(),
+            simulate_colored_paper: true,
+            transparency_flattener_preset: FlattenerPreset::HighResolution,
+            discard_white_overprint: true,
         };
         let json = document_to_test_json(&d);
         let d2 = test_json_to_document(&json);
         assert_eq!(d2.document_setup, d.document_setup);
+    }
+
+    #[test]
+    fn advanced_round_trip_carries_all_choices() {
+        use crate::document::print_preferences::{Advanced, FlattenerPreset};
+        let mut d = Document::default();
+        d.print_preferences.advanced = Advanced {
+            print_as_bitmap: true,
+            overprint_flattener_preset: FlattenerPreset::HighResolution,
+        };
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"advanced\""), "json:\n{json}");
+        assert!(json.contains("\"print_as_bitmap\":true"), "json:\n{json}");
+        assert!(json.contains("\"overprint_flattener_preset\":\"high_resolution\""),
+                "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.advanced, d.print_preferences.advanced);
     }
 
     #[test]
@@ -1697,8 +1759,8 @@ mod tests {
     #[test]
     fn print_preferences_roundtrip() {
         use crate::document::print_preferences::{
-            ArtboardRangeMode, ColorHandling, ColorManagement, DataFormat, DotShape,
-            Emulsion, FontDownload, Graphics,
+            Advanced, ArtboardRangeMode, ColorHandling, ColorManagement, DataFormat,
+            DotShape, Emulsion, FlattenerPreset, FontDownload, Graphics,
             ImagePolarity, InkOverride,
             MarksAndBleed, MediaSize, Orientation, Output, OutputMode, PostScriptLevel,
             PrintLayers,
@@ -1771,6 +1833,10 @@ mod tests {
                 printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
                 rendering_intent: RenderingIntent::Perceptual,
                 preserve_rgb_numbers: true,
+            },
+            advanced: Advanced {
+                print_as_bitmap: true,
+                overprint_flattener_preset: FlattenerPreset::LowResolution,
             },
         };
         let json = document_to_test_json(&d);
