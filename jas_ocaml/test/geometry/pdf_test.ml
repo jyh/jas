@@ -61,6 +61,72 @@ let test_pdf_ignore_artboards_collapses_to_one_page () =
   let bytes = Pdf.document_to_pdf doc in
   assert (String.length bytes > 0)
 
+(* Cairo's PDF surface compresses content streams (Flate-encoded by
+   default), so ink names don't appear in the byte buffer literally.
+   The page-tree `/Pages` object ("/Count N") and the page-list
+   ("/Kids [a b ...]") live uncompressed though, so test against the
+   total byte size as a coarse but reliable signal: separations
+   produces visibly more bytes than composite. *)
+
+let test_pdf_separations_produces_more_bytes_than_composite () =
+  let abs = [make_artboard "a" 0.0 0.0 100.0 100.0] in
+  let composite_doc = Document.make_document ~artboards:abs [||] in
+  let composite = Pdf.document_to_pdf composite_doc in
+  let sep_doc = Document.make_document
+    ~artboards:abs
+    ~print_preferences:{ Print_preferences.default with
+      output = { Print_preferences.default_output with
+                 mode = Print_preferences.Separations } }
+    [||] in
+  let sep = Pdf.document_to_pdf sep_doc in
+  (* 4 inks → roughly 4x the page-stream content; allow slop. *)
+  assert (String.length sep > 2 * String.length composite)
+
+let test_pdf_separations_skips_unprinted_inks () =
+  let abs = [make_artboard "a" 0.0 0.0 100.0 100.0] in
+  let inks = match Print_preferences.default_output.inks with
+    | c :: m :: y :: k :: _ ->
+      [ { c with print = false }; { m with print = false }; y; k ]
+    | other -> other in
+  let doc = Document.make_document
+    ~artboards:abs
+    ~print_preferences:{ Print_preferences.default with
+      output = { Print_preferences.default_output with
+                 mode = Print_preferences.Separations;
+                 inks } }
+    [||] in
+  let two_ink_bytes = Pdf.document_to_pdf doc in
+  let four_ink_doc = Document.make_document
+    ~artboards:abs
+    ~print_preferences:{ Print_preferences.default with
+      output = { Print_preferences.default_output with
+                 mode = Print_preferences.Separations } }
+    [||] in
+  let four_ink_bytes = Pdf.document_to_pdf four_ink_doc in
+  (* 2-ink output should be smaller than 4-ink. *)
+  assert (String.length two_ink_bytes < String.length four_ink_bytes)
+
+let test_pdf_separations_zero_inks_falls_back_to_composite () =
+  let abs = [make_artboard "a" 0.0 0.0 100.0 100.0] in
+  let inks = List.map (fun (i : Print_preferences.ink_override) ->
+    { i with print = false }
+  ) Print_preferences.default_output.inks in
+  let zero_ink_doc = Document.make_document
+    ~artboards:abs
+    ~print_preferences:{ Print_preferences.default with
+      output = { Print_preferences.default_output with
+                 mode = Print_preferences.Separations;
+                 inks } }
+    [||] in
+  let zero_ink_bytes = Pdf.document_to_pdf zero_ink_doc in
+  let composite_doc = Document.make_document ~artboards:abs [||] in
+  let composite_bytes = Pdf.document_to_pdf composite_doc in
+  (* Empty ink list → falls through to a single composite page. The
+     two outputs should be roughly the same size. *)
+  let diff = abs_float (float_of_int (String.length zero_ink_bytes -
+                                      String.length composite_bytes)) in
+  assert (diff < 200.0)
+
 let () =
   Alcotest.run "PDF" [
     "envelope", [
@@ -68,5 +134,10 @@ let () =
       Alcotest.test_case "empty doc fallback page" `Quick test_pdf_empty_doc_picks_fallback_page_size;
       Alcotest.test_case "N artboards N pages" `Quick test_pdf_n_artboards_yields_n_pages;
       Alcotest.test_case "ignore_artboards one page" `Quick test_pdf_ignore_artboards_collapses_to_one_page;
+    ];
+    "separations", [
+      Alcotest.test_case "produces more bytes than composite" `Quick test_pdf_separations_produces_more_bytes_than_composite;
+      Alcotest.test_case "skips unprinted inks" `Quick test_pdf_separations_skips_unprinted_inks;
+      Alcotest.test_case "zero inks falls back to composite" `Quick test_pdf_separations_zero_inks_falls_back_to_composite;
     ];
   ]
