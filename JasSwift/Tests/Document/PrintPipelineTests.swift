@@ -173,6 +173,49 @@ import Testing
     #expect(PrinterMarkType.japanese.rawValue == "japanese")
 }
 
+@Test func advancedDefaultsMatchSpec() {
+    let a = Advanced.default
+    #expect(a.printAsBitmap == false)
+    #expect(a.overprintFlattenerPreset == .mediumResolution)
+}
+
+@Test func flattenerPresetEnumRawValuesAreSnakeCase() {
+    #expect(FlattenerPreset.lowResolution.rawValue == "low_resolution")
+    #expect(FlattenerPreset.mediumResolution.rawValue == "medium_resolution")
+    #expect(FlattenerPreset.highResolution.rawValue == "high_resolution")
+    #expect(FlattenerPreset.custom.rawValue == "custom")
+}
+
+@Test func advancedRoundTripsThroughPrintPreferences() {
+    let a = Advanced(printAsBitmap: true, overprintFlattenerPreset: .highResolution)
+    let p = PrintPreferences(advanced: a)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"advanced\""))
+    #expect(json.contains("\"print_as_bitmap\":true"))
+    #expect(json.contains("\"overprint_flattener_preset\":\"high_resolution\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.advanced == a)
+}
+
+@Test func documentSetupPhase6FieldsRoundTrip() {
+    let s = DocumentSetup(
+        gridSize: 36,
+        gridColor: "#0099ff",
+        paperColor: "#fff8e7",
+        simulateColoredPaper: true,
+        transparencyFlattenerPreset: .highResolution,
+        discardWhiteOverprint: true
+    )
+    let doc = Document(documentSetup: s)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"grid_size\":36"))
+    #expect(json.contains("\"paper_color\":\"#fff8e7\""))
+    #expect(json.contains("\"simulate_colored_paper\":true"))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.documentSetup == s)
+}
+
 @Test func colorManagementDefaultsMatchSpec() {
     let c = ColorManagement.default
     #expect(c.documentProfile == "sRGB IEC61966-2.1")

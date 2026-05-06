@@ -518,8 +518,21 @@ private func documentSetupJson(_ s: DocumentSetup) -> String {
     o.num("bleed_right", s.bleedRight)
     o.num("bleed_top", s.bleedTop)
     o.bool("bleed_uniform", s.bleedUniform)
+    o.bool("discard_white_overprint", s.discardWhiteOverprint)
+    o.str("grid_color", s.gridColor)
+    o.num("grid_size", s.gridSize)
     o.bool("highlight_substituted_glyphs", s.highlightSubstitutedGlyphs)
+    o.str("paper_color", s.paperColor)
     o.bool("show_images_outline", s.showImagesOutline)
+    o.bool("simulate_colored_paper", s.simulateColoredPaper)
+    o.str("transparency_flattener_preset", s.transparencyFlattenerPreset.rawValue)
+    return o.build()
+}
+
+private func advancedJson(_ a: Advanced) -> String {
+    let o = JsonObj()
+    o.str("overprint_flattener_preset", a.overprintFlattenerPreset.rawValue)
+    o.bool("print_as_bitmap", a.printAsBitmap)
     return o.build()
 }
 
@@ -591,6 +604,7 @@ private func marksAndBleedJson(_ m: MarksAndBleed) -> String {
 
 private func printPreferencesJson(_ p: PrintPreferences) -> String {
     let o = JsonObj()
+    o.raw("advanced", advancedJson(p.advanced))
     o.str("artboard_range", p.artboardRange)
     o.str("artboard_range_mode", p.artboardRangeMode.rawValue)
     o.bool("auto_rotate", p.autoRotate)
@@ -1009,7 +1023,22 @@ private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
         bleedLeft: (d["bleed_left"] as? NSNumber)?.doubleValue ?? def.bleedLeft,
         bleedUniform: (d["bleed_uniform"] as? Bool) ?? def.bleedUniform,
         showImagesOutline: (d["show_images_outline"] as? Bool) ?? def.showImagesOutline,
-        highlightSubstitutedGlyphs: (d["highlight_substituted_glyphs"] as? Bool) ?? def.highlightSubstitutedGlyphs
+        highlightSubstitutedGlyphs: (d["highlight_substituted_glyphs"] as? Bool) ?? def.highlightSubstitutedGlyphs,
+        gridSize: (d["grid_size"] as? NSNumber)?.doubleValue ?? def.gridSize,
+        gridColor: (d["grid_color"] as? String) ?? def.gridColor,
+        paperColor: (d["paper_color"] as? String) ?? def.paperColor,
+        simulateColoredPaper: (d["simulate_colored_paper"] as? Bool) ?? def.simulateColoredPaper,
+        transparencyFlattenerPreset: FlattenerPreset(rawValue: (d["transparency_flattener_preset"] as? String) ?? "") ?? def.transparencyFlattenerPreset,
+        discardWhiteOverprint: (d["discard_white_overprint"] as? Bool) ?? def.discardWhiteOverprint
+    )
+}
+
+private func parseAdvanced(_ v: Any?) -> Advanced {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = Advanced.default
+    return Advanced(
+        printAsBitmap: (d["print_as_bitmap"] as? Bool) ?? def.printAsBitmap,
+        overprintFlattenerPreset: FlattenerPreset(rawValue: (d["overprint_flattener_preset"] as? String) ?? "") ?? def.overprintFlattenerPreset
     )
 }
 
@@ -1125,7 +1154,8 @@ private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
         marksAndBleed: parseMarksAndBleed(d["marks_and_bleed"]),
         output: parseOutput(d["output"]),
         graphics: parseGraphics(d["graphics"]),
-        colorManagement: parseColorManagement(d["color_management"])
+        colorManagement: parseColorManagement(d["color_management"]),
+        advanced: parseAdvanced(d["advanced"])
     )
 }
 
