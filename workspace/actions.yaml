@@ -2664,6 +2664,11 @@ actions:
       gfx_data_format: { type: string }
       gfx_compatible_gradient_printing: { type: bool }
       gfx_raster_effects_resolution: { type: number }
+      cm_document_profile: { type: string }
+      cm_color_handling: { type: string }
+      cm_printer_profile: { type: string }
+      cm_rendering_intent: { type: string }
+      cm_preserve_rgb_numbers: { type: bool }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2726,6 +2731,11 @@ actions:
       - doc.set_graphics_field: { field: "data_format",                  value: "param.gfx_data_format" }
       - doc.set_graphics_field: { field: "compatible_gradient_printing", value: "param.gfx_compatible_gradient_printing" }
       - doc.set_graphics_field: { field: "raster_effects_resolution",    value: "param.gfx_raster_effects_resolution" }
+      - doc.set_color_management_field: { field: "document_profile",     value: "param.cm_document_profile" }
+      - doc.set_color_management_field: { field: "color_handling",       value: "param.cm_color_handling" }
+      - doc.set_color_management_field: { field: "printer_profile",      value: "param.cm_printer_profile" }
+      - doc.set_color_management_field: { field: "rendering_intent",     value: "param.cm_rendering_intent" }
+      - doc.set_color_management_field: { field: "preserve_rgb_numbers", value: "param.cm_preserve_rgb_numbers" }
       - clear_dialog_snapshot
       - close_dialog
 
@@ -2798,6 +2808,11 @@ actions:
       gfx_data_format: { type: string }
       gfx_compatible_gradient_printing: { type: bool }
       gfx_raster_effects_resolution: { type: number }
+      cm_document_profile: { type: string }
+      cm_color_handling: { type: string }
+      cm_printer_profile: { type: string }
+      cm_rendering_intent: { type: string }
+      cm_preserve_rgb_numbers: { type: bool }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2860,6 +2875,11 @@ actions:
       - doc.set_graphics_field: { field: "data_format",                  value: "param.gfx_data_format" }
       - doc.set_graphics_field: { field: "compatible_gradient_printing", value: "param.gfx_compatible_gradient_printing" }
       - doc.set_graphics_field: { field: "raster_effects_resolution",    value: "param.gfx_raster_effects_resolution" }
+      - doc.set_color_management_field: { field: "document_profile",     value: "param.cm_document_profile" }
+      - doc.set_color_management_field: { field: "color_handling",       value: "param.cm_color_handling" }
+      - doc.set_color_management_field: { field: "printer_profile",      value: "param.cm_printer_profile" }
+      - doc.set_color_management_field: { field: "rendering_intent",     value: "param.cm_rendering_intent" }
+      - doc.set_color_management_field: { field: "preserve_rgb_numbers", value: "param.cm_preserve_rgb_numbers" }
       - clear_dialog_snapshot
       - geometry.export_pdf: {}
       - close_dialog
