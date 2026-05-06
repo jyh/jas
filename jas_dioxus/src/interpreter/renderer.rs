@@ -1461,6 +1461,29 @@ fn marks_and_bleed_view(
     })
 }
 
+fn ink_override_view(ink: &crate::document::print_preferences::InkOverride) -> serde_json::Value {
+    serde_json::json!({
+        "name": ink.name,
+        "print": ink.print,
+        "frequency": ink.frequency,
+        "angle": ink.angle,
+        "dot_shape": crate::document::print_preferences::dot_shape_str(&ink.dot_shape),
+    })
+}
+
+fn output_view(o: &crate::document::print_preferences::Output) -> serde_json::Value {
+    let inks: Vec<serde_json::Value> = o.inks.iter().map(ink_override_view).collect();
+    serde_json::json!({
+        "mode": crate::document::print_preferences::output_mode_str(&o.mode),
+        "emulsion": crate::document::print_preferences::emulsion_str(&o.emulsion),
+        "image_polarity": crate::document::print_preferences::image_polarity_str(&o.image_polarity),
+        "printer_resolution": o.printer_resolution,
+        "convert_spot_to_process": o.convert_spot_to_process,
+        "overprint_black": o.overprint_black,
+        "inks": inks,
+    })
+}
+
 fn build_active_document_view(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
@@ -1517,6 +1540,9 @@ fn build_active_document_view(
                 "tile_range": "",
                 "marks_and_bleed": marks_and_bleed_view(
                     &crate::document::print_preferences::MarksAndBleed::default(),
+                ),
+                "output": output_view(
+                    &crate::document::print_preferences::Output::default(),
                 ),
             },
             "artboards_count": 0,
@@ -1692,6 +1718,7 @@ fn build_active_document_view(
             "tile_overlap_v": doc.print_preferences.tile_overlap_v,
             "tile_range": doc.print_preferences.tile_range.clone(),
             "marks_and_bleed": marks_and_bleed_view(&doc.print_preferences.marks_and_bleed),
+            "output": output_view(&doc.print_preferences.output),
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -2202,6 +2229,74 @@ fn run_yaml_effect(
             ("bleed_right", super::expr_types::Value::Number(n)) => m.bleed_right = *n,
             ("bleed_bottom", super::expr_types::Value::Number(n)) => m.bleed_bottom = *n,
             ("bleed_left", super::expr_types::Value::Number(n)) => m.bleed_left = *n,
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.set_output_field: { field, value }  — PRINT.md §3
+    if let Some(spec) = eff.get("doc.set_output_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::{
+            output_mode_from, emulsion_from, image_polarity_from,
+        };
+        let o = &mut new_doc.print_preferences.output;
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("mode", super::expr_types::Value::Str(s)) => o.mode = output_mode_from(s),
+            ("emulsion", super::expr_types::Value::Str(s)) => o.emulsion = emulsion_from(s),
+            ("image_polarity", super::expr_types::Value::Str(s)) => o.image_polarity = image_polarity_from(s),
+            ("printer_resolution", super::expr_types::Value::Str(s)) => o.printer_resolution = s.clone(),
+            ("convert_spot_to_process", super::expr_types::Value::Bool(b)) => o.convert_spot_to_process = *b,
+            ("overprint_black", super::expr_types::Value::Bool(b)) => o.overprint_black = *b,
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.set_output_ink_field: { index, field, value }  — PRINT.md §3
+    if let Some(spec) = eff.get("doc.set_output_ink_field").and_then(|v| v.as_object()) {
+        let index = match spec.get("index").and_then(|v| v.as_u64()) {
+            Some(n) => n as usize,
+            None => return deferred,
+        };
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::dot_shape_from;
+        let inks = &mut new_doc.print_preferences.output.inks;
+        let Some(ink) = inks.get_mut(index) else { return deferred; };
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("print", super::expr_types::Value::Bool(b)) => ink.print = *b,
+            ("frequency", super::expr_types::Value::Number(n)) => ink.frequency = *n,
+            ("angle", super::expr_types::Value::Number(n)) => ink.angle = *n,
+            ("dot_shape", super::expr_types::Value::Str(s)) => ink.dot_shape = dot_shape_from(s),
+            ("name", super::expr_types::Value::Str(s)) => ink.name = s.clone(),
             _ => applied = false,
         }
         if applied {
