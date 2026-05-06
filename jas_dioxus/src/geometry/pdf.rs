@@ -1156,6 +1156,33 @@ mod tests {
     }
 
     #[test]
+    fn pdf_non_default_phase6_values_dont_break_output() {
+        // Phase 6 v1 stores Advanced + Phase 6 DocumentSetup fields
+        // but defers the rendering effects. This smoke-test pins
+        // down that having non-default values doesn't crash the
+        // emitter or produce malformed output — when the rendering
+        // pipeline lands later it should slot into this same
+        // envelope.
+        use crate::document::print_preferences::{Advanced, FlattenerPreset};
+        let mut doc = Document::default();
+        doc.print_preferences.advanced = Advanced {
+            print_as_bitmap: true,
+            overprint_flattener_preset: FlattenerPreset::HighResolution,
+        };
+        doc.document_setup.simulate_colored_paper = true;
+        doc.document_setup.paper_color = "#fff8e7".to_string();
+        doc.document_setup.discard_white_overprint = true;
+        doc.document_setup.transparency_flattener_preset = FlattenerPreset::HighResolution;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.starts_with("%PDF-"), "expected PDF envelope:\n{s}");
+        assert!(s.contains("%%EOF"), "expected EOF marker");
+        // Default page count (1 composite page on the empty doc)
+        // should still hold — Phase 6 doesn't change pagination.
+        assert!(s.contains("/Count 1"), "expected /Count 1");
+    }
+
+    #[test]
     fn pdf_default_rendering_intent_emits_no_ri_operator() {
         // RelativeColorimetric is the PDF default; the emitter
         // skips emitting an ``ri`` operator in that case.
