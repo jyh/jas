@@ -18,7 +18,9 @@ use crate::document::print_preferences::{
     font_download_from, font_download_str,
     postscript_level_from, postscript_level_str,
     data_format_from, data_format_str,
-    Graphics, InkOverride, MarksAndBleed, Output, PrintPreferences,
+    color_handling_from, color_handling_str,
+    rendering_intent_from, rendering_intent_str,
+    ColorManagement, Graphics, InkOverride, MarksAndBleed, Output, PrintPreferences,
 };
 use crate::geometry::element::*;
 
@@ -618,6 +620,16 @@ fn document_setup_json(s: &DocumentSetup) -> String {
     o.build()
 }
 
+fn color_management_json(c: &ColorManagement) -> String {
+    let mut o = JsonObj::new();
+    o.str_val("color_handling", color_handling_str(&c.color_handling));
+    o.str_val("document_profile", &c.document_profile);
+    o.bool_val("preserve_rgb_numbers", c.preserve_rgb_numbers);
+    o.str_val("printer_profile", &c.printer_profile);
+    o.str_val("rendering_intent", rendering_intent_str(&c.rendering_intent));
+    o.build()
+}
+
 fn graphics_json(g: &Graphics) -> String {
     let mut o = JsonObj::new();
     o.bool_val("compatible_gradient_printing", g.compatible_gradient_printing);
@@ -680,6 +692,7 @@ fn print_preferences_json(p: &PrintPreferences) -> String {
     o.str_val("artboard_range_mode", artboard_range_mode_str(&p.artboard_range_mode));
     o.bool_val("auto_rotate", p.auto_rotate);
     o.bool_val("collate", p.collate);
+    o.raw("color_management", color_management_json(&p.color_management));
     o.int("copies", p.copies as usize);
     o.num("custom_scale", p.custom_scale);
     o.raw("graphics", graphics_json(&p.graphics));
@@ -1176,6 +1189,25 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
     }
 }
 
+fn parse_color_management(v: &serde_json::Value) -> ColorManagement {
+    if v.is_null() || !v.is_object() {
+        return ColorManagement::default();
+    }
+    let d = ColorManagement::default();
+    ColorManagement {
+        document_profile: v["document_profile"].as_str()
+            .map(String::from).unwrap_or(d.document_profile),
+        color_handling: v["color_handling"].as_str()
+            .map(color_handling_from).unwrap_or(d.color_handling),
+        printer_profile: v["printer_profile"].as_str()
+            .map(String::from).unwrap_or(d.printer_profile),
+        rendering_intent: v["rendering_intent"].as_str()
+            .map(rendering_intent_from).unwrap_or(d.rendering_intent),
+        preserve_rgb_numbers: v["preserve_rgb_numbers"].as_bool()
+            .unwrap_or(d.preserve_rgb_numbers),
+    }
+}
+
 fn parse_graphics(v: &serde_json::Value) -> Graphics {
     if v.is_null() || !v.is_object() {
         return Graphics::default();
@@ -1287,6 +1319,7 @@ fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
         marks_and_bleed: parse_marks_and_bleed(&v["marks_and_bleed"]),
         output: parse_output(&v["output"]),
         graphics: parse_graphics(&v["graphics"]),
+        color_management: parse_color_management(&v["color_management"]),
     }
 }
 
@@ -1574,6 +1607,32 @@ mod tests {
     }
 
     #[test]
+    fn color_management_round_trip_carries_all_choices() {
+        use crate::document::print_preferences::{
+            ColorHandling, ColorManagement, RenderingIntent,
+        };
+        let mut d = Document::default();
+        d.print_preferences.color_management = ColorManagement {
+            document_profile: "Adobe RGB (1998)".to_string(),
+            color_handling: ColorHandling::PostscriptColorManagement,
+            printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
+            rendering_intent: RenderingIntent::Saturation,
+            preserve_rgb_numbers: true,
+        };
+        let json = document_to_test_json(&d);
+        assert!(json.contains("\"color_management\""), "json:\n{json}");
+        assert!(json.contains("\"color_handling\":\"postscript_color_management\""),
+                "json:\n{json}");
+        assert!(json.contains("\"rendering_intent\":\"saturation\""),
+                "json:\n{json}");
+        assert!(json.contains("\"document_profile\":\"Adobe RGB (1998)\""),
+                "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.color_management,
+                   d.print_preferences.color_management);
+    }
+
+    #[test]
     fn graphics_round_trip_carries_all_choices() {
         use crate::document::print_preferences::{
             DataFormat, FontDownload, Graphics, PostScriptLevel,
@@ -1638,11 +1697,12 @@ mod tests {
     #[test]
     fn print_preferences_roundtrip() {
         use crate::document::print_preferences::{
-            ArtboardRangeMode, DataFormat, DotShape, Emulsion, FontDownload, Graphics,
+            ArtboardRangeMode, ColorHandling, ColorManagement, DataFormat, DotShape,
+            Emulsion, FontDownload, Graphics,
             ImagePolarity, InkOverride,
             MarksAndBleed, MediaSize, Orientation, Output, OutputMode, PostScriptLevel,
             PrintLayers,
-            PrinterMarkType, PrintPreferences, ScalingMode,
+            PrinterMarkType, PrintPreferences, RenderingIntent, ScalingMode,
         };
         let mut d = Document::default();
         d.print_preferences = PrintPreferences {
@@ -1704,6 +1764,13 @@ mod tests {
                 data_format: DataFormat::Ascii,
                 compatible_gradient_printing: true,
                 raster_effects_resolution: 600.0,
+            },
+            color_management: ColorManagement {
+                document_profile: "Adobe RGB (1998)".to_string(),
+                color_handling: ColorHandling::PostscriptColorManagement,
+                printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
+                rendering_intent: RenderingIntent::Perceptual,
+                preserve_rgb_numbers: true,
             },
         };
         let json = document_to_test_json(&d);

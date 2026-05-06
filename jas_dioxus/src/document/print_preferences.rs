@@ -209,6 +209,56 @@ impl Default for Graphics {
     }
 }
 
+/// Color-handling mode for the Color Management tab (PRINT.md §Phase 5).
+/// Three Adobe-standard choices: let the app, let the printer, or
+/// hand the data straight to the PostScript driver. PDF output
+/// honours the choice for ``RenderingIntent`` only — full ICC profile
+/// management is a Phase 5+ deferral.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ColorHandling {
+    LetAppDetermine,
+    LetPrinterDetermine,
+    PostscriptColorManagement,
+}
+
+/// PDF rendering intent (PRINT.md §Phase 5). Names match the four
+/// PDF 1.7 §11.6.5.8 intents one-for-one. Stored case-insensitively
+/// on disk via snake_case wire forms; the PDF emitter writes the
+/// intent string into a ``ri`` operator.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RenderingIntent {
+    Perceptual,
+    RelativeColorimetric,
+    Saturation,
+    AbsoluteColorimetric,
+}
+
+/// Color Management sub-record on PrintPreferences (PRINT.md §Phase 5).
+/// The Color Management tab edits these 1:1; the PDF emitter applies
+/// ``rendering_intent`` via the PDF ``ri`` operator. ICC profile
+/// embedding (document_profile / printer_profile) is deferred —
+/// Phase 5 stores the names so the on-disk shape is stable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColorManagement {
+    pub document_profile: String,
+    pub color_handling: ColorHandling,
+    pub printer_profile: String,
+    pub rendering_intent: RenderingIntent,
+    pub preserve_rgb_numbers: bool,
+}
+
+impl Default for ColorManagement {
+    fn default() -> Self {
+        Self {
+            document_profile: "sRGB IEC61966-2.1".to_string(),
+            color_handling: ColorHandling::LetAppDetermine,
+            printer_profile: String::new(),
+            rendering_intent: RenderingIntent::RelativeColorimetric,
+            preserve_rgb_numbers: false,
+        }
+    }
+}
+
 /// Marks-and-bleed sub-record on PrintPreferences (PRINT.md §Phase 2).
 /// The Marks tab exposes these 1:1 as widgets; the PDF renderer
 /// extends each page by the active bleed and overlays mark geometry
@@ -288,6 +338,8 @@ pub struct PrintPreferences {
     pub output: Output,
     /// Graphics sub-record (PRINT.md §Phase 4).
     pub graphics: Graphics,
+    /// Color Management sub-record (PRINT.md §Phase 5).
+    pub color_management: ColorManagement,
 }
 
 impl Default for PrintPreferences {
@@ -319,6 +371,7 @@ impl Default for PrintPreferences {
             marks_and_bleed: MarksAndBleed::default(),
             output: Output::default(),
             graphics: Graphics::default(),
+            color_management: ColorManagement::default(),
         }
     }
 }
@@ -482,6 +535,38 @@ pub fn image_polarity_from(s: &str) -> ImagePolarity {
     }
 }
 
+pub fn color_handling_str(c: &ColorHandling) -> &'static str {
+    match c {
+        ColorHandling::LetAppDetermine => "let_app_determine",
+        ColorHandling::LetPrinterDetermine => "let_printer_determine",
+        ColorHandling::PostscriptColorManagement => "postscript_color_management",
+    }
+}
+pub fn color_handling_from(s: &str) -> ColorHandling {
+    match s {
+        "let_printer_determine" => ColorHandling::LetPrinterDetermine,
+        "postscript_color_management" => ColorHandling::PostscriptColorManagement,
+        _ => ColorHandling::LetAppDetermine,
+    }
+}
+
+pub fn rendering_intent_str(r: &RenderingIntent) -> &'static str {
+    match r {
+        RenderingIntent::Perceptual => "perceptual",
+        RenderingIntent::RelativeColorimetric => "relative_colorimetric",
+        RenderingIntent::Saturation => "saturation",
+        RenderingIntent::AbsoluteColorimetric => "absolute_colorimetric",
+    }
+}
+pub fn rendering_intent_from(s: &str) -> RenderingIntent {
+    match s {
+        "perceptual" => RenderingIntent::Perceptual,
+        "saturation" => RenderingIntent::Saturation,
+        "absolute_colorimetric" => RenderingIntent::AbsoluteColorimetric,
+        _ => RenderingIntent::RelativeColorimetric,
+    }
+}
+
 pub fn font_download_str(f: &FontDownload) -> &'static str {
     match f {
         FontDownload::None => "none",
@@ -579,6 +664,17 @@ mod tests {
         assert_eq!(p.marks_and_bleed, MarksAndBleed::default());
         assert_eq!(p.output, Output::default());
         assert_eq!(p.graphics, Graphics::default());
+        assert_eq!(p.color_management, ColorManagement::default());
+    }
+
+    #[test]
+    fn color_management_defaults_match_spec() {
+        let c = ColorManagement::default();
+        assert_eq!(c.document_profile, "sRGB IEC61966-2.1");
+        assert_eq!(c.color_handling, ColorHandling::LetAppDetermine);
+        assert_eq!(c.printer_profile, "");
+        assert_eq!(c.rendering_intent, RenderingIntent::RelativeColorimetric);
+        assert!(!c.preserve_rgb_numbers);
     }
 
     #[test]
@@ -690,6 +786,21 @@ mod tests {
         for d in [DataFormat::Ascii, DataFormat::Binary] {
             assert_eq!(data_format_from(data_format_str(&d)), d);
         }
+        for c in [
+            ColorHandling::LetAppDetermine,
+            ColorHandling::LetPrinterDetermine,
+            ColorHandling::PostscriptColorManagement,
+        ] {
+            assert_eq!(color_handling_from(color_handling_str(&c)), c);
+        }
+        for r in [
+            RenderingIntent::Perceptual,
+            RenderingIntent::RelativeColorimetric,
+            RenderingIntent::Saturation,
+            RenderingIntent::AbsoluteColorimetric,
+        ] {
+            assert_eq!(rendering_intent_from(rendering_intent_str(&r)), r);
+        }
     }
 
     #[test]
@@ -707,5 +818,7 @@ mod tests {
         assert_eq!(font_download_from("garbage"), FontDownload::Subset);
         assert_eq!(postscript_level_from("garbage"), PostScriptLevel::Level3);
         assert_eq!(data_format_from("garbage"), DataFormat::Binary);
+        assert_eq!(color_handling_from("garbage"), ColorHandling::LetAppDetermine);
+        assert_eq!(rendering_intent_from("garbage"), RenderingIntent::RelativeColorimetric);
     }
 }
