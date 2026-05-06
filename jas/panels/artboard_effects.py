@@ -422,6 +422,103 @@ def build_artboard_handlers(model) -> dict:
             model.document, print_preferences=new_p)
         return None
 
+    # PRINT.md §Phase 3
+    def doc_set_output_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            OutputMode, Emulsion, ImagePolarity, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        o = p.output
+        if field == "mode":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, mode=_enum_from_string(
+                OutputMode, value, o.mode))
+        elif field == "emulsion":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, emulsion=_enum_from_string(
+                Emulsion, value, o.emulsion))
+        elif field == "image_polarity":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, image_polarity=_enum_from_string(
+                ImagePolarity, value, o.image_polarity))
+        elif field == "printer_resolution":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, printer_resolution=value)
+        elif field in {"convert_spot_to_process", "overprint_black"}:
+            if not isinstance(value, bool):
+                return None
+            new_o = dataclasses.replace(o, **{field: value})
+        else:
+            return None
+        new_p = dataclasses.replace(p, output=new_o)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
+    # PRINT.md §Phase 3 — per-row update on Output.inks
+    def doc_set_output_ink_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            DotShape, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        index = spec.get("index")
+        if not isinstance(field, str) or not isinstance(index, int):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        o = p.output
+        inks = list(o.inks)
+        if index < 0 or index >= len(inks):
+            return None
+        ink = inks[index]
+        if field == "name":
+            if not isinstance(value, str):
+                return None
+            new_ink = dataclasses.replace(ink, name=value)
+        elif field == "print":
+            if not isinstance(value, bool):
+                return None
+            new_ink = dataclasses.replace(ink, print=value)
+        elif field in {"frequency", "angle"}:
+            if not isinstance(value, (int, float)):
+                return None
+            new_ink = dataclasses.replace(ink, **{field: float(value)})
+        elif field == "dot_shape":
+            if not isinstance(value, str):
+                return None
+            new_ink = dataclasses.replace(ink, dot_shape=_enum_from_string(
+                DotShape, value, ink.dot_shape))
+        else:
+            return None
+        inks[index] = new_ink
+        new_o = dataclasses.replace(o, inks=tuple(inks))
+        new_p = dataclasses.replace(p, output=new_o)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
     # PRINT.md §1B
     def geometry_export_pdf(_spec, _call_ctx, _store):
         from geometry.pdf import document_to_pdf
@@ -450,6 +547,8 @@ def build_artboard_handlers(model) -> dict:
         "doc.set_document_setup_field": doc_set_document_setup_field,
         "doc.set_print_preferences_field": doc_set_print_preferences_field,
         "doc.set_marks_and_bleed_field": doc_set_marks_and_bleed_field,
+        "doc.set_output_field": doc_set_output_field,
+        "doc.set_output_ink_field": doc_set_output_ink_field,
         "doc.move_artboards_up": doc_move_artboards_up,
         "doc.move_artboards_down": doc_move_artboards_down,
         "geometry.export_pdf": geometry_export_pdf,
