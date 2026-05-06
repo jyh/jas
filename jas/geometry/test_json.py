@@ -511,8 +511,21 @@ def _document_setup_json(s):
     o.num("bleed_right", s.bleed_right)
     o.num("bleed_top", s.bleed_top)
     o.bool_("bleed_uniform", s.bleed_uniform)
+    o.bool_("discard_white_overprint", s.discard_white_overprint)
+    o.str("grid_color", s.grid_color)
+    o.num("grid_size", s.grid_size)
     o.bool_("highlight_substituted_glyphs", s.highlight_substituted_glyphs)
+    o.str("paper_color", s.paper_color)
     o.bool_("show_images_outline", s.show_images_outline)
+    o.bool_("simulate_colored_paper", s.simulate_colored_paper)
+    o.str("transparency_flattener_preset", s.transparency_flattener_preset.value)
+    return o.build()
+
+
+def _advanced_json(a):
+    o = _JsonObj()
+    o.str("overprint_flattener_preset", a.overprint_flattener_preset.value)
+    o.bool_("print_as_bitmap", a.print_as_bitmap)
     return o.build()
 
 
@@ -584,6 +597,7 @@ def _marks_and_bleed_json(m):
 
 def _print_preferences_json(p):
     o = _JsonObj()
+    o.raw("advanced", _advanced_json(p.advanced))
     o.str("artboard_range", p.artboard_range)
     o.str("artboard_range_mode", p.artboard_range_mode.value)
     o.bool_("auto_rotate", p.auto_rotate)
@@ -970,6 +984,7 @@ def _parse_artboard_options(v):
 
 def _parse_document_setup(v):
     from document.document_setup import DocumentSetup
+    from document.print_preferences import FlattenerPreset, _enum_from_string
     if not isinstance(v, dict):
         return DocumentSetup()
     d = DocumentSetup()
@@ -982,6 +997,31 @@ def _parse_document_setup(v):
         show_images_outline=v.get("show_images_outline", d.show_images_outline),
         highlight_substituted_glyphs=v.get(
             "highlight_substituted_glyphs", d.highlight_substituted_glyphs),
+        grid_size=v.get("grid_size", d.grid_size),
+        grid_color=v.get("grid_color", d.grid_color),
+        paper_color=v.get("paper_color", d.paper_color),
+        simulate_colored_paper=v.get(
+            "simulate_colored_paper", d.simulate_colored_paper),
+        transparency_flattener_preset=_enum_from_string(
+            FlattenerPreset, v.get("transparency_flattener_preset", ""),
+            d.transparency_flattener_preset),
+        discard_white_overprint=v.get(
+            "discard_white_overprint", d.discard_white_overprint),
+    )
+
+
+def _parse_advanced(v):
+    from document.print_preferences import (
+        Advanced, FlattenerPreset, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return Advanced()
+    d = Advanced()
+    return Advanced(
+        print_as_bitmap=v.get("print_as_bitmap", d.print_as_bitmap),
+        overprint_flattener_preset=_enum_from_string(
+            FlattenerPreset, v.get("overprint_flattener_preset", ""),
+            d.overprint_flattener_preset),
     )
 
 
@@ -1131,6 +1171,7 @@ def _parse_print_preferences(v):
         output=_parse_output(v.get("output", None)),
         graphics=_parse_graphics(v.get("graphics", None)),
         color_management=_parse_color_management(v.get("color_management", None)),
+        advanced=_parse_advanced(v.get("advanced", None)),
     )
 
 

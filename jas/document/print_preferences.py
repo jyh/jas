@@ -81,6 +81,15 @@ class ImagePolarity(Enum):
     NEGATIVE = "negative"
 
 
+class FlattenerPreset(Enum):
+    """Transparency / overprint flattener preset (PRINT.md §Phase 6).
+    Used by both the Print Advanced tab and Document Setup."""
+    LOW_RESOLUTION = "low_resolution"
+    MEDIUM_RESOLUTION = "medium_resolution"
+    HIGH_RESOLUTION = "high_resolution"
+    CUSTOM = "custom"
+
+
 class ColorHandling(Enum):
     """Color-handling mode for the Color Management tab (PRINT.md
     §Phase 5). Three Adobe-standard choices."""
@@ -140,6 +149,17 @@ def _enum_from_string(enum_class, s: str, default):
         if v.value == s:
             return v
     return default
+
+
+@dataclass(frozen=True)
+class Advanced:
+    """Advanced sub-record on PrintPreferences (PRINT.md §Phase 6).
+    Phase 6 v1 stores the values; rendering effects deferred."""
+    print_as_bitmap: bool = False
+    overprint_flattener_preset: FlattenerPreset = FlattenerPreset.MEDIUM_RESOLUTION
+
+
+DEFAULT_ADVANCED = Advanced()
 
 
 @dataclass(frozen=True)
@@ -286,6 +306,8 @@ class PrintPreferences:
     graphics: Graphics = DEFAULT_GRAPHICS
     # Color Management sub-record (PRINT.md §Phase 5).
     color_management: ColorManagement = DEFAULT_COLOR_MANAGEMENT
+    # Advanced sub-record (PRINT.md §Phase 6).
+    advanced: Advanced = DEFAULT_ADVANCED
 
 
 DEFAULT_PRINT_PREFERENCES = PrintPreferences()

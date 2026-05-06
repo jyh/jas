@@ -10,6 +10,7 @@ from document.print_preferences import (
     Output, OutputMode, Emulsion, ImagePolarity, DotShape, InkOverride,
     Graphics, FontDownload, PostScriptLevel, DataFormat,
     ColorManagement, ColorHandling, RenderingIntent,
+    Advanced, FlattenerPreset,
 )
 from geometry.test_json import document_to_test_json, test_json_to_document
 
@@ -315,6 +316,52 @@ class ColorManagementTest(absltest.TestCase):
         self.assertIn('"color_handling":"postscript_color_management"', j)
         d2 = test_json_to_document(j)
         self.assertEqual(d2.print_preferences.color_management, c)
+
+
+class AdvancedTest(absltest.TestCase):
+    """PRINT.md §Phase 6 Advanced sub-record."""
+
+    def test_defaults(self):
+        a = Advanced()
+        self.assertFalse(a.print_as_bitmap)
+        self.assertEqual(a.overprint_flattener_preset,
+                         FlattenerPreset.MEDIUM_RESOLUTION)
+
+    def test_flattener_preset_strings(self):
+        self.assertEqual(FlattenerPreset.LOW_RESOLUTION.value, "low_resolution")
+        self.assertEqual(FlattenerPreset.MEDIUM_RESOLUTION.value, "medium_resolution")
+        self.assertEqual(FlattenerPreset.HIGH_RESOLUTION.value, "high_resolution")
+        self.assertEqual(FlattenerPreset.CUSTOM.value, "custom")
+
+    def test_advanced_roundtrip(self):
+        a = Advanced(
+            print_as_bitmap=True,
+            overprint_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+        )
+        p = PrintPreferences(advanced=a)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"advanced"', j)
+        self.assertIn('"print_as_bitmap":true', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.advanced, a)
+
+    def test_document_setup_phase6_roundtrip(self):
+        s = DocumentSetup(
+            grid_size=36.0,
+            grid_color="#0099ff",
+            paper_color="#fff8e7",
+            simulate_colored_paper=True,
+            transparency_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+            discard_white_overprint=True,
+        )
+        d = Document(document_setup=s)
+        j = document_to_test_json(d)
+        self.assertIn('"grid_size":36.0', j)
+        self.assertIn('"paper_color":"#fff8e7"', j)
+        self.assertIn('"simulate_colored_paper":true', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.document_setup, s)
 
 
 if __name__ == "__main__":
