@@ -152,7 +152,8 @@ private func _withPref(
     marksAndBleed: MarksAndBleed? = nil,
     output: Output? = nil,
     graphics: Graphics? = nil,
-    colorManagement: ColorManagement? = nil
+    colorManagement: ColorManagement? = nil,
+    advanced: Advanced? = nil
 ) -> PrintPreferences {
     return PrintPreferences(
         presetName: presetName ?? p.presetName,
@@ -181,7 +182,8 @@ private func _withPref(
         marksAndBleed: marksAndBleed ?? p.marksAndBleed,
         output: output ?? p.output,
         graphics: graphics ?? p.graphics,
-        colorManagement: colorManagement ?? p.colorManagement
+        colorManagement: colorManagement ?? p.colorManagement,
+        advanced: advanced ?? p.advanced
     )
 }
 
@@ -504,6 +506,69 @@ private func _withCm(
         printerProfile: printerProfile ?? c.printerProfile,
         renderingIntent: renderingIntent ?? c.renderingIntent,
         preserveRgbNumbers: preserveRgbNumbers ?? c.preserveRgbNumbers
+    )
+}
+
+/// Apply a single field update to PrintPreferences's Advanced
+/// sub-record (PRINT.md §Phase 6). Returns nil for unknown fields or
+/// value-type mismatches.
+func applyAdvancedField(_ p: PrintPreferences, field: String, val: Value) -> PrintPreferences? {
+    func bool() -> Bool? {
+        if case .bool(let b) = val { return b }
+        return nil
+    }
+    func str() -> String? {
+        if case .string(let s) = val { return s }
+        return nil
+    }
+    let a = p.advanced
+    let updated: Advanced
+    switch field {
+    case "print_as_bitmap":
+        guard let b = bool() else { return nil }
+        updated = Advanced(printAsBitmap: b, overprintFlattenerPreset: a.overprintFlattenerPreset)
+    case "overprint_flattener_preset":
+        guard let s = str(), let preset = FlattenerPreset(rawValue: s) else { return nil }
+        updated = Advanced(printAsBitmap: a.printAsBitmap, overprintFlattenerPreset: preset)
+    default:
+        return nil
+    }
+    return _withPref(p, advanced: updated)
+}
+
+/// DocumentSetup is immutable (`let` fields), so per-field updates
+/// build a fresh instance preserving everything else. Each labelled-
+/// arg override is optional; nil means "keep current".
+func _withDocSetup(
+    _ s: DocumentSetup,
+    bleedTop: Double? = nil,
+    bleedRight: Double? = nil,
+    bleedBottom: Double? = nil,
+    bleedLeft: Double? = nil,
+    bleedUniform: Bool? = nil,
+    showImagesOutline: Bool? = nil,
+    highlightSubstitutedGlyphs: Bool? = nil,
+    gridSize: Double? = nil,
+    gridColor: String? = nil,
+    paperColor: String? = nil,
+    simulateColoredPaper: Bool? = nil,
+    transparencyFlattenerPreset: FlattenerPreset? = nil,
+    discardWhiteOverprint: Bool? = nil
+) -> DocumentSetup {
+    return DocumentSetup(
+        bleedTop: bleedTop ?? s.bleedTop,
+        bleedRight: bleedRight ?? s.bleedRight,
+        bleedBottom: bleedBottom ?? s.bleedBottom,
+        bleedLeft: bleedLeft ?? s.bleedLeft,
+        bleedUniform: bleedUniform ?? s.bleedUniform,
+        showImagesOutline: showImagesOutline ?? s.showImagesOutline,
+        highlightSubstitutedGlyphs: highlightSubstitutedGlyphs ?? s.highlightSubstitutedGlyphs,
+        gridSize: gridSize ?? s.gridSize,
+        gridColor: gridColor ?? s.gridColor,
+        paperColor: paperColor ?? s.paperColor,
+        simulateColoredPaper: simulateColoredPaper ?? s.simulateColoredPaper,
+        transparencyFlattenerPreset: transparencyFlattenerPreset ?? s.transparencyFlattenerPreset,
+        discardWhiteOverprint: discardWhiteOverprint ?? s.discardWhiteOverprint
     )
 }
 
