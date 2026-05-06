@@ -55,6 +55,32 @@ public enum PrinterMarkType: String, Equatable, Hashable, CaseIterable {
     case japanese
 }
 
+/// Transparency / overprint flattener preset (PRINT.md §Phase 6).
+/// Used by both the Print Advanced tab and Document Setup.
+public enum FlattenerPreset: String, Equatable, Hashable, CaseIterable {
+    case lowResolution = "low_resolution"
+    case mediumResolution = "medium_resolution"
+    case highResolution = "high_resolution"
+    case custom
+}
+
+/// Advanced sub-record on PrintPreferences (PRINT.md §Phase 6).
+/// Phase 6 v1 stores the values; rendering effects deferred.
+public struct Advanced: Equatable, Hashable {
+    public let printAsBitmap: Bool
+    public let overprintFlattenerPreset: FlattenerPreset
+
+    public init(
+        printAsBitmap: Bool = false,
+        overprintFlattenerPreset: FlattenerPreset = .mediumResolution
+    ) {
+        self.printAsBitmap = printAsBitmap
+        self.overprintFlattenerPreset = overprintFlattenerPreset
+    }
+
+    public static let `default` = Advanced()
+}
+
 /// Color-handling mode for the Color Management tab (PRINT.md §Phase 5).
 public enum ColorHandling: String, Equatable, Hashable, CaseIterable {
     case letAppDetermine = "let_app_determine"
@@ -342,6 +368,8 @@ public struct PrintPreferences: Equatable, Hashable {
     public let graphics: Graphics
     /// Color Management sub-record (PRINT.md §Phase 5).
     public let colorManagement: ColorManagement
+    /// Advanced sub-record (PRINT.md §Phase 6).
+    public let advanced: Advanced
 
     public init(
         presetName: String = "[Default]",
@@ -370,7 +398,8 @@ public struct PrintPreferences: Equatable, Hashable {
         marksAndBleed: MarksAndBleed = .default,
         output: Output = .default,
         graphics: Graphics = .default,
-        colorManagement: ColorManagement = .default
+        colorManagement: ColorManagement = .default,
+        advanced: Advanced = .default
     ) {
         self.presetName = presetName
         self.printerName = printerName
@@ -399,6 +428,7 @@ public struct PrintPreferences: Equatable, Hashable {
         self.output = output
         self.graphics = graphics
         self.colorManagement = colorManagement
+        self.advanced = advanced
     }
 
     public static let `default` = PrintPreferences()
