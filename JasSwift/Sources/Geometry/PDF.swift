@@ -151,7 +151,8 @@ private func _withPref(
     tileRange: String? = nil,
     marksAndBleed: MarksAndBleed? = nil,
     output: Output? = nil,
-    graphics: Graphics? = nil
+    graphics: Graphics? = nil,
+    colorManagement: ColorManagement? = nil
 ) -> PrintPreferences {
     return PrintPreferences(
         presetName: presetName ?? p.presetName,
@@ -179,7 +180,8 @@ private func _withPref(
         tileRange: tileRange ?? p.tileRange,
         marksAndBleed: marksAndBleed ?? p.marksAndBleed,
         output: output ?? p.output,
-        graphics: graphics ?? p.graphics
+        graphics: graphics ?? p.graphics,
+        colorManagement: colorManagement ?? p.colorManagement
     )
 }
 
@@ -449,6 +451,59 @@ private func _withGfx(
         dataFormat: dataFormat ?? g.dataFormat,
         compatibleGradientPrinting: compatibleGradientPrinting ?? g.compatibleGradientPrinting,
         rasterEffectsResolution: rasterEffectsResolution ?? g.rasterEffectsResolution
+    )
+}
+
+/// Apply a single field update to PrintPreferences's ColorManagement
+/// sub-record (PRINT.md §Phase 5). Returns nil for unknown fields or
+/// value-type mismatches — caller leaves PrintPreferences unchanged.
+func applyColorManagementField(_ p: PrintPreferences, field: String, val: Value) -> PrintPreferences? {
+    func bool() -> Bool? {
+        if case .bool(let b) = val { return b }
+        return nil
+    }
+    func str() -> String? {
+        if case .string(let s) = val { return s }
+        return nil
+    }
+    let c = p.colorManagement
+    let updated: ColorManagement
+    switch field {
+    case "document_profile":
+        guard let s = str() else { return nil }
+        updated = _withCm(c, documentProfile: s)
+    case "color_handling":
+        guard let s = str(), let ch = ColorHandling(rawValue: s) else { return nil }
+        updated = _withCm(c, colorHandling: ch)
+    case "printer_profile":
+        guard let s = str() else { return nil }
+        updated = _withCm(c, printerProfile: s)
+    case "rendering_intent":
+        guard let s = str(), let ri = RenderingIntent(rawValue: s) else { return nil }
+        updated = _withCm(c, renderingIntent: ri)
+    case "preserve_rgb_numbers":
+        guard let b = bool() else { return nil }
+        updated = _withCm(c, preserveRgbNumbers: b)
+    default:
+        return nil
+    }
+    return _withPref(p, colorManagement: updated)
+}
+
+private func _withCm(
+    _ c: ColorManagement,
+    documentProfile: String? = nil,
+    colorHandling: ColorHandling? = nil,
+    printerProfile: String? = nil,
+    renderingIntent: RenderingIntent? = nil,
+    preserveRgbNumbers: Bool? = nil
+) -> ColorManagement {
+    return ColorManagement(
+        documentProfile: documentProfile ?? c.documentProfile,
+        colorHandling: colorHandling ?? c.colorHandling,
+        printerProfile: printerProfile ?? c.printerProfile,
+        renderingIntent: renderingIntent ?? c.renderingIntent,
+        preserveRgbNumbers: preserveRgbNumbers ?? c.preserveRgbNumbers
     )
 }
 

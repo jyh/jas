@@ -156,6 +156,16 @@ private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
     ]
 }
 
+private func colorManagementView(_ c: ColorManagement) -> [String: Any] {
+    return [
+        "document_profile": c.documentProfile,
+        "color_handling": c.colorHandling.rawValue,
+        "printer_profile": c.printerProfile,
+        "rendering_intent": c.renderingIntent.rawValue,
+        "preserve_rgb_numbers": c.preserveRgbNumbers,
+    ]
+}
+
 private func graphicsView(_ g: Graphics) -> [String: Any] {
     return [
         "flatness": g.flatness,
@@ -235,6 +245,7 @@ private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
         "marks_and_bleed": marksAndBleedView(p.marksAndBleed),
         "output": outputView(p.output),
         "graphics": graphicsView(p.graphics),
+        "color_management": colorManagementView(p.colorManagement),
     ]
 }
 
