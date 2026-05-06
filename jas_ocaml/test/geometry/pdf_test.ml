@@ -127,6 +127,21 @@ let test_pdf_separations_zero_inks_falls_back_to_composite () =
                                       String.length composite_bytes)) in
   assert (diff < 200.0)
 
+let test_pdf_non_default_flatness_produces_valid_pdf () =
+  (* Smoke: Graphics.flatness ≠ 1 propagates through the emitter
+     without breaking the output envelope. Cairo.set_tolerance has
+     no externally observable signature in the generated PDF stream
+     (it sets a Cairo-internal CTM tolerance state), so settle for
+     a valid PDF + non-empty bytes. *)
+  let doc = Document.make_document
+    ~print_preferences:{ Print_preferences.default with
+      graphics = { Print_preferences.default_graphics with
+                   flatness = 5.0 } }
+    [||] in
+  let bytes = Pdf.document_to_pdf doc in
+  assert (String.length bytes > 0);
+  assert (starts_with bytes "%PDF-")
+
 let () =
   Alcotest.run "PDF" [
     "envelope", [
@@ -139,5 +154,8 @@ let () =
       Alcotest.test_case "produces more bytes than composite" `Quick test_pdf_separations_produces_more_bytes_than_composite;
       Alcotest.test_case "skips unprinted inks" `Quick test_pdf_separations_skips_unprinted_inks;
       Alcotest.test_case "zero inks falls back to composite" `Quick test_pdf_separations_zero_inks_falls_back_to_composite;
+    ];
+    "graphics", [
+      Alcotest.test_case "non-default flatness produces valid PDF" `Quick test_pdf_non_default_flatness_produces_valid_pdf;
     ];
   ]

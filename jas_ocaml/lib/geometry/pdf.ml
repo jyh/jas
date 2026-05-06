@@ -424,6 +424,13 @@ let emit_marks cr (doc : Document.document) (page : page) =
 
 let rec draw_page cr (doc : Document.document) (page : page) =
   Cairo.save cr;
+  (* Phase 4: path-flattening tolerance. Cairo.set_tolerance is
+     scoped by the surrounding save/restore so it doesn't leak
+     between pages. Default 1.0 ≈ Cairo default; clamp matches
+     PDF 1.7 §8.4.3 to keep output equivalent across ports. *)
+  let flatness = doc.print_preferences.graphics.flatness in
+  if abs_float (flatness -. 1.0) > epsilon_float then
+    Cairo.set_tolerance cr (max 0.0 (min 100.0 flatness));
   (* Position the trim rect inside the (possibly bleed-extended)
      MediaBox before any user transforms. Cairo is y-down so this
      matches the Rust + Swift "trim corners at trim_x_off / trim_y_off"
