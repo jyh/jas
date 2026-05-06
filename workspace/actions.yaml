@@ -2658,6 +2658,12 @@ actions:
       out_ink3_frequency: { type: number }
       out_ink3_angle: { type: number }
       out_ink3_dot_shape: { type: string }
+      gfx_flatness: { type: number }
+      gfx_font_download: { type: string }
+      gfx_postscript_level: { type: string }
+      gfx_data_format: { type: string }
+      gfx_compatible_gradient_printing: { type: bool }
+      gfx_raster_effects_resolution: { type: number }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2714,6 +2720,12 @@ actions:
       - doc.set_output_ink_field: { index: 3, field: "frequency", value: "param.out_ink3_frequency" }
       - doc.set_output_ink_field: { index: 3, field: "angle",     value: "param.out_ink3_angle" }
       - doc.set_output_ink_field: { index: 3, field: "dot_shape", value: "param.out_ink3_dot_shape" }
+      - doc.set_graphics_field: { field: "flatness",                     value: "param.gfx_flatness" }
+      - doc.set_graphics_field: { field: "font_download",                value: "param.gfx_font_download" }
+      - doc.set_graphics_field: { field: "postscript_level",             value: "param.gfx_postscript_level" }
+      - doc.set_graphics_field: { field: "data_format",                  value: "param.gfx_data_format" }
+      - doc.set_graphics_field: { field: "compatible_gradient_printing", value: "param.gfx_compatible_gradient_printing" }
+      - doc.set_graphics_field: { field: "raster_effects_resolution",    value: "param.gfx_raster_effects_resolution" }
       - clear_dialog_snapshot
       - close_dialog
 
@@ -2780,6 +2792,12 @@ actions:
       out_ink3_frequency: { type: number }
       out_ink3_angle: { type: number }
       out_ink3_dot_shape: { type: string }
+      gfx_flatness: { type: number }
+      gfx_font_download: { type: string }
+      gfx_postscript_level: { type: string }
+      gfx_data_format: { type: string }
+      gfx_compatible_gradient_printing: { type: bool }
+      gfx_raster_effects_resolution: { type: number }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2836,6 +2854,12 @@ actions:
       - doc.set_output_ink_field: { index: 3, field: "frequency", value: "param.out_ink3_frequency" }
       - doc.set_output_ink_field: { index: 3, field: "angle",     value: "param.out_ink3_angle" }
       - doc.set_output_ink_field: { index: 3, field: "dot_shape", value: "param.out_ink3_dot_shape" }
+      - doc.set_graphics_field: { field: "flatness",                     value: "param.gfx_flatness" }
+      - doc.set_graphics_field: { field: "font_download",                value: "param.gfx_font_download" }
+      - doc.set_graphics_field: { field: "postscript_level",             value: "param.gfx_postscript_level" }
+      - doc.set_graphics_field: { field: "data_format",                  value: "param.gfx_data_format" }
+      - doc.set_graphics_field: { field: "compatible_gradient_printing", value: "param.gfx_compatible_gradient_printing" }
+      - doc.set_graphics_field: { field: "raster_effects_resolution",    value: "param.gfx_raster_effects_resolution" }
       - clear_dialog_snapshot
       - geometry.export_pdf: {}
       - close_dialog
