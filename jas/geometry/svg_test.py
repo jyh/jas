@@ -818,6 +818,27 @@ class Phase2MetadataSvgTest(absltest.TestCase):
         parsed = svg_to_document(svg)
         self.assertEqual(parsed.document_setup, s)
 
+    def test_graphics_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, Graphics, FontDownload, PostScriptLevel, DataFormat,
+        )
+        g = Graphics(
+            flatness=0.4,
+            font_download=FontDownload.COMPLETE,
+            postscript_level=PostScriptLevel.LEVEL_2,
+            data_format=DataFormat.ASCII,
+            compatible_gradient_printing=True,
+            raster_effects_resolution=600.0,
+        )
+        p = PrintPreferences(graphics=g)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:graphics', svg)
+        self.assertIn('flatness="0.4"', svg)
+        self.assertIn('font-download="complete"', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.graphics, g)
+
     def test_output_sub_record_round_trips_through_svg(self):
         from document.print_preferences import (
             PrintPreferences, Output, OutputMode, Emulsion, ImagePolarity,

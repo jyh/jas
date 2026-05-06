@@ -420,6 +420,19 @@ def _bool_str(b: bool) -> str:
     return "true" if b else "false"
 
 
+def _graphics_to_xml(g, indent: str) -> str:
+    return (
+        f'{indent}<jas:graphics'
+        f' flatness="{_fmt(g.flatness)}"'
+        f' font-download="{g.font_download.value}"'
+        f' postscript-level="{g.postscript_level.value}"'
+        f' data-format="{g.data_format.value}"'
+        f' compatible-gradient-printing="{_bool_str(g.compatible_gradient_printing)}"'
+        f' raster-effects-resolution="{_fmt(g.raster_effects_resolution)}"'
+        f'/>'
+    )
+
+
 def _ink_override_to_xml(ink, indent: str) -> str:
     return (
         f'{indent}<jas:ink'
@@ -516,6 +529,7 @@ def _print_preferences_to_xml(p, indent: str) -> str:
         f'{header}>\n'
         f'{_marks_and_bleed_to_xml(p.marks_and_bleed, inner)}\n'
         f'{_output_to_xml(p.output, inner)}\n'
+        f'{_graphics_to_xml(p.graphics, inner)}\n'
         f'{indent}</jas:print-preferences>'
     )
 
@@ -1258,6 +1272,27 @@ def _parse_document_setup_node(node: ET.Element):
     )
 
 
+def _parse_graphics_node(node: ET.Element):
+    from document.print_preferences import (
+        Graphics, FontDownload, PostScriptLevel, DataFormat,
+        _enum_from_string,
+    )
+    d = Graphics()
+    return Graphics(
+        flatness=_parse_float_attr(node, "flatness", d.flatness),
+        font_download=_enum_from_string(
+            FontDownload, _attr_get(node, "font-download") or "", d.font_download),
+        postscript_level=_enum_from_string(
+            PostScriptLevel, _attr_get(node, "postscript-level") or "", d.postscript_level),
+        data_format=_enum_from_string(
+            DataFormat, _attr_get(node, "data-format") or "", d.data_format),
+        compatible_gradient_printing=_parse_bool_attr(
+            node, "compatible-gradient-printing", d.compatible_gradient_printing),
+        raster_effects_resolution=_parse_float_attr(
+            node, "raster-effects-resolution", d.raster_effects_resolution),
+    )
+
+
 def _parse_ink_override_node(node: ET.Element):
     from document.print_preferences import (
         InkOverride, DotShape, _enum_from_string,
@@ -1329,19 +1364,22 @@ def _parse_marks_and_bleed_node(node: ET.Element):
 
 def _parse_print_preferences_node(node: ET.Element):
     from document.print_preferences import (
-        PrintPreferences, MarksAndBleed, Output,
+        PrintPreferences, MarksAndBleed, Output, Graphics,
         ArtboardRangeMode, MediaSize, Orientation, PrintLayers, ScalingMode,
         _enum_from_string,
     )
     d = PrintPreferences()
     mab = MarksAndBleed()
     output = Output()
+    graphics = Graphics()
     for child in node:
         tag = _strip_ns(child.tag)
         if tag == "marks-and-bleed":
             mab = _parse_marks_and_bleed_node(child)
         elif tag == "output":
             output = _parse_output_node(child)
+        elif tag == "graphics":
+            graphics = _parse_graphics_node(child)
     return PrintPreferences(
         preset_name=_attr_get(node, "preset-name") or d.preset_name,
         printer_name=_attr_get(node, "printer-name"),
@@ -1376,6 +1414,7 @@ def _parse_print_preferences_node(node: ET.Element):
         tile_range=_attr_get(node, "tile-range") or d.tile_range,
         marks_and_bleed=mab,
         output=output,
+        graphics=graphics,
     )
 
 
