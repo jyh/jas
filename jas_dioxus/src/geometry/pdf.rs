@@ -228,6 +228,25 @@ fn build_page_content(doc: &Document, page: &Page) -> String {
         s.push_str("i\n");
     }
 
+    // Phase 5: rendering intent. PDF's ``ri`` operator takes the
+    // intent's CamelCase name as a /Name object. Default
+    // RelativeColorimetric matches PDF 1.7 §11.6.5.8 default;
+    // emit only when non-default to keep unchanged docs
+    // byte-equivalent.
+    use crate::document::print_preferences::RenderingIntent;
+    let intent = &doc.print_preferences.color_management.rendering_intent;
+    if *intent != RenderingIntent::RelativeColorimetric {
+        let name = match intent {
+            RenderingIntent::Perceptual => "Perceptual",
+            RenderingIntent::RelativeColorimetric => "RelativeColorimetric",
+            RenderingIntent::Saturation => "Saturation",
+            RenderingIntent::AbsoluteColorimetric => "AbsoluteColorimetric",
+        };
+        s.push_str("/");
+        s.push_str(name);
+        s.push_str(" ri\n");
+    }
+
     // Artwork pass — pushed inside one save/restore so the y-flip
     // and source-rect translates don't leak into the marks pass.
     s.push_str("q\n");
@@ -1134,6 +1153,47 @@ mod tests {
         let s = String::from_utf8_lossy(&bytes);
         assert!(s.contains("5 i\n"),
                 "expected ``5 i`` directive in content stream:\n{s}");
+    }
+
+    #[test]
+    fn pdf_default_rendering_intent_emits_no_ri_operator() {
+        // RelativeColorimetric is the PDF default; the emitter
+        // skips emitting an ``ri`` operator in that case.
+        let doc = Document::default();
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(!s.contains(" ri\n"),
+                "default rendering intent must not emit an ri operator:\n{s}");
+    }
+
+    #[test]
+    fn pdf_non_default_rendering_intent_emits_ri_operator() {
+        use crate::document::print_preferences::RenderingIntent;
+        let mut doc = Document::default();
+        doc.print_preferences.color_management.rendering_intent =
+            RenderingIntent::Perceptual;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("/Perceptual ri\n"),
+                "expected ``/Perceptual ri`` directive:\n{s}");
+    }
+
+    #[test]
+    fn pdf_rendering_intent_uses_pdf_camelcase_names() {
+        use crate::document::print_preferences::RenderingIntent;
+        for (intent, name) in &[
+            (RenderingIntent::Perceptual, "Perceptual"),
+            (RenderingIntent::Saturation, "Saturation"),
+            (RenderingIntent::AbsoluteColorimetric, "AbsoluteColorimetric"),
+        ] {
+            let mut doc = Document::default();
+            doc.print_preferences.color_management.rendering_intent = intent.clone();
+            let bytes = document_to_pdf(&doc);
+            let s = String::from_utf8_lossy(&bytes);
+            let expected = format!("/{} ri\n", name);
+            assert!(s.contains(&expected),
+                    "expected `{}` in stream for {:?}:\n{}", expected, intent, s);
+        }
     }
 
     #[test]
