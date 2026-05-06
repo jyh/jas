@@ -3759,6 +3759,24 @@
         },
         "out_ink3_dot_shape": {
           "type": "string"
+        },
+        "gfx_flatness": {
+          "type": "number"
+        },
+        "gfx_font_download": {
+          "type": "string"
+        },
+        "gfx_postscript_level": {
+          "type": "string"
+        },
+        "gfx_data_format": {
+          "type": "string"
+        },
+        "gfx_compatible_gradient_printing": {
+          "type": "bool"
+        },
+        "gfx_raster_effects_resolution": {
+          "type": "number"
         }
       },
       "effects": [
@@ -4101,6 +4119,42 @@
             "index": 3,
             "field": "dot_shape",
             "value": "param.out_ink3_dot_shape"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "flatness",
+            "value": "param.gfx_flatness"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "font_download",
+            "value": "param.gfx_font_download"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "postscript_level",
+            "value": "param.gfx_postscript_level"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "data_format",
+            "value": "param.gfx_data_format"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "compatible_gradient_printing",
+            "value": "param.gfx_compatible_gradient_printing"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "raster_effects_resolution",
+            "value": "param.gfx_raster_effects_resolution"
           }
         },
         "clear_dialog_snapshot",
@@ -4272,6 +4326,24 @@
         },
         "out_ink3_dot_shape": {
           "type": "string"
+        },
+        "gfx_flatness": {
+          "type": "number"
+        },
+        "gfx_font_download": {
+          "type": "string"
+        },
+        "gfx_postscript_level": {
+          "type": "string"
+        },
+        "gfx_data_format": {
+          "type": "string"
+        },
+        "gfx_compatible_gradient_printing": {
+          "type": "bool"
+        },
+        "gfx_raster_effects_resolution": {
+          "type": "number"
         }
       },
       "effects": [
@@ -4614,6 +4686,42 @@
             "index": 3,
             "field": "dot_shape",
             "value": "param.out_ink3_dot_shape"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "flatness",
+            "value": "param.gfx_flatness"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "font_download",
+            "value": "param.gfx_font_download"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "postscript_level",
+            "value": "param.gfx_postscript_level"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "data_format",
+            "value": "param.gfx_data_format"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "compatible_gradient_printing",
+            "value": "param.gfx_compatible_gradient_printing"
+          }
+        },
+        {
+          "doc.set_graphics_field": {
+            "field": "raster_effects_resolution",
+            "value": "param.gfx_raster_effects_resolution"
           }
         },
         "clear_dialog_snapshot",
@@ -29383,6 +29491,43 @@
             "euclidean"
           ],
           "default": "round"
+        },
+        "gfx_flatness": {
+          "type": "number",
+          "default": 1.0
+        },
+        "gfx_font_download": {
+          "type": "enum",
+          "values": [
+            "none",
+            "subset",
+            "complete"
+          ],
+          "default": "subset"
+        },
+        "gfx_postscript_level": {
+          "type": "enum",
+          "values": [
+            "level_2",
+            "level_3"
+          ],
+          "default": "level_3"
+        },
+        "gfx_data_format": {
+          "type": "enum",
+          "values": [
+            "ascii",
+            "binary"
+          ],
+          "default": "binary"
+        },
+        "gfx_compatible_gradient_printing": {
+          "type": "bool",
+          "default": false
+        },
+        "gfx_raster_effects_resolution": {
+          "type": "number",
+          "default": 300.0
         }
       },
       "init": {
@@ -29439,7 +29584,13 @@
         "out_ink3_print": "active_document.print_preferences.output.inks[3].print",
         "out_ink3_frequency": "active_document.print_preferences.output.inks[3].frequency",
         "out_ink3_angle": "active_document.print_preferences.output.inks[3].angle",
-        "out_ink3_dot_shape": "active_document.print_preferences.output.inks[3].dot_shape"
+        "out_ink3_dot_shape": "active_document.print_preferences.output.inks[3].dot_shape",
+        "gfx_flatness": "active_document.print_preferences.graphics.flatness",
+        "gfx_font_download": "active_document.print_preferences.graphics.font_download",
+        "gfx_postscript_level": "active_document.print_preferences.graphics.postscript_level",
+        "gfx_data_format": "active_document.print_preferences.graphics.data_format",
+        "gfx_compatible_gradient_printing": "active_document.print_preferences.graphics.compatible_gradient_printing",
+        "gfx_raster_effects_resolution": "active_document.print_preferences.graphics.raster_effects_resolution"
       },
       "content": {
         "type": "container",
@@ -31123,19 +31274,271 @@
                   "children": [
                     {
                       "type": "text",
-                      "content": "Graphics",
+                      "content": "Paths",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Flatness:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_flatness",
+                              "type": "number_input",
+                              "min": 0.2,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.gfx_flatness"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 4 (PRINT.md \u00a7Phase 4). Path flatness, font download, PostScript level, data format, gradient compatibility, raster effects resolution.",
+                      "content": "Lower = higher curve quality (slower). Higher = coarser approximation (faster). Range 0.2\u201310.",
                       "style": {
-                        "font_size": 11,
+                        "font_size": 10,
                         "color": "var(--jas-text-dim,#888)"
                       }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Fonts",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Download:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_font_download",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "None",
+                                  "value": "none"
+                                },
+                                {
+                                  "label": "Subset",
+                                  "value": "subset"
+                                },
+                                {
+                                  "label": "Complete",
+                                  "value": "complete"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.gfx_font_download"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Options",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "PostScript:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_postscript_level",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Level 2",
+                                  "value": "level_2"
+                                },
+                                {
+                                  "label": "Level 3",
+                                  "value": "level_3"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.gfx_postscript_level"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Data Format:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_data_format",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "ASCII",
+                                  "value": "ascii"
+                                },
+                                {
+                                  "label": "Binary",
+                                  "value": "binary"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.gfx_data_format"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_gfx_compatible_gradient_printing",
+                              "type": "checkbox",
+                              "label": "Compatible Gradient and Gradient Mesh Printing",
+                              "bind": {
+                                "checked": "dialog.gfx_compatible_gradient_printing"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Raster Effects",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Resolution (dpi):",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 9,
+                          "children": [
+                            {
+                              "id": "pr_gfx_raster_effects_resolution",
+                              "type": "number_input",
+                              "min": 0,
+                              "style": {
+                                "width": 80
+                              },
+                              "bind": {
+                                "value": "dialog.gfx_raster_effects_resolution"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -31298,7 +31701,13 @@
                   "out_ink3_print": "dialog.out_ink3_print",
                   "out_ink3_frequency": "dialog.out_ink3_frequency",
                   "out_ink3_angle": "dialog.out_ink3_angle",
-                  "out_ink3_dot_shape": "dialog.out_ink3_dot_shape"
+                  "out_ink3_dot_shape": "dialog.out_ink3_dot_shape",
+                  "gfx_flatness": "dialog.gfx_flatness",
+                  "gfx_font_download": "dialog.gfx_font_download",
+                  "gfx_postscript_level": "dialog.gfx_postscript_level",
+                  "gfx_data_format": "dialog.gfx_data_format",
+                  "gfx_compatible_gradient_printing": "dialog.gfx_compatible_gradient_printing",
+                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution"
                 }
               },
               {
@@ -31360,7 +31769,13 @@
                   "out_ink3_print": "dialog.out_ink3_print",
                   "out_ink3_frequency": "dialog.out_ink3_frequency",
                   "out_ink3_angle": "dialog.out_ink3_angle",
-                  "out_ink3_dot_shape": "dialog.out_ink3_dot_shape"
+                  "out_ink3_dot_shape": "dialog.out_ink3_dot_shape",
+                  "gfx_flatness": "dialog.gfx_flatness",
+                  "gfx_font_download": "dialog.gfx_font_download",
+                  "gfx_postscript_level": "dialog.gfx_postscript_level",
+                  "gfx_data_format": "dialog.gfx_data_format",
+                  "gfx_compatible_gradient_printing": "dialog.gfx_compatible_gradient_printing",
+                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution"
                 }
               }
             ]

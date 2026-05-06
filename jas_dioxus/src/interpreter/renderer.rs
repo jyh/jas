@@ -1484,6 +1484,17 @@ fn output_view(o: &crate::document::print_preferences::Output) -> serde_json::Va
     })
 }
 
+fn graphics_view(g: &crate::document::print_preferences::Graphics) -> serde_json::Value {
+    serde_json::json!({
+        "flatness": g.flatness,
+        "font_download": crate::document::print_preferences::font_download_str(&g.font_download),
+        "postscript_level": crate::document::print_preferences::postscript_level_str(&g.postscript_level),
+        "data_format": crate::document::print_preferences::data_format_str(&g.data_format),
+        "compatible_gradient_printing": g.compatible_gradient_printing,
+        "raster_effects_resolution": g.raster_effects_resolution,
+    })
+}
+
 fn build_active_document_view(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
@@ -1543,6 +1554,9 @@ fn build_active_document_view(
                 ),
                 "output": output_view(
                     &crate::document::print_preferences::Output::default(),
+                ),
+                "graphics": graphics_view(
+                    &crate::document::print_preferences::Graphics::default(),
                 ),
             },
             "artboards_count": 0,
@@ -1719,6 +1733,7 @@ fn build_active_document_view(
             "tile_range": doc.print_preferences.tile_range.clone(),
             "marks_and_bleed": marks_and_bleed_view(&doc.print_preferences.marks_and_bleed),
             "output": output_view(&doc.print_preferences.output),
+            "graphics": graphics_view(&doc.print_preferences.graphics),
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -2297,6 +2312,39 @@ fn run_yaml_effect(
             ("angle", super::expr_types::Value::Number(n)) => ink.angle = *n,
             ("dot_shape", super::expr_types::Value::Str(s)) => ink.dot_shape = dot_shape_from(s),
             ("name", super::expr_types::Value::Str(s)) => ink.name = s.clone(),
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.set_graphics_field: { field, value }  — PRINT.md §4
+    if let Some(spec) = eff.get("doc.set_graphics_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::{
+            font_download_from, postscript_level_from, data_format_from,
+        };
+        let g = &mut new_doc.print_preferences.graphics;
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("flatness", super::expr_types::Value::Number(n)) => g.flatness = *n,
+            ("font_download", super::expr_types::Value::Str(s)) => g.font_download = font_download_from(s),
+            ("postscript_level", super::expr_types::Value::Str(s)) => g.postscript_level = postscript_level_from(s),
+            ("data_format", super::expr_types::Value::Str(s)) => g.data_format = data_format_from(s),
+            ("compatible_gradient_printing", super::expr_types::Value::Bool(b)) => g.compatible_gradient_printing = *b,
+            ("raster_effects_resolution", super::expr_types::Value::Number(n)) => g.raster_effects_resolution = *n,
             _ => applied = false,
         }
         if applied {
