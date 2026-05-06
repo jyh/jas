@@ -857,7 +857,8 @@ let () =
         assert (not (contains svg "<sodipodi:namedview")));
 
       Alcotest.test_case "non-default DocumentSetup round-trips" `Quick (fun () ->
-        let s = { Jas.Document_setup.bleed_top = 9.0;
+        let s = { Jas.Document_setup.default with
+                  bleed_top = 9.0;
                   bleed_right = 18.0; bleed_bottom = 36.0; bleed_left = 12.0;
                   bleed_uniform = false;
                   show_images_outline = true;
@@ -873,6 +874,48 @@ let () =
           in aux 0 in
         assert (contains svg "<jas:document-setup");
         assert (contains svg "xmlns:jas=");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.document_setup = s));
+
+      Alcotest.test_case "Advanced sub-record round-trips" `Quick (fun () ->
+        let a = { Jas.Print_preferences.print_as_bitmap = true;
+                  overprint_flattener_preset = Jas.Print_preferences.High_resolution } in
+        let p = { Jas.Print_preferences.default with advanced = a } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:advanced");
+        assert (contains svg "print-as-bitmap=\"true\"");
+        assert (contains svg "overprint-flattener-preset=\"high_resolution\"");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.advanced = a));
+
+      Alcotest.test_case "DocumentSetup phase 6 fields round-trip" `Quick (fun () ->
+        let s = { Jas.Document_setup.default with
+                  grid_size = 36.0;
+                  grid_color = "#0099ff";
+                  paper_color = "#fff8e7";
+                  simulate_colored_paper = true;
+                  transparency_flattener_preset = Jas.Print_preferences.High_resolution;
+                  discard_white_overprint = true } in
+        let doc = make_document ~document_setup:s [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "grid-size=\"36\"");
+        assert (contains svg "paper-color=\"#fff8e7\"");
+        assert (contains svg "simulate-colored-paper=\"true\"");
         let parsed = Jas.Svg.svg_to_document svg in
         assert (parsed.document_setup = s));
 
@@ -981,7 +1024,8 @@ let () =
                   marks_and_bleed = m;
                   output = Jas.Print_preferences.default_output;
                   graphics = Jas.Print_preferences.default_graphics;
-                  color_management = Jas.Print_preferences.default_color_management } in
+                  color_management = Jas.Print_preferences.default_color_management;
+                  advanced = Jas.Print_preferences.default_advanced } in
         let doc = make_document ~print_preferences:p [|make_layer [||]|] in
         let svg = Jas.Svg.document_to_svg doc in
         let contains s sub =
