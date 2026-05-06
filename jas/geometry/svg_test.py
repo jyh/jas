@@ -818,6 +818,43 @@ class Phase2MetadataSvgTest(absltest.TestCase):
         parsed = svg_to_document(svg)
         self.assertEqual(parsed.document_setup, s)
 
+    def test_advanced_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, Advanced, FlattenerPreset,
+        )
+        a = Advanced(
+            print_as_bitmap=True,
+            overprint_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+        )
+        p = PrintPreferences(advanced=a)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:advanced', svg)
+        self.assertIn('print-as-bitmap="true"', svg)
+        self.assertIn('overprint-flattener-preset="high_resolution"', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.advanced, a)
+
+    def test_document_setup_phase6_fields_round_trip_through_svg(self):
+        from document.document_setup import DocumentSetup
+        from document.print_preferences import FlattenerPreset
+        s = DocumentSetup(
+            grid_size=36.0,
+            grid_color="#0099ff",
+            paper_color="#fff8e7",
+            simulate_colored_paper=True,
+            transparency_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+            discard_white_overprint=True,
+        )
+        doc = Document(layers=(Layer(children=()),), document_setup=s)
+        svg = document_to_svg(doc)
+        self.assertIn('grid-size="36"', svg)
+        self.assertIn('paper-color="#fff8e7"', svg)
+        self.assertIn('simulate-colored-paper="true"', svg)
+        self.assertIn('transparency-flattener-preset="high_resolution"', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.document_setup, s)
+
     def test_color_management_sub_record_round_trips_through_svg(self):
         from document.print_preferences import (
             PrintPreferences, ColorManagement, ColorHandling, RenderingIntent,

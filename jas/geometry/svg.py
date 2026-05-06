@@ -473,6 +473,15 @@ def _output_to_xml(o, indent: str) -> str:
     return f"{header}\n{inks}\n{indent}</jas:output>"
 
 
+def _advanced_to_xml(a, indent: str) -> str:
+    return (
+        f'{indent}<jas:advanced'
+        f' print-as-bitmap="{_bool_str(a.print_as_bitmap)}"'
+        f' overprint-flattener-preset="{a.overprint_flattener_preset.value}"'
+        f'/>'
+    )
+
+
 def _document_setup_to_xml(s, indent: str) -> str:
     return (
         f'{indent}<jas:document-setup'
@@ -483,6 +492,12 @@ def _document_setup_to_xml(s, indent: str) -> str:
         f' bleed-uniform="{_bool_str(s.bleed_uniform)}"'
         f' show-images-outline="{_bool_str(s.show_images_outline)}"'
         f' highlight-substituted-glyphs="{_bool_str(s.highlight_substituted_glyphs)}"'
+        f' grid-size="{_fmt(s.grid_size)}"'
+        f' grid-color="{escape(s.grid_color)}"'
+        f' paper-color="{escape(s.paper_color)}"'
+        f' simulate-colored-paper="{_bool_str(s.simulate_colored_paper)}"'
+        f' transparency-flattener-preset="{s.transparency_flattener_preset.value}"'
+        f' discard-white-overprint="{_bool_str(s.discard_white_overprint)}"'
         f'/>'
     )
 
@@ -543,6 +558,7 @@ def _print_preferences_to_xml(p, indent: str) -> str:
         f'{_output_to_xml(p.output, inner)}\n'
         f'{_graphics_to_xml(p.graphics, inner)}\n'
         f'{_color_management_to_xml(p.color_management, inner)}\n'
+        f'{_advanced_to_xml(p.advanced, inner)}\n'
         f'{indent}</jas:print-preferences>'
     )
 
@@ -1271,6 +1287,7 @@ def _parse_int_attr(node: ET.Element, name: str, default: int) -> int:
 
 def _parse_document_setup_node(node: ET.Element):
     from document.document_setup import DocumentSetup
+    from document.print_preferences import FlattenerPreset, _enum_from_string
     d = DocumentSetup()
     return DocumentSetup(
         bleed_top=_parse_float_attr(node, "bleed-top", d.bleed_top),
@@ -1282,6 +1299,30 @@ def _parse_document_setup_node(node: ET.Element):
             node, "show-images-outline", d.show_images_outline),
         highlight_substituted_glyphs=_parse_bool_attr(
             node, "highlight-substituted-glyphs", d.highlight_substituted_glyphs),
+        grid_size=_parse_float_attr(node, "grid-size", d.grid_size),
+        grid_color=_attr_get(node, "grid-color") or d.grid_color,
+        paper_color=_attr_get(node, "paper-color") or d.paper_color,
+        simulate_colored_paper=_parse_bool_attr(
+            node, "simulate-colored-paper", d.simulate_colored_paper),
+        transparency_flattener_preset=_enum_from_string(
+            FlattenerPreset, _attr_get(node, "transparency-flattener-preset") or "",
+            d.transparency_flattener_preset),
+        discard_white_overprint=_parse_bool_attr(
+            node, "discard-white-overprint", d.discard_white_overprint),
+    )
+
+
+def _parse_advanced_node(node: ET.Element):
+    from document.print_preferences import (
+        Advanced, FlattenerPreset, _enum_from_string,
+    )
+    d = Advanced()
+    return Advanced(
+        print_as_bitmap=_parse_bool_attr(
+            node, "print-as-bitmap", d.print_as_bitmap),
+        overprint_flattener_preset=_enum_from_string(
+            FlattenerPreset, _attr_get(node, "overprint-flattener-preset") or "",
+            d.overprint_flattener_preset),
     )
 
 
@@ -1394,7 +1435,7 @@ def _parse_marks_and_bleed_node(node: ET.Element):
 
 def _parse_print_preferences_node(node: ET.Element):
     from document.print_preferences import (
-        PrintPreferences, MarksAndBleed, Output, Graphics, ColorManagement,
+        PrintPreferences, MarksAndBleed, Output, Graphics, ColorManagement, Advanced,
         ArtboardRangeMode, MediaSize, Orientation, PrintLayers, ScalingMode,
         _enum_from_string,
     )
@@ -1403,6 +1444,7 @@ def _parse_print_preferences_node(node: ET.Element):
     output = Output()
     graphics = Graphics()
     color_management = ColorManagement()
+    advanced = Advanced()
     for child in node:
         tag = _strip_ns(child.tag)
         if tag == "marks-and-bleed":
@@ -1413,6 +1455,8 @@ def _parse_print_preferences_node(node: ET.Element):
             graphics = _parse_graphics_node(child)
         elif tag == "color-management":
             color_management = _parse_color_management_node(child)
+        elif tag == "advanced":
+            advanced = _parse_advanced_node(child)
     return PrintPreferences(
         preset_name=_attr_get(node, "preset-name") or d.preset_name,
         printer_name=_attr_get(node, "printer-name"),
@@ -1449,6 +1493,7 @@ def _parse_print_preferences_node(node: ET.Element):
         output=output,
         graphics=graphics,
         color_management=color_management,
+        advanced=advanced,
     )
 
 
