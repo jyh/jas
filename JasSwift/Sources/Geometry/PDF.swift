@@ -148,7 +148,8 @@ private func _withPref(
     customScale: Double? = nil,
     tileOverlapH: Double? = nil,
     tileOverlapV: Double? = nil,
-    tileRange: String? = nil
+    tileRange: String? = nil,
+    marksAndBleed: MarksAndBleed? = nil
 ) -> PrintPreferences {
     return PrintPreferences(
         presetName: presetName ?? p.presetName,
@@ -173,7 +174,105 @@ private func _withPref(
         customScale: customScale ?? p.customScale,
         tileOverlapH: tileOverlapH ?? p.tileOverlapH,
         tileOverlapV: tileOverlapV ?? p.tileOverlapV,
-        tileRange: tileRange ?? p.tileRange
+        tileRange: tileRange ?? p.tileRange,
+        marksAndBleed: marksAndBleed ?? p.marksAndBleed
+    )
+}
+
+/// Apply a single field update to PrintPreferences's MarksAndBleed
+/// sub-record (PRINT.md §Phase 2). Returns nil for unknown fields or
+/// value-type mismatches — caller leaves PrintPreferences unchanged.
+func applyMarksAndBleedField(_ p: PrintPreferences, field: String, val: Value) -> PrintPreferences? {
+    func num() -> Double? {
+        if case .number(let n) = val { return n }
+        return nil
+    }
+    func bool() -> Bool? {
+        if case .bool(let b) = val { return b }
+        return nil
+    }
+    func str() -> String? {
+        if case .string(let s) = val { return s }
+        return nil
+    }
+    let m = p.marksAndBleed
+    let updated: MarksAndBleed
+    switch field {
+    case "all_printer_marks":
+        guard let b = bool() else { return nil }
+        updated = _withMab(m, allPrinterMarks: b)
+    case "trim_marks":
+        guard let b = bool() else { return nil }
+        updated = _withMab(m, trimMarks: b)
+    case "registration_marks":
+        guard let b = bool() else { return nil }
+        updated = _withMab(m, registrationMarks: b)
+    case "color_bars":
+        guard let b = bool() else { return nil }
+        updated = _withMab(m, colorBars: b)
+    case "page_information":
+        guard let b = bool() else { return nil }
+        updated = _withMab(m, pageInformation: b)
+    case "printer_mark_type":
+        guard let s = str(), let t = PrinterMarkType(rawValue: s) else { return nil }
+        updated = _withMab(m, printerMarkType: t)
+    case "trim_mark_weight":
+        guard let n = num() else { return nil }
+        updated = _withMab(m, trimMarkWeight: n)
+    case "mark_offset":
+        guard let n = num() else { return nil }
+        updated = _withMab(m, markOffset: n)
+    case "use_document_bleed":
+        guard let b = bool() else { return nil }
+        updated = _withMab(m, useDocumentBleed: b)
+    case "bleed_top":
+        guard let n = num() else { return nil }
+        updated = _withMab(m, bleedTop: n)
+    case "bleed_right":
+        guard let n = num() else { return nil }
+        updated = _withMab(m, bleedRight: n)
+    case "bleed_bottom":
+        guard let n = num() else { return nil }
+        updated = _withMab(m, bleedBottom: n)
+    case "bleed_left":
+        guard let n = num() else { return nil }
+        updated = _withMab(m, bleedLeft: n)
+    default:
+        return nil
+    }
+    return _withPref(p, marksAndBleed: updated)
+}
+
+private func _withMab(
+    _ m: MarksAndBleed,
+    allPrinterMarks: Bool? = nil,
+    trimMarks: Bool? = nil,
+    registrationMarks: Bool? = nil,
+    colorBars: Bool? = nil,
+    pageInformation: Bool? = nil,
+    printerMarkType: PrinterMarkType? = nil,
+    trimMarkWeight: Double? = nil,
+    markOffset: Double? = nil,
+    useDocumentBleed: Bool? = nil,
+    bleedTop: Double? = nil,
+    bleedRight: Double? = nil,
+    bleedBottom: Double? = nil,
+    bleedLeft: Double? = nil
+) -> MarksAndBleed {
+    return MarksAndBleed(
+        allPrinterMarks: allPrinterMarks ?? m.allPrinterMarks,
+        trimMarks: trimMarks ?? m.trimMarks,
+        registrationMarks: registrationMarks ?? m.registrationMarks,
+        colorBars: colorBars ?? m.colorBars,
+        pageInformation: pageInformation ?? m.pageInformation,
+        printerMarkType: printerMarkType ?? m.printerMarkType,
+        trimMarkWeight: trimMarkWeight ?? m.trimMarkWeight,
+        markOffset: markOffset ?? m.markOffset,
+        useDocumentBleed: useDocumentBleed ?? m.useDocumentBleed,
+        bleedTop: bleedTop ?? m.bleedTop,
+        bleedRight: bleedRight ?? m.bleedRight,
+        bleedBottom: bleedBottom ?? m.bleedBottom,
+        bleedLeft: bleedLeft ?? m.bleedLeft
     )
 }
 
