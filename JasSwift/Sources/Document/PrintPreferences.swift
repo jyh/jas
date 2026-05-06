@@ -55,6 +55,52 @@ public enum PrinterMarkType: String, Equatable, Hashable, CaseIterable {
     case japanese
 }
 
+/// Color-handling mode for the Color Management tab (PRINT.md §Phase 5).
+public enum ColorHandling: String, Equatable, Hashable, CaseIterable {
+    case letAppDetermine = "let_app_determine"
+    case letPrinterDetermine = "let_printer_determine"
+    case postscriptColorManagement = "postscript_color_management"
+}
+
+/// PDF rendering intent (PRINT.md §Phase 5). Names match PDF
+/// 1.7 §11.6.5.8 one-for-one (snake_case on disk, CamelCase in
+/// the PDF stream — the emitter handles the mapping).
+public enum RenderingIntent: String, Equatable, Hashable, CaseIterable {
+    case perceptual
+    case relativeColorimetric = "relative_colorimetric"
+    case saturation
+    case absoluteColorimetric = "absolute_colorimetric"
+}
+
+/// Color Management sub-record on PrintPreferences (PRINT.md §Phase 5).
+/// ``renderingIntent`` is applied by the PDF emitter via the ``ri``
+/// operator; ICC profile embedding (``documentProfile`` /
+/// ``printerProfile``) is deferred — Phase 5 stores the names so
+/// the on-disk shape is stable.
+public struct ColorManagement: Equatable, Hashable {
+    public let documentProfile: String
+    public let colorHandling: ColorHandling
+    public let printerProfile: String
+    public let renderingIntent: RenderingIntent
+    public let preserveRgbNumbers: Bool
+
+    public init(
+        documentProfile: String = "sRGB IEC61966-2.1",
+        colorHandling: ColorHandling = .letAppDetermine,
+        printerProfile: String = "",
+        renderingIntent: RenderingIntent = .relativeColorimetric,
+        preserveRgbNumbers: Bool = false
+    ) {
+        self.documentProfile = documentProfile
+        self.colorHandling = colorHandling
+        self.printerProfile = printerProfile
+        self.renderingIntent = renderingIntent
+        self.preserveRgbNumbers = preserveRgbNumbers
+    }
+
+    public static let `default` = ColorManagement()
+}
+
 /// Font-download mode for the Graphics tab (PRINT.md §Phase 4).
 /// PostScript-era concept; stored for on-disk shape stability but
 /// not applied by the PDF emitter.
@@ -294,6 +340,8 @@ public struct PrintPreferences: Equatable, Hashable {
     public let output: Output
     /// Graphics sub-record (PRINT.md §Phase 4).
     public let graphics: Graphics
+    /// Color Management sub-record (PRINT.md §Phase 5).
+    public let colorManagement: ColorManagement
 
     public init(
         presetName: String = "[Default]",
@@ -321,7 +369,8 @@ public struct PrintPreferences: Equatable, Hashable {
         tileRange: String = "",
         marksAndBleed: MarksAndBleed = .default,
         output: Output = .default,
-        graphics: Graphics = .default
+        graphics: Graphics = .default,
+        colorManagement: ColorManagement = .default
     ) {
         self.presetName = presetName
         self.printerName = printerName
@@ -349,6 +398,7 @@ public struct PrintPreferences: Equatable, Hashable {
         self.marksAndBleed = marksAndBleed
         self.output = output
         self.graphics = graphics
+        self.colorManagement = colorManagement
     }
 
     public static let `default` = PrintPreferences()

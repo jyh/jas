@@ -523,6 +523,16 @@ private func documentSetupJson(_ s: DocumentSetup) -> String {
     return o.build()
 }
 
+private func colorManagementJson(_ c: ColorManagement) -> String {
+    let o = JsonObj()
+    o.str("color_handling", c.colorHandling.rawValue)
+    o.str("document_profile", c.documentProfile)
+    o.bool("preserve_rgb_numbers", c.preserveRgbNumbers)
+    o.str("printer_profile", c.printerProfile)
+    o.str("rendering_intent", c.renderingIntent.rawValue)
+    return o.build()
+}
+
 private func graphicsJson(_ g: Graphics) -> String {
     let o = JsonObj()
     o.bool("compatible_gradient_printing", g.compatibleGradientPrinting)
@@ -585,6 +595,7 @@ private func printPreferencesJson(_ p: PrintPreferences) -> String {
     o.str("artboard_range_mode", p.artboardRangeMode.rawValue)
     o.bool("auto_rotate", p.autoRotate)
     o.bool("collate", p.collate)
+    o.raw("color_management", colorManagementJson(p.colorManagement))
     o.int("copies", p.copies)
     o.num("custom_scale", p.customScale)
     o.raw("graphics", graphicsJson(p.graphics))
@@ -1002,6 +1013,18 @@ private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
     )
 }
 
+private func parseColorManagement(_ v: Any?) -> ColorManagement {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = ColorManagement.default
+    return ColorManagement(
+        documentProfile: (d["document_profile"] as? String) ?? def.documentProfile,
+        colorHandling: ColorHandling(rawValue: (d["color_handling"] as? String) ?? "") ?? def.colorHandling,
+        printerProfile: (d["printer_profile"] as? String) ?? def.printerProfile,
+        renderingIntent: RenderingIntent(rawValue: (d["rendering_intent"] as? String) ?? "") ?? def.renderingIntent,
+        preserveRgbNumbers: (d["preserve_rgb_numbers"] as? Bool) ?? def.preserveRgbNumbers
+    )
+}
+
 private func parseGraphics(_ v: Any?) -> Graphics {
     guard let d = v as? [String: Any] else { return .default }
     let def = Graphics.default
@@ -1101,7 +1124,8 @@ private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
         tileRange: (d["tile_range"] as? String) ?? def.tileRange,
         marksAndBleed: parseMarksAndBleed(d["marks_and_bleed"]),
         output: parseOutput(d["output"]),
-        graphics: parseGraphics(d["graphics"])
+        graphics: parseGraphics(d["graphics"]),
+        colorManagement: parseColorManagement(d["color_management"])
     )
 }
 
