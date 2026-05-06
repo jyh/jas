@@ -1999,6 +1999,7 @@ fn parse_print_preferences(
         tile_range: get_attr(node, "tile-range")
             .map(str::to_string).unwrap_or(d.tile_range),
         marks_and_bleed: MarksAndBleed::default(),
+        output: Output::default(),
     };
     for child in &node.children {
         if strip_ns(&child.tag) == "marks-and-bleed" {
@@ -3193,6 +3194,7 @@ mod tests {
                 bleed_top: 4.0, bleed_right: 5.0,
                 bleed_bottom: 6.0, bleed_left: 7.0,
             },
+            output: Output::default(),
         };
         let svg = document_to_svg(&doc);
         assert!(svg.contains("<jas:print-preferences"),

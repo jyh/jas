@@ -60,6 +60,99 @@ pub enum PrinterMarkType {
     Japanese,
 }
 
+/// Output mode (PRINT.md §Phase 3): Composite renders the document
+/// as a single PDF page per artboard (Phase 1B behavior); Separations
+/// renders one PDF page per enabled ink in [`Output::inks`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutputMode {
+    Composite,
+    Separations,
+}
+
+/// Film emulsion side (PRINT.md §Phase 3). Names mirror Adobe's
+/// "Emulsion Up" / "Emulsion Down" — film output convention; for
+/// PDF output this currently has no rendering effect, but the
+/// on-disk shape is stable.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Emulsion {
+    UpRight,
+    DownRight,
+}
+
+/// PDF page polarity (PRINT.md §Phase 3). Negative inverts the final
+/// rasterized output; for PDF this is recorded but not applied.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImagePolarity {
+    Positive,
+    Negative,
+}
+
+/// Halftone dot shape for an InkOverride row (PRINT.md §Phase 3).
+/// Phase 3 stores the choice; halftone screen rendering itself is a
+/// Phase 7+ deferral.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DotShape {
+    Round,
+    Square,
+    Ellipse,
+    Diamond,
+    Line,
+    Cross,
+    Euclidean,
+}
+
+/// One row in the per-ink overrides table (PRINT.md §Phase 3 Output).
+/// The default ink list is the four CMYK process inks at standard
+/// Western screen angles (45 / 75 / 90 / 105 degrees).
+#[derive(Debug, Clone, PartialEq)]
+pub struct InkOverride {
+    pub name: String,
+    pub print: bool,
+    pub frequency: f64,
+    pub angle: f64,
+    pub dot_shape: DotShape,
+}
+
+impl InkOverride {
+    pub fn process_cmyk_defaults() -> Vec<InkOverride> {
+        vec![
+            InkOverride { name: "Process Cyan".into(),    print: true, frequency: 75.0, angle: 105.0, dot_shape: DotShape::Round },
+            InkOverride { name: "Process Magenta".into(), print: true, frequency: 75.0, angle:  75.0, dot_shape: DotShape::Round },
+            InkOverride { name: "Process Yellow".into(),  print: true, frequency: 75.0, angle:  90.0, dot_shape: DotShape::Round },
+            InkOverride { name: "Process Black".into(),   print: true, frequency: 75.0, angle:  45.0, dot_shape: DotShape::Round },
+        ]
+    }
+}
+
+/// Output sub-record on PrintPreferences (PRINT.md §Phase 3). The
+/// Output tab exposes these 1:1 as widgets; in Separations mode the
+/// PDF emitter produces one page per enabled [`InkOverride`] in
+/// [`inks`] instead of one page per artboard.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Output {
+    pub mode: OutputMode,
+    pub emulsion: Emulsion,
+    pub image_polarity: ImagePolarity,
+    pub printer_resolution: String,
+    pub convert_spot_to_process: bool,
+    pub overprint_black: bool,
+    pub inks: Vec<InkOverride>,
+}
+
+impl Default for Output {
+    fn default() -> Self {
+        Self {
+            mode: OutputMode::Composite,
+            emulsion: Emulsion::UpRight,
+            image_polarity: ImagePolarity::Positive,
+            printer_resolution: "75 lpi / 600 dpi".to_string(),
+            convert_spot_to_process: false,
+            overprint_black: false,
+            inks: InkOverride::process_cmyk_defaults(),
+        }
+    }
+}
+
 /// Marks-and-bleed sub-record on PrintPreferences (PRINT.md §Phase 2).
 /// The Marks tab exposes these 1:1 as widgets; the PDF renderer
 /// extends each page by the active bleed and overlays mark geometry
@@ -135,6 +228,8 @@ pub struct PrintPreferences {
     pub tile_range: String,
     /// Marks-and-bleed sub-record (PRINT.md §Phase 2).
     pub marks_and_bleed: MarksAndBleed,
+    /// Output sub-record (PRINT.md §Phase 3).
+    pub output: Output,
 }
 
 impl Default for PrintPreferences {
@@ -164,6 +259,7 @@ impl Default for PrintPreferences {
             tile_overlap_v: 0.0,
             tile_range: String::new(),
             marks_and_bleed: MarksAndBleed::default(),
+            output: Output::default(),
         }
     }
 }
@@ -288,6 +384,68 @@ pub fn printer_mark_type_from(s: &str) -> PrinterMarkType {
     }
 }
 
+pub fn output_mode_str(m: &OutputMode) -> &'static str {
+    match m {
+        OutputMode::Composite => "composite",
+        OutputMode::Separations => "separations",
+    }
+}
+pub fn output_mode_from(s: &str) -> OutputMode {
+    match s {
+        "separations" => OutputMode::Separations,
+        _ => OutputMode::Composite,
+    }
+}
+
+pub fn emulsion_str(e: &Emulsion) -> &'static str {
+    match e {
+        Emulsion::UpRight => "up_right",
+        Emulsion::DownRight => "down_right",
+    }
+}
+pub fn emulsion_from(s: &str) -> Emulsion {
+    match s {
+        "down_right" => Emulsion::DownRight,
+        _ => Emulsion::UpRight,
+    }
+}
+
+pub fn image_polarity_str(p: &ImagePolarity) -> &'static str {
+    match p {
+        ImagePolarity::Positive => "positive",
+        ImagePolarity::Negative => "negative",
+    }
+}
+pub fn image_polarity_from(s: &str) -> ImagePolarity {
+    match s {
+        "negative" => ImagePolarity::Negative,
+        _ => ImagePolarity::Positive,
+    }
+}
+
+pub fn dot_shape_str(d: &DotShape) -> &'static str {
+    match d {
+        DotShape::Round => "round",
+        DotShape::Square => "square",
+        DotShape::Ellipse => "ellipse",
+        DotShape::Diamond => "diamond",
+        DotShape::Line => "line",
+        DotShape::Cross => "cross",
+        DotShape::Euclidean => "euclidean",
+    }
+}
+pub fn dot_shape_from(s: &str) -> DotShape {
+    match s {
+        "square" => DotShape::Square,
+        "ellipse" => DotShape::Ellipse,
+        "diamond" => DotShape::Diamond,
+        "line" => DotShape::Line,
+        "cross" => DotShape::Cross,
+        "euclidean" => DotShape::Euclidean,
+        _ => DotShape::Round,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +477,32 @@ mod tests {
         assert_eq!(p.tile_overlap_v, 0.0);
         assert_eq!(p.tile_range, "");
         assert_eq!(p.marks_and_bleed, MarksAndBleed::default());
+        assert_eq!(p.output, Output::default());
+    }
+
+    #[test]
+    fn output_defaults_match_spec() {
+        let o = Output::default();
+        assert_eq!(o.mode, OutputMode::Composite);
+        assert_eq!(o.emulsion, Emulsion::UpRight);
+        assert_eq!(o.image_polarity, ImagePolarity::Positive);
+        assert_eq!(o.printer_resolution, "75 lpi / 600 dpi");
+        assert!(!o.convert_spot_to_process);
+        assert!(!o.overprint_black);
+        assert_eq!(o.inks.len(), 4);
+        assert_eq!(o.inks[0].name, "Process Cyan");
+        assert_eq!(o.inks[0].angle, 105.0);
+        assert_eq!(o.inks[1].name, "Process Magenta");
+        assert_eq!(o.inks[1].angle, 75.0);
+        assert_eq!(o.inks[2].name, "Process Yellow");
+        assert_eq!(o.inks[2].angle, 90.0);
+        assert_eq!(o.inks[3].name, "Process Black");
+        assert_eq!(o.inks[3].angle, 45.0);
+        for ink in &o.inks {
+            assert!(ink.print);
+            assert_eq!(ink.frequency, 75.0);
+            assert_eq!(ink.dot_shape, DotShape::Round);
+        }
     }
 
     #[test]
@@ -370,6 +554,21 @@ mod tests {
         for t in [PrinterMarkType::Roman, PrinterMarkType::Japanese] {
             assert_eq!(printer_mark_type_from(printer_mark_type_str(&t)), t);
         }
+        for m in [OutputMode::Composite, OutputMode::Separations] {
+            assert_eq!(output_mode_from(output_mode_str(&m)), m);
+        }
+        for e in [Emulsion::UpRight, Emulsion::DownRight] {
+            assert_eq!(emulsion_from(emulsion_str(&e)), e);
+        }
+        for p in [ImagePolarity::Positive, ImagePolarity::Negative] {
+            assert_eq!(image_polarity_from(image_polarity_str(&p)), p);
+        }
+        for d in [
+            DotShape::Round, DotShape::Square, DotShape::Ellipse,
+            DotShape::Diamond, DotShape::Line, DotShape::Cross, DotShape::Euclidean,
+        ] {
+            assert_eq!(dot_shape_from(dot_shape_str(&d)), d);
+        }
     }
 
     #[test]
@@ -380,5 +579,9 @@ mod tests {
         assert_eq!(print_layers_from("garbage"), PrintLayers::VisiblePrintable);
         assert_eq!(scaling_mode_from("garbage"), ScalingMode::DoNotScale);
         assert_eq!(printer_mark_type_from("garbage"), PrinterMarkType::Roman);
+        assert_eq!(output_mode_from("garbage"), OutputMode::Composite);
+        assert_eq!(emulsion_from("garbage"), Emulsion::UpRight);
+        assert_eq!(image_polarity_from("garbage"), ImagePolarity::Positive);
+        assert_eq!(dot_shape_from("garbage"), DotShape::Round);
     }
 }
