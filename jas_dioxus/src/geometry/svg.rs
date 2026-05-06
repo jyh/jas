@@ -1920,6 +1920,42 @@ fn ink_override_to_xml(
     )
 }
 
+fn color_management_to_xml(
+    c: &crate::document::print_preferences::ColorManagement,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::*;
+    format!(
+        "{indent}<jas:color-management document-profile=\"{dp}\" color-handling=\"{ch}\" printer-profile=\"{pp}\" rendering-intent=\"{ri}\" preserve-rgb-numbers=\"{prn}\"/>",
+        indent = indent,
+        dp = escape_xml(&c.document_profile),
+        ch = color_handling_str(&c.color_handling),
+        pp = escape_xml(&c.printer_profile),
+        ri = rendering_intent_str(&c.rendering_intent),
+        prn = bool_str(c.preserve_rgb_numbers),
+    )
+}
+
+fn parse_color_management(
+    node: &XmlNode,
+) -> crate::document::print_preferences::ColorManagement {
+    use crate::document::print_preferences::*;
+    let d = ColorManagement::default();
+    ColorManagement {
+        document_profile: get_attr(node, "document-profile")
+            .map(str::to_string).unwrap_or(d.document_profile),
+        color_handling: get_attr(node, "color-handling")
+            .map(color_handling_from).unwrap_or(d.color_handling),
+        printer_profile: get_attr(node, "printer-profile")
+            .map(str::to_string).unwrap_or(d.printer_profile),
+        rendering_intent: get_attr(node, "rendering-intent")
+            .map(rendering_intent_from).unwrap_or(d.rendering_intent),
+        preserve_rgb_numbers: get_attr(node, "preserve-rgb-numbers")
+            .map(|s| parse_bool(s, d.preserve_rgb_numbers))
+            .unwrap_or(d.preserve_rgb_numbers),
+    }
+}
+
 fn graphics_to_xml(
     g: &crate::document::print_preferences::Graphics,
     indent: &str,
@@ -2082,6 +2118,8 @@ fn print_preferences_to_xml(
     s.push('\n');
     s.push_str(&graphics_to_xml(&p.graphics, &inner_indent));
     s.push('\n');
+    s.push_str(&color_management_to_xml(&p.color_management, &inner_indent));
+    s.push('\n');
     s.push_str(indent);
     s.push_str("</jas:print-preferences>");
     s
@@ -2148,6 +2186,7 @@ fn parse_print_preferences(
             "marks-and-bleed" => p.marks_and_bleed = parse_marks_and_bleed(child),
             "output" => p.output = parse_output(child),
             "graphics" => p.graphics = parse_graphics(child),
+            "color-management" => p.color_management = parse_color_management(child),
             _ => {}
         }
     }
@@ -3374,6 +3413,27 @@ mod tests {
         assert!(svg.contains("PANTONE 185 C"), "spot ink missing:\n{svg}");
         let parsed = svg_to_document(&svg);
         assert_eq!(parsed.print_preferences.output, doc.print_preferences.output);
+    }
+
+    #[test]
+    fn color_management_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.color_management = ColorManagement {
+            document_profile: "Adobe RGB (1998)".to_string(),
+            color_handling: ColorHandling::PostscriptColorManagement,
+            printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
+            rendering_intent: RenderingIntent::Saturation,
+            preserve_rgb_numbers: true,
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:color-management"), "svg:\n{svg}");
+        assert!(svg.contains("color-handling=\"postscript_color_management\""), "svg:\n{svg}");
+        assert!(svg.contains("rendering-intent=\"saturation\""), "svg:\n{svg}");
+        assert!(svg.contains("Adobe RGB (1998)"), "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.color_management,
+                   doc.print_preferences.color_management);
     }
 
     #[test]
