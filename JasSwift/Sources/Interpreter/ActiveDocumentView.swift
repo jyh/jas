@@ -153,6 +153,19 @@ private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
         "bleed_uniform": s.bleedUniform,
         "show_images_outline": s.showImagesOutline,
         "highlight_substituted_glyphs": s.highlightSubstitutedGlyphs,
+        "grid_size": s.gridSize,
+        "grid_color": s.gridColor,
+        "paper_color": s.paperColor,
+        "simulate_colored_paper": s.simulateColoredPaper,
+        "transparency_flattener_preset": s.transparencyFlattenerPreset.rawValue,
+        "discard_white_overprint": s.discardWhiteOverprint,
+    ]
+}
+
+private func advancedView(_ a: Advanced) -> [String: Any] {
+    return [
+        "print_as_bitmap": a.printAsBitmap,
+        "overprint_flattener_preset": a.overprintFlattenerPreset.rawValue,
     ]
 }
 
@@ -246,6 +259,7 @@ private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
         "output": outputView(p.output),
         "graphics": graphicsView(p.graphics),
         "color_management": colorManagementView(p.colorManagement),
+        "advanced": advancedView(p.advanced),
     ]
 }
 
