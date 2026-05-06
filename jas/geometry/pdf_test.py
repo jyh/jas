@@ -5,7 +5,9 @@ from document.document import Document
 from document.print_preferences import (
     PrintPreferences, PrintLayers, Output, OutputMode, InkOverride,
     Graphics, ColorManagement, RenderingIntent,
+    Advanced, FlattenerPreset,
 )
+from document.document_setup import DocumentSetup
 from geometry.pdf import document_to_pdf
 
 
@@ -120,6 +122,25 @@ class PdfGraphicsTest(absltest.TestCase):
         prefs = PrintPreferences(graphics=Graphics(flatness=5.0))
         b = document_to_pdf(Document(print_preferences=prefs))
         self.assertTrue(b.startswith(b"%PDF-"))
+
+    def test_non_default_phase6_values_dont_break_output(self):
+        # Phase 6 v1 stores Advanced + Phase 6 DocumentSetup fields
+        # but defers the rendering effects. Smoke-test that
+        # non-default values don't crash the emitter.
+        a = Advanced(
+            print_as_bitmap=True,
+            overprint_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+        )
+        s = DocumentSetup(
+            paper_color="#fff8e7",
+            simulate_colored_paper=True,
+            transparency_flattener_preset=FlattenerPreset.HIGH_RESOLUTION,
+            discard_white_overprint=True,
+        )
+        prefs = PrintPreferences(advanced=a)
+        b = document_to_pdf(Document(document_setup=s, print_preferences=prefs))
+        self.assertTrue(b.startswith(b"%PDF-"))
+        self.assertIn(b"%%EOF", b)
 
     def test_non_default_rendering_intent_produces_valid_pdf(self):
         # Smoke: ColorManagement.rendering_intent ≠ RELATIVE_COLORIMETRIC
