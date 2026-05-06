@@ -167,7 +167,8 @@ let test_print_preferences_roundtrip () =
             tile_range = "1-2";
             marks_and_bleed = Print_preferences.default_marks_and_bleed;
             output = Print_preferences.default_output;
-            graphics = Print_preferences.default_graphics } in
+            graphics = Print_preferences.default_graphics;
+            color_management = Print_preferences.default_color_management } in
   let doc = make_document ~print_preferences:p [||] in
   let json = document_to_test_json doc in
   let doc2 = test_json_to_document json in
@@ -198,6 +199,47 @@ let test_printer_mark_type_strings () =
   assert (printer_mark_type_of_string "roman" = Roman);
   assert (printer_mark_type_of_string "japanese" = Japanese);
   assert (printer_mark_type_of_string "garbage" = Roman)
+
+(* Color Management sub-record (PRINT.md §Phase 5) *)
+
+let test_color_management_defaults () =
+  let c = Print_preferences.default_color_management in
+  assert (c.document_profile = "sRGB IEC61966-2.1");
+  assert (c.color_handling = Print_preferences.Let_app_determine);
+  assert (c.printer_profile = "");
+  assert (c.rendering_intent = Print_preferences.Relative_colorimetric);
+  assert (c.preserve_rgb_numbers = false)
+
+let test_color_management_enum_strings () =
+  let open Print_preferences in
+  assert (color_handling_to_string Let_app_determine = "let_app_determine");
+  assert (color_handling_to_string Let_printer_determine = "let_printer_determine");
+  assert (color_handling_to_string Postscript_color_management = "postscript_color_management");
+  assert (rendering_intent_to_string Perceptual = "perceptual");
+  assert (rendering_intent_to_string Relative_colorimetric = "relative_colorimetric");
+  assert (rendering_intent_to_string Saturation = "saturation");
+  assert (rendering_intent_to_string Absolute_colorimetric = "absolute_colorimetric")
+
+let test_color_management_roundtrip () =
+  let c = { Print_preferences.document_profile = "Adobe RGB (1998)";
+            color_handling = Print_preferences.Postscript_color_management;
+            printer_profile = "U.S. Web Coated (SWOP) v2";
+            rendering_intent = Print_preferences.Saturation;
+            preserve_rgb_numbers = true } in
+  let p = { Print_preferences.default with color_management = c } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"color_management\"");
+  assert (contains json "\"color_handling\":\"postscript_color_management\"");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.color_management = c)
 
 (* Graphics sub-record (PRINT.md §Phase 4) *)
 
@@ -360,6 +402,11 @@ let () =
       Alcotest.test_case "defaults" `Quick test_graphics_defaults;
       Alcotest.test_case "enum strings" `Quick test_graphics_enum_strings;
       Alcotest.test_case "roundtrip" `Quick test_graphics_roundtrip;
+    ];
+    "color_management", [
+      Alcotest.test_case "defaults" `Quick test_color_management_defaults;
+      Alcotest.test_case "enum strings" `Quick test_color_management_enum_strings;
+      Alcotest.test_case "roundtrip" `Quick test_color_management_roundtrip;
     ];
     "test_json", [
       Alcotest.test_case "document_setup omitted when default" `Quick test_document_setup_only_emitted_when_non_default;

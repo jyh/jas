@@ -510,6 +510,17 @@ let document_setup_json (s : Document_setup.t) =
   json_bool o "show_images_outline" s.show_images_outline;
   json_build o
 
+let color_management_json (c : Print_preferences.color_management) =
+  let o = json_obj () in
+  json_str o "color_handling"
+    (Print_preferences.color_handling_to_string c.color_handling);
+  json_str o "document_profile" c.document_profile;
+  json_bool o "preserve_rgb_numbers" c.preserve_rgb_numbers;
+  json_str o "printer_profile" c.printer_profile;
+  json_str o "rendering_intent"
+    (Print_preferences.rendering_intent_to_string c.rendering_intent);
+  json_build o
+
 let graphics_json (g : Print_preferences.graphics) =
   let o = json_obj () in
   json_bool o "compatible_gradient_printing" g.compatible_gradient_printing;
@@ -573,6 +584,7 @@ let print_preferences_json (p : Print_preferences.t) =
     (Print_preferences.artboard_range_mode_to_string p.artboard_range_mode);
   json_bool o "auto_rotate" p.auto_rotate;
   json_bool o "collate" p.collate;
+  json_raw o "color_management" (color_management_json p.color_management);
   json_int o "copies" p.copies;
   json_num o "custom_scale" p.custom_scale;
   json_raw o "graphics" (graphics_json p.graphics);
@@ -1010,6 +1022,29 @@ let parse_document_setup j : Document_setup.t =
     }
   with _ -> d
 
+let parse_color_management j : Print_preferences.color_management =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_color_management in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      document_profile = pick_str "document_profile" d.document_profile;
+      color_handling =
+        Print_preferences.color_handling_of_string
+          (pick_str "color_handling"
+             (Print_preferences.color_handling_to_string d.color_handling));
+      printer_profile = pick_str "printer_profile" d.printer_profile;
+      rendering_intent =
+        Print_preferences.rendering_intent_of_string
+          (pick_str "rendering_intent"
+             (Print_preferences.rendering_intent_to_string d.rendering_intent));
+      preserve_rgb_numbers = pick_bool "preserve_rgb_numbers" d.preserve_rgb_numbers;
+    }
+  with _ -> d
+
 let parse_graphics j : Print_preferences.graphics =
   let open Yojson.Safe.Util in
   let d = Print_preferences.default_graphics in
@@ -1154,6 +1189,11 @@ let parse_print_preferences j : Print_preferences.t =
     | `Null -> d.graphics
     | v -> parse_graphics v
   in
+  let pick_color_management () =
+    match try j |> member "color_management" with _ -> `Null with
+    | `Null -> d.color_management
+    | v -> parse_color_management v
+  in
   try
     {
       preset_name = pick_str "preset_name" d.preset_name;
@@ -1197,6 +1237,7 @@ let parse_print_preferences j : Print_preferences.t =
       marks_and_bleed = pick_marks_and_bleed ();
       output = pick_output ();
       graphics = pick_graphics ();
+      color_management = pick_color_management ();
     }
   with _ -> d
 

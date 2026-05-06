@@ -180,6 +180,60 @@ let default_output = {
   inks = process_cmyk_default_inks;
 }
 
+(** Color-handling mode for the Color Management tab (PRINT.md §Phase 5).
+    Three Adobe-standard choices. Stored only — full ICC profile
+    management is a Phase 5+ deferral. *)
+type color_handling =
+  | Let_app_determine
+  | Let_printer_determine
+  | Postscript_color_management
+
+let color_handling_to_string = function
+  | Let_app_determine -> "let_app_determine"
+  | Let_printer_determine -> "let_printer_determine"
+  | Postscript_color_management -> "postscript_color_management"
+let color_handling_of_string = function
+  | "let_printer_determine" -> Let_printer_determine
+  | "postscript_color_management" -> Postscript_color_management
+  | _ -> Let_app_determine
+
+(** PDF rendering intent (PRINT.md §Phase 5). Names match PDF
+    1.7 §11.6.5.8 one-for-one (snake_case on disk; the PDF emitter
+    writes the CamelCase form into a ``ri`` operator). *)
+type rendering_intent =
+  | Perceptual
+  | Relative_colorimetric
+  | Saturation
+  | Absolute_colorimetric
+
+let rendering_intent_to_string = function
+  | Perceptual -> "perceptual"
+  | Relative_colorimetric -> "relative_colorimetric"
+  | Saturation -> "saturation"
+  | Absolute_colorimetric -> "absolute_colorimetric"
+let rendering_intent_of_string = function
+  | "perceptual" -> Perceptual
+  | "saturation" -> Saturation
+  | "absolute_colorimetric" -> Absolute_colorimetric
+  | _ -> Relative_colorimetric
+
+(** Color Management sub-record on print_preferences (PRINT.md §Phase 5). *)
+type color_management = {
+  document_profile : string;
+  color_handling : color_handling;
+  printer_profile : string;
+  rendering_intent : rendering_intent;
+  preserve_rgb_numbers : bool;
+}
+
+let default_color_management = {
+  document_profile = "sRGB IEC61966-2.1";
+  color_handling = Let_app_determine;
+  printer_profile = "";
+  rendering_intent = Relative_colorimetric;
+  preserve_rgb_numbers = false;
+}
+
 (** Font-download mode for the Graphics tab (PRINT.md §Phase 4).
     PostScript-era concept; stored for on-disk shape stability but
     not applied by the PDF emitter (we always embed-by-subset). *)
@@ -311,6 +365,8 @@ type t = {
   output : output;
   (* Graphics sub-record (PRINT.md §Phase 4). *)
   graphics : graphics;
+  (* Color Management sub-record (PRINT.md §Phase 5). *)
+  color_management : color_management;
 }
 
 let default = {
@@ -340,6 +396,7 @@ let default = {
   marks_and_bleed = default_marks_and_bleed;
   output = default_output;
   graphics = default_graphics;
+  color_management = default_color_management;
 }
 
 (** Workspace-level named saved configuration. Phase 1 ships only
