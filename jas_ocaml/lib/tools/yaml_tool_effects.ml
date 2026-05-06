@@ -4141,6 +4141,60 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* doc.set_color_management_field — PRINT.md §Phase 5. *)
+  let doc_set_color_management_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let c = p.color_management in
+          let nc : Print_preferences.color_management option =
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "document_profile" ->
+              (match str_v () with
+               | Some s -> Some { c with document_profile = s }
+               | None -> None)
+            | "color_handling" ->
+              (match str_v () with
+               | Some s -> Some { c with color_handling = Print_preferences.color_handling_of_string s }
+               | None -> None)
+            | "printer_profile" ->
+              (match str_v () with
+               | Some s -> Some { c with printer_profile = s }
+               | None -> None)
+            | "rendering_intent" ->
+              (match str_v () with
+               | Some s -> Some { c with rendering_intent = Print_preferences.rendering_intent_of_string s }
+               | None -> None)
+            | "preserve_rgb_numbers" -> Some { c with preserve_rgb_numbers = bool_v () }
+            | _ -> None
+          in
+          (match nc with
+           | Some new_c ->
+             let new_p = { p with color_management = new_c } in
+             ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
   (* geometry.export_pdf — PRINT.md §1B. Generates a PDF and prompts
      for a save location via GtkFileChooserDialog. *)
   let geometry_export_pdf _ _ _ =
@@ -4177,6 +4231,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.set_output_field", doc_set_output_field);
     ("doc.set_output_ink_field", doc_set_output_ink_field);
     ("doc.set_graphics_field", doc_set_graphics_field);
+    ("doc.set_color_management_field", doc_set_color_management_field);
     ("geometry.export_pdf", geometry_export_pdf);
     ("doc.artboard.probe_hit", doc_artboard_probe_hit);
     ("doc.artboard.probe_hover", doc_artboard_probe_hover);
