@@ -217,6 +217,17 @@ fn build_page_content(doc: &Document, page: &Page) -> String {
     let (sx, sy) = scaling_pair(doc);
     let (px, py) = placement_pair(doc);
 
+    // Phase 4: path-flattening tolerance. Default 1.0 matches PDF's
+    // built-in default, so emit only when non-default to keep the
+    // content stream byte-equivalent for unchanged docs. Clamp to
+    // [0, 100] per PDF 1.7 §8.4.3.
+    let flatness = doc.print_preferences.graphics.flatness;
+    if (flatness - 1.0).abs() > f64::EPSILON {
+        let clamped = flatness.clamp(0.0, 100.0);
+        push_num(&mut s, clamped);
+        s.push_str("i\n");
+    }
+
     // Artwork pass — pushed inside one save/restore so the y-flip
     // and source-rect translates don't leak into the marks pass.
     s.push_str("q\n");
@@ -1098,6 +1109,42 @@ mod tests {
         assert!(s.contains("/Count 1"));
         assert!(!s.contains("(Process Cyan)"),
                 "composite-mode page must not stamp ink labels");
+    }
+
+    #[test]
+    fn pdf_default_flatness_emits_no_i_operator() {
+        // Default flatness is 1.0 = PDF default; the emitter skips
+        // emitting an ``i`` operator in that case so existing
+        // content streams stay byte-equivalent.
+        let doc = Document::default();
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        // Look for "<num> i\n" — but be lenient against unrelated
+        // content. The default doc has no curves so no implicit
+        // tolerance directive should appear.
+        assert!(!s.contains(" i\n"),
+                "default flatness must not emit an i operator:\n{s}");
+    }
+
+    #[test]
+    fn pdf_non_default_flatness_emits_i_operator() {
+        let mut doc = Document::default();
+        doc.print_preferences.graphics.flatness = 5.0;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("5 i\n"),
+                "expected ``5 i`` directive in content stream:\n{s}");
+    }
+
+    #[test]
+    fn pdf_flatness_is_clamped_to_pdf_max() {
+        let mut doc = Document::default();
+        doc.print_preferences.graphics.flatness = 1000.0;
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        // Per PDF 1.7 §8.4.3 the spec ceiling is 100.
+        assert!(s.contains("100 i\n"),
+                "expected clamped ``100 i`` directive:\n{s}");
     }
 
     #[test]
