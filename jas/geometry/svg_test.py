@@ -793,5 +793,68 @@ class SvgImportTest(absltest.TestCase):
         self.assertFalse(r.stroke.dash_align_anchors)
 
 
+class Phase2MetadataSvgTest(absltest.TestCase):
+    """DocumentSetup + PrintPreferences SVG persistence (PRINT.md §Phase 2)."""
+
+    def test_default_doc_emits_no_jas_blocks(self):
+        doc = Document(layers=(Layer(children=()),))
+        svg = document_to_svg(doc)
+        self.assertNotIn('<jas:document-setup', svg)
+        self.assertNotIn('<jas:print-preferences', svg)
+        self.assertNotIn('<sodipodi:namedview', svg)
+
+    def test_non_default_document_setup_round_trips(self):
+        from document.document_setup import DocumentSetup
+        s = DocumentSetup(
+            bleed_top=9.0, bleed_right=18.0,
+            bleed_bottom=36.0, bleed_left=12.0,
+            bleed_uniform=False,
+            show_images_outline=True,
+            highlight_substituted_glyphs=True)
+        doc = Document(layers=(Layer(children=()),), document_setup=s)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:document-setup', svg)
+        self.assertIn('xmlns:jas=', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.document_setup, s)
+
+    def test_non_default_print_preferences_round_trip(self):
+        from document.print_preferences import (
+            PrintPreferences, MarksAndBleed, ArtboardRangeMode, MediaSize,
+            Orientation, PrintLayers, ScalingMode, PrinterMarkType,
+        )
+        m = MarksAndBleed(
+            all_printer_marks=True, trim_marks=True,
+            registration_marks=True, color_bars=True,
+            page_information=True,
+            printer_mark_type=PrinterMarkType.JAPANESE,
+            trim_mark_weight=0.5, mark_offset=12.0,
+            use_document_bleed=False,
+            bleed_top=4.0, bleed_right=5.0,
+            bleed_bottom=6.0, bleed_left=7.0)
+        p = PrintPreferences(
+            preset_name="My Preset",
+            printer_name="LaserJet 5000",
+            copies=3, collate=True, reverse_order=True,
+            artboard_range_mode=ArtboardRangeMode.RANGE,
+            artboard_range="1-3,5",
+            ignore_artboards=True, skip_blank_artboards=True,
+            media_size=MediaSize.A4,
+            media_width=595.0, media_height=842.0,
+            orientation=Orientation.LANDSCAPE,
+            auto_rotate=False, transverse=True,
+            print_layers=PrintLayers.VISIBLE,
+            placement_x=12.5, placement_y=-3.25,
+            scaling_mode=ScalingMode.CUSTOM, custom_scale=75.0,
+            tile_overlap_h=1.0, tile_overlap_v=2.0, tile_range="1-2",
+            marks_and_bleed=m)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:print-preferences', svg)
+        self.assertIn('<jas:marks-and-bleed', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences, p)
+
+
 if __name__ == "__main__":
     absltest.main()
