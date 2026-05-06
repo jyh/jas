@@ -111,6 +111,17 @@ import PDFKit
     #expect(pdf.pageCount == 1)
 }
 
+@Test func pdfNonDefaultRenderingIntentProducesValidPdf() {
+    // Smoke: ColorManagement.renderingIntent ≠ .relativeColorimetric
+    // propagates through the emitter (CGContext.setRenderingIntent)
+    // without breaking the output envelope.
+    let cm = ColorManagement(renderingIntent: .perceptual)
+    let prefs = PrintPreferences(colorManagement: cm)
+    let doc = Document(printPreferences: prefs)
+    let data = documentToPdf(doc)
+    #expect(PDFDocument(data: data) != nil)
+}
+
 @Test func pdfNonDefaultFlatnessProducesValidPdf() {
     // Smoke: Graphics.flatness ≠ 1 propagates through the emitter
     // (CGContext.setFlatness) without breaking the output envelope.
