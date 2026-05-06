@@ -351,13 +351,19 @@ let bool_str = function true -> "true" | false -> "false"
 
 let document_setup_to_xml indent (s : Document_setup.t) =
   Printf.sprintf
-    "%s<jas:document-setup bleed-top=\"%s\" bleed-right=\"%s\" bleed-bottom=\"%s\" bleed-left=\"%s\" bleed-uniform=\"%s\" show-images-outline=\"%s\" highlight-substituted-glyphs=\"%s\"/>"
+    "%s<jas:document-setup bleed-top=\"%s\" bleed-right=\"%s\" bleed-bottom=\"%s\" bleed-left=\"%s\" bleed-uniform=\"%s\" show-images-outline=\"%s\" highlight-substituted-glyphs=\"%s\" grid-size=\"%s\" grid-color=\"%s\" paper-color=\"%s\" simulate-colored-paper=\"%s\" transparency-flattener-preset=\"%s\" discard-white-overprint=\"%s\"/>"
     indent
     (fmt s.bleed_top) (fmt s.bleed_right)
     (fmt s.bleed_bottom) (fmt s.bleed_left)
     (bool_str s.bleed_uniform)
     (bool_str s.show_images_outline)
     (bool_str s.highlight_substituted_glyphs)
+    (fmt s.grid_size)
+    (escape_xml s.grid_color)
+    (escape_xml s.paper_color)
+    (bool_str s.simulate_colored_paper)
+    (Print_preferences.flattener_preset_to_string s.transparency_flattener_preset)
+    (bool_str s.discard_white_overprint)
 
 let ink_override_to_xml indent (ink : Print_preferences.ink_override) =
   Printf.sprintf
@@ -368,6 +374,13 @@ let ink_override_to_xml indent (ink : Print_preferences.ink_override) =
     (fmt ink.frequency)
     (fmt ink.angle)
     (Print_preferences.dot_shape_to_string ink.dot_shape)
+
+let advanced_to_xml indent (a : Print_preferences.advanced) =
+  Printf.sprintf
+    "%s<jas:advanced print-as-bitmap=\"%s\" overprint-flattener-preset=\"%s\"/>"
+    indent
+    (bool_str a.print_as_bitmap)
+    (Print_preferences.flattener_preset_to_string a.overprint_flattener_preset)
 
 let color_management_to_xml indent (c : Print_preferences.color_management) =
   Printf.sprintf
@@ -450,12 +463,13 @@ let print_preferences_to_xml indent (p : Print_preferences.t) =
     | Some n -> Printf.sprintf " printer-name=\"%s\"" (escape_xml n)
     | None -> ""
   in
-  Printf.sprintf "%s%s>\n%s\n%s\n%s\n%s\n%s</jas:print-preferences>"
+  Printf.sprintf "%s%s>\n%s\n%s\n%s\n%s\n%s\n%s</jas:print-preferences>"
     header printer_attr
     (marks_and_bleed_to_xml inner p.marks_and_bleed)
     (output_to_xml inner p.output)
     (graphics_to_xml inner p.graphics)
     (color_management_to_xml inner p.color_management)
+    (advanced_to_xml inner p.advanced)
     indent
 
 let document_to_svg doc =
@@ -1201,6 +1215,25 @@ let parse_document_setup_attrs attrs : Document_setup.t =
     show_images_outline = attr_bool attrs "show-images-outline" d.show_images_outline;
     highlight_substituted_glyphs =
       attr_bool attrs "highlight-substituted-glyphs" d.highlight_substituted_glyphs;
+    grid_size = attr_float attrs "grid-size" d.grid_size;
+    grid_color = attr_str attrs "grid-color" d.grid_color;
+    paper_color = attr_str attrs "paper-color" d.paper_color;
+    simulate_colored_paper = attr_bool attrs "simulate-colored-paper" d.simulate_colored_paper;
+    transparency_flattener_preset =
+      Print_preferences.flattener_preset_of_string
+        (attr_str attrs "transparency-flattener-preset"
+           (Print_preferences.flattener_preset_to_string d.transparency_flattener_preset));
+    discard_white_overprint = attr_bool attrs "discard-white-overprint" d.discard_white_overprint;
+  }
+
+let parse_advanced_attrs attrs : Print_preferences.advanced =
+  let d = Print_preferences.default_advanced in
+  {
+    print_as_bitmap = attr_bool attrs "print-as-bitmap" d.print_as_bitmap;
+    overprint_flattener_preset =
+      Print_preferences.flattener_preset_of_string
+        (attr_str attrs "overprint-flattener-preset"
+           (Print_preferences.flattener_preset_to_string d.overprint_flattener_preset));
   }
 
 let parse_color_management_attrs attrs : Print_preferences.color_management =
@@ -1296,6 +1329,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     ?(output=Print_preferences.default_output)
     ?(graphics=Print_preferences.default_graphics)
     ?(color_management=Print_preferences.default_color_management)
+    ?(advanced=Print_preferences.default_advanced)
     attrs : Print_preferences.t =
   let d = Print_preferences.default in
   let printer_name = match get_attr attrs "printer-name" with
@@ -1344,6 +1378,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     output;
     graphics;
     color_management;
+    advanced;
   }
 
 (* Walk the SVG once via Xmlm, pulling jas:document-setup +
@@ -1386,9 +1421,10 @@ let parse_jas_print_blocks svg =
            let out = ref Print_preferences.default_output in
            let gfx = ref Print_preferences.default_graphics in
            let cm = ref Print_preferences.default_color_management in
+           let adv = ref Print_preferences.default_advanced in
            let inks = ref [] in
            (* Walk children: nested marks-and-bleed, output (with its
-              own ink children), graphics, color-management. *)
+              own ink children), graphics, color-management, advanced. *)
            let rec walk_pp () =
              match Xmlm.peek i with
              | `El_end -> let _ = Xmlm.input i in ()
@@ -1428,12 +1464,15 @@ let parse_jas_print_blocks svg =
                 | "color-management" ->
                   cm := parse_color_management_attrs cattrs_a;
                   skip_element i
+                | "advanced" ->
+                  adv := parse_advanced_attrs cattrs_a;
+                  skip_element i
                 | _ -> skip_element i);
                walk_pp ()
              | `Dtd _ -> let _ = Xmlm.input i in walk_pp ()
            in
            walk_pp ();
-           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab ~output:!out ~graphics:!gfx ~color_management:!cm attrs
+           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab ~output:!out ~graphics:!gfx ~color_management:!cm ~advanced:!adv attrs
          | _ ->
            skip_element i);
         walk_namedview ()
