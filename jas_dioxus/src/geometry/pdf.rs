@@ -27,8 +27,15 @@
 
 use crate::document::artboard::Artboard;
 use crate::document::document::Document;
-use crate::document::print_preferences::{PrintLayers, ScalingMode};
+use crate::document::print_preferences::{MarksAndBleed, PrintLayers, ScalingMode};
 use crate::geometry::element::*;
+
+/// Length of a single trim mark in points. Standard print convention.
+const TRIM_MARK_LENGTH: f64 = 12.0;
+/// Radius of the registration mark circle (with cross inscribed).
+const REG_MARK_RADIUS: f64 = 4.0;
+/// Edge of one color-bar swatch in points.
+const COLOR_BAR_SWATCH: f64 = 10.0;
 
 /// Convert a document to PDF bytes. The returned Vec<u8> is a valid
 /// PDF 1.4 file: catalog → pages → page objects → content streams,
@@ -59,39 +66,80 @@ pub fn document_to_pdf(doc: &Document) -> Vec<u8> {
 
 // ── Page collection ───────────────────────────────────────────
 
+/// Page descriptor. Phase 2: ``media_box`` is extended by the active
+/// bleed plus mark gutter; the artwork's trim rect sits inside at
+/// ``(trim_x_off, trim_y_off)`` and the mark renderer reads
+/// trim_x_off / trim_y_off / trim_w / trim_h to position trim marks,
+/// registration marks, color bars, and page information OUTSIDE the
+/// trim rect.
 #[derive(Debug, Clone)]
 struct Page {
     media_box: [f64; 4], // [llx, lly, urx, ury] in points
+    /// PDF-space (y-up) offset from page origin to the artboard's
+    /// bottom-left corner. Equal to ``bleed_left + mark_gutter`` /
+    /// ``bleed_bottom + mark_gutter``.
+    trim_x_off: f64,
+    trim_y_off: f64,
+    /// Source rect in document coordinates. Drawing transforms map
+    /// (src_x, src_y) → (trim_x_off, trim_y_off + src_h) in PDF.
     src_x: f64,
     src_y: f64,
     src_w: f64,
     src_h: f64,
 }
 
+/// Resolve the active bleed values per PRINT.md §Phase 2:
+/// document-level bleed when ``use_document_bleed`` is true, else the
+/// per-print overrides on ``MarksAndBleed``.
+fn active_bleed(doc: &Document) -> (f64, f64, f64, f64) {
+    let m = &doc.print_preferences.marks_and_bleed;
+    if m.use_document_bleed {
+        let s = &doc.document_setup;
+        (s.bleed_top, s.bleed_right, s.bleed_bottom, s.bleed_left)
+    } else {
+        (m.bleed_top, m.bleed_right, m.bleed_bottom, m.bleed_left)
+    }
+}
+
+/// Width of the gutter between the bleed edge and the page edge that
+/// holds printer's marks. Zero when no mark category is enabled so
+/// pages don't grow needlessly.
+fn mark_gutter(m: &MarksAndBleed) -> f64 {
+    let any = m.all_printer_marks
+        || m.trim_marks
+        || m.registration_marks
+        || m.color_bars
+        || m.page_information;
+    if any {
+        m.mark_offset + TRIM_MARK_LENGTH + 2.0
+    } else {
+        0.0
+    }
+}
+
 fn collect_pages(doc: &Document) -> Vec<Page> {
+    let (bt, br, bb, bl) = active_bleed(doc);
+    let g = mark_gutter(&doc.print_preferences.marks_and_bleed);
+    let make_page = |src_x: f64, src_y: f64, src_w: f64, src_h: f64| Page {
+        media_box: [0.0, 0.0, src_w + bl + br + 2.0 * g, src_h + bt + bb + 2.0 * g],
+        trim_x_off: bl + g,
+        trim_y_off: bb + g,
+        src_x,
+        src_y,
+        src_w,
+        src_h,
+    };
     if doc.print_preferences.ignore_artboards || doc.artboards.is_empty() {
         let (x, y, w, h) = if doc.artboards.is_empty() {
             (0.0, 0.0, 612.0, 792.0)
         } else {
             artboard_bounds_union(&doc.artboards)
         };
-        return vec![Page {
-            media_box: [0.0, 0.0, w, h],
-            src_x: x,
-            src_y: y,
-            src_w: w,
-            src_h: h,
-        }];
+        return vec![make_page(x, y, w, h)];
     }
     doc.artboards
         .iter()
-        .map(|ab| Page {
-            media_box: [0.0, 0.0, ab.width, ab.height],
-            src_x: ab.x,
-            src_y: ab.y,
-            src_w: ab.width,
-            src_h: ab.height,
-        })
+        .map(|ab| make_page(ab.x, ab.y, ab.width, ab.height))
         .collect()
 }
 
@@ -116,8 +164,14 @@ fn build_page_content(doc: &Document, page: &Page) -> String {
     let (sx, sy) = scaling_pair(doc);
     let (px, py) = placement_pair(doc);
 
+    // Artwork pass — pushed inside one save/restore so the y-flip
+    // and source-rect translates don't leak into the marks pass.
     s.push_str("q\n");
-    // Y-flip plus a translate to put origin at (0, page_h).
+    // Position artboard inside the bleed-extended page (Phase 2).
+    if page.trim_x_off != 0.0 || page.trim_y_off != 0.0 {
+        push_cm(&mut s, 1.0, 0.0, 0.0, 1.0, page.trim_x_off, page.trim_y_off);
+    }
+    // Y-flip plus a translate to put origin at (0, src_h).
     push_cm(&mut s, 1.0, 0.0, 0.0, -1.0, 0.0, page.src_h);
     if px != 0.0 || py != 0.0 {
         push_cm(&mut s, 1.0, 0.0, 0.0, 1.0, px, py);
@@ -133,7 +187,154 @@ fn build_page_content(doc: &Document, page: &Page) -> String {
         emit_element(&mut s, layer, &doc.print_preferences.print_layers);
     }
     s.push_str("Q\n");
+
+    // Mark pass — runs in unmodified page space so positions are
+    // straightforward and the y-flip from the artwork pass doesn't
+    // confuse mark geometry. PRINT.md §Phase 2.
+    emit_marks(&mut s, doc, page);
     s
+}
+
+/// Draw the printer's marks around the page's trim rect (PRINT.md
+/// §Phase 2). Operates in page (PDF y-up) space. Order: trim marks,
+/// registration marks, color bars, page information.
+fn emit_marks(s: &mut String, doc: &Document, page: &Page) {
+    let m = &doc.print_preferences.marks_and_bleed;
+    let any = m.all_printer_marks
+        || m.trim_marks
+        || m.registration_marks
+        || m.color_bars
+        || m.page_information;
+    if !any {
+        return;
+    }
+    let trim_x = page.trim_x_off;
+    let trim_y = page.trim_y_off;
+    let trim_w = page.src_w;
+    let trim_h = page.src_h;
+    if m.all_printer_marks || m.trim_marks {
+        emit_trim_marks(s, trim_x, trim_y, trim_w, trim_h, m.mark_offset, m.trim_mark_weight);
+    }
+    if m.all_printer_marks || m.registration_marks {
+        emit_registration_marks(s, trim_x, trim_y, trim_w, trim_h, m.mark_offset);
+    }
+    if m.all_printer_marks || m.color_bars {
+        emit_color_bars(s, trim_x, trim_y, trim_w, trim_h, m.mark_offset);
+    }
+    if m.all_printer_marks || m.page_information {
+        emit_page_info(s, trim_x, trim_y, trim_w, m.mark_offset);
+    }
+}
+
+/// Eight short black lines, two at each corner of the trim rect,
+/// offset by ``mark_offset`` and of ``TRIM_MARK_LENGTH``.
+fn emit_trim_marks(s: &mut String, tx: f64, ty: f64, tw: f64, th: f64,
+                   mark_offset: f64, weight: f64) {
+    s.push_str("q\n0 0 0 RG\n");
+    push_num(s, weight.max(0.05));
+    s.push_str("w\n");
+    let l = TRIM_MARK_LENGTH;
+    let g = mark_offset;
+    // For each corner, draw one horizontal and one vertical mark.
+    // Bottom-left corner.
+    push_line(s, tx - g - l, ty,         tx - g,       ty);
+    push_line(s, tx,         ty - g - l, tx,           ty - g);
+    // Bottom-right.
+    push_line(s, tx + tw + g, ty,         tx + tw + g + l, ty);
+    push_line(s, tx + tw,     ty - g - l, tx + tw,         ty - g);
+    // Top-left.
+    push_line(s, tx - g - l, ty + th,         tx - g,    ty + th);
+    push_line(s, tx,         ty + th + g,     tx,        ty + th + g + l);
+    // Top-right.
+    push_line(s, tx + tw + g, ty + th,         tx + tw + g + l, ty + th);
+    push_line(s, tx + tw,     ty + th + g,     tx + tw,         ty + th + g + l);
+    s.push_str("Q\n");
+}
+
+/// Four registration marks (cross-in-circle) at the midpoints of the
+/// trim rect's edges, offset outward by ``mark_offset``.
+fn emit_registration_marks(s: &mut String, tx: f64, ty: f64, tw: f64, th: f64,
+                            mark_offset: f64) {
+    s.push_str("q\n0 0 0 RG\n0.5 w\n");
+    let r = REG_MARK_RADIUS;
+    let off = mark_offset + r;
+    let cx_top = tx + tw / 2.0;
+    let cy_top = ty + th + off;
+    emit_reg_mark(s, cx_top, cy_top, r);
+    let cx_bot = tx + tw / 2.0;
+    let cy_bot = ty - off;
+    emit_reg_mark(s, cx_bot, cy_bot, r);
+    let cx_lft = tx - off;
+    let cy_lft = ty + th / 2.0;
+    emit_reg_mark(s, cx_lft, cy_lft, r);
+    let cx_rgt = tx + tw + off;
+    let cy_rgt = ty + th / 2.0;
+    emit_reg_mark(s, cx_rgt, cy_rgt, r);
+    s.push_str("Q\n");
+}
+
+fn emit_reg_mark(s: &mut String, cx: f64, cy: f64, r: f64) {
+    // Circle.
+    emit_circle(s, cx, cy, r, r);
+    s.push_str("S\n");
+    // Cross extending slightly past the circle for visibility.
+    let arm = r + 2.0;
+    push_line(s, cx - arm, cy, cx + arm, cy);
+    push_line(s, cx, cy - arm, cx, cy + arm);
+}
+
+/// Eight-square color bar above the trim rect's top edge: the
+/// process colors C/M/Y/K plus their RGB complements R/G/B and a
+/// 50%-grey reference.
+fn emit_color_bars(s: &mut String, tx: f64, ty: f64, tw: f64, th: f64,
+                   mark_offset: f64) {
+    let _ = tw;
+    let swatches: [(f64, f64, f64); 8] = [
+        (0.0, 1.0, 1.0), // C
+        (1.0, 0.0, 1.0), // M
+        (1.0, 1.0, 0.0), // Y
+        (0.0, 0.0, 0.0), // K
+        (1.0, 0.0, 0.0), // R
+        (0.0, 1.0, 0.0), // G
+        (0.0, 0.0, 1.0), // B
+        (0.5, 0.5, 0.5), // grey
+    ];
+    let bar_x = tx;
+    let bar_y = ty + th + mark_offset;
+    s.push_str("q\n");
+    for (i, (r, g, b)) in swatches.iter().enumerate() {
+        push_num(s, *r);
+        push_num(s, *g);
+        push_num(s, *b);
+        s.push_str("rg\n");
+        push_num(s, bar_x + (i as f64) * COLOR_BAR_SWATCH);
+        push_num(s, bar_y);
+        push_num(s, COLOR_BAR_SWATCH);
+        push_num(s, COLOR_BAR_SWATCH);
+        s.push_str("re\nf\n");
+    }
+    s.push_str("Q\n");
+}
+
+/// Single-line page info text along the bottom mark gutter. Phase 2
+/// emits "Jas — page" placeholder text using Helvetica 6pt; later
+/// phases will substitute filename / artboard name / date.
+fn emit_page_info(s: &mut String, tx: f64, ty: f64, tw: f64, mark_offset: f64) {
+    let _ = tw;
+    let info_y = ty - mark_offset - 8.0;
+    s.push_str("q\nBT\n/F1 6 Tf\n0 0 0 rg\n");
+    push_num(s, tx);
+    push_num(s, info_y);
+    s.push_str("Td\n(Jas \\261 page) Tj\nET\nQ\n");
+}
+
+fn push_line(s: &mut String, x1: f64, y1: f64, x2: f64, y2: f64) {
+    push_num(s, x1);
+    push_num(s, y1);
+    s.push_str("m\n");
+    push_num(s, x2);
+    push_num(s, y2);
+    s.push_str("l\nS\n");
 }
 
 fn scaling_pair(doc: &Document) -> (f64, f64) {
