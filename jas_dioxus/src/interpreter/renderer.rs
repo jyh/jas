@@ -1438,6 +1438,29 @@ fn build_appstate_ctx(
 /// Exposes top_level_layers (list of dicts with path, name, common, ...)
 /// and top_level_layer_paths (list of paths). Also computed properties
 /// used by new_layer: next_layer_name, new_layer_insert_index.
+/// Build the ``marks_and_bleed`` nested object exposed under
+/// ``active_document.print_preferences``. Split out so the parent
+/// json! macro stays under serde's recursion limit.
+fn marks_and_bleed_view(
+    m: &crate::document::print_preferences::MarksAndBleed,
+) -> serde_json::Value {
+    serde_json::json!({
+        "all_printer_marks": m.all_printer_marks,
+        "trim_marks": m.trim_marks,
+        "registration_marks": m.registration_marks,
+        "color_bars": m.color_bars,
+        "page_information": m.page_information,
+        "printer_mark_type": crate::document::print_preferences::printer_mark_type_str(&m.printer_mark_type),
+        "trim_mark_weight": m.trim_mark_weight,
+        "mark_offset": m.mark_offset,
+        "use_document_bleed": m.use_document_bleed,
+        "bleed_top": m.bleed_top,
+        "bleed_right": m.bleed_right,
+        "bleed_bottom": m.bleed_bottom,
+        "bleed_left": m.bleed_left,
+    })
+}
+
 fn build_active_document_view(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
@@ -1492,6 +1515,9 @@ fn build_active_document_view(
                 "tile_overlap_h": 0.0,
                 "tile_overlap_v": 0.0,
                 "tile_range": "",
+                "marks_and_bleed": marks_and_bleed_view(
+                    &crate::document::print_preferences::MarksAndBleed::default(),
+                ),
             },
             "artboards_count": 0,
             "next_artboard_name": "Artboard 1",
@@ -1665,6 +1691,7 @@ fn build_active_document_view(
             "tile_overlap_h": doc.print_preferences.tile_overlap_h,
             "tile_overlap_v": doc.print_preferences.tile_overlap_v,
             "tile_range": doc.print_preferences.tile_range.clone(),
+            "marks_and_bleed": marks_and_bleed_view(&doc.print_preferences.marks_and_bleed),
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -2135,6 +2162,46 @@ fn run_yaml_effect(
             ("tile_overlap_h", super::expr_types::Value::Number(n)) => p.tile_overlap_h = *n,
             ("tile_overlap_v", super::expr_types::Value::Number(n)) => p.tile_overlap_v = *n,
             ("tile_range", super::expr_types::Value::Str(s)) => p.tile_range = s.clone(),
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.set_marks_and_bleed_field: { field, value }  — PRINT.md §2
+    if let Some(spec) = eff.get("doc.set_marks_and_bleed_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::printer_mark_type_from;
+        let m = &mut new_doc.print_preferences.marks_and_bleed;
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("all_printer_marks", super::expr_types::Value::Bool(b)) => m.all_printer_marks = *b,
+            ("trim_marks", super::expr_types::Value::Bool(b)) => m.trim_marks = *b,
+            ("registration_marks", super::expr_types::Value::Bool(b)) => m.registration_marks = *b,
+            ("color_bars", super::expr_types::Value::Bool(b)) => m.color_bars = *b,
+            ("page_information", super::expr_types::Value::Bool(b)) => m.page_information = *b,
+            ("printer_mark_type", super::expr_types::Value::Str(s)) => {
+                m.printer_mark_type = printer_mark_type_from(s);
+            }
+            ("trim_mark_weight", super::expr_types::Value::Number(n)) => m.trim_mark_weight = *n,
+            ("mark_offset", super::expr_types::Value::Number(n)) => m.mark_offset = *n,
+            ("use_document_bleed", super::expr_types::Value::Bool(b)) => m.use_document_bleed = *b,
+            ("bleed_top", super::expr_types::Value::Number(n)) => m.bleed_top = *n,
+            ("bleed_right", super::expr_types::Value::Number(n)) => m.bleed_right = *n,
+            ("bleed_bottom", super::expr_types::Value::Number(n)) => m.bleed_bottom = *n,
+            ("bleed_left", super::expr_types::Value::Number(n)) => m.bleed_left = *n,
             _ => applied = false,
         }
         if applied {
