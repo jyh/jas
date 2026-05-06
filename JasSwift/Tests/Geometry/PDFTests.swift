@@ -61,3 +61,52 @@ import PDFKit
     #expect(mediaBox.width == 612)
     #expect(mediaBox.height == 792)
 }
+
+@Test func pdfSeparationsEmitsOnePagePerEnabledInk() {
+    let abs = [Artboard(id: "a", name: "A1", x: 0, y: 0, width: 100, height: 100)]
+    let prefs = PrintPreferences(output: Output(mode: .separations))
+    let doc = Document(artboards: abs, printPreferences: prefs)
+    let data = documentToPdf(doc)
+    let pdf = PDFDocument(data: data)!
+    // Default 4 process inks all enabled → 4 pages.
+    #expect(pdf.pageCount == 4)
+}
+
+@Test func pdfSeparationsSkipsUnprintedInks() {
+    let abs = [Artboard(id: "a", name: "A1", x: 0, y: 0, width: 100, height: 100)]
+    var inks = InkOverride.processCmykDefaults
+    inks[0] = InkOverride(name: inks[0].name, print: false, frequency: inks[0].frequency,
+                          angle: inks[0].angle, dotShape: inks[0].dotShape)
+    inks[1] = InkOverride(name: inks[1].name, print: false, frequency: inks[1].frequency,
+                          angle: inks[1].angle, dotShape: inks[1].dotShape)
+    let prefs = PrintPreferences(output: Output(mode: .separations, inks: inks))
+    let doc = Document(artboards: abs, printPreferences: prefs)
+    let data = documentToPdf(doc)
+    let pdf = PDFDocument(data: data)!
+    // Only Yellow + Black left enabled → 2 pages.
+    #expect(pdf.pageCount == 2)
+}
+
+@Test func pdfSeparationsWithZeroEnabledInksFallsBackToComposite() {
+    let abs = [Artboard(id: "a", name: "A1", x: 0, y: 0, width: 100, height: 100)]
+    let inks = InkOverride.processCmykDefaults.map { ink in
+        InkOverride(name: ink.name, print: false, frequency: ink.frequency,
+                    angle: ink.angle, dotShape: ink.dotShape)
+    }
+    let prefs = PrintPreferences(output: Output(mode: .separations, inks: inks))
+    let doc = Document(artboards: abs, printPreferences: prefs)
+    let data = documentToPdf(doc)
+    let pdf = PDFDocument(data: data)!
+    // Empty ink list shouldn't yield an empty PDF — fall through to
+    // the single composite page.
+    #expect(pdf.pageCount == 1)
+}
+
+@Test func pdfCompositeModeUnchangedByPhase3Changes() {
+    // Composite is the default; ensure adding the Output sub-record
+    // didn't perturb the page count for a default-options document.
+    let doc = Document()
+    let data = documentToPdf(doc)
+    let pdf = PDFDocument(data: data)!
+    #expect(pdf.pageCount == 1)
+}
