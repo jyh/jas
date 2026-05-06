@@ -10,8 +10,9 @@ use crate::document::document::{Document, ElementPath, ElementSelection, Selecti
 use crate::document::document_setup::DocumentSetup;
 use crate::document::print_preferences::{
     artboard_range_mode_from, artboard_range_mode_str, media_size_from, media_size_str,
-    orientation_from, orientation_str, print_layers_from, print_layers_str, scaling_mode_from,
-    scaling_mode_str, PrintPreferences,
+    orientation_from, orientation_str, print_layers_from, print_layers_str,
+    printer_mark_type_from, printer_mark_type_str, scaling_mode_from,
+    scaling_mode_str, MarksAndBleed, PrintPreferences,
 };
 use crate::geometry::element::*;
 
@@ -611,6 +612,24 @@ fn document_setup_json(s: &DocumentSetup) -> String {
     o.build()
 }
 
+fn marks_and_bleed_json(m: &MarksAndBleed) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("all_printer_marks", m.all_printer_marks);
+    o.num("bleed_bottom", m.bleed_bottom);
+    o.num("bleed_left", m.bleed_left);
+    o.num("bleed_right", m.bleed_right);
+    o.num("bleed_top", m.bleed_top);
+    o.bool_val("color_bars", m.color_bars);
+    o.num("mark_offset", m.mark_offset);
+    o.bool_val("page_information", m.page_information);
+    o.str_val("printer_mark_type", printer_mark_type_str(&m.printer_mark_type));
+    o.bool_val("registration_marks", m.registration_marks);
+    o.num("trim_mark_weight", m.trim_mark_weight);
+    o.bool_val("trim_marks", m.trim_marks);
+    o.bool_val("use_document_bleed", m.use_document_bleed);
+    o.build()
+}
+
 fn print_preferences_json(p: &PrintPreferences) -> String {
     let mut o = JsonObj::new();
     o.str_val("artboard_range", &p.artboard_range);
@@ -620,6 +639,7 @@ fn print_preferences_json(p: &PrintPreferences) -> String {
     o.int("copies", p.copies as usize);
     o.num("custom_scale", p.custom_scale);
     o.bool_val("ignore_artboards", p.ignore_artboards);
+    o.raw("marks_and_bleed", marks_and_bleed_json(&p.marks_and_bleed));
     o.num("media_height", p.media_height);
     o.str_val("media_size", media_size_str(&p.media_size));
     o.num("media_width", p.media_width);
@@ -1110,6 +1130,29 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
     }
 }
 
+fn parse_marks_and_bleed(v: &serde_json::Value) -> MarksAndBleed {
+    if v.is_null() || !v.is_object() {
+        return MarksAndBleed::default();
+    }
+    let d = MarksAndBleed::default();
+    MarksAndBleed {
+        all_printer_marks: v["all_printer_marks"].as_bool().unwrap_or(d.all_printer_marks),
+        trim_marks: v["trim_marks"].as_bool().unwrap_or(d.trim_marks),
+        registration_marks: v["registration_marks"].as_bool().unwrap_or(d.registration_marks),
+        color_bars: v["color_bars"].as_bool().unwrap_or(d.color_bars),
+        page_information: v["page_information"].as_bool().unwrap_or(d.page_information),
+        printer_mark_type: v["printer_mark_type"].as_str()
+            .map(printer_mark_type_from).unwrap_or(d.printer_mark_type),
+        trim_mark_weight: v["trim_mark_weight"].as_f64().unwrap_or(d.trim_mark_weight),
+        mark_offset: v["mark_offset"].as_f64().unwrap_or(d.mark_offset),
+        use_document_bleed: v["use_document_bleed"].as_bool().unwrap_or(d.use_document_bleed),
+        bleed_top: v["bleed_top"].as_f64().unwrap_or(d.bleed_top),
+        bleed_right: v["bleed_right"].as_f64().unwrap_or(d.bleed_right),
+        bleed_bottom: v["bleed_bottom"].as_f64().unwrap_or(d.bleed_bottom),
+        bleed_left: v["bleed_left"].as_f64().unwrap_or(d.bleed_left),
+    }
+}
+
 fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
     if v.is_null() || !v.is_object() {
         return PrintPreferences::default();
@@ -1140,6 +1183,7 @@ fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
         tile_overlap_h: v["tile_overlap_h"].as_f64().unwrap_or(d.tile_overlap_h),
         tile_overlap_v: v["tile_overlap_v"].as_f64().unwrap_or(d.tile_overlap_v),
         tile_range: v["tile_range"].as_str().map(String::from).unwrap_or(d.tile_range),
+        marks_and_bleed: parse_marks_and_bleed(&v["marks_and_bleed"]),
     }
 }
 
@@ -1442,7 +1486,8 @@ mod tests {
     #[test]
     fn print_preferences_roundtrip() {
         use crate::document::print_preferences::{
-            ArtboardRangeMode, MediaSize, Orientation, PrintLayers, PrintPreferences, ScalingMode,
+            ArtboardRangeMode, MarksAndBleed, MediaSize, Orientation, PrintLayers,
+            PrinterMarkType, PrintPreferences, ScalingMode,
         };
         let mut d = Document::default();
         d.print_preferences = PrintPreferences {
@@ -1469,6 +1514,21 @@ mod tests {
             tile_overlap_h: 6.0,
             tile_overlap_v: 6.0,
             tile_range: "1-2".to_string(),
+            marks_and_bleed: MarksAndBleed {
+                all_printer_marks: true,
+                trim_marks: true,
+                registration_marks: true,
+                color_bars: true,
+                page_information: true,
+                printer_mark_type: PrinterMarkType::Japanese,
+                trim_mark_weight: 0.5,
+                mark_offset: 9.0,
+                use_document_bleed: false,
+                bleed_top: 12.0,
+                bleed_right: 18.0,
+                bleed_bottom: 12.0,
+                bleed_left: 18.0,
+            },
         };
         let json = document_to_test_json(&d);
         let d2 = test_json_to_document(&json);
