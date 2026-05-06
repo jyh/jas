@@ -171,6 +171,17 @@ def _document_setup_view(s) -> dict:
     }
 
 
+def _graphics_view(g) -> dict:
+    return {
+        "flatness": g.flatness,
+        "font_download": g.font_download.value,
+        "postscript_level": g.postscript_level.value,
+        "data_format": g.data_format.value,
+        "compatible_gradient_printing": g.compatible_gradient_printing,
+        "raster_effects_resolution": g.raster_effects_resolution,
+    }
+
+
 def _ink_override_view(ink) -> dict:
     return {
         "name": ink.name,
@@ -238,6 +249,7 @@ def _print_preferences_view(p) -> dict:
         "tile_range": p.tile_range,
         "marks_and_bleed": _marks_and_bleed_view(p.marks_and_bleed),
         "output": _output_view(p.output),
+        "graphics": _graphics_view(p.graphics),
     }
 
 
