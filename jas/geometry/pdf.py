@@ -445,6 +445,16 @@ def _emit_marks(canvas: RLCanvas, doc: Document, page: _Page):
 
 def _draw_page(canvas: RLCanvas, doc: Document, page: _Page):
     canvas.saveState()
+    # Phase 4: path-flattening tolerance. ReportLab has no public
+    # flatness API, so emit the PDF ``i`` operator directly. Lives
+    # inside the per-page saveState scope so it doesn't leak between
+    # pages. Default 1.0 = PDF default; skip emitting in that case
+    # so existing content streams stay byte-equivalent. Clamp to
+    # [0, 100] per PDF 1.7 §8.4.3.
+    flatness = doc.print_preferences.graphics.flatness
+    if abs(flatness - 1.0) > 1e-9:
+        clamped = max(0.0, min(100.0, flatness))
+        canvas._code.append(f"{clamped:g} i")
     sx, sy = _scaling_pair(doc)
     px = doc.print_preferences.placement_x
     py = doc.print_preferences.placement_y
