@@ -45,6 +45,73 @@ public enum ScalingMode: String, Equatable, Hashable, CaseIterable {
     case custom
 }
 
+/// Two cultural variants of printer's marks. ``roman`` ships the
+/// standard Western trim/registration marks; ``japanese`` swaps in
+/// the kasen-style marks used by Japanese commercial print shops.
+/// Phase 2 stores the choice but the renderer only differentiates in
+/// a follow-up — the on-disk shape is stable now.
+public enum PrinterMarkType: String, Equatable, Hashable, CaseIterable {
+    case roman
+    case japanese
+}
+
+/// Marks-and-bleed sub-record on PrintPreferences (PRINT.md §Phase 2).
+/// The Marks tab exposes these 1:1 as widgets; the PDF renderer
+/// extends each page by the active bleed and overlays mark geometry
+/// around the trim rect.
+///
+/// ``useDocumentBleed`` controls whether bleeds come from the
+/// document-level ``DocumentSetup`` or from the per-print
+/// ``bleed*`` overrides on this struct. Defaulting to true keeps
+/// document and print in lockstep until the user opts out.
+public struct MarksAndBleed: Equatable, Hashable {
+    public let allPrinterMarks: Bool
+    public let trimMarks: Bool
+    public let registrationMarks: Bool
+    public let colorBars: Bool
+    public let pageInformation: Bool
+    public let printerMarkType: PrinterMarkType
+    public let trimMarkWeight: Double
+    public let markOffset: Double
+    public let useDocumentBleed: Bool
+    public let bleedTop: Double
+    public let bleedRight: Double
+    public let bleedBottom: Double
+    public let bleedLeft: Double
+
+    public init(
+        allPrinterMarks: Bool = false,
+        trimMarks: Bool = false,
+        registrationMarks: Bool = false,
+        colorBars: Bool = false,
+        pageInformation: Bool = false,
+        printerMarkType: PrinterMarkType = .roman,
+        trimMarkWeight: Double = 0.25,
+        markOffset: Double = 6.0,
+        useDocumentBleed: Bool = true,
+        bleedTop: Double = 0,
+        bleedRight: Double = 0,
+        bleedBottom: Double = 0,
+        bleedLeft: Double = 0
+    ) {
+        self.allPrinterMarks = allPrinterMarks
+        self.trimMarks = trimMarks
+        self.registrationMarks = registrationMarks
+        self.colorBars = colorBars
+        self.pageInformation = pageInformation
+        self.printerMarkType = printerMarkType
+        self.trimMarkWeight = trimMarkWeight
+        self.markOffset = markOffset
+        self.useDocumentBleed = useDocumentBleed
+        self.bleedTop = bleedTop
+        self.bleedRight = bleedRight
+        self.bleedBottom = bleedBottom
+        self.bleedLeft = bleedLeft
+    }
+
+    public static let `default` = MarksAndBleed()
+}
+
 public struct PrintPreferences: Equatable, Hashable {
     public let presetName: String
     public let printerName: String?
@@ -71,6 +138,8 @@ public struct PrintPreferences: Equatable, Hashable {
     public let tileOverlapH: Double
     public let tileOverlapV: Double
     public let tileRange: String
+    /// Marks-and-bleed sub-record (PRINT.md §Phase 2).
+    public let marksAndBleed: MarksAndBleed
 
     public init(
         presetName: String = "[Default]",
@@ -95,7 +164,8 @@ public struct PrintPreferences: Equatable, Hashable {
         customScale: Double = 100.0,
         tileOverlapH: Double = 0,
         tileOverlapV: Double = 0,
-        tileRange: String = ""
+        tileRange: String = "",
+        marksAndBleed: MarksAndBleed = .default
     ) {
         self.presetName = presetName
         self.printerName = printerName
@@ -120,6 +190,7 @@ public struct PrintPreferences: Equatable, Hashable {
         self.tileOverlapH = tileOverlapH
         self.tileOverlapV = tileOverlapV
         self.tileRange = tileRange
+        self.marksAndBleed = marksAndBleed
     }
 
     public static let `default` = PrintPreferences()
