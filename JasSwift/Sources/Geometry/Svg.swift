@@ -460,6 +460,33 @@ private func documentSetupToSvg(_ s: DocumentSetup, indent: String) -> String {
         + "/>"
 }
 
+private func inkOverrideToSvg(_ ink: InkOverride, indent: String) -> String {
+    return "\(indent)<jas:ink"
+        + " name=\"\(escapeXml(ink.name))\""
+        + " print=\"\(boolStr(ink.print))\""
+        + " frequency=\"\(fmt(ink.frequency))\""
+        + " angle=\"\(fmt(ink.angle))\""
+        + " dot-shape=\"\(ink.dotShape.rawValue)\""
+        + "/>"
+}
+
+private func outputToSvg(_ o: Output, indent: String) -> String {
+    let inner = indent + "  "
+    var s = "\(indent)<jas:output"
+    s += " mode=\"\(o.mode.rawValue)\""
+    s += " emulsion=\"\(o.emulsion.rawValue)\""
+    s += " image-polarity=\"\(o.imagePolarity.rawValue)\""
+    s += " printer-resolution=\"\(escapeXml(o.printerResolution))\""
+    s += " convert-spot-to-process=\"\(boolStr(o.convertSpotToProcess))\""
+    s += " overprint-black=\"\(boolStr(o.overprintBlack))\""
+    s += ">"
+    for ink in o.inks {
+        s += "\n" + inkOverrideToSvg(ink, indent: inner)
+    }
+    s += "\n\(indent)</jas:output>"
+    return s
+}
+
 private func marksAndBleedToSvg(_ m: MarksAndBleed, indent: String) -> String {
     return "\(indent)<jas:marks-and-bleed"
         + " all-printer-marks=\"\(boolStr(m.allPrinterMarks))\""
@@ -507,6 +534,8 @@ private func printPreferencesToSvg(_ p: PrintPreferences, indent: String) -> Str
     }
     s += ">\n"
     s += marksAndBleedToSvg(p.marksAndBleed, indent: indent + "  ")
+    s += "\n"
+    s += outputToSvg(p.output, indent: indent + "  ")
     s += "\n\(indent)</jas:print-preferences>"
     return s
 }
@@ -1369,6 +1398,38 @@ private func parseDocumentSetupNode(_ node: XMLElement) -> DocumentSetup {
     )
 }
 
+private func parseInkOverrideNode(_ node: XMLElement) -> InkOverride {
+    return InkOverride(
+        name: attrAny(node, "name") ?? "",
+        print: parseBoolAttr(node, "print", true),
+        frequency: parseDoubleAttr(node, "frequency", 75.0),
+        angle: parseDoubleAttr(node, "angle", 45.0),
+        dotShape: DotShape(rawValue: attrAny(node, "dot-shape") ?? "") ?? .round
+    )
+}
+
+private func parseOutputNode(_ node: XMLElement) -> Output {
+    let d = Output.default
+    var inks: [InkOverride] = []
+    for k in node.children ?? [] {
+        if let e = k as? XMLElement, e.localName == "ink" {
+            inks.append(parseInkOverrideNode(e))
+        }
+    }
+    if inks.isEmpty {
+        inks = d.inks
+    }
+    return Output(
+        mode: OutputMode(rawValue: attrAny(node, "mode") ?? "") ?? d.mode,
+        emulsion: Emulsion(rawValue: attrAny(node, "emulsion") ?? "") ?? d.emulsion,
+        imagePolarity: ImagePolarity(rawValue: attrAny(node, "image-polarity") ?? "") ?? d.imagePolarity,
+        printerResolution: attrAny(node, "printer-resolution") ?? d.printerResolution,
+        convertSpotToProcess: parseBoolAttr(node, "convert-spot-to-process", d.convertSpotToProcess),
+        overprintBlack: parseBoolAttr(node, "overprint-black", d.overprintBlack),
+        inks: inks
+    )
+}
+
 private func parseMarksAndBleedNode(_ node: XMLElement) -> MarksAndBleed {
     let d = MarksAndBleed.default
     return MarksAndBleed(
@@ -1391,11 +1452,14 @@ private func parseMarksAndBleedNode(_ node: XMLElement) -> MarksAndBleed {
 private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
     let d = PrintPreferences.default
     var mab = MarksAndBleed.default
+    var output = Output.default
     if let kids = node.children {
         for k in kids {
-            if let e = k as? XMLElement, e.localName == "marks-and-bleed" {
-                mab = parseMarksAndBleedNode(e)
-                break
+            guard let e = k as? XMLElement else { continue }
+            switch e.localName {
+            case "marks-and-bleed": mab = parseMarksAndBleedNode(e)
+            case "output": output = parseOutputNode(e)
+            default: break
             }
         }
     }
@@ -1423,7 +1487,8 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
         tileOverlapH: parseDoubleAttr(node, "tile-overlap-h", d.tileOverlapH),
         tileOverlapV: parseDoubleAttr(node, "tile-overlap-v", d.tileOverlapV),
         tileRange: attrAny(node, "tile-range") ?? d.tileRange,
-        marksAndBleed: mab
+        marksAndBleed: mab,
+        output: output
     )
 }
 
