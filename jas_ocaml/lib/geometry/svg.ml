@@ -1281,6 +1281,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     tile_range = attr_str attrs "tile-range" d.tile_range;
     marks_and_bleed;
     output;
+    graphics = Print_preferences.default_graphics;
   }
 
 (* Walk the SVG once via Xmlm, pulling jas:document-setup +

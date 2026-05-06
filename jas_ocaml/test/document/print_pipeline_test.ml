@@ -166,7 +166,8 @@ let test_print_preferences_roundtrip () =
             tile_overlap_v = 6.0;
             tile_range = "1-2";
             marks_and_bleed = Print_preferences.default_marks_and_bleed;
-            output = Print_preferences.default_output } in
+            output = Print_preferences.default_output;
+            graphics = Print_preferences.default_graphics } in
   let doc = make_document ~print_preferences:p [||] in
   let json = document_to_test_json doc in
   let doc2 = test_json_to_document json in
@@ -197,6 +198,49 @@ let test_printer_mark_type_strings () =
   assert (printer_mark_type_of_string "roman" = Roman);
   assert (printer_mark_type_of_string "japanese" = Japanese);
   assert (printer_mark_type_of_string "garbage" = Roman)
+
+(* Graphics sub-record (PRINT.md §Phase 4) *)
+
+let test_graphics_defaults () =
+  let g = Print_preferences.default_graphics in
+  assert (g.flatness = 1.0);
+  assert (g.font_download = Print_preferences.Font_subset);
+  assert (g.postscript_level = Print_preferences.Level_3);
+  assert (g.data_format = Print_preferences.Binary);
+  assert (g.compatible_gradient_printing = false);
+  assert (g.raster_effects_resolution = 300.0)
+
+let test_graphics_enum_strings () =
+  let open Print_preferences in
+  assert (font_download_to_string Font_none = "none");
+  assert (font_download_to_string Font_subset = "subset");
+  assert (font_download_to_string Font_complete = "complete");
+  assert (postscript_level_to_string Level_2 = "level_2");
+  assert (postscript_level_to_string Level_3 = "level_3");
+  assert (data_format_to_string Ascii = "ascii");
+  assert (data_format_to_string Binary = "binary")
+
+let test_graphics_roundtrip () =
+  let g = { Print_preferences.flatness = 0.4;
+            font_download = Print_preferences.Font_complete;
+            postscript_level = Print_preferences.Level_2;
+            data_format = Print_preferences.Ascii;
+            compatible_gradient_printing = true;
+            raster_effects_resolution = 600.0 } in
+  let p = { Print_preferences.default with graphics = g } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"graphics\"");
+  assert (contains json "\"flatness\":0.4");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.graphics = g)
 
 (* Output sub-record (PRINT.md §Phase 3) *)
 
@@ -311,6 +355,11 @@ let () =
       Alcotest.test_case "defaults" `Quick test_output_defaults;
       Alcotest.test_case "enum strings" `Quick test_output_enum_strings;
       Alcotest.test_case "roundtrip" `Quick test_output_roundtrip;
+    ];
+    "graphics", [
+      Alcotest.test_case "defaults" `Quick test_graphics_defaults;
+      Alcotest.test_case "enum strings" `Quick test_graphics_enum_strings;
+      Alcotest.test_case "roundtrip" `Quick test_graphics_roundtrip;
     ];
     "test_json", [
       Alcotest.test_case "document_setup omitted when default" `Quick test_document_setup_only_emitted_when_non_default;

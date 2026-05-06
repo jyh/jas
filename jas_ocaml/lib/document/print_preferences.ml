@@ -180,6 +180,64 @@ let default_output = {
   inks = process_cmyk_default_inks;
 }
 
+(** Font-download mode for the Graphics tab (PRINT.md §Phase 4).
+    PostScript-era concept; stored for on-disk shape stability but
+    not applied by the PDF emitter (we always embed-by-subset). *)
+type font_download = Font_none | Font_subset | Font_complete
+
+let font_download_to_string = function
+  | Font_none -> "none"
+  | Font_subset -> "subset"
+  | Font_complete -> "complete"
+let font_download_of_string = function
+  | "none" -> Font_none
+  | "complete" -> Font_complete
+  | _ -> Font_subset
+
+(** PostScript output level (PRINT.md §Phase 4). Stored but not
+    applied — we emit PDF, not PostScript. *)
+type postscript_level = Level_2 | Level_3
+
+let postscript_level_to_string = function
+  | Level_2 -> "level_2"
+  | Level_3 -> "level_3"
+let postscript_level_of_string = function
+  | "level_2" -> Level_2
+  | _ -> Level_3
+
+(** Stream encoding for PostScript output (PRINT.md §Phase 4).
+    Stored but not applied — we emit PDF. *)
+type data_format = Ascii | Binary
+
+let data_format_to_string = function
+  | Ascii -> "ascii"
+  | Binary -> "binary"
+let data_format_of_string = function
+  | "ascii" -> Ascii
+  | _ -> Binary
+
+(** Graphics sub-record on print_preferences (PRINT.md §Phase 4).
+    [flatness] is consulted by the PDF emitter as a path-flattening
+    tolerance; the others are stored for cross-app round-trip but
+    not applied (PostScript-specific). *)
+type graphics = {
+  flatness : float;
+  font_download : font_download;
+  postscript_level : postscript_level;
+  data_format : data_format;
+  compatible_gradient_printing : bool;
+  raster_effects_resolution : float;
+}
+
+let default_graphics = {
+  flatness = 1.0;
+  font_download = Font_subset;
+  postscript_level = Level_3;
+  data_format = Binary;
+  compatible_gradient_printing = false;
+  raster_effects_resolution = 300.0;
+}
+
 (** Marks-and-bleed sub-record on print_preferences (PRINT.md §Phase 2).
     The Marks tab exposes these 1:1 as widgets; the PDF renderer
     extends each page by the active bleed and overlays mark geometry
@@ -251,6 +309,8 @@ type t = {
   marks_and_bleed : marks_and_bleed;
   (* Output sub-record (PRINT.md §Phase 3). *)
   output : output;
+  (* Graphics sub-record (PRINT.md §Phase 4). *)
+  graphics : graphics;
 }
 
 let default = {
@@ -279,6 +339,7 @@ let default = {
   tile_range = "";
   marks_and_bleed = default_marks_and_bleed;
   output = default_output;
+  graphics = default_graphics;
 }
 
 (** Workspace-level named saved configuration. Phase 1 ships only
