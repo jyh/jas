@@ -506,24 +506,110 @@ let document_setup_json (s : Document_setup.t) =
   json_num o "bleed_right" s.bleed_right;
   json_num o "bleed_top" s.bleed_top;
   json_bool o "bleed_uniform" s.bleed_uniform;
+  json_bool o "discard_white_overprint" s.discard_white_overprint;
+  json_str o "grid_color" s.grid_color;
+  json_num o "grid_size" s.grid_size;
   json_bool o "highlight_substituted_glyphs" s.highlight_substituted_glyphs;
+  json_str o "paper_color" s.paper_color;
   json_bool o "show_images_outline" s.show_images_outline;
+  json_bool o "simulate_colored_paper" s.simulate_colored_paper;
+  json_str o "transparency_flattener_preset"
+    (Print_preferences.flattener_preset_to_string s.transparency_flattener_preset);
+  json_build o
+
+let advanced_json (a : Print_preferences.advanced) =
+  let o = json_obj () in
+  json_str o "overprint_flattener_preset"
+    (Print_preferences.flattener_preset_to_string a.overprint_flattener_preset);
+  json_bool o "print_as_bitmap" a.print_as_bitmap;
+  json_build o
+
+let color_management_json (c : Print_preferences.color_management) =
+  let o = json_obj () in
+  json_str o "color_handling"
+    (Print_preferences.color_handling_to_string c.color_handling);
+  json_str o "document_profile" c.document_profile;
+  json_bool o "preserve_rgb_numbers" c.preserve_rgb_numbers;
+  json_str o "printer_profile" c.printer_profile;
+  json_str o "rendering_intent"
+    (Print_preferences.rendering_intent_to_string c.rendering_intent);
+  json_build o
+
+let graphics_json (g : Print_preferences.graphics) =
+  let o = json_obj () in
+  json_bool o "compatible_gradient_printing" g.compatible_gradient_printing;
+  json_str o "data_format"
+    (Print_preferences.data_format_to_string g.data_format);
+  json_num o "flatness" g.flatness;
+  json_str o "font_download"
+    (Print_preferences.font_download_to_string g.font_download);
+  json_str o "postscript_level"
+    (Print_preferences.postscript_level_to_string g.postscript_level);
+  json_num o "raster_effects_resolution" g.raster_effects_resolution;
+  json_build o
+
+let ink_override_json (ink : Print_preferences.ink_override) =
+  let o = json_obj () in
+  json_num o "angle" ink.angle;
+  json_str o "dot_shape" (Print_preferences.dot_shape_to_string ink.dot_shape);
+  json_num o "frequency" ink.frequency;
+  json_str o "name" ink.name;
+  json_bool o "print" ink.print;
+  json_build o
+
+let inks_json (inks : Print_preferences.ink_override list) =
+  let items = List.map ink_override_json inks in
+  json_array items
+
+let output_json (out : Print_preferences.output) =
+  let o = json_obj () in
+  json_bool o "convert_spot_to_process" out.convert_spot_to_process;
+  json_str o "emulsion" (Print_preferences.emulsion_to_string out.emulsion);
+  json_str o "image_polarity"
+    (Print_preferences.image_polarity_to_string out.image_polarity);
+  json_raw o "inks" (inks_json out.inks);
+  json_str o "mode" (Print_preferences.output_mode_to_string out.mode);
+  json_bool o "overprint_black" out.overprint_black;
+  json_str o "printer_resolution" out.printer_resolution;
+  json_build o
+
+let marks_and_bleed_json (m : Print_preferences.marks_and_bleed) =
+  let o = json_obj () in
+  json_bool o "all_printer_marks" m.all_printer_marks;
+  json_num o "bleed_bottom" m.bleed_bottom;
+  json_num o "bleed_left" m.bleed_left;
+  json_num o "bleed_right" m.bleed_right;
+  json_num o "bleed_top" m.bleed_top;
+  json_bool o "color_bars" m.color_bars;
+  json_num o "mark_offset" m.mark_offset;
+  json_bool o "page_information" m.page_information;
+  json_str o "printer_mark_type"
+    (Print_preferences.printer_mark_type_to_string m.printer_mark_type);
+  json_bool o "registration_marks" m.registration_marks;
+  json_num o "trim_mark_weight" m.trim_mark_weight;
+  json_bool o "trim_marks" m.trim_marks;
+  json_bool o "use_document_bleed" m.use_document_bleed;
   json_build o
 
 let print_preferences_json (p : Print_preferences.t) =
   let o = json_obj () in
+  json_raw o "advanced" (advanced_json p.advanced);
   json_str o "artboard_range" p.artboard_range;
   json_str o "artboard_range_mode"
     (Print_preferences.artboard_range_mode_to_string p.artboard_range_mode);
   json_bool o "auto_rotate" p.auto_rotate;
   json_bool o "collate" p.collate;
+  json_raw o "color_management" (color_management_json p.color_management);
   json_int o "copies" p.copies;
   json_num o "custom_scale" p.custom_scale;
+  json_raw o "graphics" (graphics_json p.graphics);
   json_bool o "ignore_artboards" p.ignore_artboards;
+  json_raw o "marks_and_bleed" (marks_and_bleed_json p.marks_and_bleed);
   json_num o "media_height" p.media_height;
   json_str o "media_size" (Print_preferences.media_size_to_string p.media_size);
   json_num o "media_width" p.media_width;
   json_str o "orientation" (Print_preferences.orientation_to_string p.orientation);
+  json_raw o "output" (output_json p.output);
   json_num o "placement_x" p.placement_x;
   json_num o "placement_y" p.placement_y;
   json_str o "preset_name" p.preset_name;
@@ -934,6 +1020,8 @@ let parse_artboard_options j : Artboard.options =
 let parse_document_setup j : Document_setup.t =
   let open Yojson.Safe.Util in
   let d = Document_setup.default in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
   let pick_num name d_val =
     try j |> member name |> to_num with _ -> d_val in
   let pick_bool name d_val =
@@ -948,6 +1036,169 @@ let parse_document_setup j : Document_setup.t =
       show_images_outline = pick_bool "show_images_outline" d.show_images_outline;
       highlight_substituted_glyphs =
         pick_bool "highlight_substituted_glyphs" d.highlight_substituted_glyphs;
+      grid_size = pick_num "grid_size" d.grid_size;
+      grid_color = pick_str "grid_color" d.grid_color;
+      paper_color = pick_str "paper_color" d.paper_color;
+      simulate_colored_paper = pick_bool "simulate_colored_paper" d.simulate_colored_paper;
+      transparency_flattener_preset =
+        Print_preferences.flattener_preset_of_string
+          (pick_str "transparency_flattener_preset"
+             (Print_preferences.flattener_preset_to_string d.transparency_flattener_preset));
+      discard_white_overprint = pick_bool "discard_white_overprint" d.discard_white_overprint;
+    }
+  with _ -> d
+
+let parse_advanced j : Print_preferences.advanced =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_advanced in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      print_as_bitmap = pick_bool "print_as_bitmap" d.print_as_bitmap;
+      overprint_flattener_preset =
+        Print_preferences.flattener_preset_of_string
+          (pick_str "overprint_flattener_preset"
+             (Print_preferences.flattener_preset_to_string d.overprint_flattener_preset));
+    }
+  with _ -> d
+
+let parse_color_management j : Print_preferences.color_management =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_color_management in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      document_profile = pick_str "document_profile" d.document_profile;
+      color_handling =
+        Print_preferences.color_handling_of_string
+          (pick_str "color_handling"
+             (Print_preferences.color_handling_to_string d.color_handling));
+      printer_profile = pick_str "printer_profile" d.printer_profile;
+      rendering_intent =
+        Print_preferences.rendering_intent_of_string
+          (pick_str "rendering_intent"
+             (Print_preferences.rendering_intent_to_string d.rendering_intent));
+      preserve_rgb_numbers = pick_bool "preserve_rgb_numbers" d.preserve_rgb_numbers;
+    }
+  with _ -> d
+
+let parse_graphics j : Print_preferences.graphics =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_graphics in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      flatness = pick_num "flatness" d.flatness;
+      font_download =
+        Print_preferences.font_download_of_string
+          (pick_str "font_download"
+             (Print_preferences.font_download_to_string d.font_download));
+      postscript_level =
+        Print_preferences.postscript_level_of_string
+          (pick_str "postscript_level"
+             (Print_preferences.postscript_level_to_string d.postscript_level));
+      data_format =
+        Print_preferences.data_format_of_string
+          (pick_str "data_format"
+             (Print_preferences.data_format_to_string d.data_format));
+      compatible_gradient_printing =
+        pick_bool "compatible_gradient_printing" d.compatible_gradient_printing;
+      raster_effects_resolution =
+        pick_num "raster_effects_resolution" d.raster_effects_resolution;
+    }
+  with _ -> d
+
+let parse_ink_override j : Print_preferences.ink_override =
+  let open Yojson.Safe.Util in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  {
+    name = pick_str "name" "";
+    print = pick_bool "print" true;
+    frequency = pick_num "frequency" 75.0;
+    angle = pick_num "angle" 45.0;
+    dot_shape =
+      Print_preferences.dot_shape_of_string
+        (pick_str "dot_shape" "round");
+  }
+
+let parse_output j : Print_preferences.output =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_output in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  let inks =
+    match try j |> member "inks" with _ -> `Null with
+    | `Null -> d.inks
+    | `List items -> List.map parse_ink_override items
+    | _ -> d.inks
+  in
+  try
+    {
+      mode =
+        Print_preferences.output_mode_of_string
+          (pick_str "mode"
+             (Print_preferences.output_mode_to_string d.mode));
+      emulsion =
+        Print_preferences.emulsion_of_string
+          (pick_str "emulsion"
+             (Print_preferences.emulsion_to_string d.emulsion));
+      image_polarity =
+        Print_preferences.image_polarity_of_string
+          (pick_str "image_polarity"
+             (Print_preferences.image_polarity_to_string d.image_polarity));
+      printer_resolution = pick_str "printer_resolution" d.printer_resolution;
+      convert_spot_to_process =
+        pick_bool "convert_spot_to_process" d.convert_spot_to_process;
+      overprint_black = pick_bool "overprint_black" d.overprint_black;
+      inks;
+    }
+  with _ -> d
+
+let parse_marks_and_bleed j : Print_preferences.marks_and_bleed =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_marks_and_bleed in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      all_printer_marks = pick_bool "all_printer_marks" d.all_printer_marks;
+      trim_marks = pick_bool "trim_marks" d.trim_marks;
+      registration_marks = pick_bool "registration_marks" d.registration_marks;
+      color_bars = pick_bool "color_bars" d.color_bars;
+      page_information = pick_bool "page_information" d.page_information;
+      printer_mark_type =
+        Print_preferences.printer_mark_type_of_string
+          (pick_str "printer_mark_type"
+             (Print_preferences.printer_mark_type_to_string d.printer_mark_type));
+      trim_mark_weight = pick_num "trim_mark_weight" d.trim_mark_weight;
+      mark_offset = pick_num "mark_offset" d.mark_offset;
+      use_document_bleed = pick_bool "use_document_bleed" d.use_document_bleed;
+      bleed_top = pick_num "bleed_top" d.bleed_top;
+      bleed_right = pick_num "bleed_right" d.bleed_right;
+      bleed_bottom = pick_num "bleed_bottom" d.bleed_bottom;
+      bleed_left = pick_num "bleed_left" d.bleed_left;
     }
   with _ -> d
 
@@ -966,6 +1217,31 @@ let parse_print_preferences j : Print_preferences.t =
     try j |> member name |> to_num with _ -> d_val in
   let pick_bool name d_val =
     try j |> member name |> to_bool with _ -> d_val in
+  let pick_marks_and_bleed () =
+    match try j |> member "marks_and_bleed" with _ -> `Null with
+    | `Null -> d.marks_and_bleed
+    | v -> parse_marks_and_bleed v
+  in
+  let pick_output () =
+    match try j |> member "output" with _ -> `Null with
+    | `Null -> d.output
+    | v -> parse_output v
+  in
+  let pick_graphics () =
+    match try j |> member "graphics" with _ -> `Null with
+    | `Null -> d.graphics
+    | v -> parse_graphics v
+  in
+  let pick_color_management () =
+    match try j |> member "color_management" with _ -> `Null with
+    | `Null -> d.color_management
+    | v -> parse_color_management v
+  in
+  let pick_advanced () =
+    match try j |> member "advanced" with _ -> `Null with
+    | `Null -> d.advanced
+    | v -> parse_advanced v
+  in
   try
     {
       preset_name = pick_str "preset_name" d.preset_name;
@@ -1006,6 +1282,11 @@ let parse_print_preferences j : Print_preferences.t =
       tile_overlap_h = pick_num "tile_overlap_h" d.tile_overlap_h;
       tile_overlap_v = pick_num "tile_overlap_v" d.tile_overlap_v;
       tile_range = pick_str "tile_range" d.tile_range;
+      marks_and_bleed = pick_marks_and_bleed ();
+      output = pick_output ();
+      graphics = pick_graphics ();
+      color_management = pick_color_management ();
+      advanced = pick_advanced ();
     }
   with _ -> d
 

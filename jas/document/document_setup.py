@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from document.artboard import Artboard
+from document.print_preferences import FlattenerPreset
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,13 @@ class DocumentSetup:
     # Tint glyphs that were rendered with a substituted font so the
     # user can spot missing-font cases.
     highlight_substituted_glyphs: bool = False
+    # Phase 6 additions (deferred Phase 1A items).
+    grid_size: float = 72.0
+    grid_color: str = "#cccccc"
+    paper_color: str = "#ffffff"
+    simulate_colored_paper: bool = False
+    transparency_flattener_preset: FlattenerPreset = FlattenerPreset.MEDIUM_RESOLUTION
+    discard_white_overprint: bool = False
 
     def bleed_rect_for_artboard(
         self, ab: Artboard

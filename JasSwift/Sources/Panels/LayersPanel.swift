@@ -677,46 +677,45 @@ public enum LayersPanel {
             switch field {
             case "bleed_top":
                 guard case .number(let n) = val else { return nil }
-                newSetup = DocumentSetup(bleedTop: n, bleedRight: s.bleedRight,
-                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
-                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
-                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+                newSetup = _withDocSetup(s, bleedTop: n)
             case "bleed_right":
                 guard case .number(let n) = val else { return nil }
-                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: n,
-                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
-                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
-                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+                newSetup = _withDocSetup(s, bleedRight: n)
             case "bleed_bottom":
                 guard case .number(let n) = val else { return nil }
-                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
-                    bleedBottom: n, bleedLeft: s.bleedLeft,
-                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
-                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+                newSetup = _withDocSetup(s, bleedBottom: n)
             case "bleed_left":
                 guard case .number(let n) = val else { return nil }
-                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
-                    bleedBottom: s.bleedBottom, bleedLeft: n,
-                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
-                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+                newSetup = _withDocSetup(s, bleedLeft: n)
             case "bleed_uniform":
                 guard case .bool(let b) = val else { return nil }
-                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
-                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
-                    bleedUniform: b, showImagesOutline: s.showImagesOutline,
-                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+                newSetup = _withDocSetup(s, bleedUniform: b)
             case "show_images_outline":
                 guard case .bool(let b) = val else { return nil }
-                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
-                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
-                    bleedUniform: s.bleedUniform, showImagesOutline: b,
-                    highlightSubstitutedGlyphs: s.highlightSubstitutedGlyphs)
+                newSetup = _withDocSetup(s, showImagesOutline: b)
             case "highlight_substituted_glyphs":
                 guard case .bool(let b) = val else { return nil }
-                newSetup = DocumentSetup(bleedTop: s.bleedTop, bleedRight: s.bleedRight,
-                    bleedBottom: s.bleedBottom, bleedLeft: s.bleedLeft,
-                    bleedUniform: s.bleedUniform, showImagesOutline: s.showImagesOutline,
-                    highlightSubstitutedGlyphs: b)
+                newSetup = _withDocSetup(s, highlightSubstitutedGlyphs: b)
+            // Phase 6 additions
+            case "grid_size":
+                guard case .number(let n) = val else { return nil }
+                newSetup = _withDocSetup(s, gridSize: n)
+            case "grid_color":
+                guard case .string(let str) = val else { return nil }
+                newSetup = _withDocSetup(s, gridColor: str)
+            case "paper_color":
+                guard case .string(let str) = val else { return nil }
+                newSetup = _withDocSetup(s, paperColor: str)
+            case "simulate_colored_paper":
+                guard case .bool(let b) = val else { return nil }
+                newSetup = _withDocSetup(s, simulateColoredPaper: b)
+            case "transparency_flattener_preset":
+                guard case .string(let str) = val,
+                      let p = FlattenerPreset(rawValue: str) else { return nil }
+                newSetup = _withDocSetup(s, transparencyFlattenerPreset: p)
+            case "discard_white_overprint":
+                guard case .bool(let b) = val else { return nil }
+                newSetup = _withDocSetup(s, discardWhiteOverprint: b)
             default: return nil
             }
             model.document = Document(
@@ -749,6 +748,192 @@ public enum LayersPanel {
             let p = doc.printPreferences
             let np = applyPrintPrefField(p, field: field, val: val)
             guard let updated = np else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // doc.set_marks_and_bleed_field — PRINT.md §Phase 2. Same
+        // wiring shape as doc.set_print_preferences_field above; the
+        // applyMarksAndBleedField helper handles the typed dispatch
+        // and rebuilds PrintPreferences with a new marksAndBleed.
+        let docSetMarksAndBleedFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            let np = applyMarksAndBleedField(p, field: field, val: val)
+            guard let updated = np else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // doc.set_output_field — PRINT.md §Phase 3. Same wiring shape
+        // as the marks-and-bleed handler above; applyOutputField
+        // handles the typed dispatch onto Output.
+        let docSetOutputFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyOutputField(p, field: field, val: val) else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // doc.set_output_ink_field — PRINT.md §Phase 3. Adds an
+        // ``index`` parameter for which row of Output.inks to update.
+        let docSetOutputInkFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String,
+                  let indexNum = spec["index"] as? NSNumber else { return nil }
+            let index = indexNum.intValue
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyOutputInkField(p, index: index, field: field, val: val) else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // doc.set_graphics_field — PRINT.md §Phase 4. Same wiring
+        // shape as the marks-and-bleed handler above; applyGraphicsField
+        // handles the typed dispatch onto Graphics.
+        let docSetGraphicsFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyGraphicsField(p, field: field, val: val) else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // doc.set_color_management_field — PRINT.md §Phase 5. Same
+        // wiring shape as the graphics handler above.
+        let docSetColorManagementFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyColorManagementField(p, field: field, val: val) else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
+        // doc.set_advanced_field — PRINT.md §Phase 6.
+        let docSetAdvancedFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyAdvancedField(p, field: field, val: val) else { return nil }
             model.document = Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
@@ -849,6 +1034,12 @@ public enum LayersPanel {
             "doc.set_artboard_options_field": docSetArtboardOptionsFieldHandler,
             "doc.set_document_setup_field": docSetDocumentSetupFieldHandler,
             "doc.set_print_preferences_field": docSetPrintPreferencesFieldHandler,
+            "doc.set_marks_and_bleed_field": docSetMarksAndBleedFieldHandler,
+            "doc.set_output_field": docSetOutputFieldHandler,
+            "doc.set_output_ink_field": docSetOutputInkFieldHandler,
+            "doc.set_graphics_field": docSetGraphicsFieldHandler,
+            "doc.set_color_management_field": docSetColorManagementFieldHandler,
+            "doc.set_advanced_field": docSetAdvancedFieldHandler,
             "doc.move_artboards_up": docMoveArtboardsUpHandler,
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

@@ -22,6 +22,83 @@ let document_setup_view (s : Document_setup.t) : Yojson.Safe.t =
     ("bleed_uniform", `Bool s.bleed_uniform);
     ("show_images_outline", `Bool s.show_images_outline);
     ("highlight_substituted_glyphs", `Bool s.highlight_substituted_glyphs);
+    ("grid_size", `Float s.grid_size);
+    ("grid_color", `String s.grid_color);
+    ("paper_color", `String s.paper_color);
+    ("simulate_colored_paper", `Bool s.simulate_colored_paper);
+    ("transparency_flattener_preset",
+     `String (Print_preferences.flattener_preset_to_string s.transparency_flattener_preset));
+    ("discard_white_overprint", `Bool s.discard_white_overprint);
+  ]
+
+let advanced_view (a : Print_preferences.advanced) : Yojson.Safe.t =
+  `Assoc [
+    ("print_as_bitmap", `Bool a.print_as_bitmap);
+    ("overprint_flattener_preset",
+     `String (Print_preferences.flattener_preset_to_string a.overprint_flattener_preset));
+  ]
+
+let color_management_view (c : Print_preferences.color_management) : Yojson.Safe.t =
+  `Assoc [
+    ("document_profile", `String c.document_profile);
+    ("color_handling",
+     `String (Print_preferences.color_handling_to_string c.color_handling));
+    ("printer_profile", `String c.printer_profile);
+    ("rendering_intent",
+     `String (Print_preferences.rendering_intent_to_string c.rendering_intent));
+    ("preserve_rgb_numbers", `Bool c.preserve_rgb_numbers);
+  ]
+
+let graphics_view (g : Print_preferences.graphics) : Yojson.Safe.t =
+  `Assoc [
+    ("flatness", `Float g.flatness);
+    ("font_download",
+     `String (Print_preferences.font_download_to_string g.font_download));
+    ("postscript_level",
+     `String (Print_preferences.postscript_level_to_string g.postscript_level));
+    ("data_format",
+     `String (Print_preferences.data_format_to_string g.data_format));
+    ("compatible_gradient_printing", `Bool g.compatible_gradient_printing);
+    ("raster_effects_resolution", `Float g.raster_effects_resolution);
+  ]
+
+let ink_override_view (ink : Print_preferences.ink_override) : Yojson.Safe.t =
+  `Assoc [
+    ("name", `String ink.name);
+    ("print", `Bool ink.print);
+    ("frequency", `Float ink.frequency);
+    ("angle", `Float ink.angle);
+    ("dot_shape", `String (Print_preferences.dot_shape_to_string ink.dot_shape));
+  ]
+
+let output_view (o : Print_preferences.output) : Yojson.Safe.t =
+  `Assoc [
+    ("mode", `String (Print_preferences.output_mode_to_string o.mode));
+    ("emulsion", `String (Print_preferences.emulsion_to_string o.emulsion));
+    ("image_polarity",
+     `String (Print_preferences.image_polarity_to_string o.image_polarity));
+    ("printer_resolution", `String o.printer_resolution);
+    ("convert_spot_to_process", `Bool o.convert_spot_to_process);
+    ("overprint_black", `Bool o.overprint_black);
+    ("inks", `List (List.map ink_override_view o.inks));
+  ]
+
+let marks_and_bleed_view (m : Print_preferences.marks_and_bleed) : Yojson.Safe.t =
+  `Assoc [
+    ("all_printer_marks", `Bool m.all_printer_marks);
+    ("trim_marks", `Bool m.trim_marks);
+    ("registration_marks", `Bool m.registration_marks);
+    ("color_bars", `Bool m.color_bars);
+    ("page_information", `Bool m.page_information);
+    ("printer_mark_type",
+     `String (Print_preferences.printer_mark_type_to_string m.printer_mark_type));
+    ("trim_mark_weight", `Float m.trim_mark_weight);
+    ("mark_offset", `Float m.mark_offset);
+    ("use_document_bleed", `Bool m.use_document_bleed);
+    ("bleed_top", `Float m.bleed_top);
+    ("bleed_right", `Float m.bleed_right);
+    ("bleed_bottom", `Float m.bleed_bottom);
+    ("bleed_left", `Float m.bleed_left);
   ]
 
 let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
@@ -51,6 +128,11 @@ let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
     ("tile_overlap_h", `Float p.tile_overlap_h);
     ("tile_overlap_v", `Float p.tile_overlap_v);
     ("tile_range", `String p.tile_range);
+    ("marks_and_bleed", marks_and_bleed_view p.marks_and_bleed);
+    ("output", output_view p.output);
+    ("graphics", graphics_view p.graphics);
+    ("color_management", color_management_view p.color_management);
+    ("advanced", advanced_view p.advanced);
   ]
 
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =

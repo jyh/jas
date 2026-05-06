@@ -839,4 +839,205 @@ let () =
            | _ -> assert false)
         | _ -> assert false);
     ];
+
+    (* DocumentSetup + PrintPreferences SVG persistence (PRINT.md §Phase 2) *)
+    "phase2_metadata", [
+      Alcotest.test_case "default doc emits no jas blocks" `Quick (fun () ->
+        let doc = make_document [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (not (contains svg "<jas:document-setup"));
+        assert (not (contains svg "<jas:print-preferences"));
+        assert (not (contains svg "<sodipodi:namedview")));
+
+      Alcotest.test_case "non-default DocumentSetup round-trips" `Quick (fun () ->
+        let s = { Jas.Document_setup.default with
+                  bleed_top = 9.0;
+                  bleed_right = 18.0; bleed_bottom = 36.0; bleed_left = 12.0;
+                  bleed_uniform = false;
+                  show_images_outline = true;
+                  highlight_substituted_glyphs = true } in
+        let doc = make_document ~document_setup:s [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:document-setup");
+        assert (contains svg "xmlns:jas=");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.document_setup = s));
+
+      Alcotest.test_case "Advanced sub-record round-trips" `Quick (fun () ->
+        let a = { Jas.Print_preferences.print_as_bitmap = true;
+                  overprint_flattener_preset = Jas.Print_preferences.High_resolution } in
+        let p = { Jas.Print_preferences.default with advanced = a } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:advanced");
+        assert (contains svg "print-as-bitmap=\"true\"");
+        assert (contains svg "overprint-flattener-preset=\"high_resolution\"");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.advanced = a));
+
+      Alcotest.test_case "DocumentSetup phase 6 fields round-trip" `Quick (fun () ->
+        let s = { Jas.Document_setup.default with
+                  grid_size = 36.0;
+                  grid_color = "#0099ff";
+                  paper_color = "#fff8e7";
+                  simulate_colored_paper = true;
+                  transparency_flattener_preset = Jas.Print_preferences.High_resolution;
+                  discard_white_overprint = true } in
+        let doc = make_document ~document_setup:s [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "grid-size=\"36\"");
+        assert (contains svg "paper-color=\"#fff8e7\"");
+        assert (contains svg "simulate-colored-paper=\"true\"");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.document_setup = s));
+
+      Alcotest.test_case "ColorManagement sub-record round-trips" `Quick (fun () ->
+        let c = { Jas.Print_preferences.document_profile = "Adobe RGB (1998)";
+                  color_handling = Jas.Print_preferences.Postscript_color_management;
+                  printer_profile = "U.S. Web Coated (SWOP) v2";
+                  rendering_intent = Jas.Print_preferences.Saturation;
+                  preserve_rgb_numbers = true } in
+        let p = { Jas.Print_preferences.default with color_management = c } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:color-management");
+        assert (contains svg "color-handling=\"postscript_color_management\"");
+        assert (contains svg "rendering-intent=\"saturation\"");
+        assert (contains svg "Adobe RGB (1998)");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.color_management = c));
+
+      Alcotest.test_case "Graphics sub-record round-trips" `Quick (fun () ->
+        let g = { Jas.Print_preferences.flatness = 0.4;
+                  font_download = Jas.Print_preferences.Font_complete;
+                  postscript_level = Jas.Print_preferences.Level_2;
+                  data_format = Jas.Print_preferences.Ascii;
+                  compatible_gradient_printing = true;
+                  raster_effects_resolution = 600.0 } in
+        let p = { Jas.Print_preferences.default with graphics = g } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:graphics");
+        assert (contains svg "flatness=\"0.4\"");
+        assert (contains svg "font-download=\"complete\"");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.graphics = g));
+
+      Alcotest.test_case "Output sub-record round-trips" `Quick (fun () ->
+        let m = { Jas.Print_preferences.mode = Jas.Print_preferences.Separations;
+                  emulsion = Jas.Print_preferences.Down_right;
+                  image_polarity = Jas.Print_preferences.Negative;
+                  printer_resolution = "150 lpi / 1200 dpi";
+                  convert_spot_to_process = true;
+                  overprint_black = true;
+                  inks = [
+                    { name = "Process Cyan"; print = false;
+                      frequency = 100.0; angle = 105.0;
+                      dot_shape = Jas.Print_preferences.Dot_ellipse };
+                    { name = "PANTONE 185 C"; print = true;
+                      frequency = 85.0; angle = 45.0;
+                      dot_shape = Jas.Print_preferences.Dot_square };
+                  ] } in
+        let p = { Jas.Print_preferences.default with output = m } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:output");
+        assert (contains svg "<jas:ink");
+        assert (contains svg "PANTONE 185 C");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.output = m));
+
+      Alcotest.test_case "non-default PrintPreferences round-trips" `Quick (fun () ->
+        let m = { Jas.Print_preferences.all_printer_marks = true;
+                  trim_marks = true; registration_marks = true;
+                  color_bars = true; page_information = true;
+                  printer_mark_type = Jas.Print_preferences.Japanese;
+                  trim_mark_weight = 0.5; mark_offset = 12.0;
+                  use_document_bleed = false;
+                  bleed_top = 4.0; bleed_right = 5.0;
+                  bleed_bottom = 6.0; bleed_left = 7.0 } in
+        let p = { Jas.Print_preferences.preset_name = "My Preset";
+                  printer_name = Some "LaserJet 5000";
+                  copies = 3; collate = true; reverse_order = true;
+                  artboard_range_mode = Jas.Print_preferences.Range;
+                  artboard_range = "1-3,5";
+                  ignore_artboards = true; skip_blank_artboards = true;
+                  media_size = Jas.Print_preferences.A4;
+                  media_width = 595.0; media_height = 842.0;
+                  orientation = Jas.Print_preferences.Landscape;
+                  auto_rotate = false; transverse = true;
+                  print_layers = Jas.Print_preferences.Visible;
+                  placement_x = 12.5; placement_y = -3.25;
+                  scaling_mode = Jas.Print_preferences.Custom_scale;
+                  custom_scale = 75.0;
+                  tile_overlap_h = 1.0; tile_overlap_v = 2.0;
+                  tile_range = "1-2";
+                  marks_and_bleed = m;
+                  output = Jas.Print_preferences.default_output;
+                  graphics = Jas.Print_preferences.default_graphics;
+                  color_management = Jas.Print_preferences.default_color_management;
+                  advanced = Jas.Print_preferences.default_advanced } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:print-preferences");
+        assert (contains svg "<jas:marks-and-bleed");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences = p));
+    ];
   ]

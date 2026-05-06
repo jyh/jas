@@ -966,3 +966,171 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     }
     #expect(r.stroke?.dashAlignAnchors == false)
 }
+
+// MARK: - DocumentSetup + PrintPreferences SVG persistence (PRINT.md §Phase 2)
+
+@Test func defaultDocSetupAndPrefsEmitNoJasBlocks() {
+    // Pristine doc must not produce any <jas:*> metadata or
+    // sodipodi:namedview wrapper — keeps minimal SVGs minimal.
+    let doc = Document(layers: [Layer(children: [])])
+    let svg = documentToSvg(doc)
+    #expect(!svg.contains("<jas:document-setup"))
+    #expect(!svg.contains("<jas:print-preferences"))
+    #expect(!svg.contains("<sodipodi:namedview"))
+}
+
+@Test func documentSetupRoundTripsThroughSvg() {
+    let s = DocumentSetup(
+        bleedTop: 9, bleedRight: 18, bleedBottom: 36, bleedLeft: 12,
+        bleedUniform: false,
+        showImagesOutline: true,
+        highlightSubstitutedGlyphs: true
+    )
+    let doc = Document(layers: [Layer(children: [])], documentSetup: s)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:document-setup"))
+    #expect(svg.contains("xmlns:jas="))
+
+    let parsed = svgToDocument(svg)
+    #expect(parsed.documentSetup == s)
+}
+
+@Test func advancedSubRecordRoundTripsThroughSvg() {
+    let a = Advanced(printAsBitmap: true, overprintFlattenerPreset: .highResolution)
+    let p = PrintPreferences(advanced: a)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:advanced"))
+    #expect(svg.contains("print-as-bitmap=\"true\""))
+    #expect(svg.contains("overprint-flattener-preset=\"high_resolution\""))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.advanced == a)
+}
+
+@Test func documentSetupPhase6FieldsRoundTripThroughSvg() {
+    let s = DocumentSetup(
+        gridSize: 36,
+        gridColor: "#0099ff",
+        paperColor: "#fff8e7",
+        simulateColoredPaper: true,
+        transparencyFlattenerPreset: .highResolution,
+        discardWhiteOverprint: true
+    )
+    let doc = Document(layers: [Layer(children: [])], documentSetup: s)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("grid-size=\"36\""))
+    #expect(svg.contains("paper-color=\"#fff8e7\""))
+    #expect(svg.contains("simulate-colored-paper=\"true\""))
+    #expect(svg.contains("transparency-flattener-preset=\"high_resolution\""))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.documentSetup == s)
+}
+
+@Test func colorManagementSubRecordRoundTripsThroughSvg() {
+    let c = ColorManagement(
+        documentProfile: "Adobe RGB (1998)",
+        colorHandling: .postscriptColorManagement,
+        printerProfile: "U.S. Web Coated (SWOP) v2",
+        renderingIntent: .saturation,
+        preserveRgbNumbers: true
+    )
+    let p = PrintPreferences(colorManagement: c)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:color-management"))
+    #expect(svg.contains("color-handling=\"postscript_color_management\""))
+    #expect(svg.contains("rendering-intent=\"saturation\""))
+    #expect(svg.contains("Adobe RGB (1998)"))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.colorManagement == c)
+}
+
+@Test func graphicsSubRecordRoundTripsThroughSvg() {
+    let g = Graphics(
+        flatness: 0.4,
+        fontDownload: .complete,
+        postscriptLevel: .level2,
+        dataFormat: .ascii,
+        compatibleGradientPrinting: true,
+        rasterEffectsResolution: 600.0
+    )
+    let p = PrintPreferences(graphics: g)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:graphics"))
+    #expect(svg.contains("flatness=\"0.4\""))
+    #expect(svg.contains("font-download=\"complete\""))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.graphics == g)
+}
+
+@Test func outputSubRecordRoundTripsThroughSvg() {
+    let o = Output(
+        mode: .separations,
+        emulsion: .downRight,
+        imagePolarity: .negative,
+        printerResolution: "150 lpi / 1200 dpi",
+        convertSpotToProcess: true,
+        overprintBlack: true,
+        inks: [
+            InkOverride(name: "Process Cyan", print: false, frequency: 100, angle: 105, dotShape: .ellipse),
+            InkOverride(name: "PANTONE 185 C", print: true, frequency: 85, angle: 45, dotShape: .square),
+        ]
+    )
+    let p = PrintPreferences(output: o)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:output"))
+    #expect(svg.contains("<jas:ink"))
+    #expect(svg.contains("PANTONE 185 C"))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.output == o)
+}
+
+@Test func printPreferencesRoundTripThroughSvg() {
+    let p = PrintPreferences(
+        presetName: "My Preset",
+        printerName: "LaserJet 5000",
+        copies: 3,
+        collate: true,
+        reverseOrder: true,
+        artboardRangeMode: .range,
+        artboardRange: "1-3,5",
+        ignoreArtboards: true,
+        skipBlankArtboards: true,
+        mediaSize: .a4,
+        mediaWidth: 595,
+        mediaHeight: 842,
+        orientation: .landscape,
+        autoRotate: false,
+        transverse: true,
+        printLayers: .visible,
+        placementX: 12.5,
+        placementY: -3.25,
+        scalingMode: .custom,
+        customScale: 75,
+        tileOverlapH: 1,
+        tileOverlapV: 2,
+        tileRange: "1-2",
+        marksAndBleed: MarksAndBleed(
+            allPrinterMarks: true,
+            trimMarks: true,
+            registrationMarks: true,
+            colorBars: true,
+            pageInformation: true,
+            printerMarkType: .japanese,
+            trimMarkWeight: 0.5,
+            markOffset: 12,
+            useDocumentBleed: false,
+            bleedTop: 4, bleedRight: 5,
+            bleedBottom: 6, bleedLeft: 7
+        )
+    )
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:print-preferences"))
+    #expect(svg.contains("<jas:marks-and-bleed"))
+
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences == p)
+}

@@ -275,6 +275,7 @@ def build_artboard_handlers(model) -> dict:
 
     # PRINT.md §1A
     def doc_set_document_setup_field(spec, call_ctx, _store):
+        from document.print_preferences import FlattenerPreset, _enum_from_string
         if not isinstance(spec, dict):
             return None
         field = spec.get("field")
@@ -287,13 +288,17 @@ def build_artboard_handlers(model) -> dict:
         else:
             value = value_expr
         s = model.document.document_setup
-        bleed_fields = {
+        # Phase 1A bleed numerics + Phase 6 grid_size.
+        num_fields = {
             "bleed_top", "bleed_right", "bleed_bottom", "bleed_left",
+            "grid_size",
         }
         bool_fields = {
             "bleed_uniform", "show_images_outline", "highlight_substituted_glyphs",
+            "simulate_colored_paper", "discard_white_overprint",
         }
-        if field in bleed_fields:
+        str_fields = {"grid_color", "paper_color"}
+        if field in num_fields:
             if not isinstance(value, (int, float)):
                 return None
             new_s = dataclasses.replace(s, **{field: float(value)})
@@ -301,6 +306,17 @@ def build_artboard_handlers(model) -> dict:
             if not isinstance(value, bool):
                 return None
             new_s = dataclasses.replace(s, **{field: value})
+        elif field in str_fields:
+            if not isinstance(value, str):
+                return None
+            new_s = dataclasses.replace(s, **{field: value})
+        elif field == "transparency_flattener_preset":
+            if not isinstance(value, str):
+                return None
+            new_s = dataclasses.replace(
+                s,
+                transparency_flattener_preset=_enum_from_string(
+                    FlattenerPreset, value, s.transparency_flattener_preset))
         else:
             return None
         model.document = dataclasses.replace(model.document, document_setup=new_s)
@@ -382,6 +398,270 @@ def build_artboard_handlers(model) -> dict:
             model.document, print_preferences=new_p)
         return None
 
+    # PRINT.md §Phase 2
+    def doc_set_marks_and_bleed_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            PrinterMarkType, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        m = p.marks_and_bleed
+        if field in {"all_printer_marks", "trim_marks", "registration_marks",
+                     "color_bars", "page_information", "use_document_bleed"}:
+            if not isinstance(value, bool):
+                return None
+            new_m = dataclasses.replace(m, **{field: value})
+        elif field in {"trim_mark_weight", "mark_offset",
+                       "bleed_top", "bleed_right", "bleed_bottom", "bleed_left"}:
+            if not isinstance(value, (int, float)):
+                return None
+            new_m = dataclasses.replace(m, **{field: float(value)})
+        elif field == "printer_mark_type":
+            if not isinstance(value, str):
+                return None
+            new_m = dataclasses.replace(m, printer_mark_type=_enum_from_string(
+                PrinterMarkType, value, m.printer_mark_type))
+        else:
+            return None
+        new_p = dataclasses.replace(p, marks_and_bleed=new_m)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
+    # PRINT.md §Phase 3
+    def doc_set_output_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            OutputMode, Emulsion, ImagePolarity, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        o = p.output
+        if field == "mode":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, mode=_enum_from_string(
+                OutputMode, value, o.mode))
+        elif field == "emulsion":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, emulsion=_enum_from_string(
+                Emulsion, value, o.emulsion))
+        elif field == "image_polarity":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, image_polarity=_enum_from_string(
+                ImagePolarity, value, o.image_polarity))
+        elif field == "printer_resolution":
+            if not isinstance(value, str):
+                return None
+            new_o = dataclasses.replace(o, printer_resolution=value)
+        elif field in {"convert_spot_to_process", "overprint_black"}:
+            if not isinstance(value, bool):
+                return None
+            new_o = dataclasses.replace(o, **{field: value})
+        else:
+            return None
+        new_p = dataclasses.replace(p, output=new_o)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
+    # PRINT.md §Phase 3 — per-row update on Output.inks
+    def doc_set_output_ink_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            DotShape, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        index = spec.get("index")
+        if not isinstance(field, str) or not isinstance(index, int):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        o = p.output
+        inks = list(o.inks)
+        if index < 0 or index >= len(inks):
+            return None
+        ink = inks[index]
+        if field == "name":
+            if not isinstance(value, str):
+                return None
+            new_ink = dataclasses.replace(ink, name=value)
+        elif field == "print":
+            if not isinstance(value, bool):
+                return None
+            new_ink = dataclasses.replace(ink, print=value)
+        elif field in {"frequency", "angle"}:
+            if not isinstance(value, (int, float)):
+                return None
+            new_ink = dataclasses.replace(ink, **{field: float(value)})
+        elif field == "dot_shape":
+            if not isinstance(value, str):
+                return None
+            new_ink = dataclasses.replace(ink, dot_shape=_enum_from_string(
+                DotShape, value, ink.dot_shape))
+        else:
+            return None
+        inks[index] = new_ink
+        new_o = dataclasses.replace(o, inks=tuple(inks))
+        new_p = dataclasses.replace(p, output=new_o)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
+    # PRINT.md §Phase 4
+    def doc_set_graphics_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            FontDownload, PostScriptLevel, DataFormat, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        g = p.graphics
+        if field == "flatness":
+            if not isinstance(value, (int, float)):
+                return None
+            new_g = dataclasses.replace(g, flatness=float(value))
+        elif field == "font_download":
+            if not isinstance(value, str):
+                return None
+            new_g = dataclasses.replace(g, font_download=_enum_from_string(
+                FontDownload, value, g.font_download))
+        elif field == "postscript_level":
+            if not isinstance(value, str):
+                return None
+            new_g = dataclasses.replace(g, postscript_level=_enum_from_string(
+                PostScriptLevel, value, g.postscript_level))
+        elif field == "data_format":
+            if not isinstance(value, str):
+                return None
+            new_g = dataclasses.replace(g, data_format=_enum_from_string(
+                DataFormat, value, g.data_format))
+        elif field == "compatible_gradient_printing":
+            if not isinstance(value, bool):
+                return None
+            new_g = dataclasses.replace(g, compatible_gradient_printing=value)
+        elif field == "raster_effects_resolution":
+            if not isinstance(value, (int, float)):
+                return None
+            new_g = dataclasses.replace(g, raster_effects_resolution=float(value))
+        else:
+            return None
+        new_p = dataclasses.replace(p, graphics=new_g)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
+    # PRINT.md §Phase 5
+    def doc_set_color_management_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            ColorHandling, RenderingIntent, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        c = p.color_management
+        if field in {"document_profile", "printer_profile"}:
+            if not isinstance(value, str):
+                return None
+            new_c = dataclasses.replace(c, **{field: value})
+        elif field == "color_handling":
+            if not isinstance(value, str):
+                return None
+            new_c = dataclasses.replace(c, color_handling=_enum_from_string(
+                ColorHandling, value, c.color_handling))
+        elif field == "rendering_intent":
+            if not isinstance(value, str):
+                return None
+            new_c = dataclasses.replace(c, rendering_intent=_enum_from_string(
+                RenderingIntent, value, c.rendering_intent))
+        elif field == "preserve_rgb_numbers":
+            if not isinstance(value, bool):
+                return None
+            new_c = dataclasses.replace(c, preserve_rgb_numbers=value)
+        else:
+            return None
+        new_p = dataclasses.replace(p, color_management=new_c)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
+    # PRINT.md §Phase 6
+    def doc_set_advanced_field(spec, call_ctx, _store):
+        from document.print_preferences import FlattenerPreset, _enum_from_string
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        a = p.advanced
+        if field == "print_as_bitmap":
+            if not isinstance(value, bool):
+                return None
+            new_a = dataclasses.replace(a, print_as_bitmap=value)
+        elif field == "overprint_flattener_preset":
+            if not isinstance(value, str):
+                return None
+            new_a = dataclasses.replace(a, overprint_flattener_preset=_enum_from_string(
+                FlattenerPreset, value, a.overprint_flattener_preset))
+        else:
+            return None
+        new_p = dataclasses.replace(p, advanced=new_a)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
     # PRINT.md §1B
     def geometry_export_pdf(_spec, _call_ctx, _store):
         from geometry.pdf import document_to_pdf
@@ -409,6 +689,12 @@ def build_artboard_handlers(model) -> dict:
         "doc.set_artboard_options_field": doc_set_artboard_options_field,
         "doc.set_document_setup_field": doc_set_document_setup_field,
         "doc.set_print_preferences_field": doc_set_print_preferences_field,
+        "doc.set_marks_and_bleed_field": doc_set_marks_and_bleed_field,
+        "doc.set_output_field": doc_set_output_field,
+        "doc.set_output_ink_field": doc_set_output_ink_field,
+        "doc.set_graphics_field": doc_set_graphics_field,
+        "doc.set_color_management_field": doc_set_color_management_field,
+        "doc.set_advanced_field": doc_set_advanced_field,
         "doc.move_artboards_up": doc_move_artboards_up,
         "doc.move_artboards_down": doc_move_artboards_down,
         "geometry.export_pdf": geometry_export_pdf,
