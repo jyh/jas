@@ -48,12 +48,51 @@ class ScalingMode(Enum):
     CUSTOM = "custom"
 
 
+class PrinterMarkType(Enum):
+    """Two cultural variants of printer's marks. ``ROMAN`` ships the
+    standard Western trim/registration marks; ``JAPANESE`` swaps in
+    the kasen-style marks used by Japanese commercial print shops.
+    Phase 2 stores the choice but the renderer only differentiates in
+    a follow-up — the on-disk shape is stable now."""
+    ROMAN = "roman"
+    JAPANESE = "japanese"
+
+
 def _enum_from_string(enum_class, s: str, default):
     """Look up an enum value by its string form; return `default` on miss."""
     for v in enum_class:
         if v.value == s:
             return v
     return default
+
+
+@dataclass(frozen=True)
+class MarksAndBleed:
+    """Marks-and-bleed sub-record on PrintPreferences (PRINT.md §Phase 2).
+    The Marks tab exposes these 1:1 as widgets; the PDF renderer
+    extends each page by the active bleed and overlays mark geometry
+    around the trim rect.
+
+    ``use_document_bleed`` controls whether bleeds come from the
+    document-level ``DocumentSetup`` or from the per-print ``bleed_*``
+    overrides on this struct. Defaulting to True keeps document and
+    print in lockstep until the user opts out."""
+    all_printer_marks: bool = False
+    trim_marks: bool = False
+    registration_marks: bool = False
+    color_bars: bool = False
+    page_information: bool = False
+    printer_mark_type: PrinterMarkType = PrinterMarkType.ROMAN
+    trim_mark_weight: float = 0.25
+    mark_offset: float = 6.0
+    use_document_bleed: bool = True
+    bleed_top: float = 0.0
+    bleed_right: float = 0.0
+    bleed_bottom: float = 0.0
+    bleed_left: float = 0.0
+
+
+DEFAULT_MARKS_AND_BLEED = MarksAndBleed()
 
 
 @dataclass(frozen=True)
@@ -83,6 +122,8 @@ class PrintPreferences:
     tile_overlap_h: float = 0.0
     tile_overlap_v: float = 0.0
     tile_range: str = ""
+    # Marks-and-bleed sub-record (PRINT.md §Phase 2).
+    marks_and_bleed: MarksAndBleed = DEFAULT_MARKS_AND_BLEED
 
 
 DEFAULT_PRINT_PREFERENCES = PrintPreferences()
