@@ -4,7 +4,7 @@ from document.artboard import Artboard
 from document.document import Document
 from document.print_preferences import (
     PrintPreferences, PrintLayers, Output, OutputMode, InkOverride,
-    Graphics,
+    Graphics, ColorManagement, RenderingIntent,
 )
 from geometry.pdf import document_to_pdf
 
@@ -118,6 +118,14 @@ class PdfGraphicsTest(absltest.TestCase):
         # streams so the literal "5 i" doesn't appear in the
         # output buffer; settle for a valid PDF.
         prefs = PrintPreferences(graphics=Graphics(flatness=5.0))
+        b = document_to_pdf(Document(print_preferences=prefs))
+        self.assertTrue(b.startswith(b"%PDF-"))
+
+    def test_non_default_rendering_intent_produces_valid_pdf(self):
+        # Smoke: ColorManagement.rendering_intent ≠ RELATIVE_COLORIMETRIC
+        # propagates through the emitter without breaking the output.
+        cm = ColorManagement(rendering_intent=RenderingIntent.PERCEPTUAL)
+        prefs = PrintPreferences(color_management=cm)
         b = document_to_pdf(Document(print_preferences=prefs))
         self.assertTrue(b.startswith(b"%PDF-"))
 

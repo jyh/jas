@@ -16,7 +16,9 @@ import math
 from dataclasses import dataclass
 
 from document.document import Document
-from document.print_preferences import PrintLayers, ScalingMode, OutputMode
+from document.print_preferences import (
+    PrintLayers, ScalingMode, OutputMode, RenderingIntent,
+)
 from geometry.element import (
     Circle, Color, Ellipse, Group, Layer, Line, Path, Polygon, Polyline, Rect,
     Text, TextPath, Visibility,
@@ -455,6 +457,21 @@ def _draw_page(canvas: RLCanvas, doc: Document, page: _Page):
     if abs(flatness - 1.0) > 1e-9:
         clamped = max(0.0, min(100.0, flatness))
         canvas._code.append(f"{clamped:g} i")
+    # Phase 5: rendering intent. PDF's ``ri`` operator takes the
+    # CamelCase Name. ReportLab has no public rendering-intent
+    # API so emit the operator directly via canvas._code, same
+    # technique flatness uses. Default RelativeColorimetric
+    # matches PDF 1.7 §11.6.5.8 default; emit only when
+    # non-default to keep unchanged docs byte-equivalent.
+    intent = doc.print_preferences.color_management.rendering_intent
+    if intent != RenderingIntent.RELATIVE_COLORIMETRIC:
+        intent_name = {
+            RenderingIntent.PERCEPTUAL: "Perceptual",
+            RenderingIntent.RELATIVE_COLORIMETRIC: "RelativeColorimetric",
+            RenderingIntent.SATURATION: "Saturation",
+            RenderingIntent.ABSOLUTE_COLORIMETRIC: "AbsoluteColorimetric",
+        }[intent]
+        canvas._code.append(f"/{intent_name} ri")
     sx, sy = _scaling_pair(doc)
     px = doc.print_preferences.placement_x
     py = doc.print_preferences.placement_y
