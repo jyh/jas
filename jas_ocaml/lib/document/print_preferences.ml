@@ -73,6 +73,113 @@ let printer_mark_type_of_string = function
   | "japanese" -> Japanese
   | _ -> Roman
 
+(** Output mode (PRINT.md §Phase 3): [Composite] renders the
+    document as one PDF page per artboard (Phase 1B behavior);
+    [Separations] renders one page per enabled ink in
+    [Output.inks]. *)
+type output_mode = Composite | Separations
+
+let output_mode_to_string = function
+  | Composite -> "composite"
+  | Separations -> "separations"
+let output_mode_of_string = function
+  | "separations" -> Separations
+  | _ -> Composite
+
+(** Film emulsion side (PRINT.md §Phase 3). For PDF output this has
+    no rendering effect, but the on-disk shape is stable. *)
+type emulsion = Up_right | Down_right
+
+let emulsion_to_string = function
+  | Up_right -> "up_right"
+  | Down_right -> "down_right"
+let emulsion_of_string = function
+  | "down_right" -> Down_right
+  | _ -> Up_right
+
+(** PDF page polarity (PRINT.md §Phase 3). [Negative] inverts the
+    final rasterized output; for PDF this is recorded but not
+    applied. *)
+type image_polarity = Positive | Negative
+
+let image_polarity_to_string = function
+  | Positive -> "positive"
+  | Negative -> "negative"
+let image_polarity_of_string = function
+  | "negative" -> Negative
+  | _ -> Positive
+
+(** Halftone dot shape for an [InkOverride] row (PRINT.md §Phase 3).
+    Phase 3 stores the choice; halftone screen rendering itself is
+    a Phase 7+ deferral. *)
+type dot_shape =
+  | Dot_round
+  | Dot_square
+  | Dot_ellipse
+  | Dot_diamond
+  | Dot_line
+  | Dot_cross
+  | Dot_euclidean
+
+let dot_shape_to_string = function
+  | Dot_round -> "round"
+  | Dot_square -> "square"
+  | Dot_ellipse -> "ellipse"
+  | Dot_diamond -> "diamond"
+  | Dot_line -> "line"
+  | Dot_cross -> "cross"
+  | Dot_euclidean -> "euclidean"
+let dot_shape_of_string = function
+  | "square" -> Dot_square
+  | "ellipse" -> Dot_ellipse
+  | "diamond" -> Dot_diamond
+  | "line" -> Dot_line
+  | "cross" -> Dot_cross
+  | "euclidean" -> Dot_euclidean
+  | _ -> Dot_round
+
+(** One row in the per-ink overrides table (PRINT.md §Phase 3). *)
+type ink_override = {
+  name : string;
+  print : bool;
+  frequency : float;
+  angle : float;
+  dot_shape : dot_shape;
+}
+
+(** The default ink list shipped with a fresh Output: the four CMYK
+    process inks at standard Western screen angles. *)
+let process_cmyk_default_inks = [
+  { name = "Process Cyan";    print = true; frequency = 75.0; angle = 105.0; dot_shape = Dot_round };
+  { name = "Process Magenta"; print = true; frequency = 75.0; angle =  75.0; dot_shape = Dot_round };
+  { name = "Process Yellow";  print = true; frequency = 75.0; angle =  90.0; dot_shape = Dot_round };
+  { name = "Process Black";   print = true; frequency = 75.0; angle =  45.0; dot_shape = Dot_round };
+]
+
+(** Output sub-record on print_preferences (PRINT.md §Phase 3). The
+    Output tab edits these 1:1; in Separations mode the PDF emitter
+    produces one page per enabled [ink_override] instead of one page
+    per artboard. *)
+type output = {
+  mode : output_mode;
+  emulsion : emulsion;
+  image_polarity : image_polarity;
+  printer_resolution : string;
+  convert_spot_to_process : bool;
+  overprint_black : bool;
+  inks : ink_override list;
+}
+
+let default_output = {
+  mode = Composite;
+  emulsion = Up_right;
+  image_polarity = Positive;
+  printer_resolution = "75 lpi / 600 dpi";
+  convert_spot_to_process = false;
+  overprint_black = false;
+  inks = process_cmyk_default_inks;
+}
+
 (** Marks-and-bleed sub-record on print_preferences (PRINT.md §Phase 2).
     The Marks tab exposes these 1:1 as widgets; the PDF renderer
     extends each page by the active bleed and overlays mark geometry
@@ -142,6 +249,8 @@ type t = {
   tile_range : string;
   (* Marks-and-bleed sub-record (PRINT.md §Phase 2). *)
   marks_and_bleed : marks_and_bleed;
+  (* Output sub-record (PRINT.md §Phase 3). *)
+  output : output;
 }
 
 let default = {
@@ -169,6 +278,7 @@ let default = {
   tile_overlap_v = 0.0;
   tile_range = "";
   marks_and_bleed = default_marks_and_bleed;
+  output = default_output;
 }
 
 (** Workspace-level named saved configuration. Phase 1 ships only

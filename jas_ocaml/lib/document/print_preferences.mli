@@ -25,6 +25,55 @@ type printer_mark_type = Roman | Japanese
 val printer_mark_type_to_string : printer_mark_type -> string
 val printer_mark_type_of_string : string -> printer_mark_type
 
+type output_mode = Composite | Separations
+
+val output_mode_to_string : output_mode -> string
+val output_mode_of_string : string -> output_mode
+
+type emulsion = Up_right | Down_right
+
+val emulsion_to_string : emulsion -> string
+val emulsion_of_string : string -> emulsion
+
+type image_polarity = Positive | Negative
+
+val image_polarity_to_string : image_polarity -> string
+val image_polarity_of_string : string -> image_polarity
+
+type dot_shape =
+  | Dot_round
+  | Dot_square
+  | Dot_ellipse
+  | Dot_diamond
+  | Dot_line
+  | Dot_cross
+  | Dot_euclidean
+
+val dot_shape_to_string : dot_shape -> string
+val dot_shape_of_string : string -> dot_shape
+
+type ink_override = {
+  name : string;
+  print : bool;
+  frequency : float;
+  angle : float;
+  dot_shape : dot_shape;
+}
+
+val process_cmyk_default_inks : ink_override list
+
+type output = {
+  mode : output_mode;
+  emulsion : emulsion;
+  image_polarity : image_polarity;
+  printer_resolution : string;
+  convert_spot_to_process : bool;
+  overprint_black : bool;
+  inks : ink_override list;
+}
+
+val default_output : output
+
 type marks_and_bleed = {
   all_printer_marks : bool;
   trim_marks : bool;
@@ -68,6 +117,7 @@ type t = {
   tile_overlap_v : float;
   tile_range : string;
   marks_and_bleed : marks_and_bleed;
+  output : output;
 }
 
 val default : t

@@ -1220,6 +1220,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     tile_overlap_v = attr_float attrs "tile-overlap-v" d.tile_overlap_v;
     tile_range = attr_str attrs "tile-range" d.tile_range;
     marks_and_bleed;
+    output = Print_preferences.default_output;
   }
 
 (* Walk the SVG once via Xmlm, pulling jas:document-setup +
