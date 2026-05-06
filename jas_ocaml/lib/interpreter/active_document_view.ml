@@ -24,6 +24,24 @@ let document_setup_view (s : Document_setup.t) : Yojson.Safe.t =
     ("highlight_substituted_glyphs", `Bool s.highlight_substituted_glyphs);
   ]
 
+let marks_and_bleed_view (m : Print_preferences.marks_and_bleed) : Yojson.Safe.t =
+  `Assoc [
+    ("all_printer_marks", `Bool m.all_printer_marks);
+    ("trim_marks", `Bool m.trim_marks);
+    ("registration_marks", `Bool m.registration_marks);
+    ("color_bars", `Bool m.color_bars);
+    ("page_information", `Bool m.page_information);
+    ("printer_mark_type",
+     `String (Print_preferences.printer_mark_type_to_string m.printer_mark_type));
+    ("trim_mark_weight", `Float m.trim_mark_weight);
+    ("mark_offset", `Float m.mark_offset);
+    ("use_document_bleed", `Bool m.use_document_bleed);
+    ("bleed_top", `Float m.bleed_top);
+    ("bleed_right", `Float m.bleed_right);
+    ("bleed_bottom", `Float m.bleed_bottom);
+    ("bleed_left", `Float m.bleed_left);
+  ]
+
 let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
   `Assoc [
     ("preset_name", `String p.preset_name);
@@ -51,6 +69,7 @@ let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
     ("tile_overlap_h", `Float p.tile_overlap_h);
     ("tile_overlap_v", `Float p.tile_overlap_v);
     ("tile_range", `String p.tile_range);
+    ("marks_and_bleed", marks_and_bleed_view p.marks_and_bleed);
   ]
 
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =

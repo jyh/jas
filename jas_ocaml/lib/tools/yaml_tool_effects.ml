@@ -3909,6 +3909,64 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
 
+  (* doc.set_marks_and_bleed_field — PRINT.md §Phase 2. Same wiring
+     shape as doc.set_print_preferences_field above; dispatches by
+     field name onto the marks_and_bleed sub-record and then rebuilds
+     print_preferences with the new value. *)
+  let doc_set_marks_and_bleed_field spec ctx store =
+    let eval_str v_opt =
+      match v_opt with
+      | None -> None
+      | Some (`String s) ->
+        let eval_ctx = State_store.eval_context ~extra:ctx store in
+        (match Expr_eval.evaluate s eval_ctx with
+         | Expr_eval.Str s -> Some s
+         | _ -> Some s)
+      | _ -> None
+    in
+    (match spec with
+     | `Assoc args ->
+       let field_opt = List.assoc_opt "field" args in
+       let value_opt = List.assoc_opt "value" args in
+       (match field_opt, value_opt with
+        | Some (`String field), Some v ->
+          let doc = ctrl#document in
+          let p = doc.print_preferences in
+          let m = p.marks_and_bleed in
+          let nm : Print_preferences.marks_and_bleed option =
+            let num () = eval_number (Some v) store ctx in
+            let bool_v () = eval_bool (Some v) store ctx in
+            let str_v () = eval_str (Some v) in
+            match field with
+            | "all_printer_marks" -> Some { m with all_printer_marks = bool_v () }
+            | "trim_marks" -> Some { m with trim_marks = bool_v () }
+            | "registration_marks" -> Some { m with registration_marks = bool_v () }
+            | "color_bars" -> Some { m with color_bars = bool_v () }
+            | "page_information" -> Some { m with page_information = bool_v () }
+            | "printer_mark_type" ->
+              (match str_v () with
+               | Some s -> Some { m with printer_mark_type =
+                                  Print_preferences.printer_mark_type_of_string s }
+               | None -> None)
+            | "trim_mark_weight" -> Some { m with trim_mark_weight = num () }
+            | "mark_offset" -> Some { m with mark_offset = num () }
+            | "use_document_bleed" -> Some { m with use_document_bleed = bool_v () }
+            | "bleed_top" -> Some { m with bleed_top = num () }
+            | "bleed_right" -> Some { m with bleed_right = num () }
+            | "bleed_bottom" -> Some { m with bleed_bottom = num () }
+            | "bleed_left" -> Some { m with bleed_left = num () }
+            | _ -> None
+          in
+          (match nm with
+           | Some new_m ->
+             let new_p = { p with marks_and_bleed = new_m } in
+             ctrl#set_document { doc with print_preferences = new_p }
+           | None -> ())
+        | _ -> ())
+     | _ -> ());
+    `Null
+  in
+
   (* geometry.export_pdf — PRINT.md §1B. Generates a PDF and prompts
      for a save location via GtkFileChooserDialog. *)
   let geometry_export_pdf _ _ _ =
@@ -3941,6 +3999,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
   [ ("doc.snapshot", doc_snapshot);
     ("doc.set_document_setup_field", doc_set_document_setup_field);
     ("doc.set_print_preferences_field", doc_set_print_preferences_field);
+    ("doc.set_marks_and_bleed_field", doc_set_marks_and_bleed_field);
     ("geometry.export_pdf", geometry_export_pdf);
     ("doc.artboard.probe_hit", doc_artboard_probe_hit);
     ("doc.artboard.probe_hover", doc_artboard_probe_hover);
