@@ -180,6 +180,37 @@ let default_output = {
   inks = process_cmyk_default_inks;
 }
 
+(** Transparency / overprint flattener preset (PRINT.md §Phase 6).
+    Used by both the Print Advanced tab and Document Setup. *)
+type flattener_preset =
+  | Low_resolution
+  | Medium_resolution
+  | High_resolution
+  | Custom_flattener
+
+let flattener_preset_to_string = function
+  | Low_resolution -> "low_resolution"
+  | Medium_resolution -> "medium_resolution"
+  | High_resolution -> "high_resolution"
+  | Custom_flattener -> "custom"
+let flattener_preset_of_string = function
+  | "low_resolution" -> Low_resolution
+  | "high_resolution" -> High_resolution
+  | "custom" -> Custom_flattener
+  | _ -> Medium_resolution
+
+(** Advanced sub-record on print_preferences (PRINT.md §Phase 6).
+    Phase 6 v1 stores the values; rendering effects deferred. *)
+type advanced = {
+  print_as_bitmap : bool;
+  overprint_flattener_preset : flattener_preset;
+}
+
+let default_advanced = {
+  print_as_bitmap = false;
+  overprint_flattener_preset = Medium_resolution;
+}
+
 (** Color-handling mode for the Color Management tab (PRINT.md §Phase 5).
     Three Adobe-standard choices. Stored only — full ICC profile
     management is a Phase 5+ deferral. *)
@@ -367,6 +398,8 @@ type t = {
   graphics : graphics;
   (* Color Management sub-record (PRINT.md §Phase 5). *)
   color_management : color_management;
+  (* Advanced sub-record (PRINT.md §Phase 6). *)
+  advanced : advanced;
 }
 
 let default = {
@@ -397,6 +430,7 @@ let default = {
   output = default_output;
   graphics = default_graphics;
   color_management = default_color_management;
+  advanced = default_advanced;
 }
 
 (** Workspace-level named saved configuration. Phase 1 ships only

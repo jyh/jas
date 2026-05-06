@@ -19,6 +19,13 @@ type t = {
   (* Tint glyphs that were rendered with a substituted font so the
      user can spot missing-font cases. *)
   highlight_substituted_glyphs : bool;
+  (* Phase 6 additions (deferred Phase 1A items). *)
+  grid_size : float;
+  grid_color : string;
+  paper_color : string;
+  simulate_colored_paper : bool;
+  transparency_flattener_preset : Print_preferences.flattener_preset;
+  discard_white_overprint : bool;
 }
 
 let default = {
@@ -29,6 +36,12 @@ let default = {
   bleed_uniform = true;
   show_images_outline = false;
   highlight_substituted_glyphs = false;
+  grid_size = 72.0;
+  grid_color = "#cccccc";
+  paper_color = "#ffffff";
+  simulate_colored_paper = false;
+  transparency_flattener_preset = Print_preferences.Medium_resolution;
+  discard_white_overprint = false;
 }
 
 (** Compute the on-canvas bleed guide rectangle for one artboard, in
