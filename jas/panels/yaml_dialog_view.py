@@ -36,7 +36,9 @@ class YamlDialogView(QDialog):
         self._ctx = ctx or {}
 
         # Load dialog definition
-        ws = load_workspace("workspace")
+        import os as _os
+        _ws_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "workspace")
+        ws = load_workspace(_ws_path)
         dialogs = ws.get("dialogs", {}) if ws else {}
         self._dialog_def = dialogs.get(dialog_id, {})
 
@@ -94,8 +96,13 @@ def show_yaml_dialog(dialog_id: str, params: dict,
     """
     from workspace_interpreter.effects import run_effects
 
-    # Use open_dialog effect to initialize dialog state
-    ws = load_workspace("workspace")
+    # Use open_dialog effect to initialize dialog state. Workspace
+    # path is resolved relative to this file so the module works
+    # regardless of the caller's cwd (the legacy ``"workspace"`` arg
+    # only worked when cwd was the project root).
+    import os as _os
+    _ws_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "workspace")
+    ws = load_workspace(_ws_path)
     dialogs = ws.get("dialogs", {}) if ws else {}
     run_effects(
         [{"open_dialog": {"id": dialog_id, "params": params}}],

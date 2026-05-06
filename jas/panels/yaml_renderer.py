@@ -68,7 +68,8 @@ def render_element(el: dict, store: StateStore, ctx: dict,
 def _render_container(el, store, ctx, dispatch_fn):
     widget = QWidget()
     layout_dir = el.get("layout", "column")
-    if layout_dir == "row":
+    is_row = layout_dir == "row"
+    if is_row:
         layout = QHBoxLayout(widget)
     else:
         layout = QVBoxLayout(widget)
@@ -81,9 +82,42 @@ def _render_container(el, store, ctx, dispatch_fn):
         p = _parse_padding(style["padding"])
         layout.setContentsMargins(*p)
 
-    for child in el.get("children", []):
+    # Bootstrap-style: when row children declare ``col: N``, give
+    # each its proportional weight so labels stack at the same x
+    # across rows. Without this Qt's QHBoxLayout distributes by
+    # natural size and the long-content cell (e.g. a select) absorbs
+    # the leftover space, pushing the input to the right edge while
+    # the label sits at the left.
+    children = el.get("children", []) or []
+    weights = [int(c.get("col", 0) or 0) for c in children] if is_row else []
+    any_weighted = any(w > 0 for w in weights)
+    for i, child in enumerate(children):
+        # ``type: spacer`` becomes a layout stretch rather than a
+        # QWidget — the widget version renders with default chrome
+        # that shows as a thin horizontal hairline in the Print
+        # dialog footer between the disabled / enabled button
+        # clusters. addStretch is invisible.
+        if isinstance(child, dict) and child.get("type") == "spacer":
+            layout.addStretch(1)
+            continue
         child_widget = render_element(child, store, ctx, dispatch_fn)
-        if child_widget:
+        if child_widget is None:
+            continue
+        if is_row and any_weighted:
+            weight = weights[i] if i < len(weights) else 0
+            if weight > 0:
+                # Wrap so the inner widget left-aligns within the
+                # weighted slot rather than stretching to fill it.
+                cell = QWidget()
+                cell_lay = QHBoxLayout(cell)
+                cell_lay.setContentsMargins(0, 0, 0, 0)
+                cell_lay.setSpacing(0)
+                cell_lay.addWidget(child_widget)
+                cell_lay.addStretch(1)
+                layout.addWidget(cell, weight)
+            else:
+                layout.addWidget(child_widget)
+        else:
             layout.addWidget(child_widget)
 
     return widget
@@ -155,26 +189,119 @@ def _render_button(el, store, ctx, dispatch_fn):
                 invert = bool(panel_state.get("new_masks_inverted", False))
                 ctrl.make_mask_on_selection(clip=clip, invert=invert)
         btn.clicked.connect(_on_click)
+    # Generic ``action: <name>`` dispatch. Used by dialog OK/Done/
+    # Print buttons whose YAML carries a direct ``action`` (not a
+    # ``behavior`` block). Resolves ``params`` against the live
+    # ctx so dialog.X expressions reflect typed-in values, then
+    # forwards to the caller-supplied dispatch_fn.
+    action_name = el.get("action")
+    if isinstance(action_name, str) and action_name and dispatch_fn:
+        raw_params = el.get("params", {})
+        if not isinstance(raw_params, dict):
+            raw_params = {}
+        def _dispatch_click():
+            # Strip baked-in scope keys from the captured ctx before
+            # passing as ``extra`` — eval_context's update() lets
+            # extra shadow the live store, which would re-substitute
+            # the stale dialog snapshot taken at dialog-open time and
+            # mask any typed-in writebacks.
+            extra = {k: v for k, v in ctx.items()
+                     if k not in ("state", "panel", "dialog", "param", "tool")}
+            eval_ctx = store.eval_context(extra)
+            resolved = {}
+            for k, v in raw_params.items():
+                if isinstance(v, str):
+                    r = evaluate(v, eval_ctx)
+                    resolved[k] = r.value
+                else:
+                    resolved[k] = v
+            dispatch_fn(action_name, resolved)
+        btn.clicked.connect(_dispatch_click)
     return btn
 
 
 def _render_icon_button(el, store, ctx, dispatch_fn):
     summary = el.get("summary", "")
-    btn = QPushButton(summary)
+    btn = QPushButton()
     btn.setFlat(True)
-    # bind.icon: expression whose evaluated string names the icon
-    # glyph. Python's icon_button currently shows the summary as
-    # its label rather than the glyph; the resolved icon name is
-    # evaluated here so a future glyph-rendering pass can pick it
-    # up without another YAML change. Used by op_link_indicator to
-    # flip between ``link_linked`` / ``link_unlinked`` as
-    # mask.linked changes.
+    # bind.icon evaluates to the glyph name (e.g. flips between
+    # ``chain_linked`` / ``chain_broken`` as ``dialog.bleed_uniform``
+    # toggles); ``icon`` is a static fallback. Try to render the
+    # SVG glyph from workspace icons.yaml; fall back to summary text
+    # when rendering fails or the icon can't be resolved.
     bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
     icon_expr = bind.get("icon") if isinstance(bind.get("icon"), str) else None
+    icon_name = None
     if icon_expr:
-        evaluate(icon_expr, store.eval_context(ctx))
+        # ``evaluate`` returns a Value wrapper; extract .value before
+        # checking the type. Without this the chain-link expression
+        # always resolves to a non-str instance and falls through to
+        # the summary-text fallback.
+        result = evaluate(icon_expr, store.eval_context(ctx))
+        result_value = getattr(result, "value", result)
+        if isinstance(result_value, str):
+            icon_name = result_value
+    if icon_name is None:
+        static_icon = el.get("icon")
+        if isinstance(static_icon, str) and static_icon:
+            icon_name = static_icon
+    style = el.get("style", {}) if isinstance(el.get("style"), dict) else {}
+    raw_size = style.get("size")
+    icon_size = int(raw_size) if isinstance(raw_size, (int, float)) else 20
+    pixmap = _workspace_icon_pixmap(icon_name, icon_size) if icon_name else None
+    if pixmap is not None:
+        from PySide6.QtGui import QIcon
+        from PySide6.QtCore import QSize
+        btn.setIcon(QIcon(pixmap))
+        btn.setIconSize(QSize(icon_size, icon_size))
+        btn.setToolTip(summary)
+    else:
+        btn.setText(summary)
     _wire_opacity_link_indicator_click(btn, el, ctx)
     return btn
+
+
+def _workspace_icon_pixmap(name: str, size: int):
+    """Render a named workspace icon (from icons.yaml) into a QPixmap.
+
+    Substitutes ``currentColor`` with a hardcoded text-color hex
+    (matches Dark Gray theme.text — threading the active theme is a
+    follow-up). Uses QSvgRenderer to rasterize the SVG; returns None
+    when the icon can't be loaded so the caller can fall back to a
+    text label.
+    """
+    from PySide6.QtCore import QByteArray
+    from PySide6.QtGui import QPainter, QPixmap
+    from PySide6.QtSvg import QSvgRenderer
+    import os as _os
+    try:
+        from workspace_interpreter.loader import load_workspace
+        ws_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "workspace")
+        ws = load_workspace(ws_path)
+    except Exception:
+        return None
+    icons = ws.get("icons", {}) if ws else {}
+    icon_def = icons.get(name)
+    if not isinstance(icon_def, dict):
+        return None
+    viewbox = icon_def.get("viewbox", "0 0 16 16")
+    svg_inner = icon_def.get("svg", "")
+    if not svg_inner:
+        return None
+    tinted = svg_inner.replace("currentColor", "#cccccc")
+    svg_doc = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{viewbox}" '
+        f'width="{size}" height="{size}">{tinted}</svg>'
+    )
+    renderer = QSvgRenderer(QByteArray(svg_doc.encode("utf-8")))
+    if not renderer.isValid():
+        return None
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return pixmap
 
 
 def _wire_opacity_link_indicator_click(btn: QPushButton, el: dict, ctx: dict):
@@ -207,7 +334,43 @@ def _render_slider(el, store, ctx, dispatch_fn):
 def _render_number_input(el, store, ctx, dispatch_fn):
     spin = QSpinBox()
     spin.setMinimum(el.get("min", 0))
-    spin.setMaximum(el.get("max", 100))
+    spin.setMaximum(el.get("max", 999999))
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    # Initial value from bind.value (panel.X or dialog.X).
+    if value_expr is not None:
+        try:
+            init_result = evaluate(value_expr, store.eval_context(ctx))
+            if isinstance(init_result.value, (int, float)):
+                spin.setValue(int(init_result.value))
+        except Exception:
+            pass
+    # Writeback path. Without this, typing into a spin box bound to
+    # dialog.bleed_top is purely cosmetic — the dialog state stays at
+    # its default so OK / canvas-bleed-guide both see zero.
+    if isinstance(value_expr, str):
+        if value_expr.startswith("dialog."):
+            field = value_expr[len("dialog."):]
+            def _on_change(v):
+                store.set_dialog(field, v)
+            spin.valueChanged.connect(_on_change)
+            def _on_finished():
+                spin.interpretText()
+                store.set_dialog(field, spin.value())
+            spin.editingFinished.connect(_on_finished)
+        elif value_expr.startswith("panel."):
+            panel_field = value_expr[len("panel."):]
+            def _on_change_panel(v):
+                pid = store.get_active_panel_id()
+                if pid is not None:
+                    store.set_panel(pid, panel_field, v)
+            spin.valueChanged.connect(_on_change_panel)
+            def _on_finished_panel():
+                spin.interpretText()
+                pid = store.get_active_panel_id()
+                if pid is not None:
+                    store.set_panel(pid, panel_field, spin.value())
+            spin.editingFinished.connect(_on_finished_panel)
     return spin
 
 
@@ -219,6 +382,24 @@ def _render_text_input(el, store, ctx, dispatch_fn):
     max_len = el.get("max_length")
     if max_len:
         edit.setMaxLength(int(max_len))
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    if value_expr is not None:
+        try:
+            init = evaluate(value_expr, store.eval_context(ctx))
+            v = getattr(init, "value", None)
+            if isinstance(v, str):
+                edit.setText(v)
+        except Exception:
+            pass
+    if isinstance(value_expr, str) and value_expr.startswith("dialog."):
+        field = value_expr[len("dialog."):]
+        # Commit on focus loss / Enter (editingFinished) so OK reads
+        # the typed value. textChanged would fire per keystroke
+        # which is noisier than the dialog needs.
+        def _on_finished():
+            store.set_dialog(field, edit.text())
+        edit.editingFinished.connect(_on_finished)
     return edit
 
 
@@ -298,6 +479,7 @@ def _render_toggle(el, store, ctx, dispatch_fn):
     label = el.get("label", "")
     cb = QCheckBox(label)
     _wire_opacity_mask_checkbox(cb, el, store, ctx)
+    _wire_dialog_checkbox(cb, el, store, ctx)
     return cb
 
 
@@ -305,7 +487,32 @@ def _render_checkbox(el, store, ctx, dispatch_fn):
     label = el.get("label", "")
     cb = QCheckBox(label)
     _wire_opacity_mask_checkbox(cb, el, store, ctx)
+    _wire_dialog_checkbox(cb, el, store, ctx)
     return cb
+
+
+def _wire_dialog_checkbox(cb: QCheckBox, el: dict, store: StateStore, ctx: dict):
+    """Initialise + wire writeback for ``bind.checked: dialog.X`` on a
+    checkbox/toggle. No-op for non-dialog binds (those flow through
+    _apply_bindings + the panel-level subscriber)."""
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    checked_expr = bind.get("checked") if isinstance(bind.get("checked"), str) else None
+    if not isinstance(checked_expr, str):
+        return
+    try:
+        init = evaluate(checked_expr, store.eval_context(ctx))
+        v = getattr(init, "value", None)
+        if isinstance(v, bool):
+            cb.setChecked(v)
+    except Exception:
+        pass
+    if checked_expr.startswith("dialog."):
+        field = checked_expr[len("dialog."):]
+        def _on_toggled(state: int):
+            from PySide6.QtCore import Qt as _Qt
+            store.set_dialog(field, state == _Qt.CheckState.Checked.value
+                             or bool(state))
+        cb.stateChanged.connect(_on_toggled)
 
 
 def _wire_opacity_mask_checkbox(cb: QCheckBox, el: dict, store: StateStore, ctx: dict):
@@ -343,6 +550,26 @@ def _render_select(el, store, ctx, dispatch_fn):
             combo.addItem(opt.get("label", ""), opt.get("value", ""))
         else:
             combo.addItem(str(opt), str(opt))
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    if value_expr is not None:
+        try:
+            init = evaluate(value_expr, store.eval_context(ctx))
+            v = getattr(init, "value", None)
+            if v is not None:
+                # Find the option whose data matches and select it.
+                for i in range(combo.count()):
+                    if combo.itemData(i) == v:
+                        combo.setCurrentIndex(i)
+                        break
+        except Exception:
+            pass
+    if isinstance(value_expr, str) and value_expr.startswith("dialog."):
+        field = value_expr[len("dialog."):]
+        def _on_select(idx: int):
+            data = combo.itemData(idx)
+            store.set_dialog(field, data)
+        combo.currentIndexChanged.connect(_on_select)
     return combo
 
 
@@ -1818,9 +2045,16 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
             if hasattr(widget, "setChecked"):
                 widget.setChecked(result.to_bool())
 
-    # Subscribe to state changes for reactive updates
+    # Subscribe to state changes for reactive updates. Strip the
+    # baked-in scope keys from ctx — eval_context.update(extra)
+    # would otherwise re-substitute the dialog/state snapshot
+    # captured at render time, snapping widgets back to their
+    # initial values whenever dialog state changes.
+    extra_ctx = {k: v for k, v in ctx.items()
+                 if k not in ("state", "panel", "dialog", "param", "tool")}
+
     def _update_bindings(key, value):
-        new_ctx = store.eval_context(ctx)
+        new_ctx = store.eval_context(extra_ctx)
         for prop, expr in bindings.items():
             if not isinstance(expr, str):
                 continue
@@ -1987,32 +2221,67 @@ def _render_tabs(el, store, ctx, dispatch_fn):
     rail_layout = QVBoxLayout(rail)
     rail_layout.setContentsMargins(0, 4, 0, 4)
     rail_layout.setSpacing(0)
+    rail_buttons = []
     for tab in tabs:
         tab_id = tab.get("id", "")
         label = tab.get("label", "")
-        is_active = tab_id == active_id
-        prefix = "▸ " if is_active else "  "
-        btn = QPushButton(prefix + label)
+        btn = QPushButton(label)
         btn.setFlat(True)
-        btn.setStyleSheet(
-            "text-align: left; padding: 4px 12px; "
-            + ("font-weight: 600;" if is_active else ""))
         rail_layout.addWidget(btn)
+        rail_buttons.append((tab_id, btn))
     rail_layout.addStretch(1)
     outer.addWidget(rail)
 
-    # Content area.
+    # Content area — held in a container we can clear + re-fill on
+    # tab switch. Active-tab visual state lives on the rail buttons,
+    # restyled on each switch so the user sees which tab is current.
     content_widget = QWidget()
     content_layout = QVBoxLayout(content_widget)
     content_layout.setContentsMargins(12, 12, 12, 12)
-    active_tab = next((t for t in tabs if t.get("id") == active_id), None)
-    if active_tab is not None:
-        content = active_tab.get("content")
-        if isinstance(content, dict):
-            child = render_element(content, store, ctx, dispatch_fn)
-            if child:
-                content_layout.addWidget(child)
-    content_layout.addStretch(1)
+    state_holder = {"active": active_id}
+
+    def _restyle_rail():
+        for tid, b in rail_buttons:
+            b.setText(("▸ " if tid == state_holder["active"] else "   ") + b.text().lstrip("▸ "))
+            b.setStyleSheet(
+                "text-align: left; padding: 4px 12px; "
+                + ("font-weight: 600;" if tid == state_holder["active"] else ""))
+
+    def _populate_content():
+        # Clear previous content, then render the now-active tab.
+        while content_layout.count():
+            item = content_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+        active_tab = next(
+            (t for t in tabs if t.get("id") == state_holder["active"]), None)
+        if active_tab is not None:
+            content = active_tab.get("content")
+            if isinstance(content, dict):
+                child = render_element(content, store, ctx, dispatch_fn)
+                if child:
+                    content_layout.addWidget(child)
+        content_layout.addStretch(1)
+
+    def _switch_to(target_id: str):
+        if target_id == state_holder["active"]:
+            return
+        state_holder["active"] = target_id
+        # Persist into dialog state so OK / Done / Print see the tab
+        # the user actually left on (and so init expressions on
+        # reopen restore the same tab).
+        if isinstance(value_expr, str) and value_expr.startswith("dialog."):
+            field = value_expr[len("dialog."):]
+            store.set_dialog(field, target_id)
+        _restyle_rail()
+        _populate_content()
+
+    for tab_id, btn in rail_buttons:
+        btn.clicked.connect(lambda _checked=False, tid=tab_id: _switch_to(tid))
+
+    _restyle_rail()
+    _populate_content()
     outer.addWidget(content_widget, 1)
 
     return widget
