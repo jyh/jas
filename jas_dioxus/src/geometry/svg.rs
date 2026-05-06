@@ -2141,6 +2141,7 @@ fn parse_print_preferences(
         marks_and_bleed: MarksAndBleed::default(),
         output: Output::default(),
         graphics: Graphics::default(),
+        color_management: ColorManagement::default(),
     };
     for child in &node.children {
         match strip_ns(&child.tag) {
@@ -3339,6 +3340,7 @@ mod tests {
             },
             output: Output::default(),
             graphics: Graphics::default(),
+            color_management: ColorManagement::default(),
         };
         let svg = document_to_svg(&doc);
         assert!(svg.contains("<jas:print-preferences"),
