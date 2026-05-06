@@ -74,6 +74,22 @@ type output = {
 
 val default_output : output
 
+type flattener_preset =
+  | Low_resolution
+  | Medium_resolution
+  | High_resolution
+  | Custom_flattener
+
+val flattener_preset_to_string : flattener_preset -> string
+val flattener_preset_of_string : string -> flattener_preset
+
+type advanced = {
+  print_as_bitmap : bool;
+  overprint_flattener_preset : flattener_preset;
+}
+
+val default_advanced : advanced
+
 type color_handling =
   | Let_app_determine
   | Let_printer_determine
@@ -173,6 +189,7 @@ type t = {
   output : output;
   graphics : graphics;
   color_management : color_management;
+  advanced : advanced;
 }
 
 val default : t

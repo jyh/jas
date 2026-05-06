@@ -113,7 +113,8 @@ let test_document_setup_only_emitted_when_non_default () =
   assert (contains json2 "\"bleed_top\":9.0")
 
 let test_document_setup_roundtrip () =
-  let s = { Document_setup.bleed_top = 9.0; bleed_right = 9.0;
+  let s = { Document_setup.default with
+            bleed_top = 9.0; bleed_right = 9.0;
             bleed_bottom = 9.0; bleed_left = 9.0;
             bleed_uniform = false;
             show_images_outline = true;
@@ -168,7 +169,8 @@ let test_print_preferences_roundtrip () =
             marks_and_bleed = Print_preferences.default_marks_and_bleed;
             output = Print_preferences.default_output;
             graphics = Print_preferences.default_graphics;
-            color_management = Print_preferences.default_color_management } in
+            color_management = Print_preferences.default_color_management;
+            advanced = Print_preferences.default_advanced } in
   let doc = make_document ~print_preferences:p [||] in
   let json = document_to_test_json doc in
   let doc2 = test_json_to_document json in
@@ -199,6 +201,55 @@ let test_printer_mark_type_strings () =
   assert (printer_mark_type_of_string "roman" = Roman);
   assert (printer_mark_type_of_string "japanese" = Japanese);
   assert (printer_mark_type_of_string "garbage" = Roman)
+
+(* Advanced + DocumentSetup additions (PRINT.md §Phase 6) *)
+
+let test_advanced_defaults () =
+  let a = Print_preferences.default_advanced in
+  assert (a.print_as_bitmap = false);
+  assert (a.overprint_flattener_preset = Print_preferences.Medium_resolution)
+
+let test_flattener_preset_strings () =
+  let open Print_preferences in
+  assert (flattener_preset_to_string Low_resolution = "low_resolution");
+  assert (flattener_preset_to_string Medium_resolution = "medium_resolution");
+  assert (flattener_preset_to_string High_resolution = "high_resolution");
+  assert (flattener_preset_to_string Custom_flattener = "custom")
+
+let test_advanced_roundtrip () =
+  let a = { Print_preferences.print_as_bitmap = true;
+            overprint_flattener_preset = Print_preferences.High_resolution } in
+  let p = { Print_preferences.default with advanced = a } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"advanced\"");
+  assert (contains json "\"print_as_bitmap\":true");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.advanced = a)
+
+let test_document_setup_phase6_roundtrip () =
+  let s = { Document_setup.bleed_top = 0.0; bleed_right = 0.0;
+            bleed_bottom = 0.0; bleed_left = 0.0;
+            bleed_uniform = true;
+            show_images_outline = false;
+            highlight_substituted_glyphs = false;
+            grid_size = 36.0;
+            grid_color = "#0099ff";
+            paper_color = "#fff8e7";
+            simulate_colored_paper = true;
+            transparency_flattener_preset = Print_preferences.High_resolution;
+            discard_white_overprint = true } in
+  let doc = make_document ~document_setup:s [||] in
+  let json = document_to_test_json doc in
+  let doc2 = test_json_to_document json in
+  assert (doc2.document_setup = s)
 
 (* Color Management sub-record (PRINT.md §Phase 5) *)
 
@@ -407,6 +458,12 @@ let () =
       Alcotest.test_case "defaults" `Quick test_color_management_defaults;
       Alcotest.test_case "enum strings" `Quick test_color_management_enum_strings;
       Alcotest.test_case "roundtrip" `Quick test_color_management_roundtrip;
+    ];
+    "advanced", [
+      Alcotest.test_case "defaults" `Quick test_advanced_defaults;
+      Alcotest.test_case "flattener preset strings" `Quick test_flattener_preset_strings;
+      Alcotest.test_case "roundtrip" `Quick test_advanced_roundtrip;
+      Alcotest.test_case "document_setup phase 6 roundtrip" `Quick test_document_setup_phase6_roundtrip;
     ];
     "test_json", [
       Alcotest.test_case "document_setup omitted when default" `Quick test_document_setup_only_emitted_when_non_default;

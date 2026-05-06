@@ -9,6 +9,12 @@ type t = {
   bleed_uniform : bool;
   show_images_outline : bool;
   highlight_substituted_glyphs : bool;
+  grid_size : float;
+  grid_color : string;
+  paper_color : string;
+  simulate_colored_paper : bool;
+  transparency_flattener_preset : Print_preferences.flattener_preset;
+  discard_white_overprint : bool;
 }
 
 val default : t

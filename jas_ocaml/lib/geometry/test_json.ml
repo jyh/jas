@@ -506,8 +506,22 @@ let document_setup_json (s : Document_setup.t) =
   json_num o "bleed_right" s.bleed_right;
   json_num o "bleed_top" s.bleed_top;
   json_bool o "bleed_uniform" s.bleed_uniform;
+  json_bool o "discard_white_overprint" s.discard_white_overprint;
+  json_str o "grid_color" s.grid_color;
+  json_num o "grid_size" s.grid_size;
   json_bool o "highlight_substituted_glyphs" s.highlight_substituted_glyphs;
+  json_str o "paper_color" s.paper_color;
   json_bool o "show_images_outline" s.show_images_outline;
+  json_bool o "simulate_colored_paper" s.simulate_colored_paper;
+  json_str o "transparency_flattener_preset"
+    (Print_preferences.flattener_preset_to_string s.transparency_flattener_preset);
+  json_build o
+
+let advanced_json (a : Print_preferences.advanced) =
+  let o = json_obj () in
+  json_str o "overprint_flattener_preset"
+    (Print_preferences.flattener_preset_to_string a.overprint_flattener_preset);
+  json_bool o "print_as_bitmap" a.print_as_bitmap;
   json_build o
 
 let color_management_json (c : Print_preferences.color_management) =
@@ -579,6 +593,7 @@ let marks_and_bleed_json (m : Print_preferences.marks_and_bleed) =
 
 let print_preferences_json (p : Print_preferences.t) =
   let o = json_obj () in
+  json_raw o "advanced" (advanced_json p.advanced);
   json_str o "artboard_range" p.artboard_range;
   json_str o "artboard_range_mode"
     (Print_preferences.artboard_range_mode_to_string p.artboard_range_mode);
@@ -1005,6 +1020,8 @@ let parse_artboard_options j : Artboard.options =
 let parse_document_setup j : Document_setup.t =
   let open Yojson.Safe.Util in
   let d = Document_setup.default in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
   let pick_num name d_val =
     try j |> member name |> to_num with _ -> d_val in
   let pick_bool name d_val =
@@ -1019,6 +1036,32 @@ let parse_document_setup j : Document_setup.t =
       show_images_outline = pick_bool "show_images_outline" d.show_images_outline;
       highlight_substituted_glyphs =
         pick_bool "highlight_substituted_glyphs" d.highlight_substituted_glyphs;
+      grid_size = pick_num "grid_size" d.grid_size;
+      grid_color = pick_str "grid_color" d.grid_color;
+      paper_color = pick_str "paper_color" d.paper_color;
+      simulate_colored_paper = pick_bool "simulate_colored_paper" d.simulate_colored_paper;
+      transparency_flattener_preset =
+        Print_preferences.flattener_preset_of_string
+          (pick_str "transparency_flattener_preset"
+             (Print_preferences.flattener_preset_to_string d.transparency_flattener_preset));
+      discard_white_overprint = pick_bool "discard_white_overprint" d.discard_white_overprint;
+    }
+  with _ -> d
+
+let parse_advanced j : Print_preferences.advanced =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_advanced in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      print_as_bitmap = pick_bool "print_as_bitmap" d.print_as_bitmap;
+      overprint_flattener_preset =
+        Print_preferences.flattener_preset_of_string
+          (pick_str "overprint_flattener_preset"
+             (Print_preferences.flattener_preset_to_string d.overprint_flattener_preset));
     }
   with _ -> d
 
@@ -1194,6 +1237,11 @@ let parse_print_preferences j : Print_preferences.t =
     | `Null -> d.color_management
     | v -> parse_color_management v
   in
+  let pick_advanced () =
+    match try j |> member "advanced" with _ -> `Null with
+    | `Null -> d.advanced
+    | v -> parse_advanced v
+  in
   try
     {
       preset_name = pick_str "preset_name" d.preset_name;
@@ -1238,6 +1286,7 @@ let parse_print_preferences j : Print_preferences.t =
       output = pick_output ();
       graphics = pick_graphics ();
       color_management = pick_color_management ();
+      advanced = pick_advanced ();
     }
   with _ -> d
 
