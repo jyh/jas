@@ -523,6 +523,17 @@ private func documentSetupJson(_ s: DocumentSetup) -> String {
     return o.build()
 }
 
+private func graphicsJson(_ g: Graphics) -> String {
+    let o = JsonObj()
+    o.bool("compatible_gradient_printing", g.compatibleGradientPrinting)
+    o.str("data_format", g.dataFormat.rawValue)
+    o.num("flatness", g.flatness)
+    o.str("font_download", g.fontDownload.rawValue)
+    o.str("postscript_level", g.postscriptLevel.rawValue)
+    o.num("raster_effects_resolution", g.rasterEffectsResolution)
+    return o.build()
+}
+
 private func inkOverrideJson(_ ink: InkOverride) -> String {
     let o = JsonObj()
     o.num("angle", ink.angle)
@@ -576,6 +587,7 @@ private func printPreferencesJson(_ p: PrintPreferences) -> String {
     o.bool("collate", p.collate)
     o.int("copies", p.copies)
     o.num("custom_scale", p.customScale)
+    o.raw("graphics", graphicsJson(p.graphics))
     o.bool("ignore_artboards", p.ignoreArtboards)
     o.raw("marks_and_bleed", marksAndBleedJson(p.marksAndBleed))
     o.num("media_height", p.mediaHeight)
@@ -990,6 +1002,19 @@ private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
     )
 }
 
+private func parseGraphics(_ v: Any?) -> Graphics {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = Graphics.default
+    return Graphics(
+        flatness: (d["flatness"] as? NSNumber)?.doubleValue ?? def.flatness,
+        fontDownload: FontDownload(rawValue: (d["font_download"] as? String) ?? "") ?? def.fontDownload,
+        postscriptLevel: PostScriptLevel(rawValue: (d["postscript_level"] as? String) ?? "") ?? def.postscriptLevel,
+        dataFormat: DataFormat(rawValue: (d["data_format"] as? String) ?? "") ?? def.dataFormat,
+        compatibleGradientPrinting: (d["compatible_gradient_printing"] as? Bool) ?? def.compatibleGradientPrinting,
+        rasterEffectsResolution: (d["raster_effects_resolution"] as? NSNumber)?.doubleValue ?? def.rasterEffectsResolution
+    )
+}
+
 private func parseInkOverride(_ v: Any?) -> InkOverride {
     guard let d = v as? [String: Any] else {
         return InkOverride(name: "")
@@ -1075,7 +1100,8 @@ private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
         tileOverlapV: (d["tile_overlap_v"] as? NSNumber)?.doubleValue ?? def.tileOverlapV,
         tileRange: (d["tile_range"] as? String) ?? def.tileRange,
         marksAndBleed: parseMarksAndBleed(d["marks_and_bleed"]),
-        output: parseOutput(d["output"])
+        output: parseOutput(d["output"]),
+        graphics: parseGraphics(d["graphics"])
     )
 }
 
