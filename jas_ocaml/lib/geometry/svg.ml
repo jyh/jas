@@ -369,6 +369,17 @@ let ink_override_to_xml indent (ink : Print_preferences.ink_override) =
     (fmt ink.angle)
     (Print_preferences.dot_shape_to_string ink.dot_shape)
 
+let graphics_to_xml indent (g : Print_preferences.graphics) =
+  Printf.sprintf
+    "%s<jas:graphics flatness=\"%s\" font-download=\"%s\" postscript-level=\"%s\" data-format=\"%s\" compatible-gradient-printing=\"%s\" raster-effects-resolution=\"%s\"/>"
+    indent
+    (fmt g.flatness)
+    (Print_preferences.font_download_to_string g.font_download)
+    (Print_preferences.postscript_level_to_string g.postscript_level)
+    (Print_preferences.data_format_to_string g.data_format)
+    (bool_str g.compatible_gradient_printing)
+    (fmt g.raster_effects_resolution)
+
 let output_to_xml indent (o : Print_preferences.output) =
   let inner = indent ^ "  " in
   let header = Printf.sprintf
@@ -429,10 +440,11 @@ let print_preferences_to_xml indent (p : Print_preferences.t) =
     | Some n -> Printf.sprintf " printer-name=\"%s\"" (escape_xml n)
     | None -> ""
   in
-  Printf.sprintf "%s%s>\n%s\n%s\n%s</jas:print-preferences>"
+  Printf.sprintf "%s%s>\n%s\n%s\n%s\n%s</jas:print-preferences>"
     header printer_attr
     (marks_and_bleed_to_xml inner p.marks_and_bleed)
     (output_to_xml inner p.output)
+    (graphics_to_xml inner p.graphics)
     indent
 
 let document_to_svg doc =
@@ -1180,6 +1192,26 @@ let parse_document_setup_attrs attrs : Document_setup.t =
       attr_bool attrs "highlight-substituted-glyphs" d.highlight_substituted_glyphs;
   }
 
+let parse_graphics_attrs attrs : Print_preferences.graphics =
+  let d = Print_preferences.default_graphics in
+  {
+    flatness = attr_float attrs "flatness" d.flatness;
+    font_download =
+      Print_preferences.font_download_of_string
+        (attr_str attrs "font-download"
+           (Print_preferences.font_download_to_string d.font_download));
+    postscript_level =
+      Print_preferences.postscript_level_of_string
+        (attr_str attrs "postscript-level"
+           (Print_preferences.postscript_level_to_string d.postscript_level));
+    data_format =
+      Print_preferences.data_format_of_string
+        (attr_str attrs "data-format"
+           (Print_preferences.data_format_to_string d.data_format));
+    compatible_gradient_printing = attr_bool attrs "compatible-gradient-printing" d.compatible_gradient_printing;
+    raster_effects_resolution = attr_float attrs "raster-effects-resolution" d.raster_effects_resolution;
+  }
+
 let parse_output_attrs attrs : Print_preferences.output =
   let d = Print_preferences.default_output in
   {
@@ -1235,6 +1267,7 @@ let parse_marks_and_bleed_attrs attrs : Print_preferences.marks_and_bleed =
 
 let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_marks_and_bleed)
     ?(output=Print_preferences.default_output)
+    ?(graphics=Print_preferences.default_graphics)
     attrs : Print_preferences.t =
   let d = Print_preferences.default in
   let printer_name = match get_attr attrs "printer-name" with
@@ -1281,7 +1314,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     tile_range = attr_str attrs "tile-range" d.tile_range;
     marks_and_bleed;
     output;
-    graphics = Print_preferences.default_graphics;
+    graphics;
   }
 
 (* Walk the SVG once via Xmlm, pulling jas:document-setup +
@@ -1322,11 +1355,10 @@ let parse_jas_print_blocks svg =
          | "print-preferences" ->
            let mab = ref Print_preferences.default_marks_and_bleed in
            let out = ref Print_preferences.default_output in
+           let gfx = ref Print_preferences.default_graphics in
            let inks = ref [] in
            (* Walk children: nested marks-and-bleed, output (with its
-              own ink children). When <jas:output> is present, its
-              attribute set is captured into [out_attrs] and child
-              <jas:ink> elements accumulate into [inks]. *)
+              own ink children), graphics. *)
            let rec walk_pp () =
              match Xmlm.peek i with
              | `El_end -> let _ = Xmlm.input i in ()
@@ -1360,12 +1392,15 @@ let parse_jas_print_blocks svg =
                     else !inks
                   in
                   out := { (parse_output_attrs cattrs_a) with inks = parsed_inks }
+                | "graphics" ->
+                  gfx := parse_graphics_attrs cattrs_a;
+                  skip_element i
                 | _ -> skip_element i);
                walk_pp ()
              | `Dtd _ -> let _ = Xmlm.input i in walk_pp ()
            in
            walk_pp ();
-           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab ~output:!out attrs
+           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab ~output:!out ~graphics:!gfx attrs
          | _ ->
            skip_element i);
         walk_namedview ()
