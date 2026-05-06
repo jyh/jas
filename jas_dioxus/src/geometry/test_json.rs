@@ -12,7 +12,10 @@ use crate::document::print_preferences::{
     artboard_range_mode_from, artboard_range_mode_str, media_size_from, media_size_str,
     orientation_from, orientation_str, print_layers_from, print_layers_str,
     printer_mark_type_from, printer_mark_type_str, scaling_mode_from,
-    scaling_mode_str, MarksAndBleed, PrintPreferences,
+    scaling_mode_str,
+    output_mode_from, output_mode_str, emulsion_from, emulsion_str,
+    image_polarity_from, image_polarity_str, dot_shape_from, dot_shape_str,
+    InkOverride, MarksAndBleed, Output, PrintPreferences,
 };
 use crate::geometry::element::*;
 
@@ -612,6 +615,33 @@ fn document_setup_json(s: &DocumentSetup) -> String {
     o.build()
 }
 
+fn ink_override_json(ink: &InkOverride) -> String {
+    let mut o = JsonObj::new();
+    o.num("angle", ink.angle);
+    o.str_val("dot_shape", dot_shape_str(&ink.dot_shape));
+    o.num("frequency", ink.frequency);
+    o.str_val("name", &ink.name);
+    o.bool_val("print", ink.print);
+    o.build()
+}
+
+fn inks_json(inks: &[InkOverride]) -> String {
+    let items: Vec<String> = inks.iter().map(ink_override_json).collect();
+    json_array(&items)
+}
+
+fn output_json(out: &Output) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("convert_spot_to_process", out.convert_spot_to_process);
+    o.str_val("emulsion", emulsion_str(&out.emulsion));
+    o.str_val("image_polarity", image_polarity_str(&out.image_polarity));
+    o.raw("inks", inks_json(&out.inks));
+    o.str_val("mode", output_mode_str(&out.mode));
+    o.bool_val("overprint_black", out.overprint_black);
+    o.str_val("printer_resolution", &out.printer_resolution);
+    o.build()
+}
+
 fn marks_and_bleed_json(m: &MarksAndBleed) -> String {
     let mut o = JsonObj::new();
     o.bool_val("all_printer_marks", m.all_printer_marks);
@@ -644,6 +674,7 @@ fn print_preferences_json(p: &PrintPreferences) -> String {
     o.str_val("media_size", media_size_str(&p.media_size));
     o.num("media_width", p.media_width);
     o.str_val("orientation", orientation_str(&p.orientation));
+    o.raw("output", output_json(&p.output));
     o.num("placement_x", p.placement_x);
     o.num("placement_y", p.placement_y);
     o.str_val("preset_name", &p.preset_name);
@@ -1130,6 +1161,41 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
     }
 }
 
+fn parse_ink_override(v: &serde_json::Value) -> InkOverride {
+    InkOverride {
+        name: v["name"].as_str().map(String::from).unwrap_or_default(),
+        print: v["print"].as_bool().unwrap_or(true),
+        frequency: v["frequency"].as_f64().unwrap_or(75.0),
+        angle: v["angle"].as_f64().unwrap_or(45.0),
+        dot_shape: v["dot_shape"].as_str()
+            .map(dot_shape_from)
+            .unwrap_or(crate::document::print_preferences::DotShape::Round),
+    }
+}
+
+fn parse_output(v: &serde_json::Value) -> Output {
+    if v.is_null() || !v.is_object() {
+        return Output::default();
+    }
+    let d = Output::default();
+    let inks = match v["inks"].as_array() {
+        Some(arr) => arr.iter().map(parse_ink_override).collect(),
+        None => d.inks,
+    };
+    Output {
+        mode: v["mode"].as_str().map(output_mode_from).unwrap_or(d.mode),
+        emulsion: v["emulsion"].as_str().map(emulsion_from).unwrap_or(d.emulsion),
+        image_polarity: v["image_polarity"].as_str()
+            .map(image_polarity_from).unwrap_or(d.image_polarity),
+        printer_resolution: v["printer_resolution"].as_str()
+            .map(String::from).unwrap_or(d.printer_resolution),
+        convert_spot_to_process: v["convert_spot_to_process"].as_bool()
+            .unwrap_or(d.convert_spot_to_process),
+        overprint_black: v["overprint_black"].as_bool().unwrap_or(d.overprint_black),
+        inks,
+    }
+}
+
 fn parse_marks_and_bleed(v: &serde_json::Value) -> MarksAndBleed {
     if v.is_null() || !v.is_object() {
         return MarksAndBleed::default();
@@ -1184,6 +1250,7 @@ fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
         tile_overlap_v: v["tile_overlap_v"].as_f64().unwrap_or(d.tile_overlap_v),
         tile_range: v["tile_range"].as_str().map(String::from).unwrap_or(d.tile_range),
         marks_and_bleed: parse_marks_and_bleed(&v["marks_and_bleed"]),
+        output: parse_output(&v["output"]),
     }
 }
 
@@ -1471,6 +1538,33 @@ mod tests {
     }
 
     #[test]
+    fn output_round_trip_carries_all_inks_and_choices() {
+        use crate::document::print_preferences::{
+            DotShape, Emulsion, ImagePolarity, InkOverride, Output, OutputMode,
+        };
+        let mut d = Document::default();
+        d.print_preferences.output = Output {
+            mode: OutputMode::Separations,
+            emulsion: Emulsion::DownRight,
+            image_polarity: ImagePolarity::Negative,
+            printer_resolution: "150 lpi / 1200 dpi".to_string(),
+            convert_spot_to_process: true,
+            overprint_black: true,
+            inks: vec![
+                InkOverride { name: "Process Cyan".into(),    print: false, frequency: 100.0, angle: 105.0, dot_shape: DotShape::Ellipse },
+                InkOverride { name: "PANTONE 185 C".into(),   print: true,  frequency:  85.0, angle:  45.0, dot_shape: DotShape::Square },
+            ],
+        };
+        let json = document_to_test_json(&d);
+        // Output appears under print_preferences with the inks array.
+        assert!(json.contains("\"output\""), "json:\n{json}");
+        assert!(json.contains("\"inks\""), "json:\n{json}");
+        assert!(json.contains("\"PANTONE 185 C\""), "json:\n{json}");
+        let d2 = test_json_to_document(&json);
+        assert_eq!(d2.print_preferences.output, d.print_preferences.output);
+    }
+
+    #[test]
     fn print_preferences_only_emitted_when_non_default() {
         let d = Document::default();
         let json = document_to_test_json(&d);
@@ -1486,7 +1580,8 @@ mod tests {
     #[test]
     fn print_preferences_roundtrip() {
         use crate::document::print_preferences::{
-            ArtboardRangeMode, MarksAndBleed, MediaSize, Orientation, PrintLayers,
+            ArtboardRangeMode, DotShape, Emulsion, ImagePolarity, InkOverride,
+            MarksAndBleed, MediaSize, Orientation, Output, OutputMode, PrintLayers,
             PrinterMarkType, PrintPreferences, ScalingMode,
         };
         let mut d = Document::default();
@@ -1528,6 +1623,19 @@ mod tests {
                 bleed_right: 18.0,
                 bleed_bottom: 12.0,
                 bleed_left: 18.0,
+            },
+            output: Output {
+                mode: OutputMode::Separations,
+                emulsion: Emulsion::DownRight,
+                image_polarity: ImagePolarity::Negative,
+                printer_resolution: "150 lpi / 1200 dpi".to_string(),
+                convert_spot_to_process: true,
+                overprint_black: true,
+                inks: vec![
+                    InkOverride { name: "Process Cyan".into(),    print: false, frequency: 100.0, angle: 105.0, dot_shape: DotShape::Ellipse },
+                    InkOverride { name: "Process Magenta".into(), print: true,  frequency: 100.0, angle:  75.0, dot_shape: DotShape::Round },
+                    InkOverride { name: "PANTONE 185 C".into(),   print: true,  frequency:  85.0, angle:  45.0, dot_shape: DotShape::Square },
+                ],
             },
         };
         let json = document_to_test_json(&d);
