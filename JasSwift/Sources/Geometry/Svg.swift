@@ -408,15 +408,107 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
 public func documentToSvg(_ doc: Document) -> String {
     let b = doc.bounds
     let vb = "\(fmt(px(b.x))) \(fmt(px(b.y))) \(fmt(px(b.width))) \(fmt(px(b.height)))"
+    let setupDefault = doc.documentSetup == DocumentSetup.default
+    let prefsDefault = doc.printPreferences == PrintPreferences.default
+    let needsJasNs = !setupDefault || !prefsDefault
+    let needsSodipodi = needsJasNs
+    var nsAttrs = " xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\""
+    if needsSodipodi {
+        nsAttrs += " xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd\""
+    }
+    if needsJasNs {
+        nsAttrs += " xmlns:jas=\"urn:jas:1\""
+    }
     var lines = [
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" viewBox=\"\(vb)\" width=\"\(fmt(px(b.width)))\" height=\"\(fmt(px(b.height)))\">",
+        "<svg\(nsAttrs) viewBox=\"\(vb)\" width=\"\(fmt(px(b.width)))\" height=\"\(fmt(px(b.height)))\">",
     ]
+    // PRINT.md §Phase 2: persist DocumentSetup and PrintPreferences
+    // as <jas:*> children of a <sodipodi:namedview> block so reopening
+    // a saved SVG restores the bleed, print-dialog, and
+    // marks-and-bleed state. Conservative writer: emit nothing when
+    // both are default. Artboards aren't yet persisted in this
+    // port's SVG (separate cross-port follow-up).
+    if needsJasNs {
+        lines.append("  <sodipodi:namedview id=\"namedview1\">")
+        if !setupDefault {
+            lines.append(documentSetupToSvg(doc.documentSetup, indent: "    "))
+        }
+        if !prefsDefault {
+            lines.append(printPreferencesToSvg(doc.printPreferences, indent: "    "))
+        }
+        lines.append("  </sodipodi:namedview>")
+    }
     for layer in doc.layers {
         lines.append(elementSvg(.layer(layer), indent: "  "))
     }
     lines.append("</svg>")
     return lines.joined(separator: "\n")
+}
+
+private func boolStr(_ b: Bool) -> String { b ? "true" : "false" }
+
+private func documentSetupToSvg(_ s: DocumentSetup, indent: String) -> String {
+    return "\(indent)<jas:document-setup"
+        + " bleed-top=\"\(fmt(s.bleedTop))\""
+        + " bleed-right=\"\(fmt(s.bleedRight))\""
+        + " bleed-bottom=\"\(fmt(s.bleedBottom))\""
+        + " bleed-left=\"\(fmt(s.bleedLeft))\""
+        + " bleed-uniform=\"\(boolStr(s.bleedUniform))\""
+        + " show-images-outline=\"\(boolStr(s.showImagesOutline))\""
+        + " highlight-substituted-glyphs=\"\(boolStr(s.highlightSubstitutedGlyphs))\""
+        + "/>"
+}
+
+private func marksAndBleedToSvg(_ m: MarksAndBleed, indent: String) -> String {
+    return "\(indent)<jas:marks-and-bleed"
+        + " all-printer-marks=\"\(boolStr(m.allPrinterMarks))\""
+        + " trim-marks=\"\(boolStr(m.trimMarks))\""
+        + " registration-marks=\"\(boolStr(m.registrationMarks))\""
+        + " color-bars=\"\(boolStr(m.colorBars))\""
+        + " page-information=\"\(boolStr(m.pageInformation))\""
+        + " printer-mark-type=\"\(m.printerMarkType.rawValue)\""
+        + " trim-mark-weight=\"\(fmt(m.trimMarkWeight))\""
+        + " mark-offset=\"\(fmt(m.markOffset))\""
+        + " use-document-bleed=\"\(boolStr(m.useDocumentBleed))\""
+        + " bleed-top=\"\(fmt(m.bleedTop))\""
+        + " bleed-right=\"\(fmt(m.bleedRight))\""
+        + " bleed-bottom=\"\(fmt(m.bleedBottom))\""
+        + " bleed-left=\"\(fmt(m.bleedLeft))\""
+        + "/>"
+}
+
+private func printPreferencesToSvg(_ p: PrintPreferences, indent: String) -> String {
+    var s = "\(indent)<jas:print-preferences"
+    s += " preset-name=\"\(escapeXml(p.presetName))\""
+    s += " copies=\"\(p.copies)\""
+    s += " collate=\"\(boolStr(p.collate))\""
+    s += " reverse-order=\"\(boolStr(p.reverseOrder))\""
+    s += " artboard-range-mode=\"\(p.artboardRangeMode.rawValue)\""
+    s += " artboard-range=\"\(escapeXml(p.artboardRange))\""
+    s += " ignore-artboards=\"\(boolStr(p.ignoreArtboards))\""
+    s += " skip-blank-artboards=\"\(boolStr(p.skipBlankArtboards))\""
+    s += " media-size=\"\(p.mediaSize.rawValue)\""
+    s += " media-width=\"\(fmt(p.mediaWidth))\""
+    s += " media-height=\"\(fmt(p.mediaHeight))\""
+    s += " orientation=\"\(p.orientation.rawValue)\""
+    s += " auto-rotate=\"\(boolStr(p.autoRotate))\""
+    s += " transverse=\"\(boolStr(p.transverse))\""
+    s += " print-layers=\"\(p.printLayers.rawValue)\""
+    s += " placement-x=\"\(fmt(p.placementX))\""
+    s += " placement-y=\"\(fmt(p.placementY))\""
+    s += " scaling-mode=\"\(p.scalingMode.rawValue)\""
+    s += " custom-scale=\"\(fmt(p.customScale))\""
+    s += " tile-overlap-h=\"\(fmt(p.tileOverlapH))\""
+    s += " tile-overlap-v=\"\(fmt(p.tileOverlapV))\""
+    s += " tile-range=\"\(escapeXml(p.tileRange))\""
+    if let pn = p.printerName {
+        s += " printer-name=\"\(escapeXml(pn))\""
+    }
+    s += ">\n"
+    s += marksAndBleedToSvg(p.marksAndBleed, indent: indent + "  ")
+    s += "\n\(indent)</jas:print-preferences>"
+    return s
 }
 
 // MARK: - SVG Import
@@ -1197,9 +1289,16 @@ public func svgToDocument(_ svg: String) -> Document {
         return Document(layers: [Layer(children: [])], artboards: [])
     }
 
+    let (parsedSetup, parsedPrefs) = parseJasPrintBlocks(root)
     var layers: [Layer] = []
     if let childNodes = root.children {
         for child in childNodes {
+            // Skip the namedview wrapper — it carries
+            // <jas:document-setup> / <jas:print-preferences>
+            // metadata pulled out by parseJasPrintBlocks above.
+            if let elem = child as? XMLElement, elem.localName == "namedview" {
+                continue
+            }
             guard let elem = parseElement(child) else { continue }
             switch elem {
             case .layer(let l):
@@ -1222,6 +1321,127 @@ public func svgToDocument(_ svg: String) -> Document {
         }
     }
     if layers.isEmpty { layers = [Layer(children: [])] }
-    return normalizeDocument(Document(layers: layers, artboards: []))
+    return normalizeDocument(Document(
+        layers: layers, artboards: [],
+        documentSetup: parsedSetup,
+        printPreferences: parsedPrefs))
+}
+
+// MARK: - Jas-namespaced print metadata parsing (PRINT.md §Phase 2)
+
+private func attrAny(_ node: XMLElement, _ name: String) -> String? {
+    // Try the bare name first; fall back to a `jas:`-prefixed
+    // variant if a writer happens to keep namespace prefixes.
+    if let v = node.attribute(forName: name)?.stringValue { return v }
+    if let v = node.attribute(forName: "jas:" + name)?.stringValue { return v }
+    return nil
+}
+
+private func parseBoolAttr(_ node: XMLElement, _ name: String, _ def: Bool) -> Bool {
+    guard let v = attrAny(node, name) else { return def }
+    switch v {
+    case "true", "1", "yes": return true
+    case "false", "0", "no": return false
+    default: return def
+    }
+}
+
+private func parseDoubleAttr(_ node: XMLElement, _ name: String, _ def: Double) -> Double {
+    guard let v = attrAny(node, name), let n = Double(v) else { return def }
+    return n
+}
+
+private func parseIntAttr(_ node: XMLElement, _ name: String, _ def: Int) -> Int {
+    guard let v = attrAny(node, name), let n = Int(v) else { return def }
+    return n
+}
+
+private func parseDocumentSetupNode(_ node: XMLElement) -> DocumentSetup {
+    let d = DocumentSetup.default
+    return DocumentSetup(
+        bleedTop: parseDoubleAttr(node, "bleed-top", d.bleedTop),
+        bleedRight: parseDoubleAttr(node, "bleed-right", d.bleedRight),
+        bleedBottom: parseDoubleAttr(node, "bleed-bottom", d.bleedBottom),
+        bleedLeft: parseDoubleAttr(node, "bleed-left", d.bleedLeft),
+        bleedUniform: parseBoolAttr(node, "bleed-uniform", d.bleedUniform),
+        showImagesOutline: parseBoolAttr(node, "show-images-outline", d.showImagesOutline),
+        highlightSubstitutedGlyphs: parseBoolAttr(node, "highlight-substituted-glyphs", d.highlightSubstitutedGlyphs)
+    )
+}
+
+private func parseMarksAndBleedNode(_ node: XMLElement) -> MarksAndBleed {
+    let d = MarksAndBleed.default
+    return MarksAndBleed(
+        allPrinterMarks: parseBoolAttr(node, "all-printer-marks", d.allPrinterMarks),
+        trimMarks: parseBoolAttr(node, "trim-marks", d.trimMarks),
+        registrationMarks: parseBoolAttr(node, "registration-marks", d.registrationMarks),
+        colorBars: parseBoolAttr(node, "color-bars", d.colorBars),
+        pageInformation: parseBoolAttr(node, "page-information", d.pageInformation),
+        printerMarkType: PrinterMarkType(rawValue: attrAny(node, "printer-mark-type") ?? "") ?? d.printerMarkType,
+        trimMarkWeight: parseDoubleAttr(node, "trim-mark-weight", d.trimMarkWeight),
+        markOffset: parseDoubleAttr(node, "mark-offset", d.markOffset),
+        useDocumentBleed: parseBoolAttr(node, "use-document-bleed", d.useDocumentBleed),
+        bleedTop: parseDoubleAttr(node, "bleed-top", d.bleedTop),
+        bleedRight: parseDoubleAttr(node, "bleed-right", d.bleedRight),
+        bleedBottom: parseDoubleAttr(node, "bleed-bottom", d.bleedBottom),
+        bleedLeft: parseDoubleAttr(node, "bleed-left", d.bleedLeft)
+    )
+}
+
+private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
+    let d = PrintPreferences.default
+    var mab = MarksAndBleed.default
+    if let kids = node.children {
+        for k in kids {
+            if let e = k as? XMLElement, e.localName == "marks-and-bleed" {
+                mab = parseMarksAndBleedNode(e)
+                break
+            }
+        }
+    }
+    return PrintPreferences(
+        presetName: attrAny(node, "preset-name") ?? d.presetName,
+        printerName: attrAny(node, "printer-name"),
+        copies: parseIntAttr(node, "copies", d.copies),
+        collate: parseBoolAttr(node, "collate", d.collate),
+        reverseOrder: parseBoolAttr(node, "reverse-order", d.reverseOrder),
+        artboardRangeMode: ArtboardRangeMode(rawValue: attrAny(node, "artboard-range-mode") ?? "") ?? d.artboardRangeMode,
+        artboardRange: attrAny(node, "artboard-range") ?? d.artboardRange,
+        ignoreArtboards: parseBoolAttr(node, "ignore-artboards", d.ignoreArtboards),
+        skipBlankArtboards: parseBoolAttr(node, "skip-blank-artboards", d.skipBlankArtboards),
+        mediaSize: MediaSize(rawValue: attrAny(node, "media-size") ?? "") ?? d.mediaSize,
+        mediaWidth: parseDoubleAttr(node, "media-width", d.mediaWidth),
+        mediaHeight: parseDoubleAttr(node, "media-height", d.mediaHeight),
+        orientation: Orientation(rawValue: attrAny(node, "orientation") ?? "") ?? d.orientation,
+        autoRotate: parseBoolAttr(node, "auto-rotate", d.autoRotate),
+        transverse: parseBoolAttr(node, "transverse", d.transverse),
+        printLayers: PrintLayers(rawValue: attrAny(node, "print-layers") ?? "") ?? d.printLayers,
+        placementX: parseDoubleAttr(node, "placement-x", d.placementX),
+        placementY: parseDoubleAttr(node, "placement-y", d.placementY),
+        scalingMode: ScalingMode(rawValue: attrAny(node, "scaling-mode") ?? "") ?? d.scalingMode,
+        customScale: parseDoubleAttr(node, "custom-scale", d.customScale),
+        tileOverlapH: parseDoubleAttr(node, "tile-overlap-h", d.tileOverlapH),
+        tileOverlapV: parseDoubleAttr(node, "tile-overlap-v", d.tileOverlapV),
+        tileRange: attrAny(node, "tile-range") ?? d.tileRange,
+        marksAndBleed: mab
+    )
+}
+
+private func parseJasPrintBlocks(_ root: XMLElement) -> (DocumentSetup, PrintPreferences) {
+    var setup = DocumentSetup.default
+    var prefs = PrintPreferences.default
+    guard let children = root.children else { return (setup, prefs) }
+    for child in children {
+        guard let nv = child as? XMLElement, nv.localName == "namedview" else { continue }
+        for sub in nv.children ?? [] {
+            guard let e = sub as? XMLElement, let tag = e.localName else { continue }
+            switch tag {
+            case "document-setup": setup = parseDocumentSetupNode(e)
+            case "print-preferences": prefs = parsePrintPreferencesNode(e)
+            default: break
+            }
+        }
+    }
+    return (setup, prefs)
 }
 

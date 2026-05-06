@@ -11,7 +11,9 @@ public func normalizeDocument(_ doc: Document) -> Document {
         selectedLayer: doc.selectedLayer,
         selection: doc.selection,
         artboards: doc.artboards,
-        artboardOptions: doc.artboardOptions
+        artboardOptions: doc.artboardOptions,
+        documentSetup: doc.documentSetup,
+        printPreferences: doc.printPreferences
     )
 }
 

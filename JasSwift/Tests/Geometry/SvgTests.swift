@@ -966,3 +966,79 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     }
     #expect(r.stroke?.dashAlignAnchors == false)
 }
+
+// MARK: - DocumentSetup + PrintPreferences SVG persistence (PRINT.md §Phase 2)
+
+@Test func defaultDocSetupAndPrefsEmitNoJasBlocks() {
+    // Pristine doc must not produce any <jas:*> metadata or
+    // sodipodi:namedview wrapper — keeps minimal SVGs minimal.
+    let doc = Document(layers: [Layer(children: [])])
+    let svg = documentToSvg(doc)
+    #expect(!svg.contains("<jas:document-setup"))
+    #expect(!svg.contains("<jas:print-preferences"))
+    #expect(!svg.contains("<sodipodi:namedview"))
+}
+
+@Test func documentSetupRoundTripsThroughSvg() {
+    let s = DocumentSetup(
+        bleedTop: 9, bleedRight: 18, bleedBottom: 36, bleedLeft: 12,
+        bleedUniform: false,
+        showImagesOutline: true,
+        highlightSubstitutedGlyphs: true
+    )
+    let doc = Document(layers: [Layer(children: [])], documentSetup: s)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:document-setup"))
+    #expect(svg.contains("xmlns:jas="))
+
+    let parsed = svgToDocument(svg)
+    #expect(parsed.documentSetup == s)
+}
+
+@Test func printPreferencesRoundTripThroughSvg() {
+    let p = PrintPreferences(
+        presetName: "My Preset",
+        printerName: "LaserJet 5000",
+        copies: 3,
+        collate: true,
+        reverseOrder: true,
+        artboardRangeMode: .range,
+        artboardRange: "1-3,5",
+        ignoreArtboards: true,
+        skipBlankArtboards: true,
+        mediaSize: .a4,
+        mediaWidth: 595,
+        mediaHeight: 842,
+        orientation: .landscape,
+        autoRotate: false,
+        transverse: true,
+        printLayers: .visible,
+        placementX: 12.5,
+        placementY: -3.25,
+        scalingMode: .custom,
+        customScale: 75,
+        tileOverlapH: 1,
+        tileOverlapV: 2,
+        tileRange: "1-2",
+        marksAndBleed: MarksAndBleed(
+            allPrinterMarks: true,
+            trimMarks: true,
+            registrationMarks: true,
+            colorBars: true,
+            pageInformation: true,
+            printerMarkType: .japanese,
+            trimMarkWeight: 0.5,
+            markOffset: 12,
+            useDocumentBleed: false,
+            bleedTop: 4, bleedRight: 5,
+            bleedBottom: 6, bleedLeft: 7
+        )
+    )
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:print-preferences"))
+    #expect(svg.contains("<jas:marks-and-bleed"))
+
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences == p)
+}
