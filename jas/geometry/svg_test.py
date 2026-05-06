@@ -818,6 +818,27 @@ class Phase2MetadataSvgTest(absltest.TestCase):
         parsed = svg_to_document(svg)
         self.assertEqual(parsed.document_setup, s)
 
+    def test_color_management_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, ColorManagement, ColorHandling, RenderingIntent,
+        )
+        c = ColorManagement(
+            document_profile="Adobe RGB (1998)",
+            color_handling=ColorHandling.POSTSCRIPT_COLOR_MANAGEMENT,
+            printer_profile="U.S. Web Coated (SWOP) v2",
+            rendering_intent=RenderingIntent.SATURATION,
+            preserve_rgb_numbers=True,
+        )
+        p = PrintPreferences(color_management=c)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:color-management', svg)
+        self.assertIn('color-handling="postscript_color_management"', svg)
+        self.assertIn('rendering-intent="saturation"', svg)
+        self.assertIn('Adobe RGB (1998)', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.color_management, c)
+
     def test_graphics_sub_record_round_trips_through_svg(self):
         from document.print_preferences import (
             PrintPreferences, Graphics, FontDownload, PostScriptLevel, DataFormat,

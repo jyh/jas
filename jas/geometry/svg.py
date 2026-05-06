@@ -420,6 +420,18 @@ def _bool_str(b: bool) -> str:
     return "true" if b else "false"
 
 
+def _color_management_to_xml(c, indent: str) -> str:
+    return (
+        f'{indent}<jas:color-management'
+        f' document-profile="{escape(c.document_profile)}"'
+        f' color-handling="{c.color_handling.value}"'
+        f' printer-profile="{escape(c.printer_profile)}"'
+        f' rendering-intent="{c.rendering_intent.value}"'
+        f' preserve-rgb-numbers="{_bool_str(c.preserve_rgb_numbers)}"'
+        f'/>'
+    )
+
+
 def _graphics_to_xml(g, indent: str) -> str:
     return (
         f'{indent}<jas:graphics'
@@ -530,6 +542,7 @@ def _print_preferences_to_xml(p, indent: str) -> str:
         f'{_marks_and_bleed_to_xml(p.marks_and_bleed, inner)}\n'
         f'{_output_to_xml(p.output, inner)}\n'
         f'{_graphics_to_xml(p.graphics, inner)}\n'
+        f'{_color_management_to_xml(p.color_management, inner)}\n'
         f'{indent}</jas:print-preferences>'
     )
 
@@ -1272,6 +1285,23 @@ def _parse_document_setup_node(node: ET.Element):
     )
 
 
+def _parse_color_management_node(node: ET.Element):
+    from document.print_preferences import (
+        ColorManagement, ColorHandling, RenderingIntent, _enum_from_string,
+    )
+    d = ColorManagement()
+    return ColorManagement(
+        document_profile=_attr_get(node, "document-profile") or d.document_profile,
+        color_handling=_enum_from_string(
+            ColorHandling, _attr_get(node, "color-handling") or "", d.color_handling),
+        printer_profile=_attr_get(node, "printer-profile") or d.printer_profile,
+        rendering_intent=_enum_from_string(
+            RenderingIntent, _attr_get(node, "rendering-intent") or "", d.rendering_intent),
+        preserve_rgb_numbers=_parse_bool_attr(
+            node, "preserve-rgb-numbers", d.preserve_rgb_numbers),
+    )
+
+
 def _parse_graphics_node(node: ET.Element):
     from document.print_preferences import (
         Graphics, FontDownload, PostScriptLevel, DataFormat,
@@ -1364,7 +1394,7 @@ def _parse_marks_and_bleed_node(node: ET.Element):
 
 def _parse_print_preferences_node(node: ET.Element):
     from document.print_preferences import (
-        PrintPreferences, MarksAndBleed, Output, Graphics,
+        PrintPreferences, MarksAndBleed, Output, Graphics, ColorManagement,
         ArtboardRangeMode, MediaSize, Orientation, PrintLayers, ScalingMode,
         _enum_from_string,
     )
@@ -1372,6 +1402,7 @@ def _parse_print_preferences_node(node: ET.Element):
     mab = MarksAndBleed()
     output = Output()
     graphics = Graphics()
+    color_management = ColorManagement()
     for child in node:
         tag = _strip_ns(child.tag)
         if tag == "marks-and-bleed":
@@ -1380,6 +1411,8 @@ def _parse_print_preferences_node(node: ET.Element):
             output = _parse_output_node(child)
         elif tag == "graphics":
             graphics = _parse_graphics_node(child)
+        elif tag == "color-management":
+            color_management = _parse_color_management_node(child)
     return PrintPreferences(
         preset_name=_attr_get(node, "preset-name") or d.preset_name,
         printer_name=_attr_get(node, "printer-name"),
@@ -1415,6 +1448,7 @@ def _parse_print_preferences_node(node: ET.Element):
         marks_and_bleed=mab,
         output=output,
         graphics=graphics,
+        color_management=color_management,
     )
 
 
