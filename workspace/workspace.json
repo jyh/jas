@@ -3524,6 +3524,24 @@
         },
         "highlight_substituted_glyphs": {
           "type": "bool"
+        },
+        "grid_size": {
+          "type": "number"
+        },
+        "grid_color": {
+          "type": "string"
+        },
+        "paper_color": {
+          "type": "string"
+        },
+        "simulate_colored_paper": {
+          "type": "bool"
+        },
+        "transparency_flattener_preset": {
+          "type": "string"
+        },
+        "discard_white_overprint": {
+          "type": "bool"
         }
       },
       "effects": [
@@ -3568,6 +3586,42 @@
           "doc.set_document_setup_field": {
             "field": "highlight_substituted_glyphs",
             "value": "param.highlight_substituted_glyphs"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "grid_size",
+            "value": "param.grid_size"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "grid_color",
+            "value": "param.grid_color"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "paper_color",
+            "value": "param.paper_color"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "simulate_colored_paper",
+            "value": "param.simulate_colored_paper"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "transparency_flattener_preset",
+            "value": "param.transparency_flattener_preset"
+          }
+        },
+        {
+          "doc.set_document_setup_field": {
+            "field": "discard_white_overprint",
+            "value": "param.discard_white_overprint"
           }
         },
         "clear_dialog_snapshot",
@@ -3792,6 +3846,12 @@
         },
         "cm_preserve_rgb_numbers": {
           "type": "bool"
+        },
+        "adv_print_as_bitmap": {
+          "type": "bool"
+        },
+        "adv_overprint_flattener_preset": {
+          "type": "string"
         }
       },
       "effects": [
@@ -4200,6 +4260,18 @@
           "doc.set_color_management_field": {
             "field": "preserve_rgb_numbers",
             "value": "param.cm_preserve_rgb_numbers"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "print_as_bitmap",
+            "value": "param.adv_print_as_bitmap"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "overprint_flattener_preset",
+            "value": "param.adv_overprint_flattener_preset"
           }
         },
         "clear_dialog_snapshot",
@@ -4404,6 +4476,12 @@
         },
         "cm_preserve_rgb_numbers": {
           "type": "bool"
+        },
+        "adv_print_as_bitmap": {
+          "type": "bool"
+        },
+        "adv_overprint_flattener_preset": {
+          "type": "string"
         }
       },
       "effects": [
@@ -4812,6 +4890,18 @@
           "doc.set_color_management_field": {
             "field": "preserve_rgb_numbers",
             "value": "param.cm_preserve_rgb_numbers"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "print_as_bitmap",
+            "value": "param.adv_print_as_bitmap"
+          }
+        },
+        {
+          "doc.set_advanced_field": {
+            "field": "overprint_flattener_preset",
+            "value": "param.adv_overprint_flattener_preset"
           }
         },
         "clear_dialog_snapshot",
@@ -26801,7 +26891,7 @@
     },
     "document_setup": {
       "summary": "Document Setup",
-      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase-1 deferrals (parked for Phase 6 / global units): units selector, transparency grid, transparency-flattener preset, \"Discard White Overprint in Output\", \"Simulate Colored Paper\".\nPhase-1A deferral: the chain-link toggle's bleed_uniform state persists with the document, but mirroring a single-side edit to all four fields is not yet wired (matches the artboard_options chain-link precedent). User types each side individually in Phase 1A.\n",
+      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase 6 added the formerly-deferred Phase-1A items: grid size / color, simulate colored paper (with paper color), transparency- flattener preset, \"Discard White Overprint in Output\". The Units selector remains deferred (no global-units feature yet).\nPhase-1A deferral: the chain-link toggle's bleed_uniform state persists with the document, but mirroring a single-side edit to all four fields is not yet wired (matches the artboard_options chain-link precedent). User types each side individually in Phase 1A.\n",
       "modal": true,
       "width": 460,
       "state": {
@@ -26832,6 +26922,36 @@
         "highlight_substituted_glyphs": {
           "type": "bool",
           "default": false
+        },
+        "grid_size": {
+          "type": "number",
+          "default": 72.0
+        },
+        "grid_color": {
+          "type": "string",
+          "default": "#cccccc"
+        },
+        "paper_color": {
+          "type": "string",
+          "default": "#ffffff"
+        },
+        "simulate_colored_paper": {
+          "type": "bool",
+          "default": false
+        },
+        "transparency_flattener_preset": {
+          "type": "enum",
+          "values": [
+            "low_resolution",
+            "medium_resolution",
+            "high_resolution",
+            "custom"
+          ],
+          "default": "medium_resolution"
+        },
+        "discard_white_overprint": {
+          "type": "bool",
+          "default": false
         }
       },
       "init": {
@@ -26841,7 +26961,13 @@
         "bleed_left": "active_document.document_setup.bleed_left",
         "bleed_uniform": "active_document.document_setup.bleed_uniform",
         "show_images_outline": "active_document.document_setup.show_images_outline",
-        "highlight_substituted_glyphs": "active_document.document_setup.highlight_substituted_glyphs"
+        "highlight_substituted_glyphs": "active_document.document_setup.highlight_substituted_glyphs",
+        "grid_size": "active_document.document_setup.grid_size",
+        "grid_color": "active_document.document_setup.grid_color",
+        "paper_color": "active_document.document_setup.paper_color",
+        "simulate_colored_paper": "active_document.document_setup.simulate_colored_paper",
+        "transparency_flattener_preset": "active_document.document_setup.transparency_flattener_preset",
+        "discard_white_overprint": "active_document.document_setup.discard_white_overprint"
       },
       "content": {
         "type": "container",
@@ -27026,6 +27152,185 @@
             }
           },
           {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Grid",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 12,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Size (pt):",
+                "style": {
+                  "font_size": 11,
+                  "width": 80
+                }
+              },
+              {
+                "id": "ds_grid_size",
+                "type": "number_input",
+                "min": 1,
+                "style": {
+                  "width": 80
+                },
+                "bind": {
+                  "value": "dialog.grid_size"
+                }
+              },
+              {
+                "type": "text",
+                "content": "Color:",
+                "style": {
+                  "font_size": 11,
+                  "width": 50,
+                  "padding_left": 12
+                }
+              },
+              {
+                "id": "ds_grid_color",
+                "type": "text_input",
+                "style": {
+                  "width": 100
+                },
+                "bind": {
+                  "value": "dialog.grid_color"
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Paper",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "id": "ds_simulate_colored_paper",
+            "type": "toggle",
+            "label": "Simulate Colored Paper",
+            "bind": {
+              "checked": "dialog.simulate_colored_paper"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 12,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Paper Color:",
+                "style": {
+                  "font_size": 11,
+                  "width": 80
+                }
+              },
+              {
+                "id": "ds_paper_color",
+                "type": "text_input",
+                "style": {
+                  "width": 100
+                },
+                "bind": {
+                  "value": "dialog.paper_color"
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "type": "text",
+            "content": "Transparency & Overprint",
+            "style": {
+              "font_size": 11,
+              "font_weight": "bold"
+            }
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 12,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Flattener Preset:",
+                "style": {
+                  "font_size": 11,
+                  "width": 130
+                }
+              },
+              {
+                "id": "ds_transparency_flattener_preset",
+                "type": "select",
+                "options": [
+                  {
+                    "label": "Low Resolution",
+                    "value": "low_resolution"
+                  },
+                  {
+                    "label": "Medium Resolution",
+                    "value": "medium_resolution"
+                  },
+                  {
+                    "label": "High Resolution",
+                    "value": "high_resolution"
+                  },
+                  {
+                    "label": "Custom",
+                    "value": "custom"
+                  }
+                ],
+                "bind": {
+                  "value": "dialog.transparency_flattener_preset"
+                }
+              }
+            ]
+          },
+          {
+            "id": "ds_discard_white_overprint",
+            "type": "toggle",
+            "label": "Discard White Overprint in Output",
+            "bind": {
+              "checked": "dialog.discard_white_overprint"
+            }
+          },
+          {
+            "type": "text",
+            "content": "Phase 6 stores these on disk and round-trips them through Document Setup. The flattener pipeline + simulated paper rendering land in a follow-up.",
+            "style": {
+              "font_size": 10,
+              "color": "var(--jas-text-dim,#888)"
+            }
+          },
+          {
             "type": "container",
             "layout": "row",
             "style": {
@@ -27057,7 +27362,13 @@
                   "bleed_left": "dialog.bleed_left",
                   "bleed_uniform": "dialog.bleed_uniform",
                   "show_images_outline": "dialog.show_images_outline",
-                  "highlight_substituted_glyphs": "dialog.highlight_substituted_glyphs"
+                  "highlight_substituted_glyphs": "dialog.highlight_substituted_glyphs",
+                  "grid_size": "dialog.grid_size",
+                  "grid_color": "dialog.grid_color",
+                  "paper_color": "dialog.paper_color",
+                  "simulate_colored_paper": "dialog.simulate_colored_paper",
+                  "transparency_flattener_preset": "dialog.transparency_flattener_preset",
+                  "discard_white_overprint": "dialog.discard_white_overprint"
                 }
               }
             ]
@@ -29649,6 +29960,20 @@
         "cm_preserve_rgb_numbers": {
           "type": "bool",
           "default": false
+        },
+        "adv_print_as_bitmap": {
+          "type": "bool",
+          "default": false
+        },
+        "adv_overprint_flattener_preset": {
+          "type": "enum",
+          "values": [
+            "low_resolution",
+            "medium_resolution",
+            "high_resolution",
+            "custom"
+          ],
+          "default": "medium_resolution"
         }
       },
       "init": {
@@ -29716,7 +30041,9 @@
         "cm_color_handling": "active_document.print_preferences.color_management.color_handling",
         "cm_printer_profile": "active_document.print_preferences.color_management.printer_profile",
         "cm_rendering_intent": "active_document.print_preferences.color_management.rendering_intent",
-        "cm_preserve_rgb_numbers": "active_document.print_preferences.color_management.preserve_rgb_numbers"
+        "cm_preserve_rgb_numbers": "active_document.print_preferences.color_management.preserve_rgb_numbers",
+        "adv_print_as_bitmap": "active_document.print_preferences.advanced.print_as_bitmap",
+        "adv_overprint_flattener_preset": "active_document.print_preferences.advanced.overprint_flattener_preset"
       },
       "content": {
         "type": "container",
@@ -31898,18 +32225,90 @@
                   },
                   "children": [
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_adv_print_as_bitmap",
+                              "type": "checkbox",
+                              "label": "Print as Bitmap",
+                              "bind": {
+                                "checked": "dialog.adv_print_as_bitmap"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
                       "type": "text",
-                      "content": "Advanced",
+                      "content": "Overprint Flattener",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Preset:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_adv_overprint_flattener_preset",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Low Resolution",
+                                  "value": "low_resolution"
+                                },
+                                {
+                                  "label": "Medium Resolution",
+                                  "value": "medium_resolution"
+                                },
+                                {
+                                  "label": "High Resolution",
+                                  "value": "high_resolution"
+                                },
+                                {
+                                  "label": "Custom",
+                                  "value": "custom"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.adv_overprint_flattener_preset"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 6 (PRINT.md \u00a7Phase 6). Print as bitmap, overprint flattener preset; also re-houses Document Setup transparency / overprint settings.",
+                      "content": "The flattener pipeline isn't wired in yet \u2014 Phase 6 stores the choice on disk and round-trips it through Print Preferences.",
                       "style": {
-                        "font_size": 11,
+                        "font_size": 10,
                         "color": "var(--jas-text-dim,#888)"
                       }
                     }
@@ -32025,7 +32424,9 @@
                   "cm_color_handling": "dialog.cm_color_handling",
                   "cm_printer_profile": "dialog.cm_printer_profile",
                   "cm_rendering_intent": "dialog.cm_rendering_intent",
-                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers"
+                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers",
+                  "adv_print_as_bitmap": "dialog.adv_print_as_bitmap",
+                  "adv_overprint_flattener_preset": "dialog.adv_overprint_flattener_preset"
                 }
               },
               {
@@ -32098,7 +32499,9 @@
                   "cm_color_handling": "dialog.cm_color_handling",
                   "cm_printer_profile": "dialog.cm_printer_profile",
                   "cm_rendering_intent": "dialog.cm_rendering_intent",
-                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers"
+                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers",
+                  "adv_print_as_bitmap": "dialog.adv_print_as_bitmap",
+                  "adv_overprint_flattener_preset": "dialog.adv_overprint_flattener_preset"
                 }
               }
             ]

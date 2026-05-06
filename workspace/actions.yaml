@@ -2562,6 +2562,12 @@ actions:
       bleed_uniform: { type: bool }
       show_images_outline: { type: bool }
       highlight_substituted_glyphs: { type: bool }
+      grid_size: { type: number }
+      grid_color: { type: string }
+      paper_color: { type: string }
+      simulate_colored_paper: { type: bool }
+      transparency_flattener_preset: { type: string }
+      discard_white_overprint: { type: bool }
     effects:
       - snapshot
       - doc.set_document_setup_field: { field: "bleed_top",    value: "param.bleed_top" }
@@ -2571,6 +2577,12 @@ actions:
       - doc.set_document_setup_field: { field: "bleed_uniform", value: "param.bleed_uniform" }
       - doc.set_document_setup_field: { field: "show_images_outline", value: "param.show_images_outline" }
       - doc.set_document_setup_field: { field: "highlight_substituted_glyphs", value: "param.highlight_substituted_glyphs" }
+      - doc.set_document_setup_field: { field: "grid_size",                     value: "param.grid_size" }
+      - doc.set_document_setup_field: { field: "grid_color",                    value: "param.grid_color" }
+      - doc.set_document_setup_field: { field: "paper_color",                   value: "param.paper_color" }
+      - doc.set_document_setup_field: { field: "simulate_colored_paper",        value: "param.simulate_colored_paper" }
+      - doc.set_document_setup_field: { field: "transparency_flattener_preset", value: "param.transparency_flattener_preset" }
+      - doc.set_document_setup_field: { field: "discard_white_overprint",       value: "param.discard_white_overprint" }
       - clear_dialog_snapshot
       - close_dialog
 
@@ -2669,6 +2681,8 @@ actions:
       cm_printer_profile: { type: string }
       cm_rendering_intent: { type: string }
       cm_preserve_rgb_numbers: { type: bool }
+      adv_print_as_bitmap: { type: bool }
+      adv_overprint_flattener_preset: { type: string }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2736,6 +2750,8 @@ actions:
       - doc.set_color_management_field: { field: "printer_profile",      value: "param.cm_printer_profile" }
       - doc.set_color_management_field: { field: "rendering_intent",     value: "param.cm_rendering_intent" }
       - doc.set_color_management_field: { field: "preserve_rgb_numbers", value: "param.cm_preserve_rgb_numbers" }
+      - doc.set_advanced_field: { field: "print_as_bitmap",            value: "param.adv_print_as_bitmap" }
+      - doc.set_advanced_field: { field: "overprint_flattener_preset", value: "param.adv_overprint_flattener_preset" }
       - clear_dialog_snapshot
       - close_dialog
 
@@ -2813,6 +2829,8 @@ actions:
       cm_printer_profile: { type: string }
       cm_rendering_intent: { type: string }
       cm_preserve_rgb_numbers: { type: bool }
+      adv_print_as_bitmap: { type: bool }
+      adv_overprint_flattener_preset: { type: string }
     effects:
       - snapshot
       - doc.set_print_preferences_field: { field: "preset_name",          value: "param.preset_name" }
@@ -2880,6 +2898,8 @@ actions:
       - doc.set_color_management_field: { field: "printer_profile",      value: "param.cm_printer_profile" }
       - doc.set_color_management_field: { field: "rendering_intent",     value: "param.cm_rendering_intent" }
       - doc.set_color_management_field: { field: "preserve_rgb_numbers", value: "param.cm_preserve_rgb_numbers" }
+      - doc.set_advanced_field: { field: "print_as_bitmap",            value: "param.adv_print_as_bitmap" }
+      - doc.set_advanced_field: { field: "overprint_flattener_preset", value: "param.adv_overprint_flattener_preset" }
       - clear_dialog_snapshot
       - geometry.export_pdf: {}
       - close_dialog
