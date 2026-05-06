@@ -510,6 +510,24 @@ let document_setup_json (s : Document_setup.t) =
   json_bool o "show_images_outline" s.show_images_outline;
   json_build o
 
+let marks_and_bleed_json (m : Print_preferences.marks_and_bleed) =
+  let o = json_obj () in
+  json_bool o "all_printer_marks" m.all_printer_marks;
+  json_num o "bleed_bottom" m.bleed_bottom;
+  json_num o "bleed_left" m.bleed_left;
+  json_num o "bleed_right" m.bleed_right;
+  json_num o "bleed_top" m.bleed_top;
+  json_bool o "color_bars" m.color_bars;
+  json_num o "mark_offset" m.mark_offset;
+  json_bool o "page_information" m.page_information;
+  json_str o "printer_mark_type"
+    (Print_preferences.printer_mark_type_to_string m.printer_mark_type);
+  json_bool o "registration_marks" m.registration_marks;
+  json_num o "trim_mark_weight" m.trim_mark_weight;
+  json_bool o "trim_marks" m.trim_marks;
+  json_bool o "use_document_bleed" m.use_document_bleed;
+  json_build o
+
 let print_preferences_json (p : Print_preferences.t) =
   let o = json_obj () in
   json_str o "artboard_range" p.artboard_range;
@@ -520,6 +538,7 @@ let print_preferences_json (p : Print_preferences.t) =
   json_int o "copies" p.copies;
   json_num o "custom_scale" p.custom_scale;
   json_bool o "ignore_artboards" p.ignore_artboards;
+  json_raw o "marks_and_bleed" (marks_and_bleed_json p.marks_and_bleed);
   json_num o "media_height" p.media_height;
   json_str o "media_size" (Print_preferences.media_size_to_string p.media_size);
   json_num o "media_width" p.media_width;
@@ -951,6 +970,36 @@ let parse_document_setup j : Document_setup.t =
     }
   with _ -> d
 
+let parse_marks_and_bleed j : Print_preferences.marks_and_bleed =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_marks_and_bleed in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  try
+    {
+      all_printer_marks = pick_bool "all_printer_marks" d.all_printer_marks;
+      trim_marks = pick_bool "trim_marks" d.trim_marks;
+      registration_marks = pick_bool "registration_marks" d.registration_marks;
+      color_bars = pick_bool "color_bars" d.color_bars;
+      page_information = pick_bool "page_information" d.page_information;
+      printer_mark_type =
+        Print_preferences.printer_mark_type_of_string
+          (pick_str "printer_mark_type"
+             (Print_preferences.printer_mark_type_to_string d.printer_mark_type));
+      trim_mark_weight = pick_num "trim_mark_weight" d.trim_mark_weight;
+      mark_offset = pick_num "mark_offset" d.mark_offset;
+      use_document_bleed = pick_bool "use_document_bleed" d.use_document_bleed;
+      bleed_top = pick_num "bleed_top" d.bleed_top;
+      bleed_right = pick_num "bleed_right" d.bleed_right;
+      bleed_bottom = pick_num "bleed_bottom" d.bleed_bottom;
+      bleed_left = pick_num "bleed_left" d.bleed_left;
+    }
+  with _ -> d
+
 let parse_print_preferences j : Print_preferences.t =
   let open Yojson.Safe.Util in
   let d = Print_preferences.default in
@@ -966,6 +1015,11 @@ let parse_print_preferences j : Print_preferences.t =
     try j |> member name |> to_num with _ -> d_val in
   let pick_bool name d_val =
     try j |> member name |> to_bool with _ -> d_val in
+  let pick_marks_and_bleed () =
+    match try j |> member "marks_and_bleed" with _ -> `Null with
+    | `Null -> d.marks_and_bleed
+    | v -> parse_marks_and_bleed v
+  in
   try
     {
       preset_name = pick_str "preset_name" d.preset_name;
@@ -1006,6 +1060,7 @@ let parse_print_preferences j : Print_preferences.t =
       tile_overlap_h = pick_num "tile_overlap_h" d.tile_overlap_h;
       tile_overlap_v = pick_num "tile_overlap_v" d.tile_overlap_v;
       tile_range = pick_str "tile_range" d.tile_range;
+      marks_and_bleed = pick_marks_and_bleed ();
     }
   with _ -> d
 

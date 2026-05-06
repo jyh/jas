@@ -164,11 +164,64 @@ let test_print_preferences_roundtrip () =
             custom_scale = 75.5;
             tile_overlap_h = 6.0;
             tile_overlap_v = 6.0;
-            tile_range = "1-2" } in
+            tile_range = "1-2";
+            marks_and_bleed = Print_preferences.default_marks_and_bleed } in
   let doc = make_document ~print_preferences:p [||] in
   let json = document_to_test_json doc in
   let doc2 = test_json_to_document json in
   assert (doc2.print_preferences = p)
+
+(* MarksAndBleed (PRINT.md §Phase 2) *)
+
+let test_marks_and_bleed_defaults () =
+  let m = Print_preferences.default_marks_and_bleed in
+  assert (m.all_printer_marks = false);
+  assert (m.trim_marks = false);
+  assert (m.registration_marks = false);
+  assert (m.color_bars = false);
+  assert (m.page_information = false);
+  assert (m.printer_mark_type = Print_preferences.Roman);
+  assert (m.trim_mark_weight = 0.25);
+  assert (m.mark_offset = 6.0);
+  assert (m.use_document_bleed = true);
+  assert (m.bleed_top = 0.0);
+  assert (m.bleed_right = 0.0);
+  assert (m.bleed_bottom = 0.0);
+  assert (m.bleed_left = 0.0)
+
+let test_printer_mark_type_strings () =
+  let open Print_preferences in
+  assert (printer_mark_type_to_string Roman = "roman");
+  assert (printer_mark_type_to_string Japanese = "japanese");
+  assert (printer_mark_type_of_string "roman" = Roman);
+  assert (printer_mark_type_of_string "japanese" = Japanese);
+  assert (printer_mark_type_of_string "garbage" = Roman)
+
+let test_marks_and_bleed_roundtrip () =
+  let m = { Print_preferences.all_printer_marks = true;
+            trim_marks = true;
+            registration_marks = true;
+            color_bars = true;
+            page_information = true;
+            printer_mark_type = Print_preferences.Japanese;
+            trim_mark_weight = 0.5;
+            mark_offset = 12.0;
+            use_document_bleed = false;
+            bleed_top = 4.0; bleed_right = 5.0;
+            bleed_bottom = 6.0; bleed_left = 7.0 } in
+  let p = { Print_preferences.default with marks_and_bleed = m } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"marks_and_bleed\"");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.marks_and_bleed = m)
 
 let () =
   Alcotest.run "PrintPipeline" [
@@ -182,6 +235,11 @@ let () =
       Alcotest.test_case "defaults match spec" `Quick test_print_preferences_defaults_match_spec;
       Alcotest.test_case "default preset holds defaults" `Quick test_default_preset_holds_defaults;
       Alcotest.test_case "enum strings snake_case" `Quick test_enum_string_forms_are_snake_case;
+    ];
+    "marks_and_bleed", [
+      Alcotest.test_case "defaults" `Quick test_marks_and_bleed_defaults;
+      Alcotest.test_case "printer_mark_type strings" `Quick test_printer_mark_type_strings;
+      Alcotest.test_case "roundtrip" `Quick test_marks_and_bleed_roundtrip;
     ];
     "test_json", [
       Alcotest.test_case "document_setup omitted when default" `Quick test_document_setup_only_emitted_when_non_default;

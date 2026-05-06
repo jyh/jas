@@ -60,6 +60,60 @@ let scaling_mode_of_string = function
   | "custom" -> Custom_scale
   | _ -> Do_not_scale
 
+(** Two cultural variants of printer's marks. [Roman] ships the
+    standard Western trim/registration marks; [Japanese] swaps in
+    the kasen-style marks used by Japanese commercial print shops.
+    Phase 2 stores the choice but the renderer only differentiates
+    in a follow-up — the on-disk shape is stable now. *)
+type printer_mark_type = Roman | Japanese
+
+let printer_mark_type_to_string = function
+  | Roman -> "roman" | Japanese -> "japanese"
+let printer_mark_type_of_string = function
+  | "japanese" -> Japanese
+  | _ -> Roman
+
+(** Marks-and-bleed sub-record on print_preferences (PRINT.md §Phase 2).
+    The Marks tab exposes these 1:1 as widgets; the PDF renderer
+    extends each page by the active bleed and overlays mark geometry
+    around the trim rect.
+
+    [use_document_bleed] controls whether bleeds come from the
+    document-level [Document_setup] or from the per-print [bleed_*]
+    overrides on this record. Defaulting to true keeps document and
+    print in lockstep until the user opts out. *)
+type marks_and_bleed = {
+  all_printer_marks : bool;
+  trim_marks : bool;
+  registration_marks : bool;
+  color_bars : bool;
+  page_information : bool;
+  printer_mark_type : printer_mark_type;
+  trim_mark_weight : float;
+  mark_offset : float;
+  use_document_bleed : bool;
+  bleed_top : float;
+  bleed_right : float;
+  bleed_bottom : float;
+  bleed_left : float;
+}
+
+let default_marks_and_bleed = {
+  all_printer_marks = false;
+  trim_marks = false;
+  registration_marks = false;
+  color_bars = false;
+  page_information = false;
+  printer_mark_type = Roman;
+  trim_mark_weight = 0.25;
+  mark_offset = 6.0;
+  use_document_bleed = true;
+  bleed_top = 0.0;
+  bleed_right = 0.0;
+  bleed_bottom = 0.0;
+  bleed_left = 0.0;
+}
+
 type t = {
   preset_name : string;
   printer_name : string option;
@@ -86,6 +140,8 @@ type t = {
   tile_overlap_h : float;
   tile_overlap_v : float;
   tile_range : string;
+  (* Marks-and-bleed sub-record (PRINT.md §Phase 2). *)
+  marks_and_bleed : marks_and_bleed;
 }
 
 let default = {
@@ -112,6 +168,7 @@ let default = {
   tile_overlap_h = 0.0;
   tile_overlap_v = 0.0;
   tile_range = "";
+  marks_and_bleed = default_marks_and_bleed;
 }
 
 (** Workspace-level named saved configuration. Phase 1 ships only
