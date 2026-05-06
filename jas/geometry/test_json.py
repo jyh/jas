@@ -516,6 +516,16 @@ def _document_setup_json(s):
     return o.build()
 
 
+def _color_management_json(c):
+    o = _JsonObj()
+    o.str("color_handling", c.color_handling.value)
+    o.str("document_profile", c.document_profile)
+    o.bool_("preserve_rgb_numbers", c.preserve_rgb_numbers)
+    o.str("printer_profile", c.printer_profile)
+    o.str("rendering_intent", c.rendering_intent.value)
+    return o.build()
+
+
 def _graphics_json(g):
     o = _JsonObj()
     o.bool_("compatible_gradient_printing", g.compatible_gradient_printing)
@@ -578,6 +588,7 @@ def _print_preferences_json(p):
     o.str("artboard_range_mode", p.artboard_range_mode.value)
     o.bool_("auto_rotate", p.auto_rotate)
     o.bool_("collate", p.collate)
+    o.raw("color_management", _color_management_json(p.color_management))
     o.int_("copies", p.copies)
     o.num("custom_scale", p.custom_scale)
     o.raw("graphics", _graphics_json(p.graphics))
@@ -974,6 +985,24 @@ def _parse_document_setup(v):
     )
 
 
+def _parse_color_management(v):
+    from document.print_preferences import (
+        ColorManagement, ColorHandling, RenderingIntent, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return ColorManagement()
+    d = ColorManagement()
+    return ColorManagement(
+        document_profile=v.get("document_profile", d.document_profile),
+        color_handling=_enum_from_string(
+            ColorHandling, v.get("color_handling", ""), d.color_handling),
+        printer_profile=v.get("printer_profile", d.printer_profile),
+        rendering_intent=_enum_from_string(
+            RenderingIntent, v.get("rendering_intent", ""), d.rendering_intent),
+        preserve_rgb_numbers=v.get("preserve_rgb_numbers", d.preserve_rgb_numbers),
+    )
+
+
 def _parse_graphics(v):
     from document.print_preferences import (
         Graphics, FontDownload, PostScriptLevel, DataFormat,
@@ -1101,6 +1130,7 @@ def _parse_print_preferences(v):
         marks_and_bleed=_parse_marks_and_bleed(v.get("marks_and_bleed", None)),
         output=_parse_output(v.get("output", None)),
         graphics=_parse_graphics(v.get("graphics", None)),
+        color_management=_parse_color_management(v.get("color_management", None)),
     )
 
 
