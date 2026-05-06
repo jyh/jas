@@ -519,6 +519,58 @@ def build_artboard_handlers(model) -> dict:
             model.document, print_preferences=new_p)
         return None
 
+    # PRINT.md §Phase 4
+    def doc_set_graphics_field(spec, call_ctx, _store):
+        from document.print_preferences import (
+            FontDownload, PostScriptLevel, DataFormat, _enum_from_string,
+        )
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        g = p.graphics
+        if field == "flatness":
+            if not isinstance(value, (int, float)):
+                return None
+            new_g = dataclasses.replace(g, flatness=float(value))
+        elif field == "font_download":
+            if not isinstance(value, str):
+                return None
+            new_g = dataclasses.replace(g, font_download=_enum_from_string(
+                FontDownload, value, g.font_download))
+        elif field == "postscript_level":
+            if not isinstance(value, str):
+                return None
+            new_g = dataclasses.replace(g, postscript_level=_enum_from_string(
+                PostScriptLevel, value, g.postscript_level))
+        elif field == "data_format":
+            if not isinstance(value, str):
+                return None
+            new_g = dataclasses.replace(g, data_format=_enum_from_string(
+                DataFormat, value, g.data_format))
+        elif field == "compatible_gradient_printing":
+            if not isinstance(value, bool):
+                return None
+            new_g = dataclasses.replace(g, compatible_gradient_printing=value)
+        elif field == "raster_effects_resolution":
+            if not isinstance(value, (int, float)):
+                return None
+            new_g = dataclasses.replace(g, raster_effects_resolution=float(value))
+        else:
+            return None
+        new_p = dataclasses.replace(p, graphics=new_g)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
     # PRINT.md §1B
     def geometry_export_pdf(_spec, _call_ctx, _store):
         from geometry.pdf import document_to_pdf
@@ -549,6 +601,7 @@ def build_artboard_handlers(model) -> dict:
         "doc.set_marks_and_bleed_field": doc_set_marks_and_bleed_field,
         "doc.set_output_field": doc_set_output_field,
         "doc.set_output_ink_field": doc_set_output_ink_field,
+        "doc.set_graphics_field": doc_set_graphics_field,
         "doc.move_artboards_up": doc_move_artboards_up,
         "doc.move_artboards_down": doc_move_artboards_down,
         "geometry.export_pdf": geometry_export_pdf,
