@@ -369,6 +369,16 @@ let ink_override_to_xml indent (ink : Print_preferences.ink_override) =
     (fmt ink.angle)
     (Print_preferences.dot_shape_to_string ink.dot_shape)
 
+let color_management_to_xml indent (c : Print_preferences.color_management) =
+  Printf.sprintf
+    "%s<jas:color-management document-profile=\"%s\" color-handling=\"%s\" printer-profile=\"%s\" rendering-intent=\"%s\" preserve-rgb-numbers=\"%s\"/>"
+    indent
+    (escape_xml c.document_profile)
+    (Print_preferences.color_handling_to_string c.color_handling)
+    (escape_xml c.printer_profile)
+    (Print_preferences.rendering_intent_to_string c.rendering_intent)
+    (bool_str c.preserve_rgb_numbers)
+
 let graphics_to_xml indent (g : Print_preferences.graphics) =
   Printf.sprintf
     "%s<jas:graphics flatness=\"%s\" font-download=\"%s\" postscript-level=\"%s\" data-format=\"%s\" compatible-gradient-printing=\"%s\" raster-effects-resolution=\"%s\"/>"
@@ -440,11 +450,12 @@ let print_preferences_to_xml indent (p : Print_preferences.t) =
     | Some n -> Printf.sprintf " printer-name=\"%s\"" (escape_xml n)
     | None -> ""
   in
-  Printf.sprintf "%s%s>\n%s\n%s\n%s\n%s</jas:print-preferences>"
+  Printf.sprintf "%s%s>\n%s\n%s\n%s\n%s\n%s</jas:print-preferences>"
     header printer_attr
     (marks_and_bleed_to_xml inner p.marks_and_bleed)
     (output_to_xml inner p.output)
     (graphics_to_xml inner p.graphics)
+    (color_management_to_xml inner p.color_management)
     indent
 
 let document_to_svg doc =
@@ -1192,6 +1203,22 @@ let parse_document_setup_attrs attrs : Document_setup.t =
       attr_bool attrs "highlight-substituted-glyphs" d.highlight_substituted_glyphs;
   }
 
+let parse_color_management_attrs attrs : Print_preferences.color_management =
+  let d = Print_preferences.default_color_management in
+  {
+    document_profile = attr_str attrs "document-profile" d.document_profile;
+    color_handling =
+      Print_preferences.color_handling_of_string
+        (attr_str attrs "color-handling"
+           (Print_preferences.color_handling_to_string d.color_handling));
+    printer_profile = attr_str attrs "printer-profile" d.printer_profile;
+    rendering_intent =
+      Print_preferences.rendering_intent_of_string
+        (attr_str attrs "rendering-intent"
+           (Print_preferences.rendering_intent_to_string d.rendering_intent));
+    preserve_rgb_numbers = attr_bool attrs "preserve-rgb-numbers" d.preserve_rgb_numbers;
+  }
+
 let parse_graphics_attrs attrs : Print_preferences.graphics =
   let d = Print_preferences.default_graphics in
   {
@@ -1268,6 +1295,7 @@ let parse_marks_and_bleed_attrs attrs : Print_preferences.marks_and_bleed =
 let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_marks_and_bleed)
     ?(output=Print_preferences.default_output)
     ?(graphics=Print_preferences.default_graphics)
+    ?(color_management=Print_preferences.default_color_management)
     attrs : Print_preferences.t =
   let d = Print_preferences.default in
   let printer_name = match get_attr attrs "printer-name" with
@@ -1315,7 +1343,7 @@ let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_ma
     marks_and_bleed;
     output;
     graphics;
-    color_management = Print_preferences.default_color_management;
+    color_management;
   }
 
 (* Walk the SVG once via Xmlm, pulling jas:document-setup +
@@ -1357,9 +1385,10 @@ let parse_jas_print_blocks svg =
            let mab = ref Print_preferences.default_marks_and_bleed in
            let out = ref Print_preferences.default_output in
            let gfx = ref Print_preferences.default_graphics in
+           let cm = ref Print_preferences.default_color_management in
            let inks = ref [] in
            (* Walk children: nested marks-and-bleed, output (with its
-              own ink children), graphics. *)
+              own ink children), graphics, color-management. *)
            let rec walk_pp () =
              match Xmlm.peek i with
              | `El_end -> let _ = Xmlm.input i in ()
@@ -1396,12 +1425,15 @@ let parse_jas_print_blocks svg =
                 | "graphics" ->
                   gfx := parse_graphics_attrs cattrs_a;
                   skip_element i
+                | "color-management" ->
+                  cm := parse_color_management_attrs cattrs_a;
+                  skip_element i
                 | _ -> skip_element i);
                walk_pp ()
              | `Dtd _ -> let _ = Xmlm.input i in walk_pp ()
            in
            walk_pp ();
-           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab ~output:!out ~graphics:!gfx attrs
+           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab ~output:!out ~graphics:!gfx ~color_management:!cm attrs
          | _ ->
            skip_element i);
         walk_namedview ()
