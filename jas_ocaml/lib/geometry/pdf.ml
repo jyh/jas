@@ -431,6 +431,17 @@ let rec draw_page cr (doc : Document.document) (page : page) =
   let flatness = doc.print_preferences.graphics.flatness in
   if abs_float (flatness -. 1.0) > epsilon_float then
     Cairo.set_tolerance cr (max 0.0 (min 100.0 flatness));
+  (* Phase 5: rendering intent. Cairo's PDF backend doesn't expose a
+     ``ri`` operator hook — its content streams are emitted from
+     the cairo-pdf-surface internals and bypass the public OCaml
+     API for raw PDF operators. Phase 5 v1 stores the value on
+     disk and surfaces it through Test JSON / SVG, but the OCaml
+     PDF emitter applies Cairo's default rendering (which roughly
+     corresponds to RelativeColorimetric anyway). Hooking up a
+     proper /Perceptual ri / /Saturation ri / etc. directive
+     would need a fork of cairo-pdf-surface or post-processing
+     of the Cairo output — outside Phase 5 scope. *)
+  let _ = doc.print_preferences.color_management.rendering_intent in
   (* Position the trim rect inside the (possibly bleed-extended)
      MediaBox before any user transforms. Cairo is y-down so this
      matches the Rust + Swift "trim corners at trim_x_off / trim_y_off"
