@@ -6,7 +6,10 @@
     color alpha channels. *)
 
 let rec normalize_document (doc : Document.document) =
-  Document.make_document (Array.map normalize_element doc.Document.layers)
+  Document.make_document
+    ~document_setup:doc.Document.document_setup
+    ~print_preferences:doc.Document.print_preferences
+    (Array.map normalize_element doc.Document.layers)
 
 and normalize_fill (f : Element.fill) =
   let alpha = Element.color_alpha f.fill_color in

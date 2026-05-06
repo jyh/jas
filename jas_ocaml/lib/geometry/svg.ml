@@ -340,17 +340,104 @@ let rec element_svg indent (elem : Element.element) =
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
 
+(* Marks-and-Bleed + DocumentSetup SVG persistence (PRINT.md §Phase 2).
+   Stored as <jas:document-setup> and <jas:print-preferences> children
+   of <sodipodi:namedview>. Bleed values are stored as raw point
+   values (no px conversion) to keep the on-disk numbers intelligible
+   and stable across viewports — they're print-domain quantities,
+   not canvas geometry. *)
+
+let bool_str = function true -> "true" | false -> "false"
+
+let document_setup_to_xml indent (s : Document_setup.t) =
+  Printf.sprintf
+    "%s<jas:document-setup bleed-top=\"%s\" bleed-right=\"%s\" bleed-bottom=\"%s\" bleed-left=\"%s\" bleed-uniform=\"%s\" show-images-outline=\"%s\" highlight-substituted-glyphs=\"%s\"/>"
+    indent
+    (fmt s.bleed_top) (fmt s.bleed_right)
+    (fmt s.bleed_bottom) (fmt s.bleed_left)
+    (bool_str s.bleed_uniform)
+    (bool_str s.show_images_outline)
+    (bool_str s.highlight_substituted_glyphs)
+
+let marks_and_bleed_to_xml indent (m : Print_preferences.marks_and_bleed) =
+  Printf.sprintf
+    "%s<jas:marks-and-bleed all-printer-marks=\"%s\" trim-marks=\"%s\" registration-marks=\"%s\" color-bars=\"%s\" page-information=\"%s\" printer-mark-type=\"%s\" trim-mark-weight=\"%s\" mark-offset=\"%s\" use-document-bleed=\"%s\" bleed-top=\"%s\" bleed-right=\"%s\" bleed-bottom=\"%s\" bleed-left=\"%s\"/>"
+    indent
+    (bool_str m.all_printer_marks)
+    (bool_str m.trim_marks)
+    (bool_str m.registration_marks)
+    (bool_str m.color_bars)
+    (bool_str m.page_information)
+    (Print_preferences.printer_mark_type_to_string m.printer_mark_type)
+    (fmt m.trim_mark_weight) (fmt m.mark_offset)
+    (bool_str m.use_document_bleed)
+    (fmt m.bleed_top) (fmt m.bleed_right)
+    (fmt m.bleed_bottom) (fmt m.bleed_left)
+
+let print_preferences_to_xml indent (p : Print_preferences.t) =
+  let inner = indent ^ "  " in
+  let header = Printf.sprintf
+    "%s<jas:print-preferences preset-name=\"%s\" copies=\"%d\" collate=\"%s\" reverse-order=\"%s\" artboard-range-mode=\"%s\" artboard-range=\"%s\" ignore-artboards=\"%s\" skip-blank-artboards=\"%s\" media-size=\"%s\" media-width=\"%s\" media-height=\"%s\" orientation=\"%s\" auto-rotate=\"%s\" transverse=\"%s\" print-layers=\"%s\" placement-x=\"%s\" placement-y=\"%s\" scaling-mode=\"%s\" custom-scale=\"%s\" tile-overlap-h=\"%s\" tile-overlap-v=\"%s\" tile-range=\"%s\""
+    indent
+    (escape_xml p.preset_name)
+    p.copies
+    (bool_str p.collate)
+    (bool_str p.reverse_order)
+    (Print_preferences.artboard_range_mode_to_string p.artboard_range_mode)
+    (escape_xml p.artboard_range)
+    (bool_str p.ignore_artboards)
+    (bool_str p.skip_blank_artboards)
+    (Print_preferences.media_size_to_string p.media_size)
+    (fmt p.media_width) (fmt p.media_height)
+    (Print_preferences.orientation_to_string p.orientation)
+    (bool_str p.auto_rotate)
+    (bool_str p.transverse)
+    (Print_preferences.print_layers_to_string p.print_layers)
+    (fmt p.placement_x) (fmt p.placement_y)
+    (Print_preferences.scaling_mode_to_string p.scaling_mode)
+    (fmt p.custom_scale)
+    (fmt p.tile_overlap_h) (fmt p.tile_overlap_v)
+    (escape_xml p.tile_range)
+  in
+  let printer_attr = match p.printer_name with
+    | Some n -> Printf.sprintf " printer-name=\"%s\"" (escape_xml n)
+    | None -> ""
+  in
+  Printf.sprintf "%s%s>\n%s\n%s</jas:print-preferences>"
+    header printer_attr
+    (marks_and_bleed_to_xml inner p.marks_and_bleed)
+    indent
+
 let document_to_svg doc =
   let (bx, by, bw, bh) = Document.bounds doc in
   let vb = Printf.sprintf "%s %s %s %s"
     (fmt (px bx)) (fmt (px by)) (fmt (px bw)) (fmt (px bh)) in
-  let lines = [
+  let setup_default = doc.Document.document_setup = Document_setup.default in
+  let prefs_default = doc.Document.print_preferences = Print_preferences.default in
+  let needs_jas = (not setup_default) || (not prefs_default) in
+  let ns_attrs =
+    "xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\""
+    ^ (if needs_jas then
+         " xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd\" xmlns:jas=\"urn:jas:1\""
+       else "")
+  in
+  let header_lines = [
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
-    Printf.sprintf "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" viewBox=\"%s\" width=\"%s\" height=\"%s\">"
-      vb (fmt (px bw)) (fmt (px bh));
+    Printf.sprintf "<svg %s viewBox=\"%s\" width=\"%s\" height=\"%s\">"
+      ns_attrs vb (fmt (px bw)) (fmt (px bh));
   ] in
+  let namedview_lines = if needs_jas then begin
+    let opens = ["  <sodipodi:namedview id=\"namedview1\">"] in
+    let setup = if not setup_default then
+        [document_setup_to_xml "    " doc.Document.document_setup]
+      else [] in
+    let prefs = if not prefs_default then
+        [print_preferences_to_xml "    " doc.Document.print_preferences]
+      else [] in
+    opens @ setup @ prefs @ ["  </sodipodi:namedview>"]
+  end else [] in
   let layer_lines = Array.to_list (Array.map (element_svg "  ") doc.Document.layers) in
-  String.concat "\n" (lines @ layer_lines @ ["</svg>"])
+  String.concat "\n" (header_lines @ namedview_lines @ layer_lines @ ["</svg>"])
 
 (* ----------------------------------------------------------------------- *)
 (* SVG Import: parse SVG XML string back to a Document                     *)
@@ -1025,7 +1112,179 @@ and skip_element_full i =
   | `El_start _ -> skip_element i
   | _ -> ()
 
+(* Parse Phase-2 print metadata from the SVG by walking the input
+   stream once for <sodipodi:namedview> blocks and pulling
+   <jas:document-setup> / <jas:print-preferences> attributes out.
+   Returns defaults when neither element is present. Run as a
+   separate Xmlm pass before the main element walk so we don't have
+   to thread mutable refs through parse_element. *)
+
+let attr_str attrs name def =
+  match get_attr attrs name with
+  | Some v -> v
+  | None -> def
+
+let attr_bool attrs name def =
+  match get_attr attrs name with
+  | Some "true" | Some "1" | Some "yes" -> true
+  | Some "false" | Some "0" | Some "no" -> false
+  | _ -> def
+
+let attr_float attrs name def =
+  match get_attr attrs name with
+  | Some s -> (try float_of_string s with _ -> def)
+  | None -> def
+
+let attr_int attrs name def =
+  match get_attr attrs name with
+  | Some s -> (try int_of_string s with _ -> def)
+  | None -> def
+
+let parse_document_setup_attrs attrs : Document_setup.t =
+  let d = Document_setup.default in
+  {
+    bleed_top = attr_float attrs "bleed-top" d.bleed_top;
+    bleed_right = attr_float attrs "bleed-right" d.bleed_right;
+    bleed_bottom = attr_float attrs "bleed-bottom" d.bleed_bottom;
+    bleed_left = attr_float attrs "bleed-left" d.bleed_left;
+    bleed_uniform = attr_bool attrs "bleed-uniform" d.bleed_uniform;
+    show_images_outline = attr_bool attrs "show-images-outline" d.show_images_outline;
+    highlight_substituted_glyphs =
+      attr_bool attrs "highlight-substituted-glyphs" d.highlight_substituted_glyphs;
+  }
+
+let parse_marks_and_bleed_attrs attrs : Print_preferences.marks_and_bleed =
+  let d = Print_preferences.default_marks_and_bleed in
+  {
+    all_printer_marks = attr_bool attrs "all-printer-marks" d.all_printer_marks;
+    trim_marks = attr_bool attrs "trim-marks" d.trim_marks;
+    registration_marks = attr_bool attrs "registration-marks" d.registration_marks;
+    color_bars = attr_bool attrs "color-bars" d.color_bars;
+    page_information = attr_bool attrs "page-information" d.page_information;
+    printer_mark_type =
+      Print_preferences.printer_mark_type_of_string
+        (attr_str attrs "printer-mark-type"
+           (Print_preferences.printer_mark_type_to_string d.printer_mark_type));
+    trim_mark_weight = attr_float attrs "trim-mark-weight" d.trim_mark_weight;
+    mark_offset = attr_float attrs "mark-offset" d.mark_offset;
+    use_document_bleed = attr_bool attrs "use-document-bleed" d.use_document_bleed;
+    bleed_top = attr_float attrs "bleed-top" d.bleed_top;
+    bleed_right = attr_float attrs "bleed-right" d.bleed_right;
+    bleed_bottom = attr_float attrs "bleed-bottom" d.bleed_bottom;
+    bleed_left = attr_float attrs "bleed-left" d.bleed_left;
+  }
+
+let parse_print_preferences_attrs ?(marks_and_bleed=Print_preferences.default_marks_and_bleed)
+    attrs : Print_preferences.t =
+  let d = Print_preferences.default in
+  let printer_name = match get_attr attrs "printer-name" with
+    | Some s -> Some s
+    | None -> None in
+  {
+    preset_name = attr_str attrs "preset-name" d.preset_name;
+    printer_name;
+    copies = attr_int attrs "copies" d.copies;
+    collate = attr_bool attrs "collate" d.collate;
+    reverse_order = attr_bool attrs "reverse-order" d.reverse_order;
+    artboard_range_mode =
+      Print_preferences.artboard_range_mode_of_string
+        (attr_str attrs "artboard-range-mode"
+           (Print_preferences.artboard_range_mode_to_string d.artboard_range_mode));
+    artboard_range = attr_str attrs "artboard-range" d.artboard_range;
+    ignore_artboards = attr_bool attrs "ignore-artboards" d.ignore_artboards;
+    skip_blank_artboards = attr_bool attrs "skip-blank-artboards" d.skip_blank_artboards;
+    media_size =
+      Print_preferences.media_size_of_string
+        (attr_str attrs "media-size"
+           (Print_preferences.media_size_to_string d.media_size));
+    media_width = attr_float attrs "media-width" d.media_width;
+    media_height = attr_float attrs "media-height" d.media_height;
+    orientation =
+      Print_preferences.orientation_of_string
+        (attr_str attrs "orientation"
+           (Print_preferences.orientation_to_string d.orientation));
+    auto_rotate = attr_bool attrs "auto-rotate" d.auto_rotate;
+    transverse = attr_bool attrs "transverse" d.transverse;
+    print_layers =
+      Print_preferences.print_layers_of_string
+        (attr_str attrs "print-layers"
+           (Print_preferences.print_layers_to_string d.print_layers));
+    placement_x = attr_float attrs "placement-x" d.placement_x;
+    placement_y = attr_float attrs "placement-y" d.placement_y;
+    scaling_mode =
+      Print_preferences.scaling_mode_of_string
+        (attr_str attrs "scaling-mode"
+           (Print_preferences.scaling_mode_to_string d.scaling_mode));
+    custom_scale = attr_float attrs "custom-scale" d.custom_scale;
+    tile_overlap_h = attr_float attrs "tile-overlap-h" d.tile_overlap_h;
+    tile_overlap_v = attr_float attrs "tile-overlap-v" d.tile_overlap_v;
+    tile_range = attr_str attrs "tile-range" d.tile_range;
+    marks_and_bleed;
+  }
+
+(* Walk the SVG once via Xmlm, pulling jas:document-setup +
+   jas:print-preferences attributes out of any sodipodi:namedview
+   block. Defaults returned when nothing is found. *)
+let parse_jas_print_blocks svg =
+  let setup = ref Document_setup.default in
+  let prefs = ref Print_preferences.default in
+  (try
+    let i = Xmlm.make_input (`String (0, svg)) in
+    (match Xmlm.peek i with `Dtd _ -> let _ = Xmlm.input i in () | _ -> ());
+    (match Xmlm.input i with `El_start _ -> () | _ -> failwith "expected svg");
+    (* Walk svg children. *)
+    let rec walk_root () =
+      match Xmlm.peek i with
+      | `El_end -> ()
+      | `Data _ -> let _ = Xmlm.input i in walk_root ()
+      | `Dtd _ -> let _ = Xmlm.input i in walk_root ()
+      | `El_start ((_, tag), _) when tag = "namedview" ->
+        let _ = Xmlm.input i in
+        walk_namedview ();
+        walk_root ()
+      | `El_start _ ->
+        let _ = Xmlm.input i in
+        skip_element i;
+        walk_root ()
+    and walk_namedview () =
+      match Xmlm.peek i with
+      | `El_end -> let _ = Xmlm.input i in ()
+      | `Data _ -> let _ = Xmlm.input i in walk_namedview ()
+      | `El_start ((_, tag), xmlm_attrs) ->
+        let _ = Xmlm.input i in
+        let attrs = attrs_of_xmlm_attrs xmlm_attrs in
+        (match tag with
+         | "document-setup" ->
+           setup := parse_document_setup_attrs attrs;
+           skip_element i
+         | "print-preferences" ->
+           let mab = ref Print_preferences.default_marks_and_bleed in
+           (* Walk children for nested marks-and-bleed. *)
+           let rec walk_pp () =
+             match Xmlm.peek i with
+             | `El_end -> let _ = Xmlm.input i in ()
+             | `Data _ -> let _ = Xmlm.input i in walk_pp ()
+             | `El_start ((_, ctag), cattrs) ->
+               let _ = Xmlm.input i in
+               (if ctag = "marks-and-bleed" then
+                  mab := parse_marks_and_bleed_attrs (attrs_of_xmlm_attrs cattrs));
+               skip_element i;
+               walk_pp ()
+             | `Dtd _ -> let _ = Xmlm.input i in walk_pp ()
+           in
+           walk_pp ();
+           prefs := parse_print_preferences_attrs ~marks_and_bleed:!mab attrs
+         | _ ->
+           skip_element i);
+        walk_namedview ()
+      | `Dtd _ -> let _ = Xmlm.input i in walk_namedview ()
+    in
+    walk_root ()
+  with _ -> ());
+  (!setup, !prefs)
+
 let svg_to_document svg =
+  let (parsed_setup, parsed_prefs) = parse_jas_print_blocks svg in
   try
     let i = Xmlm.make_input (`String (0, svg)) in
     (* skip dtd *)
@@ -1042,7 +1301,11 @@ let svg_to_document svg =
         Element.make_layer ~name:"" [|elem|]
     ) children) in
     let layers = if layers = [] then [Element.make_layer [||]] else layers in
-    Normalize.normalize_document (Document.make_document (Array.of_list layers))
+    Normalize.normalize_document
+      (Document.make_document
+         ~document_setup:parsed_setup
+         ~print_preferences:parsed_prefs
+         (Array.of_list layers))
   with e ->
     Printf.eprintf "Warning: SVG parse error: %s\n" (Printexc.to_string e);
     Document.make_document [|Element.make_layer [||]|]
