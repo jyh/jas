@@ -1484,6 +1484,13 @@ fn output_view(o: &crate::document::print_preferences::Output) -> serde_json::Va
     })
 }
 
+fn advanced_view(a: &crate::document::print_preferences::Advanced) -> serde_json::Value {
+    serde_json::json!({
+        "print_as_bitmap": a.print_as_bitmap,
+        "overprint_flattener_preset": crate::document::print_preferences::flattener_preset_str(&a.overprint_flattener_preset),
+    })
+}
+
 fn color_management_view(c: &crate::document::print_preferences::ColorManagement) -> serde_json::Value {
     serde_json::json!({
         "document_profile": c.document_profile,
@@ -1534,6 +1541,12 @@ fn build_active_document_view(
                 "bleed_uniform": true,
                 "show_images_outline": false,
                 "highlight_substituted_glyphs": false,
+                "grid_size": 72.0,
+                "grid_color": "#cccccc",
+                "paper_color": "#ffffff",
+                "simulate_colored_paper": false,
+                "transparency_flattener_preset": "medium_resolution",
+                "discard_white_overprint": false,
             },
             "print_preferences": {
                 "preset_name": "[Default]",
@@ -1570,6 +1583,9 @@ fn build_active_document_view(
                 ),
                 "color_management": color_management_view(
                     &crate::document::print_preferences::ColorManagement::default(),
+                ),
+                "advanced": advanced_view(
+                    &crate::document::print_preferences::Advanced::default(),
                 ),
             },
             "artboards_count": 0,
@@ -1718,6 +1734,13 @@ fn build_active_document_view(
             "bleed_uniform": doc.document_setup.bleed_uniform,
             "show_images_outline": doc.document_setup.show_images_outline,
             "highlight_substituted_glyphs": doc.document_setup.highlight_substituted_glyphs,
+            "grid_size": doc.document_setup.grid_size,
+            "grid_color": doc.document_setup.grid_color.clone(),
+            "paper_color": doc.document_setup.paper_color.clone(),
+            "simulate_colored_paper": doc.document_setup.simulate_colored_paper,
+            "transparency_flattener_preset": crate::document::print_preferences::flattener_preset_str(
+                &doc.document_setup.transparency_flattener_preset),
+            "discard_white_overprint": doc.document_setup.discard_white_overprint,
         },
         "print_preferences": {
             "preset_name": doc.print_preferences.preset_name.clone(),
@@ -1748,6 +1771,7 @@ fn build_active_document_view(
             "output": output_view(&doc.print_preferences.output),
             "graphics": graphics_view(&doc.print_preferences.graphics),
             "color_management": color_management_view(&doc.print_preferences.color_management),
+            "advanced": advanced_view(&doc.print_preferences.advanced),
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -2427,7 +2451,8 @@ fn run_yaml_effect(
                     _ => unreachable!(),
                 }
             }
-            "bleed_uniform" | "show_images_outline" | "highlight_substituted_glyphs" => {
+            "bleed_uniform" | "show_images_outline" | "highlight_substituted_glyphs"
+            | "simulate_colored_paper" | "discard_white_overprint" => {
                 let b = match value_val {
                     super::expr_types::Value::Bool(b) => b,
                     _ => return deferred,
@@ -2436,12 +2461,69 @@ fn run_yaml_effect(
                     "bleed_uniform" => new_doc.document_setup.bleed_uniform = b,
                     "show_images_outline" => new_doc.document_setup.show_images_outline = b,
                     "highlight_substituted_glyphs" => new_doc.document_setup.highlight_substituted_glyphs = b,
+                    "simulate_colored_paper" => new_doc.document_setup.simulate_colored_paper = b,
+                    "discard_white_overprint" => new_doc.document_setup.discard_white_overprint = b,
                     _ => unreachable!(),
                 }
+            }
+            "grid_size" => {
+                let n = match value_val {
+                    super::expr_types::Value::Number(n) => n,
+                    _ => return deferred,
+                };
+                new_doc.document_setup.grid_size = n;
+            }
+            "grid_color" | "paper_color" => {
+                let s = match value_val {
+                    super::expr_types::Value::Str(s) => s.clone(),
+                    _ => return deferred,
+                };
+                match field.as_str() {
+                    "grid_color" => new_doc.document_setup.grid_color = s,
+                    "paper_color" => new_doc.document_setup.paper_color = s,
+                    _ => unreachable!(),
+                }
+            }
+            "transparency_flattener_preset" => {
+                let s = match value_val {
+                    super::expr_types::Value::Str(s) => s,
+                    _ => return deferred,
+                };
+                new_doc.document_setup.transparency_flattener_preset =
+                    crate::document::print_preferences::flattener_preset_from(&s);
             }
             _ => return deferred,
         }
         tab.model.set_document(new_doc);
+        return deferred;
+    }
+
+    // doc.set_advanced_field: { field, value }  — PRINT.md §6
+    if let Some(spec) = eff.get("doc.set_advanced_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::flattener_preset_from;
+        let a = &mut new_doc.print_preferences.advanced;
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("print_as_bitmap", super::expr_types::Value::Bool(b)) => a.print_as_bitmap = *b,
+            ("overprint_flattener_preset", super::expr_types::Value::Str(s)) => {
+                a.overprint_flattener_preset = flattener_preset_from(s);
+            }
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
         return deferred;
     }
 

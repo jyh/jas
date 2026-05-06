@@ -193,6 +193,12 @@ print:
       values: [perceptual, relative_colorimetric, saturation, absolute_colorimetric]
       default: relative_colorimetric
     cm_preserve_rgb_numbers: { type: bool, default: false }
+    # Advanced sub-record (PRINT.md §Phase 6).
+    adv_print_as_bitmap: { type: bool, default: false }
+    adv_overprint_flattener_preset:
+      type: enum
+      values: [low_resolution, medium_resolution, high_resolution, custom]
+      default: medium_resolution
 
   init:
     preset_name:          "active_document.print_preferences.preset_name"
@@ -260,6 +266,8 @@ print:
     cm_printer_profile:      "active_document.print_preferences.color_management.printer_profile"
     cm_rendering_intent:     "active_document.print_preferences.color_management.rendering_intent"
     cm_preserve_rgb_numbers: "active_document.print_preferences.color_management.preserve_rgb_numbers"
+    adv_print_as_bitmap:            "active_document.print_preferences.advanced.print_as_bitmap"
+    adv_overprint_flattener_preset: "active_document.print_preferences.advanced.overprint_flattener_preset"
 
   content:
     type: container
@@ -1264,7 +1272,7 @@ print:
                           bind:
                             checked: "dialog.cm_preserve_rgb_numbers"
 
-          # ── Advanced (Phase 6 placeholder) ───────────
+          # ── Advanced (PRINT.md §Phase 6) ─────────────
           - id: advanced
             label: "Advanced"
             content:
@@ -1272,11 +1280,43 @@ print:
               layout: column
               style: { gap: 12, padding: 4 }
               children:
-                - { type: text, content: "Advanced",
-                    style: { font_size: 13, font_weight: bold } }
+                - type: row
+                  children:
+                    - type: col
+                      col: 12
+                      children:
+                        - id: pr_adv_print_as_bitmap
+                          type: checkbox
+                          label: "Print as Bitmap"
+                          bind:
+                            checked: "dialog.adv_print_as_bitmap"
+
+                - type: separator
+                  orientation: horizontal
+
+                - { type: text, content: "Overprint Flattener",
+                    style: { font_size: 11, font_weight: bold } }
+                - type: row
+                  children:
+                    - type: col
+                      col: 4
+                      children:
+                        - { type: text, content: "Preset:", style: { font_size: 11 } }
+                    - type: col
+                      col: 8
+                      children:
+                        - id: pr_adv_overprint_flattener_preset
+                          type: select
+                          options:
+                            - { label: "Low Resolution",    value: "low_resolution" }
+                            - { label: "Medium Resolution", value: "medium_resolution" }
+                            - { label: "High Resolution",   value: "high_resolution" }
+                            - { label: "Custom",            value: "custom" }
+                          bind:
+                            value: "dialog.adv_overprint_flattener_preset"
                 - { type: text,
-                    content: "Available in Phase 6 (PRINT.md §Phase 6). Print as bitmap, overprint flattener preset; also re-houses Document Setup transparency / overprint settings.",
-                    style: { font_size: 11, color: "var(--jas-text-dim,#888)" } }
+                    content: "The flattener pipeline isn't wired in yet — Phase 6 stores the choice on disk and round-trips it through Print Preferences.",
+                    style: { font_size: 10, color: "var(--jas-text-dim,#888)" } }
 
       # ── Footer strip ─────────────────────────────────
       - type: container
@@ -1365,6 +1405,8 @@ print:
               cm_printer_profile:      "dialog.cm_printer_profile"
               cm_rendering_intent:     "dialog.cm_rendering_intent"
               cm_preserve_rgb_numbers: "dialog.cm_preserve_rgb_numbers"
+              adv_print_as_bitmap:            "dialog.adv_print_as_bitmap"
+              adv_overprint_flattener_preset: "dialog.adv_overprint_flattener_preset"
           - type: button
             label: "Print"
             variant: primary
@@ -1435,3 +1477,5 @@ print:
               cm_printer_profile:      "dialog.cm_printer_profile"
               cm_rendering_intent:     "dialog.cm_rendering_intent"
               cm_preserve_rgb_numbers: "dialog.cm_preserve_rgb_numbers"
+              adv_print_as_bitmap:            "dialog.adv_print_as_bitmap"
+              adv_overprint_flattener_preset: "dialog.adv_overprint_flattener_preset"
