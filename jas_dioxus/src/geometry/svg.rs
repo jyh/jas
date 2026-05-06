@@ -1904,6 +1904,103 @@ fn parse_marks_and_bleed(
     }
 }
 
+fn ink_override_to_xml(
+    ink: &crate::document::print_preferences::InkOverride,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::dot_shape_str;
+    format!(
+        "{indent}<jas:ink name=\"{name}\" print=\"{p}\" frequency=\"{f}\" angle=\"{a}\" dot-shape=\"{ds}\"/>",
+        indent = indent,
+        name = escape_xml(&ink.name),
+        p = bool_str(ink.print),
+        f = fmt(ink.frequency),
+        a = fmt(ink.angle),
+        ds = dot_shape_str(&ink.dot_shape),
+    )
+}
+
+fn output_to_xml(
+    o: &crate::document::print_preferences::Output,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::*;
+    let inner = format!("{}  ", indent);
+    let mut s = format!(
+        "{indent}<jas:output mode=\"{m}\" emulsion=\"{e}\" image-polarity=\"{ip}\" printer-resolution=\"{pr}\" convert-spot-to-process=\"{csp}\" overprint-black=\"{ob}\">",
+        indent = indent,
+        m = output_mode_str(&o.mode),
+        e = emulsion_str(&o.emulsion),
+        ip = image_polarity_str(&o.image_polarity),
+        pr = escape_xml(&o.printer_resolution),
+        csp = bool_str(o.convert_spot_to_process),
+        ob = bool_str(o.overprint_black),
+    );
+    for ink in &o.inks {
+        s.push('\n');
+        s.push_str(&ink_override_to_xml(ink, &inner));
+    }
+    s.push('\n');
+    s.push_str(indent);
+    s.push_str("</jas:output>");
+    s
+}
+
+fn parse_ink_override(
+    node: &XmlNode,
+) -> crate::document::print_preferences::InkOverride {
+    use crate::document::print_preferences::*;
+    let d = InkOverride { name: String::new(), print: true, frequency: 75.0, angle: 45.0, dot_shape: DotShape::Round };
+    InkOverride {
+        name: get_attr(node, "name").map(str::to_string).unwrap_or(d.name),
+        print: get_attr(node, "print")
+            .map(|s| parse_bool(s, d.print)).unwrap_or(d.print),
+        frequency: get_attr(node, "frequency")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.frequency),
+        angle: get_attr(node, "angle")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.angle),
+        dot_shape: get_attr(node, "dot-shape")
+            .map(dot_shape_from).unwrap_or(d.dot_shape),
+    }
+}
+
+fn parse_output(
+    node: &XmlNode,
+) -> crate::document::print_preferences::Output {
+    use crate::document::print_preferences::*;
+    let d = Output::default();
+    let mut o = Output {
+        mode: get_attr(node, "mode")
+            .map(output_mode_from).unwrap_or(d.mode),
+        emulsion: get_attr(node, "emulsion")
+            .map(emulsion_from).unwrap_or(d.emulsion),
+        image_polarity: get_attr(node, "image-polarity")
+            .map(image_polarity_from).unwrap_or(d.image_polarity),
+        printer_resolution: get_attr(node, "printer-resolution")
+            .map(str::to_string).unwrap_or(d.printer_resolution),
+        convert_spot_to_process: get_attr(node, "convert-spot-to-process")
+            .map(|s| parse_bool(s, d.convert_spot_to_process))
+            .unwrap_or(d.convert_spot_to_process),
+        overprint_black: get_attr(node, "overprint-black")
+            .map(|s| parse_bool(s, d.overprint_black))
+            .unwrap_or(d.overprint_black),
+        // Default to an empty list; populated below from <jas:ink>
+        // children. Falls back to the CMYK defaults when no children
+        // are present, so a missing <jas:output> in older files still
+        // ends up with the standard four-row table.
+        inks: Vec::new(),
+    };
+    for child in &node.children {
+        if strip_ns(&child.tag) == "ink" {
+            o.inks.push(parse_ink_override(child));
+        }
+    }
+    if o.inks.is_empty() {
+        o.inks = InkOverride::process_cmyk_defaults();
+    }
+    o
+}
+
 fn print_preferences_to_xml(
     p: &crate::document::print_preferences::PrintPreferences,
     indent: &str,
@@ -1941,6 +2038,8 @@ fn print_preferences_to_xml(
     s.push('>');
     s.push('\n');
     s.push_str(&marks_and_bleed_to_xml(&p.marks_and_bleed, &inner_indent));
+    s.push('\n');
+    s.push_str(&output_to_xml(&p.output, &inner_indent));
     s.push('\n');
     s.push_str(indent);
     s.push_str("</jas:print-preferences>");
@@ -2002,9 +2101,10 @@ fn parse_print_preferences(
         output: Output::default(),
     };
     for child in &node.children {
-        if strip_ns(&child.tag) == "marks-and-bleed" {
-            p.marks_and_bleed = parse_marks_and_bleed(child);
-            break;
+        match strip_ns(&child.tag) {
+            "marks-and-bleed" => p.marks_and_bleed = parse_marks_and_bleed(child),
+            "output" => p.output = parse_output(child),
+            _ => {}
         }
     }
     p
@@ -3204,6 +3304,30 @@ mod tests {
 
         let parsed = svg_to_document(&svg);
         assert_eq!(parsed.print_preferences, doc.print_preferences);
+    }
+
+    #[test]
+    fn output_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.output = Output {
+            mode: OutputMode::Separations,
+            emulsion: Emulsion::DownRight,
+            image_polarity: ImagePolarity::Negative,
+            printer_resolution: "150 lpi / 1200 dpi".to_string(),
+            convert_spot_to_process: true,
+            overprint_black: true,
+            inks: vec![
+                InkOverride { name: "Process Cyan".into(),    print: false, frequency: 100.0, angle: 105.0, dot_shape: DotShape::Ellipse },
+                InkOverride { name: "PANTONE 185 C".into(),   print: true,  frequency:  85.0, angle:  45.0, dot_shape: DotShape::Square },
+            ],
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:output"), "svg:\n{svg}");
+        assert!(svg.contains("<jas:ink"), "svg:\n{svg}");
+        assert!(svg.contains("PANTONE 185 C"), "spot ink missing:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.output, doc.print_preferences.output);
     }
 
     #[test]
