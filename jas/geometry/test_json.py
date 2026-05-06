@@ -516,6 +516,17 @@ def _document_setup_json(s):
     return o.build()
 
 
+def _graphics_json(g):
+    o = _JsonObj()
+    o.bool_("compatible_gradient_printing", g.compatible_gradient_printing)
+    o.str("data_format", g.data_format.value)
+    o.num("flatness", g.flatness)
+    o.str("font_download", g.font_download.value)
+    o.str("postscript_level", g.postscript_level.value)
+    o.num("raster_effects_resolution", g.raster_effects_resolution)
+    return o.build()
+
+
 def _ink_override_json(ink):
     o = _JsonObj()
     o.num("angle", ink.angle)
@@ -569,6 +580,7 @@ def _print_preferences_json(p):
     o.bool_("collate", p.collate)
     o.int_("copies", p.copies)
     o.num("custom_scale", p.custom_scale)
+    o.raw("graphics", _graphics_json(p.graphics))
     o.bool_("ignore_artboards", p.ignore_artboards)
     o.raw("marks_and_bleed", _marks_and_bleed_json(p.marks_and_bleed))
     o.num("media_height", p.media_height)
@@ -962,6 +974,29 @@ def _parse_document_setup(v):
     )
 
 
+def _parse_graphics(v):
+    from document.print_preferences import (
+        Graphics, FontDownload, PostScriptLevel, DataFormat,
+        _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return Graphics()
+    d = Graphics()
+    return Graphics(
+        flatness=v.get("flatness", d.flatness),
+        font_download=_enum_from_string(
+            FontDownload, v.get("font_download", ""), d.font_download),
+        postscript_level=_enum_from_string(
+            PostScriptLevel, v.get("postscript_level", ""), d.postscript_level),
+        data_format=_enum_from_string(
+            DataFormat, v.get("data_format", ""), d.data_format),
+        compatible_gradient_printing=v.get(
+            "compatible_gradient_printing", d.compatible_gradient_printing),
+        raster_effects_resolution=v.get(
+            "raster_effects_resolution", d.raster_effects_resolution),
+    )
+
+
 def _parse_ink_override(v):
     from document.print_preferences import (
         InkOverride, DotShape, _enum_from_string,
@@ -1065,6 +1100,7 @@ def _parse_print_preferences(v):
         tile_range=v.get("tile_range", d.tile_range),
         marks_and_bleed=_parse_marks_and_bleed(v.get("marks_and_bleed", None)),
         output=_parse_output(v.get("output", None)),
+        graphics=_parse_graphics(v.get("graphics", None)),
     )
 
 

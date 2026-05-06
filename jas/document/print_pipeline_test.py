@@ -8,6 +8,7 @@ from document.print_preferences import (
     PrintLayers, ScalingMode, DEFAULT_PRESET,
     MarksAndBleed, PrinterMarkType,
     Output, OutputMode, Emulsion, ImagePolarity, DotShape, InkOverride,
+    Graphics, FontDownload, PostScriptLevel, DataFormat,
 )
 from geometry.test_json import document_to_test_json, test_json_to_document
 
@@ -237,6 +238,45 @@ class OutputTest(absltest.TestCase):
         self.assertIn('"PANTONE 185 C"', j)
         d2 = test_json_to_document(j)
         self.assertEqual(d2.print_preferences.output, o)
+
+
+class GraphicsTest(absltest.TestCase):
+    """PRINT.md §Phase 4 Graphics sub-record."""
+
+    def test_defaults(self):
+        g = Graphics()
+        self.assertEqual(g.flatness, 1.0)
+        self.assertEqual(g.font_download, FontDownload.SUBSET)
+        self.assertEqual(g.postscript_level, PostScriptLevel.LEVEL_3)
+        self.assertEqual(g.data_format, DataFormat.BINARY)
+        self.assertFalse(g.compatible_gradient_printing)
+        self.assertEqual(g.raster_effects_resolution, 300.0)
+
+    def test_enum_strings(self):
+        self.assertEqual(FontDownload.NONE.value, "none")
+        self.assertEqual(FontDownload.SUBSET.value, "subset")
+        self.assertEqual(FontDownload.COMPLETE.value, "complete")
+        self.assertEqual(PostScriptLevel.LEVEL_2.value, "level_2")
+        self.assertEqual(PostScriptLevel.LEVEL_3.value, "level_3")
+        self.assertEqual(DataFormat.ASCII.value, "ascii")
+        self.assertEqual(DataFormat.BINARY.value, "binary")
+
+    def test_graphics_roundtrip(self):
+        g = Graphics(
+            flatness=0.4,
+            font_download=FontDownload.COMPLETE,
+            postscript_level=PostScriptLevel.LEVEL_2,
+            data_format=DataFormat.ASCII,
+            compatible_gradient_printing=True,
+            raster_effects_resolution=600.0,
+        )
+        p = PrintPreferences(graphics=g)
+        d = Document(print_preferences=p)
+        j = document_to_test_json(d)
+        self.assertIn('"graphics"', j)
+        self.assertIn('"flatness":0.4', j)
+        d2 = test_json_to_document(j)
+        self.assertEqual(d2.print_preferences.graphics, g)
 
 
 if __name__ == "__main__":
