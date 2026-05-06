@@ -441,21 +441,48 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   apply_menubar_css ();
   menubar#misc#style_context#add_provider menubar_css 600;
   let factory = new GMenu.factory menubar in
+  (* Attach the factory's accel_group to the parent window so menu
+     accelerators (Ctrl-N, Ctrl-S, Ctrl-P, etc.) actually fire as
+     keyboard shortcuts. Without this the keysym shows in the menu
+     label but the keypress is never routed to the menu callback. *)
+  parent#add_accel_group factory#accel_group;
 
   (* File menu *)
   let _file_menu = factory#add_submenu "File" in
-  let file_factory = new GMenu.factory _file_menu in
-  ignore (file_factory#add_item "New" ~key:GdkKeysyms._n ~callback:(fun () -> on_open (Model.create ())));
+  let file_factory = new GMenu.factory ~accel_group:factory#accel_group _file_menu in
+  (* Document.default_document () builds with empty artboards which
+     gives a featureless gray pasteboard. Seed the at-least-one
+     invariant so a fresh canvas opens with a visible white artboard. *)
+  ignore (file_factory#add_item "New" ~key:GdkKeysyms._n ~callback:(fun () ->
+    let layers = [| Element.make_layer [||] |] in
+    let (abs, _) = Artboard.ensure_invariant [] in
+    let doc = Document.make_document ~artboards:abs layers in
+    on_open (Model.create ~document:doc ())));
   ignore (file_factory#add_item "Open..." ~key:GdkKeysyms._o ~callback:(open_file on_open parent));
   ignore (file_factory#add_item "Save" ~key:GdkKeysyms._s ~callback:(fun () -> save (m ()) parent ()));
   ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(fun () -> save_as (m ()) parent ()));
   ignore (file_factory#add_item "Revert" ~callback:(revert m parent));
   ignore (file_factory#add_separator ());
-  (* PRINT.md §1: Document Setup, Print, Export to PDF. *)
-  ignore (file_factory#add_item "Document Setup..." ~callback:(fun () ->
-    print_endline "Document Setup (deferred: GTK dialog wiring)"));
-  ignore (file_factory#add_item "Print..." ~key:GdkKeysyms._p ~callback:(fun () ->
-    print_endline "Print (deferred: GTK dialog wiring)"));
+  (* PRINT.md §1: Document Setup, Print, Export to PDF.
+     Dialog flows route through [Yaml_dialog_view] which renders the
+     workspace YAML, wires widget write-backs, and dispatches the
+     OK / Cancel / Print actions. ``active_document`` outer scope is
+     required so init expressions like
+     ``active_document.print_preferences.copies`` resolve to persisted
+     document values rather than falling back to the YAML defaults. *)
+  let open_print_phase_dialog dialog_id () =
+    let outer_scope = [
+      ("active_document",
+       Active_document_view.build (Some (m ())));
+    ] in
+    match Yaml_dialog_view.open_dialog ~outer_scope dialog_id [] [] with
+    | Some ds -> Yaml_dialog_view.show_dialog ~parent ~outer_scope ds
+    | None -> ()
+  in
+  ignore (file_factory#add_item "Document Setup..."
+    ~callback:(open_print_phase_dialog "document_setup"));
+  ignore (file_factory#add_item "Print..." ~key:GdkKeysyms._p
+    ~callback:(open_print_phase_dialog "print"));
   ignore (file_factory#add_item "Export to PDF..." ~callback:(fun () ->
     export_to_pdf (m ()) parent ()));
   ignore (file_factory#add_separator ());
@@ -463,7 +490,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
 
   (* Edit menu *)
   let _edit_menu = factory#add_submenu "Edit" in
-  let edit_factory = new GMenu.factory _edit_menu in
+  let edit_factory = new GMenu.factory ~accel_group:factory#accel_group _edit_menu in
   ignore (edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> (m ())#undo));
   ignore (edit_factory#add_item "Redo" ~callback:(fun () -> (m ())#redo));
   ignore (edit_factory#add_separator ());
@@ -478,7 +505,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
 
   (* Object menu *)
   let _object_menu = factory#add_submenu "Object" in
-  let object_factory = new GMenu.factory _object_menu in
+  let object_factory = new GMenu.factory ~accel_group:factory#accel_group _object_menu in
   ignore (object_factory#add_item "Group" ~key:GdkKeysyms._g ~callback:(fun () -> group_selection (m ()) ()));
   ignore (object_factory#add_item "Ungroup" ~callback:(fun () -> ungroup_selection (m ()) ()));
   ignore (object_factory#add_item "Ungroup All" ~callback:(fun () -> ungroup_all (m ()) ()));
@@ -495,14 +522,32 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
 
   (* View menu *)
   let _view_menu = factory#add_submenu "View" in
-  let view_factory = new GMenu.factory _view_menu in
-  ignore (view_factory#add_item "Zoom In" ~key:GdkKeysyms._plus ~callback:(fun () -> print_endline "Zoom In"));
-  ignore (view_factory#add_item "Zoom Out" ~key:GdkKeysyms._minus ~callback:(fun () -> print_endline "Zoom Out"));
-  ignore (view_factory#add_item "Fit in Window" ~key:GdkKeysyms._0 ~callback:(fun () -> print_endline "Fit in Window"));
+  let view_factory = new GMenu.factory ~accel_group:factory#accel_group _view_menu in
+  let bump_zoom factor () =
+    let model = m () in
+    let cx = model#viewport_w /. 2.0 in
+    let cy = model#viewport_h /. 2.0 in
+    let z = model#zoom_level in
+    let doc_cx = (cx -. model#view_offset_x) /. z in
+    let doc_cy = (cy -. model#view_offset_y) /. z in
+    let z' = max 0.1 (min 64.0 (z *. factor)) in
+    model#set_zoom_level z';
+    model#set_view_offset_x (cx -. doc_cx *. z');
+    model#set_view_offset_y (cy -. doc_cy *. z');
+    parent#misc#queue_draw ()
+  in
+  ignore (view_factory#add_item "Zoom In" ~key:GdkKeysyms._plus
+    ~callback:(bump_zoom 1.2));
+  ignore (view_factory#add_item "Zoom Out" ~key:GdkKeysyms._minus
+    ~callback:(bump_zoom (1.0 /. 1.2)));
+  ignore (view_factory#add_item "Fit in Window" ~key:GdkKeysyms._0
+    ~callback:(fun () ->
+      (m ())#center_view_on_current_artboard;
+      parent#misc#queue_draw ()));
 
   (* Window menu *)
   let _window_menu = factory#add_submenu "Window" in
-  let window_factory = new GMenu.factory _window_menu in
+  let window_factory = new GMenu.factory ~accel_group:factory#accel_group _window_menu in
 
   (* Workspace submenu *)
   (match workspace_layout, app_config, refresh_dock with

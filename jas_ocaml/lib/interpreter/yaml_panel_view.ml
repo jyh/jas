@@ -86,27 +86,35 @@ let install_recent_colors_bridge () =
     change callbacks to flow user edits back to the store (where
     the subscription fires the apply pipeline). *)
 let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
-  match !_current_store, !_current_panel_id with
-  | Some store, Some panel_id ->
-    let parts = String.split_on_char '.' bind_expr in
-    (match parts with
-     | "panel" :: field :: _ ->
-       (* Phase 4: paragraph writes route through the dedicated
-          setter so mutual exclusion + sync + apply happen atomically.
-          Skipped when no model is threaded (test harness). *)
-       if panel_id = "paragraph_panel_content" then begin
-         match !_get_model_ref () with
-         | Some model ->
-           let ctrl = new Controller.controller ~model () in
-           Effects.set_paragraph_panel_field store ctrl field value
-         | None ->
+  let parts = String.split_on_char '.' bind_expr in
+  match parts with
+  | "dialog" :: field :: _ ->
+    (* YAML dialog widget bound to ``dialog.X``: route to the live
+       dialog state so OK button params (resolved at click time)
+       see the typed value. Without this the widget edit was a
+       silent no-op for any dialog widget. *)
+    Dialog_global.set_field field value
+  | _ ->
+    match !_current_store, !_current_panel_id with
+    | Some store, Some panel_id ->
+      (match parts with
+       | "panel" :: field :: _ ->
+         (* Phase 4: paragraph writes route through the dedicated
+            setter so mutual exclusion + sync + apply happen atomically.
+            Skipped when no model is threaded (test harness). *)
+         if panel_id = "paragraph_panel_content" then begin
+           match !_get_model_ref () with
+           | Some model ->
+             let ctrl = new Controller.controller ~model () in
+             Effects.set_paragraph_panel_field store ctrl field value
+           | None ->
+             State_store.set_panel store panel_id field value
+         end else
            State_store.set_panel store panel_id field value
-       end else
-         State_store.set_panel store panel_id field value
-     | "state" :: field :: _ ->
-       State_store.set store field value
-     | _ -> ())
-  | _ -> ()
+       | "state" :: field :: _ ->
+         State_store.set store field value
+       | _ -> ())
+    | _ -> ()
 
 (** Layers-panel mutable state — collapsed rows, panel selection, rename
     state, drag source/target, search filter, hidden type filter, saved
@@ -179,8 +187,32 @@ and render_container ~packing ~ctx el etype =
   let is_row = layout_dir = "row" || etype = "row" in
   let gap = el |> member "style" |> safe_member "gap" |> to_int_option |> Option.value ~default:0 in
   if is_row then begin
+    (* Bootstrap-style: when row children declare ``col: N`` weights,
+       give each child a proportional fixed width so labels in
+       column 1 of every row stack up at the same x-coordinate.
+       Without this, labels right-pack against their inputs and rows
+       drift across the dialog. Hardcoded 35px per col fits the
+       Print dialog's content area; tweak if other dialogs need
+       different totals. *)
+    let children = match el |> member "children" with
+      | `List xs -> xs | _ -> [] in
+    let weights = List.map (fun c ->
+      c |> member "col" |> to_int_option |> Option.value ~default:0
+    ) children in
+    let any_weighted = List.exists (fun w -> w > 0) weights in
     let hbox = GPack.hbox ~spacing:gap ~packing () in
-    render_children ~packing:(hbox#pack ~expand:false) ~ctx el
+    if any_weighted then
+      List.iter2 (fun child weight ->
+        if weight > 0 then begin
+          let w = weight * 35 in
+          let cell_box = GPack.hbox ~packing:(hbox#pack ~expand:false ~fill:false) () in
+          cell_box#misc#set_size_request ~width:w ();
+          render_element ~packing:(cell_box#pack ~expand:true ~fill:true) ~ctx child
+        end else
+          render_element ~packing:(hbox#pack ~expand:false) ~ctx child
+      ) children weights
+    else
+      render_children ~packing:(hbox#pack ~expand:false) ~ctx el
   end else begin
     let vbox = GPack.vbox ~spacing:gap ~packing () in
     render_children ~packing:(vbox#pack ~expand:false) ~ctx el
@@ -204,6 +236,7 @@ and render_text ~packing ~ctx el =
 
 and render_button ~packing ~ctx el =
   let open Yojson.Safe.Util in
+  let etype = el |> member "type" |> to_string_option |> Option.value ~default:"button" in
   let static_label = el |> member "label" |> to_string_option
     |> Option.value ~default:(el |> member "summary" |> to_string_option |> Option.value ~default:"") in
   (* bind.label: expression whose evaluated string replaces the
@@ -216,7 +249,48 @@ and render_button ~packing ~ctx el =
        | Expr_eval.Str s -> s
        | _ -> static_label)
     | None -> static_label in
-  let btn = GButton.button ~label ~packing () in
+  (* For ``icon_button`` widgets, try to render the SVG glyph from
+     workspace icons.yaml. ``bind.icon`` is an expression returning
+     the icon name (e.g. ``chain_linked`` / ``chain_broken``);
+     ``icon`` is a static name. Falls back to the text-label button
+     when the icon can't be resolved or the renderer doesn't support
+     the icon's primitives. *)
+  let icon_pixbuf : GdkPixbuf.pixbuf option =
+    if etype <> "icon_button" then None
+    else begin
+      let icon_name = match el |> member "bind" |> safe_member "icon" |> to_string_option with
+        | Some expr ->
+          (match Expr_eval.evaluate expr ctx with
+           | Expr_eval.Str s -> s
+           | _ -> el |> member "icon" |> to_string_option |> Option.value ~default:"")
+        | None -> el |> member "icon" |> to_string_option |> Option.value ~default:""
+      in
+      if icon_name = "" then None
+      else begin
+        let size = match el |> member "style" |> safe_member "size" |> to_number_option with
+          | Some n -> int_of_float n
+          | None -> 20
+        in
+        (* Hardcoded tint matches the Dark Gray theme's text color
+           (#cccccc). Threading the active theme into yaml_panel_view
+           is a future polish — would require either a separate
+           Theme_active module or threading the color through every
+           render_element call site. *)
+        try Some (Workspace_icon.pixbuf_for_name icon_name size "#cccccc")
+        with _ -> None
+      end
+    end
+  in
+  let btn = match icon_pixbuf with
+    | Some pb ->
+      let img = GMisc.image ~pixbuf:pb () in
+      let b = GButton.button ~packing ~relief:`NONE () in
+      b#set_image img#coerce;
+      b#misc#set_tooltip_text label;
+      b
+    | None ->
+      GButton.button ~label ~packing ()
+  in
   (* Opacity panel: op_make_mask dispatches controller make or
      release based on selection_has_mask. The button has no
      ``action`` in yaml — routing is resolved here against the
@@ -262,7 +336,37 @@ and render_button ~packing ~ctx el =
       | Some m ->
         let ctrl = new Controller.controller ~model:m () in
         ctrl#toggle_mask_linked_on_selection))
-  end
+  end;
+  (* Generic ``action: <name>`` dispatch — used by dialog buttons
+     (OK / Done / Print / Cancel / icon-button toggles). Resolves
+     ``params`` against the live dialog ctx (so values typed into
+     number_input fields after the dialog rendered are reflected),
+     then routes through [Yaml_dialog_view.dispatch_action], which
+     special-cases ``dismiss_dialog`` and otherwise runs the named
+     action's effects with the dialog-appropriate platform_effects
+     (snapshot / doc.set_*_field / close_dialog / etc.). *)
+  match el |> member "action" |> to_string_option with
+  | Some action_name when action_name <> "" ->
+    let raw_params = match el |> member "params" with
+      | `Assoc pairs -> pairs
+      | _ -> []
+    in
+    ignore (btn#connect#clicked ~callback:(fun () ->
+      let live_ctx = !Dialog_global.current_build_ctx () in
+      let resolved = List.map (fun (k, v) ->
+        match v with
+        | `String expr_str ->
+          let result = Expr_eval.evaluate expr_str live_ctx in
+          (k, Effects.value_to_json result)
+        | other -> (k, other)
+      ) raw_params in
+      let ctrl_opt = match !_get_model_ref () with
+        | Some m -> Some (new Controller.controller ~model:m ())
+        | None -> None
+      in
+      Dialog_global.dispatch_action action_name resolved ctrl_opt
+        Dialog_global.close))
+  | _ -> ()
 
 and render_slider ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -291,11 +395,40 @@ and render_number_input ~packing ~ctx el =
   let adj = GData.adjustment ~lower:min_val ~upper:max_val ~step_incr:1.0 ~value:initial () in
   let spin = GEdit.spin_button ~adjustment:adj ~digits:0 ~packing () in
   (* Write-back: commit on value change so the StateStore, and any
-     subscription on the current panel scope, see the edit. *)
+     subscription on the current panel scope, see the edit.
+     ``value_changed`` fires when the adjustment value changes (arrow
+     buttons, scroll wheel, programmatic set). On lablgtk3 the spin
+     entry's typed text doesn't reach the adjustment until ``update``
+     is called explicitly (default policy is ``IF_VALID`` on
+     focus-out, but Tab in a dialog doesn't always trigger
+     focus-out reliably) — so also wire focus_out_event and the
+     entry's activate (Enter) signal to call spin#update first. *)
   (match bind_expr with
    | Some expr ->
      ignore (spin#connect#value_changed ~callback:(fun () ->
-       _write_back_bind expr (`Float spin#value)))
+       _write_back_bind expr (`Float spin#value)));
+     ignore (spin#event#connect#focus_out ~callback:(fun _ ->
+       spin#update;
+       _write_back_bind expr (`Float spin#value);
+       false));
+     ignore (spin#connect#activate ~callback:(fun () ->
+       spin#update;
+       _write_back_bind expr (`Float spin#value)));
+     (* Per-keystroke backstop: spin#connect#value_changed only
+        fires when the underlying adjustment moves, and on lablgtk3
+        Tab in a dialog doesn't reliably trigger the focus-out
+        commit that updates the adjustment. The entry's ``changed``
+        signal fires on every keystroke; parse the text and write
+        back so OK-after-typing-without-Enter sees the typed value. *)
+     (* Spin button is a GtkEntry under the hood; cast to access its
+        text method since GEdit.spin_button doesn't inherit from
+        entry directly. *)
+     let entry_view : GEdit.entry =
+       new GEdit.entry (Gobject.try_cast spin#as_widget "GtkEntry") in
+     ignore (spin#connect#changed ~callback:(fun () ->
+       match float_of_string_opt (String.trim entry_view#text) with
+       | Some v -> _write_back_bind expr (`Float v)
+       | None -> ()))
    | None -> ())
 
 and render_text_input ~packing ~ctx el =
@@ -382,8 +515,15 @@ and render_select ~packing ~ctx el =
     let label = match opt with
       | `Assoc _ ->
         let lbl = opt |> member "label" |> to_string_option in
-        let v = opt |> member "value" |> to_string_option in
-        (match lbl with Some l -> l | None -> Option.value ~default:"" v)
+        (* `value` can be a string ("range"), int (75), or bool — coerce
+           to a display string for the fallback when label is absent. *)
+        let value_str = match opt |> member "value" with
+          | `String s -> Some s
+          | `Int i -> Some (string_of_int i)
+          | `Float f -> Some (string_of_float f)
+          | `Bool b -> Some (string_of_bool b)
+          | _ -> None in
+        (match lbl with Some l -> l | None -> Option.value ~default:"" value_str)
       | `String s -> s
       | _ -> "" in
     let row = store#append () in
@@ -464,8 +604,15 @@ and render_combo_box ~packing ~ctx:_ el =
     let label = match opt with
       | `Assoc _ ->
         let lbl = opt |> member "label" |> to_string_option in
-        let v = opt |> member "value" |> to_string_option in
-        (match lbl with Some l -> l | None -> Option.value ~default:"" v)
+        (* `value` can be a string ("range"), int (75), or bool — coerce
+           to a display string for the fallback when label is absent. *)
+        let value_str = match opt |> member "value" with
+          | `String s -> Some s
+          | `Int i -> Some (string_of_int i)
+          | `Float f -> Some (string_of_float f)
+          | `Bool b -> Some (string_of_bool b)
+          | _ -> None in
+        (match lbl with Some l -> l | None -> Option.value ~default:"" value_str)
       | `String s -> s
       | _ -> "" in
     let row = store#append () in
@@ -474,7 +621,11 @@ and render_combo_box ~packing ~ctx:_ el =
 
 and render_color_swatch ~packing ~ctx el =
   let open Yojson.Safe.Util in
-  let size = el |> member "style" |> safe_member "size" |> to_int_option |> Option.value ~default:16 in
+  (* style.size may be encoded as either int or float depending on the
+     YAML→JSON conversion. ``to_int_option`` raises on a float; lift via
+     ``to_number_option`` and round so either form works. *)
+  let size = el |> member "style" |> safe_member "size" |> to_number_option
+             |> Option.map int_of_float |> Option.value ~default:16 in
   let color_str = match el |> member "bind" |> safe_member "color" |> to_string_option with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in

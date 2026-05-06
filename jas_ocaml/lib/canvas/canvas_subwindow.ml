@@ -1480,7 +1480,13 @@ let _hex_to_rgb hex =
 let draw_artboard_fills cr (doc : Document.document) =
   List.iter (fun (ab : Artboard.artboard) ->
     match ab.fill with
-    | Artboard.Transparent -> ()
+    | Artboard.Transparent ->
+      (* Default white "paper" so the artboard reads as distinct from
+         the gray pasteboard. (Future: a transparency-grid pref could
+         opt out and draw a checkerboard instead.) *)
+      Cairo.set_source_rgb cr 1.0 1.0 1.0;
+      Cairo.rectangle cr ab.x ab.y ~w:ab.width ~h:ab.height;
+      Cairo.fill cr
     | Artboard.Color hex ->
       (match _hex_to_rgb hex with
        | None -> ()
@@ -1490,21 +1496,14 @@ let draw_artboard_fills cr (doc : Document.document) =
          Cairo.fill cr)
   ) doc.Document.artboards
 
-let draw_fade_overlay cr (doc : Document.document) ~canvas_w ~canvas_h =
-  if doc.Document.artboard_options.Artboard.fade_region_outside_artboard
-     && doc.Document.artboards <> [] then begin
-    Cairo.save cr;
-    Cairo.set_source_rgba cr (160.0 /. 255.0) (160.0 /. 255.0) (160.0 /. 255.0) 0.5;
-    Cairo.rectangle cr 0.0 0.0 ~w:canvas_w ~h:canvas_h;
-    Cairo.fill cr;
-    Cairo.set_operator cr Cairo.DEST_OUT;
-    Cairo.set_source_rgba cr 0.0 0.0 0.0 1.0;
-    List.iter (fun (ab : Artboard.artboard) ->
-      Cairo.rectangle cr ab.x ab.y ~w:ab.width ~h:ab.height;
-      Cairo.fill cr
-    ) doc.Document.artboards;
-    Cairo.restore cr
-  end
+let draw_fade_overlay _cr (_doc : Document.document) ~canvas_w:_ ~canvas_h:_ =
+  (* No-op: the gray pasteboard + white artboard fill give enough
+     contrast on their own. The legacy implementation used
+     `DEST_OUT` to punch artboards out of a darken overlay, which
+     wiped the artboard fill back to whatever Cairo's backing was
+     (matching the Swift "all-white canvas" regression). Reinstate a
+     non-destructive overlay if a future visual pass calls for it. *)
+  ()
 
 let draw_artboard_borders cr (doc : Document.document) =
   Cairo.set_source_rgb cr 0.2 0.2 0.2;
@@ -2074,11 +2073,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         let alloc = canvas_area#misc#allocation in
         let w = float_of_int alloc.Gtk.width in
         let h = float_of_int alloc.Gtk.height in
-        (* Layer 1: canvas background. Filled in screen-space
-           before the view transform so it covers the viewport
-           regardless of zoom and pan. Per ZOOM_TOOL.md
-           Anchor and clamp math (rendering pipeline). *)
-        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        (* Layer 1: pasteboard (canvas background). Medium gray;
+           artboard fills draw white over it so the artboard reads as
+           "paper on a layout table". Filled in screen-space before
+           the view transform so it covers the viewport regardless of
+           zoom and pan. *)
+        Cairo.set_source_rgb cr 0.47 0.47 0.47;
         Cairo.rectangle cr 0.0 0.0 ~w ~h;
         Cairo.fill cr;
         (* Sync model viewport size with the current canvas
