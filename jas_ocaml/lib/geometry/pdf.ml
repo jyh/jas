@@ -23,6 +23,12 @@ type page = {
      MediaBox. (0., 0.) when no bleed/marks are active. *)
   trim_x_off : float;
   trim_y_off : float;
+  (* PRINT.md §Phase 3: when [Some name], this page is one channel
+     of a separations job and is labelled with the ink name. v1
+     renders the artwork the same way Composite mode does and stamps
+     the label as a small page-info string; per-ink channel
+     extraction is a deferred follow-up. *)
+  separation_label : string option;
 }
 
 (* Marks-and-Bleed PDF geometry constants (PRINT.md §Phase 2). Same
@@ -60,6 +66,24 @@ let artboard_bounds_union (abs : Artboard.artboard list) =
   ) abs;
   (!min_x, !min_y, !max_x -. !min_x, !max_y -. !min_y)
 
+(** In Composite mode, returns [base] unchanged. In Separations mode
+    (PRINT.md §Phase 3), expands each base page into one copy per
+    enabled ink in artboard-major order. When Separations mode is
+    chosen but no inks are enabled, falls through to the composite
+    pages so the user still gets a PDF. *)
+let expand_for_separations (doc : Document.document) (base : page list) =
+  let out = doc.print_preferences.output in
+  if out.mode <> Print_preferences.Separations then base
+  else
+    let enabled = List.filter (fun (i : Print_preferences.ink_override) -> i.print) out.inks in
+    if enabled = [] then base
+    else
+      List.concat_map (fun page ->
+        List.map (fun (ink : Print_preferences.ink_override) ->
+          { page with separation_label = Some ink.name }
+        ) enabled
+      ) base
+
 let collect_pages (doc : Document.document) : page list =
   let (bt, br, bb, bl) = active_bleed doc in
   let g = mark_gutter doc.print_preferences.marks_and_bleed in
@@ -69,22 +93,25 @@ let collect_pages (doc : Document.document) : page list =
   let trim_y_off = bt +. g in
   let extra_w = bl +. br +. 2.0 *. g in
   let extra_h = bt +. bb +. 2.0 *. g in
-  if doc.print_preferences.ignore_artboards || doc.artboards = [] then begin
-    let (x, y, w, h) =
-      if doc.artboards = [] then (0.0, 0.0, 612.0, 792.0)
-      else artboard_bounds_union doc.artboards
-    in
-    [{ media_w = w +. extra_w; media_h = h +. extra_h;
-       src_x = x; src_y = y; src_w = w; src_h = h;
-       trim_x_off; trim_y_off }]
-  end
-  else
-    List.map (fun (ab : Artboard.artboard) ->
-      { media_w = ab.width +. extra_w; media_h = ab.height +. extra_h;
-        src_x = ab.x; src_y = ab.y;
-        src_w = ab.width; src_h = ab.height;
-        trim_x_off; trim_y_off }
-    ) doc.artboards
+  let base =
+    if doc.print_preferences.ignore_artboards || doc.artboards = [] then begin
+      let (x, y, w, h) =
+        if doc.artboards = [] then (0.0, 0.0, 612.0, 792.0)
+        else artboard_bounds_union doc.artboards
+      in
+      [{ media_w = w +. extra_w; media_h = h +. extra_h;
+         src_x = x; src_y = y; src_w = w; src_h = h;
+         trim_x_off; trim_y_off; separation_label = None }]
+    end
+    else
+      List.map (fun (ab : Artboard.artboard) ->
+        { media_w = ab.width +. extra_w; media_h = ab.height +. extra_h;
+          src_x = ab.x; src_y = ab.y;
+          src_w = ab.width; src_h = ab.height;
+          trim_x_off; trim_y_off; separation_label = None }
+      ) doc.artboards
+  in
+  expand_for_separations doc base
 
 let scaling_pair (doc : Document.document) =
   match doc.print_preferences.scaling_mode with
@@ -395,7 +422,7 @@ let emit_marks cr (doc : Document.document) (page : page) =
       emit_page_info cr ~tx ~ty ~th
   end
 
-let draw_page cr (doc : Document.document) (page : page) =
+let rec draw_page cr (doc : Document.document) (page : page) =
   Cairo.save cr;
   (* Position the trim rect inside the (possibly bleed-extended)
      MediaBox before any user transforms. Cairo is y-down so this
@@ -416,7 +443,26 @@ let draw_page cr (doc : Document.document) (page : page) =
   Cairo.restore cr;
   (* Marks render in MediaBox space (no user transforms), aligned to
      the trim rect inside it. *)
-  emit_marks cr doc page
+  emit_marks cr doc page;
+  (* Separations label (PRINT.md §Phase 3): stamp the ink name on
+     the page so the printer / user can tell channels apart. *)
+  (match page.separation_label with
+   | Some name -> emit_separation_label cr page name
+   | None -> ())
+
+(** Stamp the ink name in 6pt Helvetica at the bottom-right of the
+    trim rect (Cairo y-down: "below" the trim is y > trim_y_off + th).
+    Phase 3 placeholder; channel-extracted rendering is deferred. *)
+and emit_separation_label cr (page : page) (name : string) =
+  Cairo.save cr;
+  Cairo.set_source_rgb cr 0.0 0.0 0.0;
+  Cairo.select_font_face cr "Helvetica" ~slant:Cairo.Upright ~weight:Cairo.Normal;
+  Cairo.set_font_size cr 6.0;
+  let label_x = page.trim_x_off +. page.src_w -. 80.0 in
+  let label_y = page.trim_y_off +. page.src_h +. trim_mark_length +. 8.0 in
+  Cairo.move_to cr label_x label_y;
+  Cairo.show_text cr name;
+  Cairo.restore cr
 
 (** Convert a document to PDF bytes. *)
 let document_to_pdf (doc : Document.document) : string =
@@ -426,7 +472,8 @@ let document_to_pdf (doc : Document.document) : string =
     | p :: _ -> p
     | [] -> { media_w = 612.0; media_h = 792.0;
               src_x = 0.0; src_y = 0.0; src_w = 612.0; src_h = 792.0;
-              trim_x_off = 0.0; trim_y_off = 0.0 }
+              trim_x_off = 0.0; trim_y_off = 0.0;
+              separation_label = None }
   in
   let surface = Cairo.PDF.create_for_stream
       (Buffer.add_string buf)
