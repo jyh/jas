@@ -1484,6 +1484,16 @@ fn output_view(o: &crate::document::print_preferences::Output) -> serde_json::Va
     })
 }
 
+fn color_management_view(c: &crate::document::print_preferences::ColorManagement) -> serde_json::Value {
+    serde_json::json!({
+        "document_profile": c.document_profile,
+        "color_handling": crate::document::print_preferences::color_handling_str(&c.color_handling),
+        "printer_profile": c.printer_profile,
+        "rendering_intent": crate::document::print_preferences::rendering_intent_str(&c.rendering_intent),
+        "preserve_rgb_numbers": c.preserve_rgb_numbers,
+    })
+}
+
 fn graphics_view(g: &crate::document::print_preferences::Graphics) -> serde_json::Value {
     serde_json::json!({
         "flatness": g.flatness,
@@ -1557,6 +1567,9 @@ fn build_active_document_view(
                 ),
                 "graphics": graphics_view(
                     &crate::document::print_preferences::Graphics::default(),
+                ),
+                "color_management": color_management_view(
+                    &crate::document::print_preferences::ColorManagement::default(),
                 ),
             },
             "artboards_count": 0,
@@ -1734,6 +1747,7 @@ fn build_active_document_view(
             "marks_and_bleed": marks_and_bleed_view(&doc.print_preferences.marks_and_bleed),
             "output": output_view(&doc.print_preferences.output),
             "graphics": graphics_view(&doc.print_preferences.graphics),
+            "color_management": color_management_view(&doc.print_preferences.color_management),
         },
         "artboards_count": doc.artboards.len(),
         "next_artboard_name": next_artboard_name,
@@ -2345,6 +2359,38 @@ fn run_yaml_effect(
             ("data_format", super::expr_types::Value::Str(s)) => g.data_format = data_format_from(s),
             ("compatible_gradient_printing", super::expr_types::Value::Bool(b)) => g.compatible_gradient_printing = *b,
             ("raster_effects_resolution", super::expr_types::Value::Number(n)) => g.raster_effects_resolution = *n,
+            _ => applied = false,
+        }
+        if applied {
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
+    // doc.set_color_management_field: { field, value }  — PRINT.md §5
+    if let Some(spec) = eff.get("doc.set_color_management_field").and_then(|v| v.as_object()) {
+        let field = match spec.get("field").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return deferred,
+        };
+        let value_val = match spec.get("value") {
+            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+            Some(v) => super::expr_types::Value::from_json(v),
+            None => return deferred,
+        };
+        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+        let mut new_doc = tab.model.document().clone();
+        use crate::document::print_preferences::{
+            color_handling_from, rendering_intent_from,
+        };
+        let c = &mut new_doc.print_preferences.color_management;
+        let mut applied = true;
+        match (field.as_str(), &value_val) {
+            ("document_profile", super::expr_types::Value::Str(s)) => c.document_profile = s.clone(),
+            ("color_handling", super::expr_types::Value::Str(s)) => c.color_handling = color_handling_from(s),
+            ("printer_profile", super::expr_types::Value::Str(s)) => c.printer_profile = s.clone(),
+            ("rendering_intent", super::expr_types::Value::Str(s)) => c.rendering_intent = rendering_intent_from(s),
+            ("preserve_rgb_numbers", super::expr_types::Value::Bool(b)) => c.preserve_rgb_numbers = *b,
             _ => applied = false,
         }
         if applied {

@@ -3777,6 +3777,21 @@
         },
         "gfx_raster_effects_resolution": {
           "type": "number"
+        },
+        "cm_document_profile": {
+          "type": "string"
+        },
+        "cm_color_handling": {
+          "type": "string"
+        },
+        "cm_printer_profile": {
+          "type": "string"
+        },
+        "cm_rendering_intent": {
+          "type": "string"
+        },
+        "cm_preserve_rgb_numbers": {
+          "type": "bool"
         }
       },
       "effects": [
@@ -4155,6 +4170,36 @@
           "doc.set_graphics_field": {
             "field": "raster_effects_resolution",
             "value": "param.gfx_raster_effects_resolution"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "document_profile",
+            "value": "param.cm_document_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "color_handling",
+            "value": "param.cm_color_handling"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "printer_profile",
+            "value": "param.cm_printer_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "rendering_intent",
+            "value": "param.cm_rendering_intent"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "preserve_rgb_numbers",
+            "value": "param.cm_preserve_rgb_numbers"
           }
         },
         "clear_dialog_snapshot",
@@ -4344,6 +4389,21 @@
         },
         "gfx_raster_effects_resolution": {
           "type": "number"
+        },
+        "cm_document_profile": {
+          "type": "string"
+        },
+        "cm_color_handling": {
+          "type": "string"
+        },
+        "cm_printer_profile": {
+          "type": "string"
+        },
+        "cm_rendering_intent": {
+          "type": "string"
+        },
+        "cm_preserve_rgb_numbers": {
+          "type": "bool"
         }
       },
       "effects": [
@@ -4722,6 +4782,36 @@
           "doc.set_graphics_field": {
             "field": "raster_effects_resolution",
             "value": "param.gfx_raster_effects_resolution"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "document_profile",
+            "value": "param.cm_document_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "color_handling",
+            "value": "param.cm_color_handling"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "printer_profile",
+            "value": "param.cm_printer_profile"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "rendering_intent",
+            "value": "param.cm_rendering_intent"
+          }
+        },
+        {
+          "doc.set_color_management_field": {
+            "field": "preserve_rgb_numbers",
+            "value": "param.cm_preserve_rgb_numbers"
           }
         },
         "clear_dialog_snapshot",
@@ -29528,6 +29618,37 @@
         "gfx_raster_effects_resolution": {
           "type": "number",
           "default": 300.0
+        },
+        "cm_document_profile": {
+          "type": "string",
+          "default": "sRGB IEC61966-2.1"
+        },
+        "cm_color_handling": {
+          "type": "enum",
+          "values": [
+            "let_app_determine",
+            "let_printer_determine",
+            "postscript_color_management"
+          ],
+          "default": "let_app_determine"
+        },
+        "cm_printer_profile": {
+          "type": "string",
+          "default": ""
+        },
+        "cm_rendering_intent": {
+          "type": "enum",
+          "values": [
+            "perceptual",
+            "relative_colorimetric",
+            "saturation",
+            "absolute_colorimetric"
+          ],
+          "default": "relative_colorimetric"
+        },
+        "cm_preserve_rgb_numbers": {
+          "type": "bool",
+          "default": false
         }
       },
       "init": {
@@ -29590,7 +29711,12 @@
         "gfx_postscript_level": "active_document.print_preferences.graphics.postscript_level",
         "gfx_data_format": "active_document.print_preferences.graphics.data_format",
         "gfx_compatible_gradient_printing": "active_document.print_preferences.graphics.compatible_gradient_printing",
-        "gfx_raster_effects_resolution": "active_document.print_preferences.graphics.raster_effects_resolution"
+        "gfx_raster_effects_resolution": "active_document.print_preferences.graphics.raster_effects_resolution",
+        "cm_document_profile": "active_document.print_preferences.color_management.document_profile",
+        "cm_color_handling": "active_document.print_preferences.color_management.color_handling",
+        "cm_printer_profile": "active_document.print_preferences.color_management.printer_profile",
+        "cm_rendering_intent": "active_document.print_preferences.color_management.rendering_intent",
+        "cm_preserve_rgb_numbers": "active_document.print_preferences.color_management.preserve_rgb_numbers"
       },
       "content": {
         "type": "container",
@@ -31556,19 +31682,206 @@
                   "children": [
                     {
                       "type": "text",
-                      "content": "Color Management",
+                      "content": "Profiles",
                       "style": {
-                        "font_size": 13,
+                        "font_size": 11,
                         "font_weight": "bold"
                       }
                     },
                     {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Document Profile:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_document_profile",
+                              "type": "text_input",
+                              "bind": {
+                                "value": "dialog.cm_document_profile"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Printer Profile:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_printer_profile",
+                              "type": "text_input",
+                              "bind": {
+                                "value": "dialog.cm_printer_profile"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "type": "text",
-                      "content": "Available in Phase 5 (PRINT.md \u00a7Phase 5). Document and printer profiles, color handling, rendering intent, preserve RGB numbers.",
+                      "content": "ICC profile names are stored on save but not yet embedded in the PDF \u2014 that lands in a follow-up.",
                       "style": {
-                        "font_size": 11,
+                        "font_size": 10,
                         "color": "var(--jas-text-dim,#888)"
                       }
+                    },
+                    {
+                      "type": "separator",
+                      "orientation": "horizontal"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Handling",
+                      "style": {
+                        "font_size": 11,
+                        "font_weight": "bold"
+                      }
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Color Handling:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_color_handling",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Let App Determine Colors",
+                                  "value": "let_app_determine"
+                                },
+                                {
+                                  "label": "Let Printer Determine Colors",
+                                  "value": "let_printer_determine"
+                                },
+                                {
+                                  "label": "PostScript Color Management",
+                                  "value": "postscript_color_management"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.cm_color_handling"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Rendering Intent:",
+                              "style": {
+                                "font_size": 11
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "col",
+                          "col": 8,
+                          "children": [
+                            {
+                              "id": "pr_cm_rendering_intent",
+                              "type": "select",
+                              "options": [
+                                {
+                                  "label": "Perceptual",
+                                  "value": "perceptual"
+                                },
+                                {
+                                  "label": "Relative Colorimetric",
+                                  "value": "relative_colorimetric"
+                                },
+                                {
+                                  "label": "Saturation",
+                                  "value": "saturation"
+                                },
+                                {
+                                  "label": "Absolute Colorimetric",
+                                  "value": "absolute_colorimetric"
+                                }
+                              ],
+                              "bind": {
+                                "value": "dialog.cm_rendering_intent"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "children": [
+                        {
+                          "type": "col",
+                          "col": 12,
+                          "children": [
+                            {
+                              "id": "pr_cm_preserve_rgb_numbers",
+                              "type": "checkbox",
+                              "label": "Preserve RGB Numbers",
+                              "bind": {
+                                "checked": "dialog.cm_preserve_rgb_numbers"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -31707,7 +32020,12 @@
                   "gfx_postscript_level": "dialog.gfx_postscript_level",
                   "gfx_data_format": "dialog.gfx_data_format",
                   "gfx_compatible_gradient_printing": "dialog.gfx_compatible_gradient_printing",
-                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution"
+                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution",
+                  "cm_document_profile": "dialog.cm_document_profile",
+                  "cm_color_handling": "dialog.cm_color_handling",
+                  "cm_printer_profile": "dialog.cm_printer_profile",
+                  "cm_rendering_intent": "dialog.cm_rendering_intent",
+                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers"
                 }
               },
               {
@@ -31775,7 +32093,12 @@
                   "gfx_postscript_level": "dialog.gfx_postscript_level",
                   "gfx_data_format": "dialog.gfx_data_format",
                   "gfx_compatible_gradient_printing": "dialog.gfx_compatible_gradient_printing",
-                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution"
+                  "gfx_raster_effects_resolution": "dialog.gfx_raster_effects_resolution",
+                  "cm_document_profile": "dialog.cm_document_profile",
+                  "cm_color_handling": "dialog.cm_color_handling",
+                  "cm_printer_profile": "dialog.cm_printer_profile",
+                  "cm_rendering_intent": "dialog.cm_rendering_intent",
+                  "cm_preserve_rgb_numbers": "dialog.cm_preserve_rgb_numbers"
                 }
               }
             ]
