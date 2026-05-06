@@ -420,6 +420,34 @@ def _bool_str(b: bool) -> str:
     return "true" if b else "false"
 
 
+def _ink_override_to_xml(ink, indent: str) -> str:
+    return (
+        f'{indent}<jas:ink'
+        f' name="{escape(ink.name)}"'
+        f' print="{_bool_str(ink.print)}"'
+        f' frequency="{_fmt(ink.frequency)}"'
+        f' angle="{_fmt(ink.angle)}"'
+        f' dot-shape="{ink.dot_shape.value}"'
+        f'/>'
+    )
+
+
+def _output_to_xml(o, indent: str) -> str:
+    inner = indent + "  "
+    header = (
+        f'{indent}<jas:output'
+        f' mode="{o.mode.value}"'
+        f' emulsion="{o.emulsion.value}"'
+        f' image-polarity="{o.image_polarity.value}"'
+        f' printer-resolution="{escape(o.printer_resolution)}"'
+        f' convert-spot-to-process="{_bool_str(o.convert_spot_to_process)}"'
+        f' overprint-black="{_bool_str(o.overprint_black)}"'
+        f'>'
+    )
+    inks = "\n".join(_ink_override_to_xml(i, inner) for i in o.inks)
+    return f"{header}\n{inks}\n{indent}</jas:output>"
+
+
 def _document_setup_to_xml(s, indent: str) -> str:
     return (
         f'{indent}<jas:document-setup'
@@ -487,6 +515,7 @@ def _print_preferences_to_xml(p, indent: str) -> str:
     return (
         f'{header}>\n'
         f'{_marks_and_bleed_to_xml(p.marks_and_bleed, inner)}\n'
+        f'{_output_to_xml(p.output, inner)}\n'
         f'{indent}</jas:print-preferences>'
     )
 
@@ -1229,6 +1258,45 @@ def _parse_document_setup_node(node: ET.Element):
     )
 
 
+def _parse_ink_override_node(node: ET.Element):
+    from document.print_preferences import (
+        InkOverride, DotShape, _enum_from_string,
+    )
+    return InkOverride(
+        name=_attr_get(node, "name") or "",
+        print=_parse_bool_attr(node, "print", True),
+        frequency=_parse_float_attr(node, "frequency", 75.0),
+        angle=_parse_float_attr(node, "angle", 45.0),
+        dot_shape=_enum_from_string(
+            DotShape, _attr_get(node, "dot-shape") or "", DotShape.ROUND),
+    )
+
+
+def _parse_output_node(node: ET.Element):
+    from document.print_preferences import (
+        Output, OutputMode, Emulsion, ImagePolarity, _enum_from_string,
+    )
+    d = Output()
+    inks: list = []
+    for child in node:
+        if _strip_ns(child.tag) == "ink":
+            inks.append(_parse_ink_override_node(child))
+    inks_tuple = tuple(inks) if inks else d.inks
+    return Output(
+        mode=_enum_from_string(
+            OutputMode, _attr_get(node, "mode") or "", d.mode),
+        emulsion=_enum_from_string(
+            Emulsion, _attr_get(node, "emulsion") or "", d.emulsion),
+        image_polarity=_enum_from_string(
+            ImagePolarity, _attr_get(node, "image-polarity") or "", d.image_polarity),
+        printer_resolution=_attr_get(node, "printer-resolution") or d.printer_resolution,
+        convert_spot_to_process=_parse_bool_attr(
+            node, "convert-spot-to-process", d.convert_spot_to_process),
+        overprint_black=_parse_bool_attr(node, "overprint-black", d.overprint_black),
+        inks=inks_tuple,
+    )
+
+
 def _parse_marks_and_bleed_node(node: ET.Element):
     from document.print_preferences import (
         MarksAndBleed, PrinterMarkType, _enum_from_string,
@@ -1261,16 +1329,19 @@ def _parse_marks_and_bleed_node(node: ET.Element):
 
 def _parse_print_preferences_node(node: ET.Element):
     from document.print_preferences import (
-        PrintPreferences, MarksAndBleed,
+        PrintPreferences, MarksAndBleed, Output,
         ArtboardRangeMode, MediaSize, Orientation, PrintLayers, ScalingMode,
         _enum_from_string,
     )
     d = PrintPreferences()
     mab = MarksAndBleed()
+    output = Output()
     for child in node:
-        if _strip_ns(child.tag) == "marks-and-bleed":
+        tag = _strip_ns(child.tag)
+        if tag == "marks-and-bleed":
             mab = _parse_marks_and_bleed_node(child)
-            break
+        elif tag == "output":
+            output = _parse_output_node(child)
     return PrintPreferences(
         preset_name=_attr_get(node, "preset-name") or d.preset_name,
         printer_name=_attr_get(node, "printer-name"),
@@ -1304,6 +1375,7 @@ def _parse_print_preferences_node(node: ET.Element):
         tile_overlap_v=_parse_float_attr(node, "tile-overlap-v", d.tile_overlap_v),
         tile_range=_attr_get(node, "tile-range") or d.tile_range,
         marks_and_bleed=mab,
+        output=output,
     )
 
 

@@ -818,6 +818,36 @@ class Phase2MetadataSvgTest(absltest.TestCase):
         parsed = svg_to_document(svg)
         self.assertEqual(parsed.document_setup, s)
 
+    def test_output_sub_record_round_trips_through_svg(self):
+        from document.print_preferences import (
+            PrintPreferences, Output, OutputMode, Emulsion, ImagePolarity,
+            DotShape, InkOverride,
+        )
+        o = Output(
+            mode=OutputMode.SEPARATIONS,
+            emulsion=Emulsion.DOWN_RIGHT,
+            image_polarity=ImagePolarity.NEGATIVE,
+            printer_resolution="150 lpi / 1200 dpi",
+            convert_spot_to_process=True,
+            overprint_black=True,
+            inks=(
+                InkOverride(name="Process Cyan", print=False,
+                            frequency=100.0, angle=105.0,
+                            dot_shape=DotShape.ELLIPSE),
+                InkOverride(name="PANTONE 185 C", print=True,
+                            frequency=85.0, angle=45.0,
+                            dot_shape=DotShape.SQUARE),
+            ),
+        )
+        p = PrintPreferences(output=o)
+        doc = Document(layers=(Layer(children=()),), print_preferences=p)
+        svg = document_to_svg(doc)
+        self.assertIn('<jas:output', svg)
+        self.assertIn('<jas:ink', svg)
+        self.assertIn('PANTONE 185 C', svg)
+        parsed = svg_to_document(svg)
+        self.assertEqual(parsed.print_preferences.output, o)
+
     def test_non_default_print_preferences_round_trip(self):
         from document.print_preferences import (
             PrintPreferences, MarksAndBleed, ArtboardRangeMode, MediaSize,
