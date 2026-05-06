@@ -857,6 +857,37 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.set_graphics_field — PRINT.md §Phase 4. Same wiring
+        // shape as the marks-and-bleed handler above; applyGraphicsField
+        // handles the typed dispatch onto Graphics.
+        let docSetGraphicsFieldHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let field = spec["field"] as? String else { return nil }
+            let val: Value
+            if let s = spec["value"] as? String {
+                val = evaluate(s, context: callCtx)
+            } else if let b = spec["value"] as? Bool {
+                val = .bool(b)
+            } else if let n = spec["value"] as? NSNumber {
+                val = .number(n.doubleValue)
+            } else {
+                return nil
+            }
+            let doc = model.document
+            let p = doc.printPreferences
+            guard let updated = applyGraphicsField(p, field: field, val: val) else { return nil }
+            model.document = Document(
+                layers: doc.layers,
+                selectedLayer: doc.selectedLayer,
+                selection: doc.selection,
+                artboards: doc.artboards,
+                artboardOptions: doc.artboardOptions,
+                documentSetup: doc.documentSetup,
+                printPreferences: updated
+            )
+            return nil
+        }
+
         // geometry.export_pdf — PRINT.md §1B. Generates a PDF from the
         // current document and presents an NSSavePanel for the user to
         // pick the destination. filename_hint optional.
@@ -948,6 +979,7 @@ public enum LayersPanel {
             "doc.set_marks_and_bleed_field": docSetMarksAndBleedFieldHandler,
             "doc.set_output_field": docSetOutputFieldHandler,
             "doc.set_output_ink_field": docSetOutputInkFieldHandler,
+            "doc.set_graphics_field": docSetGraphicsFieldHandler,
             "doc.move_artboards_up": docMoveArtboardsUpHandler,
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

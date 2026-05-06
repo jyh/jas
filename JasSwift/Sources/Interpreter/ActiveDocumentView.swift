@@ -156,6 +156,17 @@ private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
     ]
 }
 
+private func graphicsView(_ g: Graphics) -> [String: Any] {
+    return [
+        "flatness": g.flatness,
+        "font_download": g.fontDownload.rawValue,
+        "postscript_level": g.postscriptLevel.rawValue,
+        "data_format": g.dataFormat.rawValue,
+        "compatible_gradient_printing": g.compatibleGradientPrinting,
+        "raster_effects_resolution": g.rasterEffectsResolution,
+    ]
+}
+
 private func inkOverrideView(_ ink: InkOverride) -> [String: Any] {
     return [
         "name": ink.name,
@@ -223,6 +234,7 @@ private func printPreferencesView(_ p: PrintPreferences) -> [String: Any] {
         "tile_range": p.tileRange,
         "marks_and_bleed": marksAndBleedView(p.marksAndBleed),
         "output": outputView(p.output),
+        "graphics": graphicsView(p.graphics),
     ]
 }
 
