@@ -1920,6 +1920,45 @@ fn ink_override_to_xml(
     )
 }
 
+fn graphics_to_xml(
+    g: &crate::document::print_preferences::Graphics,
+    indent: &str,
+) -> String {
+    use crate::document::print_preferences::*;
+    format!(
+        "{indent}<jas:graphics flatness=\"{fl}\" font-download=\"{fd}\" postscript-level=\"{pl}\" data-format=\"{df}\" compatible-gradient-printing=\"{cgp}\" raster-effects-resolution=\"{rer}\"/>",
+        indent = indent,
+        fl = fmt(g.flatness),
+        fd = font_download_str(&g.font_download),
+        pl = postscript_level_str(&g.postscript_level),
+        df = data_format_str(&g.data_format),
+        cgp = bool_str(g.compatible_gradient_printing),
+        rer = fmt(g.raster_effects_resolution),
+    )
+}
+
+fn parse_graphics(
+    node: &XmlNode,
+) -> crate::document::print_preferences::Graphics {
+    use crate::document::print_preferences::*;
+    let d = Graphics::default();
+    Graphics {
+        flatness: get_attr(node, "flatness")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.flatness),
+        font_download: get_attr(node, "font-download")
+            .map(font_download_from).unwrap_or(d.font_download),
+        postscript_level: get_attr(node, "postscript-level")
+            .map(postscript_level_from).unwrap_or(d.postscript_level),
+        data_format: get_attr(node, "data-format")
+            .map(data_format_from).unwrap_or(d.data_format),
+        compatible_gradient_printing: get_attr(node, "compatible-gradient-printing")
+            .map(|s| parse_bool(s, d.compatible_gradient_printing))
+            .unwrap_or(d.compatible_gradient_printing),
+        raster_effects_resolution: get_attr(node, "raster-effects-resolution")
+            .and_then(|s| s.parse().ok()).unwrap_or(d.raster_effects_resolution),
+    }
+}
+
 fn output_to_xml(
     o: &crate::document::print_preferences::Output,
     indent: &str,
@@ -2041,6 +2080,8 @@ fn print_preferences_to_xml(
     s.push('\n');
     s.push_str(&output_to_xml(&p.output, &inner_indent));
     s.push('\n');
+    s.push_str(&graphics_to_xml(&p.graphics, &inner_indent));
+    s.push('\n');
     s.push_str(indent);
     s.push_str("</jas:print-preferences>");
     s
@@ -2105,6 +2146,7 @@ fn parse_print_preferences(
         match strip_ns(&child.tag) {
             "marks-and-bleed" => p.marks_and_bleed = parse_marks_and_bleed(child),
             "output" => p.output = parse_output(child),
+            "graphics" => p.graphics = parse_graphics(child),
             _ => {}
         }
     }
@@ -3330,6 +3372,26 @@ mod tests {
         assert!(svg.contains("PANTONE 185 C"), "spot ink missing:\n{svg}");
         let parsed = svg_to_document(&svg);
         assert_eq!(parsed.print_preferences.output, doc.print_preferences.output);
+    }
+
+    #[test]
+    fn graphics_sub_record_round_trips_through_svg() {
+        use crate::document::print_preferences::*;
+        let mut doc = Document::default();
+        doc.print_preferences.graphics = Graphics {
+            flatness: 0.4,
+            font_download: FontDownload::Complete,
+            postscript_level: PostScriptLevel::Level2,
+            data_format: DataFormat::Ascii,
+            compatible_gradient_printing: true,
+            raster_effects_resolution: 600.0,
+        };
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<jas:graphics"), "svg:\n{svg}");
+        assert!(svg.contains("flatness=\"0.4\""), "svg:\n{svg}");
+        assert!(svg.contains("font-download=\"complete\""), "svg:\n{svg}");
+        let parsed = svg_to_document(&svg);
+        assert_eq!(parsed.print_preferences.graphics, doc.print_preferences.graphics);
     }
 
     #[test]
