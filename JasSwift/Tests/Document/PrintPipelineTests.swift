@@ -173,6 +173,44 @@ import Testing
     #expect(PrinterMarkType.japanese.rawValue == "japanese")
 }
 
+@Test func graphicsDefaultsMatchSpec() {
+    let g = Graphics.default
+    #expect(g.flatness == 1.0)
+    #expect(g.fontDownload == .subset)
+    #expect(g.postscriptLevel == .level3)
+    #expect(g.dataFormat == .binary)
+    #expect(g.compatibleGradientPrinting == false)
+    #expect(g.rasterEffectsResolution == 300.0)
+}
+
+@Test func graphicsEnumRawValuesAreSnakeCase() {
+    #expect(FontDownload.none.rawValue == "none")
+    #expect(FontDownload.subset.rawValue == "subset")
+    #expect(FontDownload.complete.rawValue == "complete")
+    #expect(PostScriptLevel.level2.rawValue == "level_2")
+    #expect(PostScriptLevel.level3.rawValue == "level_3")
+    #expect(DataFormat.ascii.rawValue == "ascii")
+    #expect(DataFormat.binary.rawValue == "binary")
+}
+
+@Test func graphicsRoundTripsThroughPrintPreferences() {
+    let g = Graphics(
+        flatness: 0.4,
+        fontDownload: .complete,
+        postscriptLevel: .level2,
+        dataFormat: .ascii,
+        compatibleGradientPrinting: true,
+        rasterEffectsResolution: 600.0
+    )
+    let p = PrintPreferences(graphics: g)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"graphics\""))
+    #expect(json.contains("\"flatness\":0.4"))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.graphics == g)
+}
+
 @Test func outputDefaultsMatchSpec() {
     let o = Output.default
     #expect(o.mode == .composite)

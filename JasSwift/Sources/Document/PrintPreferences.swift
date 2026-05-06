@@ -55,6 +55,60 @@ public enum PrinterMarkType: String, Equatable, Hashable, CaseIterable {
     case japanese
 }
 
+/// Font-download mode for the Graphics tab (PRINT.md §Phase 4).
+/// PostScript-era concept; stored for on-disk shape stability but
+/// not applied by the PDF emitter.
+public enum FontDownload: String, Equatable, Hashable, CaseIterable {
+    case none
+    case subset
+    case complete
+}
+
+/// PostScript output level (PRINT.md §Phase 4). Stored but not
+/// applied — we emit PDF, not PostScript.
+public enum PostScriptLevel: String, Equatable, Hashable, CaseIterable {
+    case level2 = "level_2"
+    case level3 = "level_3"
+}
+
+/// Stream encoding for PostScript output (PRINT.md §Phase 4).
+/// Stored but not applied — we emit PDF.
+public enum DataFormat: String, Equatable, Hashable, CaseIterable {
+    case ascii
+    case binary
+}
+
+/// Graphics sub-record on PrintPreferences (PRINT.md §Phase 4).
+/// ``flatness`` is consulted by the PDF emitter as a path-flattening
+/// tolerance; the others are stored for cross-app round-trip but
+/// not applied (PostScript-specific).
+public struct Graphics: Equatable, Hashable {
+    public let flatness: Double
+    public let fontDownload: FontDownload
+    public let postscriptLevel: PostScriptLevel
+    public let dataFormat: DataFormat
+    public let compatibleGradientPrinting: Bool
+    public let rasterEffectsResolution: Double
+
+    public init(
+        flatness: Double = 1.0,
+        fontDownload: FontDownload = .subset,
+        postscriptLevel: PostScriptLevel = .level3,
+        dataFormat: DataFormat = .binary,
+        compatibleGradientPrinting: Bool = false,
+        rasterEffectsResolution: Double = 300.0
+    ) {
+        self.flatness = flatness
+        self.fontDownload = fontDownload
+        self.postscriptLevel = postscriptLevel
+        self.dataFormat = dataFormat
+        self.compatibleGradientPrinting = compatibleGradientPrinting
+        self.rasterEffectsResolution = rasterEffectsResolution
+    }
+
+    public static let `default` = Graphics()
+}
+
 /// Output mode (PRINT.md §Phase 3): Composite renders the document
 /// as one PDF page per artboard (Phase 1B behavior); Separations
 /// renders one page per enabled ink in ``Output.inks``.
@@ -238,6 +292,8 @@ public struct PrintPreferences: Equatable, Hashable {
     public let marksAndBleed: MarksAndBleed
     /// Output sub-record (PRINT.md §Phase 3).
     public let output: Output
+    /// Graphics sub-record (PRINT.md §Phase 4).
+    public let graphics: Graphics
 
     public init(
         presetName: String = "[Default]",
@@ -264,7 +320,8 @@ public struct PrintPreferences: Equatable, Hashable {
         tileOverlapV: Double = 0,
         tileRange: String = "",
         marksAndBleed: MarksAndBleed = .default,
-        output: Output = .default
+        output: Output = .default,
+        graphics: Graphics = .default
     ) {
         self.presetName = presetName
         self.printerName = printerName
@@ -291,6 +348,7 @@ public struct PrintPreferences: Equatable, Hashable {
         self.tileRange = tileRange
         self.marksAndBleed = marksAndBleed
         self.output = output
+        self.graphics = graphics
     }
 
     public static let `default` = PrintPreferences()
