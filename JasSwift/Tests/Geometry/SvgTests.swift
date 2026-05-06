@@ -995,6 +995,25 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(parsed.documentSetup == s)
 }
 
+@Test func graphicsSubRecordRoundTripsThroughSvg() {
+    let g = Graphics(
+        flatness: 0.4,
+        fontDownload: .complete,
+        postscriptLevel: .level2,
+        dataFormat: .ascii,
+        compatibleGradientPrinting: true,
+        rasterEffectsResolution: 600.0
+    )
+    let p = PrintPreferences(graphics: g)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:graphics"))
+    #expect(svg.contains("flatness=\"0.4\""))
+    #expect(svg.contains("font-download=\"complete\""))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.graphics == g)
+}
+
 @Test func outputSubRecordRoundTripsThroughSvg() {
     let o = Output(
         mode: .separations,
