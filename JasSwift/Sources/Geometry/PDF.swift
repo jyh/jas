@@ -150,7 +150,8 @@ private func _withPref(
     tileOverlapV: Double? = nil,
     tileRange: String? = nil,
     marksAndBleed: MarksAndBleed? = nil,
-    output: Output? = nil
+    output: Output? = nil,
+    graphics: Graphics? = nil
 ) -> PrintPreferences {
     return PrintPreferences(
         presetName: presetName ?? p.presetName,
@@ -177,7 +178,8 @@ private func _withPref(
         tileOverlapV: tileOverlapV ?? p.tileOverlapV,
         tileRange: tileRange ?? p.tileRange,
         marksAndBleed: marksAndBleed ?? p.marksAndBleed,
-        output: output ?? p.output
+        output: output ?? p.output,
+        graphics: graphics ?? p.graphics
     )
 }
 
@@ -385,6 +387,68 @@ private func _withOut(
         convertSpotToProcess: convertSpotToProcess ?? o.convertSpotToProcess,
         overprintBlack: overprintBlack ?? o.overprintBlack,
         inks: inks ?? o.inks
+    )
+}
+
+/// Apply a single field update to PrintPreferences's Graphics
+/// sub-record (PRINT.md §Phase 4). Returns nil for unknown fields or
+/// value-type mismatches — caller leaves PrintPreferences unchanged.
+func applyGraphicsField(_ p: PrintPreferences, field: String, val: Value) -> PrintPreferences? {
+    func num() -> Double? {
+        if case .number(let n) = val { return n }
+        return nil
+    }
+    func bool() -> Bool? {
+        if case .bool(let b) = val { return b }
+        return nil
+    }
+    func str() -> String? {
+        if case .string(let s) = val { return s }
+        return nil
+    }
+    let g = p.graphics
+    let updated: Graphics
+    switch field {
+    case "flatness":
+        guard let n = num() else { return nil }
+        updated = _withGfx(g, flatness: n)
+    case "font_download":
+        guard let s = str(), let f = FontDownload(rawValue: s) else { return nil }
+        updated = _withGfx(g, fontDownload: f)
+    case "postscript_level":
+        guard let s = str(), let pl = PostScriptLevel(rawValue: s) else { return nil }
+        updated = _withGfx(g, postscriptLevel: pl)
+    case "data_format":
+        guard let s = str(), let df = DataFormat(rawValue: s) else { return nil }
+        updated = _withGfx(g, dataFormat: df)
+    case "compatible_gradient_printing":
+        guard let b = bool() else { return nil }
+        updated = _withGfx(g, compatibleGradientPrinting: b)
+    case "raster_effects_resolution":
+        guard let n = num() else { return nil }
+        updated = _withGfx(g, rasterEffectsResolution: n)
+    default:
+        return nil
+    }
+    return _withPref(p, graphics: updated)
+}
+
+private func _withGfx(
+    _ g: Graphics,
+    flatness: Double? = nil,
+    fontDownload: FontDownload? = nil,
+    postscriptLevel: PostScriptLevel? = nil,
+    dataFormat: DataFormat? = nil,
+    compatibleGradientPrinting: Bool? = nil,
+    rasterEffectsResolution: Double? = nil
+) -> Graphics {
+    return Graphics(
+        flatness: flatness ?? g.flatness,
+        fontDownload: fontDownload ?? g.fontDownload,
+        postscriptLevel: postscriptLevel ?? g.postscriptLevel,
+        dataFormat: dataFormat ?? g.dataFormat,
+        compatibleGradientPrinting: compatibleGradientPrinting ?? g.compatibleGradientPrinting,
+        rasterEffectsResolution: rasterEffectsResolution ?? g.rasterEffectsResolution
     )
 }
 
