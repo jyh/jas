@@ -995,6 +995,25 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(parsed.documentSetup == s)
 }
 
+@Test func colorManagementSubRecordRoundTripsThroughSvg() {
+    let c = ColorManagement(
+        documentProfile: "Adobe RGB (1998)",
+        colorHandling: .postscriptColorManagement,
+        printerProfile: "U.S. Web Coated (SWOP) v2",
+        renderingIntent: .saturation,
+        preserveRgbNumbers: true
+    )
+    let p = PrintPreferences(colorManagement: c)
+    let doc = Document(layers: [Layer(children: [])], printPreferences: p)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("<jas:color-management"))
+    #expect(svg.contains("color-handling=\"postscript_color_management\""))
+    #expect(svg.contains("rendering-intent=\"saturation\""))
+    #expect(svg.contains("Adobe RGB (1998)"))
+    let parsed = svgToDocument(svg)
+    #expect(parsed.printPreferences.colorManagement == c)
+}
+
 @Test func graphicsSubRecordRoundTripsThroughSvg() {
     let g = Graphics(
         flatness: 0.4,
