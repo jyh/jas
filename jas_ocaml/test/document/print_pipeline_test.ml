@@ -165,7 +165,8 @@ let test_print_preferences_roundtrip () =
             tile_overlap_h = 6.0;
             tile_overlap_v = 6.0;
             tile_range = "1-2";
-            marks_and_bleed = Print_preferences.default_marks_and_bleed } in
+            marks_and_bleed = Print_preferences.default_marks_and_bleed;
+            output = Print_preferences.default_output } in
   let doc = make_document ~print_preferences:p [||] in
   let json = document_to_test_json doc in
   let doc2 = test_json_to_document json in
@@ -196,6 +197,71 @@ let test_printer_mark_type_strings () =
   assert (printer_mark_type_of_string "roman" = Roman);
   assert (printer_mark_type_of_string "japanese" = Japanese);
   assert (printer_mark_type_of_string "garbage" = Roman)
+
+(* Output sub-record (PRINT.md §Phase 3) *)
+
+let test_output_defaults () =
+  let o = Print_preferences.default_output in
+  assert (o.mode = Print_preferences.Composite);
+  assert (o.emulsion = Print_preferences.Up_right);
+  assert (o.image_polarity = Print_preferences.Positive);
+  assert (o.printer_resolution = "75 lpi / 600 dpi");
+  assert (o.convert_spot_to_process = false);
+  assert (o.overprint_black = false);
+  assert (List.length o.inks = 4);
+  let inks = o.inks in
+  assert ((List.nth inks 0).name = "Process Cyan");
+  assert ((List.nth inks 0).angle = 105.0);
+  assert ((List.nth inks 1).name = "Process Magenta");
+  assert ((List.nth inks 2).name = "Process Yellow");
+  assert ((List.nth inks 3).name = "Process Black");
+  assert ((List.nth inks 3).angle = 45.0);
+  List.iter (fun (i : Print_preferences.ink_override) ->
+    assert i.print;
+    assert (i.frequency = 75.0);
+    assert (i.dot_shape = Print_preferences.Dot_round)
+  ) inks
+
+let test_output_enum_strings () =
+  let open Print_preferences in
+  assert (output_mode_to_string Composite = "composite");
+  assert (output_mode_to_string Separations = "separations");
+  assert (emulsion_to_string Up_right = "up_right");
+  assert (emulsion_to_string Down_right = "down_right");
+  assert (image_polarity_to_string Positive = "positive");
+  assert (image_polarity_to_string Negative = "negative");
+  assert (dot_shape_to_string Dot_round = "round");
+  assert (dot_shape_to_string Dot_euclidean = "euclidean")
+
+let test_output_roundtrip () =
+  let m = { Print_preferences.mode = Print_preferences.Separations;
+            emulsion = Print_preferences.Down_right;
+            image_polarity = Print_preferences.Negative;
+            printer_resolution = "150 lpi / 1200 dpi";
+            convert_spot_to_process = true;
+            overprint_black = true;
+            inks = [
+              { name = "Process Cyan"; print = false;
+                frequency = 100.0; angle = 105.0;
+                dot_shape = Print_preferences.Dot_ellipse };
+              { name = "PANTONE 185 C"; print = true;
+                frequency = 85.0; angle = 45.0;
+                dot_shape = Print_preferences.Dot_square };
+            ] } in
+  let p = { Print_preferences.default with output = m } in
+  let doc = make_document ~print_preferences:p [||] in
+  let json = document_to_test_json doc in
+  let contains s sub =
+    let len_s = String.length s and len_sub = String.length sub in
+    let rec aux i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else aux (i + 1)
+    in aux 0 in
+  assert (contains json "\"output\"");
+  assert (contains json "\"PANTONE 185 C\"");
+  let doc2 = test_json_to_document json in
+  assert (doc2.print_preferences.output = m)
 
 let test_marks_and_bleed_roundtrip () =
   let m = { Print_preferences.all_printer_marks = true;
@@ -240,6 +306,11 @@ let () =
       Alcotest.test_case "defaults" `Quick test_marks_and_bleed_defaults;
       Alcotest.test_case "printer_mark_type strings" `Quick test_printer_mark_type_strings;
       Alcotest.test_case "roundtrip" `Quick test_marks_and_bleed_roundtrip;
+    ];
+    "output", [
+      Alcotest.test_case "defaults" `Quick test_output_defaults;
+      Alcotest.test_case "enum strings" `Quick test_output_enum_strings;
+      Alcotest.test_case "roundtrip" `Quick test_output_roundtrip;
     ];
     "test_json", [
       Alcotest.test_case "document_setup omitted when default" `Quick test_document_setup_only_emitted_when_non_default;

@@ -510,6 +510,31 @@ let document_setup_json (s : Document_setup.t) =
   json_bool o "show_images_outline" s.show_images_outline;
   json_build o
 
+let ink_override_json (ink : Print_preferences.ink_override) =
+  let o = json_obj () in
+  json_num o "angle" ink.angle;
+  json_str o "dot_shape" (Print_preferences.dot_shape_to_string ink.dot_shape);
+  json_num o "frequency" ink.frequency;
+  json_str o "name" ink.name;
+  json_bool o "print" ink.print;
+  json_build o
+
+let inks_json (inks : Print_preferences.ink_override list) =
+  let items = List.map ink_override_json inks in
+  json_array items
+
+let output_json (out : Print_preferences.output) =
+  let o = json_obj () in
+  json_bool o "convert_spot_to_process" out.convert_spot_to_process;
+  json_str o "emulsion" (Print_preferences.emulsion_to_string out.emulsion);
+  json_str o "image_polarity"
+    (Print_preferences.image_polarity_to_string out.image_polarity);
+  json_raw o "inks" (inks_json out.inks);
+  json_str o "mode" (Print_preferences.output_mode_to_string out.mode);
+  json_bool o "overprint_black" out.overprint_black;
+  json_str o "printer_resolution" out.printer_resolution;
+  json_build o
+
 let marks_and_bleed_json (m : Print_preferences.marks_and_bleed) =
   let o = json_obj () in
   json_bool o "all_printer_marks" m.all_printer_marks;
@@ -543,6 +568,7 @@ let print_preferences_json (p : Print_preferences.t) =
   json_str o "media_size" (Print_preferences.media_size_to_string p.media_size);
   json_num o "media_width" p.media_width;
   json_str o "orientation" (Print_preferences.orientation_to_string p.orientation);
+  json_raw o "output" (output_json p.output);
   json_num o "placement_x" p.placement_x;
   json_num o "placement_y" p.placement_y;
   json_str o "preset_name" p.preset_name;
@@ -970,6 +996,59 @@ let parse_document_setup j : Document_setup.t =
     }
   with _ -> d
 
+let parse_ink_override j : Print_preferences.ink_override =
+  let open Yojson.Safe.Util in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_num name d_val =
+    try j |> member name |> to_num with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  {
+    name = pick_str "name" "";
+    print = pick_bool "print" true;
+    frequency = pick_num "frequency" 75.0;
+    angle = pick_num "angle" 45.0;
+    dot_shape =
+      Print_preferences.dot_shape_of_string
+        (pick_str "dot_shape" "round");
+  }
+
+let parse_output j : Print_preferences.output =
+  let open Yojson.Safe.Util in
+  let d = Print_preferences.default_output in
+  let pick_str name d_val =
+    try j |> member name |> to_string with _ -> d_val in
+  let pick_bool name d_val =
+    try j |> member name |> to_bool with _ -> d_val in
+  let inks =
+    match try j |> member "inks" with _ -> `Null with
+    | `Null -> d.inks
+    | `List items -> List.map parse_ink_override items
+    | _ -> d.inks
+  in
+  try
+    {
+      mode =
+        Print_preferences.output_mode_of_string
+          (pick_str "mode"
+             (Print_preferences.output_mode_to_string d.mode));
+      emulsion =
+        Print_preferences.emulsion_of_string
+          (pick_str "emulsion"
+             (Print_preferences.emulsion_to_string d.emulsion));
+      image_polarity =
+        Print_preferences.image_polarity_of_string
+          (pick_str "image_polarity"
+             (Print_preferences.image_polarity_to_string d.image_polarity));
+      printer_resolution = pick_str "printer_resolution" d.printer_resolution;
+      convert_spot_to_process =
+        pick_bool "convert_spot_to_process" d.convert_spot_to_process;
+      overprint_black = pick_bool "overprint_black" d.overprint_black;
+      inks;
+    }
+  with _ -> d
+
 let parse_marks_and_bleed j : Print_preferences.marks_and_bleed =
   let open Yojson.Safe.Util in
   let d = Print_preferences.default_marks_and_bleed in
@@ -1020,6 +1099,11 @@ let parse_print_preferences j : Print_preferences.t =
     | `Null -> d.marks_and_bleed
     | v -> parse_marks_and_bleed v
   in
+  let pick_output () =
+    match try j |> member "output" with _ -> `Null with
+    | `Null -> d.output
+    | v -> parse_output v
+  in
   try
     {
       preset_name = pick_str "preset_name" d.preset_name;
@@ -1061,6 +1145,7 @@ let parse_print_preferences j : Print_preferences.t =
       tile_overlap_v = pick_num "tile_overlap_v" d.tile_overlap_v;
       tile_range = pick_str "tile_range" d.tile_range;
       marks_and_bleed = pick_marks_and_bleed ();
+      output = pick_output ();
     }
   with _ -> d
 
