@@ -171,6 +171,16 @@ def _document_setup_view(s) -> dict:
     }
 
 
+def _color_management_view(c) -> dict:
+    return {
+        "document_profile": c.document_profile,
+        "color_handling": c.color_handling.value,
+        "printer_profile": c.printer_profile,
+        "rendering_intent": c.rendering_intent.value,
+        "preserve_rgb_numbers": c.preserve_rgb_numbers,
+    }
+
+
 def _graphics_view(g) -> dict:
     return {
         "flatness": g.flatness,
@@ -250,6 +260,7 @@ def _print_preferences_view(p) -> dict:
         "marks_and_bleed": _marks_and_bleed_view(p.marks_and_bleed),
         "output": _output_view(p.output),
         "graphics": _graphics_view(p.graphics),
+        "color_management": _color_management_view(p.color_management),
     }
 
 
