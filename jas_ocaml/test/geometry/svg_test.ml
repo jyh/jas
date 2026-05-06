@@ -876,6 +876,29 @@ let () =
         let parsed = Jas.Svg.svg_to_document svg in
         assert (parsed.document_setup = s));
 
+      Alcotest.test_case "ColorManagement sub-record round-trips" `Quick (fun () ->
+        let c = { Jas.Print_preferences.document_profile = "Adobe RGB (1998)";
+                  color_handling = Jas.Print_preferences.Postscript_color_management;
+                  printer_profile = "U.S. Web Coated (SWOP) v2";
+                  rendering_intent = Jas.Print_preferences.Saturation;
+                  preserve_rgb_numbers = true } in
+        let p = { Jas.Print_preferences.default with color_management = c } in
+        let doc = make_document ~print_preferences:p [|make_layer [||]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg "<jas:color-management");
+        assert (contains svg "color-handling=\"postscript_color_management\"");
+        assert (contains svg "rendering-intent=\"saturation\"");
+        assert (contains svg "Adobe RGB (1998)");
+        let parsed = Jas.Svg.svg_to_document svg in
+        assert (parsed.print_preferences.color_management = c));
+
       Alcotest.test_case "Graphics sub-record round-trips" `Quick (fun () ->
         let g = { Jas.Print_preferences.flatness = 0.4;
                   font_download = Jas.Print_preferences.Font_complete;
@@ -957,7 +980,8 @@ let () =
                   tile_range = "1-2";
                   marks_and_bleed = m;
                   output = Jas.Print_preferences.default_output;
-                  graphics = Jas.Print_preferences.default_graphics } in
+                  graphics = Jas.Print_preferences.default_graphics;
+                  color_management = Jas.Print_preferences.default_color_management } in
         let doc = make_document ~print_preferences:p [|make_layer [||]|] in
         let svg = Jas.Svg.document_to_svg doc in
         let contains s sub =
