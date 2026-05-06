@@ -516,6 +516,33 @@ def _document_setup_json(s):
     return o.build()
 
 
+def _ink_override_json(ink):
+    o = _JsonObj()
+    o.num("angle", ink.angle)
+    o.str("dot_shape", ink.dot_shape.value)
+    o.num("frequency", ink.frequency)
+    o.str("name", ink.name)
+    o.bool_("print", ink.print)
+    return o.build()
+
+
+def _inks_json(inks):
+    items = [_ink_override_json(i) for i in inks]
+    return _json_array(items)
+
+
+def _output_json(out):
+    o = _JsonObj()
+    o.bool_("convert_spot_to_process", out.convert_spot_to_process)
+    o.str("emulsion", out.emulsion.value)
+    o.str("image_polarity", out.image_polarity.value)
+    o.raw("inks", _inks_json(out.inks))
+    o.str("mode", out.mode.value)
+    o.bool_("overprint_black", out.overprint_black)
+    o.str("printer_resolution", out.printer_resolution)
+    return o.build()
+
+
 def _marks_and_bleed_json(m):
     o = _JsonObj()
     o.bool_("all_printer_marks", m.all_printer_marks)
@@ -548,6 +575,7 @@ def _print_preferences_json(p):
     o.str("media_size", p.media_size.value)
     o.num("media_width", p.media_width)
     o.str("orientation", p.orientation.value)
+    o.raw("output", _output_json(p.output))
     o.num("placement_x", p.placement_x)
     o.num("placement_y", p.placement_y)
     o.str("preset_name", p.preset_name)
@@ -934,6 +962,46 @@ def _parse_document_setup(v):
     )
 
 
+def _parse_ink_override(v):
+    from document.print_preferences import (
+        InkOverride, DotShape, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return InkOverride(name="")
+    return InkOverride(
+        name=v.get("name", ""),
+        print=v.get("print", True),
+        frequency=v.get("frequency", 75.0),
+        angle=v.get("angle", 45.0),
+        dot_shape=_enum_from_string(DotShape, v.get("dot_shape", ""), DotShape.ROUND),
+    )
+
+
+def _parse_output(v):
+    from document.print_preferences import (
+        Output, OutputMode, Emulsion, ImagePolarity, _enum_from_string,
+    )
+    if not isinstance(v, dict):
+        return Output()
+    d = Output()
+    inks_raw = v.get("inks")
+    if isinstance(inks_raw, list):
+        inks = tuple(_parse_ink_override(i) for i in inks_raw)
+    else:
+        inks = d.inks
+    return Output(
+        mode=_enum_from_string(OutputMode, v.get("mode", ""), d.mode),
+        emulsion=_enum_from_string(Emulsion, v.get("emulsion", ""), d.emulsion),
+        image_polarity=_enum_from_string(
+            ImagePolarity, v.get("image_polarity", ""), d.image_polarity),
+        printer_resolution=v.get("printer_resolution", d.printer_resolution),
+        convert_spot_to_process=v.get(
+            "convert_spot_to_process", d.convert_spot_to_process),
+        overprint_black=v.get("overprint_black", d.overprint_black),
+        inks=inks,
+    )
+
+
 def _parse_marks_and_bleed(v):
     from document.print_preferences import (
         MarksAndBleed, PrinterMarkType, _enum_from_string,
@@ -996,6 +1064,7 @@ def _parse_print_preferences(v):
         tile_overlap_v=v.get("tile_overlap_v", d.tile_overlap_v),
         tile_range=v.get("tile_range", d.tile_range),
         marks_and_bleed=_parse_marks_and_bleed(v.get("marks_and_bleed", None)),
+        output=_parse_output(v.get("output", None)),
     )
 
 
