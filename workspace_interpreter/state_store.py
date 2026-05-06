@@ -364,6 +364,13 @@ class StateStore:
         if prop and "get" in prop and "set" not in prop:
             return  # read-only — ignore writes
         self._dialog[key] = value
+        # Notify global subscribers so reactive bindings tied to
+        # ``dialog.X`` re-evaluate. Without this a select that flips
+        # ``dialog.artboard_range_mode`` doesn't enable the range
+        # text_input whose ``bind.disabled`` references the same
+        # field — _apply_bindings only subscribes to the global
+        # _subscribers list, and set_dialog used to mutate silently.
+        self._notify(f"dialog.{key}", value)
 
     def get_dialog_state(self) -> dict:
         return dict(self._dialog)

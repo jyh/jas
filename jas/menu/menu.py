@@ -21,9 +21,19 @@ def create_menus(window: QMainWindow) -> None:
     # File menu
     file_menu = menubar.addMenu("&File")
 
+    def _new_doc() -> None:
+        # Document() defaults artboards=(); seed the at-least-one-
+        # artboard invariant so a fresh canvas opens with a visible
+        # white artboard rather than a featureless gray pasteboard.
+        from document.document import Document
+        from document.artboard import ensure_artboards_invariant
+        abs_, _ = ensure_artboards_invariant(())
+        doc = Document(artboards=abs_)
+        window.add_canvas(Model(document=doc))
+
     new_action = file_menu.addAction("&New")
     new_action.setShortcut(QKeySequence.New)
-    new_action.triggered.connect(lambda: window.add_canvas(Model()))
+    new_action.triggered.connect(_new_doc)
 
     open_action = file_menu.addAction("&Open...")
     open_action.setShortcut(QKeySequence.Open)
@@ -148,17 +158,43 @@ def create_menus(window: QMainWindow) -> None:
     # View menu
     view_menu = menubar.addMenu("&View")
 
+    def _bump_zoom(factor: float) -> None:
+        m = _model()
+        if m is None:
+            return
+        cx = m.viewport_w / 2.0
+        cy = m.viewport_h / 2.0
+        z = m.zoom_level
+        doc_cx = (cx - m.view_offset_x) / z if z else 0
+        doc_cy = (cy - m.view_offset_y) / z if z else 0
+        z2 = max(0.1, min(64.0, z * factor))
+        m.zoom_level = z2
+        m.view_offset_x = cx - doc_cx * z2
+        m.view_offset_y = cy - doc_cy * z2
+        canvas = window.tab_widget.currentWidget() if hasattr(window, "tab_widget") else None
+        if canvas is not None and hasattr(canvas, "update"):
+            canvas.update()
+
+    def _fit_artboard() -> None:
+        m = _model()
+        if m is None:
+            return
+        m.center_view_on_current_artboard()
+        canvas = window.tab_widget.currentWidget() if hasattr(window, "tab_widget") else None
+        if canvas is not None and hasattr(canvas, "update"):
+            canvas.update()
+
     zoom_in_action = view_menu.addAction("Zoom &In")
-    zoom_in_action.setShortcut(QKeySequence.ZoomIn)
-    zoom_in_action.triggered.connect(lambda: print("Zoom in"))
+    zoom_in_action.setShortcut(QKeySequence("Ctrl+="))
+    zoom_in_action.triggered.connect(lambda: _bump_zoom(1.2))
 
     zoom_out_action = view_menu.addAction("Zoom &Out")
-    zoom_out_action.setShortcut(QKeySequence.ZoomOut)
-    zoom_out_action.triggered.connect(lambda: print("Zoom out"))
+    zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
+    zoom_out_action.triggered.connect(lambda: _bump_zoom(1.0 / 1.2))
 
     fit_action = view_menu.addAction("&Fit in Window")
     fit_action.setShortcut(QKeySequence("Ctrl+0"))
-    fit_action.triggered.connect(lambda: print("Fit in window"))
+    fit_action.triggered.connect(_fit_artboard)
 
     # --- Window menu ---
     window_menu = menubar.addMenu("&Window")
@@ -480,21 +516,62 @@ def _export_to_pdf(window: QMainWindow, model: Model | None) -> None:
 
 def _open_yaml_dialog(window: QMainWindow, dialog_id: str) -> None:
     """PRINT.md §1: open a YAML dialog (Document Setup, Print) from the
-    File menu. The dialog runtime in Python lives in
-    panels.yaml_dialog_view; the menu hook simply wires the dialog id
-    through, with active_document exposed in the init context."""
+    File menu. Routes through ``show_yaml_dialog`` with the app's
+    global state store, an ``active_document`` ctx so init
+    expressions like ``active_document.print_preferences.copies``
+    resolve to persisted document values, and a ``dispatch_fn`` that
+    runs the YAML action's effects (snapshot, doc.set_*_field,
+    close_dialog) — without it the OK button is a no-op."""
     model = window.active_model() if hasattr(window, "active_model") else None
     if model is None:
         return
-    # The Python yaml dialog framework's menu-hooked open path is not
-    # yet wired (the existing dialog open paths are panel-internal).
-    # Phase 1B ships the data model + PDF export + menu entry; the
-    # Document Setup / Print modal dialogs in Python reach the user
-    # via PDF export today, with the dialogs themselves landing in a
-    # follow-up alongside the Python yaml dialog framework upgrade.
-    print(f"[print pipeline] Open dialog '{dialog_id}' (deferred — "
-          f"see PRINT.md memory; Python yaml dialog menu-open path "
-          f"not yet wired)")
+    state_store = window.yaml_state() if hasattr(window, "yaml_state") else None
+    if state_store is None:
+        return
+    from panels.yaml_dialog_view import show_yaml_dialog
+    from panels.active_document_view import (
+        build_active_document_view, sync_document_to_store,
+    )
+    from workspace_interpreter.loader import load_workspace
+    from workspace_interpreter.effects import run_effects
+    sync_document_to_store(model, state_store)
+    ctx = {"active_document": build_active_document_view(model)}
+    import os as _os
+    ws_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "workspace")
+    ws = load_workspace(ws_path)
+    actions_catalog = ws.get("actions", {}) if ws else {}
+    dialogs_catalog = ws.get("dialogs", {}) if ws else {}
+    platform_effects = _build_dialog_platform_effects(model)
+    def _dispatch(action_name: str, params: dict) -> None:
+        action_def = actions_catalog.get(action_name)
+        if not isinstance(action_def, dict):
+            return
+        effects = action_def.get("effects", [])
+        run_ctx = dict(ctx)
+        run_ctx["param"] = params
+        run_effects(effects, run_ctx, state_store,
+                    actions=actions_catalog, dialogs=dialogs_catalog,
+                    platform_effects=platform_effects)
+    show_yaml_dialog(dialog_id, params={}, store=state_store,
+                     ctx=ctx, dispatch_fn=_dispatch, parent=window)
+
+
+def _build_dialog_platform_effects(model: Model) -> dict:
+    """Platform handlers for YAML dialog action effects.
+    ``build_artboard_handlers`` already provides the canonical
+    ``doc.set_document_setup_field`` / ``doc.set_print_preferences_field``
+    / ``geometry.export_pdf`` handlers used by the artboards panel
+    menu — reuse them so the dialog action runs through the same
+    paths. ``snapshot`` and ``close_dialog`` are handled here:
+    snapshot pushes an undo entry, close_dialog clears the store's
+    dialog id (YamlDialogView watches that and dismisses)."""
+    from panels.artboard_effects import build_artboard_handlers
+    handlers = dict(build_artboard_handlers(model))
+    def snapshot_h(_value, _ctx, _store):
+        model.snapshot()
+        return None
+    handlers["snapshot"] = snapshot_h
+    return handlers
 
 
 def _lock_selection(model: Model) -> None:

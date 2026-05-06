@@ -1609,12 +1609,15 @@ _ARTBOARD_FADE_COLOR = QColor(160, 160, 160, 128)  # 50% alpha
 
 
 def _draw_artboard_fills(painter: QPainter, doc: Document) -> None:
-    """Layer 2: per-artboard fill. Transparent artboards skip (canvas
-    shows through); color fills paint the stored hex."""
+    """Layer 2: per-artboard fill. Transparent artboards default to
+    white "paper" so they stand out against the gray pasteboard;
+    color fills paint the stored hex."""
     painter.save()
     painter.setPen(Qt.PenStyle.NoPen)
     for ab in doc.artboards:
         if ab.fill == "transparent" or not ab.fill:
+            painter.setBrush(QBrush(QColor(255, 255, 255)))
+            painter.drawRect(QRectF(ab.x, ab.y, ab.width, ab.height))
             continue
         c = QColor(ab.fill)
         if c.isValid():
@@ -1625,24 +1628,14 @@ def _draw_artboard_fills(painter: QPainter, doc: Document) -> None:
 
 def _draw_fade_overlay(painter: QPainter, doc: Document,
                        widget_width: int, widget_height: int) -> None:
-    """Layer 4: dim off-artboard regions when fade_region_outside_artboard
-    is on. Fills the whole canvas with 50%-opacity neutral gray, then
-    punches out each artboard via DestinationOut composition."""
-    if not doc.artboard_options.fade_region_outside_artboard:
-        return
-    if not doc.artboards:
-        return
-    painter.save()
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QBrush(_ARTBOARD_FADE_COLOR))
-    painter.drawRect(QRectF(0, 0, widget_width, widget_height))
-    painter.setCompositionMode(
-        QPainter.CompositionMode.CompositionMode_DestinationOut
-    )
-    painter.setBrush(QBrush(QColor(0, 0, 0, 255)))
-    for ab in doc.artboards:
-        painter.drawRect(QRectF(ab.x, ab.y, ab.width, ab.height))
-    painter.restore()
+    """Layer 4: no-op now that the gray pasteboard + white artboard
+    fill provide enough contrast on their own. The legacy implementation
+    used DestinationOut to punch artboards out of a darken overlay,
+    which on a gray canvas wiped the artboard fill back to whatever
+    was behind the painter — matching the Swift "all-white canvas"
+    regression. Reinstate a non-destructive overlay when a future
+    visual pass calls for it."""
+    return
 
 
 def _draw_artboard_borders(painter: QPainter, doc: Document) -> None:
@@ -2125,7 +2118,9 @@ class CanvasWidget(QWidget):
         # before the view transform so it covers the viewport
         # regardless of zoom and pan. Per ZOOM_TOOL.md §Anchor
         # and clamp math (rendering pipeline).
-        painter.fillRect(self.rect(), QColor("white"))
+        # Pasteboard: medium gray. Artboard fills draw white over it
+        # so the artboard reads as "paper on a layout table".
+        painter.fillRect(self.rect(), QColor(120, 120, 120))
         # Sync model viewport size with canvas widget bounds. First-
         # time syncs re-center on the active artboard (the
         # construction-time default 888x900 is replaced).

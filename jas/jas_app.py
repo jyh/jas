@@ -738,6 +738,15 @@ class MainWindow(QMainWindow):
         canvas = self.tab_widget.currentWidget()
         return canvas._model if isinstance(canvas, CanvasWidget) else None
 
+    def yaml_state(self):
+        """Return the app's global YAML StateStore. Used by menu-driven
+        dialog open paths so the dialog framework runs against the same
+        store as the panels (otherwise dialog state writes wouldn't be
+        observable to subscribers, and the Print/Doc Setup dialogs
+        couldn't share active-document context with the rest of the
+        app)."""
+        return self._yaml_state
+
     def _undo(self):
         m = self.active_model()
         if m:
