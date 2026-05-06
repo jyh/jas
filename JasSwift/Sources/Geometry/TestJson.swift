@@ -523,6 +523,24 @@ private func documentSetupJson(_ s: DocumentSetup) -> String {
     return o.build()
 }
 
+private func marksAndBleedJson(_ m: MarksAndBleed) -> String {
+    let o = JsonObj()
+    o.bool("all_printer_marks", m.allPrinterMarks)
+    o.num("bleed_bottom", m.bleedBottom)
+    o.num("bleed_left", m.bleedLeft)
+    o.num("bleed_right", m.bleedRight)
+    o.num("bleed_top", m.bleedTop)
+    o.bool("color_bars", m.colorBars)
+    o.num("mark_offset", m.markOffset)
+    o.bool("page_information", m.pageInformation)
+    o.str("printer_mark_type", m.printerMarkType.rawValue)
+    o.bool("registration_marks", m.registrationMarks)
+    o.num("trim_mark_weight", m.trimMarkWeight)
+    o.bool("trim_marks", m.trimMarks)
+    o.bool("use_document_bleed", m.useDocumentBleed)
+    return o.build()
+}
+
 private func printPreferencesJson(_ p: PrintPreferences) -> String {
     let o = JsonObj()
     o.str("artboard_range", p.artboardRange)
@@ -532,6 +550,7 @@ private func printPreferencesJson(_ p: PrintPreferences) -> String {
     o.int("copies", p.copies)
     o.num("custom_scale", p.customScale)
     o.bool("ignore_artboards", p.ignoreArtboards)
+    o.raw("marks_and_bleed", marksAndBleedJson(p.marksAndBleed))
     o.num("media_height", p.mediaHeight)
     o.str("media_size", p.mediaSize.rawValue)
     o.num("media_width", p.mediaWidth)
@@ -943,6 +962,26 @@ private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
     )
 }
 
+private func parseMarksAndBleed(_ v: Any?) -> MarksAndBleed {
+    guard let d = v as? [String: Any] else { return .default }
+    let def = MarksAndBleed.default
+    return MarksAndBleed(
+        allPrinterMarks: (d["all_printer_marks"] as? Bool) ?? def.allPrinterMarks,
+        trimMarks: (d["trim_marks"] as? Bool) ?? def.trimMarks,
+        registrationMarks: (d["registration_marks"] as? Bool) ?? def.registrationMarks,
+        colorBars: (d["color_bars"] as? Bool) ?? def.colorBars,
+        pageInformation: (d["page_information"] as? Bool) ?? def.pageInformation,
+        printerMarkType: PrinterMarkType(rawValue: (d["printer_mark_type"] as? String) ?? "") ?? def.printerMarkType,
+        trimMarkWeight: (d["trim_mark_weight"] as? NSNumber)?.doubleValue ?? def.trimMarkWeight,
+        markOffset: (d["mark_offset"] as? NSNumber)?.doubleValue ?? def.markOffset,
+        useDocumentBleed: (d["use_document_bleed"] as? Bool) ?? def.useDocumentBleed,
+        bleedTop: (d["bleed_top"] as? NSNumber)?.doubleValue ?? def.bleedTop,
+        bleedRight: (d["bleed_right"] as? NSNumber)?.doubleValue ?? def.bleedRight,
+        bleedBottom: (d["bleed_bottom"] as? NSNumber)?.doubleValue ?? def.bleedBottom,
+        bleedLeft: (d["bleed_left"] as? NSNumber)?.doubleValue ?? def.bleedLeft
+    )
+}
+
 private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
     guard let d = v as? [String: Any] else { return .default }
     let def = PrintPreferences.default
@@ -973,7 +1012,8 @@ private func parsePrintPreferences(_ v: Any?) -> PrintPreferences {
         customScale: (d["custom_scale"] as? NSNumber)?.doubleValue ?? def.customScale,
         tileOverlapH: (d["tile_overlap_h"] as? NSNumber)?.doubleValue ?? def.tileOverlapH,
         tileOverlapV: (d["tile_overlap_v"] as? NSNumber)?.doubleValue ?? def.tileOverlapV,
-        tileRange: (d["tile_range"] as? String) ?? def.tileRange
+        tileRange: (d["tile_range"] as? String) ?? def.tileRange,
+        marksAndBleed: parseMarksAndBleed(d["marks_and_bleed"])
     )
 }
 

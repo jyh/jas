@@ -148,3 +148,49 @@ import Testing
     let doc2 = testJsonToDocument(json)
     #expect(doc2.printPreferences == p)
 }
+
+// MARK: - MarksAndBleed (PRINT.md §Phase 2)
+
+@Test func marksAndBleedDefaultsMatchSpec() {
+    let m = MarksAndBleed.default
+    #expect(m.allPrinterMarks == false)
+    #expect(m.trimMarks == false)
+    #expect(m.registrationMarks == false)
+    #expect(m.colorBars == false)
+    #expect(m.pageInformation == false)
+    #expect(m.printerMarkType == .roman)
+    #expect(m.trimMarkWeight == 0.25)
+    #expect(m.markOffset == 6.0)
+    #expect(m.useDocumentBleed == true)
+    #expect(m.bleedTop == 0)
+    #expect(m.bleedRight == 0)
+    #expect(m.bleedBottom == 0)
+    #expect(m.bleedLeft == 0)
+}
+
+@Test func printerMarkTypeRawValuesAreSnakeCase() {
+    #expect(PrinterMarkType.roman.rawValue == "roman")
+    #expect(PrinterMarkType.japanese.rawValue == "japanese")
+}
+
+@Test func marksAndBleedRoundTripsThroughPrintPreferences() {
+    let m = MarksAndBleed(
+        allPrinterMarks: true,
+        trimMarks: true,
+        registrationMarks: true,
+        colorBars: true,
+        pageInformation: true,
+        printerMarkType: .japanese,
+        trimMarkWeight: 0.5,
+        markOffset: 12,
+        useDocumentBleed: false,
+        bleedTop: 4, bleedRight: 5,
+        bleedBottom: 6, bleedLeft: 7
+    )
+    let p = PrintPreferences(marksAndBleed: m)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"marks_and_bleed\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.marksAndBleed == m)
+}
