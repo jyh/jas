@@ -173,6 +173,42 @@ import Testing
     #expect(PrinterMarkType.japanese.rawValue == "japanese")
 }
 
+@Test func colorManagementDefaultsMatchSpec() {
+    let c = ColorManagement.default
+    #expect(c.documentProfile == "sRGB IEC61966-2.1")
+    #expect(c.colorHandling == .letAppDetermine)
+    #expect(c.printerProfile == "")
+    #expect(c.renderingIntent == .relativeColorimetric)
+    #expect(c.preserveRgbNumbers == false)
+}
+
+@Test func colorManagementEnumRawValuesAreSnakeCase() {
+    #expect(ColorHandling.letAppDetermine.rawValue == "let_app_determine")
+    #expect(ColorHandling.letPrinterDetermine.rawValue == "let_printer_determine")
+    #expect(ColorHandling.postscriptColorManagement.rawValue == "postscript_color_management")
+    #expect(RenderingIntent.perceptual.rawValue == "perceptual")
+    #expect(RenderingIntent.relativeColorimetric.rawValue == "relative_colorimetric")
+    #expect(RenderingIntent.saturation.rawValue == "saturation")
+    #expect(RenderingIntent.absoluteColorimetric.rawValue == "absolute_colorimetric")
+}
+
+@Test func colorManagementRoundTripsThroughPrintPreferences() {
+    let c = ColorManagement(
+        documentProfile: "Adobe RGB (1998)",
+        colorHandling: .postscriptColorManagement,
+        printerProfile: "U.S. Web Coated (SWOP) v2",
+        renderingIntent: .saturation,
+        preserveRgbNumbers: true
+    )
+    let p = PrintPreferences(colorManagement: c)
+    let doc = Document(printPreferences: p)
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"color_management\""))
+    #expect(json.contains("\"color_handling\":\"postscript_color_management\""))
+    let doc2 = testJsonToDocument(json)
+    #expect(doc2.printPreferences.colorManagement == c)
+}
+
 @Test func graphicsDefaultsMatchSpec() {
     let g = Graphics.default
     #expect(g.flatness == 1.0)
