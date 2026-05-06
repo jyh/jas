@@ -168,6 +168,19 @@ def _document_setup_view(s) -> dict:
         "bleed_uniform": s.bleed_uniform,
         "show_images_outline": s.show_images_outline,
         "highlight_substituted_glyphs": s.highlight_substituted_glyphs,
+        "grid_size": s.grid_size,
+        "grid_color": s.grid_color,
+        "paper_color": s.paper_color,
+        "simulate_colored_paper": s.simulate_colored_paper,
+        "transparency_flattener_preset": s.transparency_flattener_preset.value,
+        "discard_white_overprint": s.discard_white_overprint,
+    }
+
+
+def _advanced_view(a) -> dict:
+    return {
+        "print_as_bitmap": a.print_as_bitmap,
+        "overprint_flattener_preset": a.overprint_flattener_preset.value,
     }
 
 
@@ -261,6 +274,7 @@ def _print_preferences_view(p) -> dict:
         "output": _output_view(p.output),
         "graphics": _graphics_view(p.graphics),
         "color_management": _color_management_view(p.color_management),
+        "advanced": _advanced_view(p.advanced),
     }
 
 

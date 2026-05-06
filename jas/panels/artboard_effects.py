@@ -275,6 +275,7 @@ def build_artboard_handlers(model) -> dict:
 
     # PRINT.md §1A
     def doc_set_document_setup_field(spec, call_ctx, _store):
+        from document.print_preferences import FlattenerPreset, _enum_from_string
         if not isinstance(spec, dict):
             return None
         field = spec.get("field")
@@ -287,13 +288,17 @@ def build_artboard_handlers(model) -> dict:
         else:
             value = value_expr
         s = model.document.document_setup
-        bleed_fields = {
+        # Phase 1A bleed numerics + Phase 6 grid_size.
+        num_fields = {
             "bleed_top", "bleed_right", "bleed_bottom", "bleed_left",
+            "grid_size",
         }
         bool_fields = {
             "bleed_uniform", "show_images_outline", "highlight_substituted_glyphs",
+            "simulate_colored_paper", "discard_white_overprint",
         }
-        if field in bleed_fields:
+        str_fields = {"grid_color", "paper_color"}
+        if field in num_fields:
             if not isinstance(value, (int, float)):
                 return None
             new_s = dataclasses.replace(s, **{field: float(value)})
@@ -301,6 +306,17 @@ def build_artboard_handlers(model) -> dict:
             if not isinstance(value, bool):
                 return None
             new_s = dataclasses.replace(s, **{field: value})
+        elif field in str_fields:
+            if not isinstance(value, str):
+                return None
+            new_s = dataclasses.replace(s, **{field: value})
+        elif field == "transparency_flattener_preset":
+            if not isinstance(value, str):
+                return None
+            new_s = dataclasses.replace(
+                s,
+                transparency_flattener_preset=_enum_from_string(
+                    FlattenerPreset, value, s.transparency_flattener_preset))
         else:
             return None
         model.document = dataclasses.replace(model.document, document_setup=new_s)
@@ -614,6 +630,38 @@ def build_artboard_handlers(model) -> dict:
             model.document, print_preferences=new_p)
         return None
 
+    # PRINT.md §Phase 6
+    def doc_set_advanced_field(spec, call_ctx, _store):
+        from document.print_preferences import FlattenerPreset, _enum_from_string
+        if not isinstance(spec, dict):
+            return None
+        field = spec.get("field")
+        if not isinstance(field, str):
+            return None
+        value_expr = spec.get("value")
+        if isinstance(value_expr, str):
+            vr = evaluate(value_expr, call_ctx)
+            value = vr.value
+        else:
+            value = value_expr
+        p = model.document.print_preferences
+        a = p.advanced
+        if field == "print_as_bitmap":
+            if not isinstance(value, bool):
+                return None
+            new_a = dataclasses.replace(a, print_as_bitmap=value)
+        elif field == "overprint_flattener_preset":
+            if not isinstance(value, str):
+                return None
+            new_a = dataclasses.replace(a, overprint_flattener_preset=_enum_from_string(
+                FlattenerPreset, value, a.overprint_flattener_preset))
+        else:
+            return None
+        new_p = dataclasses.replace(p, advanced=new_a)
+        model.document = dataclasses.replace(
+            model.document, print_preferences=new_p)
+        return None
+
     # PRINT.md §1B
     def geometry_export_pdf(_spec, _call_ctx, _store):
         from geometry.pdf import document_to_pdf
@@ -646,6 +694,7 @@ def build_artboard_handlers(model) -> dict:
         "doc.set_output_ink_field": doc_set_output_ink_field,
         "doc.set_graphics_field": doc_set_graphics_field,
         "doc.set_color_management_field": doc_set_color_management_field,
+        "doc.set_advanced_field": doc_set_advanced_field,
         "doc.move_artboards_up": doc_move_artboards_up,
         "doc.move_artboards_down": doc_move_artboards_down,
         "geometry.export_pdf": geometry_export_pdf,
