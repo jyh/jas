@@ -424,6 +424,12 @@ private struct Page {
     /// MediaBox. (0, 0) when no bleed/marks are active.
     let trimXOff: Double
     let trimYOff: Double
+    /// PRINT.md §Phase 3: when set, this page is one channel of a
+    /// separations job and ``separationLabel`` is the ink name. v1
+    /// renders the artwork the same way Composite mode does and
+    /// stamps the label as a small page-info string; per-ink
+    /// channel extraction is a deferred follow-up.
+    let separationLabel: String?
 }
 
 // MARK: - Marks-and-Bleed PDF geometry (PRINT.md §Phase 2)
@@ -465,6 +471,7 @@ private func collectPages(_ doc: Document) -> [Page] {
     let extraW = bl + br + 2.0 * g
     let extraH = bt + bb + 2.0 * g
 
+    let base: [Page]
     if doc.printPreferences.ignoreArtboards || doc.artboards.isEmpty {
         let (x, y, w, h): (Double, Double, Double, Double)
         if doc.artboards.isEmpty {
@@ -472,17 +479,46 @@ private func collectPages(_ doc: Document) -> [Page] {
         } else {
             (x, y, w, h) = artboardBoundsUnion(doc.artboards)
         }
-        return [Page(
+        base = [Page(
             mediaBox: CGRect(x: 0, y: 0, width: w + extraW, height: h + extraH),
             srcX: x, srcY: y, srcW: w, srcH: h,
-            trimXOff: trimXOff, trimYOff: trimYOff)]
+            trimXOff: trimXOff, trimYOff: trimYOff,
+            separationLabel: nil)]
+    } else {
+        base = doc.artboards.map { ab in
+            Page(
+                mediaBox: CGRect(x: 0, y: 0, width: ab.width + extraW, height: ab.height + extraH),
+                srcX: ab.x, srcY: ab.y, srcW: ab.width, srcH: ab.height,
+                trimXOff: trimXOff, trimYOff: trimYOff,
+                separationLabel: nil)
+        }
     }
-    return doc.artboards.map { ab in
-        Page(
-            mediaBox: CGRect(x: 0, y: 0, width: ab.width + extraW, height: ab.height + extraH),
-            srcX: ab.x, srcY: ab.y, srcW: ab.width, srcH: ab.height,
-            trimXOff: trimXOff, trimYOff: trimYOff)
+    return expandForSeparations(doc, base)
+}
+
+/// In Composite mode, returns ``base`` unchanged. In Separations mode
+/// (PRINT.md §Phase 3), expands each base page into one copy per
+/// enabled ink in artboard-major order. When Separations mode is
+/// chosen but no inks are enabled, falls through to the composite
+/// pages so the user still gets a PDF instead of an empty file.
+private func expandForSeparations(_ doc: Document, _ base: [Page]) -> [Page] {
+    let out = doc.printPreferences.output
+    guard out.mode == .separations else { return base }
+    let enabled = out.inks.filter(\.print)
+    guard !enabled.isEmpty else { return base }
+    var expanded: [Page] = []
+    expanded.reserveCapacity(base.count * enabled.count)
+    for page in base {
+        for ink in enabled {
+            expanded.append(Page(
+                mediaBox: page.mediaBox,
+                srcX: page.srcX, srcY: page.srcY,
+                srcW: page.srcW, srcH: page.srcH,
+                trimXOff: page.trimXOff, trimYOff: page.trimYOff,
+                separationLabel: ink.name))
+        }
     }
+    return expanded
 }
 
 private func artboardBoundsUnion(_ abs: [Artboard]) -> (Double, Double, Double, Double) {
@@ -530,6 +566,28 @@ private func drawPage(_ ctx: CGContext, _ doc: Document, _ page: Page) {
     // Marks render in PDF native coordinates (y-up, bottom-left
     // origin), aligned to the trim rect inside the MediaBox.
     emitMarks(ctx, doc, page)
+    // Separations label (PRINT.md §Phase 3): stamp the ink name on
+    // each separations page so the printer / user can tell channels
+    // apart. Placed at the bottom-right of the trim rect to avoid
+    // colliding with the page-info string at the bottom-left.
+    if let name = page.separationLabel {
+        emitSeparationLabel(ctx, page, name)
+    }
+}
+
+private func emitSeparationLabel(_ ctx: CGContext, _ page: Page, _ name: String) {
+    let labelX = page.trimXOff + page.srcW - 80
+    let labelY = page.trimYOff - 14
+    let attrs: [NSAttributedString.Key: Any] = [
+        .font: NSFont(name: "Helvetica", size: 6) ?? NSFont.systemFont(ofSize: 6),
+        .foregroundColor: NSColor.black,
+    ]
+    let line = CTLineCreateWithAttributedString(
+        NSAttributedString(string: name, attributes: attrs))
+    ctx.saveGState()
+    ctx.textPosition = CGPoint(x: labelX, y: labelY)
+    CTLineDraw(line, ctx)
+    ctx.restoreGState()
 }
 
 private func emitMarks(_ ctx: CGContext, _ doc: Document, _ page: Page) {
