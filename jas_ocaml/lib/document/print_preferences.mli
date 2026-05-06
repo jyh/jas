@@ -20,6 +20,29 @@ val print_layers_of_string : string -> print_layers
 val scaling_mode_to_string : scaling_mode -> string
 val scaling_mode_of_string : string -> scaling_mode
 
+type printer_mark_type = Roman | Japanese
+
+val printer_mark_type_to_string : printer_mark_type -> string
+val printer_mark_type_of_string : string -> printer_mark_type
+
+type marks_and_bleed = {
+  all_printer_marks : bool;
+  trim_marks : bool;
+  registration_marks : bool;
+  color_bars : bool;
+  page_information : bool;
+  printer_mark_type : printer_mark_type;
+  trim_mark_weight : float;
+  mark_offset : float;
+  use_document_bleed : bool;
+  bleed_top : float;
+  bleed_right : float;
+  bleed_bottom : float;
+  bleed_left : float;
+}
+
+val default_marks_and_bleed : marks_and_bleed
+
 type t = {
   preset_name : string;
   printer_name : string option;
@@ -44,6 +67,7 @@ type t = {
   tile_overlap_h : float;
   tile_overlap_v : float;
   tile_range : string;
+  marks_and_bleed : marks_and_bleed;
 }
 
 val default : t
