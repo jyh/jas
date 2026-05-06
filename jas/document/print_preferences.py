@@ -81,6 +81,29 @@ class ImagePolarity(Enum):
     NEGATIVE = "negative"
 
 
+class FontDownload(Enum):
+    """Font-download mode for the Graphics tab (PRINT.md §Phase 4).
+    PostScript-era concept; stored for on-disk shape stability but
+    not applied by the PDF emitter."""
+    NONE = "none"
+    SUBSET = "subset"
+    COMPLETE = "complete"
+
+
+class PostScriptLevel(Enum):
+    """PostScript output level (PRINT.md §Phase 4). Stored but not
+    applied — we emit PDF, not PostScript."""
+    LEVEL_2 = "level_2"
+    LEVEL_3 = "level_3"
+
+
+class DataFormat(Enum):
+    """Stream encoding for PostScript output (PRINT.md §Phase 4).
+    Stored but not applied — we emit PDF."""
+    ASCII = "ascii"
+    BINARY = "binary"
+
+
 class DotShape(Enum):
     """Halftone dot shape for an ``InkOverride`` row (PRINT.md
     §Phase 3). Phase 3 stores the choice; halftone screen rendering
@@ -100,6 +123,23 @@ def _enum_from_string(enum_class, s: str, default):
         if v.value == s:
             return v
     return default
+
+
+@dataclass(frozen=True)
+class Graphics:
+    """Graphics sub-record on PrintPreferences (PRINT.md §Phase 4).
+    ``flatness`` is consulted by the PDF emitter as a path-flattening
+    tolerance; the others are stored for cross-app round-trip but
+    not applied (PostScript-specific)."""
+    flatness: float = 1.0
+    font_download: FontDownload = FontDownload.SUBSET
+    postscript_level: PostScriptLevel = PostScriptLevel.LEVEL_3
+    data_format: DataFormat = DataFormat.BINARY
+    compatible_gradient_printing: bool = False
+    raster_effects_resolution: float = 300.0
+
+
+DEFAULT_GRAPHICS = Graphics()
 
 
 @dataclass(frozen=True)
@@ -209,6 +249,8 @@ class PrintPreferences:
     marks_and_bleed: MarksAndBleed = DEFAULT_MARKS_AND_BLEED
     # Output sub-record (PRINT.md §Phase 3).
     output: Output = DEFAULT_OUTPUT
+    # Graphics sub-record (PRINT.md §Phase 4).
+    graphics: Graphics = DEFAULT_GRAPHICS
 
 
 DEFAULT_PRINT_PREFERENCES = PrintPreferences()
