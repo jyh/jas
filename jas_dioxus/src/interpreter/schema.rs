@@ -79,6 +79,7 @@ const STROKE_PROFILE_VALUES: &[&str] = &[
 const GRADIENT_TYPE_VALUES: &[&str] = &["linear", "radial", "freeform"];
 const GRADIENT_METHOD_VALUES: &[&str] = &["classic", "smooth", "points", "lines"];
 const GRADIENT_STROKE_SUB_MODE_VALUES: &[&str] = &["within", "along", "across"];
+const ALIGN_TO_VALUES: &[&str] = &["selection", "artboard", "key_object"];
 
 /// Look up the schema entry for a global `state:` field by name.
 ///
@@ -125,6 +126,14 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "dock_collapsed" => Some(SchemaEntry::new(Bool, false, true)),
         "active_tab" => Some(SchemaEntry::new(Number, false, true)),
         "tab_count" => Some(SchemaEntry::new(Number, false, true)),
+        // Align panel state (workspace/state.yaml §Align panel state).
+        "align_to" => Some(SchemaEntry::new(Enum(ALIGN_TO_VALUES), false, true)),
+        // align_key_object_path is a `{"__path__": [...]}` marker or
+        // null; Object covers the path-marker shape and nullable=true
+        // accepts the null clear-out.
+        "align_key_object_path" => Some(SchemaEntry::new(Object, true, true)),
+        "align_distribute_spacing" => Some(SchemaEntry::new(Number, false, true)),
+        "align_use_preview_bounds" => Some(SchemaEntry::new(Bool, false, true)),
         // Internal — writable: false
         "_drag_pane" => Some(SchemaEntry::new(String, true, false)),
         "_drag_offset_x" => Some(SchemaEntry::new(Number, false, false)),

@@ -2067,14 +2067,22 @@ impl AppState {
         }
 
         // Apply translations: clone the document once, mutate each
-        // moved element's transform in place.
+        // Translate each element by baking dx/dy into its
+        // coordinates (translate_element). Stuffing the offset into
+        // common().transform produces a visual move but leaves the
+        // element's own coords — and therefore bounds() and
+        // hit_test — at the original position, so subsequent clicks
+        // and the selection overlay disagree with the rendered
+        // element. The bake keeps coords, bounds, hit-test, and
+        // overlay in lockstep.
         let tab = self.tabs.get_mut(self.active_tab).unwrap();
         let mut new_doc = tab.model.document().clone();
         for t in &translations {
             if let Some(elem) = new_doc.get_element_mut(&t.path) {
-                let current = elem.common().transform.unwrap_or_default();
-                elem.common_mut().transform =
-                    Some(current.translated(t.dx, t.dy));
+                let translated = crate::geometry::element::translate_element(
+                    elem, t.dx, t.dy,
+                );
+                *elem = translated;
             }
         }
         tab.model.set_document(new_doc);
@@ -3423,10 +3431,17 @@ mod align_panel_state_tests {
             .unwrap_or_default()
     }
 
+    fn rect_x_at(st: &AppState, path: Vec<usize>) -> f64 {
+        match st.tabs[st.active_tab].model.document().get_element(&path) {
+            Some(Element::Rect(r)) => r.x,
+            _ => panic!("expected rect at {path:?}"),
+        }
+    }
+
     #[test]
     fn apply_align_left_translates_non_extremal_rects() {
         // Three rects at x = 10, 30, 60. Selection bbox min-x = 10.
-        // After align_left: rect@10 unchanged, rect@30 translated -20, rect@60 translated -50.
+        // After align_left: every rect's left edge sits at x = 10.
         let rects = vec![
             make_rect(10.0, 0.0, 10.0, 10.0),
             make_rect(30.0, 0.0, 10.0, 10.0),
@@ -3437,16 +3452,14 @@ mod align_panel_state_tests {
             vec![vec![0, 0], vec![0, 1], vec![0, 2]],
         );
         st.apply_align_operation("align_left");
-        // First rect at min — no translation → identity transform.
-        assert_eq!(transform_at(&st, vec![0, 0]), Transform::IDENTITY);
-        // Second rect needs translation of -20 in x.
-        let t1 = transform_at(&st, vec![0, 1]);
-        assert_eq!(t1.e, -20.0);
-        assert_eq!(t1.f, 0.0);
-        // Third rect needs translation of -50 in x.
-        let t2 = transform_at(&st, vec![0, 2]);
-        assert_eq!(t2.e, -50.0);
-        assert_eq!(t2.f, 0.0);
+        assert_eq!(rect_x_at(&st, vec![0, 0]), 10.0);
+        assert_eq!(rect_x_at(&st, vec![0, 1]), 10.0);
+        assert_eq!(rect_x_at(&st, vec![0, 2]), 10.0);
+        // Translation is baked into coords; transform stays identity
+        // so hit-test and the selection overlay agree with the
+        // rendered position.
+        assert_eq!(transform_at(&st, vec![0, 1]), Transform::IDENTITY);
+        assert_eq!(transform_at(&st, vec![0, 2]), Transform::IDENTITY);
     }
 
     #[test]
@@ -3635,12 +3648,15 @@ mod align_panel_state_tests {
         st.apply_align_operation("align_left");
         // With preview bounds, the selection's left edge is −0.5
         // (half the stroke width). Line at x=100 has preview left
-        // 99.5, so it translates by 99.5 − (−0.5) = 100 in the
-        // *preview frame*; but the translation delta is relative
-        // to the current preview anchor. Let me recompute: target
-        // is selection min = −0.5. Line[1]'s preview min = 99.5.
-        // Δ = −0.5 − 99.5 = −100.
-        let t = transform_at(&st, vec![0, 1]);
-        assert_eq!(t.e, -100.0);
+        // 99.5, so the translation delta is −0.5 − 99.5 = −100.
+        // The translation is baked into coords (transform stays
+        // identity), so x1/x2 of line[1] both shift by −100.
+        let line = match st.tabs[st.active_tab].model.document().get_element(&vec![0, 1]) {
+            Some(Element::Line(l)) => l.clone(),
+            _ => panic!("expected line at [0,1]"),
+        };
+        assert_eq!(line.x1, 0.0);
+        assert_eq!(line.x2, 0.0);
+        assert_eq!(transform_at(&st, vec![0, 1]), Transform::IDENTITY);
     }
 }
