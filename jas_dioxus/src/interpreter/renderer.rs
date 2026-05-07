@@ -543,6 +543,43 @@ fn run_effects(
     run_effects_with_ctx(effects, None, st)
 }
 
+/// Resolve a `dispatch` effect's params map. String values are
+/// expression strings: evaluated against ctx, with the bare-identifier
+/// fallback (`{ target: artboard }` resolves to the literal string
+/// `"artboard"` rather than null). Mirrors the behavior in
+/// `build_mouse_event_handler`.
+fn resolve_dispatch_params(
+    raw: &serde_json::Map<String, serde_json::Value>,
+    ctx: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut resolved = serde_json::Map::new();
+    for (k, v) in raw {
+        let val = if let Some(expr_str) = v.as_str() {
+            let result = super::expr::eval(expr_str, ctx);
+            match result {
+                Value::Null => {
+                    // Bare identifier (no dots / operators) → string literal,
+                    // matching the convention used by click-handler params
+                    // (e.g. `{ target: artboard }` means the string
+                    // "artboard", not the variable `artboard`).
+                    let bare = !expr_str.is_empty()
+                        && expr_str.chars().all(|c| c.is_alphanumeric() || c == '_');
+                    if bare {
+                        serde_json::Value::String(expr_str.to_string())
+                    } else {
+                        serde_json::Value::Null
+                    }
+                }
+                _ => super::effects::value_to_json(&result),
+            }
+        } else {
+            v.clone()
+        };
+        resolved.insert(k.clone(), val);
+    }
+    resolved
+}
+
 /// As [`run_effects`] but with a caller-provided eval context (e.g. the
 /// foreach-aware ctx captured at click time). Anything the caller
 /// passes is merged into the AppState ctx so foreach iterator
@@ -586,6 +623,27 @@ fn run_effects_with_ctx(
         // set_panel_state: { key, value }
         if let Some(sps) = effect.get("set_panel_state").and_then(|v| v.as_object()) {
             apply_set_panel_state(sps, st);
+        }
+        // dispatch: <action_name> | { action: <name>, params: { ... } }
+        // Generic indirection so YAML widgets can fire actions through
+        // the dispatch_action pipeline. Used by the Align panel's
+        // align / distribute buttons (see workspace/panels/align.yaml).
+        if let Some(disp) = effect.get("dispatch") {
+            let (action_name, params) = match disp {
+                serde_json::Value::String(s) => (s.clone(), serde_json::Map::new()),
+                serde_json::Value::Object(m) => {
+                    let name = m.get("action").and_then(|v| v.as_str())
+                        .unwrap_or("").to_string();
+                    let raw_params = m.get("params").and_then(|p| p.as_object())
+                        .cloned().unwrap_or_default();
+                    let resolved = resolve_dispatch_params(&raw_params, &eval_ctx);
+                    (name, resolved)
+                }
+                _ => continue,
+            };
+            if !action_name.is_empty() {
+                dialog_effects.extend(dispatch_action(&action_name, &params, st));
+            }
         }
         // select: { target, list, scope, scope_value, mode } — generic
         // tile-selection effect for swatch / brush / row panels.
@@ -2886,6 +2944,29 @@ fn run_yaml_effect(
         if let Some(serde_json::Value::Array(branch_effs)) = cond.get(branch) {
             // Nested list: own scope, doesn't leak back
             deferred.extend(run_yaml_effects(branch_effs, eval_ctx, st));
+        }
+        return deferred;
+    }
+
+    // dispatch: <action_name> | { action: <name>, params: { ... } }
+    // Generic indirection so YAML widgets can fire actions through
+    // the dispatch_action pipeline. The Align panel uses this for
+    // every align / distribute button click.
+    if let Some(disp) = eff.get("dispatch") {
+        let (action_name, params) = match disp {
+            serde_json::Value::String(s) => (s.clone(), serde_json::Map::new()),
+            serde_json::Value::Object(m) => {
+                let name = m.get("action").and_then(|v| v.as_str())
+                    .unwrap_or("").to_string();
+                let raw_params = m.get("params").and_then(|p| p.as_object())
+                    .cloned().unwrap_or_default();
+                let resolved = resolve_dispatch_params(&raw_params, eval_ctx);
+                (name, resolved)
+            }
+            _ => return deferred,
+        };
+        if !action_name.is_empty() {
+            deferred.extend(dispatch_action(&action_name, &params, st));
         }
         return deferred;
     }

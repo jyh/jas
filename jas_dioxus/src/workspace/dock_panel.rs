@@ -539,6 +539,24 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("new_masks_clipping".into(), J::Bool(op.new_masks_clipping));
     m.insert("new_masks_inverted".into(), J::Bool(op.new_masks_inverted));
 
+    // ── Align panel overrides ─────────────────────────────────
+    // Surface AlignPanelState so panel.align_to / panel.key_object_path
+    // / panel.distribute_spacing_value / panel.use_preview_bounds
+    // re-evaluate after set_align_to / set_panel_state effects.
+    // Without this the Align To radio buttons don't toggle their
+    // checked highlight when the user picks a different target.
+    let ap = &st.align_panel;
+    m.insert("align_to".into(), J::String(ap.align_to.as_str().into()));
+    m.insert(
+        "key_object_path".into(),
+        match &ap.key_object_path {
+            Some(p) => serde_json::json!({"__path__": p}),
+            None => J::Null,
+        },
+    );
+    m.insert("distribute_spacing_value".into(), serde_json::json!(ap.distribute_spacing));
+    m.insert("use_preview_bounds".into(), J::Bool(ap.use_preview_bounds));
+
     // ── Artboards panel overrides ─────────────────────────────
     // panel.renaming_artboard reflects which row's inline editor is
     // open. Without this, the row template's bind.visible expressions
