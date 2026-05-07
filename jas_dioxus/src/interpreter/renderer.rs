@@ -80,9 +80,11 @@ fn render_el(
     match etype {
         "container" | "row" | "col" => render_container(el, ctx, rctx),
         "grid" => render_grid(el, ctx, rctx),
-        "text" => render_text(el, ctx),
+        "text" => render_text(el, ctx, rctx),
         "button" => render_button(el, ctx, rctx),
         "icon_button" => render_icon_button(el, ctx, rctx),
+        "icon_button_group" => render_icon_button_group(el, ctx, rctx),
+        "reference_point_widget" => render_reference_point_widget(el, ctx, rctx),
         "icon" => render_icon(el, ctx),
         "slider" => render_slider(el, ctx, rctx),
         "number_input" => render_number_input(el, ctx, rctx),
@@ -474,6 +476,20 @@ pub(crate) struct HyphenationDialogValues {
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+    // Native intercept: artboards_panel_select with shift/meta modifier.
+    // The YAML action's else-branch is a no-op stub; native apps handle
+    // range-extend (shift) and toggle (meta) directly. ARTBOARDS.md
+    // §Panel Selection.
+    if action == "artboards_panel_select" {
+        let modifier = params.get("modifier").and_then(|v| v.as_str()).unwrap_or("none");
+        if modifier == "shift" || modifier == "meta" {
+            if let Some(target_id) = params.get("artboard_id").and_then(|v| v.as_str()) {
+                apply_artboards_panel_select_modifier(st, target_id, modifier);
+            }
+            return Vec::new();
+        }
+    }
+
     // Phase 4: open_layer_options is now pure YAML. It resolves the
     // target layer via element_at(path_from_id(param.layer_id)) and
     // packs its current state as open_dialog params.
@@ -1512,7 +1528,7 @@ fn graphics_view(g: &crate::document::print_preferences::Graphics) -> serde_json
     })
 }
 
-fn build_active_document_view(
+pub(crate) fn build_active_document_view(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
     use crate::geometry::element::{Element, Visibility};
@@ -3068,6 +3084,52 @@ fn resolve_element_arg(
 // block: artboards_panel_selection, panel_selection_anchor,
 // renaming_artboard, reference_point, rearrange_dirty.
 
+/// Apply shift/meta modifier semantics to the artboards panel
+/// selection. Shift extends the contiguous range from the anchor to
+/// the target; meta toggles the target id in or out. Both update
+/// `panel_selection_anchor` per ARTBOARDS.md §Panel Selection.
+pub(crate) fn apply_artboards_panel_select_modifier(
+    st: &mut crate::workspace::app_state::AppState,
+    target_id: &str,
+    modifier: &str,
+) {
+    let Some(tab) = st.tabs.get(st.active_tab) else { return; };
+    let ids: Vec<String> = tab.model.document().artboards.iter()
+        .map(|a| a.id.clone()).collect();
+    let target_idx = ids.iter().position(|id| id == target_id);
+    let Some(target_idx) = target_idx else { return; };
+
+    match modifier {
+        "shift" => {
+            // Anchor falls back to first selected, then to target itself.
+            let anchor = st.artboards_panel_anchor.clone()
+                .or_else(|| st.artboards_panel_selection.first().cloned())
+                .unwrap_or_else(|| target_id.to_string());
+            let anchor_idx = ids.iter().position(|id| id == &anchor)
+                .unwrap_or(target_idx);
+            let (lo, hi) = if anchor_idx <= target_idx {
+                (anchor_idx, target_idx)
+            } else {
+                (target_idx, anchor_idx)
+            };
+            st.artboards_panel_selection = ids[lo..=hi].to_vec();
+            // Anchor stays put across shift-clicks (per spec).
+            st.artboards_panel_anchor = Some(anchor);
+        }
+        "meta" => {
+            if let Some(pos) = st.artboards_panel_selection
+                .iter().position(|id| id == target_id)
+            {
+                st.artboards_panel_selection.remove(pos);
+            } else {
+                st.artboards_panel_selection.push(target_id.to_string());
+            }
+            st.artboards_panel_anchor = Some(target_id.to_string());
+        }
+        _ => {}
+    }
+}
+
 pub(crate) fn apply_artboards_panel_field(
     st: &mut crate::workspace::app_state::AppState,
     key: &str,
@@ -3388,6 +3450,10 @@ fn build_dblclick_handler(
 }
 
 /// Build a mouse event handler for a specific event type.
+///
+/// `click_and_wait` is treated as an alias for `double_click` here.
+/// The Artboards panel uses click-and-hold semantics in spec, but we
+/// route it through double-click for now (rename UX matches Finder).
 fn build_mouse_event_handler(
     el: &serde_json::Value,
     ctx: &serde_json::Value,
@@ -3396,7 +3462,11 @@ fn build_mouse_event_handler(
 ) -> Option<EventHandler<Event<MouseData>>> {
     let behaviors = el.get("behavior").and_then(|b| b.as_array())?;
     let click_behaviors: Vec<&serde_json::Value> = behaviors.iter()
-        .filter(|b| b.get("event").and_then(|e| e.as_str()).unwrap_or("click") == event_name)
+        .filter(|b| {
+            let evt = b.get("event").and_then(|e| e.as_str()).unwrap_or("click");
+            evt == event_name
+                || (event_name == "double_click" && evt == "click_and_wait")
+        })
         .collect();
     if click_behaviors.is_empty() {
         return None;
@@ -3808,6 +3878,27 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let etype = el.get("type").and_then(|t| t.as_str()).unwrap_or("container");
     let dir = if layout == "row" || etype == "row" { "row" } else { "column" };
     let base_style = build_style(el, ctx);
+    // bind.background — Artboards panel rows use this to highlight
+    // the panel-selected rows from `active_document.artboards_panel_selection_ids`.
+    // Expressions may embed `{{theme.colors.X}}` template segments
+    // (string literals interpolated before the if/then/else evaluates),
+    // so run eval_text first to substitute, then eval the result.
+    let bind_bg = el
+        .get("bind")
+        .and_then(|b| b.get("background"))
+        .and_then(|v| v.as_str())
+        .map(|expr_str| {
+            let substituted = expr::eval_text(expr_str, ctx);
+            let val = expr::eval(&substituted, ctx);
+            match val {
+                Value::Str(s) => s,
+                Value::Color(c) => c,
+                _ => String::new(),
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("background:{s};"))
+        .unwrap_or_default();
     // Bootstrap grid: col: N → class="col-N", type: row → class="row"
     let col_class = el.get("col").and_then(|c| c.as_u64())
         .map(|c| format!("col-{c}"))
@@ -3837,9 +3928,9 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         format!("display:flex;flex-direction:{dir};")
     };
     let style = if visible {
-        format!("{flex_dir}{pos_style}{color_default}{base_style}")
+        format!("{flex_dir}{pos_style}{color_default}{base_style};{bind_bg}")
     } else {
-        format!("display:none;{pos_style}{color_default}{base_style}")
+        format!("display:none;{pos_style}{color_default}{base_style};{bind_bg}")
     };
     let css_class = format!("{row_class} {col_class}").trim().to_string();
     let children = render_children(el, ctx, rctx);
@@ -3877,7 +3968,7 @@ fn render_grid(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx
     }
 }
 
-fn render_text(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+fn render_text(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let content = el.get("content").and_then(|c| c.as_str()).unwrap_or("");
     let text = if content.contains("{{") {
@@ -3886,12 +3977,32 @@ fn render_text(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
         content.to_string()
     };
     let style = build_style(el, ctx);
+    let visibility_style = if is_visible(el, ctx) { "" } else { "display:none;" };
 
-    rsx! {
-        span {
-            id: "{id}",
-            style: "{style}",
-            "{text}"
+    // Only attach onclick when the element actually has click behavior;
+    // adding a no-op onclick to every span widens the wbindgen surface
+    // (each event listener registered with the DOM has overhead) without
+    // gain. Clickable text rows pay for the handler; static labels do not.
+    let on_click = build_click_handler(el, ctx, rctx);
+    let on_dblclick = build_dblclick_handler(el, ctx, rctx);
+    let interactive = on_click.is_some() || on_dblclick.is_some();
+    if interactive {
+        rsx! {
+            span {
+                id: "{id}",
+                style: "cursor:pointer;{visibility_style}{style}",
+                onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+                ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
+                "{text}"
+            }
+        }
+    } else {
+        rsx! {
+            span {
+                id: "{id}",
+                style: "{visibility_style}{style}",
+                "{text}"
+            }
         }
     }
 }
@@ -4114,7 +4225,15 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     //      the slot stays stuck on the default icon after picking a
     //      different alternate from the long-press menu.
     //   3. The static ``icon`` field on the element.
-    let static_icon = el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string();
+    let static_icon_raw = el.get("icon").and_then(|i| i.as_str()).unwrap_or("").to_string();
+    // Evaluate {{...}} templates in the icon field so YAML can flip
+    // icons via expressions (e.g. chain_linked / chain_broken on the
+    // Artboard Options dialog's lock toggle).
+    let static_icon = if static_icon_raw.contains("{{") {
+        expr::eval_text(&static_icon_raw, ctx)
+    } else {
+        static_icon_raw
+    };
     let icon_name: String = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("icon")).and_then(|v| v.as_str()) {
         match expr::eval(expr_str, ctx) {
             Value::Str(s) => s,
@@ -4259,6 +4378,211 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                     dangerous_inner_html: "{triangle_html}",
                 }
             }
+        }
+    }
+}
+
+/// Horizontal group of icon-only toggle buttons. Exactly one option
+/// is highlighted at a time, determined by `bind.value`. Clicking an
+/// option fires the `change` behavior with the option's value as
+/// `event.value`. Used by the Artboard Options dialog's Orientation
+/// row (portrait / landscape).
+fn render_icon_button_group(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+    let options = el.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let current_value = if bind_expr.is_empty() {
+        String::new()
+    } else {
+        match expr::eval(bind_expr, ctx) {
+            Value::Str(s) => s,
+            _ => String::new(),
+        }
+    };
+    let dlg_field = dialog_field(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+    let ws_for_icons = super::workspace::Workspace::load();
+    let svg_px: i64 = 14;
+
+    // Pre-compute behaviors for `change` events so each button can
+    // dispatch them with its own `event.value` injected into ctx.
+    let change_behaviors: Vec<serde_json::Value> = el.get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some("change"))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let buttons: Vec<Element> = options.iter().enumerate().map(|(i, opt)| {
+        let icon_name = opt.get("icon").and_then(|v| v.as_str()).unwrap_or("");
+        let value = opt.get("value")
+            .and_then(|v| v.as_str().map(|s| s.to_string())
+                .or_else(|| Some(v.to_string())))
+            .unwrap_or_default();
+        let icon_svg = ws_for_icons.as_ref()
+            .and_then(|ws| ws.icons().get(icon_name))
+            .map(|d| {
+                let viewbox = d.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+                let inner = d.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+                format!(r#"<svg viewBox="{viewbox}" width="{svg_px}" height="{svg_px}" xmlns="http://www.w3.org/2000/svg">{inner}</svg>"#)
+            })
+            .unwrap_or_default();
+        let active = value == current_value;
+        let bg = if active { "background:#505050;" } else { "" };
+        let key = format!("{id}-{i}");
+        let dlg_field = dlg_field.clone();
+        let value_for_dlg = value.clone();
+        let value_for_log = value.clone();
+        let app_for_click = app.clone();
+        let behaviors = change_behaviors.clone();
+        let ctx_snapshot = ctx.clone();
+        rsx! {
+            div {
+                key: "{key}",
+                style: "display:flex;align-items:center;justify-content:center;width:24px;height:20px;border:1px solid var(--jas-border,#555);border-radius:2px;cursor:pointer;{bg}",
+                onclick: move |_| {
+                    // Dialog binding: write the chosen value into the dialog state.
+                    if !dlg_field.is_empty() {
+                        if let Some(mut ds) = dialog_signal() {
+                            ds.set_value(&dlg_field, serde_json::json!(value_for_dlg));
+                            dialog_signal.set(Some(ds));
+                        }
+                    }
+                    // Behavior dispatch: inject event.value into ctx, then
+                    // fire any matching change actions through dispatch_action.
+                    let mut ctx_snap = ctx_snapshot.clone();
+                    if let serde_json::Value::Object(obj) = &mut ctx_snap {
+                        obj.insert("event".to_string(), serde_json::json!({
+                            "value": value_for_log,
+                        }));
+                    }
+                    let app = app_for_click.clone();
+                    let behaviors = behaviors.clone();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        for b in &behaviors {
+                            let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
+                            let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+                            let mut resolved_params = serde_json::Map::new();
+                            for (k, v) in &raw_params {
+                                let val = if let Some(s) = v.as_str() {
+                                    super::effects::value_to_json(&super::expr::eval(s, &ctx_snap))
+                                } else {
+                                    v.clone()
+                                };
+                                resolved_params.insert(k.clone(), val);
+                            }
+                            if let Some(name) = action {
+                                dispatch_action(&name, &resolved_params, &mut st);
+                            }
+                        }
+                        revision += 1;
+                    });
+                },
+                div { style: "display:inline-flex;", dangerous_inner_html: "{icon_svg}" }
+            }
+        }
+    }).collect();
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "display:flex;flex-direction:row;gap:4px;{style}",
+            for b in buttons { {b} }
+        }
+    }
+}
+
+/// 3×3 grid of anchor buttons. Exactly one is highlighted; clicking
+/// another writes its value back via the `change` behavior. Used by
+/// the Artboard Options dialog's reference-point picker. The values
+/// are positional names: top_left, top_center, ..., bottom_right.
+fn render_reference_point_widget(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let current_value = if bind_expr.is_empty() {
+        "center".to_string()
+    } else {
+        match expr::eval(bind_expr, ctx) {
+            Value::Str(s) => s,
+            _ => "center".to_string(),
+        }
+    };
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+    let change_behaviors: Vec<serde_json::Value> = el.get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some("change"))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let anchors = [
+        ("top_left", 0, 0), ("top_center", 1, 0), ("top_right", 2, 0),
+        ("middle_left", 0, 1), ("center", 1, 1), ("middle_right", 2, 1),
+        ("bottom_left", 0, 2), ("bottom_center", 1, 2), ("bottom_right", 2, 2),
+    ];
+    let cells: Vec<Element> = anchors.iter().map(|(name, _cx, _cy)| {
+        let active = *name == current_value;
+        let key = format!("{id}-{name}");
+        let value_str = name.to_string();
+        let app_for_click = app.clone();
+        let behaviors = change_behaviors.clone();
+        let ctx_snapshot = ctx.clone();
+        let bg = if active { "background:var(--jas-accent,#4a90d9);" } else { "background:transparent;" };
+        rsx! {
+            div {
+                key: "{key}",
+                title: "{name}",
+                style: "width:8px;height:8px;border:1px solid var(--jas-border,#555);border-radius:1px;cursor:pointer;{bg}",
+                onclick: move |_| {
+                    let mut ctx_snap = ctx_snapshot.clone();
+                    if let serde_json::Value::Object(obj) = &mut ctx_snap {
+                        obj.insert("event".to_string(), serde_json::json!({
+                            "value": value_str,
+                        }));
+                    }
+                    let app = app_for_click.clone();
+                    let behaviors = behaviors.clone();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        for b in &behaviors {
+                            let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
+                            let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+                            let mut resolved_params = serde_json::Map::new();
+                            for (k, v) in &raw_params {
+                                let val = if let Some(s) = v.as_str() {
+                                    super::effects::value_to_json(&super::expr::eval(s, &ctx_snap))
+                                } else {
+                                    v.clone()
+                                };
+                                resolved_params.insert(k.clone(), val);
+                            }
+                            if let Some(name) = action {
+                                dispatch_action(&name, &resolved_params, &mut st);
+                            }
+                        }
+                        revision += 1;
+                    });
+                },
+            }
+        }
+    }).collect();
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "display:grid;grid-template-columns:repeat(3,8px);grid-template-rows:repeat(3,8px);gap:2px;",
+            for c in cells { {c} }
         }
     }
 }
@@ -4698,6 +5022,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     let id = get_id(el);
     let placeholder = el.get("placeholder").and_then(|p| p.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
+    let visibility_style = if is_visible(el, ctx) { "" } else { "display:none;" };
 
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
     let value = if !bind_expr.is_empty() {
@@ -4727,13 +5052,92 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
         value
     };
 
+    // Artboards rename input: special-cased Enter/Escape/blur
+    // handlers since the generic onchange path can't discover the
+    // ab.id needed for confirm_artboard_rename. The YAML behavior
+    // block declares the actions but the renderer fills params from
+    // ctx (artboard_id) and from the input value (new_name).
+    let is_artboard_rename = panel_kind == Some(PanelKind::Artboards) && id == "ap_name_edit";
+    let rename_artboard_id: Option<String> = if is_artboard_rename {
+        ctx.get("ab")
+            .and_then(|a| a.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    } else {
+        None
+    };
+    let app_for_keydown = app.clone();
+    let app_for_blur = app.clone();
+    let mut revision_keydown = revision;
+    let mut revision_blur = revision;
+    let rename_id_keydown = rename_artboard_id.clone();
+    let rename_id_blur = rename_artboard_id.clone();
+
     rsx! {
         input {
             id: "{id}",
             r#type: "text",
             placeholder: "{placeholder}",
             initial_value: "{value}",
-            style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+            autofocus: is_artboard_rename,
+            style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{visibility_style}{style}",
+            onkeydown: move |evt: Event<KeyboardData>| {
+                if !is_artboard_rename { return; }
+                let key = evt.data().key();
+                let Some(ref ab_id) = rename_id_keydown else { return; };
+                if key == dioxus::prelude::Key::Enter {
+                    let app = app_for_keydown.clone();
+                    let id = ab_id.clone();
+                    #[cfg(target_arch = "wasm32")]
+                    let new_val = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.get_element_by_id("ap_name_edit"))
+                        .and_then(|el| js_sys::Reflect::get(&el, &"value".into()).ok())
+                        .and_then(|v| v.as_string())
+                        .unwrap_or_default();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let new_val = String::new();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        let mut params = serde_json::Map::new();
+                        params.insert("artboard_id".into(), serde_json::Value::String(id));
+                        params.insert("new_name".into(), serde_json::Value::String(new_val));
+                        dispatch_action("confirm_artboard_rename", &params, &mut st);
+                        revision_keydown += 1;
+                    });
+                } else if key == dioxus::prelude::Key::Escape {
+                    let app = app_for_keydown.clone();
+                    spawn(async move {
+                        let mut st = app.borrow_mut();
+                        let params = serde_json::Map::new();
+                        dispatch_action("cancel_artboard_rename", &params, &mut st);
+                        revision_keydown += 1;
+                    });
+                }
+            },
+            onblur: move |_: Event<FocusData>| {
+                if !is_artboard_rename { return; }
+                let Some(ref ab_id) = rename_id_blur else { return; };
+                let app = app_for_blur.clone();
+                let id = ab_id.clone();
+                #[cfg(target_arch = "wasm32")]
+                let new_val = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| d.get_element_by_id("ap_name_edit"))
+                    .and_then(|el| js_sys::Reflect::get(&el, &"value".into()).ok())
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_default();
+                #[cfg(not(target_arch = "wasm32"))]
+                let new_val = String::new();
+                spawn(async move {
+                    let mut st = app.borrow_mut();
+                    let mut params = serde_json::Map::new();
+                    params.insert("artboard_id".into(), serde_json::Value::String(id));
+                    params.insert("new_name".into(), serde_json::Value::String(new_val));
+                    dispatch_action("confirm_artboard_rename", &params, &mut st);
+                    revision_blur += 1;
+                });
+            },
             onchange: move |evt: Event<FormData>| {
                 let new_val = evt.value();
                 if is_search {

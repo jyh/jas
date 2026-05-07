@@ -376,15 +376,12 @@ artboard_options:
         bind:
           checked: "dialog.fade_region_outside_artboard"
 
-      - type: container
-        style: { padding: "0 0 0 20" }
-        children:
-          - id: ao_update_while_dragging
-            type: toggle
-            label: "Update while dragging"
-            bind:
-              checked: "dialog.update_while_dragging"
-              disabled: "not dialog.fade_region_outside_artboard"
+      - id: ao_update_while_dragging
+        type: toggle
+        label: "Update while dragging"
+        bind:
+          checked: "dialog.update_while_dragging"
+          disabled: "not dialog.fade_region_outside_artboard"
 
       # Info section — live artboard count
       - type: separator
