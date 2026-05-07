@@ -18,6 +18,7 @@ theme:
       tab_inactive:     "#353535"
       button_checked:   "#505050"
       accent:           "#4a90d9"
+      selection:        "#3a6ea5"
       snap_preview:     "rgba(50,120,220,200)"
       handle_hover:     "rgba(74,144,217,0.5)"
       pane_shadow:      "rgba(0,0,0,0.3)"
