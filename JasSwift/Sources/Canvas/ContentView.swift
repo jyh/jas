@@ -751,13 +751,28 @@ struct ToolbarPanel: View {
     }
 
     private func fillModeButton(label: String, tooltip: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            SwiftUI.Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(SwiftUI.Color(nsColor: theme.text))
-                .frame(width: 20, height: 16)
-                .background(SwiftUI.Color(nsColor: theme.buttonChecked))
-                .cornerRadius(2)
+        // Map the mode label to its icon name (icons.yaml).
+        let iconName: String? = {
+            switch label {
+            case "C": return "fill_solid"
+            case "G": return "fill_gradient"
+            case "/": return "color_none"
+            default: return nil
+            }
+        }()
+        return Button(action: action) {
+            ZStack {
+                SwiftUI.Color(nsColor: theme.buttonChecked)
+                if let iconName, WorkspaceIconCache.shared.lookup(iconName) != nil {
+                    WorkspaceIcon(name: iconName, size: 14, tint: theme.text)
+                } else {
+                    SwiftUI.Text(label)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(SwiftUI.Color(nsColor: theme.text))
+                }
+            }
+            .frame(width: 20, height: 16)
+            .cornerRadius(2)
         }
         .buttonStyle(.plain)
         .help(tooltip)
@@ -775,20 +790,31 @@ struct FillStrokeWidget: View {
 
     var body: some View {
         ZStack {
-            // Swap arrow (top-right corner)
+            // Swap arrow — double-headed L bending around the
+            // upper-right of the icon. The horizontal leg points
+            // left (toward the fill square) with an arrow head;
+            // the vertical leg points down (toward the stroke
+            // square) with another arrow head. Mirrors Illustrator's
+            // swap-fill-stroke affordance.
             Button(action: swapColors) {
-                SwiftUI.Canvas { context, size in
-                    // Draw a small swap arrow icon
+                SwiftUI.Canvas { context, _ in
                     var path = SwiftUI.Path()
-                    path.move(to: CGPoint(x: 2, y: 8))
-                    path.addLine(to: CGPoint(x: 10, y: 8))
-                    path.addLine(to: CGPoint(x: 10, y: 4))
-                    path.addLine(to: CGPoint(x: 14, y: 9))
-                    path.addLine(to: CGPoint(x: 10, y: 14))
-                    path.addLine(to: CGPoint(x: 10, y: 10))
-                    path.addLine(to: CGPoint(x: 2, y: 10))
-                    path.closeSubpath()
-                    context.fill(path, with: .color(.white))
+                    // Left arrow tip (4, 4) with head wings.
+                    path.move(to: CGPoint(x: 7, y: 1))
+                    path.addLine(to: CGPoint(x: 4, y: 4))    // tip
+                    path.addLine(to: CGPoint(x: 7, y: 7))
+                    path.move(to: CGPoint(x: 4, y: 4))       // back to tip
+                    path.addLine(to: CGPoint(x: 12, y: 4))   // along top
+                    path.addLine(to: CGPoint(x: 12, y: 12))  // down the right
+                    // Bottom arrow tip (12, 12) with head wings.
+                    path.move(to: CGPoint(x: 9, y: 9))
+                    path.addLine(to: CGPoint(x: 12, y: 12))
+                    path.addLine(to: CGPoint(x: 15, y: 9))
+                    context.stroke(
+                        path,
+                        with: .color(.white),
+                        style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
+                    )
                 }
                 .frame(width: 16, height: 16)
             }
