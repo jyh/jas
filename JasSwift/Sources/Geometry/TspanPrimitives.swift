@@ -452,7 +452,7 @@ private func _parseXmlAttrs(_ s: String) -> [(String, String)] {
     while i < chars.count {
         while i < chars.count && chars[i].isWhitespace { i += 1 }
         if i >= chars.count { break }
-        var nameStart = i
+        let nameStart = i
         while i < chars.count && chars[i] != "=" && !chars[i].isWhitespace { i += 1 }
         let name = String(chars[nameStart..<i])
         if name.isEmpty { break }
