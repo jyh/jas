@@ -1724,6 +1724,13 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
             None => continue,
         };
 
+        // Apply the element's transform (translation from align ops,
+        // future rotate/scale, etc.) so the overlay tracks the
+        // rendered element. Save/restore so the overlay for the next
+        // selected element starts from the world transform.
+        ctx.save();
+        apply_transform(ctx, elem.transform());
+
         // Text and TextPath get a bounding-box highlight instead of
         // a path trace. For area text the bbox aligns with the area
         // (that's what `bounds()` returns); for point text it wraps
@@ -1768,6 +1775,7 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
                 ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
             }
         }
+        ctx.restore();
     }
 }
 
