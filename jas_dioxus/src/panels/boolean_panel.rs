@@ -59,10 +59,18 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
         "close_panel" => state.workspace_layout.close_panel(addr),
-        // All compound-shape, repeat, options, and reset commands
-        // are routed through the yaml-driven renderer dispatch path;
-        // this native menu-dispatch no-ops so the hamburger menu
-        // goes through the same shared effects pipeline.
+        // Forward menu commands to the YAML actions catalog so the
+        // hamburger menu fires the same effect chain as the panel
+        // YAML dispatch wiring.
+        "repeat_boolean_operation"
+        | "open_boolean_options"
+        | "make_compound_shape"
+        | "release_compound_shape"
+        | "expand_compound_shape"
+        | "reset_boolean_panel" => {
+            let params = serde_json::Map::new();
+            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+        }
         _ => {}
     }
 }
