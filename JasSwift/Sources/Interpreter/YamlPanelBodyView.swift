@@ -53,6 +53,20 @@ struct YamlElementView: View {
         } else if element["foreach"] != nil && element["do"] != nil {
             // Repeat directive: expand template for each item in source list.
             renderRepeat()
+        } else if let tmpl = element["_template"] as? String,
+                  tmpl == "fill_stroke_widget" {
+            // Substitute the native FillStrokeWidget for the YAML
+            // expansion so the Color panel and the toolbar render
+            // the same geometry (overlapping squares + L-bend swap
+            // arrow). When there's no open document, fall back to a
+            // throwaway model with default white-fill / black-stroke
+            // so the panel visualization stays consistent. Edits
+            // disappear with the throwaway, which is fine — there's
+            // no document to commit them to anyway.
+            FillStrokeWidget(
+                model: model ?? Model(),
+                onDoubleClick: { _ in }
+            )
         } else {
             let etype = element["type"] as? String ?? "placeholder"
             switch etype {
@@ -82,6 +96,8 @@ struct YamlElementView: View {
                 renderComboBox()
             case "color_swatch":
                 renderColorSwatch()
+            case "color_bar":
+                renderColorBar()
             case "gradient_tile":
                 renderGradientTile()
             case "gradient_slider":
@@ -208,6 +224,18 @@ struct YamlElementView: View {
         switch target.scope {
         case .panel:
             commitPanelWrite(key: target.key, value: value)
+            // Color panel hex commit: TextField fires the binding
+            // on Enter / blur (not live). Push the typed hex onto
+            // the recent-colors strip — notifyPanelStateChanged
+            // already updated the active color live, but recent
+            // is committed only on this terminal write.
+            if panelId == "color_panel_content", target.key == "hex",
+               let model = model,
+               let hexStr = value as? String,
+               let color = ColorPanel.colorFromHex(hexStr)
+            {
+                ColorPanel.setActiveColor(color, model: model)
+            }
         case .dialog:
             onDialogWrite?(target.key, value)
         }
@@ -321,17 +349,19 @@ struct YamlElementView: View {
 
         if isRow {
             // Bootstrap-style: when row children declare `col: N`,
-            // honor those weights as proportional widths summed to 12
-            // across the row. Lays out via GeometryReader so each col
-            // gets its slice of the parent. Without this, label and
-            // field cols pack tight against each other and rows
-            // misalign across the panel.
+            // honor those weights as 12-track proportional widths
+            // (LAYOUT.md §Bootstrap 12-column semantics). Children
+            // without `col:` take their intrinsic width and don't
+            // consume budget. The custom Layout (Bootstrap12Layout)
+            // sizes the row to its tallest child instead of clamping
+            // to a fixed line height — without that, panels with a
+            // 60-pt fill/stroke widget or a 64-pt color gradient
+            // collapsed and overflowed.
             let children = (element["children"] as? [[String: Any]]) ?? []
             let weights = children.map { ($0["col"] as? Int) ?? 0 }
-            let totalWeight = weights.reduce(0, +)
-            if totalWeight > 0 {
-                bootstrapRow(children: children, weights: weights,
-                             totalWeight: totalWeight, gap: gap)
+            let hasWeights = weights.contains { $0 > 0 }
+            if hasWeights {
+                bootstrapRow(children: children, weights: weights, gap: gap)
             } else {
                 HStack(alignment: .center, spacing: gap) {
                     renderChildElements()
@@ -350,36 +380,24 @@ struct YamlElementView: View {
         }
     }
 
-    /// Lay out a row whose children declare `col: N` weights, dividing
-    /// the available width across the columns (out of 12 by Bootstrap
-    /// convention). Each column gets `(weight / totalWeight) *
-    /// (rowWidth - gaps)` and is left-aligned within its slot.
+    /// Lay out a row whose children declare `col: N` weights via the
+    /// Bootstrap-12 custom Layout. Each `col: N` child claims N/12 of
+    /// the row's content width minus gaps; children without `col:`
+    /// take their intrinsic width and don't consume the 12-track
+    /// budget. See `transcripts/LAYOUT.md` §Bootstrap 12-column
+    /// semantics and §Edge cases for the exact rules.
     @ViewBuilder
     private func bootstrapRow(children: [[String: Any]], weights: [Int],
-                              totalWeight: Int, gap: CGFloat) -> some View {
-        GeometryReader { geo in
-            let totalGap = gap * CGFloat(max(0, children.count - 1))
-            let usable = max(0, geo.size.width - totalGap)
-            HStack(alignment: .center, spacing: gap) {
-                ForEach(0..<children.count, id: \.self) { i in
-                    let w = weights[i]
-                    let width = w > 0
-                        ? usable * CGFloat(w) / CGFloat(totalWeight)
-                        : nil
-                    YamlElementView(
-                        element: children[i], context: context, model: model,
-                        panelId: panelId, onWidgetAction: onWidgetAction,
-                        theme: theme, onDialogWrite: onDialogWrite
-                    )
-                    .frame(width: width, alignment: .leading)
-                }
+                              gap: CGFloat) -> some View {
+        Bootstrap12Layout(weights: weights, gap: gap) {
+            ForEach(0..<children.count, id: \.self) { i in
+                YamlElementView(
+                    element: children[i], context: context, model: model,
+                    panelId: panelId, onWidgetAction: onWidgetAction,
+                    theme: theme, onDialogWrite: onDialogWrite
+                )
             }
         }
-        // GeometryReader expands to fill available height by default
-        // — but row contents are typically a single line tall, so
-        // pin the row's height to its largest natural child rather
-        // than letting it absorb the rest of the dialog.
-        .frame(height: 28)
     }
 
     // MARK: - Grid
@@ -408,9 +426,52 @@ struct YamlElementView: View {
         let text = content.contains("{{")
             ? evaluateText(content, context: context)
             : content
-        let fontSize = (element["style"] as? [String: Any])?["font_size"] as? CGFloat ?? 12
-        SwiftUI.Text(text)
-            .font(.system(size: fontSize))
+        let style = element["style"] as? [String: Any]
+        let fontSize = style?["font_size"] as? CGFloat ?? 12
+        // Resolve style.color: hex literal, or `{{theme.colors.X}}`
+        // template — without this, panel labels render with SwiftUI's
+        // default Text color which is too dark for the dark gray
+        // theme. Falls back to the panel's theme.text NSColor when
+        // unset; if even that is missing, SwiftUI default applies.
+        let resolvedColor: SwiftUI.Color? = {
+            guard let raw = style?["color"] as? String else {
+                if let t = theme { return SwiftUI.Color(nsColor: t.text) }
+                return nil
+            }
+            let resolved = raw.contains("{{")
+                ? evaluateText(raw, context: context)
+                : raw
+            if let nsc = parseHexColor(resolved) {
+                return SwiftUI.Color(nsColor: nsc)
+            }
+            if let t = theme { return SwiftUI.Color(nsColor: t.text) }
+            return nil
+        }()
+        if let c = resolvedColor {
+            SwiftUI.Text(text)
+                .font(.system(size: fontSize))
+                .foregroundColor(c)
+        } else {
+            SwiftUI.Text(text)
+                .font(.system(size: fontSize))
+        }
+    }
+
+    /// Parse a `#rrggbb` (or `#rgb`) hex string into NSColor; nil on
+    /// invalid input. Used by renderText's style.color resolution.
+    private func parseHexColor(_ s: String) -> NSColor? {
+        var hex = s.trimmingCharacters(in: .whitespaces)
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        if hex.count == 3 {
+            hex = hex.map { "\($0)\($0)" }.joined()
+        }
+        guard hex.count == 6, let v = UInt32(hex, radix: 16) else {
+            return nil
+        }
+        let r = CGFloat((v >> 16) & 0xff) / 255.0
+        let g = CGFloat((v >> 8) & 0xff) / 255.0
+        let b = CGFloat(v & 0xff) / 255.0
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
     }
 
     // MARK: - Button
@@ -577,10 +638,87 @@ struct YamlElementView: View {
         let actions = ws?.data["actions"] as? [String: Any]
         let platformEffects = alignPlatformEffects(model: model)
         for entry in behavior where (entry["event"] as? String) == "click" {
+            // A click behavior may carry `effects:` (a list run
+            // through runEffects), or `action:` (an action name in
+            // the YAML actions catalog). The Color panel's None /
+            // Black / White swatches use the latter — without
+            // dispatching it here those clicks were silent.
             let effects = (entry["effects"] as? [Any]) ?? []
-            runEffects(effects, ctx: context, store: model.stateStore,
-                       actions: actions, platformEffects: platformEffects)
+            if !effects.isEmpty {
+                runEffects(effects, ctx: context, store: model.stateStore,
+                           actions: actions, platformEffects: platformEffects)
+            }
+            if let actionName = entry["action"] as? String {
+                let rawParams = (entry["params"] as? [String: Any]) ?? [:]
+                var resolved: [String: Any] = [:]
+                for (k, v) in rawParams {
+                    if let exprStr = v as? String {
+                        let result = evaluate(exprStr, context: context)
+                        if let any = result.toAny() {
+                            resolved[k] = any
+                        } else {
+                            // Bare-identifier convention used by params
+                            // like `{ color: "#000000" }`: when the
+                            // expression evaluates to null, treat a
+                            // simple alphanumeric string as a literal.
+                            resolved[k] = exprStr
+                        }
+                    } else {
+                        resolved[k] = v
+                    }
+                }
+                dispatchYamlAction(
+                    actionName, params: resolved,
+                    actions: actions, ctx: context,
+                    store: model.stateStore, model: model
+                )
+            }
         }
+    }
+
+    /// Dispatch a YAML action by looking it up in the actions catalog
+    /// and running its effects, plus any native side-effects (e.g.
+    /// set_active_color updates ColorPanel state). Mirrors
+    /// run_yaml_effects in the Rust port.
+    private func dispatchYamlAction(
+        _ name: String, params: [String: Any],
+        actions: [String: Any]?, ctx: [String: Any],
+        store: StateStore, model: Model
+    ) {
+        // Native fast-path for color-panel actions — these need
+        // model-level state changes (ColorPanel.setActiveColor pushes
+        // to the recent strip and updates default fill / stroke)
+        // that the generic effects pipeline doesn't know about.
+        switch name {
+        case "set_active_color":
+            if let hexAny = params["color"],
+               let hex = hexAny as? String,
+               let color = ColorPanel.colorFromHex(hex)
+            {
+                ColorPanel.setActiveColor(color, model: model)
+                return
+            }
+        case "set_active_color_none":
+            if model.fillOnTop {
+                model.defaultFill = nil
+            } else {
+                model.defaultStroke = nil
+            }
+            return
+        default:
+            break
+        }
+        // Fall through to the generic YAML actions catalog.
+        guard let actions = actions,
+              let actionDef = actions[name] as? [String: Any],
+              let effects = actionDef["effects"] as? [Any] else {
+            return
+        }
+        var ctxWithParams = ctx
+        ctxWithParams["param"] = params
+        let platformEffects = alignPlatformEffects(model: model)
+        runEffects(effects, ctx: ctxWithParams, store: store,
+                   actions: actions, platformEffects: platformEffects)
     }
 
     // MARK: - Slider
@@ -589,11 +727,12 @@ struct YamlElementView: View {
     private func renderSlider() -> some View {
         let minVal = element["min"] as? Double ?? 0
         let maxVal = element["max"] as? Double ?? 100
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
 
         // Get initial value from bind expression
         let initialValue: Double = {
-            if let bind = element["bind"] as? [String: Any],
-               let valueExpr = bind["value"] as? String {
+            if let valueExpr {
                 let result = evaluate(valueExpr, context: context)
                 if case .number(let n) = result { return n }
             }
@@ -601,16 +740,115 @@ struct YamlElementView: View {
         }()
 
         let isDisabled: Bool = {
-            if let bind = element["bind"] as? [String: Any],
-               let disExpr = bind["disabled"] as? String {
+            if let disExpr = bind?["disabled"] as? String {
                 return evaluate(disExpr, context: context).toBool()
             }
             return false
         }()
 
+        // Resolve the panel-state field this slider writes to and
+        // capture the model so the live drag / commit callbacks can
+        // mutate state without going through the dialog write path.
+        let writeTarget = writeBackTarget(valueExpr)
+        let panelIdLocal = panelId
+        let modelLocal = model
+
         HStack(spacing: 4) {
-            SliderView(value: initialValue, range: minVal...maxVal)
-                .disabled(isDisabled)
+            SliderView(
+                value: initialValue,
+                range: minVal...maxVal,
+                onChange: { newValue in
+                    handleSliderWrite(
+                        target: writeTarget, value: newValue,
+                        panelId: panelIdLocal, model: modelLocal,
+                        commit: false
+                    )
+                },
+                onCommit: { newValue in
+                    handleSliderWrite(
+                        target: writeTarget, value: newValue,
+                        panelId: panelIdLocal, model: modelLocal,
+                        commit: true
+                    )
+                }
+            )
+            .disabled(isDisabled)
+        }
+    }
+
+    /// Apply a slider write to the panel state and, when this is a
+    /// Color panel slider (panel.h / .s / .b / .r / .g / .bl /
+    /// .c / .m / .y / .k / .hex), recompute the active color and
+    /// either set it live (drag) or commit it (release).
+    private func handleSliderWrite(
+        target: WriteTarget?, value: Double,
+        panelId: String?, model: Model?, commit: Bool
+    ) {
+        guard let target = target, let model = model else { return }
+        switch target.scope {
+        case .panel:
+            // commitPanelWrite stores the value, bumps
+            // panelStateVersion (so SwiftUI re-renders bound
+            // widgets like the matching number_input next to the
+            // slider), and fires the notify hook. Skipping it left
+            // the slider's value invisible to its sibling input.
+            commitPanelWrite(key: target.key, value: value)
+            if panelId == "color_panel_content" {
+                applyColorPanelStateToActiveColor(model: model, commit: commit)
+            }
+        case .dialog:
+            onDialogWrite?(target.key, value)
+        }
+    }
+
+    /// Read the Color panel's current mode + slider state, derive
+    /// the corresponding RGB color, and push it through ColorPanel
+    /// (live during drag, commit on release).
+    private func applyColorPanelStateToActiveColor(
+        model: Model, commit: Bool
+    ) {
+        let panelState = model.stateStore.getPanelState("color_panel_content")
+        let mode = (panelState["mode"] as? String) ?? "hsb"
+        func num(_ key: String) -> Double {
+            (panelState[key] as? Double)
+                ?? (panelState[key] as? Int).map { Double($0) }
+                ?? 0
+        }
+        // Color enum stores components in [0, 1] for s/b/r/g/b/c/m/y/k
+        // and hue in [0, 360). The YAML sliders run 0..100 (or 0..255
+        // for r/g/b), so divide before constructing.
+        let color: Color = {
+            switch mode {
+            case "grayscale":
+                let k = num("k") / 100.0
+                return Color.rgb(r: 1.0 - k, g: 1.0 - k, b: 1.0 - k, a: 1.0)
+            case "rgb", "web_safe_rgb":
+                return Color.rgb(
+                    r: num("r") / 255.0,
+                    g: num("g") / 255.0,
+                    b: num("bl") / 255.0,
+                    a: 1.0
+                )
+            case "cmyk":
+                let c = num("c") / 100.0, mk = num("m") / 100.0
+                let y = num("y") / 100.0, k = num("k") / 100.0
+                let r = (1.0 - c) * (1.0 - k)
+                let g = (1.0 - mk) * (1.0 - k)
+                let b = (1.0 - y) * (1.0 - k)
+                return Color.rgb(r: r, g: g, b: b, a: 1.0)
+            default:  // hsb
+                return Color.hsb(
+                    h: num("h"),
+                    s: num("s") / 100.0,
+                    b: num("b") / 100.0,
+                    a: 1.0
+                )
+            }
+        }()
+        if commit {
+            ColorPanel.setActiveColor(color, model: model)
+        } else {
+            ColorPanel.setActiveColorLive(color, model: model)
         }
     }
 
@@ -740,6 +978,34 @@ struct YamlElementView: View {
             .foregroundColor(.black)
     }
 
+    // MARK: - Color Bar
+
+    /// HSB color picker bar (Color panel cp_color_bar). Hue varies
+    /// along x; saturation/brightness along y per the spec in
+    /// `transcripts/COLOR.md`. Click or drag updates the active
+    /// color live; pointer-up commits it to the recent strip.
+    @ViewBuilder
+    private func renderColorBar() -> some View {
+        // Resolve bind.disabled — when fill_color/stroke_color is
+        // null the bar disables along with the sliders / hex.
+        let disabled: Bool = {
+            if let bind = element["bind"] as? [String: Any],
+               let expr = bind["disabled"] as? String {
+                return evaluate(expr, context: context).toBool()
+            }
+            return false
+        }()
+        if let model = model {
+            ColorBarView(model: model, isDisabled: disabled)
+        } else {
+            // Without a model the bar can't commit anything, but
+            // keep the visual chrome so the panel layout stays
+            // consistent. A throwaway model lets the user "pick"
+            // colors that nothing acts on.
+            ColorBarView(model: Model(), isDisabled: true)
+        }
+    }
+
     // MARK: - Color Swatch
 
     @ViewBuilder
@@ -766,19 +1032,36 @@ struct YamlElementView: View {
         }()
 
         let selected = isSelectedInList()
-
-        if hollow {
-            Rectangle()
-                .stroke(SwiftUI.Color(nsColor: color), lineWidth: 3)
-                .frame(width: size, height: size)
-        } else {
-            Rectangle()
-                .fill(SwiftUI.Color(nsColor: color))
-                .frame(width: size, height: size)
-                .border(
-                    selected ? SwiftUI.Color.accentColor : SwiftUI.Color.gray,
-                    width: selected ? 2 : 1
+        // Honor any `behavior: [{event: click, action: ...}]` block
+        // (Color panel's Black/White/recent swatches use this).
+        // Without the gesture the swatch was a static rectangle.
+        let hasClickBehavior = (element["behavior"] as? [[String: Any]])?
+            .contains(where: { ($0["event"] as? String) == "click" }) ?? false
+        let swatch: AnyView = {
+            if hollow {
+                return AnyView(
+                    Rectangle()
+                        .stroke(SwiftUI.Color(nsColor: color), lineWidth: 3)
+                        .frame(width: size, height: size)
                 )
+            } else {
+                return AnyView(
+                    Rectangle()
+                        .fill(SwiftUI.Color(nsColor: color))
+                        .frame(width: size, height: size)
+                        .border(
+                            selected ? SwiftUI.Color.accentColor : SwiftUI.Color.gray,
+                            width: selected ? 2 : 1
+                        )
+                )
+            }
+        }()
+        if hasClickBehavior {
+            swatch
+                .contentShape(Rectangle())
+                .onTapGesture { handleWidgetClick() }
+        } else {
+            swatch
         }
     }
 
@@ -1067,14 +1350,26 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderSeparator() -> some View {
         let orientation = element["orientation"] as? String ?? "horizontal"
+        let style = element["style"] as? [String: Any]
+        // Honor explicit height/width — without this a vertical
+        // separator grows to fill the parent height (the Color
+        // panel's swatch divider was blowing the row up to the
+        // full panel height), and a horizontal one stretches across
+        // its parent, which is fine but worth being explicit.
+        let explicitHeight = (style?["height"] as? CGFloat)
+            ?? (style?["height"] as? Double).map { CGFloat($0) }
+            ?? (style?["height"] as? Int).map { CGFloat($0) }
+        let explicitWidth = (style?["width"] as? CGFloat)
+            ?? (style?["width"] as? Double).map { CGFloat($0) }
+            ?? (style?["width"] as? Int).map { CGFloat($0) }
         if orientation == "vertical" {
             Rectangle()
                 .fill(SwiftUI.Color.gray.opacity(0.5))
-                .frame(width: 1)
+                .frame(width: 1, height: explicitHeight)
         } else {
             Rectangle()
                 .fill(SwiftUI.Color.gray.opacity(0.5))
-                .frame(height: 1)
+                .frame(width: explicitWidth, height: 1)
         }
     }
 
@@ -1412,9 +1707,29 @@ struct YamlElementView: View {
 private struct SliderView: View {
     @State var value: Double
     let range: ClosedRange<Double>
+    /// Live callback fired on every drag tick (passes the current
+    /// value). Used by the Color panel's HSB / RGB / CMYK sliders
+    /// to update the active fill or stroke color in real time
+    /// without committing it to the recent strip.
+    var onChange: ((Double) -> Void)? = nil
+    /// Pointer-up callback. Commits the final value (e.g. pushes
+    /// the resulting color onto the recent-colors strip).
+    var onCommit: ((Double) -> Void)? = nil
 
     var body: some View {
-        Slider(value: $value, in: range)
+        Slider(
+            value: Binding(
+                get: { value },
+                set: { newValue in
+                    value = newValue
+                    onChange?(newValue)
+                }
+            ),
+            in: range,
+            onEditingChanged: { editing in
+                if !editing { onCommit?(value) }
+            }
+        )
     }
 }
 

@@ -171,8 +171,24 @@ public struct PanelGroupView: View {
                     let contentId = panelKindToContentId(kind)
                     if let ws = WorkspaceData.load(),
                        let content = ws.panelContent(contentId) {
-                        let ctx = buildPanelCtx(ws: ws, contentId: contentId)
-                        YamlPanelBodyView(contentSpec: content, context: ctx, model: model, panelId: contentId, theme: theme)
+                        // Wrap in a model-observing view so widget
+                        // edits (which bump model.panelStateVersion
+                        // via commitPanelWrite) trigger a re-render
+                        // of the body. Without this the slider's
+                        // sibling number_input never refreshes after
+                        // the user drags.
+                        if let m = model {
+                            PanelBodyObserver(
+                                model: m,
+                                contentSpec: content,
+                                panelId: contentId,
+                                theme: theme,
+                                contextProvider: { buildPanelCtx(ws: ws, contentId: contentId) }
+                            )
+                        } else {
+                            let ctx = buildPanelCtx(ws: ws, contentId: contentId)
+                            YamlPanelBodyView(contentSpec: content, context: ctx, model: nil, panelId: contentId, theme: theme)
+                        }
                     } else {
                         SwiftUI.Text(verbatim: panelLabel(kind))
                             .font(.system(size: 12))
@@ -248,6 +264,19 @@ public struct PanelGroupView: View {
         let documentMap: [String: Any] = [
             "recent_colors": model?.recentColors ?? []
         ]
+        // theme.colors namespace — the active theme's colors map.
+        // YAML expressions like `style: { color: "{{theme.colors.text}}" }`
+        // resolve through this. Without it, panel labels have no
+        // explicit foreground color and SwiftUI's default Text color
+        // washes out against the dark pane background.
+        let themeColors: [String: Any] = {
+            guard let theme = ws.theme(),
+                  let base = theme["base"] as? [String: Any],
+                  let colors = base["colors"] as? [String: Any] else {
+                return [:]
+            }
+            return colors
+        }()
         var ctx: [String: Any] = [
             "state": stateMap,
             "panel": panelMap,
@@ -257,7 +286,8 @@ public struct PanelGroupView: View {
                 model: model,
                 layersPanelSelection: layersPanelSelection
             ),
-            "document": documentMap
+            "document": documentMap,
+            "theme": ["colors": themeColors] as [String: Any]
         ]
         // OPACITY.md § States predicates at top level so yaml
         // expressions like `bind.disabled: "!selection_has_mask"` and
@@ -469,5 +499,29 @@ public struct FloatingDockView: View {
             workspaceLayout.bringToFront(fid)
             workspaceLayout.saveIfNeeded()
         }
+    }
+}
+
+/// Wraps `YamlPanelBodyView` with `@ObservedObject` model so widget
+/// writes that bump `model.panelStateVersion` re-render the body —
+/// otherwise a slider's sibling number_input wouldn't refresh after
+/// the user drags. Rebuilds the eval context on every render so the
+/// new panel state is reflected in `bind.value` lookups.
+private struct PanelBodyObserver: View {
+    @ObservedObject var model: Model
+    let contentSpec: [String: Any]
+    let panelId: String
+    let theme: Theme
+    let contextProvider: () -> [String: Any]
+
+    var body: some View {
+        // Read panelStateVersion so SwiftUI re-evaluates this view
+        // whenever a widget commits a panel-state write.
+        _ = model.panelStateVersion
+        let ctx = contextProvider()
+        return YamlPanelBodyView(
+            contentSpec: contentSpec, context: ctx,
+            model: model, panelId: panelId, theme: theme
+        )
     }
 }

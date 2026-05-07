@@ -1950,6 +1950,15 @@ public func notifyPanelStateChanged(_ panelId: String, store: StateStore, model:
         applyParagraphPanelToSelection(store: store, controller: Controller(model: model))
     case "stroke_panel_content":
         applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    case "color_panel_content":
+        // Hex / sliders / mode all write to the same panel state;
+        // re-derive the color from the updated state and apply it
+        // live (no push to recent — slider/hex onCommit handles
+        // that on release / Enter so dragging doesn't churn the
+        // recent strip).
+        if let color = ColorPanel.colorFromPanelState(store: store) {
+            ColorPanel.setActiveColorLive(color, model: model)
+        }
     default:
         break
     }
