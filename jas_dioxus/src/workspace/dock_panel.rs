@@ -539,6 +539,39 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("new_masks_clipping".into(), J::Bool(op.new_masks_clipping));
     m.insert("new_masks_inverted".into(), J::Bool(op.new_masks_inverted));
 
+    // ── Artboards panel overrides ─────────────────────────────
+    // panel.renaming_artboard reflects which row's inline editor is
+    // open. Without this, the row template's bind.visible expressions
+    // can't toggle between the static name and the text_input.
+    m.insert(
+        "renaming_artboard".into(),
+        match &st.artboards_renaming {
+            Some(id) => J::String(id.clone()),
+            None => J::Null,
+        },
+    );
+    m.insert(
+        "artboards_panel_selection".into(),
+        J::Array(
+            st.artboards_panel_selection
+                .iter()
+                .map(|s| J::String(s.clone()))
+                .collect(),
+        ),
+    );
+    m.insert(
+        "panel_selection_anchor".into(),
+        match &st.artboards_panel_anchor {
+            Some(id) => J::String(id.clone()),
+            None => J::Null,
+        },
+    );
+    m.insert("rearrange_dirty".into(), J::Bool(st.artboards_rearrange_dirty));
+    m.insert(
+        "reference_point".into(),
+        J::String(st.artboards_reference_point.clone()),
+    );
+
     m
 }
 
@@ -670,6 +703,7 @@ pub(crate) fn build_dock_groups(
     live_panel_overrides: &serde_json::Map<String, serde_json::Value>,
     live_state_map: &serde_json::Map<String, serde_json::Value>,
     selection_preds: &serde_json::Map<String, serde_json::Value>,
+    active_doc_view: &serde_json::Value,
 ) -> Vec<Result<VNode, RenderError>> {
     let did = dock_id;
     let group_count = groups.len();
@@ -1030,6 +1064,14 @@ pub(crate) fn build_dock_groups(
                             let mut eval_map = serde_json::Map::new();
                             eval_map.insert("state".into(), serde_json::Value::Object(panel_state));
                             eval_map.insert("panel".into(), serde_json::Value::Object(panel_map));
+                            eval_map.insert("active_document".into(), active_doc_view.clone());
+                            // Expose the active theme's colors as theme.colors
+                            // so YAML expressions like {{theme.colors.selection}}
+                            // resolve in panel bindings.
+                            let theme_colors = ws.theme()
+                                .get("base").and_then(|b| b.get("colors"))
+                                .cloned().unwrap_or(serde_json::Value::Null);
+                            eval_map.insert("theme".into(), serde_json::json!({"colors": theme_colors}));
                             eval_map.insert("icons".into(), serde_json::json!({}));
                             eval_map.insert("data".into(), serde_json::json!({
                                 "swatch_libraries": live_state_map.get("_swatch_libraries")
@@ -1093,14 +1135,15 @@ pub(crate) fn DockGroupsView() -> Element {
     // Extract everything we need from AppState, then drop the borrow
     // so child components (e.g. FillStrokeWidgetView) can borrow it.
     let (focused_panel, right_dock_snapshot, live_panel_overrides, live_state_map,
-         selection_preds) = {
+         selection_preds, active_doc_view) = {
         let st = app.borrow();
         let focused = st.workspace_layout.focused_panel();
         let dock = st.workspace_layout.anchored_dock(DockEdge::Right).cloned();
         let panel_ov = build_live_panel_overrides(&st);
         let state_map = build_live_state_map(&st);
         let preds = build_selection_predicates(&st);
-        (focused, dock, panel_ov, state_map, preds)
+        let active_doc = crate::interpreter::renderer::build_active_document_view(&st);
+        (focused, dock, panel_ov, state_map, preds, active_doc)
     };
 
     let nodes: Vec<Result<VNode, RenderError>> = match right_dock_snapshot.as_ref() {
@@ -1149,6 +1192,7 @@ pub(crate) fn DockGroupsView() -> Element {
                 &live_panel_overrides,
                 &live_state_map,
                 &selection_preds,
+                &active_doc_view,
             )
         }
     };
@@ -1180,7 +1224,7 @@ pub(crate) fn FloatingDocksView() -> Element {
     let mut title_drag = ds.title_drag;
 
     let (focused_panel, floating_snapshot, live_panel_overrides, live_state_map,
-         selection_preds, z_order) = {
+         selection_preds, z_order, active_doc_view) = {
         let st = app.borrow();
         let focused = st.workspace_layout.focused_panel();
         let floating = st.workspace_layout.floating.clone();
@@ -1188,7 +1232,8 @@ pub(crate) fn FloatingDocksView() -> Element {
         let state_map = build_live_state_map(&st);
         let preds = build_selection_predicates(&st);
         let z = st.workspace_layout.z_order.clone();
-        (focused, floating, panel_ov, state_map, preds, z)
+        let active_doc = crate::interpreter::renderer::build_active_document_view(&st);
+        (focused, floating, panel_ov, state_map, preds, z, active_doc)
     };
 
     let floating_nodes: Vec<Result<VNode, RenderError>> = floating_snapshot.iter().map(|fd| {
@@ -1212,6 +1257,7 @@ pub(crate) fn FloatingDocksView() -> Element {
             &live_panel_overrides,
             &live_state_map,
             &selection_preds,
+            &active_doc_view,
         );
         let z = 900 + z_order.iter().position(|&id| id == fid).unwrap_or(0);
 

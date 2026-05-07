@@ -82,14 +82,36 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 
 /// Dispatch a menu command for the Artboards panel.
 ///
-/// All artboard mutations route through the YAML action pipeline
-/// (dispatched by `interpreter::renderer::dispatch_action`). This
-/// function only handles the panel-container affordance
-/// `close_panel` — every other command is a no-op here, and the
-/// menu UI relies on the YAML pipeline to execute it.
+/// `close_panel` is handled here. All artboard mutations route
+/// through the YAML action pipeline via `dispatch_action`, mirroring
+/// the layers panel pattern. Param-bearing actions
+/// (rename_artboard, open_artboard_options) take the topmost
+/// panel-selected artboard id, matching the YAML menu spec.
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
         "close_panel" => state.workspace_layout.close_panel(addr),
+        // No-param actions — fire through the YAML pipeline.
+        "new_artboard"
+        | "duplicate_artboards"
+        | "delete_artboards"
+        | "delete_empty_artboards"
+        | "convert_to_artboards"
+        | "rearrange_artboards"
+        | "reset_artboards_panel"
+        | "artboards_select_all" => {
+            let params = serde_json::Map::new();
+            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+        }
+        // Param-bearing actions: derive artboard_id from the
+        // topmost panel-selected row (YAML spec uses
+        // `active_document.artboards_panel_selection_ids[0]`).
+        "rename_artboard" | "open_artboard_options" => {
+            if let Some(id) = state.artboards_panel_selection.first().cloned() {
+                let mut params = serde_json::Map::new();
+                params.insert("artboard_id".into(), serde_json::Value::String(id));
+                crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+            }
+        }
         _ => {}
     }
 }
