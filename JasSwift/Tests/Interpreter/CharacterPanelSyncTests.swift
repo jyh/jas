@@ -170,6 +170,37 @@ import Testing
     #expect(model.stateStore.getPanel("something_else", "k") as? String == "v")
 }
 
+@Test func applyCharacterPanelLanguageFlowsToElement() {
+    // Production panel id ("character_panel_content") flow: changing
+    // panel.language should update the selected element's xmlLang.
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi", xmlLang: ""))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    model.stateStore.initPanel("character_panel_content", defaults: [
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Regular",
+        "language": "fr",
+        "anti_aliasing": "Sharp",
+        "leading": 19.2,
+        "tracking": 0.0,
+        "kerning": "Auto",
+        "vertical_scale": 100.0, "horizontal_scale": 100.0,
+        "baseline_shift": 0.0, "character_rotation": 0.0,
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+    ])
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model))
+    guard case .text(let t) = model.document.getElement([0, 0]) else {
+        #expect(Bool(false), "expected Text"); return
+    }
+    #expect(t.xmlLang == "fr")
+}
+
 @Test func applyCharacterPanelWritesAttrsToSelection() {
     // Direct test of the pipeline: seed panel scope with new values,
     // call apply — the selected text picks them up.
