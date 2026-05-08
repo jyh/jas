@@ -22,17 +22,15 @@ public enum BooleanPanel {
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
-        switch cmd {
-        case "close_panel": layout.closePanel(addr)
-        case "make_compound_shape":
-            if let m = model { Controller(model: m).makeCompoundShape() }
-        case "release_compound_shape":
-            if let m = model { Controller(model: m).releaseCompoundShape() }
-        case "expand_compound_shape":
-            if let m = model { Controller(model: m).expandCompoundShape() }
-        // Repeat / Boolean Options / Reset dispatch is phase 9c+.
-        default: break
-        }
+        if cmd == "close_panel" { layout.closePanel(addr); return }
+        guard let model = model else { return }
+        // Route through runYamlActionByName so the action's
+        // `- snapshot` step runs (registering an undo entry)
+        // before the destructive op. The previous direct
+        // Controller.makeCompoundShape() etc. calls skipped that
+        // step and made compound-shape menu actions un-undoable.
+        model.stateStore.setActivePanel("boolean_panel_content")
+        runYamlActionByName(cmd, params: [:], model: model)
     }
 
     public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
