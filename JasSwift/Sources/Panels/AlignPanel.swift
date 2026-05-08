@@ -2,10 +2,9 @@
 ///
 /// Menu items follow `transcripts/ALIGN.md` §Panel menu: a
 /// "Use Preview Bounds" toggle, a "Reset Panel" action, and
-/// "Close Align". Stages 3b-3j will wire AlignPanelState,
-/// algorithms, and platform-effect handlers; this stage only
-/// registers the menu scaffolding so PanelKind.align can flow
-/// through dispatch tables.
+/// "Close Align". Each non-close command routes through
+/// runYamlActionByName so the YAML actions catalog is the source of
+/// truth for what the buttons do.
 
 public enum AlignPanel {
     public static func menuItems() -> [PanelMenuItem] {
@@ -18,20 +17,32 @@ public enum AlignPanel {
         ]
     }
 
-    public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout) {
-        switch cmd {
-        case "close_panel": layout.closePanel(addr)
-        // toggle_use_preview_bounds and reset_align_panel route
-        // through the yaml-driven renderer dispatch; Stage 3h wires
-        // them to AlignPanelState.
-        default: break
-        }
+    public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
+        if cmd == "close_panel" { layout.closePanel(addr); return }
+        guard let model = model else { return }
+        // Pin the active panel id so set_panel_state effects target
+        // the Align panel rather than whichever panel rendered most
+        // recently — without this, the toggle wrote to the wrong
+        // panel store and the checkmark never followed.
+        model.stateStore.setActivePanel("align_panel_content")
+        runYamlActionByName(cmd, params: [:], model: model)
     }
 
     public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        // Stage 3h will wire toggle_use_preview_bounds to
-        // AlignPanelState.useePreviewBounds via the shared
-        // store / model.
         false
+    }
+
+    /// Same as ``isChecked`` but with model in scope so the toggle's
+    /// checkmark can read the panel state. Used by the hamburger
+    /// menu's checked-state logic.
+    public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
+        guard let model = model else { return false }
+        switch cmd {
+        case "toggle_use_preview_bounds":
+            return (model.stateStore.getPanel(
+                "align_panel_content", "use_preview_bounds") as? Bool) ?? false
+        default:
+            return false
+        }
     }
 }

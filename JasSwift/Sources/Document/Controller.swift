@@ -39,7 +39,7 @@ public class Controller {
     public func removeLayer(at index: Int) {
         var layers = model.document.layers
         layers.remove(at: index)
-        model.document = Document(layers: layers)
+        model.document = model.document.replacing(layers: layers)
     }
 
     /// Add an element to the current editing target and select the
@@ -119,9 +119,7 @@ public class Controller {
         var newDoc = doc.replaceElement(path, with: newTarget)
         // No canonical path for "inside a mask" — select the
         // mask-target element itself after the add.
-        newDoc = Document(layers: newDoc.layers,
-                         selectedLayer: newDoc.selectedLayer,
-                         selection: [ElementSelection.all(path)])
+        newDoc = newDoc.replacing(selection: [ElementSelection.all(path)])
         model.document = newDoc
         return true
     }
@@ -195,8 +193,7 @@ public class Controller {
             }
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: finalSel)
+        model.document = doc.replacing(selection: finalSel)
     }
 
     /// Recursive selection with customizable leaf handling. Used by
@@ -228,8 +225,7 @@ public class Controller {
             check([li], .layer(layer), .preview)
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: finalSel)
+        model.document = doc.replacing(selection: finalSel)
     }
 
     // MARK: - Public selection methods
@@ -275,9 +271,7 @@ public class Controller {
     }
 
     public func setSelection(_ selection: Selection) {
-        let doc = model.document
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: selection)
+        model.document = model.document.replacing(selection: selection)
     }
 
     public func selectElement(_ path: ElementPath) {
@@ -294,23 +288,18 @@ public class Controller {
                 for i in 0..<g.children.count {
                     selection.insert(ElementSelection.all(parentPath + [i]))
                 }
-                model.document = Document(layers: doc.layers,
-                                             selectedLayer: doc.selectedLayer, selection: selection)
+                model.document = doc.replacing(selection: selection)
                 return
             }
         }
         let _ = elem
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer,
-                                     selection: [ElementSelection.all(path)])
+        model.document = doc.replacing(selection: [ElementSelection.all(path)])
     }
 
     public func selectControlPoint(path: ElementPath, index: Int) {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
-        let doc = model.document
         let es = ElementSelection.partial(path, [index])
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: [es])
+        model.document = model.document.replacing(selection: [es])
     }
 
     public func movePathHandle(_ path: ElementPath, anchorIdx: Int,
@@ -354,8 +343,7 @@ public class Controller {
             let elem = doc.getElement(es.path)
             doc = doc.replaceElement(es.path, with: lockRecursive(elem))
         }
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: [])
+        model.document = doc.replacing(selection: [])
     }
 
     public func unlockAll() {
@@ -407,14 +395,13 @@ public class Controller {
                          opacity: layer.opacity, transform: layer.transform, locked: false,
                          visibility: layer.visibility)
         }
-        let newDoc = Document(layers: newLayers, selectedLayer: doc.selectedLayer, selection: [])
+        let newDoc = doc.replacing(layers: newLayers, selection: [])
         var newSelection: Selection = []
         for path in lockedPaths {
             let _ = newDoc.getElement(path)
             newSelection.insert(ElementSelection.all(path))
         }
-        model.document = Document(layers: newLayers,
-                                     selectedLayer: doc.selectedLayer, selection: newSelection)
+        model.document = doc.replacing(layers: newLayers, selection: newSelection)
     }
 
     /// Set every element in the current selection to
@@ -431,8 +418,7 @@ public class Controller {
             let elem = doc.getElement(es.path)
             doc = doc.replaceElement(es.path, with: elem.withVisibility(.invisible))
         }
-        model.document = Document(layers: doc.layers,
-                                  selectedLayer: doc.selectedLayer, selection: [])
+        model.document = doc.replacing(selection: [])
     }
 
     /// Traverse the document, set every element whose own visibility
@@ -481,8 +467,7 @@ public class Controller {
         for path in shownPaths {
             newSelection.insert(ElementSelection.all(path))
         }
-        model.document = Document(layers: newLayers,
-                                  selectedLayer: doc.selectedLayer, selection: newSelection)
+        model.document = doc.replacing(layers: newLayers, selection: newSelection)
     }
 
     /// Group the currently selected sibling elements into a new Group.
