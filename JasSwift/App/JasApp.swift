@@ -11,6 +11,10 @@ import JasLib
 /// attempt), the quit is aborted.
 class JasAppDelegate: NSObject, NSApplicationDelegate {
     var workspace: WorkspaceState?
+    /// Strong refs so the DispatchSource isn't deallocated as soon as
+    /// `applicationDidFinishLaunching` returns. Each entry is one
+    /// installed signal handler.
+    private var signalSources: [DispatchSourceSignal] = []
 
     /// Promote the process to a regular foreground app and steal the
     /// menu bar before any window is shown. When we relied on
@@ -41,6 +45,35 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
         ) { _ in
             JasAppDelegate.applyContentMinSize()
         }
+        // SIGINT (^C from the terminal that launched `swift run Jas`)
+        // and SIGTERM (orderly shutdown) bypass the AppDelegate quit
+        // path entirely, so the session-save hook never fires. A
+        // DispatchSource converts the signal into a main-queue event
+        // we can safely run from. `signal(SIGINT, SIG_IGN)` keeps the
+        // C-level handler from terminating the process before our
+        // dispatch event runs.
+        installSessionSaveSignalHandler(signal: SIGINT)
+        installSessionSaveSignalHandler(signal: SIGTERM)
+    }
+
+    private func installSessionSaveSignalHandler(signal sig: Int32) {
+        Darwin.signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.workspace?.persistSession()
+            exit(0)
+        }
+        source.resume()
+        signalSources.append(source)
+    }
+
+    /// Persist the open canvases on quit. Fires after
+    /// applicationShouldTerminate has returned `.terminateNow`, so
+    /// we only get here when quit is actually proceeding (cancel /
+    /// failed-save paths skip session-save). Best-effort: a failed
+    /// session save logs and continues — quit isn't blocked.
+    func applicationWillTerminate(_ notification: Notification) {
+        workspace?.persistSession()
     }
 
     private static let minContentSize = NSSize(width: 800, height: 540)
@@ -100,6 +133,14 @@ struct JasApp: App {
                     // they run before the window is shown — see comment
                     // there for why .onAppear was unreliable.
                     appDelegate.workspace = workspace
+                    // Reload last session's canvases. Once restored —
+                    // and only the first time, since `.onAppear` can
+                    // re-fire on tab/window changes — the existing
+                    // tabs are kept and the restore call short-
+                    // circuits if there's nothing to read.
+                    if workspace.canvases.isEmpty {
+                        _ = workspace.restoreSession()
+                    }
                     if let icnsURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
                         ?? URL(string: "file://" + #file)
                             .flatMap({ URL(string: "../../../../assets/brand/icons/AppIcon.icns", relativeTo: $0.deletingLastPathComponent()) }) {
