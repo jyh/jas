@@ -1594,7 +1594,7 @@ let build_panel_pending_template
 let apply_character_panel_to_selection (store : State_store.t)
     (ctrl : Controller.controller) : unit =
   let panel_list () =
-    let read k = (k, State_store.get_panel store "character_panel" k) in
+    let read k = (k, State_store.get_panel store "character_panel_content" k) in
     List.map read [
       "font_family"; "style_name"; "font_size";
       "leading"; "kerning"; "tracking";
@@ -1605,25 +1605,23 @@ let apply_character_panel_to_selection (store : State_store.t)
       "language"; "anti_aliasing";
     ]
   in
-  (* Phase 3: route to next-typed-character state when there is an
-     active edit session with a bare caret (no range selection).
-     Replace semantics: clear pending, prime from new template.
-     Non-bare-caret sessions fall through to the legacy element-
-     level write below. *)
-  let routed_to_pending = match ctrl#model#current_edit_session with
-    | Some session when not session#has_selection ->
-      (try
-        let elem = Document.get_element ctrl#document session#path in
-        let template = build_panel_pending_template (panel_list ()) elem in
-        session#clear_pending_override ();
-        (match template with
-         | Some tpl -> session#set_pending_override tpl
-         | None -> ());
-        true
-      with _ -> true (* swallow — Exit on non-Text elem path still counts
-                       as "handled by pending route" *))
-    | _ -> false in
-  if routed_to_pending then () else
+  (* Caret-only edit session: prime the pending override so the next
+     typed character picks up the new attrs, then fall through to the
+     element-level apply so existing text in the element updates
+     immediately. Without the fall-through, a panel toggle (All Caps,
+     font, ...) appeared to do nothing until the user typed another
+     character. *)
+  (match ctrl#model#current_edit_session with
+   | Some session when not session#has_selection ->
+     (try
+       let elem = Document.get_element ctrl#document session#path in
+       let template = build_panel_pending_template (panel_list ()) elem in
+       session#clear_pending_override ();
+       (match template with
+        | Some tpl -> session#set_pending_override tpl
+        | None -> ())
+     with _ -> ())
+   | _ -> ());
   (* Per-range write: when the active session has a range selection,
      apply the panel state to that range via split_range +
      merge_tspan_overrides + merge. *)
@@ -1656,31 +1654,25 @@ let apply_character_panel_to_selection (store : State_store.t)
   let doc = ctrl#document in
   if Document.PathMap.is_empty doc.Document.selection then ()
   else begin
-    let panel = match List.assoc_opt "character_panel" (State_store.get_all store) with
-      | _ -> () |> fun () ->
-        (* Use raw panels access via get_active_panel_state when the
-           character panel is active; fall back to empty for the
-           subscription-driven call where the caller triggers this
-           after a set_panel on "character_panel" regardless of
-           which panel is currently "active". *)
-        match State_store.get_panel store "character_panel" "font_family" with
-        | `Null ->
-          (* Panel not initialised — read nothing, apply nothing. *)
-          []
-        | _ ->
-          (* Walk all keys via get_panel-style reads. We reconstruct
-             the panel dict by pulling the known character-panel
-             keys; this matches Rust's CharacterPanelState shape. *)
-          let read k = (k, State_store.get_panel store "character_panel" k) in
-          List.map read [
-            "font_family"; "style_name"; "font_size";
-            "leading"; "kerning"; "tracking";
-            "vertical_scale"; "horizontal_scale";
-            "baseline_shift"; "character_rotation";
-            "all_caps"; "small_caps"; "superscript"; "subscript";
-            "underline"; "strikethrough";
-            "language"; "anti_aliasing";
-          ]
+    let panel =
+      match State_store.get_panel store "character_panel_content" "font_family" with
+      | `Null ->
+        (* Panel not initialised — read nothing, apply nothing. *)
+        []
+      | _ ->
+        (* Reconstruct the panel dict by pulling the known
+           character-panel keys (matches Rust's CharacterPanelState
+           shape and the panel_list above). *)
+        let read k = (k, State_store.get_panel store "character_panel_content" k) in
+        List.map read [
+          "font_family"; "style_name"; "font_size";
+          "leading"; "kerning"; "tracking";
+          "vertical_scale"; "horizontal_scale";
+          "baseline_shift"; "character_rotation";
+          "all_caps"; "small_caps"; "superscript"; "subscript";
+          "underline"; "strikethrough";
+          "language"; "anti_aliasing";
+        ]
     in
     let attrs = attrs_from_character_panel panel in
     let new_doc = Document.PathMap.fold (fun path _ acc ->
@@ -1699,12 +1691,12 @@ let apply_character_panel_to_selection (store : State_store.t)
   end
 
 (** Subscribe [apply_character_panel_to_selection] to panel-state writes
-    on the "character_panel" scope of [store]. Once registered, any
-    widget write on the Character panel flows through to the selected
-    Text / Text_path element automatically. *)
+    on the "character_panel_content" scope of [store]. Once registered,
+    any widget write on the Character panel flows through to the
+    selected Text / Text_path element automatically. *)
 let subscribe_character_panel (store : State_store.t)
     (ctrl_getter : unit -> Controller.controller) : unit =
-  State_store.subscribe_panel store "character_panel" (fun _key _value ->
+  State_store.subscribe_panel store "character_panel_content" (fun _key _value ->
     apply_character_panel_to_selection store (ctrl_getter ()))
 
 (** Subscribe [apply_stroke_panel_to_selection] to global writes on

@@ -90,6 +90,48 @@ let paragraph_menu_dispatch (cmd : [< `Toggle of string | `Reset ])
      | `Reset ->
        Effects.reset_paragraph_panel store ctrl)
 
+(** Read a character-panel toggle's bool from the registered store.
+    Returns [default] when the panel isn't mounted or the key is
+    missing / non-bool. Used by [panel_is_checked] for the menu's
+    five Character toggles. *)
+let _character_store_bool (key : string) ~(default : bool) : bool =
+  match lookup_panel_store "character_panel_content" with
+  | None -> default
+  | Some store ->
+    (match State_store.get_panel store "character_panel_content" key with
+     | `Bool b -> b
+     | _ -> default)
+
+(** Helper: dispatch a Character menu toggle through the live
+    State_store + Controller. Flips the panel-state bool, clears
+    mutually-exclusive siblings (all_caps ↔ small_caps; superscript ↔
+    subscript), and pushes the result onto the selected Text /
+    Text_path so the menu and the in-panel icon toggles stay in
+    sync. The [snap_to_glyph_visible] toggle skips the selection
+    apply since it's purely panel-local UI state. *)
+let character_menu_dispatch (key : string)
+    (clear_on_set : string list)
+    ~(apply_to_selection : bool)
+    (get_model : unit -> Model.model) : unit =
+  match lookup_panel_store "character_panel_content" with
+  | None -> ()
+  | Some store ->
+    let cur = match State_store.get_panel store
+                      "character_panel_content" key with
+      | `Bool b -> b | _ -> false in
+    let new_val = not cur in
+    State_store.set_panel store "character_panel_content"
+      key (`Bool new_val);
+    if new_val then
+      List.iter (fun sib ->
+        State_store.set_panel store "character_panel_content"
+          sib (`Bool false)) clear_on_set;
+    if apply_to_selection then begin
+      let m = get_model () in
+      let ctrl = new Controller.controller ~model:m () in
+      Effects.apply_character_panel_to_selection store ctrl
+    end
+
 (** Human-readable label for a panel kind. *)
 let panel_label = function
   | Layers -> "Layers"
@@ -1136,6 +1178,21 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     paragraph_menu_dispatch (`Toggle "hanging_punctuation") get_model
   | "reset_paragraph_panel" when kind = Paragraph ->
     paragraph_menu_dispatch `Reset get_model
+  | "toggle_all_caps" when kind = Character ->
+    character_menu_dispatch "all_caps" ["small_caps"]
+      ~apply_to_selection:true get_model
+  | "toggle_small_caps" when kind = Character ->
+    character_menu_dispatch "small_caps" ["all_caps"]
+      ~apply_to_selection:true get_model
+  | "toggle_superscript" when kind = Character ->
+    character_menu_dispatch "superscript" ["subscript"]
+      ~apply_to_selection:true get_model
+  | "toggle_subscript" when kind = Character ->
+    character_menu_dispatch "subscript" ["superscript"]
+      ~apply_to_selection:true get_model
+  | "toggle_snap_to_glyph_visible" when kind = Character ->
+    character_menu_dispatch "snap_to_glyph_visible" []
+      ~apply_to_selection:false get_model
   | "make_compound_shape" when kind = Boolean ->
     Boolean_apply.apply_make_compound_shape (get_model ())
   | "release_compound_shape" when kind = Boolean ->
@@ -1180,4 +1237,18 @@ let panel_is_checked _kind cmd layout =
   | None ->
     match List.assoc_opt cmd opacity_toggle_table with
     | Some (key, default) -> _opacity_store_bool key ~default
-    | None -> false
+    | None ->
+      (* Character panel toggle commands map to bools in the
+         "character_panel_content" panel scope. *)
+      match cmd with
+      | "toggle_snap_to_glyph_visible" ->
+        _character_store_bool "snap_to_glyph_visible" ~default:false
+      | "toggle_all_caps" ->
+        _character_store_bool "all_caps" ~default:false
+      | "toggle_small_caps" ->
+        _character_store_bool "small_caps" ~default:false
+      | "toggle_superscript" ->
+        _character_store_bool "superscript" ~default:false
+      | "toggle_subscript" ->
+        _character_store_bool "subscript" ~default:false
+      | _ -> false
