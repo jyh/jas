@@ -54,11 +54,14 @@ def apply_character_panel_to_selection(store, model) -> None:
     if doc is None:
         return
 
-    panel = store.get_panel_state("character_panel") or {}
+    panel = store.get_panel_state("character_panel_content") or {}
 
-    # Phase 3: route to next-typed-character state when there is an
-    # active edit session with a bare caret (no range selection).
-    # Replace semantics: clear pending, prime from the new template.
+    # Caret-only edit session: prime the pending override so the next
+    # typed character picks up the new attrs, then fall through to the
+    # element-level apply so existing text in the element updates
+    # immediately. Without the fall-through, a panel toggle (All Caps,
+    # font, …) appeared to do nothing until the user typed another
+    # character.
     session = getattr(model, "current_edit_session", None)
     if session is not None and not session.has_selection():
         try:
@@ -70,7 +73,6 @@ def apply_character_panel_to_selection(store, model) -> None:
             session.clear_pending_override()
             if template is not None:
                 session.set_pending_override(template)
-            return
 
     # Per-range write: when the active session has a range selection,
     # apply the panel state to that range only via split_range +
@@ -533,4 +535,4 @@ def subscribe(store, model_getter) -> None:
     def _on_change(_key, _value):
         apply_character_panel_to_selection(store, model_getter())
 
-    store.subscribe_panel("character_panel", _on_change)
+    store.subscribe_panel("character_panel_content", _on_change)

@@ -52,6 +52,14 @@ class YamlPanelView(QWidget):
         if self._panel_id == "opacity_panel_content":
             from panels.panel_menu import set_opacity_store
             set_opacity_store(self._store)
+        # Character panel — same pattern: hamburger-menu toggle
+        # commands (toggle_all_caps / small_caps / superscript /
+        # subscript / snap_to_glyph_visible) need to reach the
+        # panel-state bools without threading the store through
+        # every dispatch call site.
+        if self._panel_id == "character_panel_content":
+            from panels.panel_menu import set_character_store
+            set_character_store(self._store)
 
         # Run init expressions
         self._run_init()

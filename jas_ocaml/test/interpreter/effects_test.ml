@@ -644,16 +644,25 @@ let phase3_pending_tests = [
     | None -> assert false
     | Some tpl -> assert (tpl.jas_aa_mode = Some "Smooth"));
 
-  Alcotest.test_case "panel_write_with_bare_caret_sets_pending" `Quick (fun () ->
-    (* Build a document with a Text element, set up an active session
-       with a bare caret on model, then apply panel Bold → pending
-       should be set, element untouched. *)
+  Alcotest.test_case "panel_write_with_bare_caret_sets_pending_and_updates_element" `Quick (fun () ->
+    (* Build a document with a selected Text element + an active
+       caret-only edit session, then apply panel Bold. Pending override
+       primes the next-typed-character; the element-level apply runs
+       in the same call so the existing text picks up bold immediately
+       (mirrors the Swift fall-through fix — without it the panel
+       toggle appeared to do nothing until the user typed another
+       character). *)
     let text = _default_text_elem () in
     let model = Jas.Model.create () in
     let layer = Jas.Element.make_layer ~name:"Layer 1" [| text |] in
+    let selection =
+      Jas.Document.PathMap.singleton [0; 0]
+        (Jas.Document.element_selection_all [0; 0])
+    in
     let doc = {
       (Jas.Document.default_document ()) with
       layers = [| layer |];
+      selection;
     } in
     model#set_document doc;
     let session = Jas.Text_edit.create
@@ -665,16 +674,17 @@ let phase3_pending_tests = [
     let panel_kv = List.map (fun (k, v) ->
       if k = "style_name" then (k, `String "Bold") else (k, v)
     ) (_aligned_panel ()) in
-    init_panel store "character_panel" panel_kv;
+    init_panel store "character_panel_content" panel_kv;
     apply_character_panel_to_selection store ctrl;
     assert (Jas.Text_edit.has_pending_override session);
     assert (Jas.Text_edit.pending_char_start session = Some 3);
     (match Jas.Text_edit.pending_override session with
      | Some p -> assert (p.font_weight = Some "bold")
      | None -> assert false);
-    (* Element untouched. *)
+    (* Existing text picked up bold via the element-level apply that
+       runs after the pending route. *)
     match Jas.Document.get_element ctrl#document [0; 0] with
-    | Jas.Element.Text r -> assert (r.font_weight = "normal")
+    | Jas.Element.Text r -> assert (r.font_weight = "bold")
     | _ -> assert false);
 ]
 
