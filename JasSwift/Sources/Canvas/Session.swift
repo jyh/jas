@@ -113,7 +113,25 @@ public extension WorkspaceState {
                 continue
             }
             do {
-                let doc = try binaryToDocument(blob)
+                var doc = try binaryToDocument(blob)
+                // The binary format predates the artboards feature
+                // and decodes into a doc with `artboards: []`. The
+                // canvas relies on the at-least-one-artboard
+                // invariant; without this, the restored doc shows
+                // no artboard frame. Mirrors the Rust load_session
+                // path which calls ensure_artboards_invariant.
+                let (repaired, _) = ensureArtboardsInvariant(doc.artboards)
+                if repaired.count != doc.artboards.count {
+                    doc = Document(
+                        layers: doc.layers,
+                        selectedLayer: doc.selectedLayer,
+                        selection: doc.selection,
+                        artboards: repaired,
+                        artboardOptions: doc.artboardOptions,
+                        documentSetup: doc.documentSetup,
+                        printPreferences: doc.printPreferences
+                    )
+                }
                 let model = Model(document: doc, filename: tab.filename)
                 loaded.append(CanvasEntry(model: model))
             } catch {
