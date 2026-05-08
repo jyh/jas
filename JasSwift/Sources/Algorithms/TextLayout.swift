@@ -50,15 +50,38 @@ private func isSpaceChar(_ c: Character) -> Bool {
 }
 
 /// Run word-wrap layout on `content`. `maxWidth <= 0` disables wrapping.
+///
+/// `perCharWidths`, when provided, is a width-per-character array
+/// (`content.count` entries) used in lieu of `measure` for individual
+/// glyph and token widths. This is what lets the layout track tspan-
+/// override fonts (e.g. a bold range produces wider glyphs) so that
+/// downstream selection-highlight rectangles still align with the
+/// rendered text. `measure` stays in the signature for the no-override
+/// fast path and as the fallback when `perCharWidths` is `nil`.
 public func layoutText(_ content: String,
                        maxWidth: Double,
                        fontSize: Double,
-                       measure: (String) -> Double) -> TextLayout {
+                       measure: (String) -> Double,
+                       perCharWidths: [Double]? = nil) -> TextLayout {
     let lineHeight = fontSize
     let ascent = fontSize * 0.8
 
     let chars = Array(content)
     let n = chars.count
+
+    // Resolve per-character widths up front so the layout below can
+    // index into a flat array regardless of which path the caller
+    // populated. When the caller's array is wrong-length (transform
+    // changed the char count) fall back to the measure closure.
+    let widths: [Double] = {
+        if let w = perCharWidths, w.count == n { return w }
+        return chars.map { measure(String($0)) }
+    }()
+    func tokenWidth(_ start: Int, _ end: Int) -> Double {
+        var sum = 0.0
+        for k in start..<end { sum += widths[k] }
+        return sum
+    }
 
     var glyphs: [TextGlyph] = []
     var lines: [LineInfo] = []
@@ -98,12 +121,11 @@ public func layoutText(_ content: String,
         while end < n && chars[end] != "\n" && (isSpaceChar(chars[end]) == isWs) {
             end += 1
         }
-        let token = String(chars[idx..<end])
-        let tokenW = measure(token)
+        let tokenW = tokenWidth(idx, end)
 
         if isWs {
             for k in 0..<(end - idx) {
-                let cw = measure(String(chars[idx + k]))
+                let cw = widths[idx + k]
                 addGlyph(idx + k, lineNo, x, cw)
                 x += cw
             }
@@ -124,7 +146,7 @@ public func layoutText(_ content: String,
             if maxWidth > 0.0 && tokenW > maxWidth && x == 0.0 {
                 // Char-by-char break for an over-long token.
                 for k in 0..<(end - idx) {
-                    let cw = measure(String(chars[idx + k]))
+                    let cw = widths[idx + k]
                     if x + cw > maxWidth && x > 0.0 {
                         pushLine(lineStart, idx + k, false, x)
                         lineNo += 1
@@ -137,7 +159,7 @@ public func layoutText(_ content: String,
             } else {
                 var curX = x
                 for k in 0..<(end - idx) {
-                    let cw = measure(String(chars[idx + k]))
+                    let cw = widths[idx + k]
                     addGlyph(idx + k, lineNo, curX, cw)
                     curX += cw
                 }
@@ -421,7 +443,8 @@ public func layoutTextWithParagraphs(_ content: String,
                                      maxWidth: Double,
                                      fontSize: Double,
                                      paragraphs: [ParagraphSegment],
-                                     measure: (String) -> Double) -> TextLayout {
+                                     measure: (String) -> Double,
+                                     perCharWidths: [Double]? = nil) -> TextLayout {
     let chars = Array(content)
     let n = chars.count
     let lineHeight = fontSize
@@ -471,6 +494,10 @@ public func layoutTextWithParagraphs(_ content: String,
         // composer instead of greedy first-fit. Falls back to greedy
         // when the composer can't find a feasible composition.
         let para: TextLayout
+        // Slice the per-char widths to match this paragraph's content.
+        let segWidths: [Double]? = perCharWidths.map {
+            Array($0[seg.charStart..<seg.charEnd])
+        }
         if seg.textAlign == .justify && effectiveMax > 0,
            let kp = justifyLayoutSegment(slice, maxWidth: effectiveMax,
                                           fontSize: fontSize, seg: seg,
@@ -478,7 +505,8 @@ public func layoutTextWithParagraphs(_ content: String,
             para = kp
         } else {
             para = layoutText(slice, maxWidth: effectiveMax,
-                              fontSize: fontSize, measure: measure)
+                              fontSize: fontSize, measure: measure,
+                              perCharWidths: segWidths)
         }
         let firstLineExtra: Double = hasList ? 0 : max(0, seg.firstLineIndent)
         let firstLineNoInCombined = allLines.count

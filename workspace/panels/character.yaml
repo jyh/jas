@@ -244,9 +244,15 @@ content:
           col: 4
           children:
             - id: ch_leading
-              type: number_input
+              type: length_input
+              unit: "pt"
+              nullable: true
               summary: "Leading"
-              description: "Line leading in points; Auto = 120% of font size."
+              description: >
+                Line leading in points; Auto = 120% of font size.
+                Clear the field (delete the value) to revert to Auto
+                — the field re-displays the auto-derived value once
+                the change applies.
               min: 0
               max: 1296
               style: { width: "100%" }
@@ -280,9 +286,18 @@ content:
                 - { value: "Auto", label: "Auto" }
                 - { value: "Optical", label: "Optical" }
                 - { value: "Metrics", label: "Metrics" }
+                - { value: "-100", label: "-100" }
+                - { value: "-75", label: "-75" }
+                - { value: "-50", label: "-50" }
+                - { value: "-25", label: "-25" }
+                - { value: "-10", label: "-10" }
+                - { value: "-5", label: "-5" }
                 - { value: "0", label: "0" }
+                - { value: "5", label: "5" }
+                - { value: "10", label: "10" }
                 - { value: "25", label: "25" }
                 - { value: "50", label: "50" }
+                - { value: "75", label: "75" }
                 - { value: "100", label: "100" }
               bind:
                 value: "panel.kerning"

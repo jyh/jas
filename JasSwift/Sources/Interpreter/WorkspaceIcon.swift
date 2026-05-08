@@ -44,6 +44,22 @@ struct WorkspaceIcon: View {
         ctx.scaleBy(x: scale, y: scale)
 
         for prim in parsed.primitives {
+            if let t = prim.text {
+                // Render text in icon-viewbox coords. SVG y is the
+                // baseline; SwiftUI.Text draws from a top-left
+                // origin, so estimate the ascent (≈0.8 * fontSize)
+                // and shift the draw point up by it.
+                let color = prim.fill.toColor(tint: tint)
+                    ?? SwiftUI.Color(nsColor: tint)
+                let font = NSFont.systemFont(ofSize: t.fontSize, weight: t.fontWeight)
+                var resolved = ctx.resolve(SwiftUI.Text(t.content)
+                    .font(SwiftUI.Font(font as CTFont))
+                    .foregroundColor(color))
+                let ascent = t.fontSize * 0.8
+                resolved.shading = .color(color)
+                ctx.draw(resolved, at: CGPoint(x: t.x, y: t.y - ascent), anchor: .topLeading)
+                continue
+            }
             if let fillColor = prim.fill.toColor(tint: tint) {
                 ctx.fill(prim.path, with: .color(fillColor))
             }
@@ -82,6 +98,20 @@ struct SvgPrimitive {
     let strokeLineCap: CGLineCap
     let strokeLineJoin: CGLineJoin
     let strokeDashArray: [Double]
+    /// Set when the primitive came from an SVG `<text>` element. The
+    /// `path` is empty in that case; the renderer draws the string at
+    /// `(textX, textY)` (where y is the SVG baseline) using the
+    /// supplied font + the icon's tint as foreground.
+    let text: SvgText?
+}
+
+struct SvgText {
+    let content: String
+    let x: Double
+    let y: Double
+    let fontFamily: String
+    let fontSize: Double
+    let fontWeight: NSFont.Weight
 }
 
 enum SvgPaint {
@@ -151,6 +181,10 @@ enum SvgIconParser {
 private final class SvgIconDelegate: NSObject, XMLParserDelegate {
     var primitives: [SvgPrimitive] = []
     var failed: Bool = false
+    /// In-flight text element being parsed. Populated on the
+    /// `<text>` open tag, fed character data via `foundCharacters`,
+    /// and committed on the corresponding `</text>`.
+    private var pendingText: (attrs: [String: String], buffer: String)? = nil
 
     func parser(_ parser: XMLParser,
                 didStartElement elementName: String,
@@ -162,7 +196,12 @@ private final class SvgIconDelegate: NSObject, XMLParserDelegate {
         case "svg", "g", "defs", "title", "desc":
             // Containers / metadata — ignore (we don't honor group transforms).
             return
-        case "text", "tspan", "use", "image", "foreignObject":
+        case "text":
+            // Open text — capture character data until </text>.
+            // Character-panel row labels rely on this (single-glyph
+            // text-as-icon glyphs, e.g. char_size renders two T's).
+            pendingText = (attrs: attrs, buffer: "")
+        case "tspan", "use", "image", "foreignObject":
             failed = true
             return
         case "rect", "line", "circle", "ellipse", "polyline", "polygon", "path":
@@ -173,6 +212,24 @@ private final class SvgIconDelegate: NSObject, XMLParserDelegate {
             }
         default:
             failed = true
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if pendingText != nil {
+            pendingText!.buffer += string
+        }
+    }
+
+    func parser(_ parser: XMLParser,
+                didEndElement elementName: String,
+                namespaceURI: String?,
+                qualifiedName qName: String?) {
+        if elementName == "text", let pt = pendingText {
+            pendingText = nil
+            if let prim = SvgPrimitiveBuilder.buildText(content: pt.buffer, attrs: pt.attrs) {
+                primitives.append(prim)
+            }
         }
     }
 }
@@ -202,7 +259,50 @@ private enum SvgPrimitiveBuilder {
             strokeWidth: Double(attrs["stroke-width"] ?? "") ?? 1.0,
             strokeLineCap: parseLineCap(attrs["stroke-linecap"]),
             strokeLineJoin: parseLineJoin(attrs["stroke-linejoin"]),
-            strokeDashArray: parseNumberList(attrs["stroke-dasharray"])
+            strokeDashArray: parseNumberList(attrs["stroke-dasharray"]),
+            text: nil
+        )
+    }
+
+    /// Build a primitive from an SVG `<text>` element. Path is empty
+    /// — WorkspaceIcon renders the text via Canvas.draw(_:Text) using
+    /// the captured font props.
+    static func buildText(content: String, attrs: [String: String]) -> SvgPrimitive? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let x = Double(attrs["x"] ?? "0") ?? 0
+        let y = Double(attrs["y"] ?? "0") ?? 0
+        let family = attrs["font-family"] ?? "Helvetica"
+        let size = Double(attrs["font-size"] ?? "12") ?? 12
+        let weight: NSFont.Weight = {
+            // Common numeric and named weights — covers the icons.yaml
+            // shorthands used today (700 / "bold").
+            switch (attrs["font-weight"] ?? "").lowercased() {
+            case "100", "thin": return .thin
+            case "200", "ultralight": return .ultraLight
+            case "300", "light": return .light
+            case "400", "normal", "regular", "": return .regular
+            case "500", "medium": return .medium
+            case "600", "semibold", "demibold": return .semibold
+            case "700", "bold": return .bold
+            case "800", "heavy", "extrabold": return .heavy
+            case "900", "black": return .black
+            default: return .regular
+            }
+        }()
+        return SvgPrimitive(
+            path: SwiftUI.Path(),
+            fill: parsePaint(attrs["fill"]) ?? .current,
+            stroke: .none,
+            strokeWidth: 0,
+            strokeLineCap: .butt,
+            strokeLineJoin: .miter,
+            strokeDashArray: [],
+            text: SvgText(
+                content: trimmed, x: x, y: y,
+                fontFamily: family, fontSize: size,
+                fontWeight: weight
+            )
         )
     }
 

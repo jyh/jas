@@ -248,6 +248,7 @@ struct PaneFrameView<Content: View>: View {
             Spacer()
 
             if geo.config.collapsedWidth != nil {
+                let dockCollapsed = workspace.workspaceLayout.anchoredDock(.right)?.collapsed ?? false
                 Button(action: {
                     if let rightDock = workspace.workspaceLayout.anchoredDock(.right) {
                         workspace.workspaceLayout.toggleDockCollapsed(rightDock.id)
@@ -259,7 +260,11 @@ struct PaneFrameView<Content: View>: View {
                         }
                     }
                 }) {
-                    SwiftUI.Text("\u{00AB}")
+                    // Same right-edge convention as the per-group
+                    // chevron: » when expanded (will collapse toward
+                    // the right), « when collapsed (will expand back
+                    // out).
+                    SwiftUI.Text(dockCollapsed ? "\u{00AB}" : "\u{00BB}")
                         .font(.system(size: 18))
                         .foregroundColor(SwiftUI.Color(nsColor: workspace.theme.textButton))
                 }

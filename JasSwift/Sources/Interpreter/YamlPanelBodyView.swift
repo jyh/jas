@@ -124,6 +124,8 @@ struct YamlElementView: View {
                 renderElementPreview()
             case "tabs":
                 renderTabs()
+            case "icon":
+                renderIcon()
             default:
                 renderPlaceholder()
             }
@@ -198,9 +200,22 @@ struct YamlElementView: View {
     /// selected element, undoing attrs they hadn't touched.
     private func commitPanelWrite(key: String, value: Any?) {
         guard let model = model, let pid = panelId else { return }
-        if pid == "character_panel",
+        if pid == "character_panel_content",
            let overrides = characterPanelLiveOverrides(model: model) {
             for (k, v) in overrides { model.stateStore.setPanel(pid, k, v) }
+            // Auto-leading tracks font size unless explicitly
+            // overridden. When the user edits font_size and the
+            // selected element's line_height is empty (Auto), bump
+            // panel.leading to newSize * 1.2 so the apply pipeline
+            // still derives line_height = "" and Auto is preserved.
+            // Without this, characterPanelLiveOverrides materialises
+            // Auto into oldSize * 1.2; the apply then sees a stale
+            // numeric leading and writes it as an explicit override.
+            if key == "font_size",
+               characterElementHasAutoLeading(model: model),
+               let n = (value as? NSNumber)?.doubleValue {
+                model.stateStore.setPanel(pid, "leading", n * 1.2)
+            }
         }
         // Paragraph panel — Phase 4. Sync the live wrapper attrs
         // first so untouched fields hold the selection's current
@@ -519,6 +534,30 @@ struct YamlElementView: View {
     }
 
     // MARK: - Icon Button
+
+    /// Static icon (no click). Used as a row label in panels like
+    /// Character / Paragraph where each control gets a small glyph
+    /// instead of a text label. Renders the SVG via WorkspaceIcon
+    /// when the theme + icon catalog resolve, else falls back to a
+    /// small empty rectangle (sized like the icon would be) so the
+    /// row layout doesn't shift.
+    @ViewBuilder
+    private func renderIcon() -> some View {
+        let name = element["name"] as? String ?? ""
+        let style = element["style"] as? [String: Any] ?? [:]
+        let w: CGFloat = {
+            if let n = style["width"] as? CGFloat { return n }
+            if let n = style["width"] as? Double { return CGFloat(n) }
+            if let n = style["width"] as? Int { return CGFloat(n) }
+            return 20
+        }()
+        if let theme = theme, !name.isEmpty,
+           WorkspaceIconCache.shared.lookup(name) != nil {
+            WorkspaceIcon(name: name, size: w, tint: theme.text)
+        } else {
+            SwiftUI.Color.clear.frame(width: w, height: w)
+        }
+    }
 
     @ViewBuilder
     private func renderIconButton() -> some View {
@@ -976,13 +1015,18 @@ struct YamlElementView: View {
         }()
         let writeTarget = writeBackTarget(valueExpr)
 
+        // YAML style.width: "100%" → fill the parent column, so inputs
+        // align with neighboring dropdowns sharing the same col cell.
+        // Numeric/missing → fixed-width 45pt (legacy default for align /
+        // opacity panels that don't declare a width).
+        let fillsParent = (element["style"] as? [String: Any])?["width"] as? String == "100%"
         TextField("", value: Binding<Int>(
             get: { currentValue },
             set: { newVal in
                 if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
             }
         ), format: .number)
-            .frame(width: 45)
+            .frame(maxWidth: fillsParent ? .infinity : 45)
             .textFieldStyle(.roundedBorder)
             // Override the inherited foregroundColor — dialogs cascade
             // theme.text (light) over the body so labels read on the
@@ -990,6 +1034,9 @@ struct YamlElementView: View {
             // background and inherit that light text, leaving the
             // typed digits low-contrast and barely legible.
             .foregroundColor(.black)
+            // When filling the parent column, leave a trailing gap so
+            // the input doesn't crowd the next col-2 icon to its right.
+            .padding(.trailing, fillsParent ? 24 : 0)
     }
 
     // MARK: - Text Input
@@ -1726,7 +1773,14 @@ struct YamlElementView: View {
             let l = opt["label"] as? String ?? ""
             return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
         }
-        Picker("", selection: Binding<String>(
+        // When YAML declares ``style.width: "100%"`` (the convention for
+        // panel rows where the select shares a col cell with sibling
+        // inputs — Character panel font / language / anti-aliasing), fill
+        // the parent column so widths line up. Otherwise take intrinsic
+        // width so the picker doesn't balloon into empty space (Print
+        // dialog's enum dropdowns rely on this).
+        let fillsParent = (element["style"] as? [String: Any])?["width"] as? String == "100%"
+        let picker = Picker("", selection: Binding<String>(
             get: { currentValue },
             set: { newVal in
                 if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
@@ -1737,14 +1791,11 @@ struct YamlElementView: View {
             }
         }
         .labelsHidden()
-        // SwiftUI Picker defaults to filling available row width on
-        // macOS; the YAML rows in print.yaml put a select inside a
-        // grid column that's wider than the dropdown's content needs,
-        // so without this the dropdown stretches to absorb the empty
-        // space and the dialog reads as button-bloat. Take intrinsic
-        // width horizontally so the dropdown sits left-aligned in its
-        // column with content-sized chrome.
-        .fixedSize(horizontal: true, vertical: false)
+        if fillsParent {
+            picker.frame(maxWidth: .infinity).padding(.trailing, 24)
+        } else {
+            picker.fixedSize(horizontal: true, vertical: false)
+        }
     }
 
     // MARK: - Toggle / Checkbox
@@ -1752,15 +1803,19 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderToggle() -> some View {
         let label = element["label"] as? String ?? ""
+        let iconName = element["icon"] as? String ?? ""
         let bind = element["bind"] as? [String: Any]
-        let checkedExpr = bind?["checked"] as? String
+        // Accept bind.value or bind.checked: panels prefer ``value``,
+        // dialogs and align/stroke radios use ``checked``. Mirrors the
+        // Rust render_toggle fallback chain.
+        let stateExpr = (bind?["value"] as? String) ?? (bind?["checked"] as? String)
         let isChecked: Bool = {
-            if let e = checkedExpr {
+            if let e = stateExpr {
                 return evaluate(e, context: context).toBool()
             }
             return false
         }()
-        let writeTarget = writeBackTarget(checkedExpr)
+        let writeTarget = writeBackTarget(stateExpr)
         let isDisabled: Bool = {
             if let disExpr = bind?["disabled"] as? String {
                 return evaluate(disExpr, context: context).toBool()
@@ -1773,7 +1828,7 @@ struct YamlElementView: View {
         // States. Mirrors the Rust ``render_toggle`` special-case.
         let maskRoute: String? = {
             guard panelId == "opacity_panel_content" else { return nil }
-            switch checkedExpr?.trimmingCharacters(in: .whitespaces) {
+            switch stateExpr?.trimmingCharacters(in: .whitespaces) {
             case "selection_mask_clip": return "clip"
             case "selection_mask_invert": return "invert"
             default: return nil
@@ -1781,23 +1836,66 @@ struct YamlElementView: View {
         }()
         let capturedModel = model
 
-        Toggle(label, isOn: Binding<Bool>(
-            get: { isChecked },
-            set: { newVal in
-                if let route = maskRoute, let m = capturedModel {
-                    let ctrl = Controller(model: m)
-                    if route == "clip" {
-                        ctrl.setMaskClipOnSelection(newVal)
-                    } else {
-                        ctrl.setMaskInvertOnSelection(newVal)
-                    }
-                    return
+        let onToggle: (Bool) -> Void = { newVal in
+            if let route = maskRoute, let m = capturedModel {
+                let ctrl = Controller(model: m)
+                if route == "clip" {
+                    ctrl.setMaskClipOnSelection(newVal)
+                } else {
+                    ctrl.setMaskInvertOnSelection(newVal)
                 }
-                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
+                return
             }
-        ))
-            .toggleStyle(.checkbox)
-            .disabled(isDisabled)
+            if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
+        }
+
+        if !iconName.isEmpty {
+            // Icon-toggle: square button with the workspace icon glyph
+            // and a highlighted background when checked. Matches the
+            // Rust render_toggle icon-mode and CHARACTER.md "icon_toggle"
+            // spec used by the 6 character-formatting toggles.
+            let summary = element["summary"] as? String ?? ""
+            let style = element["style"] as? [String: Any] ?? [:]
+            let w: CGFloat = {
+                if let n = style["width"] as? CGFloat { return n }
+                if let n = style["width"] as? Double { return CGFloat(n) }
+                if let n = style["width"] as? Int { return CGFloat(n) }
+                return 28
+            }()
+            let checkedBg: SwiftUI.Color = theme.map {
+                SwiftUI.Color(nsColor: $0.buttonChecked)
+            } ?? SwiftUI.Color.gray.opacity(0.3)
+            if let theme = theme,
+               WorkspaceIconCache.shared.lookup(iconName) != nil {
+                Button(action: { onToggle(!isChecked) }) {
+                    WorkspaceIcon(name: iconName, size: w - 4, tint: theme.text)
+                        .padding(2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(isChecked ? checkedBg : .clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(summary)
+                .disabled(isDisabled)
+            } else {
+                Button(summary.isEmpty ? label : summary) { onToggle(!isChecked) }
+                    .buttonStyle(.plain)
+                    .padding(2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(isChecked ? checkedBg : .clear)
+                    )
+                    .disabled(isDisabled)
+            }
+        } else {
+            Toggle(label, isOn: Binding<Bool>(
+                get: { isChecked },
+                set: onToggle
+            ))
+                .toggleStyle(.checkbox)
+                .disabled(isDisabled)
+        }
     }
 
     // MARK: - Combo Box
@@ -1827,7 +1925,13 @@ struct YamlElementView: View {
             let l = opt["label"] as? String ?? ""
             return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
         }
-        Picker("", selection: Binding<String>(
+        // When the YAML declares style.width: "100%" (the convention for
+        // panel rows where the dropdown shares a col cell with sibling
+        // inputs), fill the parent column so widths line up. Otherwise
+        // take intrinsic width so the combo doesn't ballow into empty
+        // space.
+        let fillsParent = (element["style"] as? [String: Any])?["width"] as? String == "100%"
+        let picker = Picker("", selection: Binding<String>(
             get: { currentValue },
             set: { newVal in
                 if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
@@ -1838,6 +1942,13 @@ struct YamlElementView: View {
             }
         }
         .labelsHidden()
+        if fillsParent {
+            // Leave a trailing gap so the dropdown doesn't crowd the
+            // next col-2 icon to its right (matches renderNumberInput).
+            picker.frame(maxWidth: .infinity).padding(.trailing, 24)
+        } else {
+            picker.fixedSize(horizontal: true, vertical: false)
+        }
     }
 
     // MARK: - Children

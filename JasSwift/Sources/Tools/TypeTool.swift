@@ -90,6 +90,19 @@ class TypeTool: CanvasTool {
     /// Public test accessor.
     var currentSession: TextEditSession? { session }
 
+    /// Convert screen-space (x, y) into document-space coords by
+    /// undoing the canvas's pan + zoom transform. CanvasNSView passes
+    /// raw `pt.x` / `pt.y` to `onPress`/`onMove`/etc; YamlTool's
+    /// pointerPayload runs the same math internally, but TypeTool
+    /// historically used the raw values, which placed text at the
+    /// pointer's screen position rather than its doc position.
+    private func toDoc(_ ctx: ToolContext, _ x: Double, _ y: Double) -> (Double, Double) {
+        let z = ctx.model.zoomLevel
+        if z == 0 { return (x, y) }
+        return ((x - ctx.model.viewOffsetX) / z,
+                (y - ctx.model.viewOffsetY) / z)
+    }
+
     private func buildLayout(_ ctx: ToolContext) -> (TextRender, TextLayout)? {
         guard let s = session, s.target == .text else { return nil }
         guard pathIsValid(ctx.document, s.path) else { return nil }
@@ -97,7 +110,13 @@ class TypeTool: CanvasTool {
         let measure = makeMeasurer(family: t.fontFamily, weight: t.fontWeight,
                                    style: t.fontStyle, size: t.fontSize)
         let maxW = (t.width > 0 && t.height > 0) ? t.width : 0.0
-        let lay = layoutText(s.content, maxWidth: maxW, fontSize: t.fontSize, measure: measure)
+        // Use per-tspan glyph widths so the layout's char positions
+        // line up with the canvas's per-tspan rendering — without this
+        // a bold range would render wider than the layout assumed and
+        // the selection-highlight rectangles would drift.
+        let widths = textPerCharWidths(t.tspans, element: t)
+        let lay = layoutText(s.content, maxWidth: maxW, fontSize: t.fontSize,
+                             measure: measure, perCharWidths: widths)
         let tr = TextRender(x: t.x, y: t.y, fontSize: t.fontSize,
                             textWidth: t.width, textHeight: t.height,
                             fill: t.fill, stroke: t.stroke, content: s.content)
@@ -121,6 +140,16 @@ class TypeTool: CanvasTool {
         if let newDoc = s.applyToDocument(ctx.document) {
             ctx.controller.setDocument(newDoc)
         }
+    }
+
+    /// Force a Character-panel re-render by bumping panelStateVersion.
+    /// Call after the session's insertion/anchor changes so range-aware
+    /// panel widgets (style_name dropdown, all_caps highlight, etc.)
+    /// re-evaluate against the new selection range. The canvas redraw
+    /// is already handled by `ctx.requestUpdate()`, but the SwiftUI
+    /// panel views observe panelStateVersion separately.
+    private func bumpPanelStateVersion(_ ctx: ToolContext) {
+        ctx.model.panelStateVersion &+= 1
     }
 
     private func beginSessionExisting(_ ctx: ToolContext, path: ElementPath, elem: Element, cursor: Int) {
@@ -157,7 +186,8 @@ class TypeTool: CanvasTool {
         ctx?.model.currentEditSession = nil
     }
 
-    func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+    func onPress(_ ctx: ToolContext, x screenX: Double, y screenY: Double, shift: Bool, alt: Bool) {
+        let (x, y) = toDoc(ctx, screenX, screenY)
         if let s = session {
             if pathIsValid(ctx.document, s.path) {
                 let elem = ctx.document.getElement(s.path)
@@ -167,6 +197,7 @@ class TypeTool: CanvasTool {
                     s.setInsertion(cursor, extend: false)
                     s.dragActive = true
                     s.blinkEpochMs = nowMs()
+                    bumpPanelStateVersion(ctx)
                     ctx.requestUpdate()
                     return
                 }
@@ -180,6 +211,7 @@ class TypeTool: CanvasTool {
                 s2.setInsertion(cursor, extend: false)
                 s2.dragActive = true
                 s2.blinkEpochMs = nowMs()
+                bumpPanelStateVersion(ctx)
                 ctx.requestUpdate()
             }
         } else {
@@ -187,11 +219,13 @@ class TypeTool: CanvasTool {
         }
     }
 
-    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
+    func onMove(_ ctx: ToolContext, x screenX: Double, y screenY: Double, shift: Bool, dragging: Bool) {
+        let (x, y) = toDoc(ctx, screenX, screenY)
         if let s = session, s.dragActive, dragging {
             let cursor = cursorAt(ctx, x, y)
             s.setInsertion(cursor, extend: true)
             s.blinkEpochMs = nowMs()
+            bumpPanelStateVersion(ctx)
             ctx.requestUpdate()
             return
         }
@@ -206,7 +240,8 @@ class TypeTool: CanvasTool {
         }
     }
 
-    func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+    func onRelease(_ ctx: ToolContext, x screenX: Double, y screenY: Double, shift: Bool, alt: Bool) {
+        let (x, y) = toDoc(ctx, screenX, screenY)
         if let s = session {
             s.dragActive = false
             s.blinkEpochMs = nowMs()
@@ -226,7 +261,8 @@ class TypeTool: CanvasTool {
         ctx.requestUpdate()
     }
 
-    func onDoubleClick(_ ctx: ToolContext, x: Double, y: Double) {
+    func onDoubleClick(_ ctx: ToolContext, x screenX: Double, y screenY: Double) {
+        let (_, _) = toDoc(ctx, screenX, screenY)
         guard let s = session else { return }
         s.selectAll()
         s.blinkEpochMs = nowMs()
@@ -309,7 +345,7 @@ class TypeTool: CanvasTool {
         let lower = key.lowercased()
 
         if cmd && lower == "a" {
-            s.selectAll(); bump(); ctx.requestUpdate(); return true
+            s.selectAll(); bump(); bumpPanelStateVersion(ctx); ctx.requestUpdate(); return true
         }
         if cmd && lower == "z" {
             if mods.shift { s.redo() } else { s.undo() }
@@ -355,29 +391,29 @@ class TypeTool: CanvasTool {
             bump(); syncToModel(ctx); ctx.requestUpdate(); return true
         case "ArrowLeft":
             s.setInsertion(s.insertion - 1, extend: mods.shift)
-            bump(); ctx.requestUpdate(); return true
+            bump(); bumpPanelStateVersion(ctx); ctx.requestUpdate(); return true
         case "ArrowRight":
             s.setInsertion(s.insertion + 1, extend: mods.shift)
-            bump(); ctx.requestUpdate(); return true
+            bump(); bumpPanelStateVersion(ctx); ctx.requestUpdate(); return true
         case "ArrowUp", "ArrowDown":
             if let (_, lay) = buildLayout(ctx) {
                 let np = key == "ArrowUp" ? lay.cursorUp(s.insertion) : lay.cursorDown(s.insertion)
                 s.setInsertion(np, extend: mods.shift)
-                bump(); ctx.requestUpdate()
+                bump(); bumpPanelStateVersion(ctx); ctx.requestUpdate()
             }
             return true
         case "Home":
             if let (_, lay) = buildLayout(ctx) {
                 let lineNo = lay.lineForCursor(s.insertion)
                 s.setInsertion(lay.lines[lineNo].start, extend: mods.shift)
-                bump(); ctx.requestUpdate()
+                bump(); bumpPanelStateVersion(ctx); ctx.requestUpdate()
             }
             return true
         case "End":
             if let (_, lay) = buildLayout(ctx) {
                 let lineNo = lay.lineForCursor(s.insertion)
                 s.setInsertion(lay.lines[lineNo].end, extend: mods.shift)
-                bump(); ctx.requestUpdate()
+                bump(); bumpPanelStateVersion(ctx); ctx.requestUpdate()
             }
             return true
         default:
@@ -390,13 +426,28 @@ class TypeTool: CanvasTool {
     }
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
+        // The canvas runs drawOverlay in screen space (post-transform)
+        // so YamlTool's screen-stored marquee rect renders correctly.
+        // TypeTool stores doc-space coords (text element x/y, drag
+        // rect from doc-converted onPress/onMove); apply the canvas
+        // transform here so caret + drag rect line up with the
+        // rendered text.
+        let z = ctx.model.zoomLevel
+        let ox = ctx.model.viewOffsetX
+        let oy = ctx.model.viewOffsetY
+        func toScreenX(_ d: Double) -> Double { d * z + ox }
+        func toScreenY(_ d: Double) -> Double { d * z + oy }
+
         // Drag-create rect preview
         if session == nil, case .dragging(let sx, let sy, let ex, let ey) = state {
             cgCtx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
             cgCtx.setLineWidth(1.0)
             cgCtx.setLineDash(phase: 0, lengths: [4, 4])
-            let r = CGRect(x: min(sx, ex), y: min(sy, ey),
-                           width: abs(ex - sx), height: abs(ey - sy))
+            let x0 = toScreenX(min(sx, ex))
+            let y0 = toScreenY(min(sy, ey))
+            let r = CGRect(x: x0, y: y0,
+                           width: abs(ex - sx) * z,
+                           height: abs(ey - sy) * z)
             cgCtx.addRect(r)
             cgCtx.strokePath()
             cgCtx.setLineDash(phase: 0, lengths: [])
@@ -404,10 +455,11 @@ class TypeTool: CanvasTool {
 
         guard let s = session, let (tr, lay) = buildLayout(ctx) else { return }
 
-        // Layout-local origin: `(x, y)` is the top of the layout box for
-        // both point text and area text.
-        let originX = tr.x
-        let originY = tr.y
+        // Layout-local origin in screen space. tr.x / tr.y are the
+        // text element's doc coords; convert to screen so the caret
+        // sits where the user sees the text drawn.
+        let originX = toScreenX(tr.x)
+        let originY = toScreenY(tr.y)
 
         // Selection highlight
         if s.hasSelection {
@@ -423,8 +475,14 @@ class TypeTool: CanvasTool {
                 }
                 let xLo = lineLo == line.start ? 0.0 : (glyphX(lineLo) ?? 0.0)
                 let xHi = lineHi == line.end ? line.width : (glyphX(lineHi) ?? line.width)
-                let r = CGRect(x: originX + xLo, y: originY + line.top,
-                               width: xHi - xLo, height: line.height)
+                // Layout offsets (xLo / xHi / line.top / line.height)
+                // are in the same coord space as the element's font
+                // size — i.e. doc units. Scale by the canvas zoom so
+                // the highlight tracks the rendered glyphs.
+                let r = CGRect(x: originX + xLo * z,
+                               y: originY + line.top * z,
+                               width: (xHi - xLo) * z,
+                               height: line.height * z)
                 cgCtx.fill(r)
             }
         }
@@ -447,8 +505,12 @@ class TypeTool: CanvasTool {
             let (cr, cg, cb, _) = color.toRgba()
             cgCtx.setStrokeColor(CGColor(red: cr, green: cg, blue: cb, alpha: 1.0))
             cgCtx.setLineWidth(1.5)
-            cgCtx.move(to: CGPoint(x: originX + cx, y: originY + cy - ch * 0.8))
-            cgCtx.addLine(to: CGPoint(x: originX + cx, y: originY + cy + ch * 0.2))
+            // Same doc → screen scaling as the highlight rects above.
+            let sx = originX + cx * z
+            let topY = originY + (cy - ch * 0.8) * z
+            let botY = originY + (cy + ch * 0.2) * z
+            cgCtx.move(to: CGPoint(x: sx, y: topY))
+            cgCtx.addLine(to: CGPoint(x: sx, y: botY))
             cgCtx.strokePath()
         }
     }
