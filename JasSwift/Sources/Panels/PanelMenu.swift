@@ -37,7 +37,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     switch kind {
     case .layers: LayersPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .color: ColorPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
-    case .swatches: SwatchesPanel.dispatch(cmd, addr: addr, layout: &layout)
+    case .swatches: SwatchesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .stroke: StrokePanel.dispatch(cmd, addr: addr, layout: &layout)
     case .properties: PropertiesPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .character: CharacterPanel.dispatch(cmd, addr: addr, layout: &layout)
@@ -51,11 +51,16 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
 }
 
 /// Query whether a toggle/radio command is checked for a panel kind.
-public func panelIsChecked(_ kind: PanelKind, cmd: String, layout: WorkspaceLayout) -> Bool {
+/// `model` is optional so legacy call sites without one still work; panels
+/// whose checked state mirrors panel-state (e.g. Swatches' thumbnail_size
+/// radio) need it to read the StateStore.
+public func panelIsChecked(_ kind: PanelKind, cmd: String,
+                           layout: WorkspaceLayout, model: Model? = nil) -> Bool {
     switch kind {
     case .layers: return LayersPanel.isChecked(cmd, layout: layout)
     case .color: return ColorPanel.isChecked(cmd, layout: layout)
-    case .swatches: return SwatchesPanel.isChecked(cmd, layout: layout)
+    case .swatches:
+        return SwatchesPanel.isCheckedWithModel(cmd, model: model)
     case .stroke: return StrokePanel.isChecked(cmd, layout: layout)
     case .properties: return PropertiesPanel.isChecked(cmd, layout: layout)
     case .character: return CharacterPanel.isChecked(cmd, layout: layout)

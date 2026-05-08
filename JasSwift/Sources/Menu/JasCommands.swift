@@ -356,10 +356,18 @@ public struct JasCommands: Commands {
                 Divider()
             }
 
-            panelToggle(.layers, "Layers")
+            panelToggle(.align, "Align")
+            panelToggle(.artboards, "Artboards")
+            panelToggle(.boolean, "Boolean")
+            panelToggle(.character, "Character")
             panelToggle(.color, "Color")
-            panelToggle(.stroke, "Stroke")
+            panelToggle(.layers, "Layers")
+            panelToggle(.magicWand, "Magic Wand")
+            panelToggle(.opacity, "Opacity")
+            panelToggle(.paragraph, "Paragraph")
             panelToggle(.properties, "Properties")
+            panelToggle(.stroke, "Stroke")
+            panelToggle(.swatches, "Swatches")
         }
     }
 
