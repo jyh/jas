@@ -501,9 +501,7 @@ public class Controller {
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
-        model.document = Document(layers: newLayers,
-                                  selectedLayer: newDoc.selectedLayer,
-                                  selection: newSelection)
+        model.document = newDoc.replacing(layers: newLayers, selection: newSelection)
     }
 
     /// Ungroup all selected Group elements, replacing each with its children.
@@ -538,8 +536,7 @@ public class Controller {
                                 opacity: layer.opacity, transform: layer.transform)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
-            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
-                              selection: [])
+            newDoc = newDoc.replacing(layers: newLayers, selection: [])
         }
         // Build selection for all unpacked children
         var newSelection: Selection = []
@@ -556,9 +553,7 @@ public class Controller {
             }
             offset += nChildren - 1
         }
-        model.document = Document(layers: newDoc.layers,
-                                  selectedLayer: newDoc.selectedLayer,
-                                  selection: newSelection)
+        model.document = newDoc.replacing(selection: newSelection)
     }
 
     /// Make a compound shape from the current selection using UNION.
@@ -608,9 +603,7 @@ public class Controller {
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
-        model.document = Document(layers: newLayers,
-                                  selectedLayer: newDoc.selectedLayer,
-                                  selection: newSelection)
+        model.document = newDoc.replacing(layers: newLayers, selection: newSelection)
     }
 
     /// Alt/Option+click on the four Shape Mode buttons. Creates a
@@ -656,8 +649,7 @@ public class Controller {
                                 opacity: layer.opacity, transform: layer.transform)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
-            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
-                              selection: [])
+            newDoc = newDoc.replacing(layers: newLayers, selection: [])
         }
         var newSelection: Selection = []
         var offset = 0
@@ -671,9 +663,7 @@ public class Controller {
             }
             offset += n - 1
         }
-        model.document = Document(layers: newDoc.layers,
-                                  selectedLayer: newDoc.selectedLayer,
-                                  selection: newSelection)
+        model.document = newDoc.replacing(selection: newSelection)
     }
 
     /// Expand every selected compound shape into static Polygon
@@ -709,8 +699,7 @@ public class Controller {
                                 opacity: layer.opacity, transform: layer.transform)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
-            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
-                              selection: [])
+            newDoc = newDoc.replacing(layers: newLayers, selection: [])
         }
         expandedCounts.reverse()
         var newSelection: Selection = []
@@ -723,9 +712,7 @@ public class Controller {
             }
             offset += n - 1
         }
-        model.document = Document(layers: newDoc.layers,
-                                  selectedLayer: newDoc.selectedLayer,
-                                  selection: newSelection)
+        model.document = newDoc.replacing(selection: newSelection)
     }
 
     /// Destructively apply one of the nine boolean ops to the
@@ -900,9 +887,7 @@ public class Controller {
         for i in 0..<newElements.count {
             newSelection.insert(ElementSelection.all([layerIdx, childIdx + i]))
         }
-        model.document = Document(layers: newLayers,
-                                  selectedLayer: newDoc.selectedLayer,
-                                  selection: newSelection)
+        model.document = newDoc.replacing(layers: newLayers, selection: newSelection)
     }
 
     /// Re-apply the last destructive or compound-creating boolean op
@@ -1227,8 +1212,7 @@ public class Controller {
             // Copying always selects the new element as a whole.
             newSelection.insert(ElementSelection.all(copyPath))
         }
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: newSelection)
+        model.document = doc.replacing(selection: newSelection)
     }
 }
 

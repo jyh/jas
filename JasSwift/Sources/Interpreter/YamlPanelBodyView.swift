@@ -713,6 +713,17 @@ struct YamlElementView: View {
             model.stateStore.setActivePanel(pid)
         }
         for entry in behavior where (entry["event"] as? String) == "click" {
+            // Honor `condition:` so behavior entries can branch on
+            // modifier state (e.g. Boolean panel's "alt-click =
+            // make compound shape" pattern). When the condition
+            // evaluates to false against the click ctx, skip this
+            // entry — without this every modifier-conditional pair
+            // fired both branches and the second-listed one
+            // unconditionally won.
+            if let cond = entry["condition"] as? String,
+               !evaluate(cond, context: ctxWithEvent).toBool() {
+                continue
+            }
             // A click behavior may carry `effects:` (a list run
             // through runEffects), or `action:` (an action name in
             // the YAML actions catalog). The Color panel's None /
