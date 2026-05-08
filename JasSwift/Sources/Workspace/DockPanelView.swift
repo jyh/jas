@@ -183,7 +183,8 @@ public struct PanelGroupView: View {
                                 contentSpec: content,
                                 panelId: contentId,
                                 theme: theme,
-                                contextProvider: { buildPanelCtx(ws: ws, contentId: contentId) }
+                                contextProvider: { buildPanelCtx(ws: ws, contentId: contentId) },
+                                yamlDialogState: yamlDialogState
                             )
                         } else {
                             let ctx = buildPanelCtx(ws: ws, contentId: contentId)
@@ -388,48 +389,91 @@ public struct PanelGroupView: View {
                 binding.wrappedValue = newState
             }
         }
-        return Menu {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                switch item {
-                case .action(let label, let command, _):
-                    Button(label) { dispatchWithDialogBridge(command) }
-                case .toggle(let label, let command):
-                    let checked = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
-                    Button {
-                        dispatchWithDialogBridge(command)
-                    } label: {
-                        if checked {
-                            SwiftUI.Label(label, systemImage: "checkmark")
-                        } else {
-                            SwiftUI.Text(label)
-                        }
-                    }
-                case .radio(let label, let command, _):
-                    let selected = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
-                    Button {
-                        dispatchWithDialogBridge(command)
-                    } label: {
-                        if selected {
-                            SwiftUI.Label(label, systemImage: "checkmark")
-                        } else {
-                            SwiftUI.Text(label)
-                        }
-                    }
-                case .separator:
-                    Divider()
-                }
-            }
-        } label: {
-            SwiftUI.Text(verbatim: "\u{2261}")
-                .font(.system(size: 18))
-                .foregroundColor(SwiftUI.Color(nsColor: theme.textButton))
+        // SwiftUI's `Menu` primitive ignores `foregroundColor` on its
+        // label and reserves space for an indicator chevron we can't
+        // suppress, so the hamburger came out dark and over-wide
+        // (pushing the dock chevron off the edge). Build it from a
+        // plain Button that pops an NSMenu programmatically; that
+        // gives full control over color and width.
+        return HamburgerMenuButton(
+            items: items,
+            color: theme.text,
+            isChecked: { cmd in
+                panelIsChecked(activeKind, cmd: cmd,
+                               layout: workspaceLayout, model: model)
+            },
+            onSelect: dispatchWithDialogBridge
+        )
+    }
+}
+
+/// Hamburger menu button used in the panel-group header. Built from
+/// a plain SwiftUI Button + native NSMenu so we can force the color
+/// (theme.text) and keep the hit area tight to the glyph — SwiftUI's
+/// own `Menu` primitive overrode both. The NSMenu is rebuilt on each
+/// click so toggle/radio checkmarks reflect the current layout state.
+private struct HamburgerMenuButton: View {
+    let items: [PanelMenuItem]
+    let color: NSColor
+    let isChecked: (String) -> Bool
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        Button(action: showMenu) {
+            SwiftUI.Image(systemName: "line.3.horizontal")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(SwiftUI.Color(nsColor: color))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
+                .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.plain)
     }
+
+    private func showMenu() {
+        let menu = NSMenu()
+        for item in items {
+            switch item {
+            case .action(let label, let command, _):
+                menu.addItem(buildItem(label: label, command: command, checked: false))
+            case .toggle(let label, let command):
+                menu.addItem(buildItem(label: label, command: command, checked: isChecked(command)))
+            case .radio(let label, let command, _):
+                menu.addItem(buildItem(label: label, command: command, checked: isChecked(command)))
+            case .separator:
+                menu.addItem(NSMenuItem.separator())
+            }
+        }
+        // Pop at the current event location so the menu drops below
+        // the hamburger button. Falls back to NSApp.currentEvent when
+        // the click event isn't directly available.
+        if let event = NSApp.currentEvent {
+            NSMenu.popUpContextMenu(menu, with: event, for: NSApp.keyWindow?.contentView ?? NSView())
+        }
+    }
+
+    private func buildItem(label: String, command: String, checked: Bool) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: label,
+            action: #selector(MenuActionTarget.fire(_:)),
+            keyEquivalent: ""
+        )
+        let target = MenuActionTarget(callback: { onSelect(command) })
+        item.target = target
+        item.representedObject = target  // retain
+        item.state = checked ? .on : .off
+        return item
+    }
+}
+
+/// Retained target for NSMenuItem callbacks — NSMenuItem holds a weak
+/// `target`, so without an external owner the action target would
+/// deallocate before the click fires. Stored in `representedObject`
+/// to extend its lifetime to the menu's.
+private final class MenuActionTarget: NSObject {
+    let callback: () -> Void
+    init(callback: @escaping () -> Void) { self.callback = callback }
+    @objc func fire(_ sender: Any) { callback() }
 }
 
 // MARK: - Floating Dock View
@@ -513,15 +557,30 @@ private struct PanelBodyObserver: View {
     let panelId: String
     let theme: Theme
     let contextProvider: () -> [String: Any]
+    /// Forwarded from PanelGroupView so a widget-level `open_dialog`
+    /// effect (e.g., double-clicking a library swatch) can copy the
+    /// store dialog state into the SwiftUI overlay binding owned by
+    /// ContentView. Mirrors the menu-path bridge in
+    /// ``PanelGroupView/hamburgerButton``.
+    var yamlDialogState: Binding<YamlDialogState?>? = nil
 
     var body: some View {
         // Read panelStateVersion so SwiftUI re-evaluates this view
         // whenever a widget commits a panel-state write.
         _ = model.panelStateVersion
         let ctx = contextProvider()
+        let capturedModel = model
+        let capturedDialog = yamlDialogState
+        let onStoreDialogOpened: () -> Void = {
+            if let binding = capturedDialog,
+               let newState = yamlDialogStateFromStore(capturedModel.stateStore) {
+                binding.wrappedValue = newState
+            }
+        }
         return YamlPanelBodyView(
             contentSpec: contentSpec, context: ctx,
-            model: model, panelId: panelId, theme: theme
+            model: model, panelId: panelId, theme: theme,
+            onStoreDialogOpened: onStoreDialogOpened
         )
     }
 }
