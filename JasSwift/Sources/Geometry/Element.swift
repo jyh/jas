@@ -979,6 +979,53 @@ public enum Element: Equatable {
                                           fill: v.fill, stroke: v.stroke,
                                           opacity: v.opacity, transform: v.transform,
                                           locked: v.locked))
+        case .text:
+            // Text resize/move via corner handles. When the whole
+            // element is selected (kind=.all, e.g. clicking the
+            // body and dragging) translate by (dx, dy). When a
+            // single corner is selected, scale the text
+            // proportionally about the opposite corner — diagonal
+            // distance ratio drives both font-size and origin so
+            // the fixed corner stays put.
+            if kind.isAll(total: 4) {
+                return self.translated(dx: dx, dy: dy)
+            }
+            guard case .text(let v) = self else { return self }
+            let cornerIdx = (0..<4).first(where: { kind.contains($0) })
+            guard let ci = cornerIdx else { return self }
+            let b = self.bounds
+            let corners: [(Double, Double)] = [
+                (b.x, b.y), (b.x + b.width, b.y),
+                (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)
+            ]
+            let opp = corners[(ci + 2) % 4]
+            let cur = corners[ci]
+            let new = (cur.0 + dx, cur.1 + dy)
+            let oldDiag = sqrt((cur.0 - opp.0) * (cur.0 - opp.0)
+                              + (cur.1 - opp.1) * (cur.1 - opp.1))
+            guard oldDiag > 0 else { return self }
+            let newDiag = sqrt((new.0 - opp.0) * (new.0 - opp.0)
+                              + (new.1 - opp.1) * (new.1 - opp.1))
+            let scale = max(0.1, min(50.0, newDiag / oldDiag))
+            let nx = opp.0 + (v.x - opp.0) * scale
+            let ny = opp.1 + (v.y - opp.1) * scale
+            return .text(Text(
+                x: nx, y: ny, tspans: v.tspans,
+                fontFamily: v.fontFamily, fontSize: v.fontSize * scale,
+                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                textDecoration: v.textDecoration,
+                textTransform: v.textTransform, fontVariant: v.fontVariant,
+                baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+                letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+                aaMode: v.aaMode, rotate: v.rotate,
+                horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+                kerning: v.kerning,
+                width: v.width * scale, height: v.height * scale,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked,
+                visibility: v.visibility, blendMode: v.blendMode,
+                mask: v.mask, name: v.name))
         default:
             return self
         }

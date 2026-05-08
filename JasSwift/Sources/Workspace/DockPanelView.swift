@@ -232,7 +232,7 @@ public struct PanelGroupView: View {
         // selected, the Character panel reflects its attributes rather
         // than the stored panel defaults. Mirrors the Rust dock
         // `build_live_panel_overrides` block.
-        if contentId == "character_panel", let m = model,
+        if contentId == "character_panel_content", let m = model,
            let overrides = characterPanelLiveOverrides(model: m) {
             for (k, v) in overrides { panelMap[k] = v }
         }
@@ -359,7 +359,11 @@ public struct PanelGroupView: View {
     }
 
     private func chevronButton() -> some View {
-        let label = group.collapsed ? "\u{00BB}" : "\u{00AB}"
+        // Right-edge dock convention: when expanded, the chevron
+        // points toward the dock edge (»); when collapsed, it points
+        // away (« — "expand back out"). The previous mapping was
+        // inverted, so the arrow looked wrong.
+        let label = group.collapsed ? "\u{00AB}" : "\u{00BB}"
         return Button(label) {
             workspaceLayout.toggleGroupCollapsed(GroupAddr(dockId: dockId, groupIdx: groupIdx))
             workspaceLayout.saveIfNeeded()
