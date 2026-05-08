@@ -1726,7 +1726,7 @@ private func drawArtboardDisplayMarks(_ ctx: CGContext, _ doc: Document) {
     }
 }
 
-private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
+private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjectPath: ElementPath? = nil) {
     for es in doc.selection {
         let path = es.path
         guard !path.isEmpty else { continue }
@@ -1764,6 +1764,21 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
         case .live(let v): applyTransform(ctx, v.transform)
         }
         drawElementOverlay(ctx, node, kind: es.kind)
+        // Key-object indicator: thicker accent outline around the
+        // element's bounds so the user can see which selected element
+        // is currently the Align panel's key. Drawn on top of the
+        // normal selection overlay so it never disappears.
+        if let kp = keyObjectPath, kp == path {
+            let b = node.bounds
+            ctx.setStrokeColor(selectionColor)
+            ctx.setLineWidth(3.0)
+            ctx.setLineDash(phase: 0, lengths: [])
+            // Inflate by ~3pt so it sits visibly outside the normal
+            // selection outline.
+            ctx.addRect(CGRect(x: b.x - 3, y: b.y - 3,
+                               width: b.width + 6, height: b.height + 6))
+            ctx.strokePath()
+        }
         ctx.restoreGState()
     }
 }
@@ -2214,7 +2229,14 @@ class CanvasNSView: NSView {
         // Layer 8: per-artboard display marks.
         drawArtboardDisplayMarks(ctx, document)
         // Layer 9: selection overlays.
-        drawSelectionOverlays(ctx, document)
+        let keyObjectPath: ElementPath? = {
+            guard let model = controller?.model,
+                  let dict = model.stateStore.get("align_key_object_path") as? [String: Any],
+                  let arr = dict["__path__"] as? [Int]
+            else { return nil }
+            return arr
+        }()
+        drawSelectionOverlays(ctx, document, keyObjectPath)
         ctx.restoreGState()
         // Active tool overlay (screen-space, post-transform).
         if let toolCtx = toolContext {
@@ -2569,8 +2591,14 @@ class CanvasNSView: NSView {
         // §Align To target). While the panel is in key-object
         // mode, canvas clicks designate / redesignate / clear the
         // key object instead of going through the active tool.
+        // Convert screen → doc coords first; the bounds we hit-test
+        // against are in document space. Same math YamlTool's
+        // pointerPayload runs.
+        let z = ctx.model.zoomLevel
+        let docX: Double = z == 0 ? Double(pt.x) : (Double(pt.x) - ctx.model.viewOffsetX) / z
+        let docY: Double = z == 0 ? Double(pt.y) : (Double(pt.y) - ctx.model.viewOffsetY) / z
         if tryDesignateAlignKeyObject(model: ctx.model, store: ctx.model.stateStore,
-                                       x: pt.x, y: pt.y) {
+                                       x: docX, y: docY) {
             ensureBlinkTimer()
             return
         }

@@ -481,13 +481,31 @@ private func runOne(
             return
         }
         if let actionsDef = actions, let actionDef = actionsDef[actionName] as? [String: Any] {
-            let actionEffects = actionDef["effects"] as? [[String: Any]] ?? []
+            // The action's `effects:` is a heterogeneous YAML list — bare
+            // string entries (`- snapshot`) coexist with map entries
+            // (`- align_left: true`, `- dispatch: ...`). The previous
+            // `as? [[String: Any]]` cast required every element to be a
+            // dict and silently produced an empty array on mixed lists,
+            // which is why dispatching the Align panel actions did
+            // nothing despite resolving correctly.
+            let actionEffects = actionDef["effects"] as? [Any] ?? []
             var dispatchCtx = ctx
             if !params.isEmpty {
                 var resolved: [String: Any] = [:]
                 for (k, v) in params {
                     let val = evalExpr(v, store: store, ctx: ctx)
-                    resolved[k] = valueToAny(val)
+                    if let any = valueToAny(val) {
+                        resolved[k] = any
+                    } else if let exprStr = v as? String {
+                        // Bare-identifier convention used in YAML params
+                        // like `{ target: artboard }`: when the
+                        // expression evaluates to null, treat the raw
+                        // string as a literal so the value flows through.
+                        // Without this, dispatch param resolution dropped
+                        // bare-identifier values and downstream
+                        // `param.<key>` reads silently became nil.
+                        resolved[k] = exprStr
+                    }
                 }
                 dispatchCtx["param"] = resolved
             }
@@ -705,7 +723,24 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
     }
     guard let base = baseStroke ?? controller.model.defaultStroke else { return }
 
-    let width = controller.model.defaultStroke?.width ?? base.width
+    // Stroke weight: read from panel state (where the length_input
+    // commits via commitPanelWrite), not from defaultStroke.width.
+    // The legacy fallback to model.defaultStroke / base meant typed
+    // values silently bounced back to whatever width the existing
+    // stroke had — exactly the symptom of "stroke weight does
+    // nothing." Numeric values arrive as Int / Double / NSNumber
+    // depending on commit path; cover all three.
+    let pid = "stroke_panel_content"
+    let panelWeight: Double? = {
+        let raw = controller.model.stateStore.getPanel(pid, "weight")
+        if let n = raw as? NSNumber { return n.doubleValue }
+        if let d = raw as? Double { return d }
+        if let i = raw as? Int { return Double(i) }
+        return nil
+    }()
+    let width = panelWeight
+        ?? controller.model.defaultStroke?.width
+        ?? base.width
     let newStroke = Stroke(color: base.color, width: width, linecap: cap, linejoin: join,
                            miterLimit: miterLimit, align: align, dashPattern: dashPattern,
                            dashAlignAnchors: dashAlignAnchors,
@@ -2194,6 +2229,18 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
     let explicitGap: Double? = {
         if alignTo != "key_object" { return nil }
         if reference.keyPath == nil { return nil }
+        // The number_input commits via commitPanelWrite which writes
+        // to panel state under `distribute_spacing_value`. The global
+        // `align_distribute_spacing` mirror is only updated by the
+        // reset action's dual-write today, so reading it here returned
+        // 0 for a freshly-typed value. Read panel state directly,
+        // falling back to global for any code path that pre-seeds it.
+        let pid = "align_panel_content"
+        if let n = store.getPanel(pid, "distribute_spacing_value") as? NSNumber {
+            return n.doubleValue
+        }
+        if let d = store.getPanel(pid, "distribute_spacing_value") as? Double { return d }
+        if let i = store.getPanel(pid, "distribute_spacing_value") as? Int { return Double(i) }
         if let n = store.get("align_distribute_spacing") as? NSNumber {
             return n.doubleValue
         }
@@ -2232,7 +2279,13 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
     var newDoc = model.document
     for t in translations {
         let elem = newDoc.getElement(t.path)
-        let moved = elem.withTransformTranslated(dx: t.dx, dy: t.dy)
+        // Bake the offset into raw coords (vs `withTransformTranslated`,
+        // which only updates the transform field). The bake keeps
+        // `bounds`, hit-test, and selection-overlay consistent with
+        // the rendered position — without it, a second align_left
+        // click computes deltas off the original (un-aligned) bbox
+        // and doubles the offset.
+        let moved = elem.translated(dx: t.dx, dy: t.dy)
         newDoc = newDoc.replaceElement(t.path, with: moved)
     }
     model.document = newDoc
@@ -2278,12 +2331,20 @@ public func tryDesignateAlignKeyObject(model: Model, store: StateStore,
             store.set("align_key_object_path", marker)
             store.setPanel(pid, "key_object_path", marker)
         }
-    } else {
-        // Click outside any selected element clears the key.
-        store.set("align_key_object_path", NSNull())
-        store.setPanel(pid, "key_object_path", NSNull())
+        // Bump panelStateVersion so SwiftUI re-evaluates the align
+        // button bind.disabled expressions — without this they
+        // remained "disabled" until the next unrelated re-render.
+        model.panelStateVersion &+= 1
+        return true
     }
-    return true
+    // Click missed every currently-selected element: don't consume —
+    // let the canvas tool handle it (marquee, click-to-select, etc).
+    // syncAlignKeyObjectFromSelection runs after the resulting
+    // selection change and clears the key if it's no longer in the
+    // selection, which gives the user the same spec-required "key
+    // gets cleared when no longer selected" guarantee without
+    // freezing the selection arrow in key-object mode.
+    return false
 }
 
 /// Clear the key-object path if the previously-designated key is
