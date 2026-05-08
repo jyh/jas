@@ -2160,8 +2160,15 @@ class CanvasNSView: NSView {
             if cw > 0 && ch > 0 {
                 let wasDefault = abs(model.viewportW - 888.0) < 0.5
                     && abs(model.viewportH - 900.0) < 0.5
-                model.viewportW = cw
-                model.viewportH = ch
+                // Dedupe: @Published fires on every assignment, even
+                // when the new value equals the old. Without these
+                // guards, every canvas redraw publishes a Model
+                // change, which re-renders every panel that observes
+                // the model — and that re-render mid-gesture resets
+                // SwiftUI's tap counter, breaking double-click on
+                // library swatches.
+                if model.viewportW != cw { model.viewportW = cw }
+                if model.viewportH != ch { model.viewportH = ch }
                 if wasDefault {
                     model.centerViewOnCurrentArtboard()
                 }

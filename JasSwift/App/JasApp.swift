@@ -12,6 +12,45 @@ import JasLib
 class JasAppDelegate: NSObject, NSApplicationDelegate {
     var workspace: WorkspaceState?
 
+    /// Promote the process to a regular foreground app and steal the
+    /// menu bar before any window is shown. When we relied on
+    /// `WindowGroup`'s `.onAppear` for this, macOS sometimes left the
+    /// menu bar on the previously-active app — `.onAppear` fires after
+    /// the window is up, by which point another app can already own
+    /// the menu bar. `applicationDidFinishLaunching` runs before
+    /// scenes appear, so the promotion + activation happens during
+    /// the launch handshake.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        // Pin a min content size on every Jas window so the right
+        // dock + canvas + toolbar all stay on-screen, even after a
+        // Window > Tile or other resize. SwiftUI's `.frame(minWidth:)`
+        // doesn't reliably translate into an NSWindow contentMinSize,
+        // so the dock chevron / hamburger could fall off the right
+        // edge. Apply on launch and again whenever a new window
+        // becomes key (covers File > New windows).
+        applyContentMinSize()
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil, queue: .main
+        ) { _ in
+            JasAppDelegate.applyContentMinSize()
+        }
+    }
+
+    private static let minContentSize = NSSize(width: 800, height: 540)
+    static func applyContentMinSize() {
+        for window in NSApp.windows where window.isVisible {
+            window.contentMinSize = minContentSize
+        }
+    }
+    func applyContentMinSize() { JasAppDelegate.applyContentMinSize() }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let workspace = workspace else { return .terminateNow }
         let modified = workspace.modifiedModels
@@ -56,8 +95,10 @@ struct JasApp: App {
         WindowGroup {
             ContentView(workspace: workspace)
                 .onAppear {
-                    NSApp.setActivationPolicy(.regular)
-                    NSApp.activate(ignoringOtherApps: true)
+                    // Activation policy + foreground promotion live in
+                    // JasAppDelegate.applicationDidFinishLaunching so
+                    // they run before the window is shown — see comment
+                    // there for why .onAppear was unreliable.
                     appDelegate.workspace = workspace
                     if let icnsURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
                         ?? URL(string: "file://" + #file)
