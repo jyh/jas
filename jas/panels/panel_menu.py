@@ -79,6 +79,7 @@ COLOR_MODE_TO_CMD = {v: k for k, v in COLOR_MODE_COMMANDS.items()}
 # stashes the store handle here when the Opacity panel mounts.
 # ``None`` means the panel isn't currently rendered.
 _opacity_store = None  # type: ignore[assignment]
+_character_store = None  # type: ignore[assignment]
 
 
 def set_opacity_store(store) -> None:
@@ -86,6 +87,15 @@ def set_opacity_store(store) -> None:
     YamlPanelView when the panel mounts)."""
     global _opacity_store
     _opacity_store = store
+
+
+def set_character_store(store) -> None:
+    """Register the live Character panel StateStore (called by
+    YamlPanelView when the panel mounts) so the hamburger menu
+    toggles can read / write the panel-state bools without
+    threading the store through every dispatch call site."""
+    global _character_store
+    _character_store = store
 
 
 def _opacity_store_bool(key: str, default: bool) -> bool:
@@ -106,6 +116,18 @@ def _opacity_store_set_bool(key: str, value: bool) -> None:
     if _opacity_store is None:
         return
     _opacity_store.set_panel("opacity_panel_content", key, value)
+
+
+def _character_store_bool(key: str, default: bool) -> bool:
+    """Read a bool from the Character panel's state store, falling
+    back to ``default`` when the store isn't set or the key is
+    missing / non-bool."""
+    if _character_store is None:
+        return default
+    val = _character_store.get_panel("character_panel_content", key)
+    if isinstance(val, bool):
+        return val
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -633,6 +655,35 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
             apply_release_compound_shape(model)
         elif cmd == "expand_compound_shape":
             apply_expand_compound_shape(model)
+    elif kind == PanelKind.CHARACTER:
+        # Character panel hamburger toggles: flip the panel-state bool,
+        # clear mutually-exclusive siblings (caps ↔ small-caps;
+        # super ↔ sub), and push to the selection so the menu and the
+        # in-panel icon toggles stay in sync. Show Snap to Glyph
+        # Options is panel-local UI state — skip the apply for that
+        # one.
+        _character_toggle_table = {
+            "toggle_all_caps": ("all_caps", ["small_caps"], True),
+            "toggle_small_caps": ("small_caps", ["all_caps"], True),
+            "toggle_superscript": ("superscript", ["subscript"], True),
+            "toggle_subscript": ("subscript", ["superscript"], True),
+            "toggle_snap_to_glyph_visible":
+                ("snap_to_glyph_visible", [], False),
+        }
+        if cmd in _character_toggle_table and _character_store is not None:
+            key, clear_on_set, apply_to_selection = _character_toggle_table[cmd]
+            cur = _character_store_bool(key, False)
+            new_val = not cur
+            _character_store.set_panel("character_panel_content", key, new_val)
+            if new_val:
+                for sib in clear_on_set:
+                    _character_store.set_panel(
+                        "character_panel_content", sib, False)
+            if apply_to_selection and model is not None:
+                from panels.character_panel_state import (
+                    apply_character_panel_to_selection,
+                )
+                apply_character_panel_to_selection(_character_store, model)
     elif kind == PanelKind.OPACITY:
         # Opacity panel-local toggles flip the stored bool in the
         # StateStore so subsequent make_opacity_mask dispatches and
@@ -678,6 +729,17 @@ def panel_is_checked(kind: PanelKind, cmd: str, layout: WorkspaceLayout) -> bool
         return _opacity_store_bool("new_masks_clipping", True)
     if cmd == "toggle_new_masks_inverted":
         return _opacity_store_bool("new_masks_inverted", False)
+    # Character panel toggle commands map to bools in the
+    # "character_panel_content" panel scope.
+    _character_check = {
+        "toggle_snap_to_glyph_visible": "snap_to_glyph_visible",
+        "toggle_all_caps": "all_caps",
+        "toggle_small_caps": "small_caps",
+        "toggle_superscript": "superscript",
+        "toggle_subscript": "subscript",
+    }
+    if cmd in _character_check:
+        return _character_store_bool(_character_check[cmd], False)
     return False
 
 

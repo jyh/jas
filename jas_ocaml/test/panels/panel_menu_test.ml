@@ -638,6 +638,131 @@ let menu_tests = [
     assert (mask.Jas.Element.clip = false);
     assert (mask.Jas.Element.invert = true);
     Jas.Panel_menu.unregister_panel_store "opacity_panel_content");
+
+  (* Character panel hamburger toggles: panel state flips, the matching
+     selection text element picks up the resulting attribute, mutually
+     exclusive siblings clear when the partner is set. *)
+  Alcotest.test_case "character_toggle_all_caps_flips_and_applies" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    Jas.State_store.init_panel store "character_panel_content"
+      [("font_family", `String "sans-serif");
+       ("font_size", `Float 16.0);
+       ("style_name", `String "Regular");
+       ("leading", `Float 19.2);
+       ("tracking", `Float 0.0);
+       ("kerning", `String "Auto");
+       ("vertical_scale", `Float 100.0);
+       ("horizontal_scale", `Float 100.0);
+       ("baseline_shift", `Float 0.0);
+       ("character_rotation", `Float 0.0);
+       ("all_caps", `Bool false); ("small_caps", `Bool false);
+       ("superscript", `Bool false); ("subscript", `Bool false);
+       ("underline", `Bool false); ("strikethrough", `Bool false);
+       ("language", `String ""); ("anti_aliasing", `String "Sharp");
+       ("snap_to_glyph_visible", `Bool true)];
+    Jas.Panel_menu.register_panel_store "character_panel_content" store;
+    (* Selected text element at [0;0]. *)
+    let m = Jas.Model.create () in
+    let text = Jas.Element.make_text 0.0 0.0 "hi" in
+    let layer = Jas.Element.make_layer ~name:"L" [|text|] in
+    let doc = { (m#document) with
+      Jas.Document.layers = [|layer|];
+      selection = Jas.Document.PathMap.singleton [0;0]
+        (Jas.Document.element_selection_all [0;0]);
+    } in
+    m#set_document doc;
+    panel_dispatch Character "toggle_all_caps" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    assert (panel_is_checked Character "toggle_all_caps" l);
+    (match Jas.Document.get_element m#document [0;0] with
+     | Jas.Element.Text r -> assert (r.text_transform = "uppercase")
+     | _ -> assert false);
+    Jas.Panel_menu.unregister_panel_store "character_panel_content");
+
+  Alcotest.test_case "character_toggle_all_caps_clears_small_caps" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    Jas.State_store.init_panel store "character_panel_content"
+      [("all_caps", `Bool false); ("small_caps", `Bool true);
+       ("superscript", `Bool false); ("subscript", `Bool false);
+       ("underline", `Bool false); ("strikethrough", `Bool false);
+       ("snap_to_glyph_visible", `Bool true)];
+    Jas.Panel_menu.register_panel_store "character_panel_content" store;
+    let m = Jas.Model.create () in
+    let text = Jas.Element.make_text 0.0 0.0 "hi" in
+    let layer = Jas.Element.make_layer ~name:"L" [|text|] in
+    let doc = { (m#document) with
+      Jas.Document.layers = [|layer|];
+      selection = Jas.Document.PathMap.singleton [0;0]
+        (Jas.Document.element_selection_all [0;0]);
+    } in
+    m#set_document doc;
+    panel_dispatch Character "toggle_all_caps" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    assert (panel_is_checked Character "toggle_all_caps" l);
+    assert (not (panel_is_checked Character "toggle_small_caps" l));
+    Jas.Panel_menu.unregister_panel_store "character_panel_content");
+
+  Alcotest.test_case "character_toggle_super_clears_sub" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    Jas.State_store.init_panel store "character_panel_content"
+      [("all_caps", `Bool false); ("small_caps", `Bool false);
+       ("superscript", `Bool false); ("subscript", `Bool true);
+       ("underline", `Bool false); ("strikethrough", `Bool false);
+       ("snap_to_glyph_visible", `Bool true)];
+    Jas.Panel_menu.register_panel_store "character_panel_content" store;
+    let m = Jas.Model.create () in
+    let text = Jas.Element.make_text 0.0 0.0 "hi" in
+    let layer = Jas.Element.make_layer ~name:"L" [|text|] in
+    let doc = { (m#document) with
+      Jas.Document.layers = [|layer|];
+      selection = Jas.Document.PathMap.singleton [0;0]
+        (Jas.Document.element_selection_all [0;0]);
+    } in
+    m#set_document doc;
+    panel_dispatch Character "toggle_superscript" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    assert (panel_is_checked Character "toggle_superscript" l);
+    assert (not (panel_is_checked Character "toggle_subscript" l));
+    Jas.Panel_menu.unregister_panel_store "character_panel_content");
+
+  Alcotest.test_case "character_toggle_snap_visibility_does_not_apply_to_selection" `Quick (fun () ->
+    (* The Show Snap to Glyph Options toggle is purely panel-local UI
+       state; flipping it must not push attribute writes onto the
+       selected text element. *)
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 0 0 in
+    let store = Jas.State_store.create () in
+    Jas.State_store.init_panel store "character_panel_content"
+      [("snap_to_glyph_visible", `Bool true);
+       ("all_caps", `Bool false); ("small_caps", `Bool false);
+       ("superscript", `Bool false); ("subscript", `Bool false);
+       ("underline", `Bool false); ("strikethrough", `Bool false)];
+    Jas.Panel_menu.register_panel_store "character_panel_content" store;
+    let m = Jas.Model.create () in
+    let text = Jas.Element.make_text 0.0 0.0 "hi" in
+    let layer = Jas.Element.make_layer ~name:"L" [|text|] in
+    let doc = { (m#document) with
+      Jas.Document.layers = [|layer|];
+      selection = Jas.Document.PathMap.singleton [0;0]
+        (Jas.Document.element_selection_all [0;0]);
+    } in
+    m#set_document doc;
+    let before = m#document in
+    panel_dispatch Character "toggle_snap_to_glyph_visible" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    assert (not (panel_is_checked Character "toggle_snap_to_glyph_visible" l));
+    assert (m#document == before);
+    Jas.Panel_menu.unregister_panel_store "character_panel_content");
 ]
 
 (* ================================================================== *)
