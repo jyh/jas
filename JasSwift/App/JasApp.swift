@@ -43,6 +43,15 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Persist the open canvases on quit. Fires after
+    /// applicationShouldTerminate has returned `.terminateNow`, so
+    /// we only get here when quit is actually proceeding (cancel /
+    /// failed-save paths skip session-save). Best-effort: a failed
+    /// session save logs and continues — quit isn't blocked.
+    func applicationWillTerminate(_ notification: Notification) {
+        workspace?.persistSession()
+    }
+
     private static let minContentSize = NSSize(width: 800, height: 540)
     static func applyContentMinSize() {
         for window in NSApp.windows where window.isVisible {
@@ -100,6 +109,14 @@ struct JasApp: App {
                     // they run before the window is shown — see comment
                     // there for why .onAppear was unreliable.
                     appDelegate.workspace = workspace
+                    // Reload last session's canvases. Once restored —
+                    // and only the first time, since `.onAppear` can
+                    // re-fire on tab/window changes — the existing
+                    // tabs are kept and the restore call short-
+                    // circuits if there's nothing to read.
+                    if workspace.canvases.isEmpty {
+                        _ = workspace.restoreSession()
+                    }
                     if let icnsURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
                         ?? URL(string: "file://" + #file)
                             .flatMap({ URL(string: "../../../../assets/brand/icons/AppIcon.icns", relativeTo: $0.deletingLastPathComponent()) }) {
