@@ -1043,18 +1043,34 @@ func buildPanelFullOverrides(_ panel: [String: Any]) -> Tspan {
     // Tracking → letter_spacing (em). Panel unit is 1/1000 em.
     let tracking = (panel["tracking"] as? NSNumber)?.doubleValue ?? 0.0
     let letterSpacing = tracking / 1000.0
-    // Baseline shift numeric (pt), skipped when super / sub is on.
+    // Super/sub on a range can't ride as a "super"/"sub" keyword on
+    // the tspan (Tspan.baselineShift is Double pt only), so encode the
+    // same visual the canvas applies at element level: shrink fontSize
+    // to 70%, shift baseline by ±35%/20% of the parent fontSize.
+    // Numeric baseline_shift wins when super/sub is off.
     let superOn = panel["superscript"] as? Bool ?? false
     let subOn = panel["subscript"] as? Bool ?? false
     let bsNum = (panel["baseline_shift"] as? NSNumber)?.doubleValue ?? 0.0
-    let baselineShift: Double? = (superOn || subOn) ? nil : bsNum
+    let effFontSize: Double = (superOn || subOn) ? fontSize * 0.7 : fontSize
+    // CoreText draws our text with a flipped textMatrix, so positive
+    // baselineOffset visually moves DOWN — encode super as a negative
+    // shift (up) and sub as positive (down) so the panel buttons map
+    // to the right direction. Numeric baseline_shift uses the same
+    // convention (positive = up at the element level, mapped through
+    // the same path).
+    let baselineShift: Double? = {
+        if superOn { return -fontSize * 0.35 }
+        if subOn { return fontSize * 0.20 }
+        if bsNum != 0.0 { return -bsNum }
+        return nil
+    }()
     // Anti-aliasing → jas_aa_mode. "Sharp" / empty are the defaults.
     let aaRaw = (panel["anti_aliasing"] as? String) ?? "Sharp"
     let aaMode = (aaRaw == "Sharp" || aaRaw.isEmpty) ? "" : aaRaw
     return Tspan(
         id: 0, content: "",
         baselineShift: baselineShift,
-        fontFamily: fontFamily, fontSize: fontSize,
+        fontFamily: fontFamily, fontSize: effFontSize,
         fontStyle: fst, fontVariant: fv,
         fontWeight: fw,
         jasAaMode: aaMode,
@@ -1356,13 +1372,15 @@ private func _parseEmValue(_ s: String) -> Double? {
 }
 
 func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
-    // Phase 3: route to next-typed-character state when there is an
-    // active edit session with a bare caret (no range selection).
-    // The panel's widget click should prime the session's pending
-    // override rather than rewrite the whole element.
+    // Caret-only edit session: prime the pending override so the
+    // next typed character picks up the new attrs, then fall through
+    // to the element-level apply so the existing text in the element
+    // updates immediately. Without the fall-through, a panel toggle
+    // (All Caps, font-family, etc.) appeared to do nothing until the
+    // user typed another character.
     if let session = controller.model.currentEditSession,
        !session.hasSelection {
-        let p = store.getPanelState("character_panel")
+        let p = store.getPanelState("character_panel_content")
         let doc = controller.model.document
         if pathIsValid(doc, session.path) {
             let elem = doc.getElement(session.path)
@@ -1371,7 +1389,6 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
             if let tpl = template {
                 session.setPendingOverride(tpl)
             }
-            return
         }
     }
 
@@ -1381,7 +1398,7 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
     // rest of the edited element is left untouched.
     if let session = controller.model.currentEditSession,
        session.hasSelection {
-        let p = store.getPanelState("character_panel")
+        let p = store.getPanelState("character_panel_content")
         let doc = controller.model.document
         if pathIsValid(doc, session.path) {
             let elem = doc.getElement(session.path)
@@ -1410,7 +1427,7 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
         }
     }
 
-    let p = store.getPanelState("character_panel")
+    let p = store.getPanelState("character_panel_content")
     var attrs: [String: Any] = [:]
 
     if let v = p["font_family"] as? String { attrs["font_family"] = v }
@@ -1987,7 +2004,7 @@ private func withJustificationAttrs(
 /// re-syncs. Silent no-op for panels without a subscriber.
 public func notifyPanelStateChanged(_ panelId: String, store: StateStore, model: Model) {
     switch panelId {
-    case "character_panel":
+    case "character_panel_content":
         applyCharacterPanelToSelection(store: store, controller: Controller(model: model))
     case "paragraph_panel_content":
         applyParagraphPanelToSelection(store: store, controller: Controller(model: model))

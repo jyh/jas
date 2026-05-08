@@ -614,14 +614,9 @@ private func parseBaselineShift(_ s: String, fontSize: Double) -> (Double, Doubl
     return (1.0, 0.0)
 }
 
-/// Uppercase / lowercase `content` per `text_transform`; small-caps
-/// renders as uppercase for now (same placeholder Rust / OCaml use —
-/// real small-caps waits on a shaper).
-private func applyTextTransform(_ tt: String, _ fv: String, _ content: String) -> String {
-    if tt == "uppercase" || fv == "small-caps" { return content.uppercased() }
-    if tt == "lowercase" { return content.lowercased() }
-    return content
-}
+// applyTextTransform now lives in TextMeasure.swift as a public
+// helper so the per-char width helpers can mirror the canvas
+// transform exactly. Same semantics as before.
 
 /// Combined letter-spacing in points for NSAttributedString.Key.kern.
 /// Both `letterSpacing` and numeric `kerning` are `Nem`; accumulate
@@ -656,26 +651,32 @@ private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
         foreground = .black
     }
 
-    // The baseline sits at the first visual line: element y + 0.8 *
-    // fontSize. Segmented rendering is one-line only for now.
-    let baselineY = v.y + v.fontSize * 0.8
+    // Line stride: explicit lineHeight ("Npt") wins; otherwise fall
+    // back to the element's fontSize (Auto = 100% in segmented mode,
+    // matches the flat path's layoutFs default when lineHeight is
+    // empty). Newlines inside any tspan content advance lineIdx.
+    let lineStride: Double = parsePt(v.lineHeight) ?? v.fontSize
+    let firstBaselineY = v.y + v.fontSize * 0.8
     ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
 
     var cx = v.x
+    var lineIdx = 0
     for t in v.tspans {
         if t.content.isEmpty { continue }
         let effFamily = t.fontFamily ?? v.fontFamily
         let effSize = t.fontSize ?? v.fontSize
         let effBold = t.fontWeight.map { $0 == "bold" } ?? parentBold
         let effItalic = t.fontStyle.map { $0 == "italic" || $0 == "oblique" } ?? parentItalic
+        // Effective text-transform / font-variant: tspan override
+        // (when set) wins over the element-level value. applyTextTransform
+        // upper-cases for "uppercase" and small-caps (placeholder for the
+        // latter — same convention Rust / OCaml ship).
+        let effTextTransform = t.textTransform ?? v.textTransform
+        let effFontVariant = t.fontVariant ?? v.fontVariant
+        let displayContent = applyTextTransform(effTextTransform, effFontVariant, t.content)
 
-        var fontDesc = NSFontDescriptor(name: effFamily, size: effSize)
-        var traits: NSFontDescriptor.SymbolicTraits = []
-        if effBold { traits.insert(.bold) }
-        if effItalic { traits.insert(.italic) }
-        fontDesc = fontDesc.withSymbolicTraits(traits)
-        let font = NSFont(descriptor: fontDesc, size: effSize)
-            ?? NSFont.systemFont(ofSize: effSize)
+        let font = resolveFont(family: effFamily, bold: effBold,
+                               italic: effItalic, size: effSize)
 
         // Effective decoration: Some([..]) overrides parent (empty
         // list = explicit no-decoration); nil inherits parent tokens.
@@ -704,32 +705,45 @@ private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
         let dxPx = (t.dx ?? 0.0) * effSize
         cx += dxPx
         let bShift = t.baselineShift ?? 0.0
-        let tspanBaseline = baselineY - bShift
         let rotDeg = t.rotate ?? 0.0
         let rotRad = rotDeg * .pi / 180.0
         let hasRotate = rotRad != 0.0
         let hasTransform = t.transform != nil
 
-        let line = NSAttributedString(string: t.content, attributes: attrs)
-        let ctLine = CTLineCreateWithAttributedString(line)
-        if hasRotate || hasTransform {
-            ctx.saveGState()
-            ctx.translateBy(x: cx, y: tspanBaseline)
-            if let tr = t.transform {
-                ctx.concatenate(CGAffineTransform(a: tr.a, b: tr.b, c: tr.c,
-                                                    d: tr.d, tx: tr.e, ty: tr.f))
+        // Split the tspan's content on newlines and draw each segment
+        // on its own visual line. A trailing empty segment after a
+        // closing newline starts a fresh line (cx reset, lineIdx
+        // advanced) so the next tspan begins where the user expects.
+        let parts = displayContent.split(separator: "\n", omittingEmptySubsequences: false)
+        for (i, part) in parts.enumerated() {
+            if i > 0 {
+                lineIdx += 1
+                cx = v.x
             }
-            if hasRotate {
-                ctx.rotate(by: rotRad)
+            let partStr = String(part)
+            if partStr.isEmpty { continue }
+            let baselineY = firstBaselineY + Double(lineIdx) * lineStride - bShift
+            let line = NSAttributedString(string: partStr, attributes: attrs)
+            let ctLine = CTLineCreateWithAttributedString(line)
+            if hasRotate || hasTransform {
+                ctx.saveGState()
+                ctx.translateBy(x: cx, y: baselineY)
+                if let tr = t.transform {
+                    ctx.concatenate(CGAffineTransform(a: tr.a, b: tr.b, c: tr.c,
+                                                        d: tr.d, tx: tr.e, ty: tr.f))
+                }
+                if hasRotate {
+                    ctx.rotate(by: rotRad)
+                }
+                ctx.textPosition = .zero
+                CTLineDraw(ctLine, ctx)
+                ctx.restoreGState()
+            } else {
+                ctx.textPosition = CGPoint(x: cx, y: baselineY)
+                CTLineDraw(ctLine, ctx)
             }
-            ctx.textPosition = .zero
-            CTLineDraw(ctLine, ctx)
-            ctx.restoreGState()
-        } else {
-            ctx.textPosition = CGPoint(x: cx, y: tspanBaseline)
-            CTLineDraw(ctLine, ctx)
+            cx += Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
         }
-        cx += Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
     }
 }
 
@@ -1104,23 +1118,24 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         // the flat fast path below. Mirrors the Rust first pass —
         // per-tspan baseline-shift / rotate / transform / dx and
         // wrapping are follow-ups.
-        let isFlat = v.tspans.count == 1 && v.tspans[0].hasNoOverrides
-        if !isFlat {
-            drawSegmentedText(ctx, v)
-            break
-        }
+        // Multi-tspan elements (range-applied bold/italic/etc.)
+        // share the flat path's wrapping + paragraph layout — the
+        // per-line render below weaves tspan-specific font / decoration
+        // / baseline-shift attributes into the shared NSAttributedString
+        // so a CTLine still does the actual drawing. The previous
+        // branch to `drawSegmentedText` ignored maxWidth and emitted a
+        // single horizontal run, which dropped wrapping inside an area
+        // text box once any range carried an override.
         // Baseline-shift: super/sub shrink the font to 70% and
         // offset the baseline; numeric "Npt" shifts up by N pt
         // without resizing. Empty = identity. Mirrors Rust / Python
         // / OCaml canvas.
         let (sizeScale, yShift) = parseBaselineShift(v.baselineShift, fontSize: v.fontSize)
         let effectiveFs = v.fontSize * sizeScale
-        var fontDesc = NSFontDescriptor(name: v.fontFamily, size: effectiveFs)
-        var traits: NSFontDescriptor.SymbolicTraits = []
-        if v.fontWeight == "bold" { traits.insert(.bold) }
-        if v.fontStyle == "italic" || v.fontStyle == "oblique" { traits.insert(.italic) }
-        fontDesc = fontDesc.withSymbolicTraits(traits)
-        let font = NSFont(descriptor: fontDesc, size: effectiveFs) ?? NSFont.systemFont(ofSize: effectiveFs)
+        let font = resolveFont(family: v.fontFamily,
+                               bold: v.fontWeight == "bold",
+                               italic: v.fontStyle == "italic" || v.fontStyle == "oblique",
+                               size: effectiveFs)
         let color: NSColor
         if let fill = v.fill {
             color = nsColor(fill.color)
@@ -1199,10 +1214,19 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         // a single default segment, equivalent to plain layoutText.
         let pSegs = buildParagraphSegments(
             tspans: v.tspans, content: drawContent, isArea: v.isAreaText)
+        // Per-character widths from per-tspan effective fonts so the
+        // layout matches what the renderer below actually draws — the
+        // selection-highlight rectangles in TypeTool index into this
+        // same layout, so layout-vs-render width drift would surface
+        // as misaligned highlights inside an edit session.
+        let perCharW = textPerCharWidths(v.tspans, element: v)
         let lay = layoutTextWithParagraphs(
             drawContent, maxWidth: maxW, fontSize: layoutFs,
-            paragraphs: pSegs, measure: measure)
+            paragraphs: pSegs, measure: measure,
+            perCharWidths: perCharW)
         let chars = Array(drawContent)
+        let parentBoldFlag = v.fontWeight == "bold"
+        let parentItalicFlag = v.fontStyle == "italic" || v.fontStyle == "oblique"
         for line in lay.lines {
             let segChars = chars[line.start..<line.end]
             let segStr = String(segChars)
@@ -1213,9 +1237,72 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
             let lineXShift: Double = (line.glyphStart < lay.glyphs.count)
                 ? lay.glyphs[line.glyphStart].x : 0.0
             let lineX = v.x + lineXShift
+            // Build the per-line attributed string. Single-tspan with
+            // no overrides → reuse element-level `attrs`. Multi-tspan or
+            // any override → walk tspans and weave per-segment font /
+            // decoration / baseline-offset into a mutable string; the
+            // element-level layout already chose the line's char range
+            // so wrapping is preserved across formatting changes.
+            let lineStr: NSAttributedString = {
+                let isFlat = v.tspans.count == 1 && v.tspans[0].hasNoOverrides
+                if isFlat {
+                    return NSAttributedString(string: segStr, attributes: attrs)
+                }
+                let mutable = NSMutableAttributedString()
+                var charPos = 0
+                for t in v.tspans {
+                    let len = t.content.unicodeScalars.count
+                    let tStart = charPos
+                    let tEnd = charPos + len
+                    charPos = tEnd
+                    let overlapStart = max(line.start, tStart)
+                    let overlapEnd = min(line.end, tEnd)
+                    if overlapStart >= overlapEnd { continue }
+                    let localStart = overlapStart - tStart
+                    let localEnd = overlapEnd - tStart
+                    let scalars = Array(t.content.unicodeScalars)
+                    let raw = String(String.UnicodeScalarView(scalars[localStart..<localEnd]))
+                    let effTT = t.textTransform ?? v.textTransform
+                    let effFV = t.fontVariant ?? v.fontVariant
+                    let portion = applyTextTransform(effTT, effFV, raw)
+                    let effFamily = t.fontFamily ?? v.fontFamily
+                    let effSize = t.fontSize ?? effectiveFs
+                    let effBold = t.fontWeight.map { $0 == "bold" } ?? parentBoldFlag
+                    let effItalic = t.fontStyle.map { $0 == "italic" || $0 == "oblique" }
+                        ?? parentItalicFlag
+                    let tFont = resolveFont(family: effFamily,
+                                            bold: effBold, italic: effItalic,
+                                            size: effSize)
+                    var pAttrs: [NSAttributedString.Key: Any] = [
+                        .font: tFont,
+                        .foregroundColor: color,
+                    ]
+                    let underlineOn: Bool
+                    let strikeOn: Bool
+                    if let members = t.textDecoration {
+                        underlineOn = members.contains("underline")
+                        strikeOn = members.contains("line-through")
+                    } else {
+                        underlineOn = tdTokens.contains("underline")
+                        strikeOn = tdTokens.contains("line-through")
+                    }
+                    if underlineOn {
+                        pAttrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                    }
+                    if strikeOn {
+                        pAttrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                    }
+                    if let bs = t.baselineShift, bs != 0 {
+                        pAttrs[.baselineOffset] = bs as NSNumber
+                    }
+                    if kernPx != 0 {
+                        pAttrs[.kern] = kernPx as NSNumber
+                    }
+                    mutable.append(NSAttributedString(string: portion, attributes: pAttrs))
+                }
+                return mutable
+            }()
             if rotRad == 0.0 {
-                // Fast path: single CTLine per line honors NSAttributedString.Key.kern.
-                let lineStr = NSAttributedString(string: segStr, attributes: attrs)
                 let ctLine = CTLineCreateWithAttributedString(lineStr)
                 ctx.textPosition = CGPoint(x: lineX, y: baselineY)
                 CTLineDraw(ctLine, ctx)
@@ -1264,12 +1351,10 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
     case .textPath(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        var fontDesc = NSFontDescriptor(name: v.fontFamily, size: v.fontSize)
-        var traits: NSFontDescriptor.SymbolicTraits = []
-        if v.fontWeight == "bold" { traits.insert(.bold) }
-        if v.fontStyle == "italic" || v.fontStyle == "oblique" { traits.insert(.italic) }
-        fontDesc = fontDesc.withSymbolicTraits(traits)
-        let font = NSFont(descriptor: fontDesc, size: v.fontSize) ?? NSFont.systemFont(ofSize: v.fontSize)
+        let font = resolveFont(family: v.fontFamily,
+                               bold: v.fontWeight == "bold",
+                               italic: v.fontStyle == "italic" || v.fontStyle == "oblique",
+                               size: v.fontSize)
         let color: NSColor
         if let fill = v.fill {
             color = nsColor(fill.color)
@@ -1424,14 +1509,18 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
     ctx.setLineWidth(1.0)
     ctx.setLineDash(phase: 0, lengths: [])
 
-    // Text and TextPath: bounding-box highlight only. No CP squares.
+    // Text: bounding-box highlight + corner CP squares so the user
+    // can grab a corner to drag/resize. Falls through to the bottom of
+    // the function so the standard handle squares render at the four
+    // bound corners (controlPointPositions returns them for text).
     if case .text = elem {
         let b = elem.bounds
         ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
         ctx.strokePath()
-        return
-    }
-    if case .textPath = elem {
+    } else if case .textPath = elem {
+        // TextPath: bounding-box highlight only. The path's own anchor
+        // points are edited via the Anchor Point tool, not the
+        // Selection tool, so no corner handles here.
         let b = elem.bounds
         ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
         ctx.strokePath()
@@ -2239,6 +2328,9 @@ class CanvasNSView: NSView {
         drawSelectionOverlays(ctx, document, keyObjectPath)
         ctx.restoreGState()
         // Active tool overlay (screen-space, post-transform).
+        // YamlTool's marquee rect is stored in screen coords so it
+        // renders here; TypeTool converts its doc-space caret into
+        // screen-space inside its own drawOverlay.
         if let toolCtx = toolContext {
             activeTool.drawOverlay(toolCtx, ctx)
         }
