@@ -129,6 +129,13 @@ public func buildActiveDocumentView(
         "has_selection": !m.document.selection.isEmpty,
         "selection_count": m.document.selection.count,
         "element_selection": elementSelection,
+        // Drives the Boolean panel's Expand button + the Release/
+        // Expand Compound Shape menu items: enabled only when at
+        // least one selected element is a compound shape.
+        "selection_has_compound_shape": m.document.selection.contains {
+            if case .live = m.document.getElement($0.path) { return true }
+            return false
+        },
         "artboards": artboardsView,
         "artboard_options": [
             "fade_region_outside_artboard": m.document.artboardOptions.fadeRegionOutsideArtboard,

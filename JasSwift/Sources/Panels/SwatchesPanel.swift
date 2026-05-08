@@ -80,7 +80,13 @@ public enum SwatchesPanel {
 /// Run a YAML-defined action by name, looking up its effects in the
 /// workspace actions catalog and dispatching them through the shared
 /// pipeline. Sets the active panel id so panel-scoped writes (and
-/// dialog opens) target the right state container.
+/// dialog opens) target the right state container. Uses the same
+/// platform-effects registry as canvas-button clicks
+/// (`alignPlatformEffects`, which despite the name covers Align,
+/// Boolean, snapshot, etc.) so menu-driven actions take the same
+/// `- snapshot` and platform-op steps a button click would — without
+/// this, hamburger-menu "Make Compound Shape" mutated the doc but
+/// never pushed an undo entry.
 public func runYamlActionByName(_ name: String, params: [String: Any], model: Model) {
     guard let ws = WorkspaceData.load() else { return }
     let actions = ws.data["actions"] as? [String: Any]
@@ -90,8 +96,9 @@ public func runYamlActionByName(_ name: String, params: [String: Any], model: Mo
     var ctx: [String: Any] = ws.stateDefaults()
     ctx["param"] = params
     let dialogs = ws.data["dialogs"] as? [String: Any]
+    let platformEffects = alignPlatformEffects(model: model)
     runEffects(effects, ctx: ctx, store: store,
                actions: actions, dialogs: dialogs,
-               platformEffects: [:])
+               platformEffects: platformEffects)
     model.panelStateVersion &+= 1
 }
