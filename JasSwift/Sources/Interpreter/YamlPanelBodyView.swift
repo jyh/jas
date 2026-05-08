@@ -524,8 +524,17 @@ struct YamlElementView: View {
     private func renderIconButton() -> some View {
         let summary = element["summary"] as? String ?? ""
         let isDisabled = evalBindDisabled()
+        let isChecked = evalBindChecked()
         let iconName = resolvedIconName()
         let iconSize = resolvedIconSize()
+        // The Align panel's "Align To" toggles, the Stroke panel's
+        // dashed/cap radio rows, etc. set bind.checked so the
+        // currently active option carries a highlight. Render the
+        // checked state as a tinted rounded background — matches the
+        // toolbar's selected-tool affordance.
+        let checkedBg: SwiftUI.Color = theme.map {
+            SwiftUI.Color(nsColor: $0.buttonChecked)
+        } ?? SwiftUI.Color.gray.opacity(0.3)
         // When a theme is in scope and the icon resolves through
         // WorkspaceIcon's parser (rect/line/circle/ellipse/poly/path
         // subset), render the SVG glyph; otherwise fall back to a
@@ -536,6 +545,11 @@ struct YamlElementView: View {
            WorkspaceIconCache.shared.lookup(iconName) != nil {
             Button(action: { handleWidgetClick() }) {
                 WorkspaceIcon(name: iconName, size: iconSize, tint: theme.text)
+                    .padding(2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(isChecked ? checkedBg : .clear)
+                    )
             }
             .buttonStyle(.plain)
             .help(summary)
@@ -543,8 +557,22 @@ struct YamlElementView: View {
         } else {
             Button(summary) { handleWidgetClick() }
                 .buttonStyle(.plain)
+                .padding(2)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(isChecked ? checkedBg : .clear)
+                )
                 .disabled(isDisabled)
         }
+    }
+
+    /// Evaluate `bind.checked` if present; returns false when absent.
+    /// Used to drive the "selected" highlight on icon buttons that
+    /// behave as radio toggles (e.g. Align panel's Align To row).
+    private func evalBindChecked() -> Bool {
+        guard let bind = element["bind"] as? [String: Any],
+              let expr = bind["checked"] as? String else { return false }
+        return evaluate(expr, context: context).toBool()
     }
 
     /// Read ``style.size`` from the icon_button element (default 20pt).

@@ -248,6 +248,33 @@ public struct Document: Equatable {
         self.printPreferences = rawPrintPreferences
     }
 
+    /// Copy-with-changes: return a Document identical to `self` except
+    /// for the fields explicitly passed. Use this instead of the
+    /// designated `Document(...)` initializer for in-place edits — the
+    /// designated init's empty defaults silently drop unset fields,
+    /// and "drop the artboards every time the selection changes" is
+    /// what made the artboard frame disappear after a selection
+    /// mutation.
+    public func replacing(
+        layers: [Layer]? = nil,
+        selectedLayer: Int? = nil,
+        selection: Selection? = nil,
+        artboards: [Artboard]? = nil,
+        artboardOptions: ArtboardOptions? = nil,
+        documentSetup: DocumentSetup? = nil,
+        printPreferences: PrintPreferences? = nil
+    ) -> Document {
+        Document(
+            layers: layers ?? self.layers,
+            selectedLayer: selectedLayer ?? self.selectedLayer,
+            selection: selection ?? self.selection,
+            artboards: artboards ?? self.artboards,
+            artboardOptions: artboardOptions ?? self.artboardOptions,
+            documentSetup: documentSetup ?? self.documentSetup,
+            printPreferences: printPreferences ?? self.printPreferences
+        )
+    }
+
     /// Return the ElementSelection for the given path, or nil.
     public func getElementSelection(_ path: ElementPath) -> ElementSelection? {
         selection.first { $0.path == path }

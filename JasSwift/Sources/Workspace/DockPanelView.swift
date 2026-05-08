@@ -335,19 +335,27 @@ public struct PanelGroupView: View {
         let isActive = pi == group.active
         let label = panelLabel(kind)
         let bg = isActive ? theme.tabActive : theme.tabInactive
-        return Button(label) {
-            workspaceLayout.setActivePanel(PanelAddr(
-                group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
-                panelIdx: pi
-            ))
-            workspaceLayout.saveIfNeeded()
-        }
-        .font(.system(size: 11, weight: isActive ? .bold : .regular))
-        .foregroundColor(SwiftUI.Color(nsColor: theme.text))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(SwiftUI.Color(nsColor: bg))
-        .buttonStyle(.plain)
+        // SwiftUI's Button consumes the mouse-down phase before
+        // .onDrag has a chance to recognize a drag, so attaching
+        // .onDrag to a Button silently never fires. Render the tab
+        // as a plain Text + onTapGesture; the gesture order
+        // (TapGesture < drag) lets .onDrag at the call site work
+        // while still treating a click without a drag as a tab
+        // selection.
+        return SwiftUI.Text(label)
+            .font(.system(size: 11, weight: isActive ? .bold : .regular))
+            .foregroundColor(SwiftUI.Color(nsColor: theme.text))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(SwiftUI.Color(nsColor: bg))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                workspaceLayout.setActivePanel(PanelAddr(
+                    group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
+                    panelIdx: pi
+                ))
+                workspaceLayout.saveIfNeeded()
+            }
     }
 
     private func chevronButton() -> some View {

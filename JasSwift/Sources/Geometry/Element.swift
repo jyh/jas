@@ -1283,6 +1283,166 @@ public enum Element: Equatable {
         return withTransformSet(t)
     }
 
+    /// Translate every coordinate in a path-command list by (dx, dy).
+    /// ArcTo's `rx`/`ry`/rotation/flags pass through — only the
+    /// endpoint moves. Used internally by `Element.translated`.
+    fileprivate func translatePathCommands(
+        _ d: [PathCommand], dx: Double, dy: Double
+    ) -> [PathCommand] {
+        d.map { cmd in
+            switch cmd {
+            case .moveTo(let x, let y): return .moveTo(x + dx, y + dy)
+            case .lineTo(let x, let y): return .lineTo(x + dx, y + dy)
+            case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+                return .curveTo(x1: x1 + dx, y1: y1 + dy,
+                                x2: x2 + dx, y2: y2 + dy,
+                                x: x + dx, y: y + dy)
+            case .smoothCurveTo(let x2, let y2, let x, let y):
+                return .smoothCurveTo(x2: x2 + dx, y2: y2 + dy,
+                                       x: x + dx, y: y + dy)
+            case .quadTo(let x1, let y1, let x, let y):
+                return .quadTo(x1: x1 + dx, y1: y1 + dy,
+                                x: x + dx, y: y + dy)
+            case .smoothQuadTo(let x, let y): return .smoothQuadTo(x + dx, y + dy)
+            case .arcTo(let rx, let ry, let rot, let la, let sw, let x, let y):
+                return .arcTo(rx: rx, ry: ry, rotation: rot,
+                              largeArc: la, sweep: sw,
+                              x: x + dx, y: y + dy)
+            case .closePath: return .closePath
+            }
+        }
+    }
+
+    /// Return a copy of this element translated by (dx, dy) — baked
+    /// into the element's raw coordinates rather than its transform.
+    /// Required wherever a translation needs to keep `bounds` /
+    /// hit-test in lockstep with the visual position; the Align panel
+    /// is the canonical caller. Stuffing the offset into the
+    /// transform field instead is what makes a second click on
+    /// align_left double the offset (per ALIGN.md §Translation
+    /// semantics, mirrored from `translate_element` in
+    /// `jas_dioxus/src/geometry/element.rs`).
+    public func translated(dx: Double, dy: Double) -> Element {
+        switch self {
+        case .line(let v):
+            return .line(Line(
+                x1: v.x1 + dx, y1: v.y1 + dy,
+                x2: v.x2 + dx, y2: v.y2 + dy,
+                stroke: v.stroke, widthPoints: v.widthPoints,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                strokeGradient: v.strokeGradient, name: v.name))
+        case .rect(let v):
+            return .rect(Rect(
+                x: v.x + dx, y: v.y + dy,
+                width: v.width, height: v.height,
+                rx: v.rx, ry: v.ry,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                name: v.name))
+        case .circle(let v):
+            return .circle(Circle(
+                cx: v.cx + dx, cy: v.cy + dy, r: v.r,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                name: v.name))
+        case .ellipse(let v):
+            return .ellipse(Ellipse(
+                cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                name: v.name))
+        case .polyline(let v):
+            let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
+            return .polyline(Polyline(
+                points: pts, fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                name: v.name))
+        case .polygon(let v):
+            let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
+            return .polygon(Polygon(
+                points: pts, fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                name: v.name))
+        case .path(let v):
+            return .path(Path(
+                d: translatePathCommands(v.d, dx: dx, dy: dy),
+                fill: v.fill, stroke: v.stroke,
+                widthPoints: v.widthPoints,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                name: v.name))
+        case .text(let v):
+            return .text(Text(
+                x: v.x + dx, y: v.y + dy, tspans: v.tspans,
+                fontFamily: v.fontFamily, fontSize: v.fontSize,
+                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                textDecoration: v.textDecoration,
+                width: v.width, height: v.height,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                name: v.name))
+        case .textPath(let v):
+            return .textPath(TextPath(
+                d: translatePathCommands(v.d, dx: dx, dy: dy),
+                tspans: v.tspans, startOffset: v.startOffset,
+                fontFamily: v.fontFamily, fontSize: v.fontSize,
+                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                textDecoration: v.textDecoration,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode, mask: v.mask,
+                name: v.name))
+        case .group(let v):
+            let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
+            return .group(Group(
+                children: kids, opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode,
+                isolatedBlending: v.isolatedBlending,
+                knockoutGroup: v.knockoutGroup,
+                mask: v.mask, name: v.name))
+        case .layer(let v):
+            let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
+            return .layer(Layer(
+                name: v.name, children: kids,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked, visibility: v.visibility,
+                blendMode: v.blendMode,
+                isolatedBlending: v.isolatedBlending,
+                knockoutGroup: v.knockoutGroup,
+                mask: v.mask))
+        case .live:
+            // Live elements don't support raw-coord translation;
+            // fall back to the transform-bake path. Align operates on
+            // resolved selections so this branch is unreachable in
+            // practice (compound shapes resolve to their boolean
+            // result before alignment math runs).
+            return self.withTransformTranslated(dx: dx, dy: dy)
+        }
+    }
+
     /// Return a copy of this element with `matrix` pre-multiplied
     /// onto its existing transform. Used by the transform-tool
     /// family (Scale / Rotate / Shear) to compose a per-frame
