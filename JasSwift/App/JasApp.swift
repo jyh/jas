@@ -11,6 +11,10 @@ import JasLib
 /// attempt), the quit is aborted.
 class JasAppDelegate: NSObject, NSApplicationDelegate {
     var workspace: WorkspaceState?
+    /// Strong refs so the DispatchSource isn't deallocated as soon as
+    /// `applicationDidFinishLaunching` returns. Each entry is one
+    /// installed signal handler.
+    private var signalSources: [DispatchSourceSignal] = []
 
     /// Promote the process to a regular foreground app and steal the
     /// menu bar before any window is shown. When we relied on
@@ -41,6 +45,26 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
         ) { _ in
             JasAppDelegate.applyContentMinSize()
         }
+        // SIGINT (^C from the terminal that launched `swift run Jas`)
+        // and SIGTERM (orderly shutdown) bypass the AppDelegate quit
+        // path entirely, so the session-save hook never fires. A
+        // DispatchSource converts the signal into a main-queue event
+        // we can safely run from. `signal(SIGINT, SIG_IGN)` keeps the
+        // C-level handler from terminating the process before our
+        // dispatch event runs.
+        installSessionSaveSignalHandler(signal: SIGINT)
+        installSessionSaveSignalHandler(signal: SIGTERM)
+    }
+
+    private func installSessionSaveSignalHandler(signal sig: Int32) {
+        Darwin.signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.workspace?.persistSession()
+            exit(0)
+        }
+        source.resume()
+        signalSources.append(source)
     }
 
     /// Persist the open canvases on quit. Fires after
