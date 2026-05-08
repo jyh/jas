@@ -441,7 +441,15 @@ private func runOne(
         let key = sps["key"] as? String ?? ""
         let value = evalExpr(sps["value"], store: store, ctx: ctx)
         let writtenPanel: String?
-        if let panelId = sps["panel"] as? String {
+        if let rawPanelId = sps["panel"] as? String {
+            // YAML actions name panels by their short kind ("swatches",
+            // "color", "stroke") but the StateStore keys panel state by
+            // the content id ("swatches_panel_content"). Append the
+            // suffix when callers pass the short form so writes land in
+            // the same bucket the YAML's `panel.<key>` reads from.
+            let panelId = rawPanelId.hasSuffix("_panel_content")
+                ? rawPanelId
+                : rawPanelId + "_panel_content"
             store.setPanel(panelId, key, valueToAny(value))
             writtenPanel = panelId
         } else if let activeId = store.getActivePanelId() {

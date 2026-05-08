@@ -45,6 +45,12 @@ struct YamlElementView: View {
     /// the dialog state held when the field rendered. Mirrors the Rust
     /// dialog-signal write path (``dialog_signal.set(Some(ds))``).
     var onDialogWrite: ((String, Any?) -> Void)? = nil
+    /// Called after dispatchYamlAction when a widget effect opens
+    /// a dialog in the store; the closure is responsible for
+    /// surfacing the dialog as a SwiftUI modal (DockPanelView
+    /// supplies a closure that bridges to its yamlDialogState
+    /// binding). Mirrors the menu-dispatch dialog bridge.
+    var onStoreDialogOpened: (() -> Void)? = nil
 
     var body: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
@@ -261,27 +267,41 @@ struct YamlElementView: View {
         let gap = (element["style"] as? [String: Any])?["gap"] as? CGFloat ?? 0
 
         if layout == "wrap" {
+            // Read the template's intrinsic width (e.g. swatch
+            // tile size) so the adaptive grid packs cells tightly
+            // — the previous fixed minimum of 20pt left a ~4pt
+            // horizontal gap when cells were the default 16pt
+            // swatch size, which read as a wide horizontal seam.
+            let templateWidth: CGFloat = {
+                if let style = template["style"] as? [String: Any] {
+                    if let size = style["size"] as? CGFloat { return size }
+                    if let size = style["size"] as? Int { return CGFloat(size) }
+                    if let w = style["width"] as? CGFloat { return w }
+                    if let w = style["width"] as? Int { return CGFloat(w) }
+                }
+                return 16
+            }()
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 20), spacing: gap)],
+                columns: [GridItem(.adaptive(minimum: templateWidth), spacing: gap)],
                 spacing: gap
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
                 }
             }
         }
@@ -394,7 +414,8 @@ struct YamlElementView: View {
                 YamlElementView(
                     element: children[i], context: context, model: model,
                     panelId: panelId, onWidgetAction: onWidgetAction,
-                    theme: theme, onDialogWrite: onDialogWrite
+                    theme: theme, onDialogWrite: onDialogWrite,
+                    onStoreDialogOpened: onStoreDialogOpened
                 )
             }
         }
@@ -413,7 +434,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
+                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
             }
         }
     }
@@ -627,6 +648,21 @@ struct YamlElementView: View {
         handleClickBehavior()
     }
 
+    /// Build an `event` dict capturing the current keyboard modifier
+    /// flags so click effects (e.g. `select` with `mode: auto`) can
+    /// dispatch shift-extend / cmd-toggle behaviors. Mirrors the
+    /// `event.shift` / `event.ctrl` / `event.meta` keys read by
+    /// applySelectEffect in Effects.swift.
+    private func currentEventModifiers() -> [String: Any] {
+        let flags = NSEvent.modifierFlags
+        return [
+            "shift": flags.contains(.shift),
+            "ctrl": flags.contains(.control),
+            "meta": flags.contains(.command),
+            "alt": flags.contains(.option),
+        ]
+    }
+
     /// Run the widget's `behavior: [{event: click, effects: [...]}]`
     /// effects through the shared `runEffects` pipeline. The
     /// platform-effects registry is scoped to Align for now; other
@@ -637,6 +673,17 @@ struct YamlElementView: View {
         let ws = WorkspaceData.load()
         let actions = ws?.data["actions"] as? [String: Any]
         let platformEffects = alignPlatformEffects(model: model)
+        var ctxWithEvent = context
+        ctxWithEvent["event"] = currentEventModifiers()
+        // Pin the active panel id before running effects so
+        // panel-scoped writes (e.g. `select`) target this widget's
+        // panel rather than whichever panel rendered most recently.
+        // Without this, clicking a Swatches-panel swatch wrote
+        // selected_swatches to (whatever panel rendered last —
+        // typically the Layers panel below it).
+        if let pid = panelId {
+            model.stateStore.setActivePanel(pid)
+        }
         for entry in behavior where (entry["event"] as? String) == "click" {
             // A click behavior may carry `effects:` (a list run
             // through runEffects), or `action:` (an action name in
@@ -645,8 +692,14 @@ struct YamlElementView: View {
             // dispatching it here those clicks were silent.
             let effects = (entry["effects"] as? [Any]) ?? []
             if !effects.isEmpty {
-                runEffects(effects, ctx: context, store: model.stateStore,
+                runEffects(effects, ctx: ctxWithEvent, store: model.stateStore,
                            actions: actions, platformEffects: platformEffects)
+                // Effects like `select` write via store.setPanel,
+                // which bypasses the commitPanelWrite version bump.
+                // Without this, the swatch's `selected_in` binding
+                // wouldn't refresh after a click and the accent
+                // border would never appear.
+                model.panelStateVersion &+= 1
             }
             if let actionName = entry["action"] as? String {
                 let rawParams = (entry["params"] as? [String: Any]) ?? [:]
@@ -717,8 +770,24 @@ struct YamlElementView: View {
         var ctxWithParams = ctx
         ctxWithParams["param"] = params
         let platformEffects = alignPlatformEffects(model: model)
+        // Thread the dialogs catalog so open_dialog effects can
+        // resolve their target id (e.g. swatch_options); without
+        // this, double-clicking a swatch fired the action but the
+        // dialog never opened.
+        let ws = WorkspaceData.load()
+        let dialogs = ws?.data["dialogs"] as? [String: Any]
+        let beforeDlg = store.getDialogId()
         runEffects(effects, ctx: ctxWithParams, store: store,
-                   actions: actions, platformEffects: platformEffects)
+                   actions: actions, dialogs: dialogs,
+                   platformEffects: platformEffects)
+        // Bridge a store-level dialog transition to the SwiftUI
+        // overlay — without this, open_dialog effects from widget
+        // clicks left the dialog state in the store but nothing
+        // surfaced. Mirrors `dispatchWithDialogBridge` in
+        // DockPanelView (used for hamburger-menu dispatches).
+        if store.getDialogId() != beforeDlg {
+            onStoreDialogOpened?()
+        }
     }
 
     // MARK: - Slider
@@ -1032,11 +1101,14 @@ struct YamlElementView: View {
         }()
 
         let selected = isSelectedInList()
-        // Honor any `behavior: [{event: click, action: ...}]` block
-        // (Color panel's Black/White/recent swatches use this).
-        // Without the gesture the swatch was a static rectangle.
-        let hasClickBehavior = (element["behavior"] as? [[String: Any]])?
-            .contains(where: { ($0["event"] as? String) == "click" }) ?? false
+        // Honor click / double_click behavior blocks (Color panel's
+        // Black/White/recent swatches use click; Swatches panel's
+        // library swatches use both — click selects + sets active
+        // color, double_click opens the Swatch Options dialog).
+        // Without these gestures the swatch is a static rectangle.
+        let behaviors = element["behavior"] as? [[String: Any]] ?? []
+        let hasClick = behaviors.contains { ($0["event"] as? String) == "click" }
+        let hasDouble = behaviors.contains { ($0["event"] as? String) == "double_click" }
         let swatch: AnyView = {
             if hollow {
                 return AnyView(
@@ -1056,12 +1128,77 @@ struct YamlElementView: View {
                 )
             }
         }()
-        if hasClickBehavior {
+        if hasDouble && hasClick {
+            // `exclusively(before:)` works in isolation but breaks down
+            // here because `handleWidgetClick` (set_active_color)
+            // mutates the doc on selection, which re-renders the
+            // panel mid-gesture; the new view tree's tap-counter
+            // resets and the second click registers as a fresh
+            // single-tap. ClickDisambiguator defers the single-click
+            // work via a DispatchWorkItem stored in @State so it
+            // survives re-renders, and the count:2 handler cancels
+            // the pending item before it fires.
+            swatch
+                .contentShape(Rectangle())
+                .modifier(ClickDisambiguator(
+                    onSingle: { handleWidgetClick() },
+                    onDouble: { handleBehaviorClick(eventName: "double_click") }
+                ))
+        } else if hasDouble {
+            swatch
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { handleBehaviorClick(eventName: "double_click") }
+        } else if hasClick {
             swatch
                 .contentShape(Rectangle())
                 .onTapGesture { handleWidgetClick() }
         } else {
             swatch
+        }
+    }
+
+    /// Dispatch behavior entries matching `eventName` — generic
+    /// version of handleClickBehavior for non-click events such as
+    /// `double_click`. Routes `effects:` through runEffects and
+    /// `action:` through dispatchYamlAction.
+    private func handleBehaviorClick(eventName: String) {
+        guard let model = model else { return }
+        guard let behavior = element["behavior"] as? [[String: Any]] else { return }
+        let ws = WorkspaceData.load()
+        let actions = ws?.data["actions"] as? [String: Any]
+        let platformEffects = alignPlatformEffects(model: model)
+        var ctxWithEvent = context
+        ctxWithEvent["event"] = currentEventModifiers()
+        if let pid = panelId {
+            model.stateStore.setActivePanel(pid)
+        }
+        for entry in behavior where (entry["event"] as? String) == eventName {
+            let effects = (entry["effects"] as? [Any]) ?? []
+            if !effects.isEmpty {
+                runEffects(effects, ctx: ctxWithEvent, store: model.stateStore,
+                           actions: actions, platformEffects: platformEffects)
+            }
+            if let actionName = entry["action"] as? String {
+                let rawParams = (entry["params"] as? [String: Any]) ?? [:]
+                var resolved: [String: Any] = [:]
+                for (k, v) in rawParams {
+                    if let exprStr = v as? String {
+                        let result = evaluate(exprStr, context: context)
+                        if let any = result.toAny() {
+                            resolved[k] = any
+                        } else {
+                            resolved[k] = exprStr
+                        }
+                    } else {
+                        resolved[k] = v
+                    }
+                }
+                dispatchYamlAction(
+                    actionName, params: resolved,
+                    actions: actions, ctx: context,
+                    store: model.stateStore, model: model
+                )
+            }
         }
     }
 
@@ -1381,10 +1518,47 @@ struct YamlElementView: View {
         let labelText = label.contains("{{")
             ? evaluateText(label, context: context)
             : label
+        let labelColor: SwiftUI.Color = theme.map {
+            SwiftUI.Color(nsColor: $0.text)
+        } ?? .primary
 
-        DisclosureGroup(labelText) {
+        // Custom disclosure: SwiftUI's DisclosureGroup ignores tint
+        // for the chevron on macOS, leaving it dark on dark themes.
+        // Roll our own header so the chevron picks up theme.text.
+        // Collapsed state lives in `bind.collapsed` (panel state);
+        // we read it on render and toggle it on tap, falling back to
+        // a local @State for unbound disclosures.
+        DisclosureSection(
+            label: labelText,
+            labelColor: labelColor,
+            initialCollapsed: evalDisclosureCollapsed(),
+            onToggle: { newCollapsed in
+                writeDisclosureCollapsed(newCollapsed)
+            }
+        ) {
             renderChildElements()
         }
+    }
+
+    /// Read the disclosure's `bind.collapsed` expression (if any)
+    /// so the initial state matches whatever's in panel state.
+    private func evalDisclosureCollapsed() -> Bool {
+        guard let bind = element["bind"] as? [String: Any],
+              let expr = bind["collapsed"] as? String
+        else { return false }
+        return evaluate(expr, context: context).toBool()
+    }
+
+    /// Write the disclosure's collapsed state back through the bind
+    /// target so it persists in panel state. No-op when there's no
+    /// bind expression (uncontrolled disclosure).
+    private func writeDisclosureCollapsed(_ collapsed: Bool) {
+        guard let bind = element["bind"] as? [String: Any],
+              let expr = bind["collapsed"] as? String
+        else { return }
+        let target = writeBackTarget(expr)
+        guard let t = target else { return }
+        commitWidgetWrite(target: t, value: collapsed)
     }
 
     // MARK: - Panel
@@ -1392,7 +1566,7 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderPanel() -> some View {
         if let content = element["content"] as? [String: Any] {
-            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
+            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
         } else {
             renderPlaceholder()
         }
@@ -1633,7 +1807,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
+            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
         }
     }
 
@@ -1693,7 +1867,7 @@ struct YamlElementView: View {
             // Content
             VStack {
                 if let content = activeContent {
-                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite)
+                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
                 }
                 Spacer()
             }
@@ -2713,9 +2887,111 @@ struct YamlPanelBodyView: View {
     /// Dialog overlays supply this so dialog-bound widgets can write
     /// back to the SwiftUI dialog state. Panels leave it nil.
     var onDialogWrite: ((String, Any?) -> Void)? = nil
+    /// Forwarded to ``YamlElementView/onStoreDialogOpened`` — fires
+    /// after a widget effect transitions the store's dialog id, so
+    /// DockPanelView can copy the new dialog state into its SwiftUI
+    /// overlay binding (mirrors `dispatchWithDialogBridge` for the
+    /// menu path).
+    var onStoreDialogOpened: (() -> Void)? = nil
 
     var body: some View {
-        YamlElementView(element: contentSpec, context: context, model: model, panelId: panelId, theme: theme, onDialogWrite: onDialogWrite)
+        YamlElementView(
+            element: contentSpec, context: context, model: model,
+            panelId: panelId, theme: theme,
+            onDialogWrite: onDialogWrite,
+            onStoreDialogOpened: onStoreDialogOpened
+        )
             .padding(4)
+    }
+}
+
+/// Disambiguate single-click from double-click without losing the
+/// double-click when the single-click handler causes a re-render.
+///
+/// SwiftUI's `TapGesture(count:2).exclusively(before: TapGesture(count:1))`
+/// works in isolation but breaks down when the count:1 callback
+/// mutates state that triggers a panel re-render mid-gesture: the
+/// new view tree's tap counter starts fresh and the second click of
+/// the user's double-click is treated as a new single-tap. By
+/// deferring the count:1 work via a `DispatchWorkItem` stored in
+/// `@State`, the pending item survives the re-render and a count:2
+/// callback can still cancel it. The result is a small (250 ms)
+/// delay on every single-click, but a reliable double-click.
+struct ClickDisambiguator: ViewModifier {
+    let onSingle: () -> Void
+    let onDouble: () -> Void
+    @State private var pendingSingle: DispatchWorkItem?
+
+    func body(content: Content) -> some View {
+        content
+            .gesture(
+                TapGesture(count: 2)
+                    .onEnded {
+                        pendingSingle?.cancel()
+                        pendingSingle = nil
+                        onDouble()
+                    }
+                    .exclusively(before:
+                        TapGesture(count: 1)
+                            .onEnded {
+                                pendingSingle?.cancel()
+                                let item = DispatchWorkItem { onSingle() }
+                                pendingSingle = item
+                                DispatchQueue.main.asyncAfter(
+                                    deadline: .now() + 0.25, execute: item
+                                )
+                            }
+                    )
+            )
+    }
+}
+
+/// Custom collapsible section used by ``YamlElementView/renderDisclosure``.
+/// Built from scratch because SwiftUI's `DisclosureGroup` chevron stays
+/// system-tinted on macOS regardless of `.tint(...)` / `.foregroundColor`,
+/// which leaves it dark on dark themes. Rolling our own gives the
+/// chevron the same theme.text color as the label.
+struct DisclosureSection<Content: View>: View {
+    let label: String
+    let labelColor: SwiftUI.Color
+    let initialCollapsed: Bool
+    let onToggle: (Bool) -> Void
+    @ViewBuilder let content: () -> Content
+    @State private var collapsed: Bool
+
+    init(label: String, labelColor: SwiftUI.Color,
+         initialCollapsed: Bool, onToggle: @escaping (Bool) -> Void,
+         @ViewBuilder content: @escaping () -> Content) {
+        self.label = label
+        self.labelColor = labelColor
+        self.initialCollapsed = initialCollapsed
+        self.onToggle = onToggle
+        self.content = content
+        _collapsed = State(initialValue: initialCollapsed)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: {
+                let next = !collapsed
+                collapsed = next
+                onToggle(next)
+            }) {
+                HStack(spacing: 6) {
+                    SwiftUI.Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(labelColor)
+                        .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    SwiftUI.Text(label)
+                        .foregroundColor(labelColor)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if !collapsed {
+                content()
+            }
+        }
     }
 }
