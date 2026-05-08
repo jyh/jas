@@ -729,3 +729,120 @@ def test_opacity_make_mask_reads_live_new_masks_flags():
         assert mask.invert is True
     finally:
         set_opacity_store(None)
+
+
+# ── Character panel hamburger toggles ────────────────────────────────
+
+def _character_test_addr(layout):
+    """Locate the right dock for character-toggle test fixtures."""
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    return PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=0), panel_idx=0)
+
+
+def _seed_character_store():
+    """Build a StateStore with a fully-initialised character panel
+    scope so apply_character_panel_to_selection has every key it
+    reads. Mirrors the YAML defaults from workspace/panels/
+    character.yaml's state block."""
+    from workspace_interpreter.state_store import StateStore
+    store = StateStore()
+    store.init_panel("character_panel_content", {
+        "font_family": "sans-serif", "font_size": 16.0,
+        "style_name": "Regular", "leading": 19.2, "tracking": 0.0,
+        "kerning": "Auto",
+        "vertical_scale": 100.0, "horizontal_scale": 100.0,
+        "baseline_shift": 0.0, "character_rotation": 0.0,
+        "all_caps": False, "small_caps": False,
+        "superscript": False, "subscript": False,
+        "underline": False, "strikethrough": False,
+        "language": "", "anti_aliasing": "Sharp",
+        "snap_to_glyph_visible": True,
+    })
+    return store
+
+
+def _model_with_selected_text():
+    """Model whose document has a single Text element selected at
+    (0, 0)."""
+    from dataclasses import replace
+    from document.model import Model
+    from document.document import ElementSelection
+    from geometry.element import Text, Layer
+    model = Model()
+    text = Text(x=0.0, y=0.0, content="hi")
+    layer = Layer(name="L", children=(text,))
+    model.document = replace(
+        model.document,
+        layers=(layer,),
+        selection=frozenset({ElementSelection.all((0, 0))}),
+    )
+    return model
+
+
+def test_character_toggle_all_caps_flips_and_applies():
+    from panels.panel_menu import set_character_store
+    layout = WorkspaceLayout.default_layout()
+    addr = _character_test_addr(layout)
+    store = _seed_character_store()
+    set_character_store(store)
+    try:
+        model = _model_with_selected_text()
+        panel_dispatch(PanelKind.CHARACTER, "toggle_all_caps", addr, layout, model=model)
+        assert panel_is_checked(PanelKind.CHARACTER, "toggle_all_caps", layout)
+        elem = model.document.get_element((0, 0))
+        assert elem.text_transform == "uppercase"
+    finally:
+        set_character_store(None)
+
+
+def test_character_toggle_all_caps_clears_small_caps():
+    from panels.panel_menu import set_character_store
+    layout = WorkspaceLayout.default_layout()
+    addr = _character_test_addr(layout)
+    store = _seed_character_store()
+    store.set_panel("character_panel_content", "small_caps", True)
+    set_character_store(store)
+    try:
+        model = _model_with_selected_text()
+        panel_dispatch(PanelKind.CHARACTER, "toggle_all_caps", addr, layout, model=model)
+        assert panel_is_checked(PanelKind.CHARACTER, "toggle_all_caps", layout)
+        assert not panel_is_checked(PanelKind.CHARACTER, "toggle_small_caps", layout)
+    finally:
+        set_character_store(None)
+
+
+def test_character_toggle_super_clears_sub():
+    from panels.panel_menu import set_character_store
+    layout = WorkspaceLayout.default_layout()
+    addr = _character_test_addr(layout)
+    store = _seed_character_store()
+    store.set_panel("character_panel_content", "subscript", True)
+    set_character_store(store)
+    try:
+        model = _model_with_selected_text()
+        panel_dispatch(PanelKind.CHARACTER, "toggle_superscript", addr, layout, model=model)
+        assert panel_is_checked(PanelKind.CHARACTER, "toggle_superscript", layout)
+        assert not panel_is_checked(PanelKind.CHARACTER, "toggle_subscript", layout)
+    finally:
+        set_character_store(None)
+
+
+def test_character_toggle_snap_visibility_does_not_apply_to_selection():
+    # Show Snap to Glyph Options is purely panel-local UI state;
+    # flipping it must not push attribute writes onto the selected
+    # text element.
+    from panels.panel_menu import set_character_store
+    layout = WorkspaceLayout.default_layout()
+    addr = _character_test_addr(layout)
+    store = _seed_character_store()
+    set_character_store(store)
+    try:
+        model = _model_with_selected_text()
+        before = model.document
+        panel_dispatch(PanelKind.CHARACTER, "toggle_snap_to_glyph_visible",
+                       addr, layout, model=model)
+        assert not panel_is_checked(
+            PanelKind.CHARACTER, "toggle_snap_to_glyph_visible", layout)
+        assert model.document is before
+    finally:
+        set_character_store(None)

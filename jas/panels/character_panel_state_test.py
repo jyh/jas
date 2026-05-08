@@ -231,7 +231,7 @@ class TestApplyEndToEnd:
         from geometry.element import Text
         t = Text(x=0, y=0, content="hello", font_family="sans-serif", font_size=12)
         model, store = self._make_model_and_store(t)
-        store.init_panel("character_panel", {"font_family": "Arial", "font_size": 12})
+        store.init_panel("character_panel_content", {"font_family": "Arial", "font_size": 12})
         apply_character_panel_to_selection(store, model)
         assert model.document.get_element((0, 0)).font_family == "Arial"
         assert model.snapshots == 1
@@ -239,7 +239,7 @@ class TestApplyEndToEnd:
     def test_no_op_when_no_model(self):
         from workspace_interpreter.state_store import StateStore
         store = StateStore()
-        store.init_panel("character_panel", {"font_family": "Arial"})
+        store.init_panel("character_panel_content", {"font_family": "Arial"})
         apply_character_panel_to_selection(store, None)  # doesn't raise
 
     def test_no_op_when_selection_empty(self):
@@ -273,7 +273,7 @@ class TestApplyEndToEnd:
         from geometry.element import Text
         t = Text(x=0, y=0, content="hi", font_family="serif", font_size=12)
         model, store = self._make_model_and_store(t)
-        store.init_panel("character_panel", {"underline": True, "font_size": 12})
+        store.init_panel("character_panel_content", {"underline": True, "font_size": 12})
         apply_character_panel_to_selection(store, model)
         assert model.document.get_element((0, 0)).text_decoration == "underline"
 
@@ -281,11 +281,11 @@ class TestApplyEndToEnd:
         from geometry.element import Text
         t = Text(x=0, y=0, content="hi", font_family="serif", font_size=12)
         model, store = self._make_model_and_store(t)
-        store.init_panel("character_panel", {"font_family": "sans-serif", "font_size": 12})
+        store.init_panel("character_panel_content", {"font_family": "sans-serif", "font_size": 12})
         subscribe(store, lambda: model)
         # The subscribe firing after every set_panel is what wires the
         # panel's write-back to the selected element.
-        store.set_panel("character_panel", "font_family", "Courier New")
+        store.set_panel("character_panel_content", "font_family", "Courier New")
         assert model.document.get_element((0, 0)).font_family == "Courier New"
 
 
@@ -539,16 +539,24 @@ class TestApplyOverridesToTspanRange:
 
 class TestPendingRouting:
     def _make_model_with_session(self, text_elem, caret: int,
-                                   has_range: bool = False):
+                                   has_range: bool = False,
+                                   selected: bool = False):
         """Minimal scaffolding: model with a single Text element and
         an active session at the given caret (optionally with a
-        range)."""
+        range or with the element added to ``document.selection``).
+        ``selected`` mirrors the real Type tool, which adds the
+        edited element to the document selection so the element-level
+        apply path can pick it up after the caret-only fall-through."""
         from tools.text_edit import EditTarget, TextEditSession
 
+        class _Sel:
+            def __init__(self, path):
+                self.path = path
+
         class _Doc:
-            def __init__(self, elem):
+            def __init__(self, elem, selection=None):
                 self.layers = []
-                self.selection = []
+                self.selection = selection or []
                 self._elem = elem
 
             def get_element(self, path):
@@ -558,12 +566,13 @@ class TestPendingRouting:
 
             def replace_element(self, path, new_elem):
                 if tuple(path) == (0, 0):
-                    return _Doc(new_elem)
+                    return _Doc(new_elem, self.selection)
                 return self
 
         class _Model:
             def __init__(self):
-                self.document = _Doc(text_elem)
+                sel = [_Sel((0, 0))] if selected else []
+                self.document = _Doc(text_elem, selection=sel)
                 self.current_edit_session = None
                 self.snapshots = 0
 
@@ -601,6 +610,38 @@ class TestPendingRouting:
         assert session.has_pending_override()
         assert session.pending_char_start == 3
         assert session.pending_override.font_weight == "bold"
+
+    def test_panel_write_with_bare_caret_also_updates_selected_element(self):
+        # When the Type tool adds the edited element to
+        # document.selection (the real-world case), the caret-only
+        # apply primes the pending override AND falls through to the
+        # element-level write, so the existing text in the element
+        # picks up the new attrs immediately. Without the
+        # fall-through, panel toggles appeared to do nothing until
+        # the user typed another character.
+        from geometry.element import Text
+        from panels.character_panel_state import apply_character_panel_to_selection
+        class _Store:
+            def __init__(self, state):
+                self._state = state
+            def get_panel_state(self, _pid):
+                return self._state
+
+        text = Text(x=0, y=0, content="hello",
+                    font_family="sans-serif", font_size=16,
+                    font_weight="normal", font_style="normal",
+                    text_decoration="", text_transform="", font_variant="",
+                    xml_lang="", rotate="")
+        model, session = self._make_model_with_session(
+            text, caret=3, selected=True)
+        store = _Store({**_aligned_panel(), "style_name": "Bold"})
+        apply_character_panel_to_selection(store, model)
+        # Pending primed for the next-typed character.
+        assert session.has_pending_override()
+        assert session.pending_override.font_weight == "bold"
+        # Existing text picked up bold via the element-level apply.
+        elem = model.document.get_element((0, 0))
+        assert elem.font_weight == "bold"
 
     def test_panel_write_with_range_selection_writes_to_range(self):
         # Range-selected session → per-range tspan write.
