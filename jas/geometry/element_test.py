@@ -925,5 +925,61 @@ class MaskTest(absltest.TestCase):
         self.assertNotIn("fill_gradient", line_field_names)
 
 
+class TextRenderIsFlatTest(absltest.TestCase):
+    """``Text.render_is_flat`` — paragraph-aware fast-path predicate.
+
+    Mirrors ``jas_dioxus/src/geometry/element.rs::render_is_flat``
+    and ``JasSwift/.../renderIsFlat``."""
+
+    def test_single_body_no_overrides_is_flat(self):
+        from geometry.tspan import Tspan
+        body = Tspan(id=0, content="hello")
+        t = Text(x=0, y=0, content="hello", tspans=(body,),
+                 font_family="sans-serif", font_size=16)
+        self.assertTrue(t.render_is_flat())
+
+    def test_empty_wrapper_plus_flat_body_is_flat(self):
+        # Regression: after the Paragraph panel inserts a wrapper
+        # before just-typed content the renderer must still take the
+        # paragraph-aware fast path. Otherwise draw_segmented_text
+        # (single-line) renders the body and the paragraph collapses.
+        from geometry.tspan import Tspan
+        wrapper = Tspan(id=0, content="", jas_role="paragraph")
+        body = Tspan(id=1, content="hello world")
+        t = Text(x=0, y=0, content="hello world", tspans=(wrapper, body),
+                 font_family="sans-serif", font_size=16,
+                 width=300, height=200)
+        self.assertTrue(t.render_is_flat())
+
+    def test_body_with_override_is_not_flat(self):
+        from geometry.tspan import Tspan
+        body = Tspan(id=0, content="hello", font_weight="bold")
+        t = Text(x=0, y=0, content="hello", tspans=(body,),
+                 font_family="sans-serif", font_size=16)
+        self.assertFalse(t.render_is_flat())
+
+    def test_wrapper_with_content_is_not_flat(self):
+        # A wrapper carrying content is corrupt — render_is_flat
+        # refuses it so the segmented path can show that something is
+        # wrong (matches Rust assertion).
+        from geometry.tspan import Tspan
+        bad = Tspan(id=0, content="hello", jas_role="paragraph")
+        t = Text(x=0, y=0, content="hello", tspans=(bad,),
+                 font_family="sans-serif", font_size=16)
+        self.assertFalse(t.render_is_flat())
+
+    def test_multiple_empty_wrappers_plus_bodies_is_flat(self):
+        from geometry.tspan import Tspan
+        w1 = Tspan(id=0, content="", jas_role="paragraph")
+        b1 = Tspan(id=1, content="first")
+        w2 = Tspan(id=2, content="", jas_role="paragraph")
+        b2 = Tspan(id=3, content="second")
+        t = Text(x=0, y=0, content="firstsecond",
+                 tspans=(w1, b1, w2, b2),
+                 font_family="sans-serif", font_size=16,
+                 width=300, height=200)
+        self.assertTrue(t.render_is_flat())
+
+
 if __name__ == "__main__":
     absltest.main()

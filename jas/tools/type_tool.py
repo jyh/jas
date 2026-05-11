@@ -44,6 +44,18 @@ def _show_selection_bbox() -> bool:
     return SHOW_SELECTION_BBOX
 
 
+def _to_doc(ctx: "ToolContext", x: float, y: float) -> tuple[float, float]:
+    """Convert canvas-widget pixel coords to document coords using the
+    active view's pan + zoom. Tools receive raw widget coords from the
+    canvas; everything that touches model state (Text.x/y, hit-test
+    against element bounds) needs document coords."""
+    z = ctx.model.zoom_level
+    if z == 0:
+        return (x, y)
+    return ((x - ctx.model.view_offset_x) / z,
+            (y - ctx.model.view_offset_y) / z)
+
+
 def _text_draw_bounds(t: Text) -> tuple[float, float, float, float]:
     """Bounding box used to hit-test a Text element. Both point and area
     text are treated as having `e.y` at their top edge."""
@@ -105,7 +117,7 @@ class TypeTool(CanvasTool):
             return None
         try:
             elem = ctx.document.get_element(self.session.path)
-        except (IndexError, KeyError):
+        except (IndexError, KeyError, ValueError):
             return None
         if not isinstance(elem, Text):
             return None
@@ -232,13 +244,14 @@ class TypeTool(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
+        x, y = _to_doc(ctx, x, y)
         if self.session is not None:
             try:
                 elem = ctx.document.get_element(self.session.path)
-            except (IndexError, KeyError):
+            except (IndexError, KeyError, ValueError):
                 elem = None
             in_elem = False
-            if isinstance(elem, Text):
+            if elem is not None and isinstance(elem, Text):
                 bx, by, bw, bh = _text_draw_bounds(elem)
                 in_elem = bx <= x <= bx + bw and by <= y <= by + bh
             if in_elem:
@@ -265,6 +278,7 @@ class TypeTool(CanvasTool):
 
     def on_move(self, ctx: ToolContext, x: float, y: float,
                 shift: bool = False, dragging: bool = False) -> None:
+        x, y = _to_doc(ctx, x, y)
         if self.session is not None and self.session.drag_active and dragging:
             cursor = self._cursor_at(ctx, x, y)
             self.session.set_insertion(cursor, True)
@@ -282,6 +296,7 @@ class TypeTool(CanvasTool):
 
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
+        x, y = _to_doc(ctx, x, y)
         if self.session is not None:
             self.session.drag_active = False
             self.session.blink_epoch_ms = _now_ms()
@@ -302,6 +317,7 @@ class TypeTool(CanvasTool):
         ctx.request_update()
 
     def on_double_click(self, ctx: ToolContext, x: float, y: float) -> None:
+        x, y = _to_doc(ctx, x, y)
         if self.session is not None:
             self.session.select_all()
             self.session.blink_epoch_ms = _now_ms()
@@ -483,6 +499,24 @@ class TypeTool(CanvasTool):
         self._end_session(ctx)
 
     def draw_overlay(self, ctx: ToolContext, painter: "QPainter") -> None:
+        from PySide6.QtCore import QPointF, QRectF, Qt
+        from PySide6.QtGui import QBrush, QColor, QPen
+
+        # Everything below uses document coords (drag rect stored as
+        # doc, t.x/t.y are doc, cursor_xy is doc-relative). The canvas
+        # restored screen-space transform before calling us; apply the
+        # view transform locally so doc coords land at the right
+        # screen pixel under any zoom/pan.
+        painter.save()
+        painter.translate(ctx.model.view_offset_x,
+                          ctx.model.view_offset_y)
+        painter.scale(ctx.model.zoom_level, ctx.model.zoom_level)
+        try:
+            self._draw_overlay_doc(ctx, painter)
+        finally:
+            painter.restore()
+
+    def _draw_overlay_doc(self, ctx: ToolContext, painter: "QPainter") -> None:
         from PySide6.QtCore import QPointF, QRectF, Qt
         from PySide6.QtGui import QBrush, QColor, QPen
 

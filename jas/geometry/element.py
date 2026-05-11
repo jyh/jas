@@ -1104,6 +1104,33 @@ class Text(Element):
     def is_area_text(self) -> bool:
         return self.width > 0 and self.height > 0
 
+    def render_is_flat(self) -> bool:
+        """Returns ``True`` when every tspan can be rendered by the
+        flat / paragraph-aware fast path:
+
+        - Empty paragraph wrappers (``jas_role == "paragraph"``) are
+          metadata only — ``build_segments_from_text`` reads them; their
+          character-level fields are ignored at render time, so an
+          empty wrapper never forces the segmented path.
+        - Body tspans (no ``jas_role``) must carry no character-level
+          overrides; otherwise the per-tspan font / decoration / dx /
+          transform must go through the segmented draw path.
+
+        Without this, the moment the Paragraph panel inserts an empty
+        wrapper before existing flat content, the renderer flips to
+        the segmented path (single-line) and the paragraph collapses
+        visually. Mirrors ``jas_dioxus/.../TextElem::render_is_flat``
+        and ``JasSwift/.../renderIsFlat``.
+        """
+        for t in self.tspans:
+            if t.jas_role == "paragraph":
+                if t.content:
+                    return False
+            else:
+                if not t.has_no_overrides():
+                    return False
+        return True
+
     def bounds(self) -> tuple[float, float, float, float]:
         if self.is_area_text:
             return (self.x, self.y, self.width, self.height)
@@ -1479,6 +1506,15 @@ def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
                 if _contains(kind, i):
                     new_pts[i] = (new_pts[i][0] + dx, new_pts[i][1] + dy)
             return replace(elem, points=tuple(new_pts))
+        case Text(x=tx, y=ty):
+            # Text supports two CPs: (x, y) for point text, or four
+            # corners (x, y), (x+w, y), (x+w, y+h), (x, y+h) for area
+            # text. SelectionKind.all translates as a whole; partials
+            # would mean resizing the area frame, which is a separate
+            # concern (TYPE_TOOL.md §Resize) and not handled here.
+            if _is_all(kind, 4) or _is_all(kind, 1):
+                return replace(elem, x=tx + dx, y=ty + dy)
+            return elem
         case Path(d=d) | TextPath(d=d):
             # Map each anchor index to its command index
             new_cmds = list(d)

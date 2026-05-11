@@ -154,6 +154,9 @@ menu:
   - separator
   - label: "Reset Panel"
     action: reset_paragraph_panel
+  - separator
+  - label: "Close Paragraph"
+    action: close_panel
 
 content:
   type: container
@@ -162,13 +165,18 @@ content:
   style: { padding: 4, gap: 6 }
   children:
 
-    # ── Row 1: Alignment radio group (7 col-1 icon toggles) ──
-    # 5-column right-padding intentional per PARAGRAPH.md §Layout.
+    # ── Row 1: Alignment radio group (7 icon toggles) ──
+    # Single col-12 cell holding the 7 toggles in an evenly-spaced
+    # row. col-1 wrappers per toggle would give 12/12 = 20px-wide
+    # cells in a 240px dock — too narrow for 24×22 buttons. Spreading
+    # them across one col-12 cell lets the row layout pick spacing
+    # that fits whatever the dock width is.
     - type: row
       children:
         - type: container
-          col: 1
-          style: { alignment: center }
+          col: 12
+          layout: row
+          style: { alignment: space-between }
           children:
             - id: pg_align_left
               type: checkbox
@@ -179,10 +187,6 @@ content:
               bind:
                 value: "panel.align_left"
                 disabled: "not panel.text_selected"
-        - type: container
-          col: 1
-          style: { alignment: center }
-          children:
             - id: pg_align_center
               type: checkbox
               icon: para_align_center
@@ -192,10 +196,6 @@ content:
               bind:
                 value: "panel.align_center"
                 disabled: "not panel.text_selected"
-        - type: container
-          col: 1
-          style: { alignment: center }
-          children:
             - id: pg_align_right
               type: checkbox
               icon: para_align_right
@@ -205,10 +205,6 @@ content:
               bind:
                 value: "panel.align_right"
                 disabled: "not panel.text_selected"
-        - type: container
-          col: 1
-          style: { alignment: center }
-          children:
             - id: pg_justify_left
               type: checkbox
               icon: para_justify_left
@@ -218,10 +214,6 @@ content:
               bind:
                 value: "panel.justify_left"
                 disabled: "not panel.area_text_selected"
-        - type: container
-          col: 1
-          style: { alignment: center }
-          children:
             - id: pg_justify_center
               type: checkbox
               icon: para_justify_center
@@ -231,10 +223,6 @@ content:
               bind:
                 value: "panel.justify_center"
                 disabled: "not panel.area_text_selected"
-        - type: container
-          col: 1
-          style: { alignment: center }
-          children:
             - id: pg_justify_right
               type: checkbox
               icon: para_justify_right
@@ -244,10 +232,6 @@ content:
               bind:
                 value: "panel.justify_right"
                 disabled: "not panel.area_text_selected"
-        - type: container
-          col: 1
-          style: { alignment: center }
-          children:
             - id: pg_justify_all
               type: checkbox
               icon: para_justify_all
@@ -257,7 +241,6 @@ content:
               bind:
                 value: "panel.justify_all"
                 disabled: "not panel.area_text_selected"
-        # 5-column right-padding intentional.
 
     # ── Row 2: Bullets icon-select + Numbered list icon-select ─
     # Compact icon-style chooser per PARAGRAPH.md §Layout — the
@@ -268,8 +251,8 @@ content:
     - type: row
       children:
         - type: container
-          col: 2
-          style: { alignment: center }
+          col: 6
+          style: { alignment: start }
           children:
             - id: pg_bullets
               type: icon_select
@@ -291,8 +274,8 @@ content:
                 value: "panel.bullets"
                 disabled: "not panel.text_selected"
         - type: container
-          col: 2
-          style: { alignment: center }
+          col: 6
+          style: { alignment: start }
           children:
             - id: pg_numbered_list
               type: icon_select
@@ -312,20 +295,21 @@ content:
               bind:
                 value: "panel.numbered_list"
                 disabled: "not panel.text_selected"
-
-    # ── Row 3: Left indent (col-1 icon + col-5 combo) + Right indent ──
+    # ── Row 3: Left indent (col-6 icon+input) + Right indent ──
+    # Single col-6 cell holding the icon and input as siblings keeps
+    # the icon's small natural width (~20px) from setting per-col-unit
+    # to 20 in a col-1 cell — instead the cell's natural is the
+    # icon+input pair (~70px) divided by 6 ≈ 12 per col.
     - type: row
       children:
         - type: container
-          col: 1
-          style: { alignment: center }
+          col: 6
+          layout: row
+          style: { gap: 4 }
           children:
             - type: icon
               name: para_left_indent
               style: { width: 20, height: 20 }
-        - type: container
-          col: 5
-          children:
             - id: pg_left_indent
               type: number_input
               summary: "Left indent"
@@ -337,15 +321,13 @@ content:
                 value: "panel.left_indent"
                 disabled: "not panel.area_text_selected"
         - type: container
-          col: 1
-          style: { alignment: center }
+          col: 6
+          layout: row
+          style: { gap: 4 }
           children:
             - type: icon
               name: para_right_indent
               style: { width: 20, height: 20 }
-        - type: container
-          col: 5
-          children:
             - id: pg_right_indent
               type: number_input
               summary: "Right indent"
@@ -356,21 +338,18 @@ content:
               bind:
                 value: "panel.right_indent"
                 disabled: "not panel.area_text_selected"
-
-    # ── Row 4: First-line indent (col-1 icon + col-5 combo) ──
+    # ── Row 4: First-line indent (col-6 icon+input) ──
     # 6-column right-padding intentional.
     - type: row
       children:
         - type: container
-          col: 1
-          style: { alignment: center }
+          col: 6
+          layout: row
+          style: { gap: 4 }
           children:
             - type: icon
               name: para_first_line_indent
               style: { width: 20, height: 20 }
-        - type: container
-          col: 5
-          children:
             - id: pg_first_line_indent
               type: number_input
               summary: "First-line indent"
@@ -383,20 +362,17 @@ content:
               bind:
                 value: "panel.first_line_indent"
                 disabled: "not panel.area_text_selected"
-
-    # ── Row 5: Space before (col-1 icon + col-5 combo) + Space after ──
+    # ── Row 5: Space before (col-6 icon+input) + Space after ──
     - type: row
       children:
         - type: container
-          col: 1
-          style: { alignment: center }
+          col: 6
+          layout: row
+          style: { gap: 4 }
           children:
             - type: icon
               name: para_space_before
               style: { width: 20, height: 20 }
-        - type: container
-          col: 5
-          children:
             - id: pg_space_before
               type: number_input
               summary: "Space before"
@@ -410,15 +386,13 @@ content:
                 value: "panel.space_before"
                 disabled: "not panel.text_selected"
         - type: container
-          col: 1
-          style: { alignment: center }
+          col: 6
+          layout: row
+          style: { gap: 4 }
           children:
             - type: icon
               name: para_space_after
               style: { width: 20, height: 20 }
-        - type: container
-          col: 5
-          children:
             - id: pg_space_after
               type: number_input
               summary: "Space after"
@@ -429,13 +403,14 @@ content:
               bind:
                 value: "panel.space_after"
                 disabled: "not panel.text_selected"
-
-    # ── Row 6: Hyphenate checkbox (col-3, 9-col right padding) ──
+    # ── Row 6: Hyphenate checkbox (col-12, full row) ──
+    # col-3 makes the "Hyphenate" label's natural width (~110px with
+    # checkbox indicator) drive per-col-unit = 37, inflating the grid
+    # to ~440px. Spanning col-12 keeps per-col-unit ≈ 9 instead.
     - type: row
       children:
         - type: container
-          col: 3
-          style: { alignment: center }
+          col: 12
           children:
             - id: pg_hyphenate
               type: checkbox

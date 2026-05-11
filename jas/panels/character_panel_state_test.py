@@ -675,3 +675,191 @@ class TestPendingRouting:
         assert elem.tspans[1].font_weight == "bold"
         assert elem.tspans[2].content == "o"
         assert elem.tspans[2].font_weight != "bold"
+
+
+# ── Auto-leading: panel.leading tracks font_size when element is Auto ─
+
+class TestCharacterAutoLeading:
+    """Mirrors the Rust ``character_element_has_auto_leading`` /
+    ``character_panel_post_write`` behaviour. When the selected text
+    element's ``line_height`` is empty (= Auto = 120% of font_size),
+    a font_size write must bump panel.leading to the new
+    ``font_size * 1.2`` so the apply pipeline still resolves to the
+    Auto-derived value and the empty element attribute survives the
+    round-trip. Without this, the first font-size nudge materialises
+    Auto into a stale numeric override."""
+
+    def _make_model(self, text_elem):
+        """Single Text/TextPath in the selection; matches the test
+        stubs used elsewhere in this file."""
+        class _Sel:
+            def __init__(self, path):
+                self.path = path
+
+        class _Doc:
+            def __init__(self, elem):
+                self._elem = elem
+                self.selection = [_Sel((0, 0))]
+
+            def get_element(self, path):
+                return self._elem
+
+            def replace_element(self, path, new_elem):
+                new = _Doc(new_elem)
+                new.selection = self.selection
+                return new
+
+        class _Model:
+            def __init__(self, elem):
+                self.document = _Doc(elem)
+                self.snapshots = 0
+
+            def snapshot(self):
+                self.snapshots += 1
+
+        return _Model(text_elem)
+
+    def test_has_auto_leading_true_for_empty_line_height(self):
+        from geometry.element import Text
+        from panels.character_panel_state import (
+            character_element_has_auto_leading,
+        )
+        t = Text(x=0, y=0, content="hi", font_family="serif",
+                 font_size=12, line_height="")
+        model = self._make_model(t)
+        assert character_element_has_auto_leading(model) is True
+
+    def test_has_auto_leading_false_for_explicit_line_height(self):
+        from geometry.element import Text
+        from panels.character_panel_state import (
+            character_element_has_auto_leading,
+        )
+        t = Text(x=0, y=0, content="hi", font_family="serif",
+                 font_size=12, line_height="20pt")
+        model = self._make_model(t)
+        assert character_element_has_auto_leading(model) is False
+
+    def test_has_auto_leading_true_for_textpath_with_empty_line_height(self):
+        from geometry.element import TextPath
+        from panels.character_panel_state import (
+            character_element_has_auto_leading,
+        )
+        tp = TextPath(content="hi", font_family="serif",
+                      font_size=12, line_height="")
+        model = self._make_model(tp)
+        assert character_element_has_auto_leading(model) is True
+
+    def test_has_auto_leading_false_for_no_model(self):
+        from panels.character_panel_state import (
+            character_element_has_auto_leading,
+        )
+        assert character_element_has_auto_leading(None) is False
+
+    def test_has_auto_leading_false_for_empty_selection(self):
+        from panels.character_panel_state import (
+            character_element_has_auto_leading,
+        )
+
+        class _Doc:
+            selection = []
+
+        class _Model:
+            document = _Doc()
+
+        assert character_element_has_auto_leading(_Model()) is False
+
+    def test_has_auto_leading_false_for_non_text_selection(self):
+        from geometry.element import Rect
+        from panels.character_panel_state import (
+            character_element_has_auto_leading,
+        )
+        r = Rect(x=0, y=0, width=10, height=10)
+        model = self._make_model(r)
+        assert character_element_has_auto_leading(model) is False
+
+    def test_post_write_font_size_bumps_leading_when_auto(self):
+        from geometry.element import Text
+        from workspace_interpreter.state_store import StateStore
+        from panels.character_panel_state import character_panel_post_write
+        t = Text(x=0, y=0, content="hi", font_family="serif",
+                 font_size=24, line_height="")  # auto
+        model = self._make_model(t)
+        store = StateStore()
+        store.init_panel("character_panel_content",
+                         {"font_size": 24.0, "leading": 14.4})
+        # Simulate the dispatch sequence: caller has just written
+        # font_size=24; post_write should sync leading to 24*1.2.
+        character_panel_post_write(store, model, "font_size")
+        assert store.get_panel("character_panel_content", "leading") == 24.0 * 1.2
+
+    def test_post_write_does_nothing_for_other_keys(self):
+        from geometry.element import Text
+        from workspace_interpreter.state_store import StateStore
+        from panels.character_panel_state import character_panel_post_write
+        t = Text(x=0, y=0, content="hi", font_family="serif",
+                 font_size=24, line_height="")  # auto
+        model = self._make_model(t)
+        store = StateStore()
+        store.init_panel("character_panel_content",
+                         {"font_size": 24.0, "leading": 14.4})
+        # tracking write must not touch leading.
+        character_panel_post_write(store, model, "tracking")
+        assert store.get_panel("character_panel_content", "leading") == 14.4
+
+    def test_post_write_does_nothing_when_element_has_explicit_leading(self):
+        from geometry.element import Text
+        from workspace_interpreter.state_store import StateStore
+        from panels.character_panel_state import character_panel_post_write
+        t = Text(x=0, y=0, content="hi", font_family="serif",
+                 font_size=24, line_height="20pt")  # not auto
+        model = self._make_model(t)
+        store = StateStore()
+        store.init_panel("character_panel_content",
+                         {"font_size": 24.0, "leading": 20.0})
+        character_panel_post_write(store, model, "font_size")
+        # leading stays put because the element has a custom override.
+        assert store.get_panel("character_panel_content", "leading") == 20.0
+
+    def test_subscribe_runs_post_write_before_apply(self):
+        # End-to-end: writing font_size into the panel scope must
+        # propagate the auto-derived leading onto the element. Without
+        # the post-write hook, leading would stay at the prior value
+        # and apply would render an explicit "Npt" line_height instead
+        # of leaving it empty (= Auto).
+        from geometry.element import Text
+        from workspace_interpreter.state_store import StateStore
+        from panels.character_panel_state import subscribe
+        t = Text(x=0, y=0, content="hi", font_family="serif",
+                 font_size=12, line_height="")  # auto
+        model = self._make_model(t)
+        store = StateStore()
+        store.init_panel("character_panel_content",
+                         {"font_size": 12.0, "leading": 14.4})
+        subscribe(store, lambda: model)
+        store.set_panel("character_panel_content", "font_size", 24.0)
+        # Element line_height stays empty (Auto round-trips).
+        assert model.document.get_element((0, 0)).line_height == ""
+        # Element font_size updated.
+        assert model.document.get_element((0, 0)).font_size == 24.0
+        # Panel leading bumped to the new auto value.
+        assert store.get_panel("character_panel_content", "leading") == 24.0 * 1.2
+
+    def test_subscribe_keeps_explicit_leading_when_user_overrode(self):
+        # When the user has a custom leading (element line_height set
+        # to e.g. "20pt"), changing the font size must not silently
+        # snap leading back to the auto ratio.
+        from geometry.element import Text
+        from workspace_interpreter.state_store import StateStore
+        from panels.character_panel_state import subscribe
+        t = Text(x=0, y=0, content="hi", font_family="serif",
+                 font_size=12, line_height="20pt")  # custom
+        model = self._make_model(t)
+        store = StateStore()
+        store.init_panel("character_panel_content",
+                         {"font_size": 12.0, "leading": 20.0})
+        subscribe(store, lambda: model)
+        store.set_panel("character_panel_content", "font_size", 24.0)
+        # Leading stays at the user's custom value.
+        assert store.get_panel("character_panel_content", "leading") == 20.0
+        # And the element keeps the explicit "20pt" line_height.
+        assert model.document.get_element((0, 0)).line_height == "20pt"

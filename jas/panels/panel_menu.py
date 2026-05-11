@@ -80,6 +80,7 @@ COLOR_MODE_TO_CMD = {v: k for k, v in COLOR_MODE_COMMANDS.items()}
 # ``None`` means the panel isn't currently rendered.
 _opacity_store = None  # type: ignore[assignment]
 _character_store = None  # type: ignore[assignment]
+_paragraph_store = None  # type: ignore[assignment]
 
 
 def set_opacity_store(store) -> None:
@@ -96,6 +97,16 @@ def set_character_store(store) -> None:
     threading the store through every dispatch call site."""
     global _character_store
     _character_store = store
+
+
+def set_paragraph_store(store) -> None:
+    """Register the live Paragraph panel StateStore (called by
+    YamlPanelView when the panel mounts) so the hamburger menu
+    toggles can read / write panel-state bools (Hanging Punctuation
+    checkmark) and the Reset Panel dispatch can reach the panel
+    scope without threading the store through every call site."""
+    global _paragraph_store
+    _paragraph_store = store
 
 
 def _opacity_store_bool(key: str, default: bool) -> bool:
@@ -125,6 +136,18 @@ def _character_store_bool(key: str, default: bool) -> bool:
     if _character_store is None:
         return default
     val = _character_store.get_panel("character_panel_content", key)
+    if isinstance(val, bool):
+        return val
+    return default
+
+
+def _paragraph_store_bool(key: str, default: bool) -> bool:
+    """Read a bool from the Paragraph panel's state store, falling
+    back to ``default`` when the store isn't set or the key is
+    missing / non-bool."""
+    if _paragraph_store is None:
+        return default
+    val = _paragraph_store.get_panel("paragraph_panel_content", key)
     if isinstance(val, bool):
         return val
     return default
@@ -267,6 +290,26 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.action("Reset Magic Wand", "reset_magic_wand_panel"),
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Magic Wand", "close_panel"),
+        ]
+    if kind == PanelKind.PARAGRAPH:
+        # Mirrors workspace/panels/paragraph.yaml menu. Hanging
+        # Punctuation is a panel-state toggle handled directly;
+        # Justification… / Hyphenation… are dialog openers handled
+        # via the YAML pipeline (open_dialog effect); Reset Panel
+        # routes through reset_paragraph_panel.
+        return [
+            PanelMenuItem.toggle("Hanging Punctuation",
+                                  "toggle_hanging_punctuation"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Justification…",
+                                  "open_paragraph_justification"),
+            PanelMenuItem.action("Hyphenation…",
+                                  "open_paragraph_hyphenation"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Reset Panel",
+                                  "reset_paragraph_panel"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Paragraph", "close_panel"),
         ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 
@@ -684,6 +727,24 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
                     apply_character_panel_to_selection,
                 )
                 apply_character_panel_to_selection(_character_store, model)
+    elif kind == PanelKind.PARAGRAPH and model is not None:
+        # Mirrors the Rust paragraph_panel.rs ``dispatch`` branch.
+        # Hanging Punctuation toggles the panel-state bool and pushes
+        # to the wrappers; Reset Panel goes through reset_paragraph_panel;
+        # the Justification… / Hyphenation… dialog openers are no-ops
+        # here — the YAML-menu path wraps them in open_dialog effects.
+        if cmd == "toggle_hanging_punctuation" and _paragraph_store is not None:
+            from panels.paragraph_panel_state import (
+                set_paragraph_panel_field,
+            )
+            cur = _paragraph_store.get_panel("paragraph_panel_content",
+                                              "hanging_punctuation")
+            set_paragraph_panel_field(_paragraph_store, model,
+                                       "hanging_punctuation",
+                                       not bool(cur))
+        elif cmd == "reset_paragraph_panel" and _paragraph_store is not None:
+            from panels.paragraph_panel_state import reset_paragraph_panel
+            reset_paragraph_panel(_paragraph_store, model)
     elif kind == PanelKind.OPACITY:
         # Opacity panel-local toggles flip the stored bool in the
         # StateStore so subsequent make_opacity_mask dispatches and
@@ -740,6 +801,10 @@ def panel_is_checked(kind: PanelKind, cmd: str, layout: WorkspaceLayout) -> bool
     }
     if cmd in _character_check:
         return _character_store_bool(_character_check[cmd], False)
+    # Paragraph panel: Hanging Punctuation toggle reads
+    # panel.hanging_punctuation in the live store.
+    if cmd == "toggle_hanging_punctuation":
+        return _paragraph_store_bool("hanging_punctuation", False)
     return False
 
 

@@ -524,6 +524,64 @@ def _fmt_num(n: float) -> str:
     return s
 
 
+def character_element_has_auto_leading(model) -> bool:
+    """Whether the first selected Text / TextPath has an empty
+    ``line_height`` (i.e. leading is in Auto mode = 120% of
+    font_size). Used by the dispatch sites that write
+    ``character_panel.font_size`` so they can keep
+    ``character_panel.leading`` tracking the new size while Auto is
+    in effect — without this, Character-panel-driven font changes
+    turn Auto into a stale numeric override on the next apply.
+    Mirrors Rust ``AppState::character_element_has_auto_leading``.
+    """
+    if model is None:
+        return False
+    doc = getattr(model, "document", None)
+    if doc is None:
+        return False
+    selection = getattr(doc, "selection", None) or []
+    for es in selection:
+        path = getattr(es, "path", None)
+        if path is None:
+            continue
+        try:
+            elem = doc.get_element(path)
+        except Exception:
+            continue
+        if isinstance(elem, (Text, TextPath)):
+            return elem.line_height == ""
+    return False
+
+
+def character_panel_post_write(store, model, key: str) -> None:
+    """Post-write hook for Character-panel field dispatches. When the
+    user changes ``font_size`` and the selected element's
+    ``line_height`` is empty (Auto), bump
+    ``character_panel.leading`` so the apply pipeline still resolves
+    to the Auto-derived value (= ``font_size × 1.2``) and the empty
+    element attribute survives the round-trip. Without this, Auto
+    materialises into a stale numeric override the moment the user
+    nudges the size. Mirrors Rust ``AppState::character_panel_post_write``.
+    """
+    if key != "font_size":
+        return
+    if not character_element_has_auto_leading(model):
+        return
+    fs = store.get_panel("character_panel_content", "font_size")
+    if fs is None:
+        return
+    store.set_panel("character_panel_content", "leading",
+                    float(fs) * 1.2)
+
+
+# Re-entrancy guard for the ``subscribe`` callback. ``character_panel_post_write``
+# may set ``panel.leading`` from inside the subscriber, which fires the
+# subscriber recursively. Without this flag the apply pipeline would run
+# twice per font-size write — harmless but wasteful, and obscures the
+# intent of "apply happens once per logical user change".
+_IN_SUBSCRIBE = False
+
+
 def subscribe(store, model_getter) -> None:
     """Wire ``apply_character_panel_to_selection`` to fire after any
     write into the ``character_panel`` scope of ``store``.
@@ -531,8 +589,23 @@ def subscribe(store, model_getter) -> None:
     ``model_getter`` is a zero-arg callable returning the live
     ``Model`` (the app rotates models across tabs, so we can't
     capture a fixed reference).
+
+    Each write also runs ``character_panel_post_write`` first so the
+    auto-leading derivation (= ``font_size × 1.2``) tracks font-size
+    nudges while the element's line_height is empty. Mirrors the
+    Rust dispatch sequence
+    ``set_character_field`` → ``character_panel_post_write`` →
+    ``apply_character_panel_to_selection``.
     """
-    def _on_change(_key, _value):
-        apply_character_panel_to_selection(store, model_getter())
+    def _on_change(key, _value):
+        global _IN_SUBSCRIBE
+        if _IN_SUBSCRIBE:
+            return
+        _IN_SUBSCRIBE = True
+        try:
+            character_panel_post_write(store, model_getter(), key)
+            apply_character_panel_to_selection(store, model_getter())
+        finally:
+            _IN_SUBSCRIBE = False
 
     store.subscribe_panel("character_panel_content", _on_change)
