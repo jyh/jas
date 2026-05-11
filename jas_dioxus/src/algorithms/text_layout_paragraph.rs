@@ -175,10 +175,20 @@ pub fn build_segments_from_text(
                 word_spacing_max: t.jas_word_spacing_max.unwrap_or(133.0),
                 last_line_align,
                 hyphenate: t.jas_hyphenate.unwrap_or(false),
-                hyphenate_min_word: t.jas_hyphenate_min_word.unwrap_or(3.0) as usize,
-                hyphenate_min_before: t.jas_hyphenate_min_before.unwrap_or(1.0) as usize,
-                hyphenate_min_after: t.jas_hyphenate_min_after.unwrap_or(1.0) as usize,
+                // Defaults match Illustrator / InDesign Hyphenation
+                // dialog: 6 / 2 / 2. The previous 3 / 1 / 1 was loose
+                // enough that the sample pattern set produced "T-rump"
+                // (matching ".un1" / "1ru" patterns at min_before=1).
+                hyphenate_min_word: t.jas_hyphenate_min_word.unwrap_or(6.0) as usize,
+                hyphenate_min_before: t.jas_hyphenate_min_before.unwrap_or(2.0) as usize,
+                hyphenate_min_after: t.jas_hyphenate_min_after.unwrap_or(2.0) as usize,
                 hyphenate_bias: t.jas_hyphenate_bias.unwrap_or(0.0) as u8,
+                // Capitalized words (proper nouns: "Trump", "London")
+                // are excluded from hyphenation by default, mirroring
+                // Illustrator / InDesign / MS Word — even with a real
+                // pattern dictionary, breaking proper nouns reads
+                // poorly to most readers.
+                hyphenate_capitalized: t.jas_hyphenate_capitalized.unwrap_or(false),
             });
         } else {
             cursor += body_chars;
@@ -257,6 +267,24 @@ mod tests {
     fn no_wrapper_yields_no_segments() {
         let segs = build_segments_from_text(&[body("hello")], "hello", true);
         assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn empty_wrapper_then_body_covers_full_content() {
+        // The Paragraph panel apply pipeline inserts an empty wrapper
+        // tspan before existing content. The segment must cover the
+        // body's char range so the layout's effective slice equals
+        // the rendered content — without this, area-text wrapping
+        // collapses to a single line the moment any panel control is
+        // clicked. Regression test for the "click align-left makes
+        // all text one line" report.
+        let segs = build_segments_from_text(
+            &[wrapper(0.0, 0.0, 0.0, 0.0, 0.0, None), body("hello world")],
+            "hello world", true);
+        assert_eq!(segs.len(), 1, "expected one segment for [empty wrapper, body]");
+        assert_eq!(segs[0].char_start, 0);
+        assert_eq!(segs[0].char_end, 11);
+        assert_eq!(segs[0].text_align, TextAlign::Left);
     }
 
     #[test]
