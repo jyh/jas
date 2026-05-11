@@ -52,6 +52,27 @@ let tool_options_dialog_id (t : tool) : string option =
             | _ -> None)
         | _ -> None)))
 
+(** Look up a tool's [tool_options_panel] field in workspace.json.
+    Returns the panel id when set, [None] otherwise. *)
+let tool_options_panel_id (t : tool) : string option =
+  let open Option in
+  bind (tool_yaml_id t) (fun yaml_id ->
+    bind (Workspace_loader.load ()) (fun ws ->
+      bind (Workspace_loader.json_member "tools" ws.data) (function
+        | `Assoc tools ->
+          bind (List.assoc_opt yaml_id tools) (function
+            | `Assoc fields ->
+              bind (List.assoc_opt "tool_options_panel" fields) (function
+                | `String s -> Some s
+                | _ -> None)
+            | _ -> None)
+        | _ -> None)))
+
+(** Map a panel YAML id to a {!Workspace_layout.panel_kind}. *)
+let panel_id_to_kind = function
+  | "magic_wand" -> Some Workspace_layout.Magic_wand
+  | _ -> None
+
 let tool_button_size = 32
 let _title_bar_height = 24
 let long_press_ms = Canvas_tool.long_press_ms
@@ -62,7 +83,10 @@ let active_bg_rgb () = Theme.hex_to_rgb !(Dock_panel.theme_bg_tab)
 let inactive_bg_rgb () = Theme.hex_to_rgb !(Dock_panel.theme_bg_dark)
 
 class toolbar ~title:(_title : string) ~x ~y
-    ?(get_model : (unit -> Model.model) option) (fixed : GPack.fixed) =
+    ?(get_model : (unit -> Model.model) option)
+    ?(workspace_layout : Workspace_layout.workspace_layout option)
+    ?(refresh_dock : (unit -> unit) option)
+    (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`NONE () in
   let vbox = GPack.vbox ~packing:frame#add () in
 
@@ -1373,17 +1397,42 @@ class toolbar ~title:(_title : string) ~x ~y
         end else false
       ) |> ignore;
 
-      (* Arrow slot: click selects, long press shows menu *)
+      (* Arrow slot: click selects, long press shows menu,
+         double-click opens tool-options panel or dialog if set. *)
       direct_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
       direct_btn#event#connect#button_press ~callback:(fun ev ->
         if GdkEvent.Button.button ev = 1 then begin
-          (* Start long press timer *)
-          long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
-            long_press_timer <- None;
-            self#show_arrow_slot_menu;
-            false
-          ));
-          true
+          if GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
+            (match long_press_timer with
+             | Some id -> GMain.Timeout.remove id; long_press_timer <- None
+             | None -> ());
+            (match tool_options_panel_id arrow_slot_tool with
+             | Some panel_id ->
+               (match panel_id_to_kind panel_id with
+                | Some kind ->
+                  (match workspace_layout with
+                   | Some layout ->
+                     Workspace_layout.show_panel layout kind;
+                     (match refresh_dock with Some f -> f () | None -> ())
+                   | None -> ())
+                | None -> ())
+             | None ->
+               (match tool_options_dialog_id arrow_slot_tool with
+                | Some dlg_id ->
+                  (match Yaml_dialog_view.open_dialog dlg_id [] [] with
+                   | Some ds -> Yaml_dialog_view.show_dialog ds
+                   | None -> ())
+                | None -> ()));
+            true
+          end
+          else begin
+            long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
+              long_press_timer <- None;
+              self#show_arrow_slot_menu;
+              false
+            ));
+            true
+          end
         end else false
       ) |> ignore;
       direct_btn#event#connect#button_release ~callback:(fun ev ->
@@ -1824,5 +1873,5 @@ class toolbar ~title:(_title : string) ~x ~y
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
   end
 
-let create ~title ~x ~y ?get_model fixed =
-  new toolbar ~title ~x ~y ?get_model fixed
+let create ~title ~x ~y ?get_model ?workspace_layout ?refresh_dock fixed =
+  new toolbar ~title ~x ~y ?get_model ?workspace_layout ?refresh_dock fixed

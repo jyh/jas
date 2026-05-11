@@ -58,10 +58,10 @@ let () =
 
   let get_model () = !active_model in
   let get_fill_on_top () = match !toolbar_ref with Some t -> t#fill_on_top | None -> true in
-  let main_window, toolbar_fixed, notebook, dock_box = Jas.Canvas.create_main_window ~get_model ~get_fill_on_top ~on_open:add_canvas () in
+  let main_window, toolbar_fixed, notebook, dock_box, workspace_layout, refresh_dock = Jas.Canvas.create_main_window ~get_model ~get_fill_on_top ~on_open:add_canvas () in
   main_window_ref := Some main_window;
   notebook_ref := Some notebook;
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 ~get_model toolbar_fixed in
+  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 ~get_model ~workspace_layout ~refresh_dock toolbar_fixed in
   toolbar_ref := Some toolbar;
   (* Tool to restore when spacebar pass-through to Hand releases.
      None when no Space-held pass-through is active. Per
